@@ -1,0 +1,24 @@
+# 待实现：ARMv7 (armv7l) 32-bit 后端
+
+## 背景
+TARGETS.md §后续优先级第 4 条：ARMv7、powerpc64le、s390x 等只在有明确
+MeuOS 平台需求时再引入，避免在缺少 sysroot 和运行验证时只增加未维护的后端。
+
+## 目标
+为 mcc 增加 ARMv7 (EABI hard-float / soft-float) 代码生成后端。
+
+## 需要实现的文件（参考现有 target 的四文件布局）
+- `src/target/armv7/armv7_targ.c`  — `Target T_armv7` 描述符（寄存器集、调用约定概要）
+- `src/target/armv7/armv7_abi.c`   — SysV AAPCS 参数/返回值分类与寄存器分配
+- `src/target/armv7/armv7_isel.c`  — IR -> ARMv7 指令选择
+- `src/target/armv7/armv7_emit.c`   — ARMv7 汇编发射
+- `include/armv7.h`                 — 后端公开接口
+
+## 前置依赖
+1. 对应 ABI 的 `crt1`、原子 runtime、syscall gate 与 meuos-libc 移植。
+2. qemu-arm 运行验证环境。
+3. `src/driver/target_select.c` 的 `pick_target()` / `targ_name()` 增加 armv7 映射。
+
+## 验收
+- `make check-targets` 覆盖 armv7 整数 ABI 汇编回归。
+- 在 qemu-arm 下运行 Phase-2 测试程序（原子 + 线程）。

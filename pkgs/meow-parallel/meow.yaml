@@ -1,0 +1,23 @@
+name: meow-parallel
+version: 1
+
+default: all
+
+targets:
+  all:
+    deps: [left, right]
+    phony: true
+    commands:
+      - test -f /tmp/meow-parallel-left -a -f /tmp/meow-parallel-right
+  left:
+    phony: true
+    commands:
+      - printf left > /tmp/meow-parallel-left
+  right:
+    phony: true
+    commands:
+      - printf right > /tmp/meow-parallel-right
+  clean:
+    phony: true
+    commands:
+      - rm -f /tmp/meow-parallel-left /tmp/meow-parallel-right

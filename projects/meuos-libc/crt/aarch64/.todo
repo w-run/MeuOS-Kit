@@ -1,0 +1,5 @@
+# 待实现：AArch64 crt1.S
+
+需要 `_start` 入口：清零 finit_tls、设置 TLS（TPIDR_EL0）、传入 argc/argv/envp、
+调用 `main`、用返回值调用 `exit`。参考 `crt/x86_64/crt1.S`。
+完整计划见 `../src/arch/aarch64/.todo`。

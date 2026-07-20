@@ -1,0 +1,19 @@
+name: meow-incremental
+version: 1
+
+default: all
+
+targets:
+  all:
+    deps: [artifact]
+    phony: true
+  artifact:
+    inputs: [/tmp/meow-incremental.input]
+    outputs: [/tmp/meow-incremental.output]
+    commands:
+      - cp /tmp/meow-incremental.input /tmp/meow-incremental.output
+      - printf hit >> /tmp/meow-incremental.log
+  clean:
+    phony: true
+    commands:
+      - rm -f /tmp/meow-incremental.input /tmp/meow-incremental.output /tmp/meow-incremental.log

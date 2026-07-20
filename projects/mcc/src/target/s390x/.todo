@@ -1,0 +1,19 @@
+# 待实现：IBM s390x (z/Architecture) 64-bit 后端
+
+## 背景
+TARGETS.md §后续优先级第 4 条：仅在出现明确 MeuOS 平台需求时引入。
+
+## 需要实现的文件
+- `src/target/s390x/s390x_targ.c`  — `Target T_s390x`
+- `src/target/s390x/s390x_abi.c`   — s390x ELF ABI 参数分类
+- `src/target/s390x/s390x_isel.c`  — IR -> s390x 指令选择
+- `src/target/s390x/s390x_emit.c`   — s390x 汇编发射
+- `include/s390x.h`                 — 后端公开接口
+
+## 前置依赖
+- s390x 的 crt1、原子 runtime、syscall gate、meuos-libc。
+- qemu-s390x 运行验证。
+
+## 验收
+- 整数 ABI 汇编回归通过。
+- qemu 下运行 Phase-2 测试程序。

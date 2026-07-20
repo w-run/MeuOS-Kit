@@ -1,0 +1,19 @@
+# 待实现：PowerPC 64-bit Little-Endian (powerpc64le) 后端
+
+## 背景
+TARGETS.md §后续优先级第 4 条：仅在出现明确 MeuOS 平台需求时引入。
+
+## 需要实现的文件
+- `src/target/powerpc64le/powerpc64le_targ.c`  — `Target T_ppc64le`
+- `src/target/powerpc64le/powerpc64le_abi.c`   — ELFv2 ABI 参数分类
+- `src/target/powerpc64le/powerpc64le_isel.c`  — IR -> ppc64le 指令选择
+- `src/target/powerpc64le/powerpc64le_emit.c`   — ppc64le 汇编发射
+- `include/powerpc64le.h`                       — 后端公开接口
+
+## 前置依赖
+- powerpc64le 的 crt1、原子 runtime、syscall gate、meuos-libc。
+- qemu-ppc64le 运行验证。
+
+## 验收
+- 整数 ABI 汇编回归通过。
+- qemu 下运行 Phase-2 测试程序。

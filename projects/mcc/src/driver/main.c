@@ -1,0 +1,375 @@
+/*
+ * mcc - MeuOS C Compiler
+ *
+ * Unified driver for the source-level integration of the frontend
+ * (lex -> parse -> sema -> AST) and the IR backend (IR construction ->
+ * optimization passes -> register allocation -> asm emission).
+ *
+ * Design:
+ *   - In -E mode, preprocessed tokens are written to stdout (or -o file).
+ *   - In -S mode, asm is written directly to stdout (or -o file).
+ *   - In -c mode, asm is written to a temp file, then the host assembler
+ *     (`cc -c`) is invoked to produce a .o (no linking).
+ *   - In default mode, asm is written to a temp file, then the host
+ *     assembler+linker (cc) is invoked to produce the final executable.
+ *     The host-cc handoff is a Phase 1a bootstrap convenience - later
+ *     phases replace `cc` with a self-hosted path.
+ */
+
+#include <ctype.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#include "util.h"
+#include "arg.h"
+#include "mcc.h"
+#include "driver_internal.h"
+
+/* Global IR backend state (declared extern in ir.h).
+ * Per-arch Target objects are declared extern in driver_internal.h. */
+Target T;
+char debug['Z' + 1];
+
+int
+main(int argc, char *argv[])
+{
+	struct array inputs = {0}, incdirs = {0}, libdirs = {0}, libs = {0};
+	struct array defines = {0}, undefs = {0};
+	bool pponly = false, emit_asm_only = false, compile_only = false;
+	bool verbose = false, nostdinc = false, nostdlib = false, nodefaultlibs = false;
+	bool static_link = false, shared = false, pic = false, meuos_specs = false;
+	char *output = NULL, *target = NULL, *first_input = NULL, *sysroot = NULL;
+	int depmode = 0;       /* 0 none, 1 -M, 2 -MM, 3 -MD, 4 -MMD */
+	char *depfile = NULL;
+	int i;
+
+	/* Normalize argv: gcc/clang compatibility allows single-dash
+	 * multi-letter options (-static, -shared, ...) which we rewrite
+	 * to the standard double-dash form (--static, --shared, ...).
+	 * Single-letter short options and category-prefixed options
+	 * (-W<w>, -f<f>, -m<m>) are left untouched. See arg_compat.c. */
+	argv = arg_normalize(argc, argv);
+	argv0 = progname(argv[0], "mcc");
+
+	/* Fetch an option argument that may be attached (-Dfoo) or separated
+	 * (-D foo). `attached` points just past the option char(s). */
+#define ARGVAL(attached) \
+	(*(attached) ? (attached) : (i + 1 < argc ? argv[++i] : (usage(), (char *)0)))
+
+	for (i = 1; i < argc; i++) {
+		char *a = argv[i];
+
+		if (a[0] != '-' || a[1] == '\0') {
+			/* input file (or "-" for stdin) */
+			arrayaddptr(&inputs, a);
+			continue;
+		}
+		/* "--" terminates option parsing */
+		if (a[0] == '-' && a[1] == '-' && a[2] == '\0') {
+			while (++i < argc)
+				arrayaddptr(&inputs, argv[i]);
+			break;
+		}
+		/* --version / --help: true long-only options */
+		if (strcmp(a, "--version") == 0) { print_version(); exit(0); }
+		if (strcmp(a, "--help") == 0) { usage_long(); exit(0); }
+
+		/* whole-arg multi-letter options (double-dash standard form;
+		 * single-dash gcc forms are normalized by arg_normalize()).
+		 * Category-prefixed options (-W<w>, -f<f>, -m<m>, -M<d>) stay
+		 * single-dash and are handled below. */
+	if (strncmp(a, "--std=", 6) == 0) {
+		/* recorded: mcc is C11-flavoured regardless */
+		continue;
+	}
+	if (strcmp(a, "--static") == 0) { static_link = true; continue; }
+	if (strcmp(a, "--shared") == 0) { shared = true; pic = true; continue; }
+	if (strcmp(a, "--nostdinc") == 0) { nostdinc = true; continue; }
+	if (strcmp(a, "--nostdlib") == 0) { nostdlib = true; continue; }
+	if (strcmp(a, "--nodefaultlibs") == 0) { nodefaultlibs = true; continue; }
+	if (strcmp(a, "--pedantic") == 0 || strcmp(a, "--pedantic-errors") == 0)
+		continue;
+	if (strcmp(a, "--pipe") == 0) continue;
+	if (strcmp(a, "--pie") == 0) continue;
+	/* -fPIE/-fpie/-fPIC/-fpic: -f is a category prefix, stays single-dash */
+	if (strcmp(a, "-fPIE") == 0 || strcmp(a, "-fpie") == 0 ||
+	    strcmp(a, "-fPIC") == 0 || strcmp(a, "-fpic") == 0)
+		{ pic = true; continue; }
+	/* -Wall/-Wextra/-Werror: -W is a category prefix, stays single-dash */
+	if (strcmp(a, "-Wall") == 0 || strcmp(a, "-Wextra") == 0 ||
+	    strcmp(a, "-Werror") == 0)
+		continue;
+	if (a[1] == 'W') continue;   /* other -Wxxx warning flags */
+	if (a[1] == 'f') continue;   /* -fxxx feature flags */
+	if (a[1] == 'm') {           /* -march= etc. */
+		continue;
+	}
+	if (a[1] == 'M') {
+		if (strcmp(a, "-M") == 0) {
+			depmode = 1;
+		} else if (strcmp(a, "-MM") == 0) {
+			depmode = 2;
+		} else if (strcmp(a, "-MD") == 0) {
+			depmode = 3;
+			depfile = ARGVAL("");
+		} else if (strcmp(a, "-MMD") == 0) {
+			depmode = 4;
+			depfile = ARGVAL("");
+		} else if (strncmp(a, "-MF", 3) == 0) {
+			depfile = ARGVAL(a + 3);
+		} else if (strncmp(a, "-MT", 3) == 0 ||
+		           strncmp(a, "-MQ", 3) == 0) {
+			(void)ARGVAL(a + 3);  /* dependency target name */
+		} else if (strcmp(a, "-MP") == 0) {
+			/* phony targets: recorded, no-op */
+		} else {
+			fprintf(stderr, "%s: unknown option '%s'\n", argv0, a);
+			usage();
+		}
+		continue;
+	}
+	if (strcmp(a, "--target") == 0) { target = ARGVAL(""); continue; }
+	if (strncmp(a, "--target=", 9) == 0) { target = a + 9; continue; }
+	if (strcmp(a, "--sysroot") == 0) { sysroot = ARGVAL(""); continue; }
+	if (strncmp(a, "--sysroot=", 10) == 0) { sysroot = a + 10; continue; }
+	if (strcmp(a, "-target") == 0) { target = ARGVAL(""); continue; }
+	if (strncmp(a, "-target=", 8) == 0) { target = a + 8; continue; }
+	if (strncmp(a, "--specs=", 8) == 0) {
+		if (strcmp(a + 8, "meuos") == 0)
+			meuos_specs = true;
+		continue;
+	}
+	if (strcmp(a, "--specs") == 0) {
+		char *spec = ARGVAL("");
+		if (strcmp(spec, "meuos") == 0)
+			meuos_specs = true;
+		continue;
+	}
+
+		/* single-char options (with optional attached argument) */
+		switch (a[1]) {
+		case 'E': pponly = true; break;
+		case 'S': emit_asm_only = true; break;
+		case 'c': compile_only = true; break;
+		case 'o': output = ARGVAL(a + 2); break;
+		case 't': target = ARGVAL(a + 2); break;  /* alias for -target */
+		case 'v': verbose = true; break;
+		case 'w': break;   /* suppress warnings (mcc emits none yet) */
+		case 'g': break;   /* debug info (recorded, not emitted) */
+		case 'P': break;   /* suppress line markers in -E */
+		case 'H': break;   /* print includes */
+		case 'D': arrayaddptr(&defines, ARGVAL(a + 2)); break;
+		case 'U': arrayaddptr(&undefs, ARGVAL(a + 2)); break;
+		case 'I': arrayaddptr(&incdirs, ARGVAL(a + 2)); break;
+		case 'L': arrayaddptr(&libdirs, ARGVAL(a + 2)); break;
+		case 'l': arrayaddptr(&libs, ARGVAL(a + 2)); break;
+		case 'O': {
+			const char *lv = a[2] ? a + 2 : "1";
+			/* mcc always optimizes; the level is accepted but does not
+			 * change behaviour (recorded for future use). */
+			if (lv[0] == 's' || lv[0] == 'f') break;
+			if (isdigit((unsigned char)lv[0])) break;
+			break;
+		}
+		default:
+			fprintf(stderr, "%s: unknown option '%s'\n", argv0, a);
+			usage();
+		}
+	}
+#undef ARGVAL
+
+	/* MeuOS is the default configuration when a sysroot is provided by the
+	 * environment.  An explicit --specs=meuos also selects it, but does not
+	 * invent a path: callers may still use -I/-L for a staged sysroot. */
+	if (!sysroot)
+		sysroot = getenv("MEUOS_SYSROOT");
+	if (meuos_specs && !sysroot)
+		fprintf(stderr, "%s: --specs=meuos requires --sysroot or MEUOS_SYSROOT\n", argv0), exit(2);
+	/* MeuOS specs select the project CRT and libc, not a mixture with the
+	 * host C runtime.  The host compiler is still used only as assembler and
+	 * linker during bootstrap. */
+	if (meuos_specs) {
+		nostdlib = true;
+		/* MeuOS libc ships only static archives; the specs mode must produce
+		 * fully static executables unless --shared was explicitly requested. */
+		if (!shared)
+			static_link = true;
+	}
+	if (sysroot) {
+		arrayaddptr(&libdirs, sysrootpath(sysroot, "lib"));
+		arrayaddptr(&libdirs, sysrootpath(sysroot, "usr/lib"));
+	}
+
+	/* An invocation containing only linkable inputs must bypass lexing and
+	 * parsing entirely.  Make-style builds use precisely this form for the
+	 * final executable link. */
+	if (inputs.len) {
+		char **inp = inputs.val;
+		bool link_only = true;
+		for (i = 0; i < (int)(inputs.len / sizeof(char *)); ++i)
+			if (!is_link_input(inp[i]))
+				link_only = false;
+		if (link_only) {
+			if (pponly || emit_asm_only || compile_only)
+				usage();
+			run_host_link(&inputs, output ? output : "a.out", verbose,
+				&libdirs, &libs, static_link, shared, nostdlib,
+				nodefaultlibs, meuos_specs, target);
+			return 0;
+		}
+	}
+
+	/* ----- IR backend + frontend init ----- */
+	T = *pick_target(target);
+	T.pic = pic;
+	targinit(targ_name(target));
+	/* IR's global `typ[]` table is normally populated by the text-IL
+	 * parser. mcc constructs IR directly, so no text IL is ever parsed -
+	 * but IR ABI passes still dereference `typ` for aggregate-typed
+	 * functions. Initialize to a valid zero-length Vec to avoid UB. */
+	typ = vnew(0, sizeof typ[0], PHeap);
+
+	tokeninit();
+	/* Target predefined macros are part of the public C ABI contract. */
+	if (target && strncmp(targ_name(target), "i386", 4) == 0)
+		ppdefine("__i386__", "1");
+
+	/* Apply command-line macro definitions / undefs / include paths
+	 * before the first token is read. */
+	for (i = 0; i < (int)(defines.len / sizeof(char *)); ++i) {
+		char *d = ((char **)defines.val)[i];
+		char *eq = strchr(d, '=');
+		if (eq) {
+			*eq = '\0';
+			ppdefine(d, eq + 1);
+			*eq = '=';
+		} else {
+			ppdefine(d, "1");
+		}
+	}
+	for (i = 0; i < (int)(undefs.len / sizeof(char *)); ++i)
+		ppundef(((char **)undefs.val)[i]);
+	for (i = 0; i < (int)(incdirs.len / sizeof(char *)); ++i)
+		ppincludepath(((char **)incdirs.val)[i]);
+	if (sysroot && !nostdinc) {
+		ppincludepath(sysrootpath(sysroot, "include"));
+		ppincludepath(sysrootpath(sysroot, "usr/include"));
+	}
+	/* ----- input setup ----- */
+	if (inputs.len) {
+		char **inp = inputs.val;
+		/* push in reverse so the first input is read first */
+		for (i = (int)(inputs.len / sizeof(char *)) - 1; i >= 0; --i)
+			scanfrom(inp[i], NULL);
+		scanopen();
+		first_input = inp[0];
+	} else {
+		scanfrom("<stdin>", stdin);
+	}
+
+	/* ----- -M / -MM : preprocess to discover includes, then emit deps ----- */
+	if (depmode == 1 || depmode == 2) {
+		char *tgt;
+		ppinit();
+		ppflags |= PPNEWLINE;
+		/* run the preprocessor discarding token output; #include
+		 * directives still execute and populate the dependency list */
+		while (tok.kind != TEOF)
+			next();
+		tgt = output ? output : default_out_name(first_input, ".o");
+		ppdumpdeps(stdout, tgt, first_input ? first_input : "<stdin>");
+		return 0;
+	}
+
+	/* ----- output routing -----
+	 *   - -E      -> preprocessed tokens to stdout (or -o file)
+	 *   - -S      -> asm to stdout (or -o file)
+	 *   - -c/default -> asm to a temp file, then host cc assembles (+links) */
+	char asm_tmp_path[] = "/tmp/mccXXXXXX";
+	int asm_fd = -1;
+	FILE *asm_out = stdout;
+
+	if (pponly) {
+		if (output && !freopen(output, "w", stdout))
+			fatal("open %s:", output);
+	} else if (emit_asm_only) {
+		if (output && !freopen(output, "w", stdout))
+			fatal("open %s:", output);
+	} else {
+		asm_fd = mkstemp(asm_tmp_path);
+		if (asm_fd < 0)
+			fatal("mkstemp:");
+		asm_out = fdopen(asm_fd, "w");
+		if (!asm_out)
+			fatal("fdopen:");
+		/* Redirect frontend writes (printf etc.) and IR emitfn
+		 * output to the asm temp file. */
+		if (!freopen(asm_tmp_path, "w", stdout))
+			fatal("freopen %s:", asm_tmp_path);
+	}
+	(void)asm_out;
+
+	ppinit();
+	if (pponly) {
+		ppflags |= PPNEWLINE;
+		while (tok.kind != TEOF) {
+			tokenprint(&tok, stdout);
+			next();
+		}
+	} else {
+		scopeinit();
+		while (tok.kind != TEOF) {
+			if (!decl(&filescope, NULL)) {
+				if (tok.kind == TSEMICOLON)
+					error(&tok.loc, "unexpected ';' at top-level");
+				error(&tok.loc, "expected declaration or function definition");
+			}
+		}
+		emittentativedefns();
+
+		/* Emit ELF footer (sections, etc.). */
+		if (T.emitfin)
+			T.emitfin(stdout);
+	}
+
+	fflush(stdout);
+	if (ferror(stdout))
+		fatal("write failed");
+
+	if (!emit_asm_only && !pponly) {
+		char *outpath = output;
+		/* Hand off to host cc for final asm (+link). */
+		if (compile_only) {
+			if (!outpath)
+				outpath = default_out_name(first_input, ".o");
+			fclose(stdout);
+			run_host_cc(asm_tmp_path, outpath, true, verbose,
+			            &libdirs, &libs, static_link, shared, nostdlib, nodefaultlibs,
+			            meuos_specs, target);
+		} else {
+			if (!outpath)
+				outpath = "a.out";
+			fclose(stdout);
+			run_host_cc(asm_tmp_path, outpath, false, verbose,
+			            &libdirs, &libs, static_link, shared, nostdlib, nodefaultlibs,
+			            meuos_specs, target);
+		}
+		unlink(asm_tmp_path);
+
+		/* -MD / -MMD : also write a dependency file alongside. */
+		if (depmode == 3 || depmode == 4) {
+			const char *tgt = output ? output :
+				default_out_name(first_input, ".o");
+			FILE *df = fopen(depfile, "w");
+			if (!df)
+				fatal("open %s:", depfile);
+			ppdumpdeps(df, tgt, first_input ? first_input : "<stdin>");
+			fclose(df);
+		}
+	}
+
+	return 0;
+}

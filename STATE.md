@@ -1,0 +1,110 @@
+# MeuOS Kit — 当前状态与会话恢复
+
+> **这是动态单一事实源。新会话恢复时，先读本文件，再按需读 AGENTS.md（项目规约）与各组件 `ARCHITECTURE.md`。每次工作结束应更新本文件的「最近变更」与「下一步」。**
+
+> 更新时间：2026-07-21
+
+---
+
+## 0. 会话快速恢复
+
+1. **项目规约**：`AGENTS.md`（harness 自动加载，定义组件规范/自举流程/禁止事项）。
+2. **当前状态**：本文件（你正在读）。
+3. **组件设计**：`projects/<组件>/ARCHITECTURE.md`（mcc / meow / meuos-libc）。
+4. **待实现项**：`projects/<组件>/.todo/*.md` 与 `env/.todo/*.md`（每个含背景/目标/影响范围/验收）。
+5. **测试环境**：`env/`（QEMU 多架构 VM，见 `env/README.md` 与 `env/bin/qvm`）。
+6. **先跑自检确认基线绿**（见第 5 节），再开始改动。
+
+工作约定：改动后必须让对应 `make check` 通过；新增待实现功能先建目录 + `.todo`（markdown 描述）再实现；中文优先。
+
+---
+
+## 1. 总体阶段状态
+
+| Phase | 状态 | 说明 |
+|-------|------|------|
+| 0 准备 | PASS | 宿主 gcc，sysroot 就绪 |
+| 1 诞生 mcc | PASS | 宿主编译 mcc，C11 矩阵 + 各 target 汇编回归通过；mcc 可用 libc-meuos 自重编译 |
+| 2 诞生 meuos-libc | PASS | 41+ 直接 syscall、C11 原子/线程/TLS、stdio/signal/setjmp/pthread；x86_64 完整，i386 bootstrap |
+| 3 诞生 meow | PASS | 原生 YAML 构建系统（依赖/变量/模式规则/-jN/自动变量）+ Makefile 兼容 |
+| 4 自举验证 | PASS（via env/ QEMU） | 原 Alpine 容器门禁已废弃，改由 `env/` QEMU 6.6.142 内核验证 mcc+libc-meuos 二进制可运行 |
+| 5 LFS 包验证 | PASS | bzip2 1.0.8、binutils 2.42 libiberty 端到端通过 meow 构建 |
+
+自举链零 GNU/LLVM/glibc 代码（AGENTS.md §4 强约束）。
+
+---
+
+## 2. 各组件当前状态
+
+### mcc（编译器，`projects/mcc/`）
+- 源码级整合 cproc 前端 + QBE 后端，单体 `mcc`；AST→IR 直接构造（无文本 IR 中间步）。
+- 支持架构：x86_64（主开发/运行验证）、aarch64、riscv64、loongarch64（汇编回归基线）、i386（整数 ABI 子集）。
+- 结构（已优化）：`src/{driver,lex,parse,sema,irgen,ir,opt,abi,emit,util,target/<arch>}`；`src/lex/pp_expr.c` 与 `src/lex/pp_internal.h` 从 pp.c 拆出；driver 拆为 `main/target_select/host_toolchain/usage + driver_internal.h`；`include/util.h` 已加 include guard。
+- **已知限制**（详见 `.todo` 与 `src/target/i386/.todo`）：i386 浮点未实现、i386 printf %d 跨函数 va_list、general-dynamic TLS、`-O` 级别控制、`-W` 诊断系统。
+
+### meuos-libc（C 库，`projects/meuos-libc/`）
+- 直接 Linux 内核 ABI 封装（不经宿主 libc）；x86_64 完整，i386 最小 bootstrap。
+- 41+ 独立 syscall 源（一文件一调用）；C11 `<stdatomic.h>` + `libatomic-meuos.a`；C11 线程（clone/futex）+ pthread 适配；signal/sigaction/sigsetjmp；最小 stdio（vfprintf/snprintf 共享格式化内核）；first-fit malloc。
+- `meuos-libc-compat`（独立归档）：argp/error/obstack/getline/asprintf/funopen 等 GNU 扩展。
+- **未完成**（见 `.todo`）：非 x86_64 完整 runtime、纯原生链接器、i386 printf va_arg。
+
+### meow（构建系统，`projects/meow/`）
+- 原生 YAML 目标图构建器（取代 Make）；已从单文件 `meow.c` 拆为 `src/{state,exec,recipe,parse,graph,main}.c + meow.h`。
+- 支持：variables/targets、deps/commands、inputs/outputs 增量、phony、`%` 模式规则、include、`-jN` 并行、自动变量 `$@/$</$^/$*`、Makefile 兼容模式。
+- **未完成**（见 `.todo`）：用 meow 原生构建 Kit 自身、完整 DAG 去重、MeuOS 原生 shell。
+
+### env（QEMU 测试环境，`env/`）
+- 自建 QEMU 10.1.0（x86_64/i386/aarch64 + 9p），内核 Alpine `linux-virt-6.6.142`，Alpine minirootfs initramfs（3.4–4.0MB）。
+- `env/bin/qvm` 管理器：`boot/console/run/stop/status <arch>`，9p 共享宿主 `env/share/` ↔ guest `/mnt/host`。
+- 已验证：mcc+libc-meuos 静态二进制在 x86_64 VM 内运行通过（`counter = 2000` 等价闭环）。
+- **未覆盖**：loongarch64 / riscv64（见 `env/.todo/`）。
+
+---
+
+## 3. 已知阻塞 / 跨组件限制
+
+- 无 git 仓库（无版本历史），删改需谨慎，改动后立即 `make check` 验证。
+- mcc 链接仍依赖宿主 `cc`/`ld`（`src/driver/host_toolchain.c`）；纯原生链接器待实现。
+- i386 不可作完整 target（缺浮点 + printf %d 缺陷）。
+- 完整独立 MeuOS userspace 尚未完成（非 x86_64 runtime、原生 shell）。
+
+---
+
+## 4. 下一步优先级
+
+1. **P1** 修复 i386 printf %d 跨函数 va_list（`projects/meuos-libc/.todo/i386-printf-va.md`）。
+2. **P2** 为 aarch64/riscv64/loongarch64 之一补齐 meuos-libc runtime + qemu 运行回归（`projects/meuos-libc/src/arch/<arch>/.todo`）。
+3. **P3** 用 meow 原生构建 Kit 自身（`projects/meow/.todo/native-kit-build.md`）。
+4. **P4** 补 loongarch64/rv64 的 QEMU 测试环境（`env/.todo/`）。
+5. **P5** 实现 `-O` 级别控制与 `-W` 诊断系统（`projects/mcc/.todo/`）。
+
+---
+
+## 5. 验证命令（快速自检）
+
+```sh
+# 三个核心组件（路径在 projects/ 下）
+make -C projects/mcc check
+make -C projects/mcc check-c11 check-driver check-targets check-i386 check-loongarch64
+make -C projects/meuos-libc check
+make -C projects/meow check
+
+# 跨组件自举门禁（mcc 用 libc-meuos 自重编译）
+make -C projects/mcc check-sysroot-static
+make -C projects/meow check-sysroot-static
+
+# QEMU 测试环境
+env/bin/qvm status
+env/bin/qvm boot x86_64 && env/bin/qvm run x86_64 'uname -r' && env/bin/qvm stop x86_64
+
+# 全流程自举
+./bootstrap.sh
+```
+
+---
+
+## 6. 最近变更
+
+- **2026-07-21**：清理冗余文档（删除 `-MP` 垃圾文件 + 4 个 `PROGRESS.md`，合并为 `STATE.md`）；修正 `bootstrap.sh` Phase 4 对已删除 `experiments/` 的引用；精简 `README.md`。
+- **2026-07-21**：搭建 `env/` QEMU 测试环境（自建 qemu 10.1.0 三 target + 9p，内核 6.6.142，三架构 boot/run/9p 验证通过）。
+- **2026-07-20**：三项目代码结构优化——meow 单文件拆分、mcc pp.c/main.c 拆分、各组件 ARCHITECTURE.md + .todo 体系、修复 4 个阻断自举的预存缺陷。

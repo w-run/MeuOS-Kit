@@ -1,0 +1,6 @@
+name: meow-include
+version: 1
+
+include: targets.yaml
+
+default: all

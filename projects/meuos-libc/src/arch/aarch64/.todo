@@ -1,0 +1,28 @@
+# 待实现：AArch64 (aarch64) 运行时移植
+
+## 背景
+TARGETS.md 推荐在 64 位非宿主 target 中优先选择 aarch64 或 riscv64 移植
+`crt1`、原子 runtime、syscall gate 与 MeuOS libc，并增加 qemu 运行测试。
+mcc 已有 aarch64 后端代码生成基线（整数 ABI + 浮点汇编回归通过），
+但 libc/运行时尚未移植。
+
+## 需要实现的文件（参考 src/arch/x86_64/ 布局）
+- `src/arch/aarch64/atomic.S`        - 1/2/4/8 字节原子 exchange/CAS/fetch-op
+- `src/arch/aarch64/setjmp.S`        - setjmp/longjmp/_setjmp/_longjmp
+- `src/arch/aarch64/sigreturn.S`     - rt_sigreturn restorer trampoline (SA_RESTORER)
+- `src/arch/aarch64/thread_clone.S` - clone syscall + 子线程 TLS 设置
+- `src/arch/aarch64/tls.c`           - TLS 初始化（TPIDR_EL0）
+- `crt/aarch64/crt1.S`               - _start 入口，调用 __meuos_tls_init + main
+- `src/internal/arch/aarch64/syscall.S` - syscall gate（x8 传号，x0-x5 传参）
+
+## 关联修改
+- `src/internal/syscall.h`：aarch64 使用与 x86_64 不同的 syscall 编号（见
+  Linux `include/uapi/asm-generic/unistd.h`），需 `__syscall_number()` 翻译
+  或直接使用 aarch64 原生编号。
+- `include/sys/syscall.h`：补 aarch64 的 `SYS_*` 宏。
+- `Makefile`：增加 `ARCH=aarch64` 的构建规则（`CC := $(MCC) --target=aarch64`）。
+- `test/`：增加 aarch64 qemu 运行回归。
+
+## 验收
+- `make ARCH=aarch6` 全量编译通过，产出 `libc-meuos.a` / `libatomic-meuos.a` / `crt1.o`。
+- qemu-aarch64 下运行 atomic / threads / TLS / stdio 回归。

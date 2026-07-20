@@ -1,0 +1,56 @@
+# Reference source trees (cproc + QBE), pulled read-only for design reference.
+# Do NOT edit or commit. MeuOS Kit is source-level integrated, not vendored.
+reference/
+
+# Build artifacts (per-component output dirs)
+meuos-libc/build/
+meuos-libc-compat/build/
+build/
+out/
+*.o
+*.a
+*.so
+*.so.*
+a.out
+
+# mcc / qbe intermediate files
+*.ssa
+*.s
+*.qbe
+
+# meow download/build staging
+dl/
+pkg-build/
+sources/
+
+# bootstrap staging
+sysroot/
+stage/
+
+# experimentation sandboxes (Alpine rootfs, etc.)
+experiments/
+
+# Editor / OS noise
+.*.swp
+.DS_Store
+*~
+
+# QEMU test environment (env/) - large binaries, not tracked
+env/build/
+env/run/
+env/kernels/*.apk
+env/kernels/*/vmlinuz
+env/rootfs/minirootfs-*.tar.gz
+env/rootfs/*-stage/
+env/rootfs/initramfs-*.cpio.gz
+
+# Auto-generated bootstrap run report
+bootstrap-report.md
+
+# Built compiler/runtime binaries (not in build/ subdirs)
+projects/mcc/mcc
+
+# env/share/ is a runtime working dir for host<->guest file transfer;
+# only its README is tracked.
+env/share/*
+!env/share/README.txt

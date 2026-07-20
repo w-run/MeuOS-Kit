@@ -1,0 +1,24 @@
+# 待实现：i386 浮点（x87 / SSE）代码生成
+
+## 背景
+PROGRESS.md §i386 已知限制：i386 x87/SSE 浮点未实现。当前 i386 仅有整数
+SysV ABI 子集，不可宣称完整 target。
+
+## 目标
+完成 i386 x87/SSE 浮点选择、比较和调用 ABI，将 i386 升级为完整代码生成
+target。
+
+## 需要修改的文件
+- `src/target/i386/i386_isel.c`：浮点 IR 指令（`Ks`/`Kd`）-> x87/SSE 指令选择。
+- `src/target/i386/i386_emit.c`：x87/SSE 汇编发射。
+- `src/target/i386/i386_sysv.c`：浮点参数/返回值寄存器分配（ST(0)/XMM0）。
+- `src/target/i386/i386_targ.c`：声明支持浮点。
+
+## 关联待办
+- i386 `printf %d` 跨函数 va_list 缺陷（PROGRESS.md §后续优先级 P1）。
+- i386 stat 结构体布局转换（P2）。
+- i386 socketcall 多路复用（P4）。
+
+## 验收
+- `make check-i386` 增加浮点回归并通过。
+- i386 libc-meuos.a 浮点数学函数可链接运行。

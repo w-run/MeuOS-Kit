@@ -1,0 +1,141 @@
+#!/bin/bash
+# qvm - MeuOS Kit QEMU test-environment manager.
+#
+# Minimal multi-arch VM launcher + connector for the MeuOS Kit test
+# environment. Replaces heavier "qdt"-style tooling: each arch boots an
+# Alpine-base initramfs on a 6.6.x kernel under QEMU (TCG), exposes a serial
+# console on a UNIX socket, and shares a host directory via 9p at /mnt/host.
+#
+# Usage:
+#   qvm boot <arch>       start the VM for <arch> (x86_64|i386|aarch64)
+#   qvm console <arch>    attach to the VM serial console (Ctrl-a x to exit)
+#   qvm stop <arch>       stop the VM
+#   qvm status            list VMs and their state
+#   qvm run <arch> <cmd>  run a one-shot command in the VM via serial (best-effort)
+#   qvm share             print the host share path (mounted at /mnt/host in guests)
+#
+# Environments: x86_64, i386, aarch64  (loongarch64/riscv64 planned, see .todo)
+
+set -eu
+ENV=/workspace/MeuOS-Kit/env
+RUN="$ENV/run"
+SHARE="$ENV/share"
+mkdir -p "$RUN" "$SHARE"
+
+# Locate the QEMU binary. Prefer the self-built multi-target set (has 9p);
+# fall back to the host qemu-kvm for x86_64/i386 (no 9p, no aarch64).
+QEMU_PREFIX="$ENV/build/qemu-install"
+qemu_bin() {
+  local arch="$1"
+  case "$arch" in
+    x86_64) echo "${QEMU_PREFIX}/bin/qemu-system-x86_64" ;;
+    i386)   echo "${QEMU_PREFIX}/bin/qemu-system-i386" ;;
+    aarch64)echo "${QEMU_PREFIX}/bin/qemu-system-aarch64" ;;
+    *) echo "qvm: unknown arch '$arch' (use x86_64|i386|aarch64)" >&2; exit 2 ;;
+  esac
+}
+
+# Translate user arch -> kernel dir / initramfs name. i386 uses the x86 apk.
+resolve() {
+  case "$1" in
+    i386) echo "x86" ;;
+    *) echo "$1" ;;
+  esac
+}
+
+is_running() {
+  local arch="$1"
+  [ -f "$RUN/$arch.pid" ] && kill -0 "$(cat "$RUN/$arch.pid" 2>/dev/null)" 2>/dev/null
+}
+
+cmd_boot() {
+  local arch="$1"
+  local bin; bin="$(qemu_bin "$arch")"
+  if [ ! -x "$bin" ]; then
+    echo "qvm: qemu binary not found: $bin" >&2
+    echo "     (build it: env/build/build-qemu.sh)" >&2
+    exit 1
+  fi
+  if is_running "$arch"; then
+    echo "qvm: $arch already running (pid $(cat "$RUN/$arch.pid"))"
+    return 0
+  fi
+  local krch; krch="$(resolve "$arch")"
+  local kernel="$ENV/kernels/$krch/vmlinuz"
+  local initrd="$ENV/rootfs/initramfs-$krch.cpio.gz"
+  local sock="$RUN/$arch.sock"
+  local mon="$RUN/$arch.mon"
+  local pidf="$RUN/$arch.pid"
+  [ -f "$kernel" ] || { echo "qvm: kernel missing: $kernel" >&2; exit 1; }
+  [ -f "$initrd" ] || { echo "qvm: initramfs missing: $initrd" >&2; exit 1; }
+  rm -f "$sock" "$mon" "$pidf" 2>/dev/null || true
+  local extra machine cpu append
+  case "$arch" in
+    x86_64|i386) machine="pc"; cpu="max"; append="console=ttyS0 quiet" ;;
+    aarch64)     machine="virt"; cpu="cortex-a72"; append="console=ttyAMA0 quiet" ;;
+  esac
+  echo "qvm: booting $arch (kernel $kernel)..."
+  "$bin" \
+    -M "$machine" -cpu "$cpu" -m 256M \
+    -kernel "$kernel" -initrd "$initrd" -append "$append" \
+    -display none -no-reboot \
+    -serial "unix:$sock,server,nowait" \
+    -monitor "unix:$mon,server,nowait" \
+    -virtfs "local,path=$SHARE,mount_tag=hostshare,security_model=none,id=hostshare" \
+    -pidfile "$pidf" -daemonize
+  echo "qvm: $arch started (pid $(cat "$pidf" 2>/dev/null)), console socket $sock"
+  echo "qvm: attach with: qvm console $arch"
+}
+
+cmd_console() {
+  local arch="$1"
+  local sock="$RUN/$arch.sock"
+  [ -S "$sock" ] || { echo "qvm: no console socket for $arch (is it booted?)" >&2; exit 1; }
+  echo "qvm: attaching to $arch console (Ctrl-a then x to detach)..."
+  socat - UNIX-CONNECT:"$sock"
+}
+
+cmd_stop() {
+  local arch="$1"
+  if is_running "$arch"; then
+    local pid; pid="$(cat "$RUN/$arch.pid")"
+    echo "qvm: stopping $arch (pid $pid)..."
+    kill "$pid" 2>/dev/null || true
+    sleep 1
+    kill -9 "$pid" 2>/dev/null || true
+    rm -f "$RUN/$arch.pid" "$RUN/$arch.sock" "$RUN/$arch.mon" 2>/dev/null || true
+    echo "qvm: $arch stopped"
+  else
+    echo "qvm: $arch not running"
+  fi
+}
+
+cmd_status() {
+  for arch in x86_64 i386 aarch64; do
+    if is_running "$arch"; then
+      printf "  %-10s RUNNING  pid %s\n" "$arch" "$(cat "$RUN/$arch.pid")"
+    else
+      printf "  %-10s stopped\n" "$arch"
+    fi
+  done
+}
+
+cmd_run() {
+  local arch="$1"; shift
+  local sock="$RUN/$arch.sock"
+  [ -S "$sock" ] || { echo "qvm: $arch not running" >&2; exit 1; }
+  # Best-effort: send command to serial, capture output for a few seconds.
+  { printf '%s\n' "$*"; sleep 3; } | socat - UNIX-CONNECT:"$sock" 2>/dev/null | tail -n +1
+}
+
+cmd_share() { echo "$SHARE"; }
+
+case "${1:-}" in
+  boot)    cmd_boot "${2:?arch required}" ;;
+  console) cmd_console "${2:?arch required}" ;;
+  stop)    cmd_stop "${2:?arch required}" ;;
+  status)  cmd_status ;;
+  run)     cmd_run "${2:?arch required}" "${@:3}" ;;
+  share)   cmd_share ;;
+  *) echo "usage: qvm <boot|console|stop|status|run|share> [arch] [args...]" >&2; exit 2 ;;
+esac

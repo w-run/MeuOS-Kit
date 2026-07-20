@@ -1,0 +1,42 @@
+# mcc Target Status
+
+本表区分“能选择 target”与“可作为完整 MeuOS 用户空间工具链”。后者还需要
+对应 ABI 的 `crt1`、`meuos-libc`、链接器路径以及运行时验证。
+
+| Target | 整数 ABI 回归 | 浮点汇编 | 当前结论 |
+|---|---:|---:|---|
+| x86_64 | 宿主运行验证 | 支持 | Phase 1/2 的主开发目标 |
+| aarch64 | 汇编回归 | 支持 | 代码生成基线可用；尚无 MeuOS libc/运行时 |
+| riscv64 | 汇编回归 | 支持 | 代码生成基线可用；尚无 MeuOS libc/运行时 |
+| loongarch64 | 专项 ABI/VLA/TLS 汇编回归 | 支持 | 后端相对成熟；尚无 MeuOS libc/运行时 |
+| i386 | 整数 SysV ABI 回归 | **未实现** | 仅整数子集，不可宣称完整 target |
+
+## 当前回归
+
+```sh
+make -C mcc check-i386
+make -C mcc check-targets       # aarch64 + riscv64
+make -C mcc check-loongarch64
+make -C mcc check-driver        # --shared、TLS 地址与浮点比较
+```
+
+`check-targets` 与 `check-i386` 是交叉汇编生成测试；它们不替代目标机执行。
+
+## TLS 与共享库边界
+
+`x86_64`、`aarch64`、`riscv64` 和 `loongarch64` 都有 local-exec TLS 地址
+生成回归；x86_64 也覆盖了外部 TLS 的 initial-exec 地址模型。`--shared`
+已经通过宿主链接器生成普通 ELF DSO 的回归，x86_64 的本地 `_Thread_local`
+定义会自动改用可链接的 initial-exec GOT 地址模型。当前尚未实现
+general-dynamic TLS；aarch64、riscv64、loongarch64 的外部 TLS 地址，以及这些
+target 含 TLS 的 DSO，仍不在支持范围内。
+
+## 后续优先级
+
+1. 完成 i386 x87/SSE 浮点选择、比较和调用 ABI，再将 i386 升级为完整代码生成
+   target。
+2. 选择一个 64 位非宿主 target（推荐 aarch64 或 riscv64）移植 `crt1`、原子
+   runtime、syscall gate 与 MeuOS libc，增加 qemu 运行测试。
+3. 对 LoongArch64 按相同路径补齐 libc/runtime；现有后端专项回归可作为基线。
+4. ARMv7、powerpc64le、s390x 等只在有明确 MeuOS 平台需求时再引入，避免在缺少
+   sysroot 和运行验证时只增加未维护的后端。

@@ -1,0 +1,13 @@
+name: meow-pattern
+version: 1
+
+targets:
+  %.out:
+    inputs: [/tmp/meow-pattern-%.in]
+    outputs: [%.out]
+    commands:
+      - printf '$*:$<' > $@
+  clean:
+    phony: true
+    commands:
+      - rm -f alpha.out /tmp/meow-pattern-alpha.in

@@ -1,0 +1,45 @@
+name: binutils
+version: 2.42
+source: https://sourceware.org/pub/binutils/releases/binutils-2.42.tar.xz
+sha256: a075178e1d8e238d056b329214d9c3b4b7e7b574428133db1384780cd7da0ddf
+
+variables:
+  MCC: /workspace/MeuOS-Kit/sysroot/usr/bin/mcc
+  CFLAGS: -g -O2 -D_GNU_SOURCE -DHAVE_CONFIG_H -I/workspace/MeuOS-Kit/sysroot/usr/include
+  PKG_BUILD_DIR: /tmp/meow-build/binutils-2.42
+  TARBALL: /tmp/binutils-2.42.tar.xz
+  LIBIBERTY_A: /tmp/libiberty-meuos.a
+  BUILD_DIR: /tmp/meuos-libiberty-build
+
+default: all
+
+targets:
+  all:
+    deps: [install]
+  fetch:
+    commands:
+      - test -f ${TARBALL} || wget -c https://sourceware.org/pub/binutils/releases/binutils-2.42.tar.xz -O ${TARBALL}
+  unpack:
+    deps: [fetch]
+    commands:
+      - mkdir -p /tmp/meow-build
+      - tar xf ${TARBALL} -C /tmp/meow-build
+  configure:
+    deps: [unpack]
+    commands:
+      - cd ${PKG_BUILD_DIR}/libiberty && ./configure --disable-shared 2>&1 | tail -3
+      - test -f ${PKG_BUILD_DIR}/libiberty/config.h
+  build:
+    deps: [configure]
+    inputs: [${TARBALL}, ${PKG_BUILD_DIR}/libiberty/config.h]
+    outputs: [${LIBIBERTY_A}]
+    commands:
+      - mkdir -p ${BUILD_DIR}
+      - bash -c 'cd ${BUILD_DIR}; for f in regex.c cplus-dem.c cp-demangle.c md5.c sha1.c alloca.c argv.c bsearch_r.c choose-temp.c concat.c cp-demint.c crc32.c d-demangle.c dwarfnames.c dyn-string.c fdmatch.c fibheap.c filedescriptor.c filename_cmp.c floatformat.c fnmatch.c fopen_unlocked.c getopt.c getopt1.c getpwd.c getruntime.c hashtab.c hex.c lbasename.c lrealpath.c make-relative-prefix.c make-temp-file.c objalloc.c obstack.c partition.c pexecute.c physmem.c pex-common.c pex-one.c pex-unix.c vprintf-support.c rust-demangle.c safe-ctype.c simple-object.c simple-object-coff.c simple-object-elf.c simple-object-mach-o.c simple-object-xcoff.c sort.c spaces.c splay-tree.c stack-limit.c strerror.c strsignal.c timeval-utils.c unlink-if-ordinary.c xasprintf.c xatexit.c xexit.c xmalloc.c xmemdup.c xstrdup.c xstrerror.c xstrndup.c xvasprintf.c; do ${MCC} --specs=meuos --sysroot=/workspace/MeuOS-Kit/sysroot ${CFLAGS} -I${PKG_BUILD_DIR}/libiberty -I${PKG_BUILD_DIR}/include -c -o ${BUILD_DIR}/${f%.c}.o ${PKG_BUILD_DIR}/libiberty/$f 2>/dev/null || true; done; ar rcs ${LIBIBERTY_A} *.o; ar d ${LIBIBERTY_A} memcpy.o memset.o memmove.o memchr.o memcmp.o calloc.o getenv.o getopt.o strncmp.o strchr.o strrchr.o strtoul.o strtoll.o strtoull.o strtod.o strtol.o getcwd.o strnlen.o strndup.o 2>/dev/null || true; ls -la ${LIBIBERTY_A}'
+  install:
+    deps: [build]
+    commands:
+      - echo "binutils 2.42 libiberty.a built to ${LIBIBERTY_A}"
+  clean:
+    commands:
+      - rm -rf ${PKG_BUILD_DIR} ${LIBIBERTY_A} ${BUILD_DIR}

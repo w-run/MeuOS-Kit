@@ -1,0 +1,20 @@
+# Default: text files use repo-native LF.
+* text=auto
+
+# Binary firmware / disk images (never normalize/diff).
+*.fd binary
+*.img binary
+*.iso binary
+*.qcow2 binary
+*.apk binary
+*.gz binary
+*.xz binary
+*.cpio.gz binary
+*.tar.gz binary
+*.o binary
+*.a binary
+*.so binary
+*.so.* binary
+
+# Kernel configs are large text; keep them diffable.
+env/kernels/*/config text

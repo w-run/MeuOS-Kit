@@ -1,0 +1,4 @@
+# 待实现：RISC-V 64-bit crt1.S
+
+`_start` 入口：设置 TLS（tp 寄存器）、传入 argc/argv/envp、调用 `main`、
+`exit`。参考 `crt/x86_64/crt1.S`。完整计划见 `../src/arch/riscv64/.todo`。

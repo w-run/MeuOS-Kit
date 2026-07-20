@@ -1,0 +1,23 @@
+# 待实现：RISC-V 64-bit (riscv64) 运行时移植
+
+## 背景
+mcc 已有 riscv64 后端代码生成基线（整数 ABI + 浮点汇编回归通过），
+libc/运行时尚未移植。TARGETS.md 将其列为 64 位非宿主 target 候选之一。
+
+## 需要实现的文件
+- `src/arch/riscv64/atomic.S`        - 原子操作（lr.w/sc.w / lr.d/sc.d）
+- `src/arch/riscv64/setjmp.S`        - setjmp/longjmp（保存 ra/sp/s0-s11）
+- `src/arch/riscv64/sigreturn.S`     - rt_sigreturn restorer
+- `src/arch/riscv64/thread_clone.S` - clone + 子线程 TLS（tp 寄存器）
+- `src/arch/riscv64/tls.c`           - TLS 初始化
+- `crt/riscv64/crt1.S`               - _start 入口
+- `src/internal/arch/riscv64/syscall.S` - syscall gate（a7 传号，a0-a5 传参）
+
+## 关联修改
+- `src/internal/syscall.h`：riscv64 syscall 编号（asm-generic/unistd.h）。
+- `include/sys/syscall.h`：补 riscv64 `SYS_*` 宏。
+- `Makefile`：`ARCH=riscv64` 构建规则。
+
+## 验收
+- `make ARCH=riscv64` 全量编译通过。
+- qemu-riscv64 下运行 Phase-2 测试程序。

@@ -1,0 +1,38 @@
+name: bzip2
+version: 1.0.8
+source: https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz
+sha256: ab5a031276eea6a0650ecf268d1b4839b7377c4c912b0b1c7c33a3d71616b8e8
+
+variables:
+  MCC: ${MEUOS_SYSROOT}/usr/bin/mcc
+  CFLAGS: -O2 -I. -I${MEUOS_SYSROOT}/usr/include -D_FILE_OFFSET_BITS=64
+  PKG_BUILD_DIR: /tmp/meow-build/bzip2-1.0.8
+  TARBALL: /tmp/bzip2-1.0.8.tar.gz
+
+default: all
+
+targets:
+  all:
+    deps: [install]
+  fetch:
+    commands:
+      - test -f ${TARBALL} || wget -c https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz -O ${TARBALL}
+  unpack:
+    deps: [fetch]
+    commands:
+      - mkdir -p /tmp/meow-build
+      - tar xf ${TARBALL} -C /tmp/meow-build
+  build:
+    deps: [unpack]
+    inputs: [${TARBALL}]
+    outputs: [${PKG_BUILD_DIR}/bzip2]
+    commands:
+      - cd ${PKG_BUILD_DIR} && make -e CC=${MCC} bzip2
+  install:
+    deps: [build]
+    commands:
+      - cp ${PKG_BUILD_DIR}/bzip2 /tmp/bzip2-test
+      - echo "bzip2 1.0.8 build complete"
+  clean:
+    commands:
+      - rm -rf ${PKG_BUILD_DIR} /tmp/bzip2-test
