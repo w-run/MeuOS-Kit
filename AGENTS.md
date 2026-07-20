@@ -287,3 +287,47 @@ Agent 自行决定目录布局，须满足：
 - 输出 `bootstrap-report.md`（本次运行日志），并更新 `STATE.md` 的「最近变更」与下一步优先级。
 
 ---
+
+## 7. 实现策略与参考资源（节省算力）
+
+**核心原则：优先参考成熟社区实现，避免从零推导繁琐算法而浪费算力。**
+libc/编译器/构建系统中有大量被反复验证过的算法（内存分配、printf 格式化、
+正则、哈希、寄存器分配、SSA 构造、ABI 分类……）。直接参考这些实现的结构与
+算法，再用本项目的代码重新实现，远比自行重新推导高效且可靠。
+
+### 本仓库已提供的只读参考树（`reference/`，gitignored，勿改勿提交）
+
+| 路径 | 用途 |
+|------|------|
+| `reference/cproc/` | mcc 前端设计参考（词法/语法/语义/类型系统） |
+| `reference/qbe/`   | mcc 后端设计参考（IR/指令选择/寄存器分配/各 arch emit） |
+| `reference/musl/`   | meuos-libc 算法参考（mallocng/stdio/pthread/...） |
+| `reference/tinycc/` | 轻量 C 编译器参考（快速编译、简单后端、tcc 的 preprocessor） |
+
+遇到具体实现问题时，先查对应参考树：例如 IR pass 行为看 `reference/qbe/<file>.c`，
+libc 的 `printf` 看 `reference/musl/src/stdio/vfprintf.c`，各 arch 的 crt/原子
+看 `reference/musl/src/<arch>/`。mcc 的对应副本在 `projects/mcc/src/`，libc 在
+`projects/meuos-libc/src/`。
+
+### 鼓励参考的其他社区资源
+
+- **libc 算法**：musl（首选，已 vendored）、Cosmopolitan Libc、serenityOS LibC、
+  PDCLib、rlibc——用于 malloc 策略、`<threads.h>`、`<stdatomic.h>` runtime、
+  `printf` 格式化内核等。
+- **编译器设计**：cproc/QBE（已 vendored）、chibicc、9cc、lacc、cparser——用于
+  递归下降解析、类型推导、IR 构造、寄存器分配思路。
+- **构建系统**：redo、tup、ninja、bear-make——用于依赖图、增量构建、模式规则。
+- **通用知识库**：OSDev Wiki、Linux man-pages、各 arch 的 ELF/ABI spec（SysV
+  psABI、AArch64 AAPCS、RISC-V calling convention）。
+
+### 边界（与 §4 禁止事项一致）
+
+- **参考算法与结构，但用本项目自己的代码重新实现**；不直接复制 musl/cproc/QBE
+  源码（许可与自举纯洁性要求）。
+- 仍受 §4 约束：核心库与 mcc 源码中**禁止** glibc 专有符号、LLVM/Clang、GCC 代码。
+- 所有实现必须能被 mcc 自身编译（自举验证），并过对应 `make check`。
+- 参考实现的 license（musl 为 MIT、cproc/QBE 为 ISC/MIT、tinycc 为 LGPL）允许
+  学习算法，但本项目代码必须是独立撰写、MIT 许可的原创实现。
+
+**一句话**：站在巨人肩膀上——读参考实现理解算法，再用自己的手写出来，不要把
+算力花在重新发明轮子上。
