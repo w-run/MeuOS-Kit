@@ -2,7 +2,7 @@
 
 > **这是动态单一事实源。新会话恢复时，先读本文件，再按需读 AGENTS.md（项目规约）与各组件 `ARCHITECTURE.md`。每次工作结束应更新本文件的「最近变更」与「下一步」。**
 
-> 更新时间：2026-07-21
+> 更新时间：2026-07-21（git 初始化后）
 
 ---
 
@@ -63,7 +63,7 @@
 
 ## 3. 已知阻塞 / 跨组件限制
 
-- 无 git 仓库（无版本历史），删改需谨慎，改动后立即 `make check` 验证。
+- git 仓库已就绪（`main` 分支，391 文件跟踪；大文件如 `reference/`、`env/build/`、`sysroot/` 均可重建不提交）。改动建议：建分支 -> 改 -> `make check` -> **同步更新本文件 §6** -> 提交。
 - mcc 链接仍依赖宿主 `cc`/`ld`（`src/driver/host_toolchain.c`）；纯原生链接器待实现。
 - i386 不可作完整 target（缺浮点 + printf %d 缺陷）。
 - 完整独立 MeuOS userspace 尚未完成（非 x86_64 runtime、原生 shell）。
@@ -105,6 +105,9 @@ env/bin/qvm boot x86_64 && env/bin/qvm run x86_64 'uname -r' && env/bin/qvm stop
 
 ## 6. 最近变更
 
+> **每次变更（含 git 操作）后必须更新本节，并据实修订 §1–§5。**
+
+- **2026-07-21**：初始化 git 仓库（`main` 分支，初始提交 81d4532 + 391 文件）；完善 `.gitignore`（忽略 mcc 二进制 / env 大文件 / share 工作目录）与 `.gitattributes`（二进制标记）；AGENTS.md 新增 §7「实现策略与参考资源」--指引 agent 优先参考 musl/cproc/QBE/tinycc 等社区实现以节省算力。
 - **2026-07-21**：清理冗余文档（删除 `-MP` 垃圾文件 + 4 个 `PROGRESS.md`，合并为 `STATE.md`）；修正 `bootstrap.sh` Phase 4 对已删除 `experiments/` 的引用；精简 `README.md`。
 - **2026-07-21**：搭建 `env/` QEMU 测试环境（自建 qemu 10.1.0 三 target + 9p，内核 6.6.142，三架构 boot/run/9p 验证通过）。
 - **2026-07-20**：三项目代码结构优化——meow 单文件拆分、mcc pp.c/main.c 拆分、各组件 ARCHITECTURE.md + .todo 体系、修复 4 个阻断自举的预存缺陷。
