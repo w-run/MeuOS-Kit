@@ -2,7 +2,7 @@
 
 > **这是动态单一事实源。新会话恢复时，先读本文件，再按需读 AGENTS.md（项目规约）与各组件 `ARCHITECTURE.md`。每次工作结束应更新本文件的「最近变更」与「下一步」。**
 
-> 更新时间：2026-07-21（git 初始化后）
+> 更新时间：2026-07-21（QEMU 自举交接文档）
 
 ---
 
@@ -58,6 +58,7 @@
 - `env/bin/qvm` 管理器：`boot/console/run/stop/status <arch>`，9p 共享宿主 `env/share/` ↔ guest `/mnt/host`。
 - 已验证：mcc+libc-meuos 静态二进制在 x86_64 VM 内运行通过（`counter = 2000` 等价闭环）。
 - **未覆盖**：loongarch64 / riscv64（见 `env/.todo/`）。
+- **下一步（Phase 6）**：qemu 改由 mcc+libc-meuos 自建（当前用宿主 gcc 过渡）；交接规格见 `env/QEMU_BOOTSTRAP.md`。核心挑战=glib2 硬依赖（zlib 易）。
 
 ---
 
@@ -77,6 +78,7 @@
 3. **P3** 用 meow 原生构建 Kit 自身（`projects/meow/.todo/native-kit-build.md`）。
 4. **P4** 补 loongarch64/rv64 的 QEMU 测试环境（`env/.todo/`）。
 5. **P5** 实现 `-O` 级别控制与 `-W` 诊断系统（`projects/mcc/.todo/`）。
+6. **P6** QEMU 自举：让 `qemu-system-*` 由 mcc+libc-meuos+meow 构建（见 `env/QEMU_BOOTSTRAP.md`；前置=glib2 移植、zlib 移植）。
 
 ---
 
@@ -107,6 +109,7 @@ env/bin/qvm boot x86_64 && env/bin/qvm run x86_64 'uname -r' && env/bin/qvm stop
 
 > **每次变更（含 git 操作）后必须更新本节，并据实修订 §1–§5。**
 
+- **2026-07-21**：新增 `env/QEMU_BOOTSTRAP.md`--QEMU 自举交接文档（供移植 Agent 阅读）：列明 qemu 源/配置/夹具提供方式、env 工具（qvm/build-initramfs.sh）可移植性、glib2 硬依赖挑战与策略、6 个里程碑与验收清单。STATE.md §4 增 P6。
 - **2026-07-21**：初始化 git 仓库（`main` 分支，初始提交 81d4532 + 391 文件）；完善 `.gitignore`（忽略 mcc 二进制 / env 大文件 / share 工作目录）与 `.gitattributes`（二进制标记）；AGENTS.md 新增 §7「实现策略与参考资源」--指引 agent 优先参考 musl/cproc/QBE/tinycc 等社区实现以节省算力。
 - **2026-07-21**：清理冗余文档（删除 `-MP` 垃圾文件 + 4 个 `PROGRESS.md`，合并为 `STATE.md`）；修正 `bootstrap.sh` Phase 4 对已删除 `experiments/` 的引用；精简 `README.md`。
 - **2026-07-21**：搭建 `env/` QEMU 测试环境（自建 qemu 10.1.0 三 target + 9p，内核 6.6.142，三架构 boot/run/9p 验证通过）。
