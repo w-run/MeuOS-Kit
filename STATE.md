@@ -54,7 +54,7 @@
 - **未完成**（见 `.todo`）：用 meow 原生构建 Kit 自身、完整 DAG 去重、MeuOS 原生 shell。
 
 ### env（QEMU 测试环境，`env/`）
-- 自建 QEMU 10.1.0（x86_64/i386/aarch64 + 9p），内核 Alpine `linux-virt-6.6.142`，Alpine minirootfs initramfs（3.4–4.0MB）。
+- 自建 QEMU 10.1.0（x86_64/i386/aarch64，**KVM+9p+TCG**），内核 Alpine `linux-virt-6.6.142`，Alpine minirootfs initramfs（3.4–4.0MB）。
 - `env/bin/qvm` 管理器：`boot/console/run/stop/status <arch>`，9p 共享宿主 `env/share/` ↔ guest `/mnt/host`。
 - 已验证：mcc+libc-meuos 静态二进制在 x86_64 VM 内运行通过（`counter = 2000` 等价闭环）。
 - **未覆盖**：loongarch64 / riscv64（见 `env/.todo/`）。
@@ -109,6 +109,7 @@ env/bin/qvm boot x86_64 && env/bin/qvm run x86_64 'uname -r' && env/bin/qvm stop
 
 > **每次变更（含 git 操作）后必须更新本节，并据实修订 §1–§5。**
 
+- **2026-07-21**：env/ qemu 重建为 **KVM+9p**（`--enable-kvm`）；新增 `env/MEUOS2026.md`（给 MeuOS 2026 构建 VM 交接文档）+ `env/bin/qemu-path`。修复 MeuOS 2026 `run-vm.sh` 的 9p 模式（RHEL qemu-kvm 缺 9p）；现可用 `QEMU_BIN=$(env/bin/qemu-path) run-vm.sh` 跑 KVM+9p 构建 VM。KVM+9p 协同已验证。
 - **2026-07-21**：新增 `env/QEMU_BOOTSTRAP.md`--QEMU 自举交接文档（供移植 Agent 阅读）：列明 qemu 源/配置/夹具提供方式、env 工具（qvm/build-initramfs.sh）可移植性、glib2 硬依赖挑战与策略、6 个里程碑与验收清单。STATE.md §4 增 P6。
 - **2026-07-21**：初始化 git 仓库（`main` 分支，初始提交 81d4532 + 391 文件）；完善 `.gitignore`（忽略 mcc 二进制 / env 大文件 / share 工作目录）与 `.gitattributes`（二进制标记）；AGENTS.md 新增 §7「实现策略与参考资源」--指引 agent 优先参考 musl/cproc/QBE/tinycc 等社区实现以节省算力。
 - **2026-07-21**：清理冗余文档（删除 `-MP` 垃圾文件 + 4 个 `PROGRESS.md`，合并为 `STATE.md`）；修正 `bootstrap.sh` Phase 4 对已删除 `experiments/` 的引用；精简 `README.md`。
