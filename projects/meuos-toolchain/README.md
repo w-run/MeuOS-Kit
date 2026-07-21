@@ -10,13 +10,16 @@
 
 - **项目名**：`meuos-toolchain`（简称 `mt`）
 - **二进制无前缀**：MeuOS 环境里这些是唯一工具，不需要 `m-` 前缀区分
-    - `as` — 汇编器（不是 `masm`）
-    - `ld` — 链接器（不是 `mld`）
-    - `ar` — 归档器（不是 `mar`）
-    - `nm` / `objdump` / `readelf` / `strip` / `objcopy` — 同理
+    - `as` — 汇编器
+    - `ld` — 链接器
+    - `ar` — 归档器
+    - `nm` / `objdump` / `readelf` / `strip` / `objcopy` — 二进制工具
 - **内部模块化**：`src/<tool>/` + `src/libelf/`（项目内部共享库，不对外暴露）
 - **与 libmcc 的区别**：libmcc 是跨二进制共享（mcc/m++），需要稳定 API；
   mt 是单项目内部共享，libelf 接口可以随意演进
+- **架构区分**：单一二进制 + `--target` 选项 / 从输入自动推断（与 mcc 一致），
+  架构差异体现在源码模块化（`src/as/emit_<arch>.c`、`src/ld/reloc_<arch>.c`），
+  不产出多个二进制
 
 ## 背景
 
@@ -119,6 +122,31 @@ projects/meuos-toolchain/
 | **size**      | `size`      | 列节区大小        |
 | **addr2line** | `addr2line` | 调试地址 → 源码行 |
 | **strings**   | `strings`   | 提取可打印字符串  |
+
+## 架构区分策略
+
+mt 与 mcc 保持一致：**单一二进制 + 架构在源码层模块化**，不产出每架构一个二进制。
+支持的目标架构：x86_64 / aarch64 / i386 / riscv64 / loongarch64。
+
+各工具的架构相关性不同，选择策略也不同：
+
+| 工具      | 架构相关性                                | 架构选择方式                                           | 源码模块化                                          |
+| --------- | ----------------------------------------- | ------------------------------------------------------ | --------------------------------------------------- |
+| `ar`      | 完全无关（只打包字节流，不解析 ELF 内容） | 不需要                                                 | 单一 `ar.c`                                         |
+| `as`      | 强相关（指令编码各架构完全不同）          | `--target=<triplet>` 选项                              | `emit_{x86_64,aarch64,i386,riscv64,loongarch64}.c`  |
+| `ld`      | 弱相关（重定位类型与计算公式不同）        | 从输入 `.o` 的 ELF header 自动推断（`e_machine` 字段） | `reloc_{x86_64,aarch64,i386,riscv64,loongarch64}.c` |
+| `nm`      | 无关（只读符号表）                        | 不需要                                                 | 单一 `nm.c`                                         |
+| `readelf` | 无关（只读不解释指令）                    | 不需要                                                 | 单一 `readelf.c`                                    |
+| `objdump` | 反汇编时相关（要解码指令）                | 从输入 ELF 自动推断                                    | `disas_{x86_64,aarch64,...}.c`                      |
+| `strip`   | 无关                                      | 不需要                                                 | 单一 `strip.c`                                      |
+| `objcopy` | 无关（节区复制不解释内容）                | 不需要                                                 | 单一 `objcopy.c`                                    |
+
+**关键设计**：
+
+- `as` 是唯一需要显式 `--target` 的工具（输入是文本，无法从输入推断目标架构）
+- `ld` / `objdump` 从输入 `.o` 的 ELF header（`e_machine`）自动推断，不需要 `--target`
+- `ar` / `nm` / `readelf` / `strip` / `objcopy` 完全架构无关
+- 这与 GNU `as` 需要 `--target` 而 `ld`/`objdump` 自动推断的行为一致
 
 ## 实施路径
 
