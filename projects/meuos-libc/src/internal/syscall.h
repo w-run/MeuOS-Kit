@@ -46,6 +46,7 @@ __syscall_number(long number)
 	case 90: return 15; /* chmod */
 	case 186: return 224; /* gettid */
 	case 202: return 240; /* futex */
+	case 231: return 252; /* exit_group */
 	case 217: return 220; /* getdents64 */
 	case 228: return 265; /* clock_gettime */
 	case 13:  return 174; /* rt_sigaction */

@@ -409,7 +409,11 @@ emitcon(Con *con, E *e)
 		l = str(con->sym.id);
 		p = l[0] == '"' ? "" : T.assym;
 		if (con->sym.type == SThr) {
-			fprintf(e->f, "%%gs:%s%s", p, l);
+			/* Local-exec TLS (variant II): the symbol is a negative
+			 * displacement from the %gs thread pointer.  Without
+			 * @ntpoff the assembler treats sym as an absolute address
+			 * and the load/store hits unmapped memory. */
+			fprintf(e->f, "%%gs:%s%s@ntpoff", p, l);
 		} else {
 			assert((con->sym.type & ~SExt) == SGlo);
 			fprintf(e->f, "%s%s", p, l);
@@ -1305,10 +1309,14 @@ emitins(Ins i, E *e)
 		sym = str(con->sym.id);
 		switch (con->sym.type) {
 		case SThr:
-			/* local-exec TLS: offset from %gs:0 */
+			/* local-exec TLS (variant II): the symbol offset is a
+			 * *negative* displacement from the thread pointer at
+			 * %gs:0.  Emit @ntpoff so the assembler emits an R_386_TLS_LE
+			 * relocation rather than treating the symbol as an absolute
+			 * address (which would produce a huge bogus offset and fault). */
 			fprintf(e->f, "\tmovl %%gs:0, %%%s\n",
 				regtoa(i.to.val, SLong));
-			fprintf(e->f, "\tleal %s%s",
+			fprintf(e->f, "\tleal %s%s@ntpoff",
 				sym[0] == '"' ? "" : T.assym, sym);
 			if (con->bits.i)
 				fprintf(e->f, "%+"PRId64, con->bits.i);

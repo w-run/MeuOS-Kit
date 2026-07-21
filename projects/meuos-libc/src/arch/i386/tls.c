@@ -21,8 +21,6 @@
 #define AT_PHENT 4
 #define AT_PHNUM 5
 #define PT_TLS 7
-#define LINUX_SYS_MMAP 9
-
 /* i386 set_thread_area(2) descriptor.  The kernel writes entry_number
  * back when it allocates a GDT slot. */
 struct meuos_user_desc {
@@ -63,7 +61,9 @@ allocate_tls(void)
 		return 0;
 	tls_end = round_up(tls_memory_size, tls_alignment);
 	tls_allocation_size = tls_end + sizeof(void *);
-	result = __syscall6(LINUX_SYS_MMAP, 0, tls_allocation_size,
+	/* i386 has no mmap (9 is link on i386); use mmap2 (192) with the
+	 * offset given in 4096-byte pages.  offset 0 -> page arg 0. */
+	result = __syscall6(192, 0, tls_allocation_size,
 		PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 	if (__syscall_error(result))
 		return 0;

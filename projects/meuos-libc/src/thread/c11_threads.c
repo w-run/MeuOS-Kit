@@ -22,8 +22,15 @@ _Noreturn void
 __meuos_thread_finish(int result, struct meuos_thread *control)
 {
 	__meuos_tss_cleanup(gettid());
-	if (control)
+	if (control) {
 		control->result = result;
+		/* Manually clear the tid and wake any thrd_join waiter, rather
+		 * than relying on the kernel's CLONE_CHILD_CLEARTID path: on
+		 * i386 the clone child_tidptr argument has proven unreliable
+		 * to observe, so publish the exit explicitly. */
+		control->tid = 0;
+		__syscall6(LINUX_SYS_FUTEX, (long)&control->tid, 1, 1, 0, 0, 0);
+	}
 	_exit(0);
 }
 

@@ -16,7 +16,12 @@
 #include <sys/types.h>
 #include <threads.h>
 
+#if defined(__i386__)
+/* i386 futex is 240; 202 is getegid32 on i386. */
+#define LINUX_SYS_FUTEX 240
+#else
 #define LINUX_SYS_FUTEX 202
+#endif
 #define FUTEX_WAIT      0
 #define THREAD_STACK_SIZE (1024 * 1024)
 #define TSS_KEYS     32

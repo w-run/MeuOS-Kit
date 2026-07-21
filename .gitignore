@@ -25,6 +25,7 @@ sources/
 
 # bootstrap staging
 sysroot/
+sysroot-i386/
 stage/
 
 # experimentation sandboxes (Alpine rootfs, etc.)

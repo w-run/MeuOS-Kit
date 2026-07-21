@@ -105,6 +105,15 @@ fixarg(Ref *r, int k, Ins *i, Fn *fn)
 	s = rslot(r0, fn);
 	op = i ? i->op : Ocopy;
 
+	/* Store instructions encode their value operand's class as Ke in
+	 * optab (the source class always follows i->cls).  Without this,
+	 * a Kl store source that lives in a stack slot falls through to the
+	 * "slot -> Oaddr" path below and stores the slot *address* instead
+	 * of its value.  amd64 never hits this because Kl temps live in
+	 * 64-bit registers and are never slot-resident here. */
+	if (k == -2)  /* Ke: optab sentinel for store value class */
+		k = i->cls;
+
 	if (KBASE(k) == 1 && rtype(r0) == RCon) {
 		/* x87 has no immediate floating-point operands.  Materialize the
 		 * bit pattern in the literal pool, exactly as the SSE targets do.
