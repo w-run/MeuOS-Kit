@@ -1,17 +1,7 @@
-# 待规划：meuos-toolchain（MeuOS 工具链，简称 mt）
+# meuos-toolchain (mt)
 
-## 背景
-
-mcc 当前生成的 `.s` 汇编文本和最终的链接工作都外包给宿主 `cc`：
-
-- `src/driver/host_toolchain.c:run_host_cc()` 调用 `cc -x assembler <file> -c`
-  做汇编，`cc <file> -o <out>` 做汇编+链接
-- `src/driver/host_toolchain.c:run_host_link()` 调用 `cc <.o files> -L -l -o`
-  做 .o + .a 链接
-- `projects/mcc/Makefile` 用宿主 `ar rcs` 打包 `libmcc.a`
-
-这三处是 MeuOS Kit 自举链的**最后外部依赖**。AGENTS.md §4 强约束
-（零 GNU 代码）要求最终由 Kit 自身工具完成 `.s → .o → 可执行`。
+> MeuOS Kit 的工具链项目：汇编器、链接器、归档器、二进制工具整套提供。
+> 解除 mcc 对宿主 `cc`/`as`/`ld`/`ar` 的最后依赖，完成 Kit 自举链。
 
 ## 项目定位
 
@@ -28,14 +18,26 @@ mcc 当前生成的 `.s` 汇编文本和最终的链接工作都外包给宿主 
 - **与 libmcc 的区别**：libmcc 是跨二进制共享（mcc/m++），需要稳定 API；
   mt 是单项目内部共享，libelf 接口可以随意演进
 
+## 背景
+
+mcc 当前生成的 `.s` 汇编文本和最终的链接工作都外包给宿主 `cc`：
+
+- `src/driver/host_toolchain.c:run_host_cc()` 调用 `cc -x assembler <file> -c`
+  做汇编，`cc <file> -o <out>` 做汇编+链接
+- `src/driver/host_toolchain.c:run_host_link()` 调用 `cc <.o files> -L -l -o`
+  做 .o + .a 链接
+- `projects/mcc/Makefile` 用宿主 `ar rcs` 打包 `libmcc.a`
+
+这三处是 MeuOS Kit 自举链的**最后外部依赖**。AGENTS.md §4 强约束
+（零 GNU 代码）要求最终由 Kit 自身工具完成 `.s → .o → 可执行`。
+
 ## 目录结构
 
 ```
 projects/meuos-toolchain/
-├── README.md
+├── README.md               # 本文件
 ├── Makefile                # 一次构建所有工具
-├── ARCHITECTURE.md
-├── .todo/                  # 各工具的详细待办
+├── ARCHITECTURE.md         # 详细架构（实现后补）
 ├── include/                # 项目内部头文件
 │   ├── elf.h               # ELF 常量（DT_*, SHT_*, R_X86_64_* 等）
 │   ├── symbol.h            # 符号表抽象
@@ -200,9 +202,9 @@ projects/meuos-toolchain/
    │  └libmcc │  ├── nm / readelf / objdump / strip   │
    │          │  └── 内部 libelf（不对外暴露）          │
    ▼          └──────────────────────────────────────┘
-┌──────────────────────────────────────────┐
-│  meuos-libc (提供运行时 + crt1.o)         │
-└──────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│  meuos-libc (提供运行时 + crt1.o)                 │
+└──────────────────────────────────────────────────┘
 ```
 
 ## 与 mcc 的集成方式
@@ -256,25 +258,6 @@ projects/meuos-toolchain/
 
 - ar 格式极简：`!<arch>\n` + 60 字节 header + 文件数据，几百行 C 即可
 - 参考 BSD ar（BSD 许可）的 ar/ranlib 实现
-
-## 影响范围
-
-### 新增
-
-- `projects/meuos-toolchain/` — 整个工具链项目（含 libelf + as + ld + ar + 辅助工具）
-
-### 修改（mt 完成后）
-
-- `projects/mcc/Makefile` — `AR ?= ar` 改为优先使用 mt 的 ar
-- `projects/mcc/src/driver/host_toolchain.c` — 增加 `MT_AS` / `MT_LD` /
-  `MT_AR` 环境变量支持，自举路径优先用 mt 工具
-- `STATE.md` §1 — 增加 mt 组件状态
-- `STATE.md` §4 — 更新 P10（工具链自研优先级）
-- `AGENTS.md` §2 — 增加 meuos-toolchain 组件规范
-
-### 不修改
-
-- `projects/mcc/` 的核心代码生成逻辑（mcc 仍输出 `.s`，由 mt 的 as 接管）
 
 ## 前置依赖
 
