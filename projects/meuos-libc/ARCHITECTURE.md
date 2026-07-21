@@ -2,12 +2,14 @@
 
 > 本文档是 meuos-libc 的导航地图，供 AI agent 与人类阅读。
 > 自举管线上下文见 `../../AGENTS.md` §2.1 与 `../../STATE.md`。
+> 多架构状态、ABI 契约与移植顺序见 [`PORTING.md`](PORTING.md)。
 
 ## 1. 概述
 
 `meuos-libc` 是直接面向 Linux 内核 ABI 的 MeuOS C 库：系统调用封装不经过
-宿主 libc，直接 `syscall()` 或内联汇编。当前以 x86_64 为唯一已运行验证
-目标，i386 有最小 bootstrap。目标是支撑 mcc 与 meow 的最小自举。
+宿主 libc，直接 `syscall()` 或内联汇编。当前以 x86_64 为完整运行验证
+目标，i386 有最小 bootstrap；aarch64、loongarch64、riscv64 的 libc runtime
+仍在移植路线中。目标是支撑 mcc 与 meow 的最小自举。
 
 按 AGENTS.md §2.1，核心库只暴露标准符号；任何 GNU 扩展符号
 （`error_at_line`、`obstack`、`argp` 等）全部放入独立 `meuos-libc-compat`
@@ -18,7 +20,8 @@
 ```
 meuos-libc/
 ├── Makefile                  # 顶层构建（libc-meuos.a / libatomic-meuos.a / crt1.o）
-├── ARCHITECTURE.md           # 本文件
+├── ARCHITECTURE.md           # 本文件（目录结构与模块索引）
+├── PORTING.md                # 多架构状态、ABI 契约与移植说明
 ├── include/                  # 公共 libc 头文件
 │   ├── stdio.h stdlib.h string.h stdint.h stdatomic.h threads.h ...
 │   └── sys/                  #   系统头文件（syscall.h / stat.h / mman.h / ...）
@@ -81,9 +84,12 @@ meuos-libc/
 ## 5. 多 arch 构建
 
 `make ARCH=<arch>` 切换目标：
-- `x86_64`（默认）：宿主 `cc` 编译 C，宿主汇编器处理 `.S`。
-- `i386`：`$(MCC) --target=i386` 编译 C，宿主 `cc -m32` 汇编。
-- `aarch64`/`riscv64`/`loongarch64`：待实现（见各 `src/arch/<arch>/.todo`）。
+- `x86_64`（默认）：宿主 `cc` 编译 C，宿主汇编器处理 `.S`；当前完整运行验证基线。
+- `i386`：`$(MCC) --target=i386` 编译 C，宿主 `cc -m32` 汇编；当前只承诺整数 bootstrap。
+- `aarch64`/`loongarch64`：已确认基石，runtime 尚待实现；`riscv64` 是强烈建议新增目标（见
+  `PORTING.md` 与各 `src/arch/<arch>/.todo`）。
+- `armhf`/`ppc64le`/`s390x`：尚未纳入构建矩阵，先按 `PORTING.md` 的路线建立 TODO 和
+  交叉测试门禁；`armel` 与 `mips*` 明确不支持。
 
 `src/internal/syscall.h` 的 `__syscall_number()` 把 x86_64 syscall 号翻译为目标
 arch 的原生编号；ABU 形状不同的 syscall（如 i386 的 mmap2/socketcall）用
@@ -91,5 +97,6 @@ arch 的原生编号；ABU 形状不同的 syscall（如 i386 的 mmap2/socketca
 
 ## 6. 待实现项
 
-见各 `src/arch/<arch>/.todo`（aarch64/riscv64/loongarch64 运行时移植）与
-`.todo/` 目录（非 x86_64 完整 runtime、原生链接器等跨模块功能）。
+见 [`PORTING.md`](PORTING.md) 的架构状态、ABI 契约、time64 策略和验收清单；
+各 `src/arch/<arch>/.todo` 记录具体 runtime 移植任务，根目录 `.todo/` 记录跨架构
+功能（例如 32 位 time64、原生链接器）。

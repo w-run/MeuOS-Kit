@@ -25,7 +25,7 @@
 |-------|------|------|
 | 0 准备 | PASS | 宿主 gcc，sysroot 就绪 |
 | 1 诞生 mcc | PASS | 宿主编译 mcc，C11 矩阵 + 各 target 汇编回归通过；mcc 可用 libc-meuos 自重编译 |
-| 2 诞生 meuos-libc | PASS | 41+ 直接 syscall、C11 原子/线程/TLS、stdio/signal/setjmp/pthread；x86_64 完整，i386 bootstrap |
+| 2 诞生 meuos-libc | PASS | 41+ 直接 syscall、C11 原子/线程/TLS、stdio/signal/setjmp/pthread；x86_64 完整，i386 bootstrap；多架构战略与 ABI 契约见 `projects/meuos-libc/PORTING.md` |
 | 3 诞生 meow | PASS | 原生 YAML 构建系统（依赖/变量/模式规则/-jN/自动变量）+ Makefile 兼容 |
 | 4 自举验证 | PASS（via env/ QEMU） | 原 Alpine 容器门禁已废弃，改由 `env/` QEMU 6.6.142 内核验证 mcc+libc-meuos 二进制可运行 |
 | 5 LFS 包验证 | PASS | bzip2 1.0.8、binutils 2.42 libiberty 端到端通过 meow 构建 |
@@ -46,7 +46,8 @@
 - 直接 Linux 内核 ABI 封装（不经宿主 libc）；x86_64 完整，i386 最小 bootstrap。
 - 41+ 独立 syscall 源（一文件一调用）；C11 `<stdatomic.h>` + `libatomic-meuos.a`；C11 线程（clone/futex）+ pthread 适配；signal/sigaction/sigsetjmp；最小 stdio（vfprintf/snprintf 共享格式化内核）；first-fit malloc。
 - `meuos-libc-compat`（独立归档）：argp/error/obstack/getline/asprintf/funopen 等 GNU 扩展。
-- **未完成**（见 `.todo`）：非 x86_64 完整 runtime、纯原生链接器、i386 printf va_arg。
+- **架构路线**：x86_64、aarch64、loongarch64、i386 为已确认基石；riscv64、armhf 为强烈建议新增；ppc64le/s390x 按需；armel/mips* 明确跳过。此处“基石”是战略选型，不代表 runtime 已完成。
+- **未完成**（见 `projects/meuos-libc/PORTING.md` 与 `.todo`）：aarch64/riscv64/loongarch64 完整 runtime、i386 64 位 time_t/time64 与 printf va_arg、armhf runtime、纯原生链接器。
 
 ### meow（构建系统，`projects/meow/`）
 - 原生 YAML 目标图构建器（取代 Make）；已从单文件 `meow.c` 拆为 `src/{state,exec,recipe,parse,graph,main}.c + meow.h`。
@@ -66,19 +67,21 @@
 
 - git 仓库已就绪（`main` 分支，391 文件跟踪；大文件如 `reference/`、`env/build/`、`sysroot/` 均可重建不提交）。改动建议：建分支 -> 改 -> `make check` -> **同步更新本文件 §6** -> 提交。
 - mcc 链接仍依赖宿主 `cc`/`ld`（`src/driver/host_toolchain.c`）；纯原生链接器待实现。
-- i386 不可作完整 target（缺浮点 + printf %d 缺陷）。
+- i386 当前不可作完整 target（缺浮点 + printf %d 跨函数 va_list 缺陷）；其公共 ABI 仍需切换到 64 位 `time_t`/time64。
 - 完整独立 MeuOS userspace 尚未完成（非 x86_64 runtime、原生 shell）。
 
 ---
 
 ## 4. 下一步优先级
 
-1. **P1** 修复 i386 printf %d 跨函数 va_list（`projects/meuos-libc/.todo/i386-printf-va.md`）。
-2. **P2** 为 aarch64/riscv64/loongarch64 之一补齐 meuos-libc runtime + qemu 运行回归（`projects/meuos-libc/src/arch/<arch>/.todo`）。
-3. **P3** 用 meow 原生构建 Kit 自身（`projects/meow/.todo/native-kit-build.md`）。
-4. **P4** 补 loongarch64/rv64 的 QEMU 测试环境（`env/.todo/`）。
-5. **P5** 实现 `-O` 级别控制与 `-W` 诊断系统（`projects/mcc/.todo/`）。
-6. **P6** QEMU 自举：让 `qemu-system-*` 由 mcc+libc-meuos+meow 构建（见 `env/QEMU_BOOTSTRAP.md`；前置=glib2 移植、zlib 移植）。
+1. **P1** 收口 i386：修复 `printf %d` 跨函数 `va_list`，并按 `projects/meuos-libc/.todo/32bit-time64.md` 切换 64 位 `time_t`/time64。
+2. **P2** 补齐 aarch64 meuos-libc runtime + QEMU Phase-2 运行回归（`projects/meuos-libc/src/arch/aarch64/.todo`）。
+3. **P3** 补齐 loongarch64 runtime，按最新 ABI/UAPI 建立独立 syscall、TLS、原子和信号门禁。
+4. **P4** 补齐 riscv64 runtime，用于验证架构抽象并建立第三条 64 位完整链。
+5. **P5** 建立 armhf TODO、交叉汇编与 QEMU 门禁；与 32 位 time64 方案一起落地。
+6. **P6** 用 meow 原生构建 Kit 自身（`projects/meow/.todo/native-kit-build.md`）。
+7. **P7** 实现 `-O` 级别控制与 `-W` 诊断系统（`projects/mcc/.todo/`）。
+8. **P8** QEMU 自举：让 `qemu-system-*` 由 mcc+libc-meuos+meow 构建（见 `env/QEMU_BOOTSTRAP.md`；前置=glib2 移植、zlib 移植）。
 
 ---
 
@@ -109,6 +112,7 @@ env/bin/qvm boot x86_64 && env/bin/qvm run x86_64 'uname -r' && env/bin/qvm stop
 
 > **每次变更（含 git 操作）后必须更新本节，并据实修订 §1–§5。**
 
+- **2026-07-21**：新增 `projects/meuos-libc/PORTING.md`，记录 x86_64/aarch64/loongarch64/i386 基石状态、riscv64/armhf 推荐新增、ppc64le/s390x 按需以及 armel/mips* 排除策略；补充 syscall/TLS/原子/启动 ABI、32 位统一 time64 和跨架构验收清单。新增 `32bit-time64.md` 与 armhf runtime TODO。
 - **2026-07-21**：env/ qemu 重建为 **KVM+9p**（`--enable-kvm`）；新增 `env/MEUOS2026.md`（给 MeuOS 2026 构建 VM 交接文档）+ `env/bin/qemu-path`。修复 MeuOS 2026 `run-vm.sh` 的 9p 模式（RHEL qemu-kvm 缺 9p）；现可用 `QEMU_BIN=$(env/bin/qemu-path) run-vm.sh` 跑 KVM+9p 构建 VM。KVM+9p 协同已验证。
 - **2026-07-21**：新增 `env/QEMU_BOOTSTRAP.md`--QEMU 自举交接文档（供移植 Agent 阅读）：列明 qemu 源/配置/夹具提供方式、env 工具（qvm/build-initramfs.sh）可移植性、glib2 硬依赖挑战与策略、6 个里程碑与验收清单。STATE.md §4 增 P6。
 - **2026-07-21**：初始化 git 仓库（`main` 分支，初始提交 81d4532 + 391 文件）；完善 `.gitignore`（忽略 mcc 二进制 / env 大文件 / share 工作目录）与 `.gitattributes`（二进制标记）；AGENTS.md 新增 §7「实现策略与参考资源」--指引 agent 优先参考 musl/cproc/QBE/tinycc 等社区实现以节省算力。

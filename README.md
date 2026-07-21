@@ -25,7 +25,8 @@ MeuOS-Kit/
 ```
 
 每个组件目录含 `ARCHITECTURE.md`（结构/模块索引）与 `.todo/`（待实现项，
-每项含背景/目标/影响范围/验收）。mcc 额外含 `TARGETS.md`（各架构成熟度）。
+每项含背景/目标/影响范围/验收）。`meuos-libc` 另有 [`PORTING.md`](projects/meuos-libc/PORTING.md)，
+记录多架构状态、ABI 契约、time64 策略和移植门禁。mcc 额外含 `TARGETS.md`（各架构成熟度）。
 
 ## 快速开始
 
