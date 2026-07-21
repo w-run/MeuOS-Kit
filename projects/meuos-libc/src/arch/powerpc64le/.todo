@@ -1,0 +1,30 @@
+# 待实现：PowerPC 64-bit Little-Endian (powerpc64le) 运行时移植
+
+## 背景
+PORTING.md §5 第 7 条：仅在明确用户空间需求或有可用 QEMU/硬件门禁时排期。
+mcc 的 powerpc64le 后端目前也是占位（见 `projects/mcc/src/target/powerpc64le/.todo`），
+本目录跟随 mcc 节奏，不提前实现。
+
+## 需要实现的文件
+- `src/arch/powerpc64le/atomic.S`        - 原子操作（lwarx/stwcx / ldarx/stdcx 系列）
+- `src/arch/powerpc64le/setjmp.S`        - setjmp/longjmp（保存 r1/r2/r14-r31/cr/lr）
+- `src/arch/powerpc64le/sigreturn.S`     - rt_sigreturn restorer
+- `src/arch/powerpc64le/thread_clone.S`  - clone + 子线程 TLS（r13 寄存器）
+- `src/arch/powerpc64le/tls.c`           - TLS 初始化
+- `crt/powerpc64le/crt1.S`               - _start 入口
+- `src/internal/arch/powerpc64le/syscall.S` - syscall gate（r0 传号，r3-r8 传参，sc 指令）
+
+## 关联修改
+- `src/internal/syscall.h`：powerpc64le syscall 编号（参考 Linux `arch/powerpc/include/uapi/asm/unistd.h`）。
+- `include/sys/syscall.h`：补 powerpc64le `SYS_*` 宏。
+- `Makefile`：`ARCH=powerpc64le` 构建规则。
+
+## 前置依赖
+- mcc 的 powerpc64le 后端落地（指令选择 + ELFv2 ABI + 汇编发射）。
+- qemu-ppc64le 运行验证。
+
+## 验收
+- `make ARCH=powerpc64le` 全量编译通过。
+- 无宿主 libc 的静态程序运行 `write`/`malloc`/stdio/C11 atomic。
+- TLS、`thrd_create/thrd_join`、futex、signal/setjmp 回归。
+- qemu-ppc64le 下运行 Phase-2 测试程序。
