@@ -40,7 +40,7 @@ mcc 当前生成的 `.s` 汇编文本和最终的链接工作都外包给宿主 
 projects/meuos-toolchain/
 ├── README.md               # 本文件
 ├── Makefile                # 一次构建所有工具
-├── ARCHITECTURE.md         # 详细架构（实现后补）
+├── ARCHITECTURE.md         # 分阶段架构、任务与验收门禁
 ├── include/                # 项目内部头文件
 │   ├── elf.h               # ELF 常量（DT_*, SHT_*, R_X86_64_* 等）
 │   ├── symbol.h            # 符号表抽象
@@ -120,7 +120,7 @@ projects/meuos-toolchain/
 
 | 工具   | 替代                        | 输入 → 输出                       | 复杂度 | 优先级 |
 | ------ | --------------------------- | --------------------------------- | ------ | ------ |
-| **ar** | `ar rcs` + `ranlib`         | `.o[] → .a`（含符号索引）         | 低     | **P0** |
+| **ar** | `ar rcs` + `ranlib`         | `.o[] → .a`（含符号索引）         | 低     | **P0b** |
 | **as** | `cc -x assembler -c` / `as` | `.s → .o`（ELF 可重定位）         | 中     | **P1** |
 | **ld** | `cc <.o> -o` / `ld`         | `.o[] + .a[] → ELF 可执行/共享库` | 高     | **P2** |
 
@@ -192,20 +192,26 @@ mt 与 mcc 保持一致：**单一二进制 + 架构在源码层模块化**，�
 
 ## 实施路径
 
-### 阶段 0：项目骨架 + libelf（P0 前置）
+### 阶段 0：项目骨架 + libelf（P0 前置，已启动）
 
 - 创建 `projects/meuos-toolchain/` 目录结构
-- `src/libelf/` 实现 ELF 常量定义、节区读取、符号表解析、重定位表读取
-- 参考：musl `src/internal/elf.h`（MIT）、serenityOS LibELF（BSD）
-- **验收**：libelf 能解析宿主 `cc` 产出的 `.o` 文件，列出节区和符号
+- `src/libelf/` 首期实现 ELF64 little-endian magic/class/encoding/version 和表范围验证
+- 使用项目自有格式常量，不包含宿主 `<elf.h>`
+- **当前验收**：`make -C projects/meuos-toolchain check`，`elf_probe` 能识别宿主 `cc` 产出的 `ET_REL/EM_X86_64` `.o`
 
-### 阶段 1：ar（P0，最低成本起步，立即替换宿主 ar）
+### 阶段 1：ar 基础读写（P0a，当前已启动）
 
-- `src/ar/` 实现 `ar rcs libfoo.a foo.o bar.o`
-    - BSD/GNU ar 格式（`!<arch>\n` magic + 60 字节 header）
-    - 内置 ranlib 功能（生成 `__.SYMDEF` 或 `/` 符号索引节）
-- **验收**：`ar rcs build/libmcc.a <objs>` 产出与宿主 `ar rcs` 符号级等价；
-  `make -C projects/mcc check` 全绿（用 mt 的 ar 替换宿主 ar）
+- `src/ar/` 实现 `ar rcs libfoo.a foo.o bar.o`、`t`、`p`、`x`
+    - SysV short-name 格式（`!<arch>\n` magic + 60 字节 header）
+    - 固定 mtime/uid/gid，保证输出可复现
+- **当前验收**：创建、列出、打印、解出成员并逐字节比较；尚未要求宿主 `ld` 链接
+
+### 阶段 1b：ar 完整化（P0b）
+
+- 成员替换和追加语义
+- GNU/BSD long-name table
+- 内置 ranlib 功能（生成 `/` 符号索引节）
+- **验收**：`ar rcs build/libmcc.a <objs>` 可被宿主 `ld` 接受，并可替换 mcc Makefile 的宿主 `ar`
 
 ### 阶段 2：as（P1，x86_64 优先，逐步扩展）
 
@@ -245,7 +251,7 @@ mt 与 mcc 保持一致：**单一二进制 + 架构在源码层模块化**，�
 
 | 优先级 | 工具                        | 理由                                            |
 | ------ | --------------------------- | ----------------------------------------------- |
-| **P0** | libelf + ar                 | 最简单、立即替换宿主 ar、为 as/ld 铺路          |
+| **P0a/P0b** | libelf + ar                 | 先建立格式层，再完成 ranlib 后替换宿主 ar          |
 | **P1** | as (x86_64)                 | 解除 mcc 对 `cc -c` 的依赖；x86_64 是主开发架构 |
 | **P2** | ld (x86_64 静态)            | 解除 mcc 对 `cc link` 的依赖；完成自举链        |
 | **P3** | as (aarch64/i386)           | 扩展架构覆盖，配合 aarch64 移植                 |
@@ -336,8 +342,9 @@ mt 与 mcc 保持一致：**单一二进制 + 架构在源码层模块化**，�
 
 ## 验收
 
-- **libelf + ar**：`ar rcs` 产出的 `.a` 可被宿主 `ld` 接受；
-  `make -C projects/mcc check` 全绿
+- **P0a 当前框架**：`make -C projects/meuos-toolchain check` 全绿；`libelf` 可验证 x86_64 ET_REL，`ar` 可创建/列出/打印/解出短名归档；
+- **P0b 完整 ar**：`ar rcs` 产出的 `.a` 可被宿主 `ld` 接受，并通过 mcc 的归档构建回归；
+  在 P0b 完成前，不把 mt/ar 设为 mcc 的默认归档器
 - **as x86_64**：`as foo.s -o foo.o` 产出的 `.o` 可被宿主 `ld`
   链接成可运行可执行文件
 - **ld x86_64 静态**：`ld foo.o -lc-meuos -o foo` 产出的可执行文件
@@ -352,7 +359,35 @@ mt 与 mcc 保持一致：**单一二进制 + 架构在源码层模块化**，�
   不必实现完整 gas 兼容。
 - **ld 的范围控制**：静态链接先行，动态链接 P7。MeuOS Next 的 DSO
   需求由后续 ldso + 动态 ld 协同。
-- **ar 的兼容性**：实现 GNU/BSD ar 格式（`<name>/` 末尾斜杠的 GNU 扩展），
-  与宿主 `ld` 互操作无障碍。
+- **ar 的兼容性**：P0a 只实现 SysV short-name 子集；P0b 再实现 GNU/BSD long-name 和
+  symbol index，完成与宿主 `ld` 的互操作。
 - **不阻塞当前工作**：aarch64 移植和 libmcc 阶段 B 都不依赖工具链自研。
   mt 的 ar 可并行启动（最简单、自包含）。
+
+## 当前实施状态（2026-07-22）
+
+首期开发固定为 **x86_64 优先**，当前已完成 P0 框架：
+
+- 独立 `Makefile`，源码、依赖文件和产物隔离到 `build/`；
+- 内部 `libelf`：不包含宿主 `<elf.h>`，可验证 ELF64 little-endian 头部和表范围；
+- 初版 `ar`：支持 `rcs`/`t`/`p`/`x`，生成可复现的 SysV 短名归档；
+- x86_64 ELF fixture、归档创建/列出/打印/解出回归测试；
+- 阶段计划和门禁见 [`ARCHITECTURE.md`](ARCHITECTURE.md)；
+- 当前限制记录在 `.todo/p0-foundation-ar.md`。
+
+### 本地构建和验收
+
+```sh
+make -C projects/meuos-toolchain clean
+make -C projects/meuos-toolchain
+make -C projects/meuos-toolchain check
+```
+
+首期 `ar` 的二进制位于：
+
+```text
+projects/meuos-toolchain/build/bin/ar
+```
+
+P0 的 `r/q` 是可复现重写语义，尚未实现已有成员替换、GNU long-name table
+和 archive symbol index；这些属于后续 ar 完整化任务，不能误认为已经完成。
