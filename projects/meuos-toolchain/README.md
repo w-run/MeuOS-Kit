@@ -14,11 +14,11 @@
     - `ld` — 链接器
     - `ar` — 归档器
     - `nm` / `objdump` / `readelf` / `strip` / `objcopy` — 二进制工具
-- **内部模块化**：`src/<tool>/` + `src/libelf/`（项目内部共享库，不对外暴露）
+- **内部模块化**：`src/<tool>/`（工具核心）+ `src/libelf/`（内部共享库）+ `src/target/<arch>/`（架构相关）
 - **与 libmcc 的区别**：libmcc 是跨二进制共享（mcc/m++），需要稳定 API；
   mt 是单项目内部共享，libelf 接口可以随意演进
 - **架构区分**：单一二进制 + `--target` 选项 / 从输入自动推断（与 mcc 一致），
-  架构差异体现在源码模块化（`src/as/emit_<arch>.c`、`src/ld/reloc_<arch>.c`），
+  架构差异集中在 `src/target/<arch>/`（与 mcc `src/target/` 对齐），
   不产出多个二进制
 
 ## 背景
@@ -52,45 +52,53 @@ projects/meuos-toolchain/
 │   │   ├── symbol.c
 │   │   ├── reloc.c
 │   │   └── section.c
-│   ├── as/                 # 汇编器（.s → .o）
+│   ├── as/                 # 汇编器核心（.s → .o）
 │   │   ├── as.c            # main
 │   │   ├── lex.c           # 词法
-│   │   ├── parse.c         # 语法（AT&T + Intel 双语法）
-│   │   ├── emit_x86_64.c   # x86_64 指令编码
-│   │   ├── emit_aarch64.c
-│   │   ├── emit_i386.c
-│   │   ├── emit_loongarch64.c
-│   │   ├── emit_riscv64.c
-│   │   ├── emit_armv7.c    # 待实现（mcc 占位中）
-│   │   ├── emit_powerpc64le.c  # 待实现（mcc 占位中）
-│   │   └── emit_s390x.c    # 待实现（mcc 占位中）
-│   ├── ld/                 # 链接器（.o + .a → 可执行/共享库）
+│   │   └── parse.c         # 语法（AT&T + Intel 双语法）
+│   ├── ld/                 # 链接器核心（.o + .a → 可执行/共享库）
 │   │   ├── ld.c            # main
 │   │   ├── resolve.c       # 符号解析
 │   │   ├── merge.c         # 节区合并
-│   │   ├── reloc_apply.c   # 重定位应用（按架构分发）
-│   │   ├── reloc_x86_64.c
-│   │   ├── reloc_aarch64.c
-│   │   ├── reloc_i386.c
-│   │   ├── reloc_loongarch64.c
-│   │   ├── reloc_riscv64.c
-│   │   ├── reloc_armv7.c   # 待实现
-│   │   ├── reloc_powerpc64le.c  # 待实现
-│   │   ├── reloc_s390x.c   # 待实现
+│   │   ├── reloc_apply.c   # 重定位应用（分发到 target/<arch>/）
 │   │   ├── layout.c        # 地址布局
 │   │   └── output.c        # ELF 输出
 │   ├── ar/                 # 归档器（.o[] → .a，含 ranlib 功能）
 │   │   └── ar.c
 │   ├── nm/                 # 符号表查看
 │   │   └── nm.c
-│   ├── objdump/            # 反汇编（可复用 as 的解码表）
-│   │   └── objdump.c
 │   ├── readelf/            # ELF 查看
 │   │   └── readelf.c
+│   ├── objdump/            # 反汇编（复用 target/<arch>/disas.c）
+│   │   └── objdump.c
 │   ├── strip/              # 去符号表
 │   │   └── strip.c
-│   └── objcopy/            # 节区复制/格式转换
-│       └── objcopy.c
+│   ├── objcopy/            # 节区复制/格式转换
+│   │   └── objcopy.c
+│   └── target/             # 架构相关代码集中（与 mcc src/target/ 对齐）
+│       ├── x86_64/
+│       │   ├── as_emit.c   # 汇编指令编码
+│       │   ├── ld_reloc.c  # 重定位应用
+│       │   └── disas.c     # 反汇编
+│       ├── aarch64/
+│       │   ├── as_emit.c
+│       │   ├── ld_reloc.c
+│       │   └── disas.c
+│       ├── i386/
+│       │   ├── as_emit.c
+│       │   ├── ld_reloc.c
+│       │   └── disas.c
+│       ├── loongarch64/
+│       │   ├── as_emit.c
+│       │   ├── ld_reloc.c
+│       │   └── disas.c
+│       ├── riscv64/
+│       │   ├── as_emit.c
+│       │   ├── ld_reloc.c
+│       │   └── disas.c
+│       ├── armv7/          # 待实现（mcc 占位中）
+│       ├── powerpc64le/    # 待实现（mcc 占位中）
+│       └── s390x/          # 待实现（mcc 占位中）
 ├── test/                   # 各工具的测试用例
 │   ├── as/
 │   ├── ld/
@@ -164,16 +172,16 @@ mt 与 mcc 保持一致：**单一二进制 + 架构在源码层模块化**，�
 
 各工具的架构相关性不同，选择策略也不同：
 
-| 工具      | 架构相关性                                | 架构选择方式                                           | 源码模块化                     |
-| --------- | ----------------------------------------- | ------------------------------------------------------ | ------------------------------ |
-| `ar`      | 完全无关（只打包字节流，不解析 ELF 内容） | 不需要                                                 | 单一 `ar.c`                    |
-| `as`      | 强相关（指令编码各架构完全不同）          | `--target=<triplet>` 选项                              | `emit_<arch>.c`（每架构一个）  |
-| `ld`      | 弱相关（重定位类型与计算公式不同）        | 从输入 `.o` 的 ELF header 自动推断（`e_machine` 字段） | `reloc_<arch>.c`（每架构一个） |
-| `nm`      | 无关（只读符号表）                        | 不需要                                                 | 单一 `nm.c`                    |
-| `readelf` | 无关（只读不解释指令）                    | 不需要                                                 | 单一 `readelf.c`               |
-| `objdump` | 反汇编时相关（要解码指令）                | 从输入 ELF 自动推断                                    | `disas_<arch>.c`（每架构一个） |
-| `strip`   | 无关                                      | 不需要                                                 | 单一 `strip.c`                 |
-| `objcopy` | 无关（节区复制不解释内容）                | 不需要                                                 | 单一 `objcopy.c`               |
+| 工具      | 架构相关性                                | 架构选择方式                                           | 源码模块化                 |
+| --------- | ----------------------------------------- | ------------------------------------------------------ | -------------------------- |
+| `ar`      | 完全无关（只打包字节流，不解析 ELF 内容） | 不需要                                                 | 单一 `ar.c`                |
+| `as`      | 强相关（指令编码各架构完全不同）          | `--target=<triplet>` 选项                              | `target/<arch>/as_emit.c`  |
+| `ld`      | 弱相关（重定位类型与计算公式不同）        | 从输入 `.o` 的 ELF header 自动推断（`e_machine` 字段） | `target/<arch>/ld_reloc.c` |
+| `nm`      | 无关（只读符号表）                        | 不需要                                                 | 单一 `nm.c`                |
+| `readelf` | 无关（只读不解释指令）                    | 不需要                                                 | 单一 `readelf.c`           |
+| `objdump` | 反汇编时相关（要解码指令）                | 从输入 ELF 自动推断                                    | `target/<arch>/disas.c`    |
+| `strip`   | 无关                                      | 不需要                                                 | 单一 `strip.c`             |
+| `objcopy` | 无关（节区复制不解释内容）                | 不需要                                                 | 单一 `objcopy.c`           |
 
 **关键设计**：
 
