@@ -38,16 +38,16 @@
 
 ### mcc（编译器，`projects/mcc/`）
 - 源码级整合 cproc 前端 + QBE 后端，单体 `mcc`；AST→IR 直接构造（无文本 IR 中间步）。
-- 支持架构：x86_64（主开发/运行验证）、aarch64、riscv64、loongarch64（汇编回归基线）、i386（整数 ABI 子集）。
+- 支持架构：x86_64（主开发/运行验证）、aarch64、riscv64、loongarch64（汇编回归基线）、i386（**完整可用**：含 x87 浮点、Kl 分解、time64、va_list）。
 - 结构（已优化）：`src/{driver,lex,parse,sema,irgen,ir,opt,abi,emit,util,target/<arch>}`；`src/lex/pp_expr.c` 与 `src/lex/pp_internal.h` 从 pp.c 拆出；driver 拆为 `main/target_select/host_toolchain/usage + driver_internal.h`；`include/util.h` 已加 include guard。
-- **已知限制**（详见 `.todo` 与 `src/target/i386/.todo`）：i386 浮点未实现、i386 printf %d 跨函数 va_list、general-dynamic TLS、`-O` 级别控制、`-W` 诊断系统。
+- **已知限制**（详见 `.todo`）：general-dynamic TLS、`-O` 级别控制、`-W` 诊断系统。
 
 ### meuos-libc（C 库，`projects/meuos-libc/`）
-- 直接 Linux 内核 ABI 封装（不经宿主 libc）；x86_64 完整，i386 最小 bootstrap。
+- 直接 Linux 内核 ABI 封装（不经宿主 libc）；x86_64/i386 runtime 完整（含 64 位 time_t/time64、跨函数 va_list、x87 浮点）。
 - 41+ 独立 syscall 源（一文件一调用）；C11 `<stdatomic.h>` + `libatomic-meuos.a`；C11 线程（clone/futex）+ pthread 适配；signal/sigaction/sigsetjmp；最小 stdio（vfprintf/snprintf 共享格式化内核）；first-fit malloc。
 - `meuos-libc-compat`（独立归档）：argp/error/obstack/getline/asprintf/funopen 等 GNU 扩展。
 - **架构路线**：x86_64、aarch64、loongarch64、i386 为已确认基石；riscv64、armhf 为强烈建议新增；ppc64le/s390x 按需；armel/mips* 明确跳过。此处“基石”是战略选型，不代表 runtime 已完成。
-- **未完成**（见 `projects/meuos-libc/PORTING.md` 与 `.todo`）：aarch64/riscv64/loongarch64 完整 runtime、i386 64 位 time_t/time64 与 printf va_arg、armhf runtime、纯原生链接器。
+- **未完成**（见 `projects/meuos-libc/PORTING.md` 与 `.todo`）：aarch64/riscv64/loongarch64 完整 runtime、armhf runtime、纯原生链接器。
 
 ### meow（构建系统，`projects/meow/`）
 - 原生 YAML 目标图构建器（取代 Make）；已从单文件 `meow.c` 拆为 `src/{state,exec,recipe,parse,graph,main}.c + meow.h`。
@@ -67,14 +67,13 @@
 
 - git 仓库已就绪（`main` 分支，391 文件跟踪；大文件如 `reference/`、`env/build/`、`sysroot/` 均可重建不提交）。改动建议：建分支 -> 改 -> `make check` -> **同步更新本文件 §6** -> 提交。
 - mcc 链接仍依赖宿主 `cc`/`ld`（`src/driver/host_toolchain.c`）；纯原生链接器待实现。
-- i386 当前不可作完整 target（缺浮点 + printf %d 跨函数 va_list 缺陷）；其公共 ABI 仍需切换到 64 位 `time_t`/time64。
 - 完整独立 MeuOS userspace 尚未完成（非 x86_64 runtime、原生 shell）。
 
 ---
 
 ## 4. 下一步优先级
 
-1. **P1** 收口 i386：修复 `printf %d` 跨函数 `va_list`，并按 `projects/meuos-libc/.todo/32bit-time64.md` 切换 64 位 `time_t`/time64。
+1. **P1** ✅ 收口 i386（已完成）：x87 浮点、Kl 分解 push/pop 修复、64 位 time_t/time64、跨函数 va_list；`make -C projects/mcc check-i386-runtime` 全绿（counter=2000、浮点、time64、stat、va_list）。
 2. **P2** 补齐 aarch64 meuos-libc runtime + QEMU Phase-2 运行回归（`projects/meuos-libc/src/arch/aarch64/.todo`）。
 3. **P3** 补齐 loongarch64 runtime，按最新 ABI/UAPI 建立独立 syscall、TLS、原子和信号门禁。
 4. **P4** 补齐 riscv64 runtime，用于验证架构抽象并建立第三条 64 位完整链。
@@ -82,6 +81,7 @@
 6. **P6** 用 meow 原生构建 Kit 自身（`projects/meow/.todo/native-kit-build.md`）。
 7. **P7** 实现 `-O` 级别控制与 `-W` 诊断系统（`projects/mcc/.todo/`）。
 8. **P8** QEMU 自举：让 `qemu-system-*` 由 mcc+libc-meuos+meow 构建（见 `env/QEMU_BOOTSTRAP.md`；前置=glib2 移植、zlib 移植）。
+9. **P9**（架构储备）mcc/m++ 共享后端架构调整：把 mcc 的 `ir/opt/abi/emit/target` 抽出为 `libmcc` 库，使未来 `m++`（C++ 前端）可复用后端（见 `projects/mcc/.todo/cpp-shared-backend.md`）。不阻塞 aarch64 移植，按阶段 A→D 渐进实施。
 
 ---
 
@@ -90,7 +90,7 @@
 ```sh
 # 三个核心组件（路径在 projects/ 下）
 make -C projects/mcc check
-make -C projects/mcc check-c11 check-driver check-targets check-i386 check-loongarch64
+make -C projects/mcc check-c11 check-driver check-targets check-i386 check-i386-runtime check-loongarch64
 make -C projects/meuos-libc check
 make -C projects/meow check
 
@@ -112,6 +112,8 @@ env/bin/qvm boot x86_64 && env/bin/qvm run x86_64 'uname -r' && env/bin/qvm stop
 
 > **每次变更（含 git 操作）后必须更新本节，并据实修订 §1–§5。**
 
+- **2026-07-22**：i386 收口完成——`projects/mcc/src/target/i386/i386_emit.c` 所有 Kl 操作（Ocopy/Oload/Ostorel/Oshl/Oshr/Osar/Oadd/Osub/Oneg/Oand/Oor/Oxor/Oxcmp/Oxtest/Oextsw/Oextuw/Oxsel）统一加 push/pop EAX（shifts 还加 EDX）保护，消除 rega 盲区导致的 EAX clobber（修复 `s.mode` 被覆盖、`mode=0` bug）；Oload 的 ECX stash 与 Ostorel 的 vreg=ECX 也加 push/pop ECX 保护。新增 i386 运行时回归测试套件（`test/i386/runtime_{kl,fp,time64,va}.c` + `runtime.sh` + Makefile `check-i386-runtime` target）。所有 i386 综合测试通过（counter=2000、浮点、time64、stat、va_list），i386 ELF32 静态二进制在 x86_64 内核原生运行验证通过。STATE.md §2/§3/§4/§5 同步更新。
+- **2026-07-22**：aarch64 移植进度保存——7 个运行时文件已就位（`crt/aarch64/crt1.S`、`src/internal/arch/aarch64/syscall.S`、`src/arch/aarch64/{atomic,setjmp,sigreturn,thread_clone,set_tls}.S` + `tls.c`，均可用 `aarch64-linux-gnu-gcc -c` 汇编验证），但 `tls.c` 被 mcc aarch64 后端 bug 阻塞（存储 64 位值到全局变量触发 `dying: invalid class`）。诊断与修复方案已记录到 `projects/mcc/.todo/aarch64-store-fix.md`（omap 存储条目 cls=Kw 应改 Ki/Ks/Kd + isel 缺少 store 特殊处理）；任务 8-11 待办清单已更新到 `projects/meuos-libc/src/arch/aarch64/.todo`。新增架构储备项 P9：mcc/m++ 共享后端 `libmcc` 化（见 `projects/mcc/.todo/cpp-shared-backend.md`），为未来 C++ 前端铺路。后续会话从 .todo 恢复即可继续。
 - **2026-07-21**：新增 `projects/meuos-libc/PORTING.md`，记录 x86_64/aarch64/loongarch64/i386 基石状态、riscv64/armhf 推荐新增、ppc64le/s390x 按需以及 armel/mips* 排除策略；补充 syscall/TLS/原子/启动 ABI、32 位统一 time64 和跨架构验收清单。新增 `32bit-time64.md` 与 armhf runtime TODO。
 - **2026-07-21**：env/ qemu 重建为 **KVM+9p**（`--enable-kvm`）；新增 `env/MEUOS2026.md`（给 MeuOS 2026 构建 VM 交接文档）+ `env/bin/qemu-path`。修复 MeuOS 2026 `run-vm.sh` 的 9p 模式（RHEL qemu-kvm 缺 9p）；现可用 `QEMU_BIN=$(env/bin/qemu-path) run-vm.sh` 跑 KVM+9p 构建 VM。KVM+9p 协同已验证。
 - **2026-07-21**：新增 `env/QEMU_BOOTSTRAP.md`--QEMU 自举交接文档（供移植 Agent 阅读）：列明 qemu 源/配置/夹具提供方式、env 工具（qvm/build-initramfs.sh）可移植性、glib2 硬依赖挑战与策略、6 个里程碑与验收清单。STATE.md §4 增 P6。
