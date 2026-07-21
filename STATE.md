@@ -48,8 +48,8 @@
 - 直接 Linux 内核 ABI 封装（不经宿主 libc）；x86_64/i386 runtime 完整（含 64 位 time_t/time64、跨函数 va_list、x87 浮点）。
 - 41+ 独立 syscall 源（一文件一调用）；C11 `<stdatomic.h>` + `libatomic-meuos.a`；C11 线程（clone/futex）+ pthread 适配；signal/sigaction/sigsetjmp；最小 stdio（vfprintf/snprintf 共享格式化内核）；first-fit malloc。
 - `meuos-libc-compat`（独立归档）：argp/error/obstack/getline/asprintf/funopen 等 GNU 扩展。
-- **架构路线**：x86_64、aarch64、loongarch64、i386 为已确认基石；riscv64、armhf 为强烈建议新增；ppc64le/s390x 按需；armel/mips\* 明确跳过。此处“基石”是战略选型，不代表 runtime 已完成。
-- **未完成**（见 `projects/meuos-libc/PORTING.md` 与 `.todo`）：aarch64/riscv64/loongarch64 完整 runtime、armhf runtime、纯原生链接器。
+- **架构路线**：x86_64、aarch64、loongarch64、i386 为已确认基石；riscv64、armv7 为强烈建议新增；ppc64le/s390x 按需；armel/mips\* 明确跳过。此处“基石”是战略选型，不代表 runtime 已完成。
+- **未完成**（见 `projects/meuos-libc/PORTING.md` 与 `.todo`）：aarch64/riscv64/loongarch64 完整 runtime、armv7 runtime、纯原生链接器。
 
 ### meow（构建系统，`projects/meow/`）
 
@@ -81,7 +81,7 @@
 2. **P2** 补齐 aarch64 meuos-libc runtime + QEMU Phase-2 运行回归（`projects/meuos-libc/src/arch/aarch64/.todo`）。
 3. **P3** 补齐 loongarch64 runtime，按最新 ABI/UAPI 建立独立 syscall、TLS、原子和信号门禁。
 4. **P4** 补齐 riscv64 runtime，用于验证架构抽象并建立第三条 64 位完整链。
-5. **P5** 建立 armhf TODO、交叉汇编与 QEMU 门禁；与 32 位 time64 方案一起落地。
+5. **P5** 建立 armv7 TODO、交叉汇编与 QEMU 门禁；与 32 位 time64 方案一起落地。
 6. **P6** 用 meow 原生构建 Kit 自身（`projects/meow/.todo/native-kit-build.md`）。
 7. **P7** 实现 `-O` 级别控制与 `-W` 诊断系统（`projects/mcc/.todo/`）。
 8. **P8** QEMU 自举：让 `qemu-system-*` 由 mcc+libc-meuos+meow 构建（见 `env/QEMU_BOOTSTRAP.md`；前置=glib2 移植、zlib 移植）。
@@ -121,7 +121,7 @@ env/bin/qvm boot x86_64 && env/bin/qvm run x86_64 'uname -r' && env/bin/qvm stop
 - **2026-07-22**：aarch64 移植进度保存——7 个运行时文件已就位（`crt/aarch64/crt1.S`、`src/internal/arch/aarch64/syscall.S`、`src/arch/aarch64/{atomic,setjmp,sigreturn,thread_clone,set_tls}.S` + `tls.c`，均可用 `aarch64-linux-gnu-gcc -c` 汇编验证），但 `tls.c` 被 mcc aarch64 后端 bug 阻塞（存储 64 位值到全局变量触发 `dying: invalid class`）。诊断与修复方案已记录到 `projects/mcc/.todo/aarch64-store-fix.md`（omap 存储条目 cls=Kw 应改 Ki/Ks/Kd + isel 缺少 store 特殊处理）；任务 8-11 待办清单已更新到 `projects/meuos-libc/src/arch/aarch64/.todo`。新增架构储备项 P9：mcc/m++ 共享后端 `libmcc` 化（见 `projects/mcc/.todo/cpp-shared-backend.md`），为未来 C++ 前端铺路。后续会话从 .todo 恢复即可继续。
 - **2026-07-22**：libmcc 化阶段 A 完成（分支 `refactor/libmcc-split`）——`projects/mcc/Makefile` 拆分 FE/BE 源：FE_DIRS=`src/{driver,lex,parse,sema,irgen}`（39 .o），BE_DIRS=`src/{ir,opt,abi,emit,target,util}`（41 .o）。BE .o 打成 `build/libmcc.a`（2.35MB），mcc 二进制 = FE .o + libmcc.a（1.76MB）。全绿验证：`make check` / `check-c11` / `check-driver` / `check-targets` / `check-i386` / `check-i386-runtime` / `check-loongarch64` / `check-abi` / `check-sysroot-static`（mcc 自重编译 mcc 通过）。行为零变化，为未来 m++ 共享后端铺路。
 - **2026-07-22**：工具链自研规划落地（`projects/meuos-toolchain/README.md`）——确认 mcc 通过 `host_toolchain.c` 把汇编/链接外包给宿主 `cc`，Makefile 用宿主 `ar`，这是 Kit 自举链的最后外部依赖。决策：**单项目整套提供**，项目名 `meuos-toolchain`（简称 mt），二进制无 m- 前缀（`as`/`ld`/`ar`/`nm`/`objdump`/`readelf`/`strip`/`objcopy`，MeuOS 环境里是唯一工具）。组织：单项目 `projects/meuos-toolchain/` + 内部 `src/libelf/` 共享库（不对外暴露）。优先级：libelf+ar (P0) → as x86_64 (P1) → ld x86_64 静态 (P2) → 多架构 (P3-6) → 动态链接 (P7) → 辅助 (P8)。STATE.md §4 增 P10。
-- **2026-07-21**：新增 `projects/meuos-libc/PORTING.md`，记录 x86_64/aarch64/loongarch64/i386 基石状态、riscv64/armhf 推荐新增、ppc64le/s390x 按需以及 armel/mips\* 排除策略；补充 syscall/TLS/原子/启动 ABI、32 位统一 time64 和跨架构验收清单。新增 `32bit-time64.md` 与 armhf runtime TODO。
+- **2026-07-21**：新增 `projects/meuos-libc/PORTING.md`，记录 x86_64/aarch64/loongarch64/i386 基石状态、riscv64/armv7 推荐新增、ppc64le/s390x 按需以及 armel/mips\* 排除策略；补充 syscall/TLS/原子/启动 ABI、32 位统一 time64 和跨架构验收清单。新增 `32bit-time64.md` 与 armv7 runtime TODO。
 - **2026-07-21**：env/ qemu 重建为 **KVM+9p**（`--enable-kvm`）；新增 `env/MEUOS2026.md`（给 MeuOS 2026 构建 VM 交接文档）+ `env/bin/qemu-path`。修复 MeuOS 2026 `run-vm.sh` 的 9p 模式（RHEL qemu-kvm 缺 9p）；现可用 `QEMU_BIN=$(env/bin/qemu-path) run-vm.sh` 跑 KVM+9p 构建 VM。KVM+9p 协同已验证。
 - **2026-07-21**：新增 `env/QEMU_BOOTSTRAP.md`--QEMU 自举交接文档（供移植 Agent 阅读）：列明 qemu 源/配置/夹具提供方式、env 工具（qvm/build-initramfs.sh）可移植性、glib2 硬依赖挑战与策略、6 个里程碑与验收清单。STATE.md §4 增 P6。
 - **2026-07-21**：初始化 git 仓库（`main` 分支，初始提交 81d4532 + 391 文件）；完善 `.gitignore`（忽略 mcc 二进制 / env 大文件 / share 工作目录）与 `.gitattributes`（二进制标记）；AGENTS.md 新增 §7「实现策略与参考资源」--指引 agent 优先参考 musl/cproc/QBE/tinycc 等社区实现以节省算力。

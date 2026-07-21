@@ -88,7 +88,7 @@ meuos-libc/
 - `i386`：`$(MCC) --target=i386` 编译 C，宿主 `cc -m32` 汇编；当前只承诺整数 bootstrap。
 - `aarch64`/`loongarch64`：已确认基石，runtime 尚待实现；`riscv64` 是强烈建议新增目标（见
   `PORTING.md` 与各 `src/arch/<arch>/.todo`）。
-- `armhf`/`ppc64le`/`s390x`：尚未纳入构建矩阵，先按 `PORTING.md` 的路线建立 TODO 和
+- `armv7`/`ppc64le`/`s390x`：尚未纳入构建矩阵，先按 `PORTING.md` 的路线建立 TODO 和
   交叉测试门禁；`armel` 与 `mips*` 明确不支持。
 
 `src/internal/syscall.h` 的 `__syscall_number()` 把 x86_64 syscall 号翻译为目标

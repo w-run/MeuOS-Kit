@@ -1,6 +1,6 @@
-# 待实现：ARMv7 hard-float (armhf) libc runtime
+# 待实现：ARMv7 hard-float (armv7) libc runtime
 
-armhf 是推荐新增的 32 位 ARM 目标，用于验证 32/64 位变体与 VFP hard-float EABI。
+armv7 是推荐新增的 32 位 ARM 目标，用于验证 32/64 位变体与 VFP hard-float EABI。
 实现前先阅读 `projects/meuos-libc/PORTING.md`，并与 `.todo/32bit-time64.md` 协同：
 公共 `time_t` 必须为 64 位。
 
@@ -11,4 +11,4 @@ armhf 是推荐新增的 32 位 ARM 目标，用于验证 32/64 位变体与 VFP
 - Linux ARM syscall 编号与参数约定，不依赖 armel 的软浮点路径；
 - QEMU arm 用户态或完整 VM 的静态 Phase-2 回归。
 
-在 runtime 和交叉汇编门禁落地前，不将 `ARCH=armhf` 加入默认构建矩阵。
+在 runtime 和交叉汇编门禁落地前，不将 `ARCH=armv7` 加入默认构建矩阵。
