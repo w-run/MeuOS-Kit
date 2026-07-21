@@ -4,17 +4,24 @@
 # mcc is a unified single-tree compiler (source-level integration of a
 # frontend and an IR backend, originally derived from cproc + QBE).
 #
-# Layout:
+# Layout (split for future m++ shared-backend support, see
+# .todo/cpp-shared-backend.md stage A):
 #   include/        shared headers
-#   src/driver/     main.c unified driver
-#   src/{lex,parse,sema,util}/   frontend (lexing, parsing, semantics)
-#   src/irgen/      AST -> IR direct construction (no textual IR step)
-#   src/{ir,opt,abi,emit}/       IR core + optimization passes
-#   src/target/{amd64,arm64,rv64}/   per-arch backends
+#   src/driver/     main.c unified driver                  (C frontend)
+#   src/{lex,parse,sema}/  frontend (lex/parsing/semantics) (C frontend)
+#   src/irgen/      AST -> IR direct construction           (C frontend)
+#   src/util/       common utilities (xmalloc/utf/warn)     (shared)
+#   src/{ir,opt,abi,emit}/  IR core + optimization passes   (libmcc)
+#   src/target/{x86_64,aarch64,riscv64,i386,loongarch64}/  (libmcc)
 #   build/          compilation output (gitignored)
+#
+# Stage A split (this file): backend sources are archived into
+# build/libmcc.a; the mcc binary = C frontend objects + libmcc.a.
+# Behavior is byte-equivalent to the previous monolithic link.
 
 # ---- Toolchain ----
 HOST_CC ?= cc
+AR      ?= ar
 # The source is known-clean C99/C11 but emits a lot of -Wall noise
 # (unused params, sign compares, missing braces in designated initializers,
 # pointer casts, etc.). Phase 1a gate is functional correctness, not warning
@@ -49,20 +56,33 @@ endif
 CFLAGS += -DMCC_DEFAULT_TARGET=\"$(DEFAULT_TARGET)\"
 
 # ---- Sources ----
-# Compile every supported backend so one mcc binary can target any supported
-# architecture.
-SRC_DIRS := src
-SRCS := $(shell find $(SRC_DIRS) -name '*.c' | sort)
-OBJS := $(patsubst %.c,build/%.o,$(SRCS))
-DEPS := $(OBJS:.o=.d)
+# Split into C frontend (FE, language-specific) and shared backend (BE,
+# language-agnostic). Stage A of the libmcc migration: BE objects are
+# archived into libmcc.a so a future m++ binary can link the same archive.
+# util/ is shared (utf/warn/xmalloc are used by both FE and BE).
+FE_DIRS := src/driver src/lex src/parse src/sema src/irgen
+BE_DIRS := src/ir src/opt src/abi src/emit src/target src/util
+
+FE_SRCS := $(shell find $(FE_DIRS) -name '*.c' | sort)
+BE_SRCS := $(shell find $(BE_DIRS) -name '*.c' | sort)
+FE_OBJS := $(patsubst %.c,build/%.o,$(FE_SRCS))
+BE_OBJS := $(patsubst %.c,build/%.o,$(BE_SRCS))
+DEPS := $(FE_OBJS:.o=.d) $(BE_OBJS:.o=.d)
 
 BIN := mcc
+LIB := build/libmcc.a
 
 # ---- Rules ----
 all: $(BIN)
 
-$(BIN): $(OBJS)
-	$(HOST_CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+# mcc = C frontend objects + libmcc.a (shared backend archive)
+$(BIN): $(FE_OBJS) $(LIB)
+	$(HOST_CC) $(CFLAGS) $(LDFLAGS) -o $@ $(FE_OBJS) $(LIB) $(LDLIBS)
+
+# libmcc.a = backend objects (language-agnostic, future m++ shares this)
+$(LIB): $(BE_OBJS)
+	@mkdir -p $(dir $@)
+	$(AR) rcs $@ $^
 
 build/%.o: %.c
 	@mkdir -p $(dir $@)

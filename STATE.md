@@ -81,7 +81,7 @@
 6. **P6** 用 meow 原生构建 Kit 自身（`projects/meow/.todo/native-kit-build.md`）。
 7. **P7** 实现 `-O` 级别控制与 `-W` 诊断系统（`projects/mcc/.todo/`）。
 8. **P8** QEMU 自举：让 `qemu-system-*` 由 mcc+libc-meuos+meow 构建（见 `env/QEMU_BOOTSTRAP.md`；前置=glib2 移植、zlib 移植）。
-9. **P9**（架构储备）mcc/m++ 共享后端架构调整：把 mcc 的 `ir/opt/abi/emit/target` 抽出为 `libmcc` 库，使未来 `m++`（C++ 前端）可复用后端（见 `projects/mcc/.todo/cpp-shared-backend.md`）。不阻塞 aarch64 移植，按阶段 A→D 渐进实施。
+9. **P9**（架构储备，进行中）mcc/m++ 共享后端架构调整：把 mcc 的 `ir/opt/abi/emit/target` 抽出为 `libmcc` 库，使未来 `m++`（C++ 前端）可复用后端（见 `projects/mcc/.todo/cpp-shared-backend.md`）。**阶段 A 已完成**（refactor/libmcc-split 分支）：Makefile 拆分 FE/BE 源，BE 打成 `build/libmcc.a`，mcc = FE .o + libmcc.a，全绿 check + 自举链未破。下一步阶段 B：抽 `projects/libmcc/include/` 公共 API。
 
 ---
 

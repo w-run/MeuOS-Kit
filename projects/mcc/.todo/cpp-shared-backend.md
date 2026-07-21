@@ -108,12 +108,17 @@ projects/
 
 ## 实施阶段（渐进、可回滚）
 
-### 阶段 A（最小破坏性改动，验证可行性）
+### 阶段 A（最小破坏性改动，验证可行性）✅ 已完成（2026-07-22）
 
 - **不改目录结构**，只在 `projects/mcc/Makefile` 把后端 .o 打成
-  `libmcc.a`（包含 `ir/opt/abi/emit/target` 的所有 .o）
-- mcc 二进制 = C 前端 .o + libmcc.a
-- **验收**：`make -C projects/mcc check` 全绿，行为不变
+  `libmcc.a`（包含 `ir/opt/abi/emit/target/util` 的所有 .o，共 41 个）
+- mcc 二进制 = C 前端 .o（39 个：driver/lex/parse/sema/irgen）+ libmcc.a
+- **验收**：全绿（check / check-c11 / check-driver / check-targets /
+  check-i386 / check-i386-runtime / check-loongarch64 / check-abi /
+  check-sysroot-static mcc 自重编译通过）
+- **构建产物**：`build/libmcc.a`（2.35MB）、`mcc`（1.76MB）
+- **行为零变化**：链接命令从"全 .o 直接链接"改为"FE .o + libmcc.a"，
+  ld 从 .a 中按需拉取被引用的 .o，最终二进制功能等价
 
 ### 阶段 B（提取公共 API，准备 m++ 接入）
 
