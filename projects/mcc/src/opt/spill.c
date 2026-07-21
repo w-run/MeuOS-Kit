@@ -475,10 +475,11 @@ spill(Fn *fn)
 				t = i->to.val;
 				if (bshas(v, t))
 					bsclr(v, t);
-				else if (!T.kl_in_reg
-				&& t >= Tmp0
-				&& tmp[t].cls == Kl) {
-					/* Kl results on i386 never go to a
+				else if ((!T.kl_in_reg && t >= Tmp0
+				&& tmp[t].cls == Kl)
+				|| (T.nfpr == 0 && t >= Tmp0
+				&& KBASE(tmp[t].cls) == 1)) {
+					/* Kl and x87 results on i386 never go to a
 					 * register; just ensure a slot so
 					 * the subsequent store() (Ostorel)
 					 * has somewhere to write. isel is

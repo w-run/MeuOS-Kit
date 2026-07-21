@@ -6,7 +6,8 @@
 /* Signal-return trampoline (see src/x86_64/sigreturn.S). */
 extern void __meuos_restore_rt(void);
 
-/* x86_64 syscall numbers used by the signal API. */
+/* Stable internal syscall IDs; src/internal/syscall.h translates these
+ * to the native i386 numbers when building the 32-bit target. */
 #define LINUX_SYS_RT_SIGACTION    13
 #define LINUX_SYS_RT_SIGPROCMASK  14
 #define LINUX_SYS_RT_SIGPENDING  127
@@ -57,7 +58,7 @@ sigaction(int signum, const struct sigaction *act,
 		    : __meuos_restore_rt;
 		kact.mask = act->sa_mask;
 		/* Avoid clearing the handler's own signal while it runs. */
-		kact.mask |= (1UL << (signum - 1));
+		kact.mask |= ((sigset_t)1 << (signum - 1));
 	}
 	if (do_sigaction(signum, act ? &kact : 0,
 	    oldact ? &kold : 0) < 0)
@@ -186,7 +187,7 @@ sigaddset(sigset_t *set, int signum)
 		errno = EINVAL;
 		return -1;
 	}
-	*set |= (1UL << (signum - 1));
+	*set |= ((sigset_t)1 << (signum - 1));
 	return 0;
 }
 
@@ -197,7 +198,7 @@ sigdelset(sigset_t *set, int signum)
 		errno = EINVAL;
 		return -1;
 	}
-	*set &= ~(1UL << (signum - 1));
+	*set &= ~((sigset_t)1 << (signum - 1));
 	return 0;
 }
 
@@ -208,5 +209,5 @@ sigismember(const sigset_t *set, int signum)
 		errno = EINVAL;
 		return 0;
 	}
-	return (*set & (1UL << (signum - 1))) ? 1 : 0;
+	return (*set & ((sigset_t)1 << (signum - 1))) ? 1 : 0;
 }

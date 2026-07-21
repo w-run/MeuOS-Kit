@@ -7,13 +7,19 @@
 extern "C" {
 #endif
 
-/* x86_64: rbx, rbp, r12, r13, r14, r15, rsp, rip.  The buffer is opaque;
- * the layout matches the implementation in src/setjmp/setjmp.S and must not
- * be inspected by portable code. */
+/* The buffer is opaque.  i386 stores ebx/esi/edi/ebp, the caller stack
+ * pointer and return address; 64-bit targets store their native callee-save
+ * set. */
+#if defined(__i386__)
+typedef unsigned long jmp_buf[6];
+#ifndef __STRICT_ANSI__
+typedef unsigned long sigjmp_buf[10];
+#endif
+#else
 typedef unsigned long jmp_buf[8];
-
 #ifndef __STRICT_ANSI__
 typedef unsigned long sigjmp_buf[16];
+#endif
 #endif
 
 int setjmp(jmp_buf);

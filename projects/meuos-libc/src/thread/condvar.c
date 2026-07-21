@@ -79,8 +79,18 @@ cnd_timedwait(cnd_t *condition, mtx_t *mutex, const struct timespec *deadline)
 	expected = atomic_load(&condition->sequence);
 	if (mtx_unlock(mutex) != thrd_success)
 		return thrd_error;
+#if defined(__i386__)
+	{
+		struct { int64_t tv_sec, tv_nsec; } timeout64;
+		timeout64.tv_sec = remaining.tv_sec;
+		timeout64.tv_nsec = remaining.tv_nsec;
+		value = __syscall6(422, (long)&condition->sequence, FUTEX_WAIT,
+			expected, (long)&timeout64, 0, 0);
+	}
+#else
 	value = __syscall6(LINUX_SYS_FUTEX, (long)&condition->sequence, FUTEX_WAIT,
 		expected, (long)&remaining, 0, 0);
+#endif
 	if (mtx_lock(mutex) != thrd_success)
 		return thrd_error;
 	if (__syscall_error(value) && -value == ETIMEDOUT)

@@ -159,6 +159,7 @@ main(int argc, char *argv[])
 		case 'v': verbose = true; break;
 		case 'w': break;   /* suppress warnings (mcc emits none yet) */
 		case 'g': break;   /* debug info (recorded, not emitted) */
+		case 'd': { for (char *p = a + 2; *p; ++p) if (*p <= 'Z') debug[(unsigned char)*p] = 1; break; }
 		case 'P': break;   /* suppress line markers in -E */
 		case 'H': break;   /* print includes */
 		case 'D': arrayaddptr(&defines, ARGVAL(a + 2)); break;

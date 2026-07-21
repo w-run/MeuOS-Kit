@@ -536,17 +536,22 @@ Next:
 			}
 			if (m->offset.type != CUndef)
 				emitcon(&m->offset, e);
-			fputc('(', e->f);
-			if (!req(m->base, R))
-				fprintf(e->f, "%%%s",
-					regtoa(m->base.val, SLong)
-				);
-			if (!req(m->index, R))
-				fprintf(e->f, ", %%%s, %d",
-					regtoa(m->index.val, SLong),
-					m->scale
-				);
-			fputc(')', e->f);
+			/* A symbol with no base is an absolute memory operand on
+			 * i386; do not print the empty `()` accepted by neither GAS
+			 * nor the linker. */
+			if (!req(m->base, R) || !req(m->index, R)) {
+				fputc('(', e->f);
+				if (!req(m->base, R))
+					fprintf(e->f, "%%%s",
+						regtoa(m->base.val, SLong)
+					);
+				if (!req(m->index, R))
+					fprintf(e->f, ", %%%s, %d",
+						regtoa(m->index.val, SLong),
+						m->scale
+					);
+				fputc(')', e->f);
+			}
 			break;
 		case RCon:
 			fputc('$', e->f);
@@ -598,6 +603,232 @@ Next:
 	goto Next;
 }
 
+static int float_label;
+
+/* The i386 target keeps Ks/Kd values in stack slots and uses the x87 stack
+ * only as a short-lived execution stack.  This avoids pretending that x87
+ * registers are ordinary allocatable SSA registers. */
+static Ref
+float_ref(Ref r, E *e)
+{
+	if (rtype(r) == RTmp && !isreg(r)) {
+		int s = e->fn->tmp[r.val].slot;
+		assert(s != -1);
+		return SLOT(s);
+	}
+	return r;
+}
+
+static void
+float_load(Ref r, int k, E *e)
+{
+	Ins f;
+	int64_t v;
+	int n = KWIDE(k) ? 8 : 4;
+
+	r = float_ref(r, e);
+	if (req(r, R))
+		return; /* ST(0) already contains the value. */
+	if (rtype(r) == RCon && e->fn->con[r.val].type == CBits) {
+		v = e->fn->con[r.val].bits.i;
+		fprintf(e->f, "\tsubl $%d, %%esp\n", n);
+		fprintf(e->f, "\tmovl $%d, (%%esp)\n", (int)(uint32_t)v);
+		if (n == 8)
+			fprintf(e->f, "\tmovl $%d, 4(%%esp)\n", (int)(uint32_t)((uint64_t)v >> 32));
+		fprintf(e->f, "\tfld%c (%%esp)\n", n == 8 ? 'l' : 's');
+		fprintf(e->f, "\taddl $%d, %%esp\n", n);
+		return;
+	}
+	f = (Ins){.op = Oload, .cls = k, .to = TMP(EAX), .arg = {r, R}};
+	emitf(n == 8 ? "fldl %M0" : "flds %M0", &f, e);
+}
+
+static void
+float_store(Ref r, int k, E *e)
+{
+	Ins f;
+
+	if (req(r, R)) {
+		fprintf(e->f, "\tfstp %%st(0)\n");
+		return;
+	}
+	r = float_ref(r, e);
+	f = (Ins){.op = Ostorew, .cls = k, .to = R, .arg = {R, r}};
+	emitf(KWIDE(k) ? "fstpl %M1" : "fstps %M1", &f, e);
+}
+
+static void
+float_binary(Ins i, E *e)
+{
+	char *op;
+
+	float_load(i.arg[0], i.cls, e);
+	switch (i.op) {
+	case Oadd: op = KWIDE(i.cls) ? "faddl %M1" : "fadds %M1"; break;
+	case Osub: op = KWIDE(i.cls) ? "fsubl %M1" : "fsubs %M1"; break;
+	case Omul: op = KWIDE(i.cls) ? "fmull %M1" : "fmuls %M1"; break;
+	case Odiv: op = KWIDE(i.cls) ? "fdivl %M1" : "fdivs %M1"; break;
+	default: die("i386: invalid x87 binary op %d", i.op);
+	}
+	emitf(op, &i, e);
+	float_store(i.to, i.cls, e);
+}
+
+static void
+float_branch_false(int c, int label, E *e)
+{
+	int aux;
+
+	/* x87 fcom/fnstsw/sahf exposes ZF/PF/CF with the same unordered
+	 * convention as ucomiss/ucomisd.  The branch sequences below encode
+	 * the C/QBE ordered and unordered predicates without touching GPRs. */
+	switch (c) {
+	case Cfeq:
+		fprintf(e->f, "\tjp .Lff%d\n\tjne .Lff%d\n", label, label);
+		break;
+	case Cfne:
+		aux = ++float_label;
+		fprintf(e->f, "\tjnp .Lfo%d\n\tjmp .Lfc%d\n.Lfo%d:\n\tje .Lff%d\n.Lfc%d:\n",
+			aux, label, aux, label, label);
+		break;
+	case Cfge:
+		fprintf(e->f, "\tjp .Lff%d\n\tjb .Lff%d\n", label, label);
+		break;
+	case Cfgt:
+		fprintf(e->f, "\tjp .Lff%d\n\tjbe .Lff%d\n", label, label);
+		break;
+	case Cfle:
+		fprintf(e->f, "\tjp .Lff%d\n\tja .Lff%d\n", label, label);
+		break;
+	case Cflt:
+		fprintf(e->f, "\tjp .Lff%d\n\tjae .Lff%d\n", label, label);
+		break;
+	case Cfo:
+		fprintf(e->f, "\tjp .Lff%d\n", label);
+		break;
+	case Cfuo:
+		fprintf(e->f, "\tjnp .Lff%d\n", label);
+		break;
+	default:
+		die("i386: invalid x87 condition %d", c);
+	}
+}
+
+static void
+float_flag(Ins i, E *e)
+{
+	int c, bad, end;
+
+	c = i.op - Oflag - NCmpI;
+	bad = ++float_label;
+	end = ++float_label;
+	float_branch_false(c, bad, e);
+	emitcopy(i.to, getcon(1, e->fn), Kw, e);
+	fprintf(e->f, "\tjmp .Lfe%d\n.Lff%d:\n", end, bad);
+	emitcopy(i.to, getcon(0, e->fn), Kw, e);
+	fprintf(e->f, ".Lfe%d:\n", end);
+}
+
+static int
+emit_float(Ins i, E *e)
+{
+	int c, false_label;
+
+	if (i.op == Ocall || i.op == Odbgloc || i.op == Opar)
+		return 0;
+	if (i.op == Ostores || i.op == Ostored) {
+		int fk = i.op == Ostores ? Ks : Kd;
+		float_load(i.arg[0], fk, e);
+		float_store(i.arg[1], fk, e);
+		return 1;
+	}
+	if (i.op == Ocopy && KBASE(i.cls) == 1) {
+		if (req(i.to, R))
+			float_load(i.arg[0], i.cls, e);
+		else {
+			float_load(i.arg[0], i.cls, e);
+			float_store(i.to, i.cls, e);
+		}
+		return 1;
+	}
+	if (KBASE(i.cls) == 1) {
+		switch (i.op) {
+		case Oload:
+			float_load(i.arg[0], i.cls, e);
+			float_store(i.to, i.cls, e);
+			return 1;
+		case Oadd:
+		case Osub:
+		case Omul:
+		case Odiv:
+			float_binary(i, e);
+			return 1;
+		case Oxcmp:
+			/* fcompp writes the x87 condition bits; fnstsw/sahf maps
+			 * them to ZF/PF/CF without consuming a GPR value. */
+			float_load(i.arg[0], i.cls, e);
+			float_load(i.arg[1], i.cls, e);
+			fprintf(e->f, "\tfcompp\n\tpushl %%eax\n\tfnstsw %%ax\n\tsahf\n\tpopl %%eax\n");
+			return 1;
+		case Oneg:
+			float_load(i.arg[0], i.cls, e);
+			fprintf(e->f, "\tfchs\n");
+			float_store(i.to, i.cls, e);
+			return 1;
+		case Oexts:
+			float_load(i.arg[0], Ks, e);
+			float_store(i.to, Kd, e);
+			return 1;
+		case Otruncd:
+			float_load(i.arg[0], Kd, e);
+			float_store(i.to, Ks, e);
+			return 1;
+		case Oswtof:
+		case Osltof:
+			if (i.op == Oswtof)
+				emitf("fildl %M0", &i, e);
+			else
+				emitf("fildq %M0", &i, e);
+			float_store(i.to, i.cls, e);
+			return 1;
+		case Ouwtof:
+		case Oultof:
+			die("i386: unsigned integer to float not yet supported");
+		case Ocast:
+			return 0;
+		default:
+			break;
+		}
+	}
+	if (i.op == Ostosi || i.op == Odtosi) {
+		float_load(i.arg[0], i.op == Ostosi ? Ks : Kd, e);
+		if (i.cls == Kl)
+			emitf("fisttpq %M=", &i, e);
+		else
+			emitf("fisttpl %M=", &i, e);
+		return 1;
+	}
+	if (i.op == Oswap && KBASE(i.cls) == 1) {
+		float_load(i.arg[0], i.cls, e);
+		float_load(i.arg[1], i.cls, e);
+		float_store(i.arg[0], i.cls, e);
+		float_store(i.arg[1], i.cls, e);
+		return 1;
+	}
+	if (isxsel(i.op) && KBASE(i.cls) == 1) {
+		c = i.op - Oxsel;
+		false_label = ++float_label;
+		float_load(i.arg[1], i.cls, e);
+		float_store(i.to, i.cls, e);
+		float_branch_false(c, false_label, e);
+		float_load(i.arg[0], i.cls, e);
+		float_store(i.to, i.cls, e);
+		fprintf(e->f, ".Lff%d:\n", false_label);
+		return 1;
+	}
+	return 0;
+}
+
 static void
 emitins(Ins i, E *e)
 {
@@ -608,12 +839,19 @@ emitins(Ins i, E *e)
 	Con *con;
 	char *sym;
 
+	if (i.op >= Oflag + NCmpI && i.op <= Oflag + NCmpI + Cfuo) {
+		float_flag(i, e);
+		return;
+	}
+	if (emit_float(i, e))
+		return;
+
 	/* ---- Kl (64-bit) op decomposition ----
 	 * i386 has no 64-bit GPR; Kl ops are decomposed into Kw ops on
 	 * the low/high halves of slot-based Kl values. See the helper
 	 * block above for conventions. After this block returns, the
 	 * generic switch below only handles Kw/Ks/Kd. */
-	if (i.cls == Kl) {
+	if (i.cls == Kl || i.op == Ostorel) {
 		switch (i.op) {
 		case Ocopy:
 			/* selret/selcall convention: TMP(EAX) as one
@@ -624,7 +862,7 @@ emitins(Ins i, E *e)
 				return;
 			if (req(i.to, TMP(EAX))) {
 				/* Kl slot → EAX:EDX pair */
-				assert(kl_isslot(i.arg[0]));
+				assert(kl_isslot(i.arg[0]) || rtype(i.arg[0]) == RCon);
 				kl_load_to(i.arg[0], 0, EAX, e);
 				kl_load_to(i.arg[0], 1, EDX, e);
 				return;
@@ -685,6 +923,61 @@ emitins(Ins i, E *e)
 			kl_store_eax_mem_reg(i.arg[1], 0, vreg, e);
 			kl_load_to(i.arg[0], 1, vreg, e);
 			kl_store_eax_mem_reg(i.arg[1], 4, vreg, e);
+			return;
+		}
+		case Oshl:
+		case Oshr:
+		case Osar:
+		{
+			/* 64-bit shifts use EAX:EDX as low:high scratch.  The
+			 * selector already keeps the count in ECX when it is not an
+			 * immediate. */
+			static int shlbl;
+			int64_t n = -1;
+			int l = ++shlbl;
+			assert(kl_isslot(i.to));
+			kl_load_to(i.arg[0], 0, EAX, e);
+			kl_load_to(i.arg[0], 1, EDX, e);
+			if (rtype(i.arg[1]) == RCon)
+				n = e->fn->con[i.arg[1].val].bits.i & 63;
+			else {
+				if (rtype(i.arg[1]) == RSlot)
+					fprintf(e->f, "\tmovl %d(%%ebp), %%ecx\n", slot(i.arg[1], e));
+				fprintf(e->f, "\tandl $63, %%ecx\n\tcmpl $32, %%ecx\n\tjae .Lklsh%d\n", l);
+			}
+			if (n >= 32) {
+				int c = (int)n - 32;
+				if (i.op == Oshl) {
+					fprintf(e->f, "\tmovl %%eax, %%edx\n\txorl %%eax, %%eax\n\tshll $%d, %%edx\n", c);
+				} else {
+					fprintf(e->f, "\tmovl %%edx, %%eax\n\txorl %%edx, %%edx\n\t%s $%d, %%eax\n",
+						i.op == Osar ? "sarl" : "shrl", c);
+				}
+			} else if (n >= 0) {
+				if (n == 0) {
+					/* already in place */
+				} else if (i.op == Oshl) {
+					fprintf(e->f, "\tshldl $%d, %%eax, %%edx\n\tshll $%d, %%eax\n", (int)n, (int)n);
+				} else {
+					fprintf(e->f, "\tshrdl $%d, %%edx, %%eax\n\t%s $%d, %%edx\n",
+						(int)n, i.op == Osar ? "sarl" : "shrl", (int)n);
+				}
+			} else {
+				if (i.op == Oshl)
+					fprintf(e->f, "\tshldl %%cl, %%eax, %%edx\n\tshll %%cl, %%eax\n");
+				else
+					fprintf(e->f, "\tshrdl %%cl, %%edx, %%eax\n\t%s %%cl, %%edx\n",
+						i.op == Osar ? "sarl" : "shrl");
+				fprintf(e->f, "\tjmp .Lklshdone%d\n.Lklsh%d:\n", l, l);
+				if (i.op == Oshl)
+					fprintf(e->f, "\tsubl $32, %%ecx\n\tmovl %%eax, %%edx\n\txorl %%eax, %%eax\n\tshll %%cl, %%edx\n");
+				else
+					fprintf(e->f, "\tsubl $32, %%ecx\n\tmovl %%edx, %%eax\n\txorl %%edx, %%edx\n\t%s %%cl, %%eax\n",
+						i.op == Osar ? "sarl" : "shrl");
+				fprintf(e->f, ".Lklshdone%d:\n", l);
+			}
+			kl_store_from(i.to, 0, EAX, e);
+			kl_store_from(i.to, 1, EDX, e);
 			return;
 		}
 		case Oadd:
@@ -922,6 +1215,27 @@ emitins(Ins i, E *e)
 		break;
 	case Onop:
 		break;
+	case Ostorew:
+	case Ostoreh:
+	case Ostoreb:
+		/* Register allocation can leave a narrow value in a stack slot
+		 * (notably the low word of a Kl load narrowed to long). x86 has
+		 * no memory-to-memory move, so use EAX as the bridge. */
+		if (rtype(i.arg[0]) == RSlot && rtype(i.arg[1]) != RTmp) {
+			Ins load = i, store = i;
+			load.op = Oload;
+			load.cls = Kw;
+			load.to = TMP(EAX);
+			load.arg[0] = i.arg[0];
+			load.arg[1] = R;
+			emitf("movl %M0, %=", &load, e);
+			store.arg[0] = TMP(EAX);
+			emitf(i.op == Ostoreb ? "movb %B0, %M1" :
+				 i.op == Ostoreh ? "movw %H0, %M1" :
+				 "movl %W0, %M1", &store, e);
+			break;
+		}
+		goto Table;
 	case Omul:
 		if (rtype(i.arg[1]) == RCon) {
 			r = i.arg[0];
@@ -1129,6 +1443,43 @@ i386_framesz(E *e)
 	e->fsz += pad;
 }
 
+static int
+float_cond_neg(int c)
+{
+	switch (c) {
+	case Cfeq: return Cfne;
+	case Cfne: return Cfeq;
+	case Cfge: return Cflt;
+	case Cfgt: return Cfle;
+	case Cfle: return Cfgt;
+	case Cflt: return Cfge;
+	case Cfo: return Cfuo;
+	case Cfuo: return Cfo;
+	default: return c;
+	}
+}
+
+static const char *
+float_jcc(int c)
+{
+	switch (c) {
+	case Cfeq: return "e";
+	case Cfne: return "ne";
+	case Cfge: return "ae";
+	case Cfgt: return "a";
+	case Cfle: return "be";
+	case Cflt: return "b";
+	case Cfo: return "np";
+	case Cfuo: return "p";
+	default: die("i386: invalid float jump condition %d", c);
+	}
+}
+
+static int
+float_ordered(int c)
+{	return c != Cfuo && c != Cfne;
+}
+
 void
 i386_sysv_emitfn(Fn *fn, FILE *f)
 {
@@ -1206,6 +1557,18 @@ i386_sysv_emitfn(Fn *fn, FILE *f)
 					n = 0;
 				} else
 					n = 1;
+				if (c >= NCmpI) {
+					int fc = c - NCmpI;
+					if (n)
+						fc = float_cond_neg(fc);
+					/* An ordered predicate must route unordered values to
+					 * the fall-through edge before testing its integer flags. */
+					if (float_ordered(fc))
+						fprintf(f, "\tjp %sbb%d\n", T.asloc, id0+b->link->id);
+					fprintf(f, "\tj%s %sbb%d\n", float_jcc(fc),
+						T.asloc, id0+b->s2->id);
+					goto Jmp;
+				}
 				fprintf(f, "\tj%s %sbb%d\n", ctoa[c][n],
 					T.asloc, id0+b->s2->id);
 				goto Jmp;

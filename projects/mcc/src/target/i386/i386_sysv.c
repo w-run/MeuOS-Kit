@@ -168,7 +168,11 @@ selret(Blk *b, Fn *fn)
 				ca = 1;
 			}
 		} else {
-			die("i386: float not yet supported");
+			/* i386 cdecl returns float and double in x87 ST(0).  The
+			 * emitter understands an Ocopy with destination R as the
+			 * “load return value into ST(0)” marker.  No GPR is live. */
+			emit(Ocopy, k, R, r0, R);
+			ca = 0;
 		}
 	}
 
@@ -286,7 +290,9 @@ selcall(Fn *fn, Ins *i0, Ins *i1, RAlloc **rap)
 				ca += 1;
 			}
 		} else {
-			die("i386: float not yet supported");
+			/* The call leaves the x87 result in ST(0).  Store it into the
+			 * stack-resident SSA temporary after the call. */
+			emit(Ocopy, i1->cls, i1->to, R, R);
 		}
 	}
 
@@ -341,9 +347,23 @@ selcall(Fn *fn, Ins *i0, Ins *i1, RAlloc **rap)
 			fn->mem[fn->nmem-1] = m;
 			emit(Ostorel, Kl, R, i->arg[0], MEM(fn->nmem-1));
 		} else {
-			r1 = newtmp("abi", Kw, fn);
-			emit(Ostorew, Kw, R, i->arg[0], r1);
-			emit(Oadd, Kw, r1, r, getcon(off, fn));
+			/* Scalar float arguments are ordinary cdecl stack bytes, but
+			 * they must be written with x87 stores rather than an integer
+			 * register-to-memory move. */
+			if (KBASE(i->cls) == 1) {
+				Mem m = {0};
+				m.offset.type = CBits;
+				m.offset.bits.i = off;
+				m.base = r;
+				vgrow(&fn->mem, ++fn->nmem);
+				fn->mem[fn->nmem-1] = m;
+				emit(i->cls == Kd ? Ostored : Ostores, 0, R,
+					i->arg[0], MEM(fn->nmem-1));
+			} else {
+				r1 = newtmp("abi", Kw, fn);
+				emit(Ostorew, Kw, R, i->arg[0], r1);
+				emit(Oadd, Kw, r1, r, getcon(off, fn));
+			}
 		}
 		off += a->size;
 	}
@@ -391,7 +411,10 @@ selpar(Fn *fn, Ins *i0, Ins *i1)
 			s += a->size / 4;
 			continue;
 		}
-		if (i->cls == Kl) {
+		if (i->cls == Kl || KBASE(i->cls) == 1) {
+			/* Wide integer and all floating parameters are stack-resident:
+			 * incoming bytes are at SLOT(-s). Alias the temporary rather
+			 * than emitting a needless load/store through x87. */
 			/* Kl parameter: incoming 8 bytes are on the stack at
 			 * SLOT(-s). The Kl temp i->to will live in a slot
 			 * anyway (kl_in_reg=0), so just alias it to the
@@ -408,8 +431,8 @@ selpar(Fn *fn, Ins *i0, Ins *i1)
 			 * aliasing). If the marker survives to emit, it's
 			 * a no-op. */
 			fn->tmp[i->to.val].slot = -s;
-			emit(Opar, Kl, i->to, R, R);
-			s += 2;
+			emit(Opar, i->cls, i->to, R, R);
+			s += KWIDE(i->cls) ? 2 : 1;
 			continue;
 		}
 		/* scalar parameter (Kw/Kh/Kb): load from stack slot */
@@ -478,7 +501,7 @@ selvaarg(Fn *fn, Blk *b, Ins *i)
 	 *   new  = add Kw, loc, step      (advance pointer)
 	 *   store Kw, new, [arguments]   (update struct field)
 	 */
-	step = (i->cls == Kl) ? 8 : 4;
+	step = KWIDE(i->cls) ? 8 : 4;
 	loc = newtmp("abi", Kw, fn);
 	newloc = newtmp("abi", Kw, fn);
 	emit(Ostorew, Kw, R, newloc, i->arg[0]);

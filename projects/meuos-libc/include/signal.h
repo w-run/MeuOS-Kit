@@ -74,7 +74,7 @@ extern "C" {
 
 typedef int sig_atomic_t;
 /* Kernel-size sigset: 64 bits covers all real-time signals on x86_64. */
-typedef unsigned long sigset_t;
+typedef uint64_t sigset_t;
 
 /* Minimal siginfo_t: enough to expose the SA_SIGINFO third argument shape
  * without dragging in the full kernel layout.  The first three members match

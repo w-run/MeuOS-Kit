@@ -48,6 +48,13 @@ __syscall_number(long number)
 	case 202: return 240; /* futex */
 	case 217: return 220; /* getdents64 */
 	case 228: return 265; /* clock_gettime */
+	case 13:  return 174; /* rt_sigaction */
+	case 14:  return 175; /* rt_sigprocmask */
+	case 127: return 176; /* rt_sigpending */
+	case 130: return 179; /* rt_sigsuspend */
+	case 131: return 186; /* sigaltstack */
+	case 62:  return 37;  /* kill */
+	case 234: return 270; /* tgkill */
 	default: return number;
 	}
 #else

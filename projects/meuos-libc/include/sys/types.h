@@ -16,7 +16,11 @@ typedef unsigned long nlink_t;
 typedef uint32_t uid_t;
 typedef uint32_t gid_t;
 typedef long pid_t;
+#if defined(__i386__)
+typedef int64_t time_t;
+#else
 typedef long time_t;
+#endif
 typedef int clockid_t;
 typedef unsigned short sa_family_t;
 typedef unsigned int socklen_t;

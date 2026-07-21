@@ -95,6 +95,7 @@ isbytesrcop(int op)
 static void
 fixarg(Ref *r, int k, Ins *i, Fn *fn)
 {
+	char buf[32];
 	Ref r0, r1, r2, r3;
 	int s, n, op;
 	Con cc, *c;
@@ -105,8 +106,18 @@ fixarg(Ref *r, int k, Ins *i, Fn *fn)
 	op = i ? i->op : Ocopy;
 
 	if (KBASE(k) == 1 && rtype(r0) == RCon) {
-		/* floats not supported */
-		die("i386: float not yet supported");
+		/* x87 has no immediate floating-point operands.  Materialize the
+		 * bit pattern in the literal pool, exactly as the SSE targets do.
+		 * All i386 floating temporaries are stack-resident, so the memory
+		 * reference is also the natural representation after spill. */
+		r1 = MEM(fn->nmem);
+		vgrow(&fn->mem, ++fn->nmem);
+		memset(&a, 0, sizeof a);
+		a.offset.type = CAddr;
+		n = stashbits(fn->con[r0.val].bits.i, KWIDE(k) ? 8 : 4);
+		sprintf(buf, "\"%sfp%d\"", T.asloc, n);
+		a.offset.sym.id = intern(buf);
+		fn->mem[fn->nmem-1] = a;
 	}
 	else if (op == Ocall && r == &i->arg[0]
 	&& rtype(r0) == RCon && fn->con[r0.val].type != CAddr) {
@@ -282,11 +293,6 @@ sel(Ins i, Num *tn, Fn *fn)
 	i0 = curi;
 	k = i.cls;
 
-	/* die on float operations */
-	if (KBASE(k) == 1 && i.op != Ocopy && i.op != Oload
-	&& !isstore(i.op) && i.op != Oaddr && i.op != Osalloc
-	&& i.op != Odbgloc && i.op != Onop && i.op != Ocall)
-		die("i386: float not yet supported (op=%s)", optab[i.op].name);
 
 	switch (i.op) {
 	case Odiv:
@@ -294,7 +300,7 @@ sel(Ins i, Num *tn, Fn *fn)
 	case Oudiv:
 	case Ourem:
 		if (KBASE(k) == 1)
-			die("i386: float not yet supported");
+			goto Emit;
 		if (k == Kl)
 			die("i386: 64-bit arithmetic not yet supported");
 		if (i.op == Odiv || i.op == Oudiv)
@@ -343,14 +349,12 @@ sel(Ins i, Num *tn, Fn *fn)
 	case Onop:
 		break;
 	case Opar:
-		/* Parameter marker emitted by selpar for Kl-class
-		 * parameters that are aliased to their incoming stack
-		 * slot (kl_in_reg=0). The temp's slot is already set;
-		 * no instruction is needed at isel. Drop it. */
+		/* Parameter marker emitted by selpar for stack-resident Kl/Ks/Kd
+		 * parameters. The temp's slot is already set; no instruction is
+		 * needed at isel. Drop it. */
 		break;
 	case Ostored:
 	case Ostores:
-		die("i386: float not yet supported");
 	case Ostorel:
 	case Ostorew:
 	case Ostoreh:
@@ -428,7 +432,7 @@ sel(Ins i, Num *tn, Fn *fn)
 	case Osltof:
 	case Oexts:
 	case Otruncd:
-		die("i386: float not yet supported");
+		goto Emit;
 	default:
 		if (isext(i.op))
 			goto case_Oext;
@@ -437,8 +441,6 @@ sel(Ins i, Num *tn, Fn *fn)
 		if (isload(i.op))
 			goto case_Oload;
 		if (iscmp(i.op, &kc, &x)) {
-			if (KBASE(kc) == 1)
-				die("i386: float comparison not yet supported");
 			swap = cmpswap(i.arg, x);
 			if (swap)
 				x = cmpop(x);
@@ -562,8 +564,16 @@ seljmp(Blk *b, Fn *fn)
 		return;
 	assert(b->jmp.type == Jjnz);
 	r = b->jmp.arg;
-	t = &fn->tmp[r.val];
 	b->jmp.arg = R;
+	/* Constant-folded conditions can reach target lowering as RCon. */
+	if (rtype(r) == RCon) {
+		int nonzero = fn->con[r.val].type == CBits && fn->con[r.val].bits.i != 0;
+		b->jmp.type = Jjmp;
+		b->s1 = nonzero ? b->s1 : b->s2;
+		b->s2 = 0;
+		return;
+	}
+	t = &fn->tmp[r.val];
 	assert(rtype(r) == RTmp);
 	if (b->s1 == b->s2) {
 		chuse(r, -1, fn);

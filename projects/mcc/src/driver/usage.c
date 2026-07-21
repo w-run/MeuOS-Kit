@@ -60,6 +60,7 @@ usage_long(void)
 "Optimization & diagnostics:\n"
 "  -O<level>          optimization (-O0,-O1,-O2,-O3,-Os,-Ofast)\n"
 "  -g                 debug info (recorded, not emitted)\n"
+"  -d<flags>          backend debug dumps (A/I/R/S)\n"
 "  -w                 suppress warnings\n"
 "  -W<warning>        warning control (-Wall, -Werror, ...)\n"
 "\n"

@@ -125,7 +125,11 @@ ralloctry(RMap *m, int t, int try)
 	 * bshas may be true (e.g. when Kl temps appear in the block's
 	 * out set and were pre-added to m). Returning TMP(r) in that case
 	 * would wrongly allocate a 32-bit GPR to a 64-bit value. */
-	if (!T.kl_in_reg && tmp[t].cls == Kl) {
+	if ((!T.kl_in_reg && tmp[t].cls == Kl)
+	|| (T.nfpr == 0 && KBASE(tmp[t].cls) == 1)) {
+		/* Stack-resident wide integers and x87 values have no allocatable
+		 * machine register on i386. spill.c assigns their slots before
+		 * register allocation. */
 		assert(tmp[t].slot != -1);
 		return SLOT(tmp[t].slot);
 	}
@@ -427,8 +431,10 @@ doblk(Blk *b, RMap *cur)
 				 * (with i->to left as the temp; emit's Kl
 				 * dispatch resolves it via tmp[t].slot). */
 				assert(!isreg(i->to));
-			if (!T.kl_in_reg && r >= Tmp0
-			&& tmp[r].cls == Kl) {
+			if ((!T.kl_in_reg && r >= Tmp0
+			&& tmp[r].cls == Kl)
+			|| (T.nfpr == 0 && r >= Tmp0
+			&& KBASE(tmp[r].cls) == 1)) {
 				assert(tmp[r].slot != -1);
 				break;
 			}
