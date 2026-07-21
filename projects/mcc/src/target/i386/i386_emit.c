@@ -789,10 +789,43 @@ emit_float(Ins i, E *e)
 			return 1;
 		case Oswtof:
 		case Osltof:
-			if (i.op == Oswtof)
-				emitf("fildl %M0", &i, e);
-			else
-				emitf("fildq %M0", &i, e);
+			if (i.op == Oswtof) {
+				/* fildl can only load from memory.  On i386 a Kw source
+				 * often lands in a GPR after rega, and a constant
+				 * source has no address — `fildl %M0` would emit
+				 * `fildl (%eax)` (treating the register value as an
+				 * address) or `fildl $imm` (likewise), both invalid.
+				 * Spill to ESP-relative scratch and fildl from there,
+				 * mirroring the fisttpl fix below and the float_load
+				 * helper.  `movl %0, (%%esp)` handles every source
+				 * kind (GPR/slot/const) uniformly. */
+				fprintf(e->f, "\tsubl $4, %%esp\n");
+				emitf("movl %0, (%%esp)", &i, e);
+				fprintf(e->f, "\tfildl (%%esp)\n");
+				fprintf(e->f, "\taddl $4, %%esp\n");
+			} else {
+				/* Osltof: Kl (64-bit int) source.  On i386 kl_in_reg=0
+				 * keeps Kl values in slots, so `fildq slot(%ebp)` works
+				 * directly.  Constants (rare) must be materialised to
+				 * scratch because `fildq $imm` is invalid. */
+				if (rtype(i.arg[0]) == RSlot) {
+					emitf("fildq %M0", &i, e);
+				} else if (rtype(i.arg[0]) == RCon
+				        && e->fn->con[i.arg[0].val].type == CBits) {
+					int64_t v = e->fn->con[i.arg[0].val].bits.i;
+					fprintf(e->f, "\tsubl $8, %%esp\n");
+					fprintf(e->f, "\tmovl $%d, (%%esp)\n",
+						(int)(uint32_t)v);
+					fprintf(e->f, "\tmovl $%d, 4(%%esp)\n",
+						(int)(uint32_t)((uint64_t)v >> 32));
+					fprintf(e->f, "\tfildq (%%esp)\n");
+					fprintf(e->f, "\taddl $8, %%esp\n");
+				} else {
+					/* Kl in two GPRs is not modeled on i386
+					 * (kl_in_reg=0); reaching here is internal. */
+					die("i386: Osltof from unsupported source kind");
+				}
+			}
 			float_store(i.to, i.cls, e);
 			return 1;
 		case Ouwtof:
@@ -808,8 +841,19 @@ emit_float(Ins i, E *e)
 		float_load(i.arg[0], i.op == Ostosi ? Ks : Kd, e);
 		if (i.cls == Kl)
 			emitf("fisttpq %M=", &i, e);
-		else
-			emitf("fisttpl %M=", &i, e);
+		else {
+			/* fisttpl can only store to memory.  When the
+			 * destination is a GPR (the common Kw case after
+			 * rega), use ESP-relative scratch space, then
+			 * load the int into the destination register.
+			 * (For slot destinations %M= would work, but rega
+			 * gives Kw results a GPR, so always go through
+			 * scratch to be safe.) */
+			fprintf(e->f, "\tsubl $4, %%esp\n");
+			fprintf(e->f, "\tfisttpl (%%esp)\n");
+			emitf("movl (%%esp), %=", &i, e);
+			fprintf(e->f, "\taddl $4, %%esp\n");
+		}
 		return 1;
 	}
 	if (i.op == Oswap && KBASE(i.cls) == 1) {
@@ -856,14 +900,41 @@ emitins(Ins i, E *e)
 	 * block above for conventions. After this block returns, the
 	 * generic switch below only handles Kw/Ks/Kd. */
 	if (i.cls == Kl || i.op == Ostorel) {
-		switch (i.op) {
-		case Ocopy:
-			/* selret/selcall convention: TMP(EAX) as one
-			 * operand denotes the EAX:EDX pair (low:high). */
+		int kl_wrap, kl_edx;
+		/* Pre-checks: no-ops that return before any push. */
+		if (i.op == Ocopy) {
 			if (req(i.to, R) || req(i.arg[0], R))
 				return;
 			if (req(i.to, i.arg[0]))
 				return;
+		} else if (i.op == Ostorel) {
+			if (rtype(i.arg[0]) == RTmp && rtype(i.arg[1]) == RSlot
+			&& e->fn->tmp[i.arg[0].val].slot == rsval(i.arg[1])
+			&& !isreg(i.arg[0]))
+				return;
+		}
+		/* Determine which scratch registers the decomposition will
+		 * clobber so we can push/pop them around it. rega only sees
+		 * the IR operands and does not know about these implicit
+		 * EAX/EDX clobbers (isel already pins ECX for shifts, so
+		 * rega handles ECX). Ocopy with TMP(EAX) uses EAX:EDX as
+		 * the value itself (not scratch), and Ocall's clobbers are
+		 * already modelled by rega as caller-saved. */
+		kl_edx = (i.op == Oshl || i.op == Oshr || i.op == Osar);
+		kl_wrap = !(i.op == Ocall
+			|| (i.op == Ocopy
+				&& (req(i.to, TMP(EAX))
+					|| req(i.arg[0], TMP(EAX)))));
+		if (kl_wrap) {
+			fputs("\tpushl %eax\n", e->f);
+			if (kl_edx)
+				fputs("\tpushl %edx\n", e->f);
+		}
+		switch (i.op) {
+		case Ocopy:
+			/* selret/selcall convention: TMP(EAX) as one
+			 * operand denotes the EAX:EDX pair (low:high).
+			 * These are not wrapped (kl_wrap == 0). */
 			if (req(i.to, TMP(EAX))) {
 				/* Kl slot → EAX:EDX pair */
 				assert(kl_isslot(i.arg[0]) || rtype(i.arg[0]) == RCon);
@@ -884,41 +955,45 @@ emitins(Ins i, E *e)
 			kl_store_from(i.to, 0, EAX, e);
 			kl_load_to(i.arg[0], 1, EAX, e);
 			kl_store_from(i.to, 1, EAX, e);
-			return;
+			break;
 		case Oload:
-			/* Kl load from memory: two movl, low then high.
-			 * kl_load_mem_eax hard-codes EAX as the load target, so
-			 * if the address itself is in EAX the first movl
-			 * clobbers the address before the high half is read.
-			 * Move the address to ECX first in that case. */
-			assert(kl_isslot(i.to));
-			{
-				Ref addr = i.arg[0];
-				int stash = 0;
-				/* kl_load_mem_eax hard-codes EAX as the load target.
-				 * If the address (or a memory operand's base) is EAX,
-				 * the first movl clobbers it before the high half is
-				 * read.  Stash the address into ECX and load from
-				 * there.  This covers both RTmp==EAX and RMem with
-				 * base==EAX. */
-				if (req(addr, TMP(EAX))) {
-					fprintf(e->f, "\tmovl %%eax, %%ecx\n");
-					addr = TMP(ECX);
-					stash = 1;
-				} else if (rtype(addr) == RMem
-				&& req(e->fn->mem[addr.val].base, TMP(EAX))) {
-					fprintf(e->f, "\tmovl %%eax, %%ecx\n");
-					e->fn->mem[addr.val].base = TMP(ECX);
-					stash = 2;
-				}
-				kl_load_mem_eax(addr, 0, e);
-				kl_store_from(i.to, 0, EAX, e);
-				kl_load_mem_eax(addr, 4, e);
-				kl_store_from(i.to, 1, EAX, e);
+		/* Kl load from memory: two movl, low then high.
+		 * kl_load_mem_eax hard-codes EAX as the load target, so
+		 * if the address itself is in EAX the first movl
+		 * clobbers the address before the high half is read.
+		 * Move the address to ECX first in that case.
+		 *
+		 * rega does not know that the two-movl decomposition
+		 * clobbers EAX, so the unified push/pop EAX around all
+		 * Kl ops protects any live Kw value rega may have placed
+		 * in EAX. When the address is in EAX, we additionally
+		 * stash it to ECX (and push/pop ECX to protect any live
+		 * ECX value, since rega doesn't know about this either). */
+		assert(kl_isslot(i.to));
+		{
+			Ref addr = i.arg[0];
+			int stash = 0;
+			if (req(addr, TMP(EAX))) {
+				fputs("\tpushl %ecx\n\tmovl %eax, %ecx\n", e->f);
+				addr = TMP(ECX);
+				stash = 1;
+			} else if (rtype(addr) == RMem
+			&& req(e->fn->mem[addr.val].base, TMP(EAX))) {
+				fputs("\tpushl %ecx\n\tmovl %eax, %ecx\n", e->f);
+				e->fn->mem[addr.val].base = TMP(ECX);
+				stash = 2;
+			}
+			kl_load_mem_eax(addr, 0, e);
+			kl_store_from(i.to, 0, EAX, e);
+			kl_load_mem_eax(addr, 4, e);
+			kl_store_from(i.to, 1, EAX, e);
+			if (stash) {
+				fputs("\tpopl %ecx\n", e->f);
 				if (stash == 2)
 					e->fn->mem[i.arg[0].val].base = TMP(EAX);
 			}
-			return;
+		}
+		break;
 		case Ostorel:
 			/* Spill may emit `Ostorel Kl, R, RTmp(t), SLOT(s)`
 			 * where s == tmp[t].slot, to spill a Kl result to its
@@ -937,8 +1012,8 @@ emitins(Ins i, E *e)
 			 * the destination address (i.arg[1]) uses EAX as its
 			 * base/index register, loading the value into EAX
 			 * would clobber the address. In that case, use ECX
-			 * instead. This happens when selcall's Osalloc result
-			 * temp `r` is allocated to EAX by rega. */
+			 * instead and push/pop ECX to protect any live value
+			 * rega may have placed there. */
 		{
 			int vreg = EAX;
 			if (rtype(i.arg[1]) == RMem) {
@@ -949,11 +1024,15 @@ emitins(Ins i, E *e)
 			} else if (rtype(i.arg[1]) == RTmp && i.arg[1].val == EAX) {
 				vreg = ECX;
 			}
+			if (vreg == ECX)
+				fputs("\tpushl %ecx\n", e->f);
 			kl_load_to(i.arg[0], 0, vreg, e);
 			kl_store_eax_mem_reg(i.arg[1], 0, vreg, e);
 			kl_load_to(i.arg[0], 1, vreg, e);
 			kl_store_eax_mem_reg(i.arg[1], 4, vreg, e);
-			return;
+			if (vreg == ECX)
+				fputs("\tpopl %ecx\n", e->f);
+			break;
 		}
 		case Oshl:
 		case Oshr:
@@ -1008,9 +1087,9 @@ emitins(Ins i, E *e)
 			}
 			kl_store_from(i.to, 0, EAX, e);
 			kl_store_from(i.to, 1, EDX, e);
-			return;
+			break;
 		}
-		case Oadd:
+	case Oadd:
 			/* addl low + adcl high. movl preserves CF. */
 			assert(kl_isslot(i.to));
 			kl_load_to(i.arg[0], 0, EAX, e);
@@ -1023,8 +1102,8 @@ emitins(Ins i, E *e)
 			kl_operand(i.arg[1], 1, e);
 			fputs(", %eax\n", e->f);
 			kl_store_from(i.to, 1, EAX, e);
-			return;
-		case Osub:
+			break;
+	case Osub:
 			/* subl low + sbbl high. */
 			assert(kl_isslot(i.to));
 			kl_load_to(i.arg[0], 0, EAX, e);
@@ -1037,8 +1116,8 @@ emitins(Ins i, E *e)
 			kl_operand(i.arg[1], 1, e);
 			fputs(", %eax\n", e->f);
 			kl_store_from(i.to, 1, EAX, e);
-			return;
-		case Oneg:
+			break;
+	case Oneg:
 			/* Two's complement of 64-bit value:
 			 *   negl hi
 			 *   negl lo    (sets CF = (lo != 0))
@@ -1053,8 +1132,8 @@ emitins(Ins i, E *e)
 			kl_load_to(i.to, 1, EAX, e);
 			fputs("\tsbbl $0, %eax\n", e->f);
 			kl_store_from(i.to, 1, EAX, e);
-			return;
-		case Oand:
+			break;
+	case Oand:
 		case Oor:
 		case Oxor:
 			/* Two independent Kw operations on each half. */
@@ -1073,8 +1152,8 @@ emitins(Ins i, E *e)
 			kl_operand(i.arg[1], 1, e);
 			fputs(", %eax\n", e->f);
 			kl_store_from(i.to, 1, EAX, e);
-			return;
-		case Ocall:
+			break;
+	case Ocall:
 			/* A Kl-class Ocall denotes a function returning
 			 * long long (or a struct <= 8 bytes). The call
 			 * instruction itself is the same as Kw; the Kl
@@ -1117,9 +1196,9 @@ emitins(Ins i, E *e)
 			kl_operand(i.arg[0], 0, e);
 			fputs(", %eax\n", e->f);
 			fprintf(e->f, ".Lklcmp%d:\n", id);
-			return;
+			break;
 		}
-		case Oxtest:
+	case Oxtest:
 			/* 64-bit test: OR low + OR high, result in EFLAGS.
 			 *   movl arg0_lo, %eax
 			 *   orl  arg1_lo, %eax    (sets ZF if both low==0)
@@ -1136,8 +1215,8 @@ emitins(Ins i, E *e)
 			kl_operand(i.arg[1], 1, e);
 			fputs(", %eax\n", e->f);
 			fputs("\ttestl %eax, %eax\n", e->f);
-			return;
-		case Oextsw:
+			break;
+	case Oextsw:
 		case Oextuw:
 			/* 32-bit -> 64-bit extension.
 			 * Low half: movl source -> EAX, store to dst.low.
@@ -1167,8 +1246,8 @@ emitins(Ins i, E *e)
 			else
 				fputs("\txorl %eax, %eax\n", e->f);
 			kl_store_from(i.to, 1, EAX, e);
-			return;
-		default:
+			break;
+	default:
 			if (isxsel(i.op)) {
 				/* Kl conditional select: copy false value,
 				 * then conditionally copy true value. */
@@ -1185,11 +1264,18 @@ emitins(Ins i, E *e)
 				kl_load_to(i.arg[0], 1, EAX, e);
 				kl_store_from(i.to, 1, EAX, e);
 				fprintf(e->f, ".Lxsel%d:\n", l);
-				return;
+				break;
 			}
 			die("i386: Kl op %s not yet supported",
 				optab[i.op].name);
 		}
+		if (kl_wrap) {
+			if (kl_edx)
+				fputs("\tpopl %edx\n", e->f);
+			fputs("\tpopl %eax\n", e->f);
+		}
+		if (i.op != Ocall)
+			return;
 	}
 
 	switch (i.op) {
@@ -1477,43 +1563,6 @@ i386_framesz(E *e)
 	e->fsz += pad;
 }
 
-static int
-float_cond_neg(int c)
-{
-	switch (c) {
-	case Cfeq: return Cfne;
-	case Cfne: return Cfeq;
-	case Cfge: return Cflt;
-	case Cfgt: return Cfle;
-	case Cfle: return Cfgt;
-	case Cflt: return Cfge;
-	case Cfo: return Cfuo;
-	case Cfuo: return Cfo;
-	default: return c;
-	}
-}
-
-static const char *
-float_jcc(int c)
-{
-	switch (c) {
-	case Cfeq: return "e";
-	case Cfne: return "ne";
-	case Cfge: return "ae";
-	case Cfgt: return "a";
-	case Cfle: return "be";
-	case Cflt: return "b";
-	case Cfo: return "np";
-	case Cfuo: return "p";
-	default: die("i386: invalid float jump condition %d", c);
-	}
-}
-
-static int
-float_ordered(int c)
-{	return c != Cfuo && c != Cfne;
-}
-
 void
 i386_sysv_emitfn(Fn *fn, FILE *f)
 {
@@ -1591,18 +1640,16 @@ i386_sysv_emitfn(Fn *fn, FILE *f)
 					n = 0;
 				} else
 					n = 1;
-				if (c >= NCmpI) {
-					int fc = c - NCmpI;
-					if (n)
-						fc = float_cond_neg(fc);
-					/* An ordered predicate must route unordered values to
-					 * the fall-through edge before testing its integer flags. */
-					if (float_ordered(fc))
-						fprintf(f, "\tjp %sbb%d\n", T.asloc, id0+b->link->id);
-					fprintf(f, "\tj%s %sbb%d\n", float_jcc(fc),
-						T.asloc, id0+b->s2->id);
-					goto Jmp;
-				}
+				/* Float branch conditions that reach here (Cfgt/Cfge/Cfo/
+				 * Cfuo; Cflt/Cfle are lowered to Cfgt/Cfge by isel's
+				 * cmpswap+cmpop) use the same EFLAGS layout as ucomiss
+				 * because x87 fcompp+fnstsw+sahf sets ZF/PF/CF identically.
+				 * The generic ctoa[] table therefore handles both integer
+				 * and float conditions, matching amd64.  The previous
+				 * float-specific `jp .Lbb<link>` was buggy: when link was
+				 * the fall-through block its label was suppressed by the
+				 * Jmp fall-through optimisation, producing undefined
+				 * references at link time. */
 				fprintf(f, "\tj%s %sbb%d\n", ctoa[c][n],
 					T.asloc, id0+b->s2->id);
 				goto Jmp;

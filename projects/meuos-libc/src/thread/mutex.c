@@ -75,8 +75,21 @@ mtx_timedlock(mtx_t *mutex, const struct timespec *deadline)
 		}
 		if (remaining.tv_sec < 0)
 			return thrd_timedout;
+#if defined(__i386__)
+		/* i386 futex (240) takes a 32-bit time_t timeout, which
+		 * mismatches our 64-bit time_t.  Use futex_time64 (422)
+		 * with a 64-bit timespec, mirroring cnd_timedwait. */
+		{
+			struct { int64_t tv_sec, tv_nsec; } timeout64;
+			timeout64.tv_sec = remaining.tv_sec;
+			timeout64.tv_nsec = remaining.tv_nsec;
+			value = __syscall6(422, (long)&mutex->state, FUTEX_WAIT,
+				1, (long)&timeout64, 0, 0);
+		}
+#else
 		value = __syscall6(LINUX_SYS_FUTEX, (long)&mutex->state, FUTEX_WAIT,
 			1, (long)&remaining, 0, 0);
+#endif
 		if (__syscall_error(value) && -value == ETIMEDOUT)
 			return thrd_timedout;
 		if (__syscall_error(value) && -value != EINTR && -value != EAGAIN)

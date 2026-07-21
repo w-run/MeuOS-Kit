@@ -61,4 +61,12 @@ int __meuos_sink_number(struct __meuos_print_sink *sink,
     int negative, const char *prefix);
 int __meuos_vformat(struct __meuos_print_sink *sink, const char *format, va_list arguments);
 
+/* Floating-point formatter for %f/%e/%g (and uppercase variants).
+ * flags: bit 0='-', 1='+', 2=' ', 3='#', 4='0'.
+ * precision: -1 for unspecified (resolved to 6), otherwise >= 0.
+ * conv: one of 'f','F','e','E','g','G'; 'a','A' degrade to 'g','G'.
+ * Returns 0 on success, -1 on sink error. */
+int __meuos_fmt_fp(struct __meuos_print_sink *sink, double value, int conv,
+    int width, int precision, int flags);
+
 #endif

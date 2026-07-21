@@ -185,8 +185,27 @@ rfree(RMap *m, int t)
 	assert(t >= Tmp0 || !(BIT(t) & T.rglob));
 	if (!bshas(m->b, t))
 		return -1;
-	for (i=0; m->t[i] != t; i++)
-		assert(i+1 < m->n);
+	/* When t is a physical register (< Tmp0), it may be in the map
+	 * either as a physical-register entry (radd(m, t, t)) or as the
+	 * register assigned to some regular temp (radd(m, tempt, t)).
+	 * In the latter case m->t[] does not contain t, so search m->r[]
+	 * to locate the entry and switch to the temp id. This happens in
+	 * doblk's Ocall case which calls rfree(cur, T.rsave[r]) with a
+	 * physical register number. On i386 with only 3 caller-save GPRs,
+	 * a live temp is frequently allocated to a rsave register that has
+	 * no separate physical-register entry in the map. */
+	if (t < Tmp0) {
+		for (i=0; i<m->n; i++)
+			if (m->r[i] == t)
+				break;
+		if (i == m->n)
+			return -1;
+		t = m->t[i];
+	} else {
+		for (i=0; i<m->n && m->t[i] != t; i++)
+			;
+		assert(i < m->n && m->t[i] == t);
+	}
 	r = m->r[i];
 	bsclr(m->b, t);
 	bsclr(m->b, r);

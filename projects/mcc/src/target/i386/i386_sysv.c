@@ -290,10 +290,22 @@ selcall(Fn *fn, Ins *i0, Ins *i1, RAlloc **rap)
 				ca += 1;
 			}
 		} else {
-			/* The call leaves the x87 result in ST(0).  Store it into the
-			 * stack-resident SSA temporary after the call. */
-			emit(Ocopy, i1->cls, i1->to, R, R);
-		}
+		/* The call leaves the x87 result in ST(0).  Store it into the
+		 * stack-resident SSA temporary after the call. */
+		emit(Ocopy, i1->cls, i1->to, R, R);
+		/* Emit a dummy regcpy (arg[0]=TMP(EAX), a physical register)
+		 * right after the call so that spill.c's dopm is triggered.
+		 * Without a regcpy following the call, dopm is never invoked
+		 * and the rsave registers (EAX/ECX/EDX) holding live temps
+		 * are not spilled before the call — the call clobbers them
+		 * and the values are lost.
+		 *
+		 * The dummy regcpy has to=R (no destination) and is a no-op
+		 * in emit (regcpy emit only moves arg[0] to to, and to=R is
+		 * skipped). It exists solely to make regcpy(i) return true
+		 * in spill's main loop so dopm handles the preceding Ocall. */
+		emit(Ocopy, Kw, R, TMP(EAX), R);
+	}
 	}
 
 	emit(Ocall, i1->cls, R, i1->arg[0], CALL(ca));

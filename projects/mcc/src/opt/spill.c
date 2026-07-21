@@ -313,6 +313,15 @@ dopm(Blk *b, Ins *i, BSet *v)
 		if (!req(i->to, R))
 		if (bshas(v, t)) {
 			bsclr(v, t);
+			/* The temp t was kept in a register by a prior
+			 * limit2() (high cost), so tmp[t].slot may still
+			 * be -1. We are about to remove t from v and the
+			 * upcoming Ocall clobbers the rsave registers,
+			 * so the value must be spilled to a slot now.
+			 * Without this, store() is a no-op on slot==-1
+			 * and the call's return value is lost. */
+			if (tmp[t].slot == -1)
+				slot(t);
 			store(i->to, tmp[t].slot);
 		}
 		bsset(v, i->arg[0].val);
@@ -320,6 +329,25 @@ dopm(Blk *b, Ins *i, BSet *v)
 	bscopy(u, v);
 	if (i != b->ins && (i-1)->op == Ocall) {
 		v->t[0] &= ~T.retregs((i-1)->arg[1], 0);
+		/* Also remove caller-saved (rsave) registers from v, except
+		 * those that are globally reserved (rglob).  For x87-returning
+		 * calls on i386, selcall emits a dummy regcpy (Ocopy Kw, R,
+		 * TMP(EAX), R) which adds EAX (a physical register, < Tmp0)
+		 * to v via bsset(v, EAX) in the do-while loop above.  retregs
+		 * is 0 for x87 returns so it doesn't remove EAX.  If EAX stays
+		 * in v, limit2 -> limit -> slot(EAX) asserts (t >= Tmp0).
+		 *
+		 * The rglob exclusion matters for aarch64, whose rsave[] list
+		 * contains IP1 and R18 but those are also in rglob (alongside
+		 * FP/SP); they are not actually clobbered by the call and must
+		 * remain in v, otherwise the start-block invariant
+		 * (v->t[0] == T.rglob | fn->reg) below trips.  On i386 rsave
+		 * (EAX/ECX/EDX) and rglob (EBP/ESP) are disjoint, so the guard
+		 * is a no-op there.  For normal (GPR) returns this whole loop
+		 * is redundant (retregs already removed them). */
+		for (n=0; T.rsave[n]>=0; n++)
+			if (!(BIT(T.rsave[n]) & T.rglob))
+				v->t[0] &= ~BIT(T.rsave[n]);
 		limit2(v, T.nrsave[0], T.nrsave[1], 0);
 		for (n=0, r=0; T.rsave[n]>=0; n++)
 			r |= BIT(T.rsave[n]);
@@ -522,8 +550,8 @@ spill(Fn *fn)
 					break;
 				}
 			bscopy(u, v);
-			limit2(v, 0, 0, w);
-			for (n=0; n<2; n++)
+		limit2(v, 0, 0, w);
+		for (n=0; n<2; n++)
 				if (rtype(i->arg[n]) == RTmp) {
 					t = i->arg[n].val;
 					if (!bshas(v, t)) {

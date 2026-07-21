@@ -23,13 +23,13 @@ EOF
 "$mcc" --target=i386 -I"$root/include" -c -o "$work/hello.o" "$work/hello.c"
 "$mcc" --target=i386 -I"$root/include" -I"$root/src" -c -o "$work/write.o" "$root/src/syscall/write.c"
 "$mcc" --target=i386 -I"$root/include" -I"$root/src" -c -o "$work/getpid.o" "$root/src/syscall/getpid.c"
-"$mcc" --target=i386 -I"$root/include" -c -o "$work/errno.o" "$root/src/errno.c"
+"$mcc" --target=i386 -I"$root/include" -I"$root/src" -c -o "$work/errno.o" "$root/src/errno/errno.c"
 "$cc" -m32 -c -o "$work/crt1.o" "$root/crt/i386/crt1.S"
-"$cc" -m32 -c -o "$work/syscall.o" "$root/src/internal/i386/syscall.S"
-"$cc" -m32 -c -o "$work/atomic.o" "$root/src/i386/atomic.S"
-"$mcc" --target=i386 -I"$root/include" -I"$root/src" -c -o "$work/tls.o" "$root/src/i386/tls.c"
+"$cc" -m32 -c -o "$work/syscall.o" "$root/src/internal/arch/i386/syscall.S"
+"$cc" -m32 -c -o "$work/atomic.o" "$root/src/arch/i386/atomic.S"
+"$mcc" --target=i386 -I"$root/include" -I"$root/src" -c -o "$work/tls.o" "$root/src/arch/i386/tls.c"
 "$mcc" --target=i386 -I"$root/include" -c -o "$work/memory.o" "$root/src/string/memory.c"
-"$cc" -m32 -c -o "$work/load_gs.o" "$root/src/i386/load_gs.S"
+"$cc" -m32 -c -o "$work/load_gs.o" "$root/src/arch/i386/load_gs.S"
 "$cc" -m32 -nostdlib -static -o "$work/hello" \
 	"$work/crt1.o" "$work/hello.o" "$work/write.o" "$work/getpid.o" "$work/errno.o" "$work/syscall.o" "$work/tls.o" "$work/memory.o" "$work/load_gs.o"
 

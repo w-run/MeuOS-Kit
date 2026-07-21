@@ -85,6 +85,13 @@ check-loongarch64: $(BIN)
 check-i386: $(BIN)
 	sh test/i386/regress.sh ./$(BIN)
 
+# i386 runtime regression: compiles and runs i386 static binaries that
+# exercise Kl decomposition (push/pop EAX fix), x87 floating-point,
+# time64/stat (64-bit time_t), and cross-function va_list.  Requires
+# the i386 MeuOS sysroot at ../sysroot-i386; skips gracefully if absent.
+check-i386-runtime: $(BIN)
+	sh test/i386/runtime.sh ./$(BIN)
+
 check-targets: $(BIN)
 	sh test/targets/regress.sh ./$(BIN)
 
@@ -137,4 +144,4 @@ check-sysroot-static: $(BIN)
 # Compatibility alias for existing scripts.
 check-la64: check-loongarch64
 
-.PHONY: all clean check check-loongarch64 check-i386 check-targets check-la64 check-c11-atomic check-c11 check-driver check-abi check-sysroot-static
+.PHONY: all clean check check-loongarch64 check-i386 check-i386-runtime check-targets check-la64 check-c11-atomic check-c11 check-driver check-abi check-sysroot-static

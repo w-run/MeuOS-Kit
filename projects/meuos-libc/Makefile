@@ -80,8 +80,8 @@ STDLIB_OBJS    := $(BUILD)/stdlib/malloc.o $(BUILD)/stdlib/convert.o \
 STDIO_OBJS     := $(BUILD)/stdio/file.o $(BUILD)/stdio/char_io.o \
                   $(BUILD)/stdio/block_io.o $(BUILD)/stdio/position.o \
                   $(BUILD)/stdio/fmt_out.o $(BUILD)/stdio/fmt_in.o \
-                  $(BUILD)/stdio/memory_stream.o $(BUILD)/stdio/file_misc.o \
-                  $(BUILD)/stdio/truncate.o
+                  $(BUILD)/stdio/fp_fmt.o $(BUILD)/stdio/memory_stream.o \
+                  $(BUILD)/stdio/file_misc.o $(BUILD)/stdio/truncate.o
 SYSCALL_OBJS   := $(addprefix $(BUILD)/syscall/, \
                   read.o write.o open.o close.o fork.o execve.o exit.o \
                   mmap.o munmap.o brk.o stat.o fstat.o lstat.o lseek.o \

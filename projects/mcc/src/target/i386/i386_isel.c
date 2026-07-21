@@ -150,6 +150,13 @@ fixarg(Ref *r, int k, Ins *i, Fn *fn)
 		 * slot at use, and emit's Kl dispatch reads the right
 		 * half directly. */
 	}
+	else if (T.nfpr == 0 && KBASE(k) == 1 && rtype(r0) == RTmp) {
+		/* Ks/Kd temps on i386 live in slots (nfpr==0, no FPRs)
+		 * and must not be rewritten to their address. Pass them
+		 * through unchanged; spill/rega resolve them to their
+		 * slot at use, and emit's x87 dispatch reads the value
+		 * directly from the slot via float_ref(). */
+	}
 	else if (s != -1) {
 		/* load fast locals' addresses into
 		 * temporaries right before the
@@ -467,6 +474,35 @@ sel(Ins i, Num *tn, Fn *fn)
 		if (isload(i.op))
 			goto case_Oload;
 		if (iscmp(i.op, &kc, &x)) {
+			switch (x) {
+			case NCmpI+Cfeq:
+				/* zf is set when operands are unordered, so we
+				 * must AND with "ordered" (PF=0) to get a
+				 * correct ordered-equal flag.  Otherwise the
+				 * subsequent Jjf+Cfeq jump would need a "jcc
+				 * AND jcc" sequence which has no single x86
+				 * encoding (mirrors amd64 sel). */
+				r0 = newtmp("isel", Kw, fn);
+				r1 = newtmp("isel", Kw, fn);
+				emit(Oand, Kw, i.to, r0, r1);
+				emit(Oflagfo, k, r1, R, R);
+				i.to = r0;
+				break;
+			case NCmpI+Cfne:
+				/* zf is clear when operands are unordered, so
+				 * we OR with "unordered" (PF=1) to get a
+				 * correct ordered-not-equal flag.  Without
+				 * this, NaN operands would be reported as
+				 * "not equal" which is correct for != but the
+				 * subsequent Jjf+Cfne jump would again need a
+				 * compound jcc sequence (mirrors amd64 sel). */
+				r0 = newtmp("isel", Kw, fn);
+				r1 = newtmp("isel", Kw, fn);
+				emit(Oor, Kw, i.to, r0, r1);
+				emit(Oflagfuo, k, r1, R, R);
+				i.to = r0;
+				break;
+			}
 			swap = cmpswap(i.arg, x);
 			if (swap)
 				x = cmpop(x);
@@ -480,12 +516,23 @@ sel(Ins i, Num *tn, Fn *fn)
 	while (i0>curi && --i0) {
 		/* On i386 with kl_in_reg==0, Kl-class temps legitimately
 		 * carry stack slots through isel (e.g. parameters aliased
-		 * by selpar, or copies of large constants). Downstream
-		 * spill.c / rega.c resolve them to RSlot at use. Allow
-		 * slots only when the instruction's class is Kl. */
-		if (i0->cls != Kl) {
-			assert(rslot(i0->arg[0], fn) == -1);
-			assert(rslot(i0->arg[1], fn) == -1);
+		 * by selpar, or copies of large constants). Also Ks/Kd
+		 * when nfpr==0 (x87 values live in slots). Downstream
+		 * spill.c / rega.c resolve them to RSlot at use. Check
+		 * each argument's own class, since store/cmp instructions
+		 * have cls=Kw but float arguments. */
+		int s0, s1;
+		s0 = rslot(i0->arg[0], fn);
+		s1 = rslot(i0->arg[1], fn);
+		if (s0 != -1) {
+			assert(rtype(i0->arg[0]) == RTmp);
+			assert(fn->tmp[i0->arg[0].val].cls == Kl
+			    || (T.nfpr == 0 && KBASE(fn->tmp[i0->arg[0].val].cls) == 1));
+		}
+		if (s1 != -1) {
+			assert(rtype(i0->arg[1]) == RTmp);
+			assert(fn->tmp[i0->arg[1].val].cls == Kl
+			    || (T.nfpr == 0 && KBASE(fn->tmp[i0->arg[1].val].cls) == 1));
 		}
 	}
 }
@@ -532,7 +579,11 @@ selsel(Fn *fn, Blk *b, Ins *i, Num *tn)
 		cr[0] = r;
 		cr[1] = CON_Z;
 	}
-	else if (iscmp(fi->op, &k, &c)) {
+	else if (iscmp(fi->op, &k, &c)
+	     && c != NCmpI+Cfeq
+	     && c != NCmpI+Cfne) {
+		/* Cfeq/Cfne are lowered by sel() into Oand/Oor
+		 * compounds; see seljmp for the same guard. */
 		swap = cmpswap(fi->arg, c);
 		if (swap)
 			c = cmpop(c);
@@ -612,7 +663,17 @@ seljmp(Blk *b, Fn *fn)
 		selcmp((Ref[2]){r, CON_Z}, Kw, 0, fn);
 		b->jmp.type = Jjf + Cine;
 	}
-	else if (iscmp(fi->op, &k, &c)) {
+	else if (iscmp(fi->op, &k, &c)
+	     && c != NCmpI+Cfeq
+	     && c != NCmpI+Cfne) {
+		/* Cfeq/Cfne are lowered by sel() into Oand/Oor
+		 * compounds (see sel() iscmp case).  They cannot
+		 * be encoded as a single x86 jcc because x87
+		 * fcompp+fnstsw+sahf sets ZF=1 for unordered
+		 * operands, so "ordered equal" requires ANDing
+		 * with PF=0.  Defer to the else branch which
+		 * tests the materialized 0/1 result with Cine,
+		 * mirroring amd64 seljmp. */
 		swap = cmpswap(fi->arg, c);
 		if (swap)
 			c = cmpop(c);

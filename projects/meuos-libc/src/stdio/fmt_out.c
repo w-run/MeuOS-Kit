@@ -88,9 +88,10 @@ int
 __meuos_vformat(struct __meuos_print_sink *sink, const char *format, va_list arguments)
 {
 	while (*format) {
-		int zero = 0;
+		int flags = 0;    /* bit 0='-', 1='+', 2=' ', 3='#', 4='0' */
 		int width = 0;
 		int length = 0;
+		int precision = -1;
 		char conversion;
 		unsigned long long value;
 
@@ -102,16 +103,22 @@ __meuos_vformat(struct __meuos_print_sink *sink, const char *format, va_list arg
 		++format;
 		while (*format == '-' || *format == '+' || *format == ' ' || *format == '#'
 		 || *format == '0') {
-			if (*format == '0')
-				zero = 1;
+			switch (*format) {
+			case '-': flags |= 1; break;
+			case '+': flags |= 2; break;
+			case ' ': flags |= 4; break;
+			case '#': flags |= 8; break;
+			case '0': flags |= 16; break;
+			}
 			++format;
 		}
 		while (*format >= '0' && *format <= '9')
 			width = width * 10 + *format++ - '0';
 		if (*format == '.') {
 			++format;
+			precision = 0;
 			while (*format >= '0' && *format <= '9')
-				++format;
+				precision = precision * 10 + *format++ - '0';
 		}
 		if (*format == 'l') {
 			length = 1;
@@ -122,6 +129,10 @@ __meuos_vformat(struct __meuos_print_sink *sink, const char *format, va_list arg
 			}
 		} else if (*format == 'z') {
 			length = 3;
+			++format;
+		} else if (*format == 'L') {
+			/* long double — read as double (minimal libc limitation). */
+			length = 4;
 			++format;
 		}
 		conversion = *format ? *format++ : '%';
@@ -144,6 +155,7 @@ __meuos_vformat(struct __meuos_print_sink *sink, const char *format, va_list arg
 			break;
 		case 'd':
 		case 'i': {
+			int zero = (flags & 16) != 0;
 			long long signed_value;
 			if (length == 1) signed_value = va_arg(arguments, long);
 			else if (length == 2) signed_value = va_arg(arguments, long long);
@@ -156,7 +168,8 @@ __meuos_vformat(struct __meuos_print_sink *sink, const char *format, va_list arg
 		case 'u':
 		case 'x':
 		case 'X':
-		case 'o':
+		case 'o': {
+			int zero = (flags & 16) != 0;
 			if (length == 1) value = va_arg(arguments, unsigned long);
 			else if (length == 2) value = va_arg(arguments, unsigned long long);
 			else if (length == 3) value = va_arg(arguments, size_t);
@@ -164,10 +177,29 @@ __meuos_vformat(struct __meuos_print_sink *sink, const char *format, va_list arg
 			if (__meuos_sink_number(sink, value, conversion == 'o' ? 8 : conversion == 'u' ? 10 : 16,
 				width, zero, 0, "") < 0) return -1;
 			break;
-		case 'p':
+		}
+		case 'p': {
+			int zero = (flags & 16) != 0;
 			value = (unsigned long long)(unsigned long)va_arg(arguments, void *);
 			if (__meuos_sink_number(sink, value, 16, width, zero, 0, "0x") < 0) return -1;
 			break;
+		}
+		case 'f':
+		case 'F':
+		case 'e':
+		case 'E':
+		case 'g':
+		case 'G':
+		case 'a':
+		case 'A': {
+			/* %a/%A (hex float) not implemented; degrade to %g/%G. */
+			double dv = va_arg(arguments, double);
+			int fc = (conversion == 'a') ? 'g' :
+			         (conversion == 'A') ? 'G' : conversion;
+			if (__meuos_fmt_fp(sink, dv, fc, width, precision, flags) < 0)
+				return -1;
+			break;
+		}
 		default:
 			if (__meuos_sink_put(sink, '%') < 0 || __meuos_sink_put(sink, conversion) < 0) return -1;
 			break;
