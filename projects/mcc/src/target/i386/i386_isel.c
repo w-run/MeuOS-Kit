@@ -378,6 +378,23 @@ sel(Ins i, Num *tn, Fn *fn)
 		goto Emit;
 	case_Oload:
 		seladdr(&i.arg[0], tn, fn);
+		/* Kl loads are decomposed in emit into two movl through EAX
+		 * (kl_load_mem_eax).  Pin the address operand away from EAX
+		 * so the first movl does not clobber the address before the
+		 * high half (or a following Kw load from the same base, e.g.
+		 * request->tv_sec then request->tv_nsec) is read.  Covers
+		 * both a plain temp address and a memory operand's base. */
+		if (i.cls == Kl) {
+			Ref base = R;
+			if (rtype(i.arg[0]) == RTmp
+			&& i.arg[0].val >= Tmp0 && !isreg(i.arg[0]))
+				base = i.arg[0];
+			else if (rtype(i.arg[0]) == RMem)
+				base = fn->mem[i.arg[0].val].base;
+			if (rtype(base) == RTmp && base.val >= Tmp0
+			&& !isreg(base))
+				fn->tmp[base.val].hint.m |= BIT(EAX);
+		}
 		goto Emit;
 	case Odbgloc:
 	case Ocall:

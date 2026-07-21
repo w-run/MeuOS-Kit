@@ -886,12 +886,38 @@ emitins(Ins i, E *e)
 			kl_store_from(i.to, 1, EAX, e);
 			return;
 		case Oload:
-			/* Kl load from memory: two movl, low then high. */
+			/* Kl load from memory: two movl, low then high.
+			 * kl_load_mem_eax hard-codes EAX as the load target, so
+			 * if the address itself is in EAX the first movl
+			 * clobbers the address before the high half is read.
+			 * Move the address to ECX first in that case. */
 			assert(kl_isslot(i.to));
-			kl_load_mem_eax(i.arg[0], 0, e);
-			kl_store_from(i.to, 0, EAX, e);
-			kl_load_mem_eax(i.arg[0], 4, e);
-			kl_store_from(i.to, 1, EAX, e);
+			{
+				Ref addr = i.arg[0];
+				int stash = 0;
+				/* kl_load_mem_eax hard-codes EAX as the load target.
+				 * If the address (or a memory operand's base) is EAX,
+				 * the first movl clobbers it before the high half is
+				 * read.  Stash the address into ECX and load from
+				 * there.  This covers both RTmp==EAX and RMem with
+				 * base==EAX. */
+				if (req(addr, TMP(EAX))) {
+					fprintf(e->f, "\tmovl %%eax, %%ecx\n");
+					addr = TMP(ECX);
+					stash = 1;
+				} else if (rtype(addr) == RMem
+				&& req(e->fn->mem[addr.val].base, TMP(EAX))) {
+					fprintf(e->f, "\tmovl %%eax, %%ecx\n");
+					e->fn->mem[addr.val].base = TMP(ECX);
+					stash = 2;
+				}
+				kl_load_mem_eax(addr, 0, e);
+				kl_store_from(i.to, 0, EAX, e);
+				kl_load_mem_eax(addr, 4, e);
+				kl_store_from(i.to, 1, EAX, e);
+				if (stash == 2)
+					e->fn->mem[i.arg[0].val].base = TMP(EAX);
+			}
 			return;
 		case Ostorel:
 			/* Spill may emit `Ostorel Kl, R, RTmp(t), SLOT(s)`
