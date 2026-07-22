@@ -233,8 +233,8 @@ Kit 组件是构建其他软件的基础设施，必须由 Kit 自己实现，�
 | Coreutils/Diffutils/Findutils | meuos-utils | 待启动 |
 | Gawk/Sed/Grep | meuos-utils（文本处理） | 待启动 |
 | Bash | meuos-shell (msh) | 待启动 |
-| Autoconf/Automake/Libtool | 被 meow 取代，不实现 | — |
-| CMake/Ninja | 被 meow 取代，不实现 | — |
+| Autoconf/Automake/Libtool | 被 meow 取代（特性检测/包查询/库构建内置） | 内置 |
+| CMake/Ninja | 被 meow 取代（并行构建/多平台内置） | 内置 |
 
 ### meow 软件包（从源码构建，不自己实现）
 
