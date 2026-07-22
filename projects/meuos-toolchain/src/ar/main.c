@@ -86,7 +86,9 @@ main(int argc, char **argv)
 	members = (const char *const *)&argv[3];
 	member_count = argc > 3 ? (size_t)(argc - 3) : 0;
 	create = has_operation(options, 'r') || has_operation(options, 'q') ||
-	         has_operation(options, 'c');
+	         has_operation(options, 'c') ||
+	         (has_operation(options, 's') && !has_operation(options, 'r') &&
+	          !has_operation(options, 'q') && !has_operation(options, 'c'));
 	list = has_operation(options, 't');
 	print = has_operation(options, 'p');
 	extract = has_operation(options, 'x');
@@ -95,7 +97,8 @@ main(int argc, char **argv)
 		return 2;
 	}
 	if (create) {
-		if (member_count == 0 && !has_operation(options, 'c')) {
+		if (member_count == 0 && !has_operation(options, 'c') &&
+		    !has_operation(options, 's')) {
 			fprintf(stderr, "ar: no archive members specified\n");
 			return 2;
 		}

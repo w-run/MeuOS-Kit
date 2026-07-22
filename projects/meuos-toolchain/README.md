@@ -199,21 +199,21 @@ mt 与 mcc 保持一致：**单一二进制 + 架构在源码层模块化**，�
 - 使用项目自有格式常量，不包含宿主 `<elf.h>`
 - **当前验收**：`make -C projects/meuos-toolchain check`，`elf_probe` 能识别宿主 `cc` 产出的 `ET_REL/EM_X86_64` `.o`
 
-### 阶段 1：ar 基础读写（P0a，当前已启动）
+### 阶段 1：ar 基础读写（P0a，已完成）
 
 - `src/ar/` 实现 `ar rcs libfoo.a foo.o bar.o`、`t`、`p`、`x`
     - SysV short-name 格式（`!<arch>\n` magic + 60 字节 header）
     - 固定 mtime/uid/gid，保证输出可复现
-- **当前验收**：创建、列出、打印、解出成员并逐字节比较；尚未要求宿主 `ld` 链接
+- **验收**：创建、列出、打印、解出成员并逐字节比较；P0b 继续增加宿主 `ld` 链接门禁
 
-### 阶段 1b：ar 完整化（P0b）
+### 阶段 1b：ar 完整化（P0b，核心完成）
 
 - 成员替换和追加语义
 - GNU/BSD long-name table
 - 内置 ranlib 功能（生成 `/` 符号索引节）
-- **验收**：`ar rcs build/libmcc.a <objs>` 可被宿主 `ld` 接受，并可替换 mcc Makefile 的宿主 `ar`
+- **验收**：`ar rcs build/libmcc.a <objs>` 可被宿主 `ld` 接受；独立 `ar s` 可重建索引；mcc Makefile 自动替换留到 P3
 
-### 阶段 2：as（P1，x86_64 优先，逐步扩展）
+### 阶段 2：as（P1，x86_64 核心已完成，逐步扩展）
 
 - `src/as/` 输入 `.s`（mcc 生成的 AT&T 语法 + 手写 `.S`）
 - 第一里程碑：x86_64 整数指令 + 重定位
@@ -226,7 +226,7 @@ mt 与 mcc 保持一致：**单一二进制 + 架构在源码层模块化**，�
 - **验收**：`as foo.s -o foo.o` 产出的 `.o` 可被宿主 `ld` 链接；
   最终用 mt 的 `ld` 链接通过
 
-### 阶段 3：ld（P2，静态链接优先，动态后期）
+### 阶段 3：ld（P2，x86_64 静态核心已完成，动态后期）
 
 - `src/ld/` 输入 `.o[]` + `.a[]`
 - 第一里程碑：静态链接 x86_64
@@ -236,6 +236,7 @@ mt 与 mcc 保持一致：**单一二进制 + 架构在源码层模块化**，�
     - 程序头生成（PT_LOAD / PT_INTERP / PT_DYNAMIC）
     - ELF 可执行文件输出（含 entry、`_start` 解析）
     - TLS 模板处理（`.tdata`/`.tbss`）
+- **当前 x86_64 静态核心已覆盖**：ET_REL 合并、全局/弱符号、归档输入、`.text/.rodata/.got/.data/.bss` 布局、R_X86_64_64/PC32/PLT32/GOTPCREL/32/32S；
 - 第二里程碑：aarch64 / i386 静态链接
 - 第三里程碑：动态链接（`.dynsym` / PLT / GOT / R_X86_64_GLOB_DAT）
 - **验收**：`ld foo.o -lc-meuos -o foo` 产出的可执行文件可在
@@ -251,9 +252,9 @@ mt 与 mcc 保持一致：**单一二进制 + 架构在源码层模块化**，�
 
 | 优先级 | 工具                        | 理由                                            |
 | ------ | --------------------------- | ----------------------------------------------- |
-| **P0a/P0b** | libelf + ar                 | 先建立格式层，再完成 ranlib 后替换宿主 ar          |
-| **P1** | as (x86_64)                 | 解除 mcc 对 `cc -c` 的依赖；x86_64 是主开发架构 |
-| **P2** | ld (x86_64 静态)            | 解除 mcc 对 `cc link` 的依赖；完成自举链        |
+| **P0a/P0b** | libelf + ar                 | 已完成格式层、symbol index、长名和宿主链接互操作 |
+| **P1** | as (x86_64)                 | 已完成 mcc 常见 x86_64 汇编子集和 ET_REL 输出   |
+| **P2** | ld (x86_64 静态)            | 已完成静态核心，下一步接入 MeuOS sysroot       |
 | **P3** | as (aarch64/i386)           | 扩展架构覆盖，配合 aarch64 移植                 |
 | **P4** | ld (aarch64/i386 静态)      | 多架构自举                                      |
 | **P5** | nm / readelf                | 调试工具，提升 as/ld 开发效率                   |
@@ -343,11 +344,10 @@ mt 与 mcc 保持一致：**单一二进制 + 架构在源码层模块化**，�
 ## 验收
 
 - **P0a/P0b 当前完成**：`make -C projects/meuos-toolchain check` 全绿；`libelf` 可验证 x86_64 ET_REL 并读取 symtab/strtab；`ar` 支持 symbol index、GNU long-name table、r/q 更新语义和宿主 `ld` 互操作；
-- **尚未完成**：独立 `ranlib` 命令、BSD `#1/` extended-name 变体、mcc Makefile/driver 集成；完成这些前，mt/ar 仍通过显式路径使用
-- **as x86_64**：`as foo.s -o foo.o` 产出的 `.o` 可被宿主 `ld`
-  链接成可运行可执行文件
-- **ld x86_64 静态**：`ld foo.o -lc-meuos -o foo` 产出的可执行文件
-  在 MeuOS 上运行输出 `counter = 2000`
+- **尚未完成**：独立 `ranlib` 命令、BSD `#1/` extended-name 变体、浮点/SSE 完整编码、mcc Makefile/driver 集成；
+- **as x86_64**：`make -C projects/meuos-toolchain check-as-x86_64` 和 mcc 整数/数据/调用 fixture 通过；
+- **ld x86_64 核心**：`make -C projects/meuos-toolchain check-ld-x86_64` 通过，mt as + ar + ld + GOT/PLT + syscall smoke 可运行；
+- **尚未完成的 P2 生产门禁**：MeuOS libc/crt1/sysroot 静态链接和 `counter = 2000`，需要下一阶段接入 sysroot
 - **完整自举**：mcc + mt（as + ld + ar）全部由 mcc + libc-meuos 自重编译
   通过；Kit 自举链零宿主依赖
 
@@ -365,13 +365,13 @@ mt 与 mcc 保持一致：**单一二进制 + 架构在源码层模块化**，�
 
 ## 当前实施状态（2026-07-22）
 
-首期开发固定为 **x86_64 优先**，当前已完成 P0a/P0b 核心 ar：
+首期开发固定为 **x86_64 优先**，当前已完成 P0a/P0b、P1 核心和 P2 静态链接基础：
 
 - 独立 `Makefile`，源码、依赖文件和产物隔离到 `build/`；
 - 内部 `libelf`：不包含宿主 `<elf.h>`，可验证 ELF64 little-endian 头部/节区表，并读取 symtab/strtab；
-- `ar` 支持 `rcs`/`q`/`r`/`t`/`p`/`x`，生成可复现的 SysV/GNU archive；
+- `ar` 支持 `rcs`/`q`/`r`/`s`/`t`/`p`/`x`，生成可复现的 SysV/GNU archive；
 - 归档包含 `/` symbol index，长成员名使用 `//` table，宿主 `ld` 可以直接链接；
-- 回归覆盖 x86_64 ELF、symbol index、宿主链接、长名、追加、替换、解出；
+- x86_64 `as` 生成 ET_REL，`ld` 生成 ET_EXEC；回归覆盖 ELF、symbol index、宿主链接、长名、追加、替换、GOT/PLT 和 syscall 运行；
 - 阶段计划和门禁见 [`ARCHITECTURE.md`](ARCHITECTURE.md)；
 - 当前剩余兼容性任务记录在 `.todo/p0-foundation-ar.md`。
 
@@ -383,11 +383,11 @@ make -C projects/meuos-toolchain
 make -C projects/meuos-toolchain check
 ```
 
-首期 `ar` 的二进制位于：
+首期核心二进制位于：
 
 ```text
-projects/meuos-toolchain/build/bin/ar
+projects/meuos-toolchain/build/bin/{ar,as,ld}
 ```
 
-P0a/P0b 已完成 symbol index、GNU long-name table 和基本 r/q 更新语义；当前仍未实现
-独立 `ranlib`、BSD `#1/` extended-name 以及 mcc 的自动集成。
+P0a/P0b、x86_64 as 核心和静态 ld 核心已完成；当前仍未实现独立 `ranlib`、BSD `#1/`
+extended-name、浮点/SSE 完整编码、MeuOS libc sysroot 链接以及 mcc 的自动集成。

@@ -835,6 +835,8 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 		return emit_u8(as, section, 0x90);
 	if (strcmp(base, "ud2") == 0)
 		return emit_u8(as, section, 0x0f) || emit_u8(as, section, 0x0b);
+	if (strcmp(base, "syscall") == 0)
+		return emit_u8(as, section, 0x0f) || emit_u8(as, section, 0x05);
 	if (strcmp(base, "cqto") == 0)
 		return emit_u8(as, section, 0x48) || emit_u8(as, section, 0x99);
 	if (strcmp(base, "cltd") == 0)
@@ -1297,6 +1299,7 @@ parse_directive(struct as_file *as, char *directive, char *rest)
 	int64_t count;
 	int64_t element_size;
 	int64_t fill_value;
+	int64_t common_size;
 	char *name;
 	char *cursor;
 	char *item;
@@ -1416,7 +1419,7 @@ parse_directive(struct as_file *as, char *directive, char *rest)
 		cursor = rest;
 		name = next_csv(&cursor);
 		item = next_csv(&cursor);
-		if (parse_integer(item, &value) != 0 || value < 0)
+		if (parse_integer(item, &common_size) != 0 || common_size < 0)
 			return as_error(as, "invalid .comm size");
 		item = next_csv(&cursor);
 		align = 1;
@@ -1429,7 +1432,7 @@ parse_directive(struct as_file *as, char *directive, char *rest)
 			return -1;
 		symbol->defined = 1;
 		symbol->section = -2;
-		symbol->size = (uint64_t)value;
+		symbol->size = (uint64_t)common_size;
 		symbol->value = align;
 		symbol->bind = MT_STB_GLOBAL;
 		return 0;

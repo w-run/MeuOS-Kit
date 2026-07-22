@@ -99,7 +99,7 @@ make -C projects/meuos-toolchain check
 - `ar t`/`nm` 可看到稳定的成员和符号；
 - `make -C projects/mcc check` 可在 `MT_AR` 下通过。
 
-### P1：x86_64 汇编器（下一阶段）
+### P1：x86_64 汇编器（核心完成）
 
 任务：
 
@@ -110,20 +110,22 @@ make -C projects/meuos-toolchain check
 5. 支持 crt1.S、atomic.S、setjmp.S 等 MeuOS 运行时汇编；
 6. 对每个 instruction family 建立 golden bytes 测试。
 
-验收门禁：
+当前已完成门禁：
 
 ```sh
 make -C projects/meuos-toolchain check-as-x86_64
 ```
 
+- x86_64 mcc 常见整数/内存/栈/分支/call/ret/shift/div/set/cmov 指令可编码；
+- `.text/.rodata/.data/.bss` 和常用数据指令可生成；
 - 每个 golden case 的字节和 relocation 与参考结果一致；
 - 生成的 `.o` 可由宿主 `readelf` 读取；
 - mcc 产出的 x86_64 `.s` 可完整汇编；
 - 错误输入必须报告行号和列号，不得崩溃。
 
-### P2：x86_64 静态链接器
+### P2：x86_64 静态链接器（核心完成，sysroot 集成待做）
 
-任务：
+当前核心已通过 `test/ld_smoke.sh`，任务：
 
 1. 读取 ET_REL 和归档成员；
 2. 符号解析、强/弱符号、重复定义和未定义符号诊断；
@@ -132,16 +134,16 @@ make -C projects/meuos-toolchain check-as-x86_64
 5. 输出 ET_EXEC，加入 `PT_LOAD`、入口地址和 `crt1.o` 路径；
 6. 处理 `--sysroot`、`-L`、`-l`、`--static`、`-o`。
 
-验收门禁：
+当前验收门禁：
 
 ```sh
 make -C projects/meuos-toolchain check-ld-x86_64
 ```
 
-- 空 main、stdio、C11 atomic/threads 测试均可静态链接；
-- 生成的 ELF 可在宿主 Linux 或 env/QEMU x86_64 运行；
-- 与宿主 `ld` 的退出码和关键符号布局对照通过；
-- 缺失符号、重叠节区、溢出 relocation 有明确诊断。
+- mt as + mt ar + mt ld 的 syscall-only ET_EXEC 可在宿主 x86_64 运行；
+- 归档输入、GOT/PLT、`.text/.data/.bss`、PC-relative 和绝对 relocation 已覆盖；
+- 未定义符号有明确诊断；
+- 后续生产门禁：MeuOS libc/crt1、stdio、C11 atomic/threads 和 QEMU 运行。
 
 ### P3：mcc 集成
 

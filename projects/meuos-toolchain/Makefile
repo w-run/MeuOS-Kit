@@ -28,12 +28,17 @@ AS_SRCS := $(sort $(wildcard src/as/*.c))
 AS_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(AS_SRCS))
 AS_BIN := $(BUILD)/bin/as
 
+LD_SRCS := $(sort $(wildcard src/ld/*.c))
+LD_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(LD_SRCS))
+LD_BIN := $(BUILD)/bin/ld
+AR_CORE_OBJ := $(BUILD)/src/ar/archive.o
+
 ELF_PROBE := $(BUILD)/test/elf_probe
 TEST_FIXTURE_OBJ := $(BUILD)/test/hello.o
 TEST_ARCHIVE := $(BUILD)/test/libhello.a
-DEPS := $(LIBELF_OBJS:.o=.d) $(AR_OBJS:.o=.d) $(AS_OBJS:.o=.d) $(ELF_PROBE).d
+DEPS := $(LIBELF_OBJS:.o=.d) $(AR_OBJS:.o=.d) $(AS_OBJS:.o=.d) $(LD_OBJS:.o=.d) $(ELF_PROBE).d
 
-all: $(AR_BIN) $(AS_BIN)
+all: $(AR_BIN) $(AS_BIN) $(LD_BIN)
 
 $(LIBELF_LIB): $(LIBELF_OBJS)
 	@mkdir -p $(dir $@)
@@ -46,6 +51,10 @@ $(AR_BIN): $(AR_OBJS) $(LIBELF_LIB)
 $(AS_BIN): $(AS_OBJS) $(LIBELF_LIB)
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(LDFLAGS) -o $@ $(AS_OBJS) $(LIBELF_LIB) $(LDLIBS)
+
+$(LD_BIN): $(LD_OBJS) $(AR_CORE_OBJ) $(LIBELF_LIB)
+	@mkdir -p $(dir $@)
+	$(HOST_CC) $(LDFLAGS) -o $@ $(LD_OBJS) $(AR_CORE_OBJ) $(LIBELF_LIB) $(LDLIBS)
 
 $(ELF_PROBE): test/elf_probe.c $(LIBELF_LIB)
 	@mkdir -p $(dir $@)
@@ -65,10 +74,11 @@ build/%.o: %.c
 
 -include $(DEPS)
 
-check: check-as-x86_64 $(AR_BIN) $(AS_BIN) $(ELF_PROBE) $(TEST_ARCHIVE)
+check: check-as-x86_64 check-ld-x86_64 $(AR_BIN) $(AS_BIN) $(LD_BIN) $(ELF_PROBE) $(TEST_ARCHIVE)
 	@set -eu; \
 	test "$$($(AR_BIN) --version)" = "meuos-toolchain ar 0.2.0 (x86_64 bootstrap)"; \
 	test "$$($(AR_BIN) t $(TEST_ARCHIVE))" = hello.o; \
+	$(AR_BIN) s $(TEST_ARCHIVE); \
 	$(ELF_PROBE) $(TEST_FIXTURE_OBJ) | grep '^type=1 machine=x86_64 sections=.* symbols=1$$'; \
 	tmp=$$(mktemp -d /tmp/meuos-toolchain-check.XXXXXX); \
 	trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; \
@@ -105,18 +115,22 @@ check-as-x86_64: $(AS_BIN)
 	readelf -s "$$tmp/main.o" | grep -Eq '[[:space:]]main$$'; \
 	printf 'mt as x86_64 check: PASS\n'
 
+check-ld-x86_64: $(AS_BIN) $(AR_BIN) $(LD_BIN)
+	sh test/ld_smoke.sh "$(abspath $(AS_BIN))" "$(abspath $(AR_BIN))" "$(abspath $(LD_BIN))"
+
 check-elf: $(ELF_PROBE) $(TEST_FIXTURE_OBJ)
 	$(ELF_PROBE) $(TEST_FIXTURE_OBJ)
 
 check-ar: $(AR_BIN) $(TEST_ARCHIVE)
 	test "$$($(AR_BIN) t $(TEST_ARCHIVE))" = hello.o
 
-install: $(AR_BIN) $(AS_BIN)
+install: $(AR_BIN) $(AS_BIN) $(LD_BIN)
 	@mkdir -p $(DESTDIR)$(PREFIX)/bin
 	cp $(AR_BIN) $(DESTDIR)$(PREFIX)/bin/ar
 	cp $(AS_BIN) $(DESTDIR)$(PREFIX)/bin/as
+	cp $(LD_BIN) $(DESTDIR)$(PREFIX)/bin/ld
 
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all check check-elf check-ar check-as-x86_64 install clean
+.PHONY: all check check-elf check-ar check-as-x86_64 check-ld-x86_64 install clean
