@@ -40,6 +40,12 @@ MeuOS-Kit/
 | `meuos-shell` (msh) | POSIX sh + 可选 bash 兼容 + zsh 插件/主题 | 待启动 |
 | `meuos-buildtools` | m4/bison/flex/gperf（取代 GNU 构建工具） | 待启动 |
 
+## Kit 实现 vs meow 软件包
+
+Kit 直接实现自举链基础设施（libc/编译器/工具链/构建系统/Shell/工具集/构建工具）。
+应用级库（GMP/MPFR/MPC/GDBM/zlib/openssl 等）通过 `meow build` 从源码构建，不自己实现。
+被取代的工具（make/autoconf/cmake）不实现、不构建。详见 [AGENTS.md §2.8](AGENTS.md)。
+
 ## 快速开始
 
 ```sh

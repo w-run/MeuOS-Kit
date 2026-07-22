@@ -203,6 +203,51 @@ meow --bootstrap         # 自举模式：用宿主编译自己
 
 ---
 
+## 2.8 软件包策略：Kit 实现 vs meow 构建
+
+参考 LFS 12.1 软件包列表，分为两类：
+
+### Kit 实现（自举链基础设施）
+
+Kit 组件是构建其他软件的基础设施，必须由 Kit 自己实现，不依赖 GNU 对应物：
+
+| LFS 软件包 | Kit 组件 | 状态 |
+|-----------|---------|------|
+| Glibc | meuos-libc | ✅ |
+| GCC | mcc/m++ | ✅ C11，C23/m++ 待 |
+| Binutils | meuos-toolchain | ✅ P0-P2 |
+| Make | meow | ✅ |
+| M4/Bison/Flex/Gperf | meuos-buildtools | 待启动 |
+| Coreutils/Diffutils/Findutils | meuos-utils | 待启动 |
+| Gawk/Sed/Grep | meuos-utils（文本处理） | 待启动 |
+| Bash | meuos-shell (msh) | 待启动 |
+| Autoconf/Automake/Libtool | 被 meow 取代，不实现 | — |
+| CMake/Ninja | 被 meow 取代，不实现 | — |
+
+### meow 软件包（从源码构建，不自己实现）
+
+这些是应用级库和软件，用 Kit 工具从源码编译安装，通过 `meow build <package>`：
+
+| 类别 | 软件包 | 说明 |
+|------|--------|------|
+| 数学库 | GMP, MPFR, MPC | GCC 的依赖，mcc 不需要；Python/加密库等需要时通过 meow 构建 |
+| 数据库 | GDBM, Berkeley DB | 应用级存储库 |
+| 压缩 | Zlib, Bzip2, Xz, Zstd | 基础依赖库 |
+| 终端 | Ncurses, Readline | msh 可自实现行编辑；其他软件需要时通过 meow 构建 |
+| 正则 | Pcre2 | grep 可用 POSIX 正则；需要 PCRE 的软件通过 meow 构建 |
+| 加密 | OpenSSL/LibreSSL, GnuPG | 安全库 |
+| 解释器 | Python, Perl | 脚本语言 |
+| 系统工具 | Util-linux, Procps, E2fsprogs | 系统管理工具 |
+| init | — | MeuOS Next 自有 init，不用 systemd/sysvinit |
+
+**判断原则**：
+- 自举链直接需要的工具 → Kit 实现
+- MeuOS Next 中不可依赖 GNU 的工具 → Kit 实现
+- 应用级库和软件 → meow 软件包（用 Kit 工具从源码构建）
+- 被取代的工具（make/autoconf/cmake）→ 不实现、不构建
+
+---
+
 ## 3. 自举流程
 
 Agent 必须严格遵循以下阶段，每步都要验证：
