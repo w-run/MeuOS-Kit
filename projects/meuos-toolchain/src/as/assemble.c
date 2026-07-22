@@ -11,30 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MT_SHF_WRITE 0x1ULL
-#define MT_SHF_ALLOC 0x2ULL
-#define MT_SHF_EXECINSTR 0x4ULL
-#define MT_SHF_TLS 0x400ULL
-#define MT_SHT_NOBITS 8
-#define MT_SHT_RELA 4
-#define MT_SHT_SYMTAB 2
-#define MT_SHT_STRTAB 3
-#define MT_ST_INFO(bind, type) (((bind) << 4) | ((type) & 0xf))
-#define MT_STT_NOTYPE 0
-#define MT_STT_SECTION 3
-#define MT_STT_OBJECT 1
-#define MT_STT_FUNC 2
-#define MT_STB_LOCAL 0
-#define MT_STB_GLOBAL 1
-#define MT_STB_WEAK 2
-#define MT_SHN_COMMON 0xfff2
-
-#define MT_R_X86_64_64 1
-#define MT_R_X86_64_PC32 2
-#define MT_R_X86_64_PLT32 4
-#define MT_R_X86_64_GOTPCREL 9
-#define MT_R_X86_64_32 10
-#define MT_R_X86_64_32S 11
+#define MT_ST_INFO(bind, type) MT_ELF64_ST_INFO(bind, type)
 
 struct as_section {
 	char *name;

@@ -82,7 +82,7 @@ build/%.o: %.c
 
 -include $(DEPS)
 
-check: check-as-x86_64 check-as-sse-x86_64 check-as-libc-x86_64 check-ld-x86_64 check-ar-bsd check-ld-libpath check-ranlib $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(ELF_PROBE) $(TEST_ARCHIVE)
+check: check-as-x86_64 check-as-sse-x86_64 check-as-libc-x86_64 check-ld-x86_64 check-ar-bsd check-ld-libpath check-ranlib check-libelf $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(ELF_PROBE) $(TEST_ARCHIVE)
 	@set -eu; \
 	test "$$($(AR_BIN) --version)" = "meuos-toolchain ar 0.2.0 (x86_64 bootstrap)"; \
 	test "$$($(AR_BIN) t $(TEST_ARCHIVE))" = hello.o; \
@@ -148,6 +148,9 @@ check-elf: $(ELF_PROBE) $(TEST_FIXTURE_OBJ)
 check-ar: $(AR_BIN) $(TEST_ARCHIVE)
 	test "$$($(AR_BIN) t $(TEST_ARCHIVE))" = hello.o
 
+check-libelf: $(ELF_PROBE) $(AS_BIN) $(LD_BIN) $(AR_BIN)
+	sh test/libelf_roundtrip.sh "$(abspath $(ELF_PROBE))" "$(abspath $(AS_BIN))" "$(abspath $(LD_BIN))" "$(abspath $(AR_BIN))"
+
 install: $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN)
 	@mkdir -p $(DESTDIR)$(PREFIX)/bin
 	cp $(AR_BIN) $(DESTDIR)$(PREFIX)/bin/ar
@@ -157,4 +160,4 @@ install: $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN)
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all check check-elf check-ar check-as-x86_64 check-as-sse-x86_64 check-as-libc-x86_64 check-ld-x86_64 check-ar-bsd check-ld-libpath check-ranlib install clean
+.PHONY: all check check-elf check-ar check-as-x86_64 check-as-sse-x86_64 check-as-libc-x86_64 check-ld-x86_64 check-ar-bsd check-ld-libpath check-ranlib check-libelf install clean

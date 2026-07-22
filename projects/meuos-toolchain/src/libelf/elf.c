@@ -221,3 +221,200 @@ mt_elf_machine_name(uint16_t machine)
 	default: return "unknown";
 	}
 }
+
+const char *
+mt_elf_section_type_name(uint32_t type)
+{
+	switch (type) {
+	case MT_SHT_NULL: return "NULL";
+	case MT_SHT_PROGBITS: return "PROGBITS";
+	case MT_SHT_SYMTAB: return "SYMTAB";
+	case MT_SHT_STRTAB: return "STRTAB";
+	case MT_SHT_RELA: return "RELA";
+	case MT_SHT_HASH: return "HASH";
+	case MT_SHT_DYNAMIC: return "DYNAMIC";
+	case MT_SHT_NOTE: return "NOTE";
+	case MT_SHT_NOBITS: return "NOBITS";
+	case MT_SHT_REL: return "REL";
+	case MT_SHT_DYNSYM: return "DYNSYM";
+	case MT_SHT_INIT_ARRAY: return "INIT_ARRAY";
+	case MT_SHT_FINI_ARRAY: return "FINI_ARRAY";
+	case MT_SHT_PREINIT_ARRAY: return "PREINIT_ARRAY";
+	case MT_SHT_GROUP: return "GROUP";
+	case MT_SHT_SYMTAB_SHNDX: return "SYMTAB SHNDX";
+	case MT_SHT_GNU_HASH: return "GNU_HASH";
+	case MT_SHT_GNU_VERDEF: return "VERDEF";
+	case MT_SHT_GNU_VERNEED: return "VERNEED";
+	case MT_SHT_GNU_VERSYM: return "VERSYM";
+	default: return NULL;
+	}
+}
+
+const char *
+mt_elf_dt_name(uint64_t tag)
+{
+	switch (tag) {
+	case MT_DT_NULL: return "NULL";
+	case MT_DT_NEEDED: return "NEEDED";
+	case MT_DT_PLTRELSZ: return "PLTRELSZ";
+	case MT_DT_PLTGOT: return "PLTGOT";
+	case MT_DT_HASH: return "HASH";
+	case MT_DT_STRTAB: return "STRTAB";
+	case MT_DT_SYMTAB: return "SYMTAB";
+	case MT_DT_RELA: return "RELA";
+	case MT_DT_RELASZ: return "RELASZ";
+	case MT_DT_RELAENT: return "RELAENT";
+	case MT_DT_STRSZ: return "STRSZ";
+	case MT_DT_SYMENT: return "SYMENT";
+	case MT_DT_INIT: return "INIT";
+	case MT_DT_FINI: return "FINI";
+	case MT_DT_SONAME: return "SONAME";
+	case MT_DT_RPATH: return "RPATH";
+	case MT_DT_SYMBOLIC: return "SYMBOLIC";
+	case MT_DT_REL: return "REL";
+	case MT_DT_RELSZ: return "RELSZ";
+	case MT_DT_RELENT: return "RELENT";
+	case MT_DT_PLTREL: return "PLTREL";
+	case MT_DT_DEBUG: return "DEBUG";
+	case MT_DT_TEXTREL: return "TEXTREL";
+	case MT_DT_JMPREL: return "JMPREL";
+	case MT_DT_BIND_NOW: return "BIND_NOW";
+	case MT_DT_INIT_ARRAY: return "INIT_ARRAY";
+	case MT_DT_FINI_ARRAY: return "FINI_ARRAY";
+	case MT_DT_INIT_ARRAYSZ: return "INIT_ARRAYSZ";
+	case MT_DT_FINI_ARRAYSZ: return "FINI_ARRAYSZ";
+	case MT_DT_FLAGS: return "FLAGS";
+	case MT_DT_GNU_HASH: return "GNU_HASH";
+	case MT_DT_VERSYM: return "VERSYM";
+	case MT_DT_VERDEF: return "VERDEF";
+	case MT_DT_VERNEED: return "VERNEED";
+	default: return NULL;
+	}
+}
+
+const char *
+mt_elf_pt_name(uint32_t type)
+{
+	switch (type) {
+	case MT_PT_NULL: return "NULL";
+	case MT_PT_LOAD: return "LOAD";
+	case MT_PT_DYNAMIC: return "DYNAMIC";
+	case MT_PT_INTERP: return "INTERP";
+	case MT_PT_NOTE: return "NOTE";
+	case MT_PT_SHLIB: return "SHLIB";
+	case MT_PT_PHDR: return "PHDR";
+	case MT_PT_TLS: return "TLS";
+	case MT_PT_GNU_EH_FRAME: return "GNU_EH_FRAME";
+	case MT_PT_GNU_STACK: return "GNU_STACK";
+	case MT_PT_GNU_RELRO: return "GNU_RELRO";
+	default: return NULL;
+	}
+}
+
+/* 读取一个 program header (ELF64)。 */
+enum mt_elf_status
+mt_elf64_get_phdr(const void *bytes, size_t size,
+                  const struct mt_elf64_view *view, uint16_t index,
+                  struct mt_elf64_phdr *phdr)
+{
+	const unsigned char *p = (const unsigned char *)bytes;
+	uint64_t offset;
+
+	if (!p || !view || !phdr)
+		return MT_ELF_E_ARGUMENT;
+	if (index >= view->program_count)
+		return MT_ELF_E_LAYOUT;
+	if (view->program_entry_size < MT_ELF64_PHDR_SIZE)
+		return MT_ELF_E_LAYOUT;
+	if ((uint64_t)index > UINT64_MAX / view->program_entry_size)
+		return MT_ELF_E_LAYOUT;
+	offset = view->program_offset + (uint64_t)index * view->program_entry_size;
+	if (offset < view->program_offset ||
+	    !range_valid(offset, MT_ELF64_PHDR_SIZE, size))
+		return MT_ELF_E_LAYOUT;
+
+	p += offset;
+	memset(phdr, 0, sizeof(*phdr));
+	phdr->type = read32(p + 0);
+	phdr->flags = read32(p + 4);
+	phdr->offset = read64(p + 8);
+	phdr->vaddr = read64(p + 16);
+	phdr->paddr = read64(p + 24);
+	phdr->filesz = read64(p + 32);
+	phdr->memsz = read64(p + 40);
+	phdr->align = read64(p + 48);
+	return MT_ELF_OK;
+}
+
+/* 读取一个重定位条目（RELA 或 REL）。
+ * REL 节区没有 addend 字段，返回 addend=0。 */
+enum mt_elf_status
+mt_elf64_get_rela(const void *bytes, size_t size,
+                  const struct mt_elf64_section *table, uint64_t index,
+                  struct mt_elf64_rela *rela)
+{
+	const unsigned char *p = (const unsigned char *)bytes;
+	uint64_t offset;
+	uint64_t entry_size;
+	int is_rela;
+
+	if (!p || !table || !rela)
+		return MT_ELF_E_ARGUMENT;
+	if (table->type != MT_SHT_RELA && table->type != MT_SHT_REL)
+		return MT_ELF_E_ARGUMENT;
+	is_rela = (table->type == MT_SHT_RELA);
+	entry_size = is_rela ? 24 : 16;  /* Elf64_Rela = 24, Elf64_Rel = 16 */
+	if (table->entry_size != 0 && table->entry_size < entry_size)
+		return MT_ELF_E_LAYOUT;
+	if (table->size % entry_size != 0 || index >= table->size / entry_size)
+		return MT_ELF_E_LAYOUT;
+	if (index > UINT64_MAX / entry_size)
+		return MT_ELF_E_LAYOUT;
+	offset = table->offset + index * entry_size;
+	if (offset < table->offset || !range_valid(offset, entry_size, size))
+		return MT_ELF_E_LAYOUT;
+
+	p += offset;
+	memset(rela, 0, sizeof(*rela));
+	rela->offset = read64(p + 0);
+	rela->info = read64(p + 8);
+	rela->addend = is_rela ? (int64_t)read64(p + 16) : 0;
+	return MT_ELF_OK;
+}
+
+/* 按名称查找节区。使用 section_name_index 指向的 shstrtab。 */
+enum mt_elf_status
+mt_elf64_find_section(const void *bytes, size_t size,
+                      const struct mt_elf64_view *view, const char *name,
+                      struct mt_elf64_section *section)
+{
+	enum mt_elf_status st;
+	struct mt_elf64_section shstrtab;
+	uint16_t i;
+
+	if (!bytes || !view || !name || !section)
+		return MT_ELF_E_ARGUMENT;
+	if (view->section_name_index >= view->section_count)
+		return MT_ELF_E_LAYOUT;
+	st = mt_elf64_get_section(bytes, size, view,
+	                          view->section_name_index, &shstrtab);
+	if (st != MT_ELF_OK)
+		return st;
+	if (shstrtab.type != MT_SHT_STRTAB)
+		return MT_ELF_E_LAYOUT;
+	for (i = 0; i < view->section_count; ++i) {
+		struct mt_elf64_section cur;
+		const char *sname;
+		st = mt_elf64_get_section(bytes, size, view, i, &cur);
+		if (st != MT_ELF_OK)
+			return st;
+		st = mt_elf64_get_string(bytes, size, &shstrtab, cur.name, &sname);
+		if (st != MT_ELF_OK)
+			return st;
+		if (strcmp(sname, name) == 0) {
+			*section = cur;
+			return MT_ELF_OK;
+		}
+	}
+	return MT_ELF_E_LAYOUT;  /* not found */
+}
