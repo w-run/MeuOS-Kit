@@ -102,6 +102,14 @@ options:
 
 **Makefile 兼容**：如果当前目录下没有 `meow.yaml`，meow 自动检测 `Makefile`/`GNUmakefile` 并透明调用 `make`。此模式仅用于过渡，移植完成后 MeuOS 包应全部使用原生 YAML 配方。
 
+**取代 autoconf**：meow 内置特性检测能力（编译测试、头文件/库存在性检测），生成 `config.h`，不需要 `configure` 脚本。YAML 配方中声明依赖和检测规则，meow 执行检测并生成配置。
+
+**取代 pkg-config**：meow 内置包查询，记录已安装库的编译/链接参数（`CFLAGS`/`LDFLAGS`），配方中通过变量引用。
+
+**取代 libtool**：meow 直接管理共享库/静态库的构建规则，不需要 `.la` 文件抽象。
+
+**内置归档/补丁**：meow 的 `fetch`/`unpack` 步骤内置 tar/gzip/bzip2/xz 解压和 patch 应用能力，不依赖外部命令。
+
 **自身构建**：用纯 C 编写，依赖 meuos-libc。支持依赖 DAG、增量构建、模式规则、并行构建（`-jN`）。
 
 **命令**：
@@ -147,10 +155,12 @@ meow --bootstrap         # 自举模式：用宿主编译自己
 
 | 类别 | 工具 |
 |------|------|
-| coreutils | `ls`/`cp`/`mv`/`rm`/`cat`/`echo`/`mkdir`/`rmdir`/`touch`/`ln`/`chmod`/`chown`/`wc`/`head`/`tail`/`sort`/`uniq`/`cut`/`tr`/`tee`/`dd`/`df`/`du` 等 |
+| coreutils | `ls`/`cp`/`mv`/`rm`/`cat`/`echo`/`mkdir`/`rmdir`/`touch`/`ln`/`chmod`/`chown`/`wc`/`head`/`tail`/`sort`/`uniq`/`cut`/`tr`/`tee`/`dd`/`df`/`du`/`which` 等 |
 | diffutils | `diff`/`cmp`/`patch` |
 | findutils | `find`/`locate`/`xargs` |
-| 其他 | `grep`/`sed`/`awk`（文本处理三件套） |
+| 文本处理 | `grep`/`sed`/`awk` |
+| 归档 | `tar`（创建/解包，支持 gzip/bzip2/xz/zstd 格式透传） |
+| 压缩 | `gzip`/`bzip2`/`xz`/`zstd`/`unzip` |
 
 **设计原则**：
 - 用 C 编写（mcc 编译），依赖 meuos-libc
@@ -190,6 +200,8 @@ meow --bootstrap         # 自举模式：用宿主编译自己
 | `bison` | 解析器生成器（.y -> .c/.h） | GNU Bison | binutils, bash, gawk, flex 等的语法分析 |
 | `flex` | 词法分析器生成器（.l -> .c） | Flex | binutils, bash, gawk, wc 等的词法扫描 |
 | `gperf` | 完美哈希函数生成器 | GNU gperf | glib, libidn2 等的关键字查找 |
+| `msgfmt`/`msgmerge` | i18n 翻译编译器 | GNU gettext | 构建需要 i18n 的软件包（.po -> .mo） |
+| `pkg-config` | 包查询工具 | pkg-config | 查询已安装库的编译/链接参数 |
 
 **设计原则**：
 - 用 C 编写（mcc 编译），依赖 meuos-libc
