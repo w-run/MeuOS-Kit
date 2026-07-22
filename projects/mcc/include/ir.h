@@ -426,7 +426,17 @@ struct Fn {
 	char leaf;
 	char *name;
 	Lnk lnk;
+	int optlevel;   /* 0=O0, 1=O1, 2=O2(default), 3=O3 */
+	int warnlevel;  /* bitmask of WARN_* */
 };
+
+/* Warning bitmask definitions for fn->warnlevel */
+#define WARN_UNUSED    (1<<0)
+#define WARN_TYPE      (1<<1)
+#define WARN_IMPLICIT  (1<<2)
+#define WARN_RETURN    (1<<3)
+#define WARN_ALL       (WARN_UNUSED|WARN_TYPE|WARN_IMPLICIT|WARN_RETURN)
+#define WARN_ERROR     (1<<7)  /* -Werror flag (or'd into warnlevel) */
 
 struct Typ {
 	char *name;
@@ -480,6 +490,8 @@ struct Dat {
 /* main.c */
 extern Target T;
 extern char debug['Z'+1];
+extern int opt_level;   /* -O0..3, default 2 */
+extern int warn_level;  /* WARN_* bitmask, default WARN_ALL */
 
 /* util.c */
 typedef enum {

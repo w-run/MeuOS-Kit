@@ -32,6 +32,8 @@
  * Per-arch Target objects are declared extern in driver_internal.h. */
 Target T;
 char debug['Z' + 1];
+int opt_level = 2;    /* -O2 default */
+int warn_level = WARN_ALL;
 
 int
 main(int argc, char *argv[])
@@ -99,9 +101,14 @@ main(int argc, char *argv[])
 	    strcmp(a, "-fPIC") == 0 || strcmp(a, "-fpic") == 0)
 		{ pic = true; continue; }
 	/* -Wall/-Wextra/-Werror: -W is a category prefix, stays single-dash */
-	if (strcmp(a, "-Wall") == 0 || strcmp(a, "-Wextra") == 0 ||
-	    strcmp(a, "-Werror") == 0)
+	if (strcmp(a, "-Wall") == 0 || strcmp(a, "-Wextra") == 0) {
+		warn_level = WARN_ALL;
 		continue;
+	}
+	if (strcmp(a, "-Werror") == 0) {
+		warn_level |= WARN_ERROR;
+		continue;
+	}
 	if (a[1] == 'W') continue;   /* other -Wxxx warning flags */
 	if (a[1] == 'f') continue;   /* -fxxx feature flags */
 	if (a[1] == 'm') {           /* -march= etc. */
@@ -157,7 +164,7 @@ main(int argc, char *argv[])
 		case 'o': output = ARGVAL(a + 2); break;
 		case 't': target = ARGVAL(a + 2); break;  /* alias for -target */
 		case 'v': verbose = true; break;
-		case 'w': break;   /* suppress warnings (mcc emits none yet) */
+		case 'w': warn_level = 0; break;
 		case 'g': break;   /* debug info (recorded, not emitted) */
 		case 'd': { for (char *p = a + 2; *p; ++p) if (*p <= 'Z') debug[(unsigned char)*p] = 1; break; }
 		case 'P': break;   /* suppress line markers in -E */
@@ -169,10 +176,12 @@ main(int argc, char *argv[])
 		case 'l': arrayaddptr(&libs, ARGVAL(a + 2)); break;
 		case 'O': {
 			const char *lv = a[2] ? a + 2 : "1";
-			/* mcc always optimizes; the level is accepted but does not
-			 * change behaviour (recorded for future use). */
-			if (lv[0] == 's' || lv[0] == 'f') break;
-			if (isdigit((unsigned char)lv[0])) break;
+			if (lv[0] == 's' || lv[0] == 'f') {
+				opt_level = (lv[0] == 's') ? 2 : 3;
+				break;
+			}
+			if (isdigit((unsigned char)lv[0]))
+				opt_level = lv[0] - '0';
 			break;
 		}
 		default:
