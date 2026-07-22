@@ -24,7 +24,7 @@ x86_64 等价的回归覆盖。
 
 ## 进度
 
-### aarch64 — ✅ 已完成（work/aarch64-runtime-cont）
+### aarch64 — ✅ 已完成（main，2a3f5c9 / 25f9384）
 
 - crt1.S / syscall.S / atomic.S / setjmp.S / sigreturn.S / thread_clone.S / set_tls.S / tls.c 全套存在；
   Makefile 已经注册 `ARCH=aarch64`，`arch_prctl.o` 在该 arch build 中按 ifeq 过滤。
