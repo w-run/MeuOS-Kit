@@ -59,11 +59,13 @@
 
 ### meuos-toolchain（工具链，`projects/meuos-toolchain/`）
 
-- x86_64-first 核心已建立：`Makefile`、`ARCHITECTURE.md`、`.todo/`、`WORKLOG.md`、`include/mt`、`src/{libelf,ar,as,ld,target}`、测试夹具。
-- P0a/P0b 已实现：不依赖宿主 `<elf.h>` 的 ELF64 little-endian header/section/symtab 读取；可复现 GNU/SysV `ar rcs/q/r/s/t/p/x`、symbol index、long-name table。
-- P1/P2 核心已实现：mt/as 可汇编 mcc 常见 x86_64 整数/数据/GOT/PLT 输出、SIB/numeric labels、atomic lock 指令和 MeuOS libc crt/runtime 汇编并生成 ET_REL；mt/ld 可按需抽取归档、应用 PC32/PLT32/GOTPCREL/64/32/TPOFF32 relocation、生成可运行 ET_EXEC，并已能静态链接宿主 MeuOS sysroot 中的 crt1+libc-meuos+libatomic-meuos。
-- 当前限制：mcc driver/Makefile 集成尚未完成（P3）。P0-P2 全部收口：ranlib、BSD `#1/` 格式、`-L`/`-l`/`--sysroot` 均已完成。
-- 协作边界：只修改 `projects/meuos-toolchain/**`；mcc `host_toolchain.c`/Makefile 集成延后到 P3 独立提交。
+- 独立项目，一次 `make` 构建 `as`/`ld`/`ar`/`ranlib` 四个二进制 + 内部 `libelf.a`。
+- **P0a/P0b**（已完成）：不依赖宿主 `<elf.h>` 的 ELF64 解析；`ar rcs/q/r/s/t/p/x`、GNU `//` long-name、`/` symbol index、BSD `#1/` extended-name 读取、独立 `ranlib`。
+- **P1**（已完成）：x86_64 汇编器，AT&T 子集，整数 + SSE/SSE2 标量编码，生成 ET_REL，golden bytes 与宿主 `as` 字节级一致。
+- **P2**（已完成）：x86_64 静态链接器，ET_REL + 归档读取、符号解析、`R_X86_64_64/32/32S/PC32/PLT32/GOTPCREL/TPOFF32`、PT_TLS + TLS 静态模型、`-L`/`-l`/`-l:`/`--sysroot`。`counter = 2000` 多线程端到端 QEMU x86_64 运行通过。
+- **P3-P11**（规划中）：mcc driver 集成、辅助工具、自举验证、动态链接、TLS 动态模型、DWARF、i386/aarch64/riscv64。详见 `ARCHITECTURE.md`。
+- `make -C projects/meuos-toolchain check` 10 项全绿。
+- 协作边界：只修改 `projects/meuos-toolchain/**`；mcc `host_toolchain.c`/Makefile 集成延后到 P3。
 
 ### env（QEMU 测试环境，`env/`）
 
