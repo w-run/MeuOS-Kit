@@ -15,6 +15,13 @@ typedef unsigned long jmp_buf[6];
 #ifndef __STRICT_ANSI__
 typedef unsigned long sigjmp_buf[10];
 #endif
+#elif defined(__aarch64__)
+/* aarch64 setjmp.S 保存 x19-x30、sp、d8-d15 共 22 个字；sigjmp_buf
+ * 额外追加了 mask-saved 标志位与 sigset_t，共 24 个字。 */
+typedef unsigned long jmp_buf[22];
+#ifndef __STRICT_ANSI__
+typedef unsigned long sigjmp_buf[24];
+#endif
 #else
 typedef unsigned long jmp_buf[8];
 #ifndef __STRICT_ANSI__

@@ -2,8 +2,9 @@
 
 /* Linux i386 process entry.  The kernel supplies argc at (%esp) followed
  * by argv[] and envp[].  Set up TLS (%gs) before calling main so that
- * _Thread_local variables (notably errno) work.  Then terminate directly
- * through SYS_exit. */
+ * _Thread_local variables (notably errno) work.  Then terminate via exit()
+ * so that atexit handlers run and stdio buffers are flushed (important
+ * when stdout is redirected to a file rather than a line-buffered tty). */
 .globl _start
 .type _start,@function
 _start:
@@ -25,9 +26,8 @@ _start:
 	pushl %eax              /* argc */
 	call main
 	addl $12, %esp
-	movl %eax, %ebx
-	movl $1, %eax
-	int $0x80
+	pushl %eax              /* exit status from main (cdecl arg) */
+	call exit
 	hlt
 
 .bss

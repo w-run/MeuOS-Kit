@@ -92,3 +92,18 @@ __meuos_tls_init(char **environment)
 void *
 __meuos_tls_alloc(void) { return allocate_tls(); }
 size_t __meuos_tls_size(void) { return tls_allocation_size; }
+
+/* 释放 variant II TLS 块：mmap base = TP - tls_allocation_size + sizeof(void*)，
+ * 因为 *(void**)TP == TP 的自引用槽占用了一个字。c11_threads.c 通过
+ * __meuos_tls_free(thread->tls) 调用，由本文件集中持有释放公式，避免
+ * 在线程代码里硬编码 variant II 偏移。__syscall_number() 在 i386 上把
+ * 内部号 11 翻译成 munmap(91)，在 x86_64 上保持 11。 */
+#define LINUX_SYS_MUNMAP 11
+void
+__meuos_tls_free(void *thread_pointer)
+{
+	if (thread_pointer && tls_allocation_size)
+		__syscall6(LINUX_SYS_MUNMAP,
+		    (long)((char *)thread_pointer - tls_allocation_size + sizeof(void *)),
+		    tls_allocation_size, 0, 0, 0, 0);
+}

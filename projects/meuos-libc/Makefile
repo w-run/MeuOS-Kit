@@ -38,6 +38,10 @@ SYSROOT ?= ../sysroot
 ifeq ($(ARCH),i386)
 CC := $(MCC) --target=i386
 AS := $(HOST_CC) -m32
+else ifeq ($(ARCH),aarch64)
+# mcc 不支持 msr/mrs/svc/brk 等系统指令，所有 .S 必须经交叉 gcc 汇编。
+CC := $(MCC) --target=aarch64
+AS := aarch64-linux-gnu-gcc
 else
 CC := $(HOST_CC)
 AS := $(HOST_CC)
@@ -55,12 +59,19 @@ ATOMIC_OBJ := $(BUILD)/arch/$(ARCH)/atomic.o
 ATOMIC_LIB := $(BUILD)/libatomic-meuos.a
 
 # Per-arch runtime helpers (TLS, setjmp, sigreturn, thread clone).
-# load_gs.S and soft_arith.c are i386-only.
+# load_gs.S and soft_arith.c are i386-only; set_tls.S is aarch64-only
+# (variant I TLS 用 msr tpidr_el0 直接设置线程指针，没有 arch_prctl 等价 syscall)。
 ifeq ($(ARCH),x86_64)
 ARCH_RT_OBJS := $(BUILD)/arch/$(ARCH)/tls.o \
                 $(BUILD)/arch/$(ARCH)/setjmp.o \
                 $(BUILD)/arch/$(ARCH)/sigreturn.o \
                 $(BUILD)/arch/$(ARCH)/thread_clone.o
+else ifeq ($(ARCH),aarch64)
+ARCH_RT_OBJS := $(BUILD)/arch/$(ARCH)/tls.o \
+                $(BUILD)/arch/$(ARCH)/setjmp.o \
+                $(BUILD)/arch/$(ARCH)/sigreturn.o \
+                $(BUILD)/arch/$(ARCH)/thread_clone.o \
+                $(BUILD)/arch/$(ARCH)/set_tls.o
 else
 ARCH_RT_OBJS := $(BUILD)/arch/$(ARCH)/tls.o \
                 $(BUILD)/arch/$(ARCH)/setjmp.o \
@@ -159,9 +170,13 @@ $(LIBC_LIB): $(ALL_OBJS)
 # Compat layer (separate archive, recursive make)
 # ============================================================
 
+# 不向子 make 传递 HOST_CC：compat 在 aarch64 下不使用 HOST_CC（无 .S），
+# 而将 HOST_CC 作为命令行变量传给子 make 会被 GNU Make 自动导出为环境变量，
+# 使 mcc 的 pick_host_cc() 读取到 HOST_CC=cc 而不选择 aarch64-linux-gnu-gcc。
+# compat Makefile 内的 HOST_CC ?= cc 仍可作为普通 Make 变量供 i386/x86_64 使用。
 compat:
 	@$(MAKE) -C src/compat \
-		HOST_CC=$(HOST_CC) MCC=$(MCC) AR=$(AR) \
+		MCC=$(abspath $(MCC)) AR=$(AR) \
 		PREFIX=$(PREFIX) DESTDIR=$(DESTDIR) \
 		SYSROOT=$(SYSROOT) ARCH=$(ARCH) all
 

@@ -224,6 +224,20 @@ sel(Ins i, Fn *fn)
 		emiti(i);
 		return;
 	}
+	if (isstore(i.op)) {
+		/* Stores bypass the generic argcls() path: ir_ops.h declares
+		 * store ops with `T(l,e,e,e, m,e,e,e)` so for i->cls=Kl the
+		 * [Kl] column is `e` (Ke=-2 == Ka), which makes fixarg take
+		 * the floating-point immediate load branch and then die in
+		 * rname().  The source class is exactly i.cls and the
+		 * address is always Kl; spell them explicitly.  Mirrors the
+		 * store case in x86_64_isel.c sel().  */
+		emiti(i);
+		iarg = curi->arg;
+		fixarg(&iarg[0], i.cls, 0, fn);
+		fixarg(&iarg[1], Kl, 0, fn);
+		return;
+	}
 	if (i.op != Onop) {
 		emiti(i);
 		iarg = curi->arg; /* fixarg() can change curi */

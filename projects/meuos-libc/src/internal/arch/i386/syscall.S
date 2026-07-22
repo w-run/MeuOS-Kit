@@ -2,9 +2,9 @@
 
 /* long __syscall6(number, a1, a2, a3, a4, a5, a6)
  * Linux i386 uses int $0x80 with eax, ebx, ecx, edx, esi, edi, ebp. */
-.globl __syscall6
-.type __syscall6,@function
-__syscall6:
+.globl __meuos_syscall6
+.type __meuos_syscall6,@function
+__meuos_syscall6:
 	pushl %ebx
 	pushl %esi
 	pushl %edi

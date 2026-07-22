@@ -19,9 +19,16 @@ ARCH ?= x86_64
 MCC ?= ../../mcc/mcc
 SYSROOT ?= ../../sysroot
 
+# 防止 HOST_CC 泄漏到 mcc 的环境变量中：mcc 的 pick_host_cc() 会优先读取
+# MCC_HOST_CC / HOST_CC 环境变量，而非基于 --target 自动选择交叉编译器。
+# unexport 确保 HOST_CC 仅作为 Make 变量使用，不进入子进程环境。
+unexport HOST_CC
+
 ifeq ($(ARCH),i386)
 CC := $(MCC) --target=i386
 AS := $(HOST_CC) -m32
+else ifeq ($(ARCH),aarch64)
+CC := $(MCC) --target=aarch64
 else
 CC ?= $(HOST_CC)
 endif

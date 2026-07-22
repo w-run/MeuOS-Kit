@@ -112,6 +112,14 @@ check-i386: $(BIN)
 check-i386-runtime: $(BIN)
 	sh test/i386/runtime.sh ./$(BIN)
 
+# aarch64 runtime regression: compiles aarch64 static binaries (threads/
+# atomics, floating-point, TLS, time64/stat, cross-function va_list) and
+# runs them inside the env/bin/qvm aarch64 VM via the 9p share.  Requires
+# sysroot-aarch64 (make -C ../meuos-libc ARCH=aarch64 install) and the
+# aarch64 VM (qvm boot aarch64); skips gracefully if either is absent.
+check-aarch64-runtime: $(BIN)
+	sh test/aarch64/runtime.sh ./$(BIN)
+
 check-targets: $(BIN)
 	sh test/targets/regress.sh ./$(BIN)
 
@@ -164,4 +172,4 @@ check-sysroot-static: $(BIN)
 # Compatibility alias for existing scripts.
 check-la64: check-loongarch64
 
-.PHONY: all clean check check-loongarch64 check-i386 check-i386-runtime check-targets check-la64 check-c11-atomic check-c11 check-driver check-abi check-sysroot-static
+.PHONY: all clean check check-loongarch64 check-i386 check-i386-runtime check-aarch64-runtime check-targets check-la64 check-c11-atomic check-c11 check-driver check-abi check-sysroot-static
