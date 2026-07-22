@@ -156,6 +156,17 @@ check-driver: $(BIN)
 	sh test/driver/sysroot.sh ./$(BIN)
 	sh test/driver/feature-regress.sh ./$(BIN)
 
+# P3: verify MT_AS/MT_LD/MT_AR redirect mcc to the MeuOS toolchain
+# (mt/as, mt/ld) instead of the host cc.  SKIPs gracefully when
+# meuos-toolchain has not been built.
+check-mt-integration: $(BIN)
+	@MT_DIR=$(abspath ../meuos-toolchain/build); \
+	if [ -x "$$MT_DIR/bin/as" ]; then \
+		sh test/driver/mt_integration.sh ./$(BIN) "$$MT_DIR"; \
+	else \
+		echo "check-mt-integration: SKIP (meuos-toolchain not built)"; \
+	fi
+
 # Aggregate ABI regression: verifies that adjacent bit-fields sharing a
 # storage unit do not inflate the direct-IR type layout during by-value calls.
 check-abi: $(BIN)
@@ -165,12 +176,18 @@ check-abi: $(BIN)
 # Rebuild mcc as a fully static program against the MeuOS sysroot, then use
 # that rebuilt compiler to compile and execute a program.  The host compiler
 # remains only the assembler/linker handoff selected by MCC_HOST_CC.
+#
+# The self-rebuild deliberately drops MT_AS/MT_LD/MT_AR from the
+# environment: mt/as does not yet support every addressing mode mcc
+# emits (extended SIB index, etc.), so the bootstrap self-rebuild keeps
+# using the host cc as assembler/linker.  The MT integration itself is
+# exercised by check-mt-integration.
 check-sysroot-static: $(BIN)
 	@$(MAKE) -C ../meuos-libc install DESTDIR=$(abspath ../sysroot) PREFIX=/usr
 	@work=$$(mktemp -d /tmp/mcc-sysroot-static.XXXXXX); trap 'rm -rf "$$work"' EXIT HUP INT TERM; \
 	cp -a . "$$work/mcc"; \
 	$(MAKE) -C "$$work/mcc" clean; \
-	MCC_HOST_CC=cc $(MAKE) -C "$$work/mcc" HOST_CC="$(abspath $(BIN))" \
+	env -u MT_AS -u MT_LD -u MT_AR MCC_HOST_CC=cc $(MAKE) -C "$$work/mcc" HOST_CC="$(abspath $(BIN))" \
 		CFLAGS="-O2 -g -std=gnu11 -Iinclude -I$(abspath ../meuos-libc/include) -Wno-all --specs=meuos --sysroot=$(abspath ../sysroot) --nostdlib --static"; \
 	"$$work/mcc/mcc" --version; \
 	printf '%s\n' 'int main(void) { return 0; }' > "$$work/hello.c"; \
@@ -180,4 +197,4 @@ check-sysroot-static: $(BIN)
 # Compatibility alias for existing scripts.
 check-la64: check-loongarch64
 
-.PHONY: all clean check check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-la64 check-c11-atomic check-c11 check-driver check-abi check-sysroot-static
+.PHONY: all clean check check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-la64 check-c11-atomic check-c11 check-driver check-mt-integration check-abi check-sysroot-static
