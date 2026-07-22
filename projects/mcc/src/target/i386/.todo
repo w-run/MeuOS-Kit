@@ -35,7 +35,14 @@
 | P4 socketcall 多路复用 | libc 侧 socketcall.c，i386 走 socketcall(102) |
 | P5 端到端验证 | runtime.sh（宿主 ia32）+ qemu-runtime.sh（真 32 位内核），全绿 |
 
-## 仍 OPEN
+## 仍 OPEN / 已关闭
 
-- TLS 与信号上下文（架构文件存在但未端到端验证）
+### ✅ 已关闭（2026-07-23）
+
+- TLS/信号端到端验证：hello/atomic/setjmp/phase2("counter=2000") 在 IA32 仿真宿主
+  通过。注：bare_tls 因 mcc i386 后端 TLS 模型选择缺口（发出 IE 而非 LE reloc）
+  被排除 — 见 `../../.todo/gd-tls.md` Phase A TLS 模型选择。
+
+### ⬜ 仍 OPEN
+
 - armv7 共享的 32 位通用抽象（非 i386 专属）

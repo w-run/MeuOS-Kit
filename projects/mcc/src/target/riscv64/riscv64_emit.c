@@ -131,7 +131,8 @@ slot(Ref r, Fn *fn)
 static void
 emitaddr(Con *c, FILE *f)
 {
-	assert((c->sym.type & ~SExt) == SGlo);
+	assert((c->sym.type & ~SExt) == SGlo
+	    || c->sym.type == SGenThr);
 	fputs(str(c->sym.id), f);
 	if (c->bits.i)
 		fprintf(f, "+%"PRIi64, c->bits.i);

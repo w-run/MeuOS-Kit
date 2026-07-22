@@ -199,7 +199,8 @@ emitcon(Con *con, E *e)
 			assert(!T.apple);
 			fprintf(e->f, "%%fs:%s%s@tpoff", p, l);
 		} else {
-			assert((con->sym.type & ~SExt) == SGlo);
+			assert((con->sym.type & ~SExt) == SGlo
+			    || con->sym.type == SGenThr);
 			fprintf(e->f, "%s%s", p, l);
 		}
 		if (con->bits.i)
@@ -680,6 +681,18 @@ emitins(Ins i, E *e)
 			assert(!con->bits.i);
 			fprintf(e->f,
 				"\tmovq %s%s@gotpcrel(%%rip), %%%s\n",
+				sym[0] == '"' ? "" : T.assym, sym,
+				regtoa(i.to.val, SLong));
+			break;
+		case SGenThr:
+			/* general-dynamic TLS: call __tls_get_addr with
+			 * @tlsgd descriptor.  The result arrives in %rax;
+			 * move to the destination register. */
+			assert(!con->bits.i);
+			fprintf(e->f,
+				"\tleaq %s%s@tlsgd(%%rip), %%rdi\n"
+				"\tcall __tls_get_addr@plt\n"
+				"\tmovq %%rax, %%%s\n",
 				sym[0] == '"' ? "" : T.assym, sym,
 				regtoa(i.to.val, SLong));
 			break;

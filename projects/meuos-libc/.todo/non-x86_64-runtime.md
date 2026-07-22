@@ -67,10 +67,10 @@ x86_64 等价的回归覆盖。
   runtime_va/fp_unsigned/fp_arith 全量。
 - ✅ 浮点运行时回归已覆盖（MCC FPR 收口 + runtime_fp/fp_arith/fp_unsigned 双门禁）。
 
-- ⬜ 待补：
-  - qemu 门禁覆盖 hello / atomic / phase2_counter / bare_tls / stdio（当前编译
-    自检通过，但未在 QEMU VM 内运行这些测试）；
-  - time64 专项边界测试用例（INT32_MAX / 2038+ / 负值）。
+- ✅ **qemu/IA32 门禁覆盖**：2026-07-23 在 IA32 仿真宿主通过
+  hello/atomic/setjmp/phase2_counter。bare_tls 因 mcc i386 后端
+  TLS 模型选择缺口（IE→LE 转换失败）排除，见 `projects/mcc/.todo/gd-tls.md`。
+- ⬜ time64 专项边界测试用例（INT32_MAX / 2038+ / 负值）。
 - ✅ **i386 64 位乘除法/取余（mcc 侧缺口）**：已通过 pre-pass 重写
   为 libc 软算术调用解决。详见 `projects/mcc/.todo/i386-kl-arith.md`。
 

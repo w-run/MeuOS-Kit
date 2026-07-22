@@ -415,7 +415,8 @@ emitcon(Con *con, E *e)
 			 * and the load/store hits unmapped memory. */
 			fprintf(e->f, "%%gs:%s%s@ntpoff", p, l);
 		} else {
-			assert((con->sym.type & ~SExt) == SGlo);
+			assert((con->sym.type & ~SExt) == SGlo
+			    || con->sym.type == SGenThr);
 			fprintf(e->f, "%s%s", p, l);
 		}
 		if (con->bits.i)

@@ -65,7 +65,11 @@ ifeq ($(ARCH),x86_64)
 ARCH_RT_OBJS := $(BUILD)/arch/$(ARCH)/tls.o \
                 $(BUILD)/arch/$(ARCH)/setjmp.o \
                 $(BUILD)/arch/$(ARCH)/sigreturn.o \
-                $(BUILD)/arch/$(ARCH)/thread_clone.o
+                $(BUILD)/arch/$(ARCH)/thread_clone.o \
+                $(BUILD)/thread/__tls_get_addr.o
+# __tls_get_addr.c for x86_64 lives in src/thread/ (host cc w/ inline asm)
+$(BUILD)/thread/__tls_get_addr.o: src/thread/__tls_get_addr.c
+	$(CC) -Iinclude -Isrc -c -o $@ $<
 else ifeq ($(ARCH),aarch64)
 ARCH_RT_OBJS := $(BUILD)/arch/$(ARCH)/tls.o \
                 $(BUILD)/arch/$(ARCH)/setjmp.o \
@@ -73,12 +77,14 @@ ARCH_RT_OBJS := $(BUILD)/arch/$(ARCH)/tls.o \
                 $(BUILD)/arch/$(ARCH)/thread_clone.o \
                 $(BUILD)/arch/$(ARCH)/set_tls.o
 else
+# i386 and other archs: __tls_get_addr is assembly (no inline asm in mcc)
 ARCH_RT_OBJS := $(BUILD)/arch/$(ARCH)/tls.o \
                 $(BUILD)/arch/$(ARCH)/setjmp.o \
                 $(BUILD)/arch/$(ARCH)/sigreturn.o \
                 $(BUILD)/arch/$(ARCH)/thread_clone.o \
                 $(BUILD)/arch/$(ARCH)/load_gs.o \
-                $(BUILD)/arch/$(ARCH)/soft_arith.o
+                $(BUILD)/arch/$(ARCH)/soft_arith.o \
+                $(BUILD)/arch/$(ARCH)/__tls_get_addr.o
 endif
 
 # Per-feature C objects.

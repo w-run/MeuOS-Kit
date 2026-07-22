@@ -20,6 +20,8 @@ printcon(Con *c, FILE *f)
 			fprintf(f, "extern ");
 		if (c->sym.type & SThr)
 			fprintf(f, "thread ");
+		if (c->sym.type == SGenThr)
+			fprintf(f, "gd-thread ");
 		fprintf(f, "$%s", str(c->sym.id));
 		if (c->bits.i)
 			fprintf(f, "%+"PRIi64, c->bits.i);
