@@ -521,6 +521,14 @@ parse_reference(const char *text, char **symbol, char *modifier,
 	}
 	if (!buffer[0])
 		return -1;
+	/* Strip surrounding quotes (e.g., mcc emits "symbol" for names
+	 * containing dots or other special characters). */
+	if (buffer[0] == '"' && buffer[strlen(buffer) - 1] == '"' &&
+	    strlen(buffer) >= 2) {
+		size_t len = strlen(buffer);
+		memmove(buffer, buffer + 1, len - 2);
+		buffer[len - 2] = '\0';
+	}
 	*symbol = mt_strdup(buffer);
 	return *symbol ? 0 : -1;
 }
@@ -559,6 +567,22 @@ parse_register(const char *text, int *reg, int *width)
 			*width = 8;
 			free(copy);
 			return 0;
+	}
+	/* XMM0-XMM15: reg=0..15, width=16 (distinguishes from GPRs) */
+	if (copy[0] == 'x' && copy[1] == 'm' && copy[2] == 'm' &&
+	    copy[3] >= '0' && copy[3] <= '9' && copy[4] == '\0') {
+		*reg = copy[3] - '0';
+		*width = 16;
+		free(copy);
+		return 0;
+	}
+	if (copy[0] == 'x' && copy[1] == 'm' && copy[2] == 'm' &&
+	    copy[3] == '1' && copy[4] >= '0' && copy[4] <= '5' &&
+	    copy[5] == '\0') {
+		*reg = 10 + (copy[4] - '0');
+		*width = 16;
+		free(copy);
+		return 0;
 	}
 	free(copy);
 	return -1;
@@ -908,6 +932,63 @@ emit_symbol_branch(struct as_file *as, struct as_section *section,
 }
 
 static int
+is_xmm(const struct as_operand *op)
+{
+	return op->kind == OP_REG && op->width == 16;
+}
+
+/* Emit an SSE instruction: mandatory_prefix + REX + 0F + opcode + ModR/M.
+ * reg_num: register number for ModR/M.reg field (0-15, GPR or XMM).
+ * rm: operand for ModR/M.r/m field (register or memory).
+ * need_w: set REX.W (for 64-bit GPR operands in cvtsi2sdq etc.).
+ */
+static int
+emit_sse(struct as_file *as, struct as_section *s,
+         unsigned mandatory_prefix, unsigned opcode2,
+         int reg_num, const struct as_operand *rm,
+         int need_w, unsigned fix_type, int64_t fix_addend)
+{
+	int rm_num = (rm->kind == OP_REG) ? rm->reg : rm->base;
+	unsigned char rex = 0;
+
+	if (mandatory_prefix && emit_u8(as, s, mandatory_prefix) != 0)
+		return -1;
+	if (need_w) rex |= 0x48;
+	if (reg_num >= 8) rex |= 0x44;
+	if (rm_num >= 8) rex |= 0x41;
+	if (rex && emit_u8(as, s, rex) != 0)
+		return -1;
+	if (emit_u8(as, s, 0x0F) != 0 || emit_u8(as, s, opcode2) != 0)
+		return -1;
+	return emit_modrm(as, s, reg_num, rm, fix_type, fix_addend);
+}
+
+/* SSE scalar arithmetic lookup table.
+ * Maps mnemonic suffix to (mandatory_prefix, opcode). */
+static int
+sse_arithmetic_lookup(const char *base, unsigned *prefix, unsigned *opcode2)
+{
+	struct entry { const char *name; unsigned pfx; unsigned op; };
+	static const struct entry table[] = {
+		{"addss", 0xF3, 0x58}, {"addsd", 0xF2, 0x58},
+		{"subss", 0xF3, 0x5C}, {"subsd", 0xF2, 0x5C},
+		{"mulss", 0xF3, 0x59}, {"mulsd", 0xF2, 0x59},
+		{"divss", 0xF3, 0x5E}, {"divsd", 0xF2, 0x5E},
+		{"sqrtss", 0xF3, 0x51}, {"sqrtsd", 0xF2, 0x51},
+		{"minss", 0xF3, 0x5D}, {"minsd", 0xF2, 0x5D},
+		{"maxss", 0xF3, 0x5F}, {"maxsd", 0xF2, 0x5F},
+	};
+	size_t i;
+	for (i = 0; i < sizeof(table) / sizeof(table[0]); ++i)
+		if (strcmp(base, table[i].name) == 0) {
+			*prefix = table[i].pfx;
+			*opcode2 = table[i].op;
+			return 0;
+		}
+	return -1;
+}
+
+static int
 emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 {
 	struct as_section *section = &as->sections[as->current];
@@ -1091,6 +1172,146 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 		    emit_modrm(as, section, ext, &op[0], MT_R_X86_64_PC32, -4) != 0)
 			goto fail;
 		goto done;
+	}
+	/* --- SSE scalar instructions --- */
+	{
+		unsigned sse_pfx, sse_op;
+		/* Scalar arithmetic: addsd, addss, subsd, etc. */
+		if (n == 2 && sse_arithmetic_lookup(base, &sse_pfx, &sse_op) == 0) {
+			if (!is_xmm(&op[1]))
+				goto unsupported;
+			if (emit_sse(as, section, sse_pfx, sse_op,
+			             op[1].reg, &op[0], 0,
+			             MT_R_X86_64_PC32, -4) != 0)
+				goto fail;
+			goto done;
+		}
+		/* movss / movsd */
+		if (n == 2 && (strcmp(base, "movss") == 0 ||
+		                strcmp(base, "movsd") == 0)) {
+			unsigned pfx = (strcmp(base, "movsd") == 0) ? 0xF2 : 0xF3;
+			unsigned op2;
+			if (is_xmm(&op[0]) && is_xmm(&op[1])) {
+				/* xmm -> xmm: use load form (0x10), reg=dst, rm=src */
+				op2 = 0x10;
+				if (emit_sse(as, section, pfx, op2,
+				             op[1].reg, &op[0], 0,
+				             MT_R_X86_64_PC32, -4) != 0)
+					goto fail;
+			} else if (is_xmm(&op[0]) && op[1].kind == OP_MEM) {
+				/* xmm -> mem: store form (0x11), reg=src(xmm) */
+				op2 = 0x11;
+				if (emit_sse(as, section, pfx, op2,
+				             op[0].reg, &op[1], 0,
+				             MT_R_X86_64_PC32, -4) != 0)
+					goto fail;
+			} else if (op[0].kind == OP_MEM && is_xmm(&op[1])) {
+				/* mem -> xmm: load form (0x10), reg=dst(xmm) */
+				op2 = 0x10;
+				if (emit_sse(as, section, pfx, op2,
+				             op[1].reg, &op[0], 0,
+				             MT_R_X86_64_PC32, -4) != 0)
+					goto fail;
+			} else
+				goto unsupported;
+			goto done;
+		}
+		/* cvtss2sd / cvtsd2ss */
+		if (n == 2 && (strcmp(base, "cvtss2sd") == 0 ||
+		                strcmp(base, "cvtsd2ss") == 0)) {
+			unsigned pfx = (strcmp(base, "cvtsd2ss") == 0) ? 0xF2 : 0xF3;
+			if (!is_xmm(&op[1]))
+				goto unsupported;
+			if (emit_sse(as, section, pfx, 0x5A,
+			             op[1].reg, &op[0], 0,
+			             MT_R_X86_64_PC32, -4) != 0)
+				goto fail;
+			goto done;
+		}
+		/* cvttss2sil / cvttss2siq / cvttsd2sil / cvttsd2siq */
+		if (n == 2 && (strncmp(base, "cvttss2si", 9) == 0 ||
+		                strncmp(base, "cvttsd2si", 9) == 0) && n == 2) {
+			unsigned pfx = (base[5] == 'd') ? 0xF2 : 0xF3;
+			int need_w = (base[9] == 'q');
+			if (op[1].kind != OP_REG || is_xmm(&op[1]))
+				goto unsupported;
+			if (emit_sse(as, section, pfx, 0x2C,
+			             op[1].reg, &op[0], need_w,
+			             MT_R_X86_64_PC32, -4) != 0)
+				goto fail;
+			goto done;
+		}
+		/* cvtsi2ssl / cvtsi2ssq / cvtsi2sdl / cvtsi2sdq */
+		if (n == 2 && (strncmp(base, "cvtsi2ss", 8) == 0 ||
+		                strncmp(base, "cvtsi2sd", 8) == 0)) {
+			unsigned pfx = (base[7] == 'd') ? 0xF2 : 0xF3;
+			int need_w = (base[8] == 'q');
+			if (!is_xmm(&op[1]) || op[0].kind != OP_REG)
+				goto unsupported;
+			if (emit_sse(as, section, pfx, 0x2A,
+			             op[1].reg, &op[0], need_w,
+			             MT_R_X86_64_PC32, -4) != 0)
+				goto fail;
+			goto done;
+		}
+		/* ucomiss / ucomisd */
+		if (n == 2 && (strcmp(base, "ucomiss") == 0 ||
+		                strcmp(base, "ucomisd") == 0)) {
+			unsigned pfx = (strcmp(base, "ucomisd") == 0) ? 0x66 : 0;
+			if (!is_xmm(&op[0]) || !is_xmm(&op[1]))
+				goto unsupported;
+			/* AT&T: ucomiss src, dst -> Intel: ucomiss dst, src
+			 * ModR/M.reg = dst (second operand), rm = src (first) */
+			if (emit_sse(as, section, pfx, 0x2E,
+			             op[1].reg, &op[0], 0,
+			             MT_R_X86_64_PC32, -4) != 0)
+				goto fail;
+			goto done;
+		}
+		/* movq with XMM<->GPR (Ocast in mcc) */
+		if (n == 2 && (strcmp(base, "movq") == 0 || strcmp(base, "movd") == 0) &&
+		    (is_xmm(&op[0]) || is_xmm(&op[1]))) {
+			if (is_xmm(&op[0]) && !is_xmm(&op[1])) {
+				/* xmm -> gpr: 66 REX.W 0F 7E /r (movq xmm, r/m) */
+				int need_w = (op[1].width == 8);
+				if (emit_sse(as, section, 0x66, 0x7E,
+				             op[0].reg, &op[1], need_w,
+				             MT_R_X86_64_PC32, -4) != 0)
+					goto fail;
+			} else if (!is_xmm(&op[0]) && is_xmm(&op[1])) {
+				/* gpr -> xmm: 66 REX.W 0F 6E /r (movq r/m, xmm) */
+				int need_w = (op[0].width == 8);
+				if (emit_sse(as, section, 0x66, 0x6E,
+				             op[1].reg, &op[0], need_w,
+				             MT_R_X86_64_PC32, -4) != 0)
+					goto fail;
+			} else {
+				/* xmm -> xmm: use movaps (0x0F 0x28) */
+				if (emit_sse(as, section, 0, 0x28,
+				             op[1].reg, &op[0], 0,
+				             MT_R_X86_64_PC32, -4) != 0)
+					goto fail;
+			}
+			goto done;
+		}
+		/* xorps %xmm, %xmm (used to zero XMM registers) */
+		if (n == 2 && strcmp(base, "xorps") == 0 &&
+		    is_xmm(&op[0]) && is_xmm(&op[1])) {
+			if (emit_sse(as, section, 0, 0x57,
+			             op[1].reg, &op[0], 0,
+			             MT_R_X86_64_PC32, -4) != 0)
+				goto fail;
+			goto done;
+		}
+		/* pxor %xmm, %xmm */
+		if (n == 2 && strcmp(base, "pxor") == 0 &&
+		    is_xmm(&op[0]) && is_xmm(&op[1])) {
+			if (emit_sse(as, section, 0x66, 0xEF,
+			             op[1].reg, &op[0], 0,
+			             MT_R_X86_64_PC32, -4) != 0)
+				goto fail;
+			goto done;
+		}
 	}
 	if (strncmp(base, "movz", 4) == 0 || strncmp(base, "movs", 4) == 0) {
 		int signed_move = base[3] == 's';

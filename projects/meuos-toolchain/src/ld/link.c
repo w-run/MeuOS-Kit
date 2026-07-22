@@ -114,6 +114,11 @@ struct ld_context {
 	size_t group_capacity;
 	struct ld_globals globals;
 	struct ld_got got;
+	int tls_tdata_group;
+	int tls_tbss_group;
+	uint64_t tls_tdata_size;
+	uint64_t tls_size;
+	uint64_t tls_align;
 	char error[512];
 };
 
@@ -360,10 +365,17 @@ section_rank(const char *name)
 {
 	if (strcmp(name, ".text") == 0) return 0;
 	if (strcmp(name, ".rodata") == 0) return 1;
+	if (strcmp(name, ".eh_frame") == 0) return 1;
 	if (strcmp(name, ".got") == 0) return 2;
 	if (strcmp(name, ".data") == 0 || strcmp(name, ".tdata") == 0) return 3;
 	if (strcmp(name, ".bss") == 0 || strcmp(name, ".tbss") == 0) return 4;
 	return 5;
+}
+
+static int
+is_tls_group(struct ld_context *ctx, int group)
+{
+	return group == ctx->tls_tdata_group || group == ctx->tls_tbss_group;
 }
 
 static int
@@ -965,34 +977,131 @@ static int
 layout_output(struct ld_context *ctx)
 {
 	uint64_t offset = LD_PAGE;
-	uint64_t rw_start = 0;
-	uint64_t file_end;
-	uint64_t bss_end;
 	int have_rw = 0;
 	int rank;
 	size_t i;
+
+	ctx->tls_tdata_group = find_group(ctx, ".tdata");
+	ctx->tls_tbss_group = find_group(ctx, ".tbss");
+	ctx->tls_tdata_size = 0;
+	ctx->tls_size = 0;
+	ctx->tls_align = 1;
+
+	/* Calculate TLS block size (variant II: tdata then tbss). */
+	if (ctx->tls_tdata_group >= 0 || ctx->tls_tbss_group >= 0) {
+		uint64_t tdata = 0, tbss = 0, talign = 1;
+		if (ctx->tls_tdata_group >= 0) {
+			tdata = ctx->groups[ctx->tls_tdata_group].size;
+			talign = ctx->groups[ctx->tls_tdata_group].align;
+		}
+		if (ctx->tls_tbss_group >= 0) {
+			tbss = ctx->groups[ctx->tls_tbss_group].size;
+			if (ctx->groups[ctx->tls_tbss_group].align > talign)
+				talign = ctx->groups[ctx->tls_tbss_group].align;
+		}
+		ctx->tls_tdata_size = tdata;
+		ctx->tls_align = talign;
+		/* variant II: tbss starts after aligned tdata */
+		ctx->tls_size = align_up(align_up(tdata, talign) + tbss, talign);
+	}
+
+	/* Pass 1: PROGBITS sections (skip TLS .tdata) */
 	for (rank = 0; rank <= 5; ++rank) {
 		if (rank >= 2 && !have_rw) {
 			offset = align_up(offset, LD_PAGE);
-			rw_start = offset;
 			have_rw = 1;
 		}
 		for (i = 0; i < ctx->group_count; ++i) {
 			struct ld_group *group = &ctx->groups[i];
-			if (group->rank != rank)
+			if (group->rank != rank || group->type == MT_SHT_NOBITS)
+				continue;
+			if (is_tls_group(ctx, (int)i))
 				continue;
 			offset = align_up(offset, group->align ? group->align : 1);
 			group->file_offset = offset;
 			group->address = LD_BASE + offset;
-			if (group->type != MT_SHT_NOBITS)
-				offset += group->size;
+			offset += group->size;
 		}
 	}
-	file_end = offset;
-	bss_end = LD_BASE + offset;
-	(void)rw_start;
-	(void)file_end;
-	(void)bss_end;
+
+	/* Pass 2: NOBITS sections (skip TLS .tbss) - always after PROGBITS */
+	for (rank = 2; rank <= 5; ++rank) {
+		for (i = 0; i < ctx->group_count; ++i) {
+			struct ld_group *group = &ctx->groups[i];
+			if (group->rank != rank || group->type != MT_SHT_NOBITS)
+				continue;
+			if (is_tls_group(ctx, (int)i))
+				continue;
+			offset = align_up(offset, group->align ? group->align : 1);
+			group->file_offset = offset;
+			group->address = LD_BASE + offset;
+			/* NOBITS: does not advance file offset */
+		}
+	}
+
+	/* TLS sections: lay out .tdata (needs file space) then .tbss (NOBITS). */
+	if (ctx->tls_tdata_group >= 0) {
+		struct ld_group *g = &ctx->groups[ctx->tls_tdata_group];
+		offset = align_up(offset, g->align ? g->align : 1);
+		g->file_offset = offset;
+		g->address = LD_BASE + offset;
+		offset += g->size;
+	}
+	if (ctx->tls_tbss_group >= 0) {
+		struct ld_group *g = &ctx->groups[ctx->tls_tbss_group];
+		if (ctx->tls_tdata_group >= 0) {
+			struct ld_group *td = &ctx->groups[ctx->tls_tdata_group];
+			g->file_offset = td->file_offset + td->size;
+			g->address = td->address + td->size;
+		} else {
+			/* No .tdata: .tbss shares address with .data for section header
+			 * purposes, but does not consume PT_LOAD file or memory space. */
+			int dg = find_group(ctx, ".data");
+			if (dg >= 0) {
+				g->file_offset = ctx->groups[dg].file_offset;
+				g->address = ctx->groups[dg].address;
+			} else {
+				g->file_offset = offset;
+				g->address = LD_BASE + offset;
+			}
+		}
+	}
+
+	return 0;
+}
+
+static int
+symbol_tls_offset(struct ld_context *ctx, struct ld_object *object,
+                  uint64_t symbol_index, uint64_t *tls_offset)
+{
+	struct mt_elf64_symbol symbol;
+	const char *name;
+	struct ld_global *global;
+	struct ld_section_map *map;
+	if (get_symbol_by_index(ctx, object, symbol_index, &symbol, &name) != 0)
+		return -1;
+	if (symbol.section == MT_SHN_UNDEF) {
+		global = find_global(ctx, name);
+		if (!global || !global->defined)
+			return ld_errorf(ctx, "undefined symbol", name);
+		if (global->group == ctx->tls_tdata_group)
+			*tls_offset = global->offset + symbol.value;
+		else if (global->group == ctx->tls_tbss_group)
+			*tls_offset = ctx->tls_tdata_size + global->offset + symbol.value;
+		else
+			return ld_errorf(ctx, "TPOFF32 relocation against non-TLS symbol", name);
+		return 0;
+	}
+	if (symbol.section >= object->view.section_count ||
+	    object->maps[symbol.section].group < 0)
+		return ld_errorf(ctx, "symbol section was discarded", name);
+	map = &object->maps[symbol.section];
+	if (map->group == ctx->tls_tdata_group)
+		*tls_offset = map->offset + symbol.value;
+	else if (map->group == ctx->tls_tbss_group)
+		*tls_offset = ctx->tls_tdata_size + map->offset + symbol.value;
+	else
+		return ld_errorf(ctx, "TPOFF32 relocation against non-TLS symbol", name);
 	return 0;
 }
 
@@ -1034,11 +1143,12 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 		value = resolved_value + addend - place;
 		width = 4;
 	} else if (type == LD_R_X86_64_TPOFF32) {
-		/* Static TLS: the tpoff of a non-TLS symbol is the negative
-		 * offset from %fs:0 to the symbol's runtime address.  Because
-		 * %fs points at the end of the static TLS block, this value is
-		 * stored as a signed 32-bit delta. */
-		value = (uint64_t)(-(int64_t)resolved_value) + addend;
+		/* x86_64 variant II TLS: %fs points at the end of the static
+		 * TLS block. tpoff = symbol_offset_in_tls_block - tls_size. */
+		uint64_t tls_off;
+		if (symbol_tls_offset(ctx, object, symbol_index, &tls_off) != 0)
+			return -1;
+		value = (uint64_t)((int64_t)tls_off - (int64_t)ctx->tls_size) + addend;
 		width = 4;
 	} else if (type == LD_R_X86_64_64) {
 		value = resolved_value + addend;
@@ -1162,20 +1272,32 @@ strings_add(struct ld_strings *strings, const char *name, uint32_t *offset)
 	return 0;
 }
 
+#define LD_PT_TLS 7
+
 static int
-write_program_header(FILE *file, uint32_t flags, uint64_t offset,
-                     uint64_t address, uint64_t file_size, uint64_t memory_size)
+write_program_header_type(FILE *file, uint32_t type, uint32_t flags,
+                          uint64_t offset, uint64_t address,
+                          uint64_t file_size, uint64_t memory_size,
+                          uint64_t align)
 {
 	unsigned char p[56] = {0};
-	write32(p + 0, LD_PT_LOAD);
+	write32(p + 0, type);
 	write32(p + 4, flags);
 	write64(p + 8, offset);
 	write64(p + 16, address);
 	write64(p + 24, address);
 	write64(p + 32, file_size);
 	write64(p + 40, memory_size);
-	write64(p + 48, LD_PAGE);
+	write64(p + 48, align);
 	return fwrite(p, 1, sizeof(p), file) == sizeof(p) ? 0 : -1;
+}
+
+static int
+write_program_header(FILE *file, uint32_t flags, uint64_t offset,
+                     uint64_t address, uint64_t file_size, uint64_t memory_size)
+{
+	return write_program_header_type(file, LD_PT_LOAD, flags, offset, address,
+	                                file_size, memory_size, LD_PAGE);
 }
 
 static int
@@ -1207,6 +1329,8 @@ write_executable(struct ld_context *ctx, const char *path,
 	entry_address = entry_group->address + entry_symbol->offset;
 	for (i = 0; i < ctx->group_count; ++i) {
 		struct ld_group *group = &ctx->groups[i];
+		if (is_tls_group(ctx, (int)i))
+			continue;
 		if (group->rank < 2)
 			rx_end = group->type == MT_SHT_NOBITS ? rx_end :
 			          group->file_offset + group->size > rx_end ?
@@ -1219,10 +1343,13 @@ write_executable(struct ld_context *ctx, const char *path,
 		if (memory_end < group->file_offset + group->size)
 			memory_end = group->file_offset + group->size;
 	}
-	for (i = 0; i < ctx->group_count; ++i)
+	for (i = 0; i < ctx->group_count; ++i) {
+		if (is_tls_group(ctx, (int)i))
+			continue;
 		if (ctx->groups[i].type == MT_SHT_NOBITS &&
 		    memory_end < ctx->groups[i].file_offset + ctx->groups[i].size)
 			memory_end = ctx->groups[i].file_offset + ctx->groups[i].size;
+	}
 	output_count = (int)ctx->group_count + 2; /* null + groups + shstrtab */
 	sections = (struct ld_output_section *)calloc(output_count,
 	                                               sizeof(*sections));
@@ -1271,7 +1398,7 @@ write_executable(struct ld_context *ctx, const char *path,
 		write64(h + 40, section_offset);
 		write16(h + 52, 64);
 		write16(h + 54, 56);
-		write16(h + 56, 2);
+		write16(h + 56, ctx->tls_size ? 3 : 2);
 		write16(h + 58, 64);
 		write16(h + 60, (uint16_t)output_count);
 		write16(h + 62, (uint16_t)shstr_index);
@@ -1287,6 +1414,21 @@ write_executable(struct ld_context *ctx, const char *path,
 	                         load_file_end > rw_start ? load_file_end - rw_start : 0,
 	                         memory_end - rw_start) != 0)
 		goto out_file;
+	if (ctx->tls_size) {
+		uint64_t tls_addr = 0, tls_off = 0, tls_filesz = 0;
+		if (ctx->tls_tdata_group >= 0) {
+			tls_addr = ctx->groups[ctx->tls_tdata_group].address;
+			tls_off = ctx->groups[ctx->tls_tdata_group].file_offset;
+			tls_filesz = ctx->groups[ctx->tls_tdata_group].size;
+		} else if (ctx->tls_tbss_group >= 0) {
+			tls_addr = ctx->groups[ctx->tls_tbss_group].address;
+			tls_off = ctx->groups[ctx->tls_tbss_group].file_offset;
+		}
+		if (write_program_header_type(file, LD_PT_TLS, LD_PF_R, tls_off,
+		                               tls_addr, tls_filesz, ctx->tls_size,
+		                               ctx->tls_align) != 0)
+			goto out_file;
+	}
 	for (i = 0; i < ctx->group_count; ++i) {
 		struct ld_group *group = &ctx->groups[i];
 		if (group->type == MT_SHT_NOBITS || group->size == 0)

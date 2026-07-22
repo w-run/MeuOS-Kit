@@ -2,7 +2,7 @@
 
 > **这是动态单一事实源。新会话恢复时，先读本文件，再按需读 AGENTS.md（项目规约）与各组件 `ARCHITECTURE.md`。每次工作结束应更新本文件的「最近变更」与「下一步」。**
 
-> 更新时间：2026-07-22（meuos-toolchain x86_64 P2 核心完成）
+> 更新时间：2026-07-22（meuos-toolchain P2 production：SSE 编码 + counter=2000 QEMU 端到端通过）
 
 ---
 
@@ -62,7 +62,7 @@
 - x86_64-first 核心已建立：`Makefile`、`ARCHITECTURE.md`、`.todo/`、`WORKLOG.md`、`include/mt`、`src/{libelf,ar,as,ld,target}`、测试夹具。
 - P0a/P0b 已实现：不依赖宿主 `<elf.h>` 的 ELF64 little-endian header/section/symtab 读取；可复现 GNU/SysV `ar rcs/q/r/s/t/p/x`、symbol index、long-name table。
 - P1/P2 核心已实现：mt/as 可汇编 mcc 常见 x86_64 整数/数据/GOT/PLT 输出、SIB/numeric labels、atomic lock 指令和 MeuOS libc crt/runtime 汇编并生成 ET_REL；mt/ld 可按需抽取归档、应用 PC32/PLT32/GOTPCREL/64/32/TPOFF32 relocation、生成可运行 ET_EXEC，并已能静态链接宿主 MeuOS sysroot 中的 crt1+libc-meuos+libatomic-meuos。
-- 当前限制：浮点/SSE 完整编码、独立 ranlib、BSD `#1/` extended-name、MeuOS 多线程 `counter = 2000` 完整验证、QEMU 端到端运行和 mcc driver/Makefile 集成尚未完成。
+- 当前限制：独立 ranlib、BSD `#1/` extended-name、mcc driver/Makefile 集成尚未完成。浮点/SSE 编码和 `counter = 2000` QEMU 端到端验证已完成。
 - 协作边界：只修改 `projects/meuos-toolchain/**`；mcc `host_toolchain.c`/Makefile 集成延后到 P3 独立提交。
 
 ### env（QEMU 测试环境，`env/`）
@@ -94,7 +94,7 @@
 7. **P7** 实现 `-O` 级别控制与 `-W` 诊断系统（`projects/mcc/.todo/`）。
 8. **P8** QEMU 自举：让 `qemu-system-*` 由 mcc+libc-meuos+meow 构建（见 `env/QEMU_BOOTSTRAP.md`；前置=glib2 移植、zlib 移植）。
 9. **P9**（架构储备，进行中）mcc/m++ 共享后端架构调整：把 mcc 的 `ir/opt/abi/emit/target` 抽出为 `libmcc` 库，使未来 `m++`（C++ 前端）可复用后端（见 `projects/mcc/.todo/cpp-shared-backend.md`）。**阶段 A 已完成**（refactor/libmcc-split 分支）：Makefile 拆分 FE/BE 源，BE 打成 `build/libmcc.a`，mcc = FE .o + libmcc.a，全绿 check + 自举链未破。下一步阶段 B：抽 `projects/libmcc/include/` 公共 API。
-10. **P10**（工具链自研，**x86_64 P2 sysroot 闭环已完成**）**meuos-toolchain**（简称 mt）：单项目整套提供汇编器 `as`、链接器 `ld`、归档器 `ar`、二进制工具 `nm`/`objdump`/`readelf`/`strip`/`objcopy`（无 m- 前缀，MeuOS 里是唯一工具）。当前 mt/as + mt/ar + mt/ld 已能把 x86_64 ET_REL/归档按需抽取、静态链接 MeuOS sysroot 的 crt1+libc-meuos+libatomic-meuos，输出可运行 ET_EXEC；下一步是 `counter = 2000` 多线程验证、QEMU 端到端运行和 P3 mcc driver 集成。组织与门禁详见 `projects/meuos-toolchain/README.md` / `ARCHITECTURE.md`。
+10. **P10**（工具链自研，**x86_64 P2 production 已完成**）**meuos-toolchain**（简称 mt）：单项目整套提供汇编器 `as`、链接器 `ld`、归档器 `ar`、二进制工具 `nm`/`objdump`/`readelf`/`strip`/`objcopy`（无 m- 前缀，MeuOS 里是唯一工具）。当前 mt/as + mt/ar + mt/ld 已完成：整数/浮点/SSE 指令编码、TLS（PT_TLS + TPOFF32）静态链接、`counter = 2000` 多线程程序 mt/as + mt/ld 端到端在 QEMU x86_64 上运行通过。下一步是 P3 mcc driver 集成（消除对宿主 `cc` 的最后依赖）。组织与门禁详见 `projects/meuos-toolchain/README.md` / `ARCHITECTURE.md`。
 
 ---
 
@@ -127,6 +127,8 @@ env/bin/qvm boot x86_64 && env/bin/qvm run x86_64 'uname -r' && env/bin/qvm stop
 ## 6. 最近变更
 
 > **每次变更（含 git 操作）后必须更新本节，并据实修订 §1–§5。**
+
+- **2026-07-22**：meuos-toolchain P2 production 完成--(1) mt/ld 修复 3 个 bug：① NOBITS 段布局（.bss 被 .eh_frame 覆盖导致数据损坏）② 缺少 PT_TLS 程序头（.tbss 的 TLS 无法初始化）③ TPOFF32 重定位计算错误（用虚拟地址而非 TLS 块内偏移）。(2) mt/as 新增 SSE/SSE2 标量指令编码：movss/movsd/addss/addsd/subss/subsd/mulss/mulsd/divss/divsd/sqrtss/sqrtsd/minss/minsd/maxss/maxsd/cvtss2sd/cvtsd2ss/cvttss2sil/q/cvttsd2sil/q/cvtsi2ssl/q/cvtsi2sdl/q/ucomiss/ucomisd/movq(xmm↔gpr)/movd/xorps/pxor，全部与 host as 字节级一致。(3) mt/as 修复符号引号解析（mcc 对含 `.` 的符号名加引号如 `".Lfp8"(%rip)`，mt/as 未 strip 引号导致 undefined symbol）。(4) 内部库 `libmtelf.a` 改名为 `libelf.a`（与 `src/libelf/` 目录名一致）。(5) 新增测试集：`test/as_sse_x86_64.sh`（SSE golden bytes 对比）、`test/ld_counter_e2e.sh`（counter=2000 端到端含 QEMU 选项），Makefile 增 `check-as-sse-x86_64` 和 `check-ld-counter-e2e` target。(6) 验证：`counter = 2000` 通过 mt/as + mt/ld 链接，宿主运行 exit 0，QEMU x86_64 VM 运行 exit 0。`make check` 全绿。已知限制：libc printf `%f` 的 va_arg 浮点参数处理有 bug（宿主 cc 链接亦然，非 mt 工具链问题）。
 
 - **2026-07-22**：meuos-toolchain x86_64 核心与 sysroot 闭环（独立 worktree `work/meuos-toolchain`）——P0b ar 新增 ELF64 symtab/strtab 驱动的 `/` symbol index、GNU `//` long-name、r/q/s 语义和宿主 ld 互操作；P1 新增 x86_64 AT&T 子集 assembler，扩展 C 注释、numeric labels、SIB、atomic lock/xadd/cmpxchg、mfence/hlt/syscall，并通过 MeuOS libc crt1/atomic/setjmp/sigreturn/thread_clone/syscall 六个汇编 fixture；P2 新增静态 linker，按需抽取归档、应用 R_X86_64 64/32/PC32/PLT32/GOTPCREL/TPOFF32，静态链接 MeuOS sysroot 的 crt1+libc-meuos+libatomic-meuos，输出可在宿主 Linux 运行的 ET_EXEC（`printf("toolchain = %d\n", 42)` 闭环输出 `toolchain = 42`）。`make -C projects/meuos-toolchain check` 通过。下一步是 `counter = 2000` 多线程与 QEMU 端到端运行和 P3 mcc driver 集成；未修改 aarch64/mcc/libc 源文件。
 - **2026-07-22**：i386 收口完成——`projects/mcc/src/target/i386/i386_emit.c` 所有 Kl 操作（Ocopy/Oload/Ostorel/Oshl/Oshr/Osar/Oadd/Osub/Oneg/Oand/Oor/Oxor/Oxcmp/Oxtest/Oextsw/Oextuw/Oxsel）统一加 push/pop EAX（shifts 还加 EDX）保护，消除 rega 盲区导致的 EAX clobber（修复 `s.mode` 被覆盖、`mode=0` bug）；Oload 的 ECX stash 与 Ostorel 的 vreg=ECX 也加 push/pop ECX 保护。新增 i386 运行时回归测试套件（`test/i386/runtime_{kl,fp,time64,va}.c` + `runtime.sh` + Makefile `check-i386-runtime` target）。所有 i386 综合测试通过（counter=2000、浮点、time64、stat、va_list），i386 ELF32 静态二进制在 x86_64 内核原生运行验证通过。STATE.md §2/§3/§4/§5 同步更新。

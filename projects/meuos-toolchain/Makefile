@@ -6,6 +6,8 @@
 
 HOST_CC ?= cc
 HOST_AR ?= ar
+MCC ?= ../mcc/mcc
+SYSROOT ?= /workspace/MeuOS-Kit/sysroot
 PREFIX ?= /usr
 DESTDIR ?=
 BUILD ?= build
@@ -18,7 +20,7 @@ LDLIBS ?=
 
 LIBELF_SRCS := $(sort $(wildcard src/libelf/*.c))
 LIBELF_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(LIBELF_SRCS))
-LIBELF_LIB := $(BUILD)/lib/libmtelf.a
+LIBELF_LIB := $(BUILD)/lib/libelf.a
 
 AR_SRCS := $(sort $(wildcard src/ar/*.c))
 AR_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(AR_SRCS))
@@ -74,7 +76,7 @@ build/%.o: %.c
 
 -include $(DEPS)
 
-check: check-as-x86_64 check-as-libc-x86_64 check-ld-x86_64 $(AR_BIN) $(AS_BIN) $(LD_BIN) $(ELF_PROBE) $(TEST_ARCHIVE)
+check: check-as-x86_64 check-as-sse-x86_64 check-as-libc-x86_64 check-ld-x86_64 $(AR_BIN) $(AS_BIN) $(LD_BIN) $(ELF_PROBE) $(TEST_ARCHIVE)
 	@set -eu; \
 	test "$$($(AR_BIN) --version)" = "meuos-toolchain ar 0.2.0 (x86_64 bootstrap)"; \
 	test "$$($(AR_BIN) t $(TEST_ARCHIVE))" = hello.o; \
@@ -115,9 +117,14 @@ check-as-x86_64: $(AS_BIN)
 	readelf -s "$$tmp/main.o" | grep -Eq '[[:space:]]main$$'; \
 	printf 'mt as x86_64 check: PASS\n'
 
+
+check-as-sse-x86_64: $(AS_BIN)
+	sh test/as_sse_x86_64.sh "$(abspath $(AS_BIN))"
+
 check-ld-x86_64: $(AS_BIN) $(AR_BIN) $(LD_BIN)
 	sh test/ld_smoke.sh "$(abspath $(AS_BIN))" "$(abspath $(AR_BIN))" "$(abspath $(LD_BIN))"
 	sh test/ld_sysroot.sh "$(abspath $(AS_BIN))" "$(abspath $(LD_BIN))"
+	sh test/ld_counter_e2e.sh "$(abspath $(AS_BIN))" "$(abspath $(LD_BIN))" "$(abspath $(MCC))" "$(SYSROOT)"
 
 
 check-elf: $(ELF_PROBE) $(TEST_FIXTURE_OBJ)
@@ -135,4 +142,4 @@ install: $(AR_BIN) $(AS_BIN) $(LD_BIN)
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all check check-elf check-ar check-as-x86_64 check-as-libc-x86_64 check-ld-x86_64 install clean
+.PHONY: all check check-elf check-ar check-as-x86_64 check-as-sse-x86_64 check-as-libc-x86_64 check-ld-x86_64 install clean

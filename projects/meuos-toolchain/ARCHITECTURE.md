@@ -99,7 +99,7 @@ make -C projects/meuos-toolchain check
 - `ar t`/`nm` 可看到稳定的成员和符号；
 - `make -C projects/mcc check` 可在 `MT_AR` 下通过。
 
-### P1：x86_64 汇编器（核心完成）
+### P1：x86_64 汇编器（核心完成，含 SSE/SSE2 标量指令）
 
 任务：
 
@@ -123,7 +123,7 @@ make -C projects/meuos-toolchain check-as-x86_64 check-as-libc-x86_64
 - mcc 产出的 x86_64 `.s` 和 MeuOS libc 的 crt/atomic/setjmp/sigreturn/thread/syscall 汇编可汇编；
 - 错误输入必须报告行号和列号，不得崩溃。
 
-### P2：x86_64 静态链接器（核心完成，sysroot 集成待做）
+### P2：x86_64 静态链接器（核心完成，含 TLS + counter=2000 验证）
 
 当前核心已通过 `test/ld_smoke.sh`，任务：
 
@@ -142,8 +142,11 @@ make -C projects/meuos-toolchain check-ld-x86_64
 
 - mt as + mt ar + mt ld 的 syscall-only ET_EXEC 可在宿主 x86_64 运行；
 - 归档输入、GOT/PLT、`.text/.data/.bss`、PC-relative 和绝对 relocation 已覆盖；
+- PT_TLS 程序头生成、TPOFF32 TLS 重定位、NOBITS 段布局已修复；
+- **`counter = 2000` 多线程程序通过 mt/as + mt/ld 端到端在 QEMU x86_64 上运行通过**；
+- SSE/SSE2 标量指令编码与 host as 字节级一致；
 - 未定义符号有明确诊断；
-- 后续生产门禁：C11 atomic/threads `counter = 2000` 验证、QEMU 运行、其他架构 ELF 重定位。
+- 后续：P3 mcc driver 集成、其他架构 ELF 重定位。
 
 ### P3：mcc 集成
 
