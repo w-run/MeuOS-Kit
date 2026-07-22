@@ -1,4 +1,4 @@
-# P0：基础层与 ar
+# P0：基础层与 ar（P0a/P0b 已完成）
 
 ## 背景
 
@@ -14,10 +14,10 @@ MeuOS Kit 目前依赖宿主 `ar` 归档 `libmcc.a`。需要先建立不依赖�
 
 ## 当前限制
 
-- `r/q` 当前是重写模式，不保留已有成员；
-- 尚未实现 GNU `//` long-name table；
-- 尚未实现 `/` symbol index；
-- 只验证 x86_64 ELF64，不能解析 ELF32 或大端 ELF。
+- `r`/`q` 已支持基本替换和追加，但尚未覆盖所有 GNU/BSD 兼容选项；
+- 尚未实现独立 `ranlib` 命令和 BSD `#1/` extended-name member；
+- archive 目前整体读入内存，超大归档的流式优化留给后续；
+- 只解析 x86_64 ELF64 little-endian symbol index，不能解析 ELF32 或大端 ELF。
 
 ## 完成标准
 
@@ -25,4 +25,6 @@ MeuOS Kit 目前依赖宿主 `ar` 归档 `libmcc.a`。需要先建立不依赖�
 make -C projects/meuos-toolchain check
 ```
 
-通过后才进入 P1 x86_64 汇编器；不允许用宿主 `ar` 代替项目二进制完成 ar 行为测试。
+已通过：symbol index、GNU long-name、宿主 ld 链接、r/q、t/p/x 和 x86_64
+ELF fixture。后续进入 P1 x86_64 汇编器；不允许用宿主 `ar` 代替项目二进制完成
+ar 行为测试。

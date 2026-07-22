@@ -52,11 +52,11 @@ src/target/       架构相关编码、重定位和反汇编
 
 ## 2. 分阶段开发任务
 
-### P0a：基础层与 ar 框架（当前阶段）
+### P0a：基础层与 ar 框架（已完成）
 
 **目标**：建立所有工具共享的编译、错误、ELF 和测试边界，并让短名 `ar rcs` 可用。
 
-这是框架阶段，不宣称已经具备完整 ranlib 或可替换 mcc 的生产能力。
+P0a 已完成；symbol index/长名等完整归档能力在 P0b 中补齐。
 
 任务：
 
@@ -78,12 +78,12 @@ make -C projects/meuos-toolchain check
 - x86_64 relocatable object 可被 `libelf` 识别为 `ET_REL/EM_X86_64`；
 - `ar rcs` 创建的归档可列出成员、打印成员、解出成员；
 - 解出内容与输入逐字节一致；
-- 当前不要求宿主 `ld` 接受归档，因为 P0b 的 symbol index 尚未实现；
+- P0a 阶段不要求宿主 `ld` 接受归档；该门禁由 P0b 补齐；
 - `git diff --name-only` 只包含本项目文件。
 
-### P0b：ar 完整化
+### P0b：ar 完整化（核心完成）
 
-**目标**：让 mt/ar 具备替换 mcc 宿主 `ar` 的条件。
+**目标**：让 mt/ar 具备被宿主链接器直接使用的条件。
 
 任务：
 
@@ -99,7 +99,7 @@ make -C projects/meuos-toolchain check
 - `ar t`/`nm` 可看到稳定的成员和符号；
 - `make -C projects/mcc check` 可在 `MT_AR` 下通过。
 
-### P1：x86_64 汇编器
+### P1：x86_64 汇编器（下一阶段）
 
 任务：
 

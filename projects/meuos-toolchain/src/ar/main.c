@@ -5,17 +5,19 @@
 #include <stdio.h>
 #include <string.h>
 
-#define MT_AR_VERSION "0.1.0"
+#define MT_AR_VERSION "0.2.0"
 
 static void
 usage(FILE *output)
 {
 	fprintf(output,
-	        "usage: ar [rcs|t|p|x] archive [member ...]\n"
+	        "usage: ar [rcsq] archive [member ...]\n"
+	        "       ar [tpx] archive [member ...]\n"
 	        "       ar --help\n"
 	        "       ar --version\n\n"
-	        "initial scope: reproducible short-name SysV archives\n"
-	        "operations: r/q/c create, t list, p print, x extract\n");
+	        "operations: r replace, q append, c create, s index,\n"
+	        "           t list, p print, x extract\n"
+	        "format: reproducible SysV/GNU archive with symbol index\n");
 }
 
 static int
@@ -37,7 +39,7 @@ options_valid(const char *options)
 {
 	size_t i;
 	for (i = 0; options[i] != '\0'; ++i) {
-		if (!strchr("rcqstpxv", options[i]))
+		if (!strchr("rcqstpx", options[i]))
 			return 0;
 	}
 	return options[0] != '\0';
@@ -97,7 +99,9 @@ main(int argc, char **argv)
 			fprintf(stderr, "ar: no archive members specified\n");
 			return 2;
 		}
-		if (mt_ar_create(archive, members, member_count) != 0) {
+		if (mt_ar_update(archive, members, member_count,
+		                 has_operation(options, 'q') ? MT_AR_UPDATE_APPEND :
+		                 MT_AR_UPDATE_REPLACE) != 0) {
 			report_error(archive);
 			return 1;
 		}

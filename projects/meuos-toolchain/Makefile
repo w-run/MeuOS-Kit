@@ -24,12 +24,16 @@ AR_SRCS := $(sort $(wildcard src/ar/*.c))
 AR_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(AR_SRCS))
 AR_BIN := $(BUILD)/bin/ar
 
+AS_SRCS := $(sort $(wildcard src/as/*.c))
+AS_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(AS_SRCS))
+AS_BIN := $(BUILD)/bin/as
+
 ELF_PROBE := $(BUILD)/test/elf_probe
 TEST_FIXTURE_OBJ := $(BUILD)/test/hello.o
 TEST_ARCHIVE := $(BUILD)/test/libhello.a
-DEPS := $(LIBELF_OBJS:.o=.d) $(AR_OBJS:.o=.d) $(ELF_PROBE).d
+DEPS := $(LIBELF_OBJS:.o=.d) $(AR_OBJS:.o=.d) $(AS_OBJS:.o=.d) $(ELF_PROBE).d
 
-all: $(AR_BIN)
+all: $(AR_BIN) $(AS_BIN)
 
 $(LIBELF_LIB): $(LIBELF_OBJS)
 	@mkdir -p $(dir $@)
@@ -38,6 +42,10 @@ $(LIBELF_LIB): $(LIBELF_OBJS)
 $(AR_BIN): $(AR_OBJS) $(LIBELF_LIB)
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(LDFLAGS) -o $@ $(AR_OBJS) $(LIBELF_LIB) $(LDLIBS)
+
+$(AS_BIN): $(AS_OBJS) $(LIBELF_LIB)
+	@mkdir -p $(dir $@)
+	$(HOST_CC) $(LDFLAGS) -o $@ $(AS_OBJS) $(LIBELF_LIB) $(LDLIBS)
 
 $(ELF_PROBE): test/elf_probe.c $(LIBELF_LIB)
 	@mkdir -p $(dir $@)
@@ -57,11 +65,11 @@ build/%.o: %.c
 
 -include $(DEPS)
 
-check: $(AR_BIN) $(ELF_PROBE) $(TEST_ARCHIVE)
+check: check-as-x86_64 $(AR_BIN) $(AS_BIN) $(ELF_PROBE) $(TEST_ARCHIVE)
 	@set -eu; \
-	test "$$($(AR_BIN) --version)" = "meuos-toolchain ar 0.1.0 (x86_64 bootstrap)"; \
+	test "$$($(AR_BIN) --version)" = "meuos-toolchain ar 0.2.0 (x86_64 bootstrap)"; \
 	test "$$($(AR_BIN) t $(TEST_ARCHIVE))" = hello.o; \
-	$(ELF_PROBE) $(TEST_FIXTURE_OBJ) | grep '^type=1 machine=x86_64 sections='; \
+	$(ELF_PROBE) $(TEST_FIXTURE_OBJ) | grep '^type=1 machine=x86_64 sections=.* symbols=1$$'; \
 	tmp=$$(mktemp -d /tmp/meuos-toolchain-check.XXXXXX); \
 	trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; \
 	printf 'meuos-toolchain\n' > "$$tmp/input.txt"; \
@@ -70,7 +78,32 @@ check: $(AR_BIN) $(ELF_PROBE) $(TEST_ARCHIVE)
 	mkdir "$$tmp/extract"; \
 	( cd "$$tmp/extract" && "$(abspath $(AR_BIN))" x "$$tmp/libtext.a" ); \
 	cmp "$$tmp/input.txt" "$$tmp/extract/input.txt"; \
+	printf '%s\n' 'int toolchain_fixture_value(void);' 'int main(void) { return toolchain_fixture_value() == 42 ? 0 : 1; }' > "$$tmp/main.c"; \
+	$(HOST_CC) -c "$$tmp/main.c" -o "$$tmp/main.o"; \
+	$(HOST_CC) "$$tmp/main.o" "$(TEST_ARCHIVE)" -o "$$tmp/main"; \
+	"$$tmp/main"; \
+	printf alpha > "$$tmp/this_is_a_long_member_name.o"; \
+	printf beta > "$$tmp/second_long_member_name.o"; \
+	$(AR_BIN) rcs "$$tmp/long.a" "$$tmp/this_is_a_long_member_name.o"; \
+	$(AR_BIN) q "$$tmp/long.a" "$$tmp/second_long_member_name.o"; \
+	test "$$($(AR_BIN) t "$$tmp/long.a" | tr '\n' ' ')" = 'this_is_a_long_member_name.o second_long_member_name.o '; \
+	printf gamma > "$$tmp/this_is_a_long_member_name.o"; \
+	$(AR_BIN) r "$$tmp/long.a" "$$tmp/this_is_a_long_member_name.o"; \
+	mkdir "$$tmp/long-extract"; \
+	( cd "$$tmp/long-extract" && "$(abspath $(AR_BIN))" x "$$tmp/long.a" ); \
+	test "$$(cat "$$tmp/long-extract/this_is_a_long_member_name.o")" = gamma; \
+	test "$$(cat "$$tmp/long-extract/second_long_member_name.o")" = beta; \
 	printf 'mt check: PASS\n'
+
+check-as-x86_64: $(AS_BIN)
+	@set -eu; \
+	tmp=$$(mktemp -d /tmp/meuos-toolchain-as-check.XXXXXX); \
+	trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; \
+	printf '%s\n' '.text' '.globl main' 'main:' 'endbr64' 'movl $$0, %eax' 'ret' > "$$tmp/main.s"; \
+	$(AS_BIN) -o "$$tmp/main.o" "$$tmp/main.s"; \
+	readelf -h "$$tmp/main.o" | grep -Eq 'Type:[[:space:]]+REL'; \
+	readelf -s "$$tmp/main.o" | grep -Eq '[[:space:]]main$$'; \
+	printf 'mt as x86_64 check: PASS\n'
 
 check-elf: $(ELF_PROBE) $(TEST_FIXTURE_OBJ)
 	$(ELF_PROBE) $(TEST_FIXTURE_OBJ)
@@ -78,11 +111,12 @@ check-elf: $(ELF_PROBE) $(TEST_FIXTURE_OBJ)
 check-ar: $(AR_BIN) $(TEST_ARCHIVE)
 	test "$$($(AR_BIN) t $(TEST_ARCHIVE))" = hello.o
 
-install: $(AR_BIN)
+install: $(AR_BIN) $(AS_BIN)
 	@mkdir -p $(DESTDIR)$(PREFIX)/bin
 	cp $(AR_BIN) $(DESTDIR)$(PREFIX)/bin/ar
+	cp $(AS_BIN) $(DESTDIR)$(PREFIX)/bin/as
 
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all check check-elf check-ar install clean
+.PHONY: all check check-elf check-ar check-as-x86_64 install clean

@@ -342,9 +342,8 @@ mt 与 mcc 保持一致：**单一二进制 + 架构在源码层模块化**，�
 
 ## 验收
 
-- **P0a 当前框架**：`make -C projects/meuos-toolchain check` 全绿；`libelf` 可验证 x86_64 ET_REL，`ar` 可创建/列出/打印/解出短名归档；
-- **P0b 完整 ar**：`ar rcs` 产出的 `.a` 可被宿主 `ld` 接受，并通过 mcc 的归档构建回归；
-  在 P0b 完成前，不把 mt/ar 设为 mcc 的默认归档器
+- **P0a/P0b 当前完成**：`make -C projects/meuos-toolchain check` 全绿；`libelf` 可验证 x86_64 ET_REL 并读取 symtab/strtab；`ar` 支持 symbol index、GNU long-name table、r/q 更新语义和宿主 `ld` 互操作；
+- **尚未完成**：独立 `ranlib` 命令、BSD `#1/` extended-name 变体、mcc Makefile/driver 集成；完成这些前，mt/ar 仍通过显式路径使用
 - **as x86_64**：`as foo.s -o foo.o` 产出的 `.o` 可被宿主 `ld`
   链接成可运行可执行文件
 - **ld x86_64 静态**：`ld foo.o -lc-meuos -o foo` 产出的可执行文件
@@ -359,21 +358,22 @@ mt 与 mcc 保持一致：**单一二进制 + 架构在源码层模块化**，�
   不必实现完整 gas 兼容。
 - **ld 的范围控制**：静态链接先行，动态链接 P7。MeuOS Next 的 DSO
   需求由后续 ldso + 动态 ld 协同。
-- **ar 的兼容性**：P0a 只实现 SysV short-name 子集；P0b 再实现 GNU/BSD long-name 和
-  symbol index，完成与宿主 `ld` 的互操作。
+- **ar 的兼容性**：P0a/P0b 已实现 SysV/GNU short-name、GNU `//` long-name table 和
+  `/` symbol index；BSD `#1/` extended-name 及独立 ranlib 留在后续兼容性任务。
 - **不阻塞当前工作**：aarch64 移植和 libmcc 阶段 B 都不依赖工具链自研。
   mt 的 ar 可并行启动（最简单、自包含）。
 
 ## 当前实施状态（2026-07-22）
 
-首期开发固定为 **x86_64 优先**，当前已完成 P0 框架：
+首期开发固定为 **x86_64 优先**，当前已完成 P0a/P0b 核心 ar：
 
 - 独立 `Makefile`，源码、依赖文件和产物隔离到 `build/`；
-- 内部 `libelf`：不包含宿主 `<elf.h>`，可验证 ELF64 little-endian 头部和表范围；
-- 初版 `ar`：支持 `rcs`/`t`/`p`/`x`，生成可复现的 SysV 短名归档；
-- x86_64 ELF fixture、归档创建/列出/打印/解出回归测试；
+- 内部 `libelf`：不包含宿主 `<elf.h>`，可验证 ELF64 little-endian 头部/节区表，并读取 symtab/strtab；
+- `ar` 支持 `rcs`/`q`/`r`/`t`/`p`/`x`，生成可复现的 SysV/GNU archive；
+- 归档包含 `/` symbol index，长成员名使用 `//` table，宿主 `ld` 可以直接链接；
+- 回归覆盖 x86_64 ELF、symbol index、宿主链接、长名、追加、替换、解出；
 - 阶段计划和门禁见 [`ARCHITECTURE.md`](ARCHITECTURE.md)；
-- 当前限制记录在 `.todo/p0-foundation-ar.md`。
+- 当前剩余兼容性任务记录在 `.todo/p0-foundation-ar.md`。
 
 ### 本地构建和验收
 
@@ -389,5 +389,5 @@ make -C projects/meuos-toolchain check
 projects/meuos-toolchain/build/bin/ar
 ```
 
-P0 的 `r/q` 是可复现重写语义，尚未实现已有成员替换、GNU long-name table
-和 archive symbol index；这些属于后续 ar 完整化任务，不能误认为已经完成。
+P0a/P0b 已完成 symbol index、GNU long-name table 和基本 r/q 更新语义；当前仍未实现
+独立 `ranlib`、BSD `#1/` extended-name 以及 mcc 的自动集成。
