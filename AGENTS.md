@@ -4,13 +4,13 @@
 >
 > IMPORTANT: 全程思考/回复/文档优先使用简体中文
 >
-> **会话恢复**：因不可抗力会话可能中断。新会话先读 [`STATE.md`](STATE.md)（当前状态/阶段进度/下一步/验证命令/最近变更），再按需读各组件 `ARCHITECTURE.md` 与 `.todo/`。本文件是静态规约，`STATE.md` 是动态事实源，每次工作结束应更新它。
+> **会话恢复**：因不可抗力会话可能中断。新会话先读对应子项目的 `ARCHITECTURE.md`（结构/模块/状态/路线图）与 `.todo/`（待实现项），再按需读本文件（项目规约）。各子项目独立维护状态，无全局 STATE 文件。
 
 **项目名称**：MeuOS Kit**项目定位**：MeuOS Next 的独立开发工具集。提供从零自举所需的全部工具：C 库、编译器、构建系统。**核心组件**：
 
-- `meuos-libc` - C 库（C11 + POSIX，零 GNU 依赖）
-- `meuos-libc-compat` - 兼容层（隔离被滥用的 glibc 扩展符号）
+- `meuos-libc` - C 库（C11 + POSIX，零 GNU 依赖；含 compat 兼容层，隔离被滥用的 glibc 扩展符号）
 - `mcc` — 编译器（C11，cproc+QBE 源码级整合，单体，不区分前后端）
+- `meuos-toolchain` - 工具链（as/ld/ar/ranlib，消除 Kit 对宿主 cc 的最后依赖）
 - `meow` — 构建系统（YAML 配方 + Makefile 兼容）
 
 **交付对象**：具备系统编程和编译器经验的大型 AI Agent（兆级上下文）。
@@ -37,7 +37,7 @@
 
 **系统调用**：直接封装 Linux 内核 ABI，使用 `syscall()` 或内联汇编，不经过任何中间库。每个系统调用一个独立源文件。
 
-**符号策略**：核心库只暴露标准符号。任何 GNU 扩展符号（`error_at_line`、`obstack`、`argp` 等）全部放入 `meuos-libc-compat`，核心库不包含。
+**符号策略**：核心库只暴露标准符号。任何 GNU 扩展符号（`error_at_line`、`obstack`、`argp` 等）放入 `meuos-libc/src/compat/`，作为独立归档 `libc-meuos-compat.a` 提供，核心库不包含。
 
 **初始里程碑**（最小可用来编译 mcc 和 meow）：
 
@@ -52,26 +52,7 @@
 
 ---
 
-### 2.2 meuos-libc-compat - 兼容层
-
-**定位**：独立于 meuos-libc 的动态/静态库，提供被广泛软件依赖但不在标准中的符号。
-
-**初始实现清单**（按优先级）：
-
-1. `error` / `error_at_line` / `error_message_count` / `error_one_per_line` / `error_print_progname`
-2. `argp_parse` / `argp_usage` / `argp_error` 等（最小可用子集）
-3. `obstack_init` / `obstack_alloc` / `obstack_free` / `obstack_printf` 等
-4. `funopen` / `fopencookie`
-5. `__malloc_hook` / `__free_hook` / `__realloc_hook`（弱符号，空实现即可）
-6. `getline` / `getdelim`（标准库后来收了，但很多老代码仍假定在 glibc 扩展中）
-7. `strdupa` / `strndupa`
-8. `asprintf` / `vasprintf`
-
-所有实现不得依赖任何 glibc 内部结构体（如 `_IO_FILE`），必须使用 POSIX 标准接口实现。
-
----
-
-### 2.3 mcc — MeuOS C Compiler
+### 2.2 mcc - MeuOS C Compiler### 2.3 mcc — MeuOS C Compiler
 
 **架构要求**：**源码级整合** cproc 编译器前端 + QBE 编译器后端。不保留原始项目边界，所有代码在一个统一源码树中，不区分前后端——对外只有 `mcc` 一个可执行文件。
 
@@ -121,7 +102,7 @@ options:
 
 ---
 
-### 2.4 meow — 构建系统
+### 2.3 meow — 构建系统
 
 **配方格式**：YAML。一个包的完整构建描述。
 
@@ -231,62 +212,9 @@ Agent 自行决定目录布局，须满足：
 
 ---
 
-## 6. 初始可交付任务
+## 6. 初始可交付任务（已完成）
 
-收到此 prompt 后，请立即按顺序执行并输出每步验证结果：
-
-### 任务 1：实现 mcc（编译器）
-
-- 阅读 cproc（https://git.sr.ht/~mcf/cproc）和 QBE（https://c9x.me/compile/）源码作为参考。
-- 设计统一模块架构，实现源码级整合。
-- 实现 AST → IR 的直接转换（无文本 IR 中间步骤）。
-- 支持 C11 核心特性（`_Atomic`, `_Generic`, `_Thread_local`）。
-- 提供构建脚本，用宿主编译出 `mcc`。
-- **验证**：以下测试程序通过编译并正确运行：
-
-    ```c
-    #include <stdatomic.h>
-    #include <threads.h>
-    #include <stdio.h>
-    
-    _Atomic int counter = 0;
-    
-    int thread_func(void *arg) {
-        for (int i = 0; i < 1000; i++) counter++;
-        return 0;
-    }
-    
-    int main() {
-        thrd_t t1, t2;
-        thrd_create(&t1, thread_func, NULL);
-        thrd_create(&t2, thread_func, NULL);
-        thrd_join(t1, NULL);
-        thrd_join(t2, NULL);
-        printf("counter = %d\n", counter);
-        return counter == 2000 ? 0 : 1;
-    }
-    ```
-
-### 任务 2：实现 meuos-libc（C 库）
-
-- 实现 30 个系统调用封装。
-- 实现 `_start`（crt1.c）和基本的 `printf`/`malloc`。
-- 实现任务 1 测试程序所需的所有 C11 标准库组件（`<stdatomic.h>`, `<threads.h>`, `<stdio.h>`）。
-- **验证**：用 `mcc -specs=meuos` 静态链接 libc-meuos，编译任务 1 的测试程序，在宿主 Linux 上直接运行（或 qemu 运行），输出 `counter = 2000`。
-
-### 任务 3：实现 meow（构建系统）
-
-- 实现 `meow.c`，支持 YAML 配方解析（至少支持 fetch、unpack、build、install 步骤）。
-- 实现 Makefile 兼容模式。
-- 编写一个测试配方 `pkgs/dash/meow.yaml`。
-- **验证**：`meow build dash` 能拉取 dash 源码、解压、调用 configure + make。
-
-### 任务 4：自举验证脚本
-
-- 编写 `bootstrap.sh`，自动化 Phase 0 ~ Phase 4 全流程。
-- 输出 `bootstrap-report.md`（本次运行日志），并更新 `STATE.md` 的「最近变更」与下一步优先级。
-
----
+初始任务 1-4 已全部完成。后续工作见各子项目 `ARCHITECTURE.md` 路线图。
 
 ## 7. 实现策略与参考资源（节省算力）
 

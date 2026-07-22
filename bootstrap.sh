@@ -177,7 +177,7 @@ phase4_verify() {
     # Phase 4 = self-rebuild gate. The former Alpine-container flow
     # (experiments/run-alpine-phase4.sh) was removed; the equivalent
     # verification is mcc rebuilding itself against libc-meuos only.
-    # Cross-arch runtime verification lives in env/ (QEMU, see STATE.md).
+    # Cross-arch runtime verification lives in env/ (QEMU, see env/README.md).
     phase "Phase 4 - Bootstrap Verification (self-rebuild gate)"
     if [ "${MEUOS_SKIP_PHASE4:-0}" = 1 ]; then
         log "Phase 4 SKIP (MEUOS_SKIP_PHASE4=1)"
@@ -290,7 +290,7 @@ MeuOS Next 尚不可启动时，Alpine/musl 最小用户空间作为自举代理
 
 ${next_steps}
 EOF
-    log "Report written to ${PROGRESS_FILE} (auto-generated; curated status is STATE.md)"
+    log "Report written to ${PROGRESS_FILE} (auto-generated; curated status is in each project's ARCHITECTURE.md)"
 }
 
 # ============================================================

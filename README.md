@@ -4,7 +4,7 @@ MeuOS Kit 是 MeuOS Next 的自举工具链：`mcc` C11 编译器、`meuos-libc`
 C 库、`meow` 构建系统与 `meuos-toolchain` 工具链（汇编器/链接器/归档器）。
 源码树不包含 GCC、LLVM 或 glibc 代码。
 
-> **当前状态、阶段进度、下一步优先级、会话恢复指南** → 见 [`STATE.md`](STATE.md)
+> **项目规约（组件规范 / 自举流程 / 禁止事项）** -> 见 [`AGENTS.md`](AGENTS.md)
 > **项目规约（组件规范 / 自举流程 / 禁止事项）** → 见 [`AGENTS.md`](AGENTS.md)
 
 ## 目录结构
@@ -12,7 +12,6 @@ C 库、`meow` 构建系统与 `meuos-toolchain` 工具链（汇编器/链接器
 ```
 MeuOS-Kit/
 ├── AGENTS.md            项目规约（harness 自动加载）
-├── STATE.md             当前状态 + 会话恢复（动态单一事实源）
 ├── README.md            本文件
 ├── bootstrap.sh         Phase 0–5 全流程自举脚本
 ├── projects/            四个核心组件
@@ -45,7 +44,7 @@ make -C projects/meow install DESTDIR=$(pwd)/sysroot PREFIX=/usr
 # 构建 mt 工具链（as/ld/ar/ranlib）
 make -C projects/meuos-toolchain
 
-# 验证（详见 STATE.md 第 5 节）
+# 验证（ 第 5 节）
 make -C projects/mcc check
 make -C projects/meuos-libc check
 make -C projects/meow check
