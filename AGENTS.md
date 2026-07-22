@@ -309,11 +309,29 @@ Agent 必须严格遵循以下阶段，每步都要验证：
 
 ---
 
-## 6. 实现策略与参考资源（节省算力）
+## 6. 实现策略
+
+### 6.1 分阶段实现原则
+
+**先标准化可用，再增强优化。** 所有组件遵循三阶段实现路径：
+
+1. **标准化可用**：实现 ISO/POSIX 标准定义的核心接口，确保正确性和可用性。不追求完整覆盖标准中的每个边缘特性，但已实现的部分必须行为正确、可被 mcc 自编译。
+2. **有利特性与简化接口**：在标准化基础上，增加 MeuOS Next 实际需要的便利特性。因为是 Kit 自己实现的，可以针对 MeuOS 的使用场景设计更简洁的 API、更方便的命令行接口，或省略不适用于 MeuOS 的标准冗余。
+3. **性能优化**：在功能和接口稳定后，针对 MeuOS 的实际工作负载做性能优化。可以利用 Kit 自身的架构知识做针对性优化（如 mcc 了解 mt/as 的编码偏好、meow 了解 mcc 的编译速度特性等）。
+
+**必要性简化**：因为 MeuOS Kit 是我们自己的工具集，可以对不适用于 MeuOS Next 的标准内容进行简化。例如：
+- 省略标准中 MeuOS 不需要的 locale/i18n 子集（初期只支持 C locale）
+- 省略不使用的 POSIX 选项（如 POSIX 消息队列、实时调度选项等）
+- 简化错误处理路径（初期用简洁的 abort/panic，后续再完善）
+- 工具命令行只实现 MeuOS 实际需要的选项子集
+
+但所有简化必须有据可查，记录在各子项目的 `.todo/` 或 `ARCHITECTURE.md` 中。
+
+### 6.2 参考资源（节省算力）
 
 **核心原则：优先参考成熟社区实现，避免从零推导繁琐算法而浪费算力。**
 
-### 本仓库已提供的只读参考树（`reference/`，gitignored，勿改勿提交）
+#### 本仓库已提供的只读参考树（`reference/`，gitignored，勿改勿提交）
 
 | 路径 | 用途 |
 |------|------|
@@ -322,7 +340,7 @@ Agent 必须严格遵循以下阶段，每步都要验证：
 | `reference/musl/`   | meuos-libc 算法参考（mallocng/stdio/pthread/...） |
 | `reference/tinycc/` | 轻量 C 编译器参考（快速编译、简单后端、tcc 的 preprocessor） |
 
-### 鼓励参考的其他社区资源
+#### 鼓励参考的其他社区资源
 
 - **libc 算法**：musl（首选，已 vendored）、Cosmopolitan Libc、serenityOS LibC、PDCLib
 - **编译器设计**：cproc/QBE（已 vendored）、chibicc、9cc、lacc、cparser
@@ -332,7 +350,7 @@ Agent 必须严格遵循以下阶段，每步都要验证：
 - **构建工具**：GNU m4/Bison/Flex/Gperf（参考行为和语法兼容性，不复制源码）
 - **通用知识库**：OSDev Wiki、Linux man-pages、各 arch 的 ELF/ABI spec
 
-### 边界（与 §4 禁止事项一致）
+#### 边界（与 §4 禁止事项一致）
 
 - **参考算法与结构，但用本项目自己的代码重新实现**；不直接复制任何参考源码。
 - 仍受 §4 约束：核心库与 mcc 源码中**禁止** glibc 专有符号、LLVM/Clang、GCC 代码。
