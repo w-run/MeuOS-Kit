@@ -4,20 +4,26 @@
 #include <sys/mman.h>
 #include "../../internal/syscall.h"
 
-/* aarch64 ELF TLS uses variant I: static TLS lives at or above the
- * thread pointer (TPIDR_EL0).  The thread pointer addresses the start
- * of the TLS block, and TLS variables are reached at non-negative
- * offsets from it.  mcc emits local-exec TLS access as:
+/* aarch64 ELF TLS uses variant I: static TLS lives at non-negative
+ * offsets from the thread pointer (TPIDR_EL0).  mcc emits local-exec
+ * TLS access as:
  *
  *     mrs   R, tpidr_el0
  *     add   R, R, #:tprel_hi12:S, lsl #12
  *     add   R, R, #:tprel_lo12_nc:S
  *
- * The kernel programs TPIDR_EL0 directly when CLONE_SETTLS is supplied
- * to clone(2); the main thread installs it here via `msr tpidr_el0`.
- * Unlike variant II (x86_64/i386) there is no self-referential slot at
- * *(void **)TP, so threads release their TLS block with
- * __meuos_tls_free(tp) instead of recomputing the mmap base from TP. */
+ * For static binaries the linker bakes the symbol's offset within
+ * the PT_TLS image into the addend, plus a 16-byte GAP_ABOVE_TP
+ * reservation that matches the musl aarch64 ABI (the TCB header lives
+ * just below .tdata).  Concretely TPIDR_EL0 must address the start of
+ * the mmap allocation; .tdata starts at TP+16; user-visible TLS
+ * reads at TP+0x10 land on .tdata[0].  Without the gap the access
+ * reads garbage from neighbouring pages.
+ *
+ * The kernel programs TPIDR_EL0 directly when CLONE_SETTLS is
+ * supplied to clone(2); the main thread installs it via `msr tpidr_el0`
+ * in set_tls.S.  Threads release the TLS block with __meuos_tls_free(tp)
+ * (passing the user-visible TP, i.e. the mmap base). */
 
 #define AT_NULL 0
 #define AT_PHDR 3
@@ -43,6 +49,18 @@ struct meuos_phdr {
  * MSR lives in its own tiny assembly stub. */
 extern void __meuos_set_tls(void *tp);
 
+/* musl uses GAP_ABOVE_TP = 16 on aarch64 to leave room for the TCB
+ * header that lives just below the TLS data.  The compiler emits
+ * local-exec TLS accesses as `mrs R, tpidr_el0; add R, R, #tprel`
+ * where tprel is the symbol's offset within the TLS segment; the
+ * static linker bakes the GAP into the addend so an access like
+ * `*((int*)TP+0x10)` actually reads .tdata[0].  We follow the same
+ * layout: TPIDR_EL0 points at the TCB header (mmap base), .tdata is
+ * copied to mmap_base + GAP, and __meuos_tls_free must release the
+ * whole mmap region (not TP+something) since the user address is the
+ * TCB pointer itself. */
+#define MEUOS_TLS_GAP 16
+
 static const void *tls_image;
 static size_t tls_file_size, tls_memory_size, tls_alignment, tls_allocation_size;
 
@@ -60,15 +78,19 @@ allocate_tls(void)
 
 	if (!tls_memory_size)
 		return 0;
-	tls_allocation_size = round_up(tls_memory_size, tls_alignment);
+	/* Reserve MEUOS_TLS_GAP bytes at the low end of the allocation so
+	 * the thread pointer (the start of the region) addresses a small
+	 * TCB header instead of .tdata itself.  The linker-baked tprel
+	 * already accounts for this gap (see MEUOS_TLS_GAP comment). */
+	tls_allocation_size = round_up(tls_memory_size + MEUOS_TLS_GAP, tls_alignment);
 	result = __syscall6(AARCH64_SYS_MMAP, 0, tls_allocation_size,
 		PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 	if (__syscall_error(result))
 		return 0;
 	memory = (char *)result;
-	/* mmap already zeroes the whole region; copy .tdata into place.
-	 * Variant I: TLS data begins at the thread pointer (memory + 0). */
-	memcpy(memory, tls_image, tls_file_size);
+	/* mmap already zeroes the whole region (including the TCB gap);
+	 * copy .tdata into place at memory + GAP. */
+	memcpy(memory + MEUOS_TLS_GAP, tls_image, tls_file_size);
 	return memory;
 }
 
@@ -118,8 +140,8 @@ void *
 __meuos_tls_alloc(void) { return allocate_tls(); }
 size_t __meuos_tls_size(void) { return tls_allocation_size; }
 
-/* Variant I has no self-referential slot above TP, so the mmap base
- * equals the thread pointer itself. */
+/* thread_pointer is the user-visible TP (mmap base, TPIDR_EL0 value);
+ * munmap releases the entire allocation that backs it. */
 void
 __meuos_tls_free(void *thread_pointer)
 {
