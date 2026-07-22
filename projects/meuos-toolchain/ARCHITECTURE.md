@@ -154,61 +154,44 @@ make -C projects/meuos-toolchain check-ld-x86_64
 
 ### P3：mcc driver 集成
 
-> **为什么需要**：当前 mcc 通过 `host_toolchain.c` 把汇编/链接外包给宿主 `cc`，
-> 这是 Kit 自举链的最后一个外部依赖。消除它才能实现真正的自我重建。
+> 消除 Kit 自举链的最后一个外部依赖（宿主 `cc` 做汇编/链接）。
 
-**依赖**：P0-P2（已完成）
-**规模**：S
+**依赖**：P0-P2　**规模**：S
 
-**产物**：mcc 不再调用宿主 `cc`/`as`/`ld`，改用 `mt/as` + `mt/ld` + `mt/ar`。
-
-任务：
-1. `projects/mcc/src/driver/host_toolchain.c` 增加 mt 工具调用路径；
-2. `projects/mcc/Makefile` 在 `MT_AS`/`MT_LD`/`MT_AR` 设置时使用 mt 工具；
-3. 未设置时保持宿主回退（Phase 1 bootstrap 不回归）。
+产物：mcc 通过 `MT_AS`/`MT_LD`/`MT_AR` 调用 mt 工具，不再经宿主 `cc`。
 
 验收：
 ```sh
 MT_AS=<mt>/bin/as MT_LD=<mt>/bin/ld MT_AR=<mt>/bin/ar \
     make -C projects/mcc check check-sysroot-static
-# strace 确认 mcc 不调用宿主 cc
-MT_AS=<mt>/bin/as MT_LD=<mt>/bin/ld \
-    strace -f mcc --specs=meuos test.c -o test 2>&1 \
-    | grep 'execve' | grep -v '/mt/' | grep -E 'cc|as|ld'
-# 上面的输出应为空
+strace -f mcc --specs=meuos test.c -o test 2>&1 \
+    | grep execve | grep -v '/mt/' | grep -E 'cc|as|ld'   # 应为空
 ```
 
 ---
 
 ### P4：二进制辅助工具
 
-> **为什么需要**：构建真实软件包（busybox/binutils/coreutils）时，configure
-> 脚本和 Makefile 会调用 `nm`/`readelf`/`objdump`/`strip`/`objcopy`。没有
-> 这些工具，meow 无法完整构建任何非平凡软件包。
+> 构建真实软件包时 configure/make 会调用 nm/readelf/objdump/strip/objcopy。
 
-**依赖**：P0（libelf）
-**规模**：M
+**依赖**：P0（libelf）　**规模**：M
 
-**产物**：`readelf`、`nm`、`objdump`、`strip`、`objcopy`。
+产物：`readelf`、`nm`、`objdump`、`strip`、`objcopy`，全部复用 libelf。
 
-| 工具 | 真实场景 | 复用 |
-|------|---------|------|
-| readelf | `configure` 检测 ELF 属性、交叉编译验证 | libelf |
-| nm | 链接时符号检查、调试符号冲突 | libelf symtab |
-| objdump | 反汇编排查代码生成问题 | libelf + 解码器 |
-| strip | 发布前减小二进制体积 | libelf 写入 |
-| objcopy | 提取 `.text` 做 firmware/boot image | libelf 写入 |
+| 工具 | 真实场景 |
+|------|---------|
+| readelf | configure 检测 ELF 属性、交叉编译验证 |
+| nm | 符号冲突检查、库依赖分析 |
+| objdump | 反汇编排查代码生成问题 |
+| strip | 发布前减小二进制体积 |
+| objcopy | 提取节区、格式转换 |
 
 验收：
 ```sh
 make -C projects/meuos-toolchain check-tools
-# readelf 输出能被 configure 脚本解析
 readelf -h build/bin/as | grep -q 'Machine:.*x86-64'
-# nm 输出兼容宿主格式
 nm build/bin/ar | grep -q ' T main'
-# strip 后程序仍可运行
-strip build/bin/as && build/bin/as --version
-# objdump -d 反汇编
+cp build/bin/as /tmp/as.s && strip /tmp/as.s && /tmp/as.s --version
 objdump -d build/bin/ar | grep -q 'endbr64'
 ```
 
@@ -216,76 +199,161 @@ objdump -d build/bin/ar | grep -q 'endbr64'
 
 ### P5：自举验证
 
-> **为什么需要**：证明 Kit 工具链能在 MeuOS 环境中自我重建。这是 AGENTS.md
-> Phase 4 的核心要求，也是"零 GNU 代码"自举链的最终验证。
+> AGENTS.md Phase 4 核心要求：Kit 在 MeuOS 环境中自我重建。
 
-**依赖**：P3 + P4
-**规模**：M
+**依赖**：P3 + P4　**规模**：M
 
-**产物**：`bootstrap.sh` 全流程通过，在 QEMU x86_64 sysroot 中用 mt 工具链
-重建 mcc、libc、meow、mt 自身。
-
-任务：
-1. Phase 0-1：宿主工具构建第一代 mt；
-2. Phase 2-3：mcc + libc-meuos + mt 工具链构建第二代 mt；
-3. Phase 4：QEMU sysroot 中执行 `bootstrap.sh`，两代工具行为对比；
-4. 输出 `bootstrap-report.md`。
+产物：`bootstrap.sh` 全流程通过，QEMU x86_64 sysroot 中 mt 自重建 Kit。
 
 验收：
 ```sh
 MEUOS_SYSROOT=<sysroot> ./bootstrap.sh
 grep -q 'Phase 4.*PASS' bootstrap-report.md
-# 两代 mcc 编译同一程序，行为等价（不要求 bit-identical）
-gen1_mcc -S test.c -o gen1.s && gen2_mcc -S test.c -o gen2.s
-gen1_mcc test.c -o gen1 && gen2_mcc test.c -o gen2
-diff <(./gen1) <(./gen2)  # 输出一致
 ```
 
 ---
 
 ### P6：动态链接
 
-> **为什么需要**：真实系统中几乎所有软件都依赖共享库（libc.so、libssl.so
-> 等）。没有动态链接，meow 只能构建纯静态二进制，无法构建真实发行版。
-> 这是 P3-P5 之后最关键的基础设施缺口。
+> 真实软件几乎都依赖共享库。没有动态链接，meow 只能构建纯静态二进制。
 
-**依赖**：P3 + P5（自举验证通过）
-**规模**：L（最大单项工程）
+**依赖**：P3 + P5　**规模**：L
 
-**产物**：mt/ld 支持 `-shared` 生成 `ET_DYN` 共享库，动态链接器 `ld.so`，
-mcc 支持 `-fPIC`/`-shared`，libc 提供 `dlopen`/`dlsym`。
+产物：mt/ld `-shared`（`ET_DYN`）、`-pie`/`-no-pie`、动态链接器 `ld.so`、
+libc `dlopen`/`dlsym`/`dlclose`。
 
 任务：
-1. mcc: `-fPIC` 生成位置无关代码（GOTPCREL/PLT 已有基础）；
-2. mt/ld: `-shared` 生成共享库（`.dynsym`/`.dynstr`/`.hash`/`.plt`/`.got`）；
-3. mt/ld: `-pie`/`-no-pie` 选项，动态可执行文件链接；
-4. `ld.so`: 动态链接器（加载 `.so`、符号解析、懒绑定、RELRO）；
+1. mcc: `-fPIC` 位置无关代码生成；
+2. mt/ld: 共享库输出（`.dynsym`/`.dynstr`/`.hash`/`.plt`/`.got`）；
+3. mt/ld: 动态可执行文件链接、`NEEDED` 条目；
+4. `ld.so`: 加载 `.so`、符号解析、懒绑定、RELRO；
 5. libc: `dlopen`/`dlsym`/`dlclose`。
 
 验收：
 ```sh
-# 构建共享库
 mcc -shared -fPIC -o libfoo.so foo.c
-# 动态链接
 mcc -o app main.c -L. -lfoo
-# 运行
 LD_LIBRARY_PATH=. ./app
-# 依赖关系正确
 readelf -d app | grep -q 'NEEDED.*libfoo.so'
-# busybox 动态构建
-meow build busybox  # 动态链接版本
+meow build busybox    # 动态链接版本
 ```
 
 ---
 
-### 后续（按需，不预设阶段）
+### P7：TLS 动态模型
 
-以下能力在 P6 完成后按 MeuOS Next 实际需求安排，不预设优先级：
+> 共享库中的 `_Thread_local` 需要 GD/LD 模型。glibc 的 `errno` 就是
+> `_Thread_local`，任何使用 errno 的共享库都会触发。
 
-- **多架构**（i386/aarch64/riscv64）：取决于 MeuOS Next 目标平台
-- **DWARF 调试信息**：取决于是否有 gdb 或其他调试器
-- **TLS 动态模型**（GD/LD）：取决于共享库中是否使用 `_Thread_local`
-- **完整 gas 兼容**：只需 mcc 生成的子集，非目标
+**依赖**：P6　**规模**：M
+
+产物：TLS general-dynamic 和 local-dynamic 代码序列、重定位、运行时支持。
+
+任务：
+1. mt/as: TLS GD/LD 代码序列编码（`__tls_get_addr` 调用）；
+2. mt/ld: `R_X86_64_DTPMOD64`/`R_X86_64_DTPOFF64`/`R_X86_64_TPOFF64`；
+3. ld.so: `PT_TLS` 处理、`__tls_get_addr` 实现；
+4. libc: `__tls_get_addr` 运行时。
+
+验收：
+```sh
+# 共享库中的 _Thread_local
+echo '_Thread_local int tls_var = 42; int get_tls(void){return tls_var;}' > libtls.c
+mcc -shared -fPIC -o libtls.so libtls.c
+mcc -o tls_test main.c -L. -ltls
+LD_LIBRARY_PATH=. ./tls_test     # 输出 42
+# 多线程 TLS 隔离
+./tls_threads_test               # 每线程独立
+```
+
+---
+
+### P8：DWARF 调试信息
+
+> 构建带 `-g` 的软件包、调试崩溃、stack trace 都需要 DWARF。部分 configure
+> 脚本会检测调试信息支持。
+
+**依赖**：P3 + P4（objdump 反汇编）　**规模**：M
+
+产物：mcc `-g` 生成 DWARF v5（`.debug_info`/`.debug_line`/`.debug_abbrev`），
+mt/ld 合并重定位 `.debug_*` 节，strip 支持 `--strip-debug`。
+
+任务：
+1. mcc: IR/emit 阶段生成 DWARF 调试信息段；
+2. mt/ld: 合并 `.debug_*`，应用重定位；
+3. strip: `--strip-debug` 只删调试节；
+4. readelf: `.debug_info` 解析查看。
+
+验收：
+```sh
+mcc -g --specs=meuos -o test test.c
+readelf --debug-dump=info test | grep -q 'DW_TAG_subprogram'
+strip --strip-debug test && readelf -S test | grep -v '\.debug'
+./test                          # 仍正常运行
+```
+
+---
+
+### P9：i386 架构
+
+> 32 位 x86 仍在嵌入式/兼容场景中使用。某些遗留软件包只支持 i386。
+
+**依赖**：P3　**规模**：M
+
+产物：mt/as + mt/ld 支持 i386（`EM_386`，ELF32）。
+
+任务：
+1. mt/as: i386 指令编码（32 位 GPR、x87 浮点）；
+2. mt/ld: i386 重定位（`R_386_32`/`R_386_PC32`/`R_386_GOTPC`/`R_386_TLS_*`）；
+3. mt/as: i386 crt1.S/atomic.S 运行时汇编。
+
+验收：
+```sh
+make -C projects/meuos-toolchain check-as-i386 check-ld-i386
+qvm run i386 '/mnt/host/i386_counter_test'
+```
+
+---
+
+### P10：aarch64 架构
+
+> ARM 服务器和嵌入式平台。MeuOS Next 可能需要跨架构支持。
+
+**依赖**：P3　**规模**：L
+
+产物：mt/as + mt/ld 支持 aarch64（`EM_AARCH64`）。
+
+任务：
+1. mt/as: aarch64 指令编码（ADRP/LDR/STR/B/BL 等）；
+2. mt/ld: aarch64 重定位（`R_AARCH64_ADR_PREL_PG_HI21`/`R_AARCH64_CALL26` 等）；
+3. mt/as: aarch64 crt/atomic/syscall 运行时汇编。
+
+验收：
+```sh
+make -C projects/meuos-toolchain check-as-aarch64 check-ld-aarch64
+qvm run aarch64 '/mnt/host/aarch64_test'
+```
+
+---
+
+### P11：riscv64 架构
+
+> RISC-V 是开放架构，MeuOS Next 可能需要支持。
+
+**依赖**：P3　**规模**：L
+
+产物：mt/as + mt/ld 支持 riscv64（`EM_RISCV`）。
+
+任务：
+1. mt/as: riscv64 指令编码（LUI/AUIPC/JAL/JALR 等）；
+2. mt/ld: riscv64 重定位（`R_RISCV_HI20`/`R_RISCV_CALL` 等）；
+3. mt/as: riscv64 crt/atomic/syscall 运行时汇编。
+
+验收：
+```sh
+make -C projects/meuos-toolchain check-as-riscv64 check-ld-riscv64
+qvm run riscv64 '/mnt/host/riscv64_test'
+```
 
 ## 3. 后续架构策略
 
