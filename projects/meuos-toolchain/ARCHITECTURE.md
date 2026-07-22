@@ -113,14 +113,14 @@ make -C projects/meuos-toolchain check
 当前已完成门禁：
 
 ```sh
-make -C projects/meuos-toolchain check-as-x86_64
+make -C projects/meuos-toolchain check-as-x86_64 check-as-libc-x86_64
 ```
 
 - x86_64 mcc 常见整数/内存/栈/分支/call/ret/shift/div/set/cmov 指令可编码；
 - `.text/.rodata/.data/.bss` 和常用数据指令可生成；
 - 每个 golden case 的字节和 relocation 与参考结果一致；
 - 生成的 `.o` 可由宿主 `readelf` 读取；
-- mcc 产出的 x86_64 `.s` 可完整汇编；
+- mcc 产出的 x86_64 `.s` 和 MeuOS libc 的 crt/atomic/setjmp/sigreturn/thread/syscall 汇编可汇编；
 - 错误输入必须报告行号和列号，不得崩溃。
 
 ### P2：x86_64 静态链接器（核心完成，sysroot 集成待做）

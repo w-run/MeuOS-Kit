@@ -30,3 +30,8 @@
 - `test/ld_smoke.sh` 覆盖 mt as + mt ar + mt ld + GOT/PLT + syscall-only `_start`。
 - `make -C projects/meuos-toolchain check` 全绿。
 - 下一阶段是接入 MeuOS libc/crt1/sysroot；浮点/SSE、完整 GNU as 兼容和 mcc driver 集成仍未完成。
+
+## 2026-07-22：x86_64 as runtime coverage 扩展
+
+- 支持 C 风格块注释、GNU numeric labels（`1f/1b`）、SIB 地址、`lock xadd/cmpxchg`、`xchg`、`mfence`、`hlt`、`syscall`。
+- 新增 `test/as_libc_x86_64.sh`，crt1、atomic、setjmp、sigreturn、thread_clone、syscall gate 六个 MeuOS libc x86_64 汇编文件均可由 mt/as 生成 ET_REL。

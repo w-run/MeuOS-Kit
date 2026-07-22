@@ -345,7 +345,7 @@ mt 与 mcc 保持一致：**单一二进制 + 架构在源码层模块化**，�
 
 - **P0a/P0b 当前完成**：`make -C projects/meuos-toolchain check` 全绿；`libelf` 可验证 x86_64 ET_REL 并读取 symtab/strtab；`ar` 支持 symbol index、GNU long-name table、r/q 更新语义和宿主 `ld` 互操作；
 - **尚未完成**：独立 `ranlib` 命令、BSD `#1/` extended-name 变体、浮点/SSE 完整编码、mcc Makefile/driver 集成；
-- **as x86_64**：`make -C projects/meuos-toolchain check-as-x86_64` 和 mcc 整数/数据/调用 fixture 通过；
+- **as x86_64**：`make -C projects/meuos-toolchain check-as-x86_64 check-as-libc-x86_64` 通过；mcc 整数/数据/调用 fixture 与 MeuOS libc x86_64 运行时汇编均可生成 ET_REL；
 - **ld x86_64 核心**：`make -C projects/meuos-toolchain check-ld-x86_64` 通过，mt as + ar + ld + GOT/PLT + syscall smoke 可运行；
 - **尚未完成的 P2 生产门禁**：MeuOS libc/crt1/sysroot 静态链接和 `counter = 2000`，需要下一阶段接入 sysroot
 - **完整自举**：mcc + mt（as + ld + ar）全部由 mcc + libc-meuos 自重编译
@@ -373,7 +373,7 @@ mt 与 mcc 保持一致：**单一二进制 + 架构在源码层模块化**，�
 - 归档包含 `/` symbol index，长成员名使用 `//` table，宿主 `ld` 可以直接链接；
 - x86_64 `as` 生成 ET_REL，`ld` 生成 ET_EXEC；回归覆盖 ELF、symbol index、宿主链接、长名、追加、替换、GOT/PLT 和 syscall 运行；
 - 阶段计划和门禁见 [`ARCHITECTURE.md`](ARCHITECTURE.md)；
-- 当前剩余兼容性任务记录在 `.todo/p0-foundation-ar.md`。
+- 当前剩余兼容性任务记录在 `.todo/p0-foundation-ar.md`、`.todo/p1-x86_64-as.md` 和 `.todo/p2-x86_64-ld.md`。
 
 ### 本地构建和验收
 

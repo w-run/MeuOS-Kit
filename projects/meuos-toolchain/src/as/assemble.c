@@ -81,6 +81,8 @@ struct as_file {
 	const char *filename;
 	unsigned line;
 	char error[256];
+	size_t numeric_counts[10];
+	int block_comment;
 };
 
 struct as_operand {
@@ -88,6 +90,8 @@ struct as_operand {
 	int reg;
 	int width;
 	int base;
+	int index;
+	int scale;
 	int64_t displacement;
 	char *symbol;
 	char modifier[16];
@@ -174,29 +178,47 @@ trim(char *text)
 }
 
 static void
-strip_comment(char *line)
+strip_comments(struct as_file *as, char *line)
 {
+	char *source = line;
+	char *destination = line;
 	int quote = 0;
 	int escape = 0;
-	char *p;
-	for (p = line; *p; ++p) {
+
+	while (*source) {
+		if (as->block_comment) {
+			if (source[0] == '*' && source[1] == '/') {
+				as->block_comment = 0;
+				source += 2;
+			} else
+				++source;
+			continue;
+		}
 		if (escape) {
+			*destination++ = *source++;
 			escape = 0;
 			continue;
 		}
-		if (*p == '\\' && quote) {
+		if (*source == '\\' && quote) {
+			*destination++ = *source++;
 			escape = 1;
 			continue;
 		}
-		if (*p == '"') {
+		if (*source == '"') {
 			quote = !quote;
+			*destination++ = *source++;
 			continue;
 		}
-		if (*p == '#' && !quote) {
-			*p = '\0';
-			return;
+		if (!quote && source[0] == '/' && source[1] == '*') {
+			as->block_comment = 1;
+			source += 2;
+			continue;
 		}
+		if (!quote && *source == '#')
+			break;
+		*destination++ = *source++;
 	}
+	*destination = '\0';
 }
 
 static void
@@ -543,6 +565,40 @@ parse_register(const char *text, int *reg, int *width)
 }
 
 static int
+normalize_numeric_reference(struct as_file *as, char **symbol)
+{
+	const char *text = *symbol;
+	size_t length = strlen(text);
+	size_t i;
+	int number;
+	int forward;
+	char generated[64];
+	size_t occurrence;
+
+	if (length < 2 || (text[length - 1] != 'f' && text[length - 1] != 'b'))
+		return 0;
+	for (i = 0; i + 1 < length; ++i)
+		if (text[i] < '0' || text[i] > '9')
+			return 0;
+	if (i != 1 || text[0] < '0' || text[0] > '9')
+		return 0;
+	number = text[0] - '0';
+	forward = text[length - 1] == 'f';
+	if (!forward && as->numeric_counts[number] == 0)
+		return as_error(as, "backward numeric label has no definition: %s", text);
+	occurrence = forward ? as->numeric_counts[number] + 1 :
+	             as->numeric_counts[number];
+	snprintf(generated, sizeof(generated), ".Lmt_num_%d_%zu",
+	         number, occurrence);
+	free(*symbol);
+	*symbol = mt_strdup(generated);
+	return *symbol ? 0 : as_error(as, "out of memory");
+}
+
+static int
+split_operands(char *text, char *operands[4]);
+
+static int
 parse_operand(struct as_file *as, char *text, struct as_operand *op)
 {
 	char *open;
@@ -553,6 +609,9 @@ parse_operand(struct as_file *as, char *text, struct as_operand *op)
 	int is_number;
 
 	memset(op, 0, sizeof(*op));
+	op->base = -1;
+	op->index = -1;
+	op->scale = 1;
 	text = trim(text);
 	if (!*text)
 		return as_error(as, "empty operand");
@@ -564,6 +623,8 @@ parse_operand(struct as_file *as, char *text, struct as_operand *op)
 		op->kind = is_number ? OP_IMM : OP_SYMBOL;
 		op->displacement = op->addend;
 		op->symbol = symbol;
+		if (op->symbol && normalize_numeric_reference(as, &op->symbol) != 0)
+			return -1;
 		return 0;
 	}
 	if (text[0] == '%' && parse_register(text, &op->reg, &op->width) == 0) {
@@ -579,10 +640,29 @@ parse_operand(struct as_file *as, char *text, struct as_operand *op)
 		*close = '\0';
 		prefix = trim(text);
 		inside = trim(open + 1);
-		if (strcmp(inside, "%rip") == 0) {
-			op->base = -2;
-		} else if (parse_register(inside, &op->base, &op->width) != 0) {
-			return as_error(as, "unsupported address register: %s", inside);
+		{
+			char *parts[4];
+			int part_count = split_operands(inside, parts);
+			if (part_count == 1 && strcmp(parts[0], "%rip") == 0) {
+				op->base = -2;
+			} else if (part_count >= 1 && part_count <= 3 &&
+			           parse_register(parts[0], &op->base, &op->width) == 0) {
+				if (part_count >= 2 && *parts[1] &&
+				    parse_register(parts[1], &op->index, &op->width) != 0)
+					return as_error(as, "unsupported address index: %s", parts[1]);
+				if (part_count == 3 && parse_integer(parts[2], &op->displacement) != 0)
+					return as_error(as, "invalid address scale: %s", parts[2]);
+				if (part_count == 3 && op->displacement != 1 &&
+				    op->displacement != 2 && op->displacement != 4 &&
+				    op->displacement != 8)
+					return as_error(as, "address scale must be 1, 2, 4 or 8");
+				if (part_count == 3) {
+					op->scale = (int)op->displacement;
+					op->displacement = 0;
+				}
+			} else {
+				return as_error(as, "unsupported address expression: %s", inside);
+			}
 		}
 		if (*prefix) {
 			if (parse_reference(prefix, &symbol, op->modifier,
@@ -591,8 +671,11 @@ parse_operand(struct as_file *as, char *text, struct as_operand *op)
 				return as_error(as, "invalid memory displacement: %s", prefix);
 			if (is_number)
 				op->displacement = op->addend;
-			else
+			else {
 				op->symbol = symbol;
+				if (normalize_numeric_reference(as, &op->symbol) != 0)
+					return -1;
+			}
 		}
 		op->kind = OP_MEM;
 		return 0;
@@ -606,6 +689,8 @@ parse_operand(struct as_file *as, char *text, struct as_operand *op)
 	} else {
 		op->kind = OP_SYMBOL;
 		op->symbol = symbol;
+		if (normalize_numeric_reference(as, &op->symbol) != 0)
+			return -1;
 	}
 	return 0;
 }
@@ -663,6 +748,14 @@ emit_rex(struct as_file *as, struct as_section *section, int w, int r, int b)
 }
 
 static int
+emit_byte_rex(struct as_file *as, struct as_section *section, int reg, int rm)
+{
+	if ((reg >= 4 && reg < 8) || (rm >= 4 && rm < 8))
+		return emit_u8(as, section, 0x40);
+	return 0;
+}
+
+static int
 emit_modrm(struct as_file *as, struct as_section *section, int reg,
            const struct as_operand *rm, unsigned fix_type,
            int64_t fix_addend)
@@ -703,10 +796,16 @@ emit_modrm(struct as_file *as, struct as_section *section, int reg,
 		mod = 1;
 	else
 		mod = 2;
-	if (base == 4 || base == 12) {
+	if (rm->index >= 8)
+		return as_error(as, "extended SIB index registers are not supported yet");
+	if (rm->index >= 0 || base == 4 || base == 12) {
+		unsigned scale = rm->scale == 8 ? 3 : rm->scale == 4 ? 2 :
+		                 rm->scale == 2 ? 1 : 0;
+		unsigned index = rm->index >= 0 ? (unsigned)rm->index : 4;
 		modrm = ((unsigned)mod << 6) | ((unsigned)reg & 7) << 3 | 4;
 		if (emit_u8(as, section, modrm) != 0 ||
-		    emit_u8(as, section, 0x20 | ((unsigned)base & 7)) != 0)
+		    emit_u8(as, section, (scale << 6) | (index << 3) |
+		             ((unsigned)base & 7)) != 0)
 			return -1;
 	} else {
 		modrm = ((unsigned)mod << 6) | ((unsigned)reg & 7) << 3 |
@@ -745,7 +844,10 @@ emit_rm_reg(struct as_file *as, struct as_section *section, unsigned opcode,
 		else if (rm->base != -2)
 			return as_error(as, "symbolic non-RIP memory is unsupported");
 	}
-	if (emit_rex(as, section, width == 8, reg, rm->kind == OP_REG ? rm->reg : rm->base) != 0 ||
+	if ((width == 1 && emit_byte_rex(as, section, reg,
+	                               rm->kind == OP_REG ? rm->reg : -1) != 0) ||
+	    emit_rex(as, section, width == 8, reg,
+	              rm->kind == OP_REG ? rm->reg : rm->base) != 0 ||
 	    emit_u8(as, section, opcode) != 0)
 		return -1;
 	return emit_modrm(as, section, reg, rm, fix_type, rm->addend - 4);
@@ -759,7 +861,9 @@ emit_binary_immediate(struct as_file *as, struct as_section *section,
 	if (src->kind != OP_IMM ||
 	    (dst->kind != OP_REG && dst->kind != OP_MEM))
 		return as_error(as, "invalid immediate arithmetic operands");
-	if (emit_rex(as, section, width == 8, 0,
+	if ((width == 1 && emit_byte_rex(as, section, 0,
+	                               dst->kind == OP_REG ? dst->reg : -1) != 0) ||
+	    emit_rex(as, section, width == 8, 0,
 	             dst->kind == OP_REG ? dst->reg : dst->base) != 0 ||
 	    emit_u8(as, section, width == 1 ? 0x80 : 0x81) != 0 ||
 	    emit_modrm(as, section, ext, dst, MT_R_X86_64_PC32, -4) != 0)
@@ -837,6 +941,25 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 		return emit_u8(as, section, 0x0f) || emit_u8(as, section, 0x0b);
 	if (strcmp(base, "syscall") == 0)
 		return emit_u8(as, section, 0x0f) || emit_u8(as, section, 0x05);
+	if (strcmp(base, "mfence") == 0)
+		return emit_u8(as, section, 0x0f) || emit_u8(as, section, 0xae) ||
+		       emit_u8(as, section, 0xf0);
+	if (strcmp(base, "hlt") == 0)
+		return emit_u8(as, section, 0xf4);
+	if (strcmp(base, "lock") == 0) {
+		char *inner = trim(operand_text);
+		char *inner_operands;
+		char *split = inner;
+		while (*split && !isspace((unsigned char)*split))
+			++split;
+		if (!*inner || !*split)
+			return as_error(as, "lock requires an instruction");
+		*split++ = '\0';
+		inner_operands = trim(split);
+		if (emit_u8(as, section, 0xf0) != 0)
+			return -1;
+		return emit_instruction(as, inner, inner_operands);
+	}
 	if (strcmp(base, "cqto") == 0)
 		return emit_u8(as, section, 0x48) || emit_u8(as, section, 0x99);
 	if (strcmp(base, "cltd") == 0)
@@ -920,7 +1043,7 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 			goto unsupported;
 		width = op[1].width;
 		if (emit_rex(as, section, width == 8, op[1].reg,
-		              op[0].kind == OP_REG ? op[0].reg : op[0].base) != 0 ||
+		              op[0].kind == OP_REG ? op[0].reg : -1) != 0 ||
 		    emit_u8(as, section, 0x0f) != 0 ||
 		    emit_u8(as, section, 0x40 | code) != 0 ||
 		    emit_modrm(as, section, op[1].reg, &op[0],
@@ -963,7 +1086,7 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 		if (op[0].kind != OP_REG && op[0].kind != OP_MEM)
 			goto unsupported;
 		if (emit_rex(as, section, width == 8, 0,
-		              op[0].kind == OP_REG ? op[0].reg : op[0].base) != 0 ||
+		              op[0].kind == OP_REG ? op[0].reg : -1) != 0 ||
 		    emit_u8(as, section, width == 1 ? 0xf6 : 0xf7) != 0 ||
 		    emit_modrm(as, section, ext, &op[0], MT_R_X86_64_PC32, -4) != 0)
 			goto fail;
@@ -981,7 +1104,7 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 		width = op[1].width;
 		if (source_width == 4 && width == 8) {
 			if (emit_rex(as, section, 1, op[1].reg,
-			              op[0].kind == OP_REG ? op[0].reg : op[0].base) != 0 ||
+			              op[0].kind == OP_REG ? op[0].reg : -1) != 0 ||
 			    emit_u8(as, section, 0x63) != 0 ||
 			    emit_modrm(as, section, op[1].reg, &op[0],
 			               MT_R_X86_64_PC32, -4) != 0)
@@ -992,7 +1115,7 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 			if (source_width == 4)
 				goto unsupported;
 			if (emit_rex(as, section, width == 8, op[1].reg,
-			              op[0].kind == OP_REG ? op[0].reg : op[0].base) != 0 ||
+			              op[0].kind == OP_REG ? op[0].reg : -1) != 0 ||
 			    emit_u8(as, section, 0x0f) != 0 || emit_u8(as, section, opcode) != 0 ||
 			    emit_modrm(as, section, op[1].reg, &op[0],
 			               MT_R_X86_64_PC32, -4) != 0)
@@ -1040,13 +1163,53 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 		}
 		goto unsupported;
 	}
-	if (strcmp(base, "lea") == 0 && n == 2 && op[1].kind == OP_REG) {
+	if (strncmp(base, "lea", 3) == 0 && n == 2 && op[1].kind == OP_REG) {
 		width = op[1].width;
 		if (emit_rex(as, section, width == 8, op[1].reg,
-		              op[0].kind == OP_REG ? op[0].reg : op[0].base) != 0 ||
+		              op[0].kind == OP_REG ? op[0].reg : -1) != 0 ||
 		    emit_u8(as, section, 0x8d) != 0 ||
 		    emit_modrm(as, section, op[1].reg, &op[0],
 		               MT_R_X86_64_PC32, -4) != 0)
+			goto fail;
+		goto done;
+	}
+	if ((strncmp(base, "xchg", 4) == 0 || strncmp(base, "xadd", 4) == 0 ||
+	     strncmp(base, "cmpxchg", 7) == 0) && n == 2) {
+		const char *prefix = strncmp(base, "cmpxchg", 7) == 0 ? base + 7 : base + 4;
+		char suffix_char = *prefix;
+		width = suffix_char == 'b' ? 1 : suffix_char == 'w' ? 2 :
+		        suffix_char == 'l' ? 4 : 8;
+		if (strncmp(base, "xchg", 4) == 0) {
+			opcode = width == 1 ? 0x86 : 0x87;
+			if (emit_rm_reg(as, section, opcode, width, &op[0], &op[1]) != 0)
+				goto fail;
+		} else {
+			opcode = strncmp(base, "xadd", 4) == 0 ?
+			          (width == 1 ? 0xc0 : 0xc1) :
+			          (width == 1 ? 0xb0 : 0xb1);
+			if ((width == 1 && emit_byte_rex(as, section,
+			                               op[0].kind == OP_REG ? op[0].reg :
+			                               op[1].reg,
+			                               op[1].kind == OP_REG ? op[1].reg : -1) != 0) ||
+			    emit_rex(as, section, width == 8,
+			              op[0].kind == OP_REG ? op[0].reg : op[1].reg,
+			              op[1].kind == OP_REG ? op[1].reg : op[1].base) != 0 ||
+			    emit_u8(as, section, 0x0f) != 0 || emit_u8(as, section, opcode) != 0 ||
+			    emit_modrm(as, section, op[0].kind == OP_REG ? op[0].reg : op[1].reg,
+			               &op[1], MT_R_X86_64_PC32, -4) != 0)
+				goto fail;
+		}
+		goto done;
+	}
+	if ((strncmp(base, "inc", 3) == 0 || strncmp(base, "dec", 3) == 0) && n == 1) {
+		char suffix_char = base[3];
+		width = suffix_char == 'b' ? 1 : suffix_char == 'w' ? 2 :
+		        suffix_char == 'l' ? 4 : 8;
+		opcode = strncmp(base, "inc", 3) == 0 ? 0 : 1;
+		if (emit_rex(as, section, width == 8, 0,
+		              op[0].kind == OP_REG ? op[0].reg : -1) != 0 ||
+		    emit_u8(as, section, width == 1 ? 0xfe : 0xff) != 0 ||
+		    emit_modrm(as, section, opcode, &op[0], MT_R_X86_64_PC32, -4) != 0)
 			goto fail;
 		goto done;
 	}
@@ -1065,7 +1228,7 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 		if (n == 2 && op[1].kind == OP_REG) {
 			width = op[1].width;
 			if (emit_rex(as, section, width == 8, op[1].reg,
-			              op[0].kind == OP_REG ? op[0].reg : op[0].base) != 0 ||
+			              op[0].kind == OP_REG ? op[0].reg : -1) != 0 ||
 			    emit_u8(as, section, 0x0f) != 0 || emit_u8(as, section, 0xaf) != 0 ||
 			    emit_modrm(as, section, op[1].reg, &op[0],
 			               MT_R_X86_64_PC32, -4) != 0)
@@ -1097,8 +1260,10 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 	if (strncmp(base, "neg", 3) == 0 && n == 1) {
 		width = base[3] == 'b' ? 1 : base[3] == 'w' ? 2 :
 		        base[3] == 'l' ? 4 : 8;
-		if (emit_rex(as, section, width == 8, 0,
-		             op[0].kind == OP_REG ? op[0].reg : op[0].base) != 0 ||
+		if ((width == 1 && emit_byte_rex(as, section, 0,
+		                               op[0].kind == OP_REG ? op[0].reg : -1) != 0) ||
+		    emit_rex(as, section, width == 8, 0,
+		             op[0].kind == OP_REG ? op[0].reg : -1) != 0 ||
 		    emit_u8(as, section, width == 1 ? 0xf6 : 0xf7) != 0 ||
 		    emit_modrm(as, section, 3, &op[0], MT_R_X86_64_PC32, -4) != 0)
 			goto fail;
@@ -1453,7 +1618,7 @@ parse_line(struct as_file *as, char *line)
 	char *rest;
 	struct as_symbol *symbol;
 
-	strip_comment(text);
+	strip_comments(as, text);
 	text = trim(text);
 	while (*text) {
 		colon = strchr(text, ':');
@@ -1466,7 +1631,19 @@ parse_line(struct as_file *as, char *line)
 		*colon = '\0';
 		if (!*text)
 			return as_error(as, "empty label");
-		symbol = get_symbol(as, text);
+		{
+			char numeric_name[64];
+			int numeric = text[0] >= '0' && text[0] <= '9' && text[1] == '\0';
+			if (numeric) {
+				int number = text[0] - '0';
+				++as->numeric_counts[number];
+				snprintf(numeric_name, sizeof(numeric_name),
+				         ".Lmt_num_%d_%zu", number, as->numeric_counts[number]);
+				symbol = get_symbol(as, numeric_name);
+			} else
+				symbol = get_symbol(as, text);
+		}
+
 		if (!symbol)
 			return -1;
 		if (symbol->defined)

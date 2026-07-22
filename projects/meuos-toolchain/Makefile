@@ -74,7 +74,7 @@ build/%.o: %.c
 
 -include $(DEPS)
 
-check: check-as-x86_64 check-ld-x86_64 $(AR_BIN) $(AS_BIN) $(LD_BIN) $(ELF_PROBE) $(TEST_ARCHIVE)
+check: check-as-x86_64 check-as-libc-x86_64 check-ld-x86_64 $(AR_BIN) $(AS_BIN) $(LD_BIN) $(ELF_PROBE) $(TEST_ARCHIVE)
 	@set -eu; \
 	test "$$($(AR_BIN) --version)" = "meuos-toolchain ar 0.2.0 (x86_64 bootstrap)"; \
 	test "$$($(AR_BIN) t $(TEST_ARCHIVE))" = hello.o; \
@@ -118,6 +118,9 @@ check-as-x86_64: $(AS_BIN)
 check-ld-x86_64: $(AS_BIN) $(AR_BIN) $(LD_BIN)
 	sh test/ld_smoke.sh "$(abspath $(AS_BIN))" "$(abspath $(AR_BIN))" "$(abspath $(LD_BIN))"
 
+check-as-libc-x86_64: $(AS_BIN)
+	sh test/as_libc_x86_64.sh "$(abspath $(AS_BIN))"
+
 check-elf: $(ELF_PROBE) $(TEST_FIXTURE_OBJ)
 	$(ELF_PROBE) $(TEST_FIXTURE_OBJ)
 
@@ -133,4 +136,4 @@ install: $(AR_BIN) $(AS_BIN) $(LD_BIN)
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all check check-elf check-ar check-as-x86_64 check-ld-x86_64 install clean
+.PHONY: all check check-elf check-ar check-as-x86_64 check-as-libc-x86_64 check-ld-x86_64 install clean
