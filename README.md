@@ -101,4 +101,4 @@ env/bin/qvm stop aarch64
 
 ## 许可
 
-MIT
+RFL (Run Free Software License) v1.0

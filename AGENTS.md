@@ -8,7 +8,7 @@
 
 **项目名称**：MeuOS Kit
 **项目定位**：MeuOS Next 的完整自举开发工具集。提供从零自举所需的全部工具：C/C++ 编译器、标准 C 库、构建系统、底层工具链、核心工具集与 Shell。
-**许可**：MIT
+**许可**：RFL (Run Free Software License) v1.0
 
 **核心组件**：
 
