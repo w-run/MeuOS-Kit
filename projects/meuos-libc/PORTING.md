@@ -9,8 +9,8 @@
 ## 1. 状态口径
 
 本文中的“已确认基石”表示该架构已经被选为长期支持和 ABI 设计基准，**不表示
-该架构的 `meuos-libc` runtime 已经完成**。例如 aarch64、loongarch64 目前是
-mcc 已有代码生成基线、libc 运行时仍待移植；x86_64 才是当前完整运行验证基线。
+该架构的 `meuos-libc` runtime 已经完成**。例如 loongarch64 目前是
+mcc 已有代码生成基线、libc 运行时仍待移植；x86_64 和 aarch64 才是当前完整运行验证基线。
 
 | 架构            | 战略状态         | 当前仓库事实                                                                      | 移植定位与下一道门禁                                                                   |
 | --------------- | ---------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
@@ -140,8 +140,9 @@ TLS 由 `msr tpidr_el0` 设置，CLONE_SETTLS 直接交给 kernel。
 - 跨函数 `va_list` 已修复（mcc `typevalist` 改 4 字节 struct）
 - 端到端双门禁：`runtime.sh`（宿主 ia32）+ `qemu-runtime.sh`（真 32 位内核）
   全套 runtime_kl/runtime_fp/runtime_time64/runtime_va/fp_unsigned/fp_arith 全绿
+（Kl mul/div/rem 已通过 sysv 预扫描+软算术库实现）
 
-剩余：Kl mul/div/rem/shifts 软算术库；TLS/信号上下文端到端验证。
+剩余：TLS/信号上下文端到端验证。
 
 强制 64 位 `time_t` 是公共 ABI 政策，不得用 `-D_TIME_BITS=64` 这种仅对某个构建命令生效的旁路替代。
 

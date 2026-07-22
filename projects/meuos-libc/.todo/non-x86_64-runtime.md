@@ -71,6 +71,8 @@ x86_64 等价的回归覆盖。
   - qemu 门禁覆盖 hello / atomic / phase2_counter / bare_tls / stdio（当前编译
     自检通过，但未在 QEMU VM 内运行这些测试）；
   - time64 专项边界测试用例（INT32_MAX / 2038+ / 负值）。
+- ✅ **i386 64 位乘除法/取余（mcc 侧缺口）**：已通过 pre-pass 重写
+  为 libc 软算术调用解决。详见 `projects/mcc/.todo/i386-kl-arith.md`。
 
 ### riscv64 / loongarch64 — 未开始
 

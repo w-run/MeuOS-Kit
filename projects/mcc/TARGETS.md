@@ -50,6 +50,6 @@ target 含 TLS 的 DSO，仍不在支持范围内。
    借助 aarch64 的工作流（crt1 + set_tls + setjmp + sigreturn + thread_clone
    + tls.c + syscall 翻译表 + qemu 运行时 gate）复制。
 3. 对 LoongArch64 按相同路径补齐 libc/runtime；现有后端专项回归可作为基线。
-4. i386 剩余项：Kl mul/div/rem/shifts 软算术库；TLS/信号上下文端到端验证。
+4. i386 剩余项：TLS/信号上下文端到端验证。
 5. ARMv7、powerpc64le、s390x 等只在有明确 MeuOS 平台需求时再引入，避免在缺少
    sysroot 和运行验证时只增加未维护的后端。

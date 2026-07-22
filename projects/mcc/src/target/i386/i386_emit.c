@@ -1492,6 +1492,12 @@ emitins(Ins i, E *e)
 		}
 		goto Table;
 	case Omul:
+		/* Kl multiply should be rewritten to a call by the
+		 * i386_sysv_abi() pre-pass; if it reaches emit the
+		 * omap Ki entry would produce a 32-bit imull which
+		 * silently truncates, so guard against it. */
+		if (i.cls == Kl)
+			die("i386: Kl multiply not rewritten");
 		if (rtype(i.arg[1]) == RCon) {
 			r = i.arg[0];
 			i.arg[0] = i.arg[1];

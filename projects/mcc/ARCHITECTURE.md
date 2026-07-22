@@ -321,6 +321,9 @@ artifacts and structural integration of the two source trees. Status:
   be worth keeping for cross-referencing during the bootstrap audit).
 - Implement true `-O` level control (mcc currently always optimizes).
 - Implement warning system for `-W`/`-w` (currently accepted but no-op).
+- i386 64-bit mul/div/rem (`Omul/Odiv/Orem/Oudiv/Ourem Kl`): solved via
+  `i386_sysv_abi()` pre-pass that rewrites to libc soft-arith calls
+  (see `.todo/i386-kl-arith.md` for implementation details).
 - Extend shared-library validation beyond the x86_64 host DSO/TLS runtime
   regression to target runtime/linker integration once each target has a
   MeuOS sysroot.

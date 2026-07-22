@@ -37,6 +37,5 @@
 
 ## 仍 OPEN
 
-- Kl mul/div/rem/shifts 软算术库（当前 die）
 - TLS 与信号上下文（架构文件存在但未端到端验证）
 - armv7 共享的 32 位通用抽象（非 i386 专属）

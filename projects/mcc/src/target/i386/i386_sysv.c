@@ -1,4 +1,5 @@
 #include "i386.h"
+#include <string.h>
 
 /* i386 cdecl ABI: all arguments passed on stack.
  *
@@ -224,6 +225,22 @@ argsclass(Ins *i0, Ins *i1, AClass *ac, int op, AClass *aret, int *varc)
 		}
 
 	return stk;
+}
+
+/* Build a direct call to a named external function.  Used to lower
+ * i386 64-bit (Kl) multiply/divide/remainder — which the i386 has no
+ * native instructions for — into calls to libc soft-arithmetic
+ * helpers (see projects/meuos-libc/src/arch/i386/soft_arith.c).
+ * The Ins shape we emit (Oarg/Oarg/Ocall) is identical to a real
+ * function call, so selcall lowers it normally. */
+static Ref
+call_sym(const char *name, Fn *fn)
+{
+	Con cc;
+	memset(&cc, 0, sizeof cc);
+	cc.type = CAddr;
+	cc.sym.id = intern(name);
+	return newcon(&cc, fn);
 }
 
 static void
@@ -586,6 +603,43 @@ i386_sysv_abi(Fn *fn)
 		if (b->visit)
 			continue;
 		curi = &insb[NIns];
+
+		/* Pre-pass: i386 has no 64-bit (Kl) mul/div/rem instructions.
+		 * Rewrite Omul/Odiv/Orem/Oudiv/Ourem with class Kl into
+		 * Oarg/Oarg/Ocall to libc soft-arithmetic helpers, so selcall
+		 * lowers them exactly like a normal function call (the Ins
+		 * shape is identical to a real call).  Helpers live in
+		 * projects/meuos-libc/src/arch/i386/soft_arith.c. */
+		{
+			int j, nw = 0;
+			int max_nins = b->nins + 2 * b->nins + 1;
+			Ins *nb = vnew(max_nins, sizeof(Ins), PHeap);
+			for (j = 0; j < b->nins; j++) {
+				Ins t = b->ins[j];
+				if ((t.op == Omul || t.op == Odiv || t.op == Orem
+				     || t.op == Oudiv || t.op == Ourem)
+				    && t.cls == Kl) {
+					Ref rfn;
+					const char *sym;
+					switch (t.op) {
+					case Omul:  sym = "meuos_u64_mul64"; break;
+					case Oudiv: sym = "meuos_u64_divu"; break;
+					case Ourem: sym = "meuos_u64_remu"; break;
+					case Odiv:  sym = "meuos_i64_div"; break;
+					case Orem:  sym = "meuos_i64_rem"; break;
+					}
+					rfn = call_sym(sym, fn);
+					nb[nw++] = (Ins){.op=Oarg, .cls=Kl, .to=R, .arg={t.arg[0], R}};
+					nb[nw++] = (Ins){.op=Oarg, .cls=Kl, .to=R, .arg={t.arg[1], R}};
+					nb[nw++] = (Ins){.op=Ocall, .cls=Kl, .to=t.to, .arg={rfn, R}};
+				} else {
+					nb[nw++] = t;
+				}
+			}
+			b->ins = nb;
+			b->nins = nw;
+		}
+
 		selret(b, fn);
 		for (i=&b->ins[b->nins]; i!=b->ins;)
 			switch ((--i)->op) {

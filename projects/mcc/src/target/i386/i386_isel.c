@@ -19,9 +19,11 @@
  *   x87 is only used to move values between slots (fld/fop/fstp). This
  *   is the deliberate i386 strategy — x87 is a stack machine, not a
  *   register file, so it is never modelled as a QBE register class.
- * - Kl arithmetic: add/sub/neg/and/or/xor/load/store/copy
- *   are decomposed in emit (kl_in_reg == 0); mul/div/rem/
- *   shifts still need a soft-arith library (die).
+ * - Kl arithmetic: add/sub/neg/and/or/xor/load/store/copy/shift
+ *   are decomposed in emit (kl_in_reg == 0, shld/shrd at L1176-1229).
+ *   mul/div/rem for Kl is rewritten by i386_sysv_abi() pre-pass to
+ *   libc soft-arithmetic calls (meuos_u64_mul64 / meuos_u64_divu /
+ *   meuos_i64_div / etc.) — see .todo/i386-kl-arith.md.
  * - No RIP-relative addressing (absolute)
  * - 8-bit ops limited to EAX/EBX/ECX/EDX
  */
@@ -321,8 +323,8 @@ sel(Ins i, Num *tn, Fn *fn)
 	case Ourem:
 		if (KBASE(k) == 1)
 			goto Emit;
-		if (k == Kl)
-			die("i386: 64-bit arithmetic not yet supported");
+		/* Kl mul/div/rem are rewritten to Oarg/Oarg/Ocall sequences
+		 * by i386_sysv_abi()'s pre-pass; they never reach isel. */
 		if (i.op == Odiv || i.op == Oudiv)
 			r0 = TMP(EAX), r1 = TMP(EDX);
 		else
