@@ -1,0 +1,6 @@
+# AGENTS.md §4 禁止提交预编译二进制。QEMU user-mode static 大约 10MB，
+# 由各开发者按需从 https://github.com/multiarch/qemu-user-static/releases 下载，
+# 通过 MEUOS_AARCH64_QEMU 环境变量或 PATH 注入到 aarch64-bootstrap.sh。
+*
+!.gitignore
+!README.md

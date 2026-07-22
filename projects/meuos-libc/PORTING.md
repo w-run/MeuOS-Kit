@@ -15,7 +15,7 @@ mcc 已有代码生成基线、libc 运行时仍待移植；x86_64 才是当前�
 | 架构            | 战略状态         | 当前仓库事实                                                                      | 移植定位与下一道门禁                                                                   |
 | --------------- | ---------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | **x86_64**      | **已确认基石**   | libc runtime 完整；`counter = 2000`、线程、TLS、stdio、静态链接和 QEMU 回归已通过 | 主开发平台、参考实现和每次变更的回归基线                                               |
-| **aarch64**     | **已确认基石**   | mcc 后端有基线；`crt/`、`src/arch/`、syscall gate 仍是待实现项                    | 第一优先级的 64 位次级基石；完成 Linux ABI、TLS、原子、线程后接入 QEMU                 |
+| **aarch64**     | **运行验证**     | libc runtime 完整（crt1/syscall/atomic/setjmp/sigreturn/thread_clone/set_tls/tls.c）；`make ARCH=aarch64` + `test/aarch64-bootstrap.sh` qemu gate 通过 | 64 位次级基石；hello/atomic/phase2/bare_tls 端到端输出已固化，详见 §5 |
 | **loongarch64** | **已确认基石**   | mcc 后端有 ABI/汇编回归基线；libc runtime 尚未落地                                | 龙芯新生态；syscall 编号、ABI、TLS 和内核接口必须按最新 Linux UAPI 校准                |
 | **i386**        | **已确认基石**   | 有可运行的整数 ABI bootstrap；浮点、跨函数 `va_list` 等仍有限制                   | 32 位兼容基石；`time_t` 必须改为 64 位，并补齐 time64 syscall/API，彻底消除 2038 问题  |
 | **riscv64**     | **强烈建议新增** | mcc 后端有基线；libc runtime 尚未落地                                             | 无历史包袱的 64 位架构，用于检验 syscall/TLS/原子等抽象是否干净                        |
@@ -113,9 +113,15 @@ FS 线程指针、`lock` 原子指令、16 字节栈对齐。任何新架构功�
 ### aarch64
 
 使用 AAPCS64，syscall 号放入 `x8`、参数放入 `x0`–`x5`、通过 `svc #0` 进入内核；
-线程指针使用 `TPIDR_EL0`。原子优先用 `ldxr/stxr`（或按 CPU 能力选择 LSE），
-不能假设宿主编译器会替 libc 生成完整 C11 原子 runtime。需要独立实现
-`crt1`、`setjmp`、`sigreturn` 和 clone 子线程入口。
+线程指针使用 `TPIDR_EL0`。原子用 `ldaxr/stlxr`（独占 monitor）实现 C11 原子
+runtime，独立汇编 `crt1`、`setjmp`、`sigreturn` 和 clone 子线程入口；变体 I
+TLS 由 `msr tpidr_el0` 设置，CLONE_SETTLS 直接交给 kernel。
+
+**aarch64 TLS 布局（GAP_ABOVE_TP = 16）**：与 musl ABI 一致，静态链接器把
+16 字节的 TCB 间隔烤进 `R_AARCH64_TLSLE_*` reloc 的 addend。运行时：
+`TPIDR_EL0 = mmap 起点`，`.tdata` 必须 `memcpy` 到 `mmap + 16`，`__meuos_tls_alloc`
+返回 `mmap 起点` 作为 `CLONE_SETTLS` 的目标值；`__meuos_tls_free` 释放整个 mmap 块。
+实现见 `src/arch/aarch64/tls.c` 的 `MEUOS_TLS_GAP` 与 `allocate_tls()`。
 
 ### loongarch64
 
@@ -150,8 +156,11 @@ FS 线程指针、`lock` 原子指令、16 字节栈对齐。任何新架构功�
 1. **x86_64 保持绿**：所有公共行为先通过现有 `make -C projects/meuos-libc check`。
 2. **i386 收口**：先修复跨函数 `va_list`，再完成 time64 类型和 syscall 适配，补
    2038 边界测试；在没有浮点完整支持前仍标记为 bootstrap/整数 ABI。
-3. **aarch64**：完成全套 arch runtime、构建注册和 QEMU Phase-2 回归，作为第一条
-   64 位跨 ISA 完整链。
+3. ~~aarch64~~ ✅：crt1 + syscall gate + atomic + setjmp + sigreturn +
+   thread_clone + set_tls + tls.c 全套到位，`Makefile ARCH=aarch64` 规则注册，
+   `test/aarch64-bootstrap.sh` 提供跨编译自检 + 可选 qemu-aarch64-static
+   运行时 gate（hello/atomic/phase2_counter=2000/bare_tls）。作为第一条
+   64 位跨 ISA 完整链，riscv64/loongarch64 可参照其工作流。
 4. **loongarch64**：按最新 ABI/UAPI 完成同样的门禁，独立验证 syscall 编号、TLS、
    原子和信号布局。
 5. **riscv64**：借助较干净的 ABI 抽象完成第三条 64 位完整链，反向清理公共层的

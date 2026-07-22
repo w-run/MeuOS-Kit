@@ -96,7 +96,7 @@ STDIO_OBJS     := $(BUILD)/stdio/file.o $(BUILD)/stdio/char_io.o \
 SYSCALL_OBJS   := $(addprefix $(BUILD)/syscall/, \
                   read.o write.o open.o close.o fork.o execve.o exit.o \
                   mmap.o munmap.o brk.o stat.o fstat.o lstat.o lseek.o \
-                  getpid.o gettid.o arch_prctl.o getcwd.o chdir.o \
+                  getpid.o gettid.o getcwd.o chdir.o \
                   dup.o dup2.o pipe.o waitpid.o wait.o wait4.o nanosleep.o \
                   clock_gettime.o getdents64.o socket.o connect.o bind.o \
                   listen.o chmod.o fchmod.o access.o sched_yield.o \
@@ -105,6 +105,14 @@ SYSCALL_OBJS   := $(addprefix $(BUILD)/syscall/, \
                   unlink.o mkdir.o rmdir.o rename.o mkstemp.o mkstemps.o \
                   time.o times.o utime.o gettimeofday.o sysconf.o flock.o \
                   fcntl.o)
+# arch_prctl(2) 只存在于 x86_64；i386/aarch64 的 tls.c 都不引用它。
+# 链接器按需从 .a 抽取，未引用时不会进入最终二进制；这里仍按 arch
+# 过滤，避免给非 x86_64 build 列表里塞一条无意义的目标。
+ifeq ($(ARCH),x86_64)
+ARCH_PRCTL_OBJ := $(BUILD)/syscall/arch_prctl.o
+else
+ARCH_PRCTL_OBJ :=
+endif
 THREAD_OBJS    := $(BUILD)/thread/state.o $(BUILD)/thread/c11_threads.o \
                   $(BUILD)/thread/tss.o $(BUILD)/thread/mutex.o \
                   $(BUILD)/thread/condvar.o $(BUILD)/thread/call_once.o \
@@ -116,7 +124,7 @@ CRT1_OBJ := $(BUILD)/crt1.o
 LIBC_LIB := $(BUILD)/libc-meuos.a
 
 ALL_OBJS := $(STRING_OBJS) $(STDLIB_OBJS) $(STDIO_OBJS) $(SYSCALL_OBJS) \
-            $(THREAD_OBJS) $(SUPPORT_OBJS) $(SYSCALL_GATE_OBJ) \
+            $(ARCH_PRCTL_OBJ) $(THREAD_OBJS) $(SUPPORT_OBJS) $(SYSCALL_GATE_OBJ) \
             $(ARCH_RT_OBJS) $(ATOMIC_OBJ)
 
 # ============================================================
@@ -269,8 +277,19 @@ check-mcc:
 check-i386-bootstrap:
 	MCC=$(abspath $(MCC)) CC=$(HOST_CC) sh test/i386-bootstrap.sh
 
+# aarch64-bootstrap.sh 跑 ELF 头自检；MEUOS_AARCH64_RUN=1 时附加 qemu 运行时
+# gate，期望 phase2-counter 输出 "counter = 2000"。 qemu 二进制默认从
+# env/qemu/qemu-aarch64-static 找，可通过 MEUOS_AARCH64_QEMU 覆盖。
+check-aarch64-bootstrap:
+	ASCC=aarch64-linux-gnu-gcc sh test/aarch64-bootstrap.sh
+
+# 一步式：build + install + 全套检查（包括 atomic/tls/threads/stdio/process）
+# 默认 host 是 x86_64，跨架构检查通过 check-aarch64-bootstrap / check-i386-bootstrap。
+check-all: check check-aarch64-bootstrap check-i386-bootstrap
+
 clean:
 	rm -rf build
 	@$(MAKE) -C src/compat clean 2>/dev/null || true
 
-.PHONY: all compat install check check-mcc check-i386-bootstrap clean
+.PHONY: all compat install check check-mcc check-i386-bootstrap \
+        check-aarch64-bootstrap check-all clean

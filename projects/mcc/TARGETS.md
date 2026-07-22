@@ -6,7 +6,7 @@
 | Target | 整数 ABI 回归 | 浮点汇编 | 当前结论 |
 |---|---:|---:|---|
 | x86_64 | 宿主运行验证 | 支持 | Phase 1/2 的主开发目标 |
-| aarch64 | 汇编回归 | 支持 | 代码生成基线可用；尚无 MeuOS libc/运行时 |
+| aarch64 | **qemu 端到端** | 支持 | libc runtime 完整（crt1/atomic/setjmp/sigreturn/thread_clone/tls + syscall gate + *at 翻译表）；qemu-aarch64-static hello/atomic/phase2/bare_tls 全绿；TLS GAP_ABOVE_TP=16 + mcc store fix 已固化 |
 | riscv64 | 汇编回归 | 支持 | 代码生成基线可用；尚无 MeuOS libc/运行时 |
 | loongarch64 | 专项 ABI/VLA/TLS 汇编回归 | 支持 | 后端相对成熟；尚无 MeuOS libc/运行时 |
 | i386 | 整数 SysV ABI 回归 | **未实现** | 仅整数子集，不可宣称完整 target |
@@ -18,9 +18,17 @@ make -C mcc check-i386
 make -C mcc check-targets       # aarch64 + riscv64
 make -C mcc check-loongarch64
 make -C mcc check-driver        # --shared、TLS 地址与浮点比较
+make -C meuos-libc check-aarch64-bootstrap
+# 默认只交叉编译并验证 ELF64/AArch64 头；设 MEUOS_AARCH64_RUN=1 且
+# MEUOS_AARCH64_QEMU=<qemu-aarch64-static 路径> 时附加 qemu 运行时 gate
+# （期望 hello="aarch64 MeuOS libc", phase2="counter = 2000",
+# bare_tls="tls main=5 child=9 errno=31/47"）。
 ```
 
 `check-targets` 与 `check-i386` 是交叉汇编生成测试；它们不替代目标机执行。
+`check-aarch64-bootstrap` 是 meuos-libc 的跨架构 gate——既验证 mcc 的 aarch64
+代码生成 + store fix，也通过 qemu-user-static 验证 libc runtime（C11 原子、
+TLS 布局、线程/futex、stdio）端到端可用。
 
 ## TLS 与共享库边界
 
@@ -35,8 +43,9 @@ target 含 TLS 的 DSO，仍不在支持范围内。
 
 1. 完成 i386 x87/SSE 浮点选择、比较和调用 ABI，再将 i386 升级为完整代码生成
    target。
-2. 选择一个 64 位非宿主 target（推荐 aarch64 或 riscv64）移植 `crt1`、原子
-   runtime、syscall gate 与 MeuOS libc，增加 qemu 运行测试。
+2. ✅ aarch64：libc runtime + qemu gate 端到端通过；下一个目标是 riscv64，
+   借助 aarch64 的工作流（crt1 + set_tls + setjmp + sigreturn + thread_clone
+   + tls.c + syscall 翻译表 + qemu 运行时 gate）复制。
 3. 对 LoongArch64 按相同路径补齐 libc/runtime；现有后端专项回归可作为基线。
 4. ARMv7、powerpc64le、s390x 等只在有明确 MeuOS 平台需求时再引入，避免在缺少
    sysroot 和运行验证时只增加未维护的后端。
