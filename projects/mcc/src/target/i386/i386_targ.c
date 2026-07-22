@@ -15,7 +15,22 @@ i386_memargs(int op)
 #define I386_COMMON \
 	.gpr0 = EAX, \
 	.ngpr = NGPR, \
-	.fpr0 = EAX, /* no FPR, reuse EAX as placeholder */ \
+	/* i386 has no *allocatable* floating-point register class.  x87 is a
+	 * stack machine (ST(0)..ST(7) form a push/pop evaluation stack, not a
+	 * flat register file), so it cannot be modelled as a QBE register
+	 * class the way SSE/AdvSIMD/FP are on the 64-bit targets.  The
+	 * deliberate, correct design is therefore:
+	 *   - nfpr == 0  (no FPR class at all), and
+	 *   - every Ks/Kd temporary is stack-slot resident; x87 is used only
+	 *     as a transient evaluation stack (fld/fop/fstp) between slots.
+	 * rega.c/ralloctry() short-circuit KBASE==1 temps to SLOT() when
+	 * nfpr==0, and i386_isel.c passes Ks/Kd slot temps through untouched,
+	 * so floats never reach register allocation.  fpr0 is thus 0 (an
+	 * index below the GPR range, never a valid machine register): the
+	 * FPR interval [fpr0, fpr0+nfpr) is empty and collides with nothing.
+	 * Do NOT "declare ST(0..7) as an FPR class" — that would require a
+	 * register-to-stack allocation pass QBE does not have. */ \
+	.fpr0 = 0, \
 	.nfpr = NFPR, \
 	.rglob = BIT(EBP) | BIT(ESP), \
 	.nrglob = 2, \

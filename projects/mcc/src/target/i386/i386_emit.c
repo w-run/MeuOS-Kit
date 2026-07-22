@@ -665,6 +665,7 @@ static void
 float_binary(Ins i, E *e)
 {
 	char *op;
+	Ins f;
 
 	float_load(i.arg[0], i.cls, e);
 	switch (i.op) {
@@ -674,7 +675,15 @@ float_binary(Ins i, E *e)
 	case Odiv: op = KWIDE(i.cls) ? "fdivl %M1" : "fdivs %M1"; break;
 	default: die("i386: invalid x87 binary op %d", i.op);
 	}
-	emitf(op, &i, e);
+	/* x87 binary ops take their second operand from memory (faddl m64
+	 * computes ST(0) += m64); they cannot address an x87 register.
+	 * On i386 every Ks/Kd temporary is slot-resident (nfpr==0), so route
+	 * arg[1] through float_ref() to turn a slot RTmp into RSlot (MEM
+	 * passes through untouched).  Without this, emitf's %M would receive
+	 * a non-register RTmp and trip the isreg() assertion. */
+	f = i;
+	f.arg[1] = float_ref(i.arg[1], e);
+	emitf(op, &f, e);
 	float_store(i.to, i.cls, e);
 }
 
@@ -829,19 +838,149 @@ emit_float(Ins i, E *e)
 			float_store(i.to, i.cls, e);
 			return 1;
 		case Ouwtof:
+			/* Unsigned 32-bit → float/double.  Zero-extend the
+			 * 32-bit unsigned value to 64 bits (high half = 0)
+			 * and fildq, which loads it as a signed 64-bit in
+			 * [0, 2^32-1] — exactly the unsigned value.  No float
+			 * constant is needed.  The source (%0) may be a GPR,
+			 * slot, or constant; `movl %0, (%%esp)` handles all
+			 * uniformly (mirrors the Oswtof fix above). */
+			fprintf(e->f, "\tsubl $8, %%esp\n");
+			emitf("movl %0, (%%esp)", &i, e);
+			fprintf(e->f, "\tmovl $0, 4(%%esp)\n");
+			fprintf(e->f, "\tfildq (%%esp)\n");
+			fprintf(e->f, "\taddl $8, %%esp\n");
+			float_store(i.to, i.cls, e);
+			return 1;
 		case Oultof:
-			die("i386: unsigned integer to float not yet supported");
+			/* Unsigned 64-bit → float/double.  fildq interprets a
+			 * 64-bit value as signed.  If bit 63 of the original
+			 * unsigned value is clear (value < 2^63), fildq already
+			 * yields the correct positive result.  If bit 63 is set
+			 * (value >= 2^63), fildq gives a negative number; we
+			 * then form (value - 2^63) in scratch, fildq it, and add
+			 * 2^63.0.  2^63.0 is produced without a float constant
+			 * by fildq(0x8000000000000000) = -2^63 followed by fchs.
+			 * The Kl source lives in a stack slot (kl_in_reg = 0). */
+			{
+				int lpos = ++float_label;
+				int ldone = ++float_label;
+				int s = kloffset(i.arg[0], 1, e);
+				int base = e->fp;
+				assert(s != -1);
+				fprintf(e->f, "\tmovl %d(%%%s), %%%s\n",
+					s, regtoa(base, SLong), regtoa(EAX, SLong));
+				fprintf(e->f, "\ttestl $0x80000000, %%%s\n",
+					regtoa(EAX, SLong));
+				fprintf(e->f, "\tjns .Lultof%d\n", lpos);
+				/* negative path: value >= 2^63 */
+				fprintf(e->f, "\tsubl $8, %%esp\n");
+				fprintf(e->f, "\tmovl %d(%%%s), %%%s\n",
+					kloffset(i.arg[0], 0, e),
+					regtoa(base, SLong), regtoa(EAX, SLong));
+				fprintf(e->f, "\tmovl %%%s, (%%esp)\n",
+					regtoa(EAX, SLong));
+				fprintf(e->f, "\tmovl %d(%%%s), %%%s\n",
+					kloffset(i.arg[0], 1, e),
+					regtoa(base, SLong), regtoa(EAX, SLong));
+				fprintf(e->f, "\tsubl $0x80000000, %%%s\n",
+					regtoa(EAX, SLong));
+				fprintf(e->f, "\tmovl %%%s, 4(%%esp)\n",
+					regtoa(EAX, SLong));
+				fprintf(e->f, "\tfildq (%%esp)\n");
+				fprintf(e->f, "\tpushl $0x80000000\n\tpushl $0\n");
+				fprintf(e->f, "\tfildq (%%esp)\n");
+				fprintf(e->f, "\tfchs\n");
+				fprintf(e->f, "\tfaddp\n");
+				fprintf(e->f, "\taddl $16, %%esp\n");
+				fprintf(e->f, "\tjmp .Lultof%d\n", ldone);
+				fprintf(e->f, ".Lultof%d:\n", lpos);
+				fprintf(e->f, "\tfildq %d(%%%s)\n",
+					kloffset(i.arg[0], 0, e),
+					regtoa(base, SLong));
+				fprintf(e->f, ".Lultof%d:\n", ldone);
+				float_store(i.to, i.cls, e);
+			}
+			return 1;
 		case Ocast:
 			return 0;
 		default:
 			break;
 		}
 	}
+	if (i.op == Ostoui || i.op == Odtoui) {
+		/* x87 has no unsigned→integer conversion: fisttp only
+		 * produces a signed truncation.  For a value x, fisttp's
+		 * two's-complement bits are exactly the C unsigned result
+		 * for x < 2^N (this range includes every negative x, since
+		 * (unsigned)x is defined as the truncated value mod 2^N).
+		 * For x >= 2^N (i.e. [2^N, 2^{N+1}), the only region that
+		 * can arise for an N-bit unsigned), fisttp of x overflows,
+		 * so compute (x - 2^N) truncated and add 2^N back.  The
+		 * threshold compare uses fcom + fnstsw/sahf (ST(0) is
+		 * preserved by fcom, unlike fcompp). */
+		int isd = (i.op == Odtoui);
+		int iskl = (i.cls == Kl);
+		int lge = ++float_label;
+		int thrlo, thrhi;
+
+		if (isd) {
+			if (iskl) { thrlo = 0;          thrhi = 0x43e00000; }
+			else     { thrlo = 0;          thrhi = 0x41e00000; }
+		} else {
+			if (iskl) { thrlo = 0x5f000000; thrhi = 0;          }
+			else     { thrlo = 0x4f000000; thrhi = 0;          }
+		}
+		/* scratch: [0) threshold (8B, 2^N), [8) integer result (8B) */
+		fprintf(e->f, "\tsubl $16, %%esp\n");
+		fprintf(e->f, "\tmovl $0x%08x, (%%esp)\n", thrlo);
+		if (iskl || isd)
+			fprintf(e->f, "\tmovl $0x%08x, 4(%%esp)\n", thrhi);
+		float_load(i.arg[0], isd ? Kd : Ks, e);
+		fprintf(e->f, "\tfcom%c (%%esp)\n", isd ? 'l' : 's');
+		fprintf(e->f, "\tpushl %%eax\n\tfnstsw %%ax\n\tsahf\n\tpopl %%eax\n");
+		fprintf(e->f, "\tjae .Lutof%d\n", lge);
+		fprintf(e->f, "\tfisttp%c 8(%%esp)\n", iskl ? 'q' : 'l');
+		fprintf(e->f, "\tjmp .Lutofd%d\n", lge);
+		fprintf(e->f, ".Lutof%d:\n", lge);
+		fprintf(e->f, "\tfsub%c (%%esp)\n", isd ? 'l' : 's');
+		fprintf(e->f, "\tfisttp%c 8(%%esp)\n", iskl ? 'q' : 'l');
+		fprintf(e->f, "\taddl $0x80000000, %d(%%esp)\n",
+			iskl ? 12 : 8);
+		fprintf(e->f, ".Lutofd%d:\n", lge);
+		if (iskl) {
+			/* x86 has no memory-to-memory mov, so stage the
+			 * 64-bit integer result through %eax/%edx.  Kl is
+			 * always slot-resident on i386, so i.to is a slot. */
+			int s = slot(float_ref(i.to, e), e);
+			fprintf(e->f, "\tmovl 8(%%esp), %%eax\n");
+			fprintf(e->f, "\tmovl 12(%%esp), %%edx\n");
+			fprintf(e->f, "\tmovl %%eax, %d(%%ebp)\n", s);
+			fprintf(e->f, "\tmovl %%edx, %d(%%ebp)\n", s + 4);
+		} else if (isreg(i.to)) {
+			fprintf(e->f, "\tmovl 8(%%esp), %%eax\n");
+			fprintf(e->f, "\tmovl %%eax, %%%s\n",
+				regtoa(i.to.val, SLong));
+		} else {
+			int s = slot(float_ref(i.to, e), e);
+			fprintf(e->f, "\tmovl 8(%%esp), %%eax\n");
+			fprintf(e->f, "\tmovl %%eax, %d(%%ebp)\n", s);
+		}
+		fprintf(e->f, "\taddl $16, %%esp\n");
+		return 1;
+	}
 	if (i.op == Ostosi || i.op == Odtosi) {
 		float_load(i.arg[0], i.op == Ostosi ? Ks : Kd, e);
-		if (i.cls == Kl)
-			emitf("fisttpq %M=", &i, e);
-		else {
+		if (i.cls == Kl) {
+			/* fisttpq stores to memory.  A Kl result is always
+			 * slot-resident on i386 (kl_in_reg==0, rega routes Kl
+			 * temps to SLOT), so convert the destination through
+			 * float_ref() to a memory reference; a register
+			 * destination cannot occur for Kl here. */
+			Ins f = i;
+			f.to = float_ref(i.to, e);
+			emitf("fisttpq %M=", &f, e);
+		} else {
 			/* fisttpl can only store to memory.  When the
 			 * destination is a GPR (the common Kw case after
 			 * rega), use ESP-relative scratch space, then

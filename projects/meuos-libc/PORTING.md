@@ -1,6 +1,6 @@
 # meuos-libc 多架构移植说明
 
-> 更新：2026-07-21
+> 更新：2026-07-23
 >
 > 本文记录 `meuos-libc` 的架构取舍、移植边界与验收顺序。它是移植路线的
 > 动态说明；代码当前是否已经落地，以仓库中的源码、`.todo/` 和 `STATE.md`
@@ -17,7 +17,7 @@ mcc 已有代码生成基线、libc 运行时仍待移植；x86_64 才是当前�
 | **x86_64**      | **已确认基石**   | libc runtime 完整；`counter = 2000`、线程、TLS、stdio、静态链接和 QEMU 回归已通过 | 主开发平台、参考实现和每次变更的回归基线                                               |
 | **aarch64**     | **运行验证**     | libc runtime 完整（crt1/syscall/atomic/setjmp/sigreturn/thread_clone/set_tls/tls.c）；`make ARCH=aarch64` + `test/aarch64-bootstrap.sh` qemu gate 通过 | 64 位次级基石；hello/atomic/phase2/bare_tls 端到端输出已固化，详见 §5 |
 | **loongarch64** | **已确认基石**   | mcc 后端有 ABI/汇编回归基线；libc runtime 尚未落地                                | 龙芯新生态；syscall 编号、ABI、TLS 和内核接口必须按最新 Linux UAPI 校准                |
-| **i386**        | **已确认基石**   | 有可运行的整数 ABI bootstrap；浮点、跨函数 `va_list` 等仍有限制                   | 32 位兼容基石；`time_t` 必须改为 64 位，并补齐 time64 syscall/API，彻底消除 2038 问题  |
+| **i386**        | **运行验证**     | x87 浮点完整（运算/比较/signed·unsigned 转换/ABI）、FPR 收口（nfpr=0）、跨函数 `va_list` 已修复；`make check-i386` + `make check-i386-qemu` 双门禁全绿 | 32 位兼容基石；`time_t`=int64_t、statx(383)、mmap2(192)、socketcall(102) 均就位；剩余 Kl 软算术库 + TLS/信号端到端 |
 | **riscv64**     | **强烈建议新增** | mcc 后端有基线；libc runtime 尚未落地                                             | 无历史包袱的 64 位架构，用于检验 syscall/TLS/原子等抽象是否干净                        |
 | **armv7**       | **强烈建议新增** | 当前只有占位 TODO，没有 libc runtime 或构建目标                                   | ARMv7 hard-float EABI；同时验证 32 位指针、VFP/硬浮点 ABI、原子、TLS 与 64 位 `time_t` |
 | **ppc64le**     | **按需可选**     | 当前未实现、未纳入默认构建                                                        | POWER 服务器目标；在基础多架构 runtime 稳定后再投入，重点验证多寄存器调用约定          |
@@ -132,10 +132,18 @@ TLS 由 `msr tpidr_el0` 设置，CLONE_SETTLS 直接交给 kernel。
 
 ### i386
 
-使用 Linux i386 `int $0x80` gate 和 `mmap2` 等 32 位接口。当前 bootstrap 只覆盖
-整数 ABI；完整目标还必须解决：64 位 `time_t`/time64、64 位 syscall 参数打包、
-浮点 ABI、跨函数 `va_list`、TLS 与信号上下文。强制 64 位 `time_t` 是公共 ABI
-政策，不得用 `-D_TIME_BITS=64` 这种仅对某个构建命令生效的旁路替代。
+使用 Linux i386 `int $0x80` gate 和 `mmap2` 等 32 位接口。已完成项：
+- 整数 ABI 完整（add/sub/neg/and/or/xor 的 Kl 分解 + shldl/shrdl）
+- 64 位 `time_t`/time64：types 固定 `int64_t`、`statx(383)` 时间戳、`mmap2(192)` 就位
+- socketcall(102) 多路复用（`src/syscall/socketcall.c`）
+- x87 浮点完整：运算/比较/signed·unsigned 转换/ABI（FPR 收口 nfpr=0）
+- 跨函数 `va_list` 已修复（mcc `typevalist` 改 4 字节 struct）
+- 端到端双门禁：`runtime.sh`（宿主 ia32）+ `qemu-runtime.sh`（真 32 位内核）
+  全套 runtime_kl/runtime_fp/runtime_time64/runtime_va/fp_unsigned/fp_arith 全绿
+
+剩余：Kl mul/div/rem/shifts 软算术库；TLS/信号上下文端到端验证。
+
+强制 64 位 `time_t` 是公共 ABI 政策，不得用 `-D_TIME_BITS=64` 这种仅对某个构建命令生效的旁路替代。
 
 ### riscv64
 
@@ -154,8 +162,9 @@ TLS 由 `msr tpidr_el0` 设置，CLONE_SETTLS 直接交给 kernel。
 ## 5. 推荐移植顺序与验收
 
 1. **x86_64 保持绿**：所有公共行为先通过现有 `make -C projects/meuos-libc check`。
-2. **i386 收口**：先修复跨函数 `va_list`，再完成 time64 类型和 syscall 适配，补
-   2038 边界测试；在没有浮点完整支持前仍标记为 bootstrap/整数 ABI。
+2. ✅ **i386 收口**：跨函数 `va_list`、time64 类型与 syscall、x87 浮点完整、
+   FPR 收口、socketcall 多路复用、qemu 端到端 gate 均已完成
+   （`make check-i386-qemu` 全绿）。剩余 Kl 软算术/TLS/信号上下文。
 3. ~~aarch64~~ ✅：crt1 + syscall gate + atomic + setjmp + sigreturn +
    thread_clone + set_tls + tls.c 全套到位，`Makefile ARCH=aarch64` 规则注册，
    `test/aarch64-bootstrap.sh` 提供跨编译自检 + 可选 qemu-aarch64-static

@@ -53,6 +53,25 @@ x86_64 等价的回归覆盖。
 - **x86_64 专有 syscall 隔离**：`Makefile` 用 `ifeq ($(ARCH),x86_64)` 把 `arch_prctl.o` 收进
   `ARCH_PRCTL_OBJ`，避免给 i386/aarch64 build 列表里塞一条无意义的目标。
 
+### i386 — 类型/syscall 层完成，端到端 qemu gate 已就位
+
+- 架构文件全套存在：`arch/i386/` atomic.S / load_gs.S / setjmp.S / sigreturn.S /
+  soft_arith.c / thread_clone.S / tls.c；`internal/arch/i386/syscall.S`（int $0x80）；
+  `crt/i386/crt1.S`。
+- time64 基石已落地：`time_t`=int64_t、`statx(383)` 转换、`mmap2(192)`（见
+  `32bit-time64.md`）。
+- ✅ socketcall(102) 多路复用（`src/syscall/socketcall.c`，2026-07-22）。
+- ✅ 跨函数 va_list 已修复（mcc `targ.c` typevalist 改 struct，见 `i386-printf-va.md`）。
+- ✅ QEMU 端到端 gate 已就位：`make check-i386-qemu` / `test/i386/qemu-runtime.sh`，
+  Alpine linux-virt 6.6.x 真实 32 位内核下通过 runtime_kl/runtime_fp/runtime_time64/
+  runtime_va/fp_unsigned/fp_arith 全量。
+- ✅ 浮点运行时回归已覆盖（MCC FPR 收口 + runtime_fp/fp_arith/fp_unsigned 双门禁）。
+
+- ⬜ 待补：
+  - qemu 门禁覆盖 hello / atomic / phase2_counter / bare_tls / stdio（当前编译
+    自检通过，但未在 QEMU VM 内运行这些测试）；
+  - time64 专项边界测试用例（INT32_MAX / 2038+ / 负值）。
+
 ### riscv64 / loongarch64 — 未开始
 
 参考 aarch64 的工作流（crt1 + set_tls + setjmp + sigreturn + thread_clone + tls.c + syscall

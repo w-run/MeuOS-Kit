@@ -14,7 +14,11 @@
  *
  * Differences from amd64:
  * - 32-bit registers (EAX/ECX/EDX/EBX/ESI/EDI)
- * - No float support (die on Ks/Kd)
+ * - x87 floating-point via a transient evaluation stack: every Ks/Kd
+ *   temporary is stack-slot resident (nfpr==0, no flat FPR class);
+ *   x87 is only used to move values between slots (fld/fop/fstp). This
+ *   is the deliberate i386 strategy — x87 is a stack machine, not a
+ *   register file, so it is never modelled as a QBE register class.
  * - Kl arithmetic: add/sub/neg/and/or/xor/load/store/copy
  *   are decomposed in emit (kl_in_reg == 0); mul/div/rem/
  *   shifts still need a soft-arith library (die).

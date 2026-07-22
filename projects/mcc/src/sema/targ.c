@@ -48,10 +48,27 @@ static const struct target alltargs[] = {
 	},
 	{
 		.name = "i386-sysv",
+		/* i386 va_list is a struct { void *__p; } of 4 bytes (ILP32).
+		 * Modelling it as a struct — rather than a bare 4-byte
+		 * pointer — makes the ABI handling uniform with the other
+		 * targets: va_list is *always* addressed, never passed as
+		 * a raw pointer value.
+		 *
+		 * Concretely, with a pointer-typed va_list a va_list
+		 * argument arrived at the callee as the pointer value P, but
+		 * selvaarg treats its operand as the *address* of the
+		 * list, so it dereferenced P (reading a vararg instead of
+		 * the pointer) and stored the advanced pointer into *P
+		 * (corrupting the vararg) on the register-resident path —
+		 * the classic cross-function va_list breakage.  As a struct,
+		 * the 4-byte object is copied by value (blit) and its
+		 * parameter slot is aliased, so va_arg reads/writes the
+		 * slot at offset 0 and advancement updates the slot
+		 * correctly in both same-function and cross-function use. */
 		.typevalist = &(struct type){
-			.kind = TYPEPOINTER, .prop = PROPSCALAR,
+			.kind = TYPESTRUCT,
 			.align = 4, .size = 4,
-			.base = &typevoid,
+			.u.structunion.tag = "va_list",
 		},
 		.typewchar = &typeint,
 		.signedchar = 1,

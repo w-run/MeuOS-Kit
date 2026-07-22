@@ -112,6 +112,14 @@ check-i386: $(BIN)
 check-i386-runtime: $(BIN)
 	sh test/i386/runtime.sh ./$(BIN)
 
+# i386 runtime regression inside the MeuOS Kit qemu-system-i386 VM (env/).
+# Stronger gate than check-i386-runtime: runs the same binaries on a REAL
+# 32-bit kernel (Alpine linux-virt 6.6.x under QEMU TCG) via the 9p share.
+# Requires env/build/qemu-install/bin/qemu-system-i386 and sysroot-i386;
+# skips gracefully if either is absent.
+check-i386-qemu: $(BIN)
+	sh test/i386/qemu-runtime.sh ./$(BIN)
+
 # aarch64 runtime regression: compiles aarch64 static binaries (threads/
 # atomics, floating-point, TLS, time64/stat, cross-function va_list) and
 # runs them inside the env/bin/qvm aarch64 VM via the 9p share.  Requires
@@ -172,4 +180,4 @@ check-sysroot-static: $(BIN)
 # Compatibility alias for existing scripts.
 check-la64: check-loongarch64
 
-.PHONY: all clean check check-loongarch64 check-i386 check-i386-runtime check-aarch64-runtime check-targets check-la64 check-c11-atomic check-c11 check-driver check-abi check-sysroot-static
+.PHONY: all clean check check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-la64 check-c11-atomic check-c11 check-driver check-abi check-sysroot-static

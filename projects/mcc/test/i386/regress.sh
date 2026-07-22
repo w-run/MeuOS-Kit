@@ -18,4 +18,15 @@ grep -Eq 'addl .*%eax' "$asm"
 "$mcc" --target=i386-linux -c -o "$obj" "$root/test/i386/regress.c"
 LC_ALL=C readelf -h "$obj" | grep -Eq 'Class:[[:space:]]+ELF32'
 LC_ALL=C readelf -h "$obj" | grep -Eq 'Machine:[[:space:]]+Intel 80386'
+
+# Float code generation must not trip emitter asserts (a slot-resident
+# float temporary reaching a %M operand in float_binary, or the
+# previously-unimplemented unsigned float->int conversions Ostoui/Odtoui),
+# and must not emit invalid memory-to-memory moves in the Ostoui/Odtoui
+# result store.  Assemble to a real object (-c) so the host assembler
+# catches these faults; compiling to textual .s only (-S) would miss
+# them.  The test sources include <stdio.h>, so point at libc headers.
+"$mcc" --target=i386-linux -I"$root/../meuos-libc/include" -c -o "$obj" "$root/test/i386/fp_arith.c"
+"$mcc" --target=i386-linux -I"$root/../meuos-libc/include" -c -o "$obj" "$root/test/i386/fp_unsigned.c"
+
 printf '%s\n' 'i386 integer ABI and ELF32 object regression checks passed'

@@ -1,24 +1,42 @@
-# 待实现：i386 浮点（x87 / SSE）代码生成
+# i386 target 状态记录
 
-## 背景
-PROGRESS.md §i386 已知限制：i386 x87/SSE 浮点未实现。当前 i386 仅有整数
-SysV ABI 子集，不可宣称完整 target。
+> Update 2026-07-23：i386 已是**完整代码生成 target**，所有 P1-P5 任务
+> 关闭。本文件转为状态参考，记录架构决策与已完成项，供未来维护查阅。
 
-## 目标
-完成 i386 x87/SSE 浮点选择、比较和调用 ABI，将 i386 升级为完整代码生成
-target。
+## 架构决策（永久参考）
 
-## 需要修改的文件
-- `src/target/i386/i386_isel.c`：浮点 IR 指令（`Ks`/`Kd`）-> x87/SSE 指令选择。
-- `src/target/i386/i386_emit.c`：x87/SSE 汇编发射。
-- `src/target/i386/i386_sysv.c`：浮点参数/返回值寄存器分配（ST(0)/XMM0）。
-- `src/target/i386/i386_targ.c`：声明支持浮点。
+- **x87 栈机不建模为 flat FPR 类**：x87 ST(0)..ST(7) 是 push/pop 求值栈，
+  无法建模为 QBE 的寄存器类（否则需要 QBE 不具备的「寄存器→栈」分配过程）。
+  因此刻意令 `nfpr=0`、`fpr0=0`，所有 Ks/Kd 临时量栈槽驻留，
+  x87 仅作瞬态求值栈（fld/fop/fstp 在槽间移动值）。`rega.c`/`ralloctry`
+  对 `nfpr==0` 时把 `KBASE==1` temp 短路到 `SLOT()`。
+- **Kl（64 位整数）始终槽驻留**：`kl_in_reg=0`，两个 32 位 slot 拼成。
+  add/sub/neg/and/or/xor 用 adcl/sbbl carry 链，shifts 用 shldl/shrdl；
+  mul/div/rem 当前仍是软算术（die），待补。
+- **无符号浮点转换用 x87 修正法**：`Ouwtof` 零扩展→fildq；`Oultof` bit63
+  分支减法修正；`Ostoui/Odtoui` 用 fcom+fnstsw/sahf 阈值比较 + fsub 修正。
+  所有阈值常量通过整数 hex 编码，不依赖浮点字面量。
+- **va_list 为 4 字节 struct**（`targ.c` `typevalist`），与 amd64/riscv64/
+  loongarch64 对齐，统一取地址语义。
 
-## 关联待办
-- i386 `printf %d` 跨函数 va_list 缺陷（PROGRESS.md §后续优先级 P1）。
-- i386 stat 结构体布局转换（P2）。
-- i386 socketcall 多路复用（P4）。
+## 已完成项（2026-07-22）
 
-## 验收
-- `make check-i386` 增加浮点回归并通过。
-- i386 libc-meuos.a 浮点数学函数可链接运行。
+| 项目 | 说明 |
+|------|------|
+| x87 浮点代码生成 | fadd/fsub/fmul/fdiv/fchs/fild/fisttp/fcompp/fld/fstp，浮点比较/分支，类型转换 |
+| 64 位整数指令分解 | adcl/sbbl 进位链 + shldl/shrdl |
+| Ouwtof / Oultof | 无符号 32/64 → 浮点，含 >=2^31 / >=2^63 边界 |
+| Ostoui / Odtoui | 无符号浮点→整数，fcom 阈值修正法 |
+| float_binary float_ref 修复 | 第二个操作数转内存引用，消除 isreg 断言 |
+| Ostosi/Odtosi Kl 目标 float_ref | fisttpq 目标转内存引用 |
+| mem-to-mem mov 修复 | Ostoui/Odtoui 结果回写经寄存器中转 |
+| P1 跨函数 va_list | typevalist 改 TYPESTRUCT，根因修复 |
+| P3 FPR 收口 | fpr0=0, nfpr=0，设计决策固化 |
+| P4 socketcall 多路复用 | libc 侧 socketcall.c，i386 走 socketcall(102) |
+| P5 端到端验证 | runtime.sh（宿主 ia32）+ qemu-runtime.sh（真 32 位内核），全绿 |
+
+## 仍 OPEN
+
+- Kl mul/div/rem/shifts 软算术库（当前 die）
+- TLS 与信号上下文（架构文件存在但未端到端验证）
+- armv7 共享的 32 位通用抽象（非 i386 专属）

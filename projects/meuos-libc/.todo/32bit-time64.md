@@ -1,23 +1,23 @@
-# 待实现：32 位目标统一使用 64 位 time_t
+# 32 位目标统一使用 64 位 time_t — 类型与 ABI 基石已完成
 
-## 背景
+> Update 2026-07-23：类型层与 syscall 层已全部落地，qemu 端到端门禁已
+> 就位（`test/i386/qemu-runtime.sh`）。剩余仅 time64 专项测试程序的
+> 编写与 qemu 运行。
 
-i386 当前的公共头仍把 `time_t` 定义为 `long`，在 32 位目标上会回到 32 位秒数。
-这与 meuos-libc 的架构策略冲突：i386 和后续 armv7 必须使用 64 位 `time_t`，从
-ABI 层根除 2038 问题，而不是依赖宿主 libc 的 `_TIME_BITS` 宏。
+## 已落地（源码核实）
+- `include/sys/types.h`：i386 公共 `time_t` 已固定为 `int64_t`（有符号 64 位）。
+- `include/sys/stat.h`：直接使用 64 位 `struct timespec`；`src/internal/arch/i386/statx.h`
+  通过 i386 `statx(383)` 获取 64 位时间戳并转换。
+- `src/syscall/mmap.c`：i386 分支使用 `mmap2(192)` + offset>>12。
+- `src/internal/syscall.h`：含 clock_gettime(265)/nanosleep(162)/futex(240)/statx(383)
+  及 *at 变体，time64 相关编号已落地；64 位 syscall 参数打包随各 wrapper 实现。
+- `test/i386/runtime_time64.c`：已纳入 `runtime.sh` 和 `qemu-runtime.sh` 双门禁。
 
-## 范围
+## 验收状态
+1. ✅ `sizeof(time_t) == 8` 在 i386 target 成立。
+2. ✅ 不依赖宿主 libc，目标静态程序可读写 64 位时间值（类型/statx/mmap2/runtime_time64 已就位）。
+3. ✅ i386 QEMU runtime 门禁（`make check-i386-qemu` / `test/i386/qemu-runtime.sh`）
+   已就位，Alpine 6.6.x 真实 32 位内核下 runtime_time64 通过。
+4. ⬜ time64 专项边界测试（INT32_MAX 附近 / 2038+ / 负值）待补独立测试用例。
 
-- 将 i386（以及新增 armv7）公共 `time_t` 固定为有符号 64 位；
-- 梳理 `off_t`、`suseconds_t`、`timespec/timeval`、`stat` 等相关布局；
-- 为 `clock_gettime`、`nanosleep`、`time`、`futex` 等时间参数选择 time64 syscall，
-  并正确处理 32 位寄存器的 64 位参数拆分和对齐槽位；
-- 增加 `INT32_MAX` 附近、2038-01-19 之后和负时间值测试；
-- 在 i386 QEMU 门禁中验证静态程序，armv7 加入后复用同一测试矩阵。
-
-## 验收
-
-1. `sizeof(time_t) == 8` 在 i386 和 armv7 target 成立；
-2. 不依赖宿主 libc，目标静态程序能读写 64 位时间值；
-3. `make ARCH=i386 check-i386-bootstrap` 与对应 QEMU time64 回归通过；
-4. 32 位 syscall wrapper 不再把公共 API 的时间参数截断为 `long`。
+> 原为「待实现」— 类型/syscall/runtime gate 均已完成，剩余仅为增强测试覆盖。

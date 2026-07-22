@@ -98,8 +98,8 @@ SYSCALL_OBJS   := $(addprefix $(BUILD)/syscall/, \
                   mmap.o munmap.o brk.o stat.o fstat.o lstat.o lseek.o \
                   getpid.o gettid.o getcwd.o chdir.o \
                   dup.o dup2.o pipe.o waitpid.o wait.o wait4.o nanosleep.o \
-                  clock_gettime.o getdents64.o socket.o connect.o bind.o \
-                  listen.o chmod.o fchmod.o access.o sched_yield.o \
+                  clock_gettime.o getdents64.o socketcall.o chmod.o fchmod.o \
+                  access.o sched_yield.o \
                   fchown.o chown.o getuid.o getgid.o geteuid.o getegid.o \
                   umask.o isatty.o fchdir.o symlink.o link.o readlink.o \
                   unlink.o mkdir.o rmdir.o rename.o mkstemp.o mkstemps.o \
