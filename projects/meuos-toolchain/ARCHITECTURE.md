@@ -81,7 +81,7 @@ make -C projects/meuos-toolchain check
 - P0a 阶段不要求宿主 `ld` 接受归档；该门禁由 P0b 补齐；
 - `git diff --name-only` 只包含本项目文件。
 
-### P0b：ar 完整化（核心完成）
+### P0b：ar 完整化（完成，含 ranlib + BSD #1/）
 
 **目标**：让 mt/ar 具备被宿主链接器直接使用的条件。
 
@@ -123,7 +123,7 @@ make -C projects/meuos-toolchain check-as-x86_64 check-as-libc-x86_64
 - mcc 产出的 x86_64 `.s` 和 MeuOS libc 的 crt/atomic/setjmp/sigreturn/thread/syscall 汇编可汇编；
 - 错误输入必须报告行号和列号，不得崩溃。
 
-### P2：x86_64 静态链接器（核心完成，含 TLS + counter=2000 验证）
+### P2：x86_64 静态链接器（完成，含 TLS + counter=2000 + -L/-l/--sysroot）
 
 当前核心已通过 `test/ld_smoke.sh`，任务：
 
@@ -146,6 +146,7 @@ make -C projects/meuos-toolchain check-ld-x86_64
 - **`counter = 2000` 多线程程序通过 mt/as + mt/ld 端到端在 QEMU x86_64 上运行通过**；
 - SSE/SSE2 标量指令编码与 host as 字节级一致；
 - 未定义符号有明确诊断；
+- `-L`/`-l`/`-l:`/`--sysroot` 库搜索路径已支持；
 - 后续：P3 mcc driver 集成、其他架构 ELF 重定位。
 
 ### P3：mcc 集成

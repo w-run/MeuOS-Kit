@@ -400,6 +400,20 @@ resolve_long_name(const char *raw, const unsigned char *longnames,
 	size_t length;
 	char *copy;
 
+	/* BSD #1/ extended name: filename stored at start of member data */
+	if (raw[0] == '#' && raw[1] == '1' && raw[2] == '/') {
+		uint64_t name_len;
+		size_t num_len = 0;
+		while (raw[3 + num_len] >= '0' && raw[3 + num_len] <= '9')
+			++num_len;
+		if (num_len == 0 ||
+		    parse_decimal_text(raw + 3, num_len, &name_len) != 0)
+			return -1;
+		/* Signal BSD format: caller reads name from member data */
+		*name = NULL;
+		return (int)name_len;
+	}
+
 	if (raw[0] != '/') {
 		raw_length = strlen(raw);
 		if (raw_length > 0 && raw[raw_length - 1] == '/')
@@ -489,7 +503,44 @@ load_archive(const char *path, struct ar_collection *collection)
 				goto fail;
 			continue;
 		}
-		if (read_member_data(file, member_size, &data) != 0)
+		if (result >= 3) {
+			/* BSD #1/ format: result is the filename length.
+			 * Read full member data, then split into name + content. */
+			size_t name_len = (size_t)result;
+			if (name_len > member_size) {
+				set_error(MT_AR_E_FORMAT);
+				goto fail;
+			}
+			if (read_member_data(file, member_size, &data) != 0)
+				goto fail;
+			name = (char *)mt_malloc(name_len + 1);
+			if (!name) {
+				free(data);
+				goto fail;
+			}
+			memcpy(name, data, name_len);
+			name[name_len] = '\0';
+			/* Shift data past the name prefix */
+			{
+				size_t content_size = (size_t)member_size - name_len;
+				unsigned char *content = (unsigned char *)mt_malloc(content_size ? content_size : 1);
+				if (!content) {
+					free(name);
+					free(data);
+					goto fail;
+				}
+				memcpy(content, data + name_len, content_size);
+				free(data);
+				data = content;
+				if (member_size & 1u && fgetc(file) != '\n') {
+					set_error(MT_AR_E_FORMAT);
+					free(name); free(data); goto fail;
+				}
+				member_size = content_size;
+				/* padding already handled above; skip outer check */
+				member_size = content_size & ~1u; /* make even to skip outer check */
+			}
+		} else if (read_member_data(file, member_size, &data) != 0)
 			goto fail;
 		if (member_size & 1u && fgetc(file) != '\n') {
 			set_error(MT_AR_E_FORMAT);
