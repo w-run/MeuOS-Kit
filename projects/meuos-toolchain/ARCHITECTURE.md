@@ -1,4 +1,4 @@
-# meuos-toolchain 架构与首期开发计划
+# meuos-toolchain 架构与开发路线图
 
 > 当前基线：x86_64 Linux 宿主；首期只保证 ELF64 little-endian、静态归档和
 > mcc 生成的 x86_64 汇编/目标文件路径。aarch64 等架构保留目录和接口，
@@ -21,7 +21,7 @@ strip    删除调试/非必要符号
 objcopy  节区和格式复制
 ```
 
-首期只实现 `ar` 和内部 `libelf`；其余目录先建立边界，不放假实现二进制。
+当前已实现 `ar`、`ranlib`、`as`、`ld` 和内部 `libelf`；`nm`/`objdump`/`readelf`/`strip`/`objcopy` 在 P4 实现。
 
 ### 1.2 内部共享层
 
@@ -37,21 +37,20 @@ src/target/       架构相关编码、重定位和反汇编
 
 ### 1.3 x86_64 首期边界
 
-首期必须支持：
+P0-P2 已实现：
 
 - ELF64 little-endian；`ET_REL`、`ET_EXEC`、`ET_DYN` 头部读取；
 - `EM_X86_64`；
-- SysV `ar` 短成员名（最多 15 字符）；
+- SysV `ar` 短成员名、GNU `//` long-name、BSD `#1/` extended-name；
 - 可复现归档元数据（mtime/uid/gid 固定为 0）；
 - mcc 当前生成的 AT&T 汇编子集；
 - 静态链接 MeuOS libc 和 `crt1.o`；
 - 宿主 Linux 上的 `make check`，以及 QEMU x86_64 上的端到端运行。
 
-首期范围（P0-P2 已全部完成）：GNU // long-name table、archive symbol index、
+P0-P2 范围（已全部完成）：GNU // long-name table、archive symbol index、
 SSE/SSE2 标量编码、TLS 静态模型（IE/LE + PT_TLS + TPOFF32）、BSD #1/ 格式读取、
 ranlib、-L/-l/--sysroot 库搜索。
-首期不包含（后续阶段）：完整 gas 兼容、动态链接器、DWARF 调试信息、
-TLS 动态模型（GD/LD）、非 x86_64 架构运行验证。
+P3-P11 覆盖后续全部能力（详见 §2），不预设优先级。
 
 ## 2. 分阶段开发任务
 
@@ -86,7 +85,7 @@ make -C projects/meuos-toolchain check
 
 ### P0b：ar 完整化（完成，含 ranlib + BSD #1/）
 
-**目标**：让 mt/ar 具备被宿主链接器直接使用的条件。
+**目标**：让 mt/ar 具备被宿主链接器直接使用的条件。（已完成）
 
 任务：
 
@@ -128,7 +127,7 @@ make -C projects/meuos-toolchain check-as-x86_64 check-as-libc-x86_64
 
 ### P2：x86_64 静态链接器（完成，含 TLS + counter=2000 + -L/-l/--sysroot）
 
-当前核心已通过 `test/ld_smoke.sh`，任务：
+已完成的任务：
 
 1. 读取 ET_REL 和归档成员；
 2. 符号解析、强/弱符号、重复定义和未定义符号诊断；
@@ -150,7 +149,7 @@ make -C projects/meuos-toolchain check-ld-x86_64
 - SSE/SSE2 标量指令编码与 host as 字节级一致；
 - 未定义符号有明确诊断；
 - `-L`/`-l`/`-l:`/`--sysroot` 库搜索路径已支持；
-- 后续：P3 mcc driver 集成、其他架构 ELF 重定位。
+- 后续：P3-P11（见下文）。
 
 ### P3：mcc driver 集成
 
@@ -355,28 +354,21 @@ make -C projects/meuos-toolchain check-as-riscv64 check-ld-riscv64
 qvm run riscv64 '/mnt/host/riscv64_test'
 ```
 
-## 3. 后续架构策略
+## 3. 架构策略
 
-aarch64 的移植 Agent 负责 mcc 和 meuos-libc 的 ABI/runtime；本项目只读取其
-输出契约。mt 的 `src/target/aarch64/` 在 P6 单独实现 ELF relocation/编码，
-不直接修改 `projects/mcc/src/target/aarch64/`。
+mt 的多架构支持在各架构阶段（P9-P11）中实现。每个架构的 mt/as 编码和 mt/ld
+重定位独立于 mcc 的后端：mcc 生成 AT&T 汇编文本，mt/as 负责编码为机器码。
 
-顺序建议：
+每个架构必须同时提供：指令编码、重定位类型、golden bytes 对比、QEMU 运行
+测试，不能只添加目录或只通过编译测试。
 
-```text
-P6 aarch64 ELF/relocation
-P7 riscv64 / loongarch64
-P8 i386 ELF32 + time64 运行时链路
-P9 动态链接和 TLS
-```
-
-每个架构必须同时提供：格式常量、重定位表、golden object、链接运行测试，
-不能只添加目录或只通过编译测试。
+mcc 和 libc 的架构移植由各自项目负责（见 `projects/mcc/` 和
+`projects/meuos-libc/PORTING.md`），mt 只读取其输出契约（汇编语法、ABI）。
 
 ## 4. 非目标与禁止事项
 
 - 不复制 GNU binutils、gas 或 GNU ld 源码；
 - 不依赖宿主 `<elf.h>`、glibc 内部结构或 GNU 专有 API；
-- 不把完整 gas 兼容性作为首期目标；
+- 不把完整 gas 兼容性作为目标（只需 mcc 生成的汇编子集）；
 - 不为了通过测试而调用宿主 `as`/`ld` 作为运行时后备；
 - 不在 aarch64 Agent 的工作文件中直接修改代码。
