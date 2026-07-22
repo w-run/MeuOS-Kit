@@ -3,8 +3,9 @@
 /* Linux aarch64 process entry.  The kernel supplies argc at [sp] followed by
  * argv[] and envp[].  AAPCS64 requires SP to be 16-byte aligned at function
  * call boundaries.  Set up TLS (TPIDR_EL0) before calling main so that
- * _Thread_local variables (notably errno) work, then terminate directly
- * through SYS_exit. */
+ * _Thread_local variables (notably errno) work, then terminate via exit()
+ * so that atexit handlers run and stdio buffers are flushed (important
+ * when stdout is redirected to a file rather than a line-buffered tty). */
 .globl _start
 .type _start,@function
 _start:
@@ -31,9 +32,10 @@ _start:
 	add x2, x1, x0, lsl #3
 	add x2, x2, #8		/* envp */
 	bl main
-	mov x1, x0		/* exit code */
-	mov x8, #93		/* SYS_exit (aarch64) */
-	svc #0
+	/* main's return value (x0) becomes exit()'s status argument.
+	 * exit() runs atexit handlers and fflush(NULL) before the raw
+	 * _exit syscall, so buffered printf output is not lost. */
+	bl exit
 	brk #0			/* unreachable */
 
 .bss

@@ -138,3 +138,15 @@ __meuos_set_tls(void *thread_pointer)
 {
 	return install_thread_pointer(thread_pointer);
 }
+
+/* 释放 variant II TLS 块：与 x86_64 相同的偏移公式。__syscall_number()
+ * 在 i386 上把内部号 11 翻译成 munmap(91)。 */
+#define LINUX_SYS_MUNMAP 11
+void
+__meuos_tls_free(void *thread_pointer)
+{
+	if (thread_pointer && tls_allocation_size)
+		__syscall6(LINUX_SYS_MUNMAP,
+		    (long)((char *)thread_pointer - tls_allocation_size + sizeof(void *)),
+		    tls_allocation_size, 0, 0, 0, 0);
+}

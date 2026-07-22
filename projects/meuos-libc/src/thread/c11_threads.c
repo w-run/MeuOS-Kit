@@ -57,15 +57,13 @@ thrd_create(thrd_t *thread, thrd_start_t start, void *argument)
 		MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 	if (control->stack == MAP_FAILED) {
 		if (control->tls)
-			munmap((char *)control->tls - control->tls_size + sizeof(void *),
-				control->tls_size);
+			__meuos_tls_free(control->tls);
 		free(control);
 		return thrd_nomem;
 	}
 	if (!__meuos_control_add(control)) {
 		if (control->tls)
-			munmap((char *)control->tls - control->tls_size + sizeof(void *),
-				control->tls_size);
+			__meuos_tls_free(control->tls);
 		munmap(control->stack, THREAD_STACK_SIZE);
 		free(control);
 		return thrd_nomem;
@@ -75,8 +73,7 @@ thrd_create(thrd_t *thread, thrd_start_t start, void *argument)
 	if (__syscall_error(result)) {
 		__meuos_control_remove(control);
 		if (control->tls)
-			munmap((char *)control->tls - control->tls_size + sizeof(void *),
-				control->tls_size);
+			__meuos_tls_free(control->tls);
 		munmap(control->stack, THREAD_STACK_SIZE);
 		free(control);
 		return thrd_error;
@@ -99,8 +96,7 @@ thrd_join(thrd_t thread, int *result)
 		*result = thread->result;
 	__meuos_control_remove(thread);
 	if (thread->tls)
-		munmap((char *)thread->tls - thread->tls_size + sizeof(void *),
-			thread->tls_size);
+		__meuos_tls_free(thread->tls);
 	munmap(thread->stack, THREAD_STACK_SIZE);
 	free(thread);
 	return thrd_success;

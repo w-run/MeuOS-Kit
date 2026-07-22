@@ -1,10 +1,16 @@
 #ifndef MEUOS_I386_STATX_H
 #define MEUOS_STATX_H
 
-/* i386 time64 stat: the legacy stat/stat64/fstat/lstat syscalls
- * (4/5/6 and 106/107/108) all return 32-bit time_t, which mismatches
- * our struct stat (64-bit time_t via struct timespec).  Use statx
- * (i386 syscall 383) which returns 64-bit timestamps, then convert. */
+/* statx 转换辅助：把 statx 返回的结构转换成本库的 struct stat。
+ *
+ * - i386: legacy stat/stat64/fstat/lstat (4/5/6, 106/107/108) 返回 32 位
+ *   time_t，与本库 struct stat（64 位 time_t via struct timespec）不兼容，
+ *   改用 statx(i386 syscall 383) 取 64 位时间戳后转换。
+ * - aarch64: kernel stat 布局（st_mode/st_nlink 顺序、padding）与
+ *   struct stat 不同，同样用 statx（aarch64 syscall 291）+ 本转换函数。
+ *
+ * 头文件路径名带 i386 是历史原因；aarch64 直接复用本文件，转换逻辑
+ * 架构无关。各 stat 包装器根据架构选用对应的内部 syscall 号。 */
 
 #include <errno.h>
 #include <stdint.h>
@@ -19,6 +25,11 @@
 
 /* i386 statx syscall number (x86_64 is 332; this header is i386-only). */
 #define LINUX_SYS_STATX_I386     383
+
+/* aarch64 走 x86_64 内部号 332，由 syscall.h 翻译表转 aarch64 291。 */
+#if defined(__aarch64__)
+#define LINUX_SYS_STATX          332
+#endif
 
 struct meuos_statx_timestamp {
 	int64_t tv_sec;

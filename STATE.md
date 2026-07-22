@@ -117,6 +117,12 @@ env/bin/qvm boot x86_64 && env/bin/qvm run x86_64 'uname -r' && env/bin/qvm stop
 
 > **每次变更（含 git 操作）后必须更新本节，并据实修订 §1–§5。**
 
+- **2026-07-22**：aarch64 runtime 回归诊断进展（分支 `aarch64-complete`，未提交）——mcc printf IR 生成 bug 已修复（重建后正常）；单线程 atomic/printf 正常运行；`diag-write`（thread + write）5/5 成功。但 `runtime_threads` 在 VM 内 segfault。精确诊断锁定 bug 为 **"thread + fputc" 组合**：
+  - `diag-min-fputc`（无 thread + fputc）5/5 OK
+  - `diag-fputc-nothread`（无 thread + write + fputc）5/5 OK
+  - `diag-write`（thread + write）5/5 OK
+  - `diag-fpdiag2-m1`（thread + fputc）0/5 SEGFAULT
+  - 最强假设：`thread_create/join` 破坏了主线程 TPIDR_EL0，导致 fputc 内部 `__errno_location()`（`mrs tpidr_el0` + TLS offset 0）写入错误地址。write 成功路径不调 `__errno_location`，故 `diag-write` 不暴露。验证方案与已排除假设详见 `projects/meuos-libc/src/arch/aarch64/.todo-segfault-diag`。**P2 仍 in_progress，被此 segfault 阻塞。** 下次会话从方案 A（把 errno.c 的 `_Thread_local` 临时去掉）开始验证。
 - **2026-07-22**：i386 收口完成——`projects/mcc/src/target/i386/i386_emit.c` 所有 Kl 操作（Ocopy/Oload/Ostorel/Oshl/Oshr/Osar/Oadd/Osub/Oneg/Oand/Oor/Oxor/Oxcmp/Oxtest/Oextsw/Oextuw/Oxsel）统一加 push/pop EAX（shifts 还加 EDX）保护，消除 rega 盲区导致的 EAX clobber（修复 `s.mode` 被覆盖、`mode=0` bug）；Oload 的 ECX stash 与 Ostorel 的 vreg=ECX 也加 push/pop ECX 保护。新增 i386 运行时回归测试套件（`test/i386/runtime_{kl,fp,time64,va}.c` + `runtime.sh` + Makefile `check-i386-runtime` target）。所有 i386 综合测试通过（counter=2000、浮点、time64、stat、va_list），i386 ELF32 静态二进制在 x86_64 内核原生运行验证通过。STATE.md §2/§3/§4/§5 同步更新。
 - **2026-07-22**：aarch64 移植进度保存——7 个运行时文件已就位（`crt/aarch64/crt1.S`、`src/internal/arch/aarch64/syscall.S`、`src/arch/aarch64/{atomic,setjmp,sigreturn,thread_clone,set_tls}.S` + `tls.c`，均可用 `aarch64-linux-gnu-gcc -c` 汇编验证），但 `tls.c` 被 mcc aarch64 后端 bug 阻塞（存储 64 位值到全局变量触发 `dying: invalid class`）。诊断与修复方案已记录到 `projects/mcc/.todo/aarch64-store-fix.md`（omap 存储条目 cls=Kw 应改 Ki/Ks/Kd + isel 缺少 store 特殊处理）；任务 8-11 待办清单已更新到 `projects/meuos-libc/src/arch/aarch64/.todo`。新增架构储备项 P9：mcc/m++ 共享后端 `libmcc` 化（见 `projects/mcc/.todo/cpp-shared-backend.md`），为未来 C++ 前端铺路。后续会话从 .todo 恢复即可继续。
 - **2026-07-22**：libmcc 化阶段 A 完成（分支 `refactor/libmcc-split`）——`projects/mcc/Makefile` 拆分 FE/BE 源：FE_DIRS=`src/{driver,lex,parse,sema,irgen}`（39 .o），BE_DIRS=`src/{ir,opt,abi,emit,target,util}`（41 .o）。BE .o 打成 `build/libmcc.a`（2.35MB），mcc 二进制 = FE .o + libmcc.a（1.76MB）。全绿验证：`make check` / `check-c11` / `check-driver` / `check-targets` / `check-i386` / `check-i386-runtime` / `check-loongarch64` / `check-abi` / `check-sysroot-static`（mcc 自重编译 mcc 通过）。行为零变化，为未来 m++ 共享后端铺路。

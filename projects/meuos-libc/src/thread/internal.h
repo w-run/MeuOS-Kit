@@ -59,6 +59,7 @@ long __meuos_thread_clone(thrd_start_t, void *, void *, struct meuos_thread *, v
 /* TLS helpers declared by arch/<arch>/tls.c. */
 void *__meuos_tls_alloc(void);
 size_t __meuos_tls_size(void);
+void __meuos_tls_free(void *thread_pointer);
 
 /* TSS destructor sweep, called from __meuos_thread_finish. */
 void __meuos_tss_cleanup(pid_t tid);

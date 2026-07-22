@@ -234,9 +234,45 @@ main(int argc, char *argv[])
 	typ = vnew(0, sizeof typ[0], PHeap);
 
 	tokeninit();
-	/* Target predefined macros are part of the public C ABI contract. */
-	if (target && strncmp(targ_name(target), "i386", 4) == 0)
-		ppdefine("__i386__", "1");
+	/* Target predefined macros are part of the public C ABI contract.
+	 * These mirror GCC's built-in target macros so libc/runtime code
+	 * can branch on architecture via #ifdef __<arch>__.  The macro
+	 * set matches what GCC defines for the same triplet, enabling
+	 * shared source between mcc and host-built code. */
+	if (target) {
+		const char *name = targ_name(target);
+		if (!name) {
+			/* Fall through; host default is x86_64-sysv on Linux. */
+		} else if (strncmp(name, "i386", 4) == 0) {
+			ppdefine("__i386__", "1");
+			ppdefine("__i386", "1");
+			ppdefine("__ILP32__", "1");
+			ppdefine("_ILP32", "1");
+		} else if (strncmp(name, "x86_64", 6) == 0) {
+			ppdefine("__x86_64__", "1");
+			ppdefine("__x86_64", "1");
+			ppdefine("__amd64__", "1");
+			ppdefine("__amd64", "1");
+			ppdefine("__LP64__", "1");
+			ppdefine("_LP64", "1");
+		} else if (strncmp(name, "aarch64", 7) == 0) {
+			ppdefine("__aarch64__", "1");
+			ppdefine("__aarch64", "1");
+			ppdefine("__LP64__", "1");
+			ppdefine("_LP64", "1");
+		} else if (strncmp(name, "riscv64", 7) == 0) {
+			ppdefine("__riscv", "1");
+			ppdefine("__riscv_xlen", "64");
+			ppdefine("__riscv64", "1");
+			ppdefine("__LP64__", "1");
+			ppdefine("_LP64", "1");
+		} else if (strncmp(name, "loongarch64", 11) == 0) {
+			ppdefine("__loongarch64", "1");
+			ppdefine("__loongarch_lp64", "1");
+			ppdefine("__LP64__", "1");
+			ppdefine("_LP64", "1");
+		}
+	}
 
 	/* Apply command-line macro definitions / undefs / include paths
 	 * before the first token is read. */

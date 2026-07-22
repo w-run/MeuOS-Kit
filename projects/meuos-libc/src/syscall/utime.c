@@ -4,11 +4,13 @@
 #include <time.h>
 #include "../internal/syscall.h"
 
-#if defined(__i386__)
-/* Legacy i386 utime (syscall 132) takes 32-bit time_t.  Use
- * utimensat_time64 (syscall 412) which accepts 64-bit timestamps.
- * utimensat(dirfd, path, times[2], flags) with AT_FDCWD and 0 flags
- * matches utime() semantics when both times are non-NULL. */
+#if defined(__i386__) || defined(__aarch64__)
+/* i386: legacy utime (syscall 132) 只接受 32 位 time_t，与本库 64 位
+ *   time_t 不兼容，改用 utimensat_time64(412) 取 64 位时间戳。
+ * aarch64: 没有 utime(132)，直接用 utimensat（x86_64 内部号 412，
+ *   翻译表转 aarch64 88）。
+ * utimensat(dirfd, path, times[2], flags) 配 AT_FDCWD + 0 flags，且 times
+ * 非 NULL 时与 utime() 语义等价。 */
 #define MEUOS_AT_FDCWD (-100)
 #define LINUX_SYS_UTIMENSAT_TIME64 412
 

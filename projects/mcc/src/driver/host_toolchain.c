@@ -18,6 +18,52 @@ cmdadd(struct array *cmd, const char *s)
 	arrayaddbuf(cmd, s, strlen(s));
 }
 
+/* True if the target triplet selects a 32-bit x86 target.  i386 family
+ * reuses the host x86_64 toolchain via -m32 (no separate cross prefix). */
+static bool
+target_is_i386(const char *target_triple)
+{
+	return target_triple && (
+	    strncmp(target_triple, "i386", 4) == 0 ||
+	    strncmp(target_triple, "i486", 4) == 0 ||
+	    strncmp(target_triple, "i586", 4) == 0 ||
+	    strncmp(target_triple, "i686", 4) == 0);
+}
+
+/* Pick the host cc that can assemble+link the emitted asm for the given
+ * target.  For non-host 64-bit targets (aarch64/riscv64/loongarch64) we
+ * delegate to the matching <arch>-linux-gnu-gcc cross toolchain so that
+ * `mcc --target=aarch64` works out of the box.  MCC_HOST_CC / HOST_CC
+ * override the auto-detection for self-host builds and unusual setups.
+ *
+ * The cross gcc only assembles/links; CRT objects and libc/libatomic
+ * archives still come from the MeuOS sysroot via -L/-l flags.  This is a
+ * Phase-1 bootstrap convenience - P10 (meuos-toolchain) removes the
+ * dependency entirely. */
+static const char *
+pick_host_cc(const char *target_triple)
+{
+	const char *cc = getenv("MCC_HOST_CC");
+	if (!cc)
+		cc = getenv("HOST_CC");
+	if (cc)
+		return cc;
+	if (!target_triple)
+		return "cc";
+	if (strncmp(target_triple, "aarch64", 7) == 0 ||
+	    strncmp(target_triple, "arm64", 5) == 0)
+		return "aarch64-linux-gnu-gcc";
+	if (strncmp(target_triple, "riscv64", 7) == 0 ||
+	    strncmp(target_triple, "rv64", 4) == 0)
+		return "riscv64-linux-gnu-gcc";
+	if (strncmp(target_triple, "loongarch64", 11) == 0 ||
+	    strncmp(target_triple, "la64", 4) == 0)
+		return "loongarch64-linux-gnu-gcc";
+	/* i386 family uses `cc -m32` (handled by callers); other/unknown
+	 * triplets default to the host cc. */
+	return "cc";
+}
+
 char *
 sysrootpath(const char *root, const char *suffix)
 {
@@ -76,22 +122,12 @@ run_host_cc(const char *asm_path, const char *output, bool compile_only,
             bool meuos_specs, const char *target_triple)
 {
 	struct array cmd = {0};
-	/* HOST_CC selects the compiler that builds mcc itself.  Keep the
-	 * assembler/linker handoff separately configurable so a self-host build
-	 * can use mcc for C sources without recursively invoking mcc on .s. */
-	const char *cc = getenv("MCC_HOST_CC");
-	if (!cc)
-		cc = getenv("HOST_CC");
+	const char *cc = pick_host_cc(target_triple);
 	char **p;
 	size_t i;
 
-	if (!cc)
-		cc = "cc";
 	cmdadd(&cmd, cc);
-	if (target_triple && (strncmp(target_triple, "i386", 4) == 0 ||
-	    strncmp(target_triple, "i486", 4) == 0 ||
-	    strncmp(target_triple, "i586", 4) == 0 ||
-	    strncmp(target_triple, "i686", 4) == 0))
+	if (target_is_i386(target_triple))
 		arrayaddbuf(&cmd, " -m32", 5);
 	/* mkstemp has no filename suffix. Tell the host driver explicitly that
 	 * the generated temporary is assembler, rather than relying on .s. */
@@ -150,19 +186,12 @@ run_host_link(struct array *objects, const char *output, bool verbose,
 	bool nostdlib, bool nodefaultlibs, bool meuos_specs, const char *target_triple)
 {
 	struct array cmd = {0};
-	const char *cc = getenv("MCC_HOST_CC");
+	const char *cc = pick_host_cc(target_triple);
 	char **p;
 	size_t i;
 
-	if (!cc)
-		cc = getenv("HOST_CC");
-	if (!cc)
-		cc = "cc";
 	cmdadd(&cmd, cc);
-	if (target_triple && (strncmp(target_triple, "i386", 4) == 0 ||
-	    strncmp(target_triple, "i486", 4) == 0 ||
-	    strncmp(target_triple, "i586", 4) == 0 ||
-	    strncmp(target_triple, "i686", 4) == 0))
+	if (target_is_i386(target_triple))
 		arrayaddbuf(&cmd, " -m32", 5);
 	for (i = 0, p = objects->val; i < objects->len / sizeof(char *); ++i) {
 		arrayaddbuf(&cmd, " ", 1);

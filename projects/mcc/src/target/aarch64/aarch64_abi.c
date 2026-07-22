@@ -106,6 +106,12 @@ typclass(Class *c, Typ *t, int *gp, int *fp)
 	c->size = sz;
 	c->hfa.base = Kx;
 	c->ishfa = isfloatv(t, &c->hfa.base);
+	/* isfloatv() vacuously returns 1 for a struct with no fields
+	 * (e.g. the aarch64 va_list builtin, which is an opaque 32-byte
+	 * struct).  If no float field was encountered, hfa.base stays Kx
+	 * and the struct is not an HFA.  Guard against the resulting
+	 * out-of-bounds store[Kx] access in sttmps(). */
+	c->ishfa &= c->hfa.base != Kx;
 	hfasz = t->size/(KWIDE(c->hfa.base) ? 8 : 4);
 	c->ishfa &= !t->isdark && hfasz <= 4;
 	c->hfa.size = hfasz;

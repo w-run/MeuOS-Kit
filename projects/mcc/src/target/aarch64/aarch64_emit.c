@@ -62,12 +62,18 @@ static struct {
 	{ Ocopy,   Ka, "fmov %=, %0" },
 	{ Oswap,   Ki, "mov %?, %0\n\tmov\t%0, %1\n\tmov\t%1, %?" },
 	{ Oswap,   Ka, "fmov %?, %0\n\tfmov\t%0, %1\n\tfmov\t%1, %?" },
-	{ Ostoreb, Kw, "strb %W0, %M1" },
-	{ Ostoreh, Kw, "strh %W0, %M1" },
-	{ Ostorew, Kw, "str %W0, %M1" },
-	{ Ostorel, Kw, "str %L0, %M1" },
-	{ Ostores, Kw, "str %S0, %M1" },
-	{ Ostored, Kw, "str %D0, %M1" },
+	/* omap.cls governs the matcher in emitins (`omap.cls == i->cls ||
+	 * Ka || (Ki && KBASE==0)`); the emitted register name width comes
+	 * from the %W0/%L0/%S0/%D0 escape in `fmt`.  Integer stores must
+	 * therefore use Ki so both Kw and Kl sources match, otherwise a
+	 * `storel` with i->cls=Kl falls through and dies with "invalid
+	 * class" (see .todo/aarch64-store-fix.md). */
+	{ Ostoreb, Ki, "strb %W0, %M1" },
+	{ Ostoreh, Ki, "strh %W0, %M1" },
+	{ Ostorew, Ki, "str %W0, %M1" },
+	{ Ostorel, Ki, "str %L0, %M1" },
+	{ Ostores, Ka, "str %S0, %M1" },
+	{ Ostored, Ka, "str %D0, %M1" },
 	{ Oloadsb, Ki, "ldrsb %=, %M0" },
 	{ Oloadub, Ki, "ldrb %W=, %M0" },
 	{ Oloadsh, Ki, "ldrsh %=, %M0" },
@@ -413,8 +419,8 @@ emitins(Ins *i, E *e)
 			/* this linear search should really be a binary
 			 * search */
 			if (omap[o].op == NOp)
-				die("no match for %s(%c)",
-					optab[i->op].name, "wlsd"[i->cls]);
+		die("no match for %s(%c)",
+			optab[i->op].name, "wlsd"[i->cls]);
 			if (omap[o].op == i->op)
 			if (omap[o].cls == i->cls || omap[o].cls == Ka
 			|| (omap[o].cls == Ki && KBASE(i->cls) == 0))
@@ -602,6 +608,7 @@ arm64_emitfn(Fn *fn, FILE *out)
 		if (e->fn->reg & BIT(*r)) {
 			s -= 2;
 			i = &(Ins){.arg = {TMP(*r), SLOT(s)}};
+			i->cls = *r >= V0 ? Kd : Kl;
 			i->op = *r >= V0 ? Ostored : Ostorel;
 			emitins(i, e);
 		}
