@@ -32,7 +32,7 @@ MeuOS-Kit/
 
 | 组件 | 目标 | 当前状态 |
 |------|------|---------|
-| `meuos-libc` | ISO C11 + POSIX 标准实现；compat 层独立归档 | x86_64 完整，i386 可用 |
+| `meuos-libc` | ISO C11 + POSIX 标准实现；compat 层独立归档 | x86_64 完整；aarch64 端到端 qemu 验证（hello/atomic/setjmp/phase2/bare_tls/malloc_threads）；i386 整数 ABI bootstrap |
 | `mcc` / `m++` | C99+C11 完整，C23 稳定；后续 C++ 共享后端 | C11 核心 + 多架构 |
 | `meow` | 取代 make + autoconf | 原生 YAML + Makefile 兼容 |
 | `meuos-toolchain` | 取缔 binutils（as/ld/ar/ranlib/nm/objdump/readelf/strip/objcopy） | P0-P2 完成，P3-P11 规划中 |
@@ -60,14 +60,22 @@ make -C projects/meow install DESTDIR=$(pwd)/sysroot PREFIX=/usr
 make -C projects/meuos-toolchain
 
 # 验证
-make -C projects/mcc check
-make -C projects/meuos-libc check
+make -C projects/mcc check                # mcc C11 + 各后端 ABI 回归
+make -C projects/meuos-libc check         # host (x86_64) libc 全套回归
 make -C projects/meow check
-make -C projects/meuos-toolchain check   # 10 项测试
+make -C projects/meuos-toolchain check    # 10 项测试
+make -C projects/meuos-libc check-aarch64-bootstrap  # aarch64 跨编译 + 可选 qemu 运行时
 
 # 全流程自举
 ./bootstrap.sh
 ```
+
+`check-aarch64-bootstrap` 默认只验证 aarch64 ELF64/AArch64 头（hello / atomic /
+setjmp / phase2 / bare_tls / malloc_threads 全部交叉编译成功）。设
+`MEUOS_AARCH64_RUN=1` 且 `MEUOS_AARCH64_QEMU` 指向 qemu-aarch64-static 时附加
+运行时 gate：hello 输出 `aarch64 MeuOS libc`、setjmp 输出 `setjmp ok`、
+phase2 输出 `counter = 2000`、bare_tls 输出 `tls main=5 child=9 errno=31/47`、
+atomic-test 与 malloc_threads exit 0。```
 
 ## 自举流程（AGENTS.md §3）
 
@@ -82,8 +90,15 @@ Phase 6  构建工具      构建 m4/bison/flex/gperf
 Phase 7  用户空间      构建 meuos-utils + meuos-shell
 ```
 
-当前 Phase 0–3 与 5（LFS 包验证）均已 PASS。Phase 4 由 `env/` QEMU 验证。
-Phase 5-7 进行中。
+当前状态：
+
+| Phase | 范围 | 验证方式 |
+|---|---|---|
+| 0–3 | 宿主编译 mcc → mcc 编译 libc + meow → 静态 sysroot | `make check` 全套 |
+| 4 | sysroot 内自重建 Kit | `make -C meuos-libc check-aarch64-bootstrap`（aarch64 跨 ISA 端到端） + `env/` QEMU |
+| 5 | meuos-toolchain + mcc driver 集成 mt | `make -C meuos-toolchain check` |
+| 6 | meuos-buildtools (m4/bison/flex/gperf) | 已规划，待启动 |
+| 7 | meuos-utils + meuos-shell | 待启动 |
 
 ## 测试环境（env/）
 

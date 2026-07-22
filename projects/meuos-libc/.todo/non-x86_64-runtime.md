@@ -1,8 +1,10 @@
 # 待实现：非 x86_64 完整 runtime 验证
 
 ## 背景
-STATE.md §3：完整独立 MeuOS userspace、非 x86_64 runtime 与纯原生链接器
-仍未完成，因此不将完整 Phase 2 标记为完成。当前 x86_64 是唯一已运行验证目标。
+STATE.md §3（已弃用；按 AGENTS.md §2 各子项目独立维护状态）：完整独立 MeuOS userspace
+与纯原生链接器仍未完成；非 x86_64 runtime 端到端验证是其中一道门禁。
+x86_64 与 aarch64 是当前已端到端 qemu 验证的目标（见 §进度 aarch64 行）；riscv64 /
+loongarch64 仍在移植路线中。
 
 ## 目标
 为至少一个 64 位非宿主 target（推荐 aarch64 或 riscv64）补齐 crt1、原子

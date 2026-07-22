@@ -277,10 +277,15 @@ check-mcc:
 check-i386-bootstrap:
 	MCC=$(abspath $(MCC)) CC=$(HOST_CC) sh test/i386-bootstrap.sh
 
-# aarch64-bootstrap.sh 跑 ELF 头自检；MEUOS_AARCH64_RUN=1 时附加 qemu 运行时
-# gate，期望 phase2-counter 输出 "counter = 2000"。 qemu 二进制默认从
-# env/qemu/qemu-aarch64-static 找，可通过 MEUOS_AARCH64_QEMU 覆盖。
+# aarch64-bootstrap.sh 跨编译自检 ELF64/AArch64 头；MEUOS_AARCH64_RUN=1
+# 且 MEUOS_AARCH64_QEMU=<path> 时附加 qemu-user 运行时 gate，期望 hello=
+# "aarch64 MeuOS libc" / setjmp="setjmp ok" / phase2="counter = 2000" /
+# bare_tls="tls main=5 child=9 errno=31/47" / atomic-test 与 malloc-threads
+# exit 0。产物缺失时自动触发 ARCH=aarch64 build。
 check-aarch64-bootstrap:
+	@if [ ! -f build/aarch64/libc-meuos.a ] || [ ! -f build/aarch64/libatomic-meuos.a ] || [ ! -f build/aarch64/crt1.o ]; then \
+		$(MAKE) ARCH=aarch64; \
+	fi
 	ASCC=aarch64-linux-gnu-gcc sh test/aarch64-bootstrap.sh
 
 # 一步式：build + install + 全套检查（包括 atomic/tls/threads/stdio/process）
