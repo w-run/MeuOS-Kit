@@ -2,7 +2,7 @@
 
 > **这是动态单一事实源。新会话恢复时，先读本文件，再按需读 AGENTS.md（项目规约）与各组件 `ARCHITECTURE.md`。每次工作结束应更新本文件的「最近变更」与「下一步」。**
 
-> 更新时间：2026-07-22（meuos-toolchain P0a 框架完成）
+> 更新时间：2026-07-22（meuos-toolchain x86_64 P2 核心完成）
 
 ---
 
@@ -59,10 +59,11 @@
 
 ### meuos-toolchain（工具链，`projects/meuos-toolchain/`）
 
-- 已建立 x86_64-first 独立项目骨架：`Makefile`、`ARCHITECTURE.md`、`.todo/`、`WORKLOG.md`、`include/mt`、`src/{libelf,ar,target}`、测试夹具。
-- P0a 已实现：不依赖宿主 `<elf.h>` 的 ELF64 little-endian 头部/表范围验证；可复现短名 SysV `ar rcs/t/p/x`；项目级 `make check` 通过。
-- 当前限制：ar 尚未实现 symbol index、GNU long-name table、成员替换/追加完整语义，因此暂不替换 mcc 的宿主 `ar`；P0b 计划先完成 ranlib，再进入 x86_64 as。
-- 协作边界：当前只修改 `projects/meuos-toolchain/**`；mcc `host_toolchain.c`/Makefile 集成延后到 P3 独立提交。
+- x86_64-first 核心已建立：`Makefile`、`ARCHITECTURE.md`、`.todo/`、`WORKLOG.md`、`include/mt`、`src/{libelf,ar,as,ld,target}`、测试夹具。
+- P0a/P0b 已实现：不依赖宿主 `<elf.h>` 的 ELF64 little-endian header/section/symtab 读取；可复现 GNU/SysV `ar rcs/q/r/s/t/p/x`、symbol index、long-name table。
+- P1/P2 核心已实现：mt/as 可汇编 mcc 常见 x86_64 整数/数据/GOT/PLT 输出并生成 ET_REL；mt/ld 可合并 ET_REL/归档、处理 PC32/PLT32/GOTPCREL/64/32 relocation 并生成可运行 ET_EXEC。
+- 当前限制：浮点/SSE 完整编码、独立 ranlib、BSD `#1/` extended-name、MeuOS libc/crt1/sysroot 链接和 mcc driver/Makefile 集成尚未完成。
+- 协作边界：只修改 `projects/meuos-toolchain/**`；mcc `host_toolchain.c`/Makefile 集成延后到 P3 独立提交。
 
 ### env（QEMU 测试环境，`env/`）
 
@@ -77,7 +78,7 @@
 ## 3. 已知阻塞 / 跨组件限制
 
 - git 仓库已就绪（`main` 分支，391 文件跟踪；大文件如 `reference/`、`env/build/`、`sysroot/` 均可重建不提交）。改动建议：建分支 -> 改 -> `make check` -> **同步更新本文件 §6** -> 提交。
-- mcc 链接仍依赖宿主 `cc`/`ld`（`src/driver/host_toolchain.c`）；纯原生链接器待实现。meuos-toolchain 当前仅完成 P0a 框架，尚未接管 mcc。
+- mcc driver 仍依赖宿主 `cc`/`ld`（`src/driver/host_toolchain.c`）；meuos-toolchain 已有 x86_64 as/ld 核心，但尚未接入共享 driver 或 MeuOS sysroot。
 - 完整独立 MeuOS userspace 尚未完成（非 x86_64 runtime、原生 shell）。
 
 ---
@@ -93,14 +94,14 @@
 7. **P7** 实现 `-O` 级别控制与 `-W` 诊断系统（`projects/mcc/.todo/`）。
 8. **P8** QEMU 自举：让 `qemu-system-*` 由 mcc+libc-meuos+meow 构建（见 `env/QEMU_BOOTSTRAP.md`；前置=glib2 移植、zlib 移植）。
 9. **P9**（架构储备，进行中）mcc/m++ 共享后端架构调整：把 mcc 的 `ir/opt/abi/emit/target` 抽出为 `libmcc` 库，使未来 `m++`（C++ 前端）可复用后端（见 `projects/mcc/.todo/cpp-shared-backend.md`）。**阶段 A 已完成**（refactor/libmcc-split 分支）：Makefile 拆分 FE/BE 源，BE 打成 `build/libmcc.a`，mcc = FE .o + libmcc.a，全绿 check + 自举链未破。下一步阶段 B：抽 `projects/libmcc/include/` 公共 API。
-10. **P10**（工具链自研，**P0a 进行中**）**meuos-toolchain**（简称 mt）：单项目整套提供汇编器 `as`、链接器 `ld`、归档器 `ar`、二进制工具 `nm`/`objdump`/`readelf`/`strip`/`objcopy`（无 m- 前缀，MeuOS 里是唯一工具）。解除 mcc 对宿主 `cc`/`as`/`ld`/`ar` 的最后依赖，完成 Kit 自举链。当前已完成 x86_64-first 项目骨架、libelf ELF64 header 校验和短名 ar 基础读写；下一步 P0b=ranlib/symbol index，再做 x86_64 as。组织与门禁详见 `projects/meuos-toolchain/README.md` / `ARCHITECTURE.md`。
+10. **P10**（工具链自研，**x86_64 P2 核心已完成**）**meuos-toolchain**（简称 mt）：单项目整套提供汇编器 `as`、链接器 `ld`、归档器 `ar`、二进制工具 `nm`/`objdump`/`readelf`/`strip`/`objcopy`（无 m- 前缀，MeuOS 里是唯一工具）。当前 mt/as + mt/ar + mt/ld 已能把 x86_64 ET_REL/归档链接为 syscall-only ET_EXEC；下一步是 MeuOS libc/crt1/sysroot 链接和 P3 mcc driver 集成。组织与门禁详见 `projects/meuos-toolchain/README.md` / `ARCHITECTURE.md`。
 
 ---
 
 ## 5. 验证命令（快速自检）
 
 ```sh
-# 工具链 P0a 框架
+# 工具链 x86_64 核心（ar + as + ld）
 make -C projects/meuos-toolchain check
 
 # 三个核心组件（路径在 projects/ 下）
@@ -127,7 +128,7 @@ env/bin/qvm boot x86_64 && env/bin/qvm run x86_64 'uname -r' && env/bin/qvm stop
 
 > **每次变更（含 git 操作）后必须更新本节，并据实修订 §1–§5。**
 
-- **2026-07-22**：meuos-toolchain P0a 框架完成（独立 worktree `work/meuos-toolchain`）——新增 `projects/meuos-toolchain/` 的 Makefile、ARCHITECTURE/WORKLOG、x86_64-first 目录和 `.todo` 阶段文档；新增不依赖宿主 `<elf.h>` 的 ELF64 little-endian header/table 范围验证库；新增可复现短名 SysV `ar rcs/t/p/x` 和 fixture 回归。`make -C projects/meuos-toolchain check` 通过。P0b 的 symbol index/long-name/member replacement 尚未实现，暂不接管 mcc 的宿主 ar；未修改 aarch64/mcc/libc 源文件。
+- **2026-07-22**：meuos-toolchain x86_64 核心推进完成（独立 worktree `work/meuos-toolchain`）——P0b ar 新增 ELF64 symtab/strtab 驱动的 `/` symbol index、GNU `//` long-name、r/q/s 语义和宿主 ld 互操作；P1 新增 x86_64 AT&T 子集 assembler，生成 ET_REL；P2 新增静态 linker，支持 ET_REL/归档、`.text/.rodata/.got/.data/.bss`、R_X86_64 64/32/PC32/PLT32/GOTPCREL 并生成可运行 ET_EXEC。`make -C projects/meuos-toolchain check`、GOT/PLT/archive/syscall smoke 全部通过。下一步是 MeuOS libc/crt1/sysroot 链接和 P3 mcc 集成；未修改 aarch64/mcc/libc 源文件。
 - **2026-07-22**：i386 收口完成——`projects/mcc/src/target/i386/i386_emit.c` 所有 Kl 操作（Ocopy/Oload/Ostorel/Oshl/Oshr/Osar/Oadd/Osub/Oneg/Oand/Oor/Oxor/Oxcmp/Oxtest/Oextsw/Oextuw/Oxsel）统一加 push/pop EAX（shifts 还加 EDX）保护，消除 rega 盲区导致的 EAX clobber（修复 `s.mode` 被覆盖、`mode=0` bug）；Oload 的 ECX stash 与 Ostorel 的 vreg=ECX 也加 push/pop ECX 保护。新增 i386 运行时回归测试套件（`test/i386/runtime_{kl,fp,time64,va}.c` + `runtime.sh` + Makefile `check-i386-runtime` target）。所有 i386 综合测试通过（counter=2000、浮点、time64、stat、va_list），i386 ELF32 静态二进制在 x86_64 内核原生运行验证通过。STATE.md §2/§3/§4/§5 同步更新。
 - **2026-07-22**：aarch64 移植进度保存——7 个运行时文件已就位（`crt/aarch64/crt1.S`、`src/internal/arch/aarch64/syscall.S`、`src/arch/aarch64/{atomic,setjmp,sigreturn,thread_clone,set_tls}.S` + `tls.c`，均可用 `aarch64-linux-gnu-gcc -c` 汇编验证），但 `tls.c` 被 mcc aarch64 后端 bug 阻塞（存储 64 位值到全局变量触发 `dying: invalid class`）。诊断与修复方案已记录到 `projects/mcc/.todo/aarch64-store-fix.md`（omap 存储条目 cls=Kw 应改 Ki/Ks/Kd + isel 缺少 store 特殊处理）；任务 8-11 待办清单已更新到 `projects/meuos-libc/src/arch/aarch64/.todo`。新增架构储备项 P9：mcc/m++ 共享后端 `libmcc` 化（见 `projects/mcc/.todo/cpp-shared-backend.md`），为未来 C++ 前端铺路。后续会话从 .todo 恢复即可继续。
 - **2026-07-22**：libmcc 化阶段 A 完成（分支 `refactor/libmcc-split`）——`projects/mcc/Makefile` 拆分 FE/BE 源：FE_DIRS=`src/{driver,lex,parse,sema,irgen}`（39 .o），BE_DIRS=`src/{ir,opt,abi,emit,target,util}`（41 .o）。BE .o 打成 `build/libmcc.a`（2.35MB），mcc 二进制 = FE .o + libmcc.a（1.76MB）。全绿验证：`make check` / `check-c11` / `check-driver` / `check-targets` / `check-i386` / `check-i386-runtime` / `check-loongarch64` / `check-abi` / `check-sysroot-static`（mcc 自重编译 mcc 通过）。行为零变化，为未来 m++ 共享后端铺路。
