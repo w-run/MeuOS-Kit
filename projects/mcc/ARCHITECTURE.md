@@ -319,8 +319,9 @@ artifacts and structural integration of the two source trees. Status:
 - Comments throughout `src/` and `src/target/` that reference QBE
   source files by name (these are accurate provenance notes and may
   be worth keeping for cross-referencing during the bootstrap audit).
-- Implement true `-O` level control (mcc currently always optimizes).
-- Implement warning system for `-W`/`-w` (currently accepted but no-op).
+- ✅ `-O` level control (done: O0/O1/O2/O3/s, pass gating in run_passes).
+- ⚠️ `-W`/`-w` warning system (flag parsing + Fn infrastructure done;
+  actual warn() function and per-pass warning calls not yet implemented).
 - i386 64-bit mul/div/rem (`Omul/Odiv/Orem/Oudiv/Ourem Kl`): solved via
   `i386_sysv_abi()` pre-pass that rewrites to libc soft-arith calls
   (see `.todo/i386-kl-arith.md` for implementation details).
