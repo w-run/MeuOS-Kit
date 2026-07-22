@@ -30,6 +30,7 @@
 #define LD_R_X86_64_GOTPCREL 9
 #define LD_R_X86_64_32 10
 #define LD_R_X86_64_32S 11
+#define LD_R_X86_64_TPOFF32 23
 
 struct ld_group {
 	char *name;
@@ -68,6 +69,12 @@ struct ld_objects {
 	size_t capacity;
 };
 
+struct ld_archives {
+	char **paths;
+	size_t count;
+	size_t capacity;
+};
+
 struct ld_global {
 	char *name;
 	struct ld_object *object;
@@ -101,6 +108,7 @@ struct ld_got {
 
 struct ld_context {
 	struct ld_objects objects;
+	struct ld_archives archives;
 	struct ld_group *groups;
 	size_t group_count;
 	size_t group_capacity;
@@ -217,6 +225,9 @@ free_context(struct ld_context *ctx)
 		free(ctx->globals.items[i].name);
 	for (i = 0; i < ctx->got.count; ++i)
 		free(ctx->got.items[i].name);
+	for (i = 0; i < ctx->archives.count; ++i)
+		free(ctx->archives.paths[i]);
+	free(ctx->archives.paths);
 	free(ctx->objects.items);
 	free(ctx->groups);
 	free(ctx->globals.items);
@@ -307,11 +318,23 @@ read_file(const char *path, unsigned char **data, size_t *size)
 }
 
 static int
-archive_member(const struct mt_ar_member *member, const unsigned char *data,
-               void *context)
+remember_archive(struct ld_context *ctx, const char *path)
 {
-	struct ld_context *ctx = (struct ld_context *)context;
-	return append_object(ctx, member->name, data, (size_t)member->size);
+	char **paths;
+	if (ctx->archives.count == ctx->archives.capacity) {
+		size_t capacity = ctx->archives.capacity ? ctx->archives.capacity * 2 : 8;
+		paths = (char **)ld_realloc(ctx->archives.paths,
+		                           capacity * sizeof(*paths));
+		if (!paths)
+			return ld_error(ctx, "out of memory");
+		ctx->archives.paths = paths;
+		ctx->archives.capacity = capacity;
+	}
+	ctx->archives.paths[ctx->archives.count] = ld_strdup(path);
+	if (!ctx->archives.paths[ctx->archives.count])
+		return ld_error(ctx, "out of memory");
+	++ctx->archives.count;
+	return 0;
 }
 
 static int
@@ -319,17 +342,17 @@ load_input(struct ld_context *ctx, const char *path)
 {
 	unsigned char *data;
 	size_t size;
-	int result;
 	const char *suffix = strrchr(path, '.');
-	if (suffix && strcmp(suffix, ".a") == 0) {
-		result = mt_ar_foreach(path, archive_member, ctx);
-		return result == 0 ? 0 : ld_errorf(ctx, "cannot read archive", path);
-	}
+	if (suffix && strcmp(suffix, ".a") == 0)
+		return remember_archive(ctx, path);
 	if (read_file(path, &data, &size) != 0)
 		return ld_errorf(ctx, "cannot read input", path);
-	result = append_object(ctx, path, data, size);
+	if (append_object(ctx, path, data, size) != 0) {
+		free(data);
+		return -1;
+	}
 	free(data);
-	return result;
+	return 0;
 }
 
 static int
@@ -491,6 +514,49 @@ collect_sections(struct ld_context *ctx)
 	return 0;
 }
 
+static int
+collect_one_object_sections(struct ld_context *ctx, size_t object_index)
+{
+	struct ld_object *object = &ctx->objects.items[object_index];
+	struct mt_elf64_section section;
+	const char *name;
+	struct ld_group *out;
+	uint16_t j;
+	int group;
+	uint64_t offset;
+	for (j = 0; j < object->view.section_count; ++j) {
+		if (mt_elf64_get_section(object->data, object->size,
+		                        &object->view, j, &section) != MT_ELF_OK)
+			return ld_errorf(ctx, "invalid section in object", object->name);
+		if (section.type != MT_SHT_PROGBITS && section.type != MT_SHT_NOBITS)
+			continue;
+		if (!(section.flags & LD_SHF_ALLOC))
+			continue;
+		name = object_section_name(object, j);
+		if (!name || !*name)
+			return ld_errorf(ctx, "section has no name", object->name);
+		group = get_group(ctx, name, section.type, section.flags,
+		                  section.alignment ? section.alignment : 1);
+		if (group < 0)
+			return ld_error(ctx, "out of memory");
+		out = &ctx->groups[group];
+		if (section.type == MT_SHT_NOBITS) {
+			if (append_group_data(ctx, out, NULL, (size_t)section.size,
+			                      section.alignment ? section.alignment : 1,
+			                      &offset) != 0)
+				return -1;
+		} else if (append_group_data(ctx, out,
+		                      object->data + section.offset,
+		                      (size_t)section.size,
+		                      section.alignment ? section.alignment : 1,
+		                      &offset) != 0)
+			return -1;
+		object->maps[j].group = group;
+		object->maps[j].offset = offset;
+	}
+	return 0;
+}
+
 static struct ld_global *
 find_global(struct ld_context *ctx, const char *name)
 {
@@ -528,33 +594,29 @@ get_global(struct ld_context *ctx, const char *name)
 }
 
 static int
-prepare_object_symbols(struct ld_context *ctx)
+prepare_object_symbol(struct ld_context *ctx, struct ld_object *object)
 {
 	struct mt_elf64_section section;
 	uint16_t i;
-	size_t j;
-	for (j = 0; j < ctx->objects.count; ++j) {
-		struct ld_object *object = &ctx->objects.items[j];
-		object->has_symtab = 0;
-		for (i = 0; i < object->view.section_count; ++i) {
-			if (mt_elf64_get_section(object->data, object->size,
-			                        &object->view, i, &section) != MT_ELF_OK)
-				return ld_errorf(ctx, "invalid symbol section", object->name);
-			if (section.type != MT_SHT_SYMTAB)
-				continue;
-			if (section.link >= object->view.section_count ||
-			    mt_elf64_get_section(object->data, object->size,
-			                        &object->view, (uint16_t)section.link,
-			                        &object->strtab) != MT_ELF_OK ||
-			    object->strtab.type != MT_SHT_STRTAB ||
-			    section.entry_size < MT_ELF64_SYM_SIZE ||
-			    section.size % section.entry_size != 0)
-				return ld_errorf(ctx, "invalid symbol table", object->name);
-			object->symtab_index = i;
-			object->symtab = section;
-			object->has_symtab = 1;
-			break;
-		}
+	object->has_symtab = 0;
+	for (i = 0; i < object->view.section_count; ++i) {
+		if (mt_elf64_get_section(object->data, object->size,
+		                        &object->view, i, &section) != MT_ELF_OK)
+			return ld_errorf(ctx, "invalid symbol section", object->name);
+		if (section.type != MT_SHT_SYMTAB)
+			continue;
+		if (section.link >= object->view.section_count ||
+		    mt_elf64_get_section(object->data, object->size,
+		                        &object->view, (uint16_t)section.link,
+		                        &object->strtab) != MT_ELF_OK ||
+		    object->strtab.type != MT_SHT_STRTAB ||
+		    section.entry_size < MT_ELF64_SYM_SIZE ||
+		    section.size % section.entry_size != 0)
+			return ld_errorf(ctx, "invalid symbol table", object->name);
+		object->symtab_index = i;
+		object->symtab = section;
+		object->has_symtab = 1;
+		break;
 	}
 	return 0;
 }
@@ -607,30 +669,133 @@ register_global_symbol(struct ld_context *ctx, struct ld_object *object,
 }
 
 static int
+collect_one_object_symbols(struct ld_context *ctx, size_t object_index)
+{
+	struct ld_object *object = &ctx->objects.items[object_index];
+	struct mt_elf64_symbol symbol;
+	const char *name;
+	uint64_t j;
+	if (prepare_object_symbol(ctx, object) != 0)
+		return -1;
+	if (!object->has_symtab)
+		return 0;
+	for (j = 0; j < object->symtab.size / object->symtab.entry_size; ++j) {
+		if (mt_elf64_get_symbol(object->data, object->size,
+		                        &object->symtab, j, &symbol) != MT_ELF_OK)
+			return ld_errorf(ctx, "invalid symbol", object->name);
+		if (symbol.name == 0 ||
+		    mt_elf64_get_string(object->data, object->size,
+		                       &object->strtab, symbol.name, &name) != MT_ELF_OK)
+			continue;
+		if (register_global_symbol(ctx, object, j, &symbol, name) != 0)
+			return -1;
+	}
+	return 0;
+}
+
+static int
 collect_symbols(struct ld_context *ctx)
 {
 	size_t i;
-	uint64_t j;
+	for (i = 0; i < ctx->objects.count; ++i)
+		if (collect_one_object_symbols(ctx, i) != 0)
+			return -1;
+	return 0;
+}
+
+struct archive_extract_context {
+	struct ld_context *ctx;
+	const char *archive;
+	int added;
+};
+
+static int
+archive_member_needed(struct ld_context *ctx, const unsigned char *data,
+                      size_t size)
+{
+	struct mt_elf64_view view;
+	struct mt_elf64_section symtab;
+	struct mt_elf64_section strtab;
 	struct mt_elf64_symbol symbol;
 	const char *name;
-	if (prepare_object_symbols(ctx) != 0)
-		return -1;
-	for (i = 0; i < ctx->objects.count; ++i) {
-		struct ld_object *object = &ctx->objects.items[i];
-		if (!object->has_symtab)
+	uint16_t i;
+	uint64_t j;
+	unsigned binding;
+
+	if (mt_elf64_parse(data, size, &view) != MT_ELF_OK ||
+	    view.type != MT_ET_REL || view.machine != MT_EM_X86_64)
+		return 0;
+	for (i = 0; i < view.section_count; ++i) {
+		if (mt_elf64_get_section(data, size, &view, i, &symtab) != MT_ELF_OK)
+			return -1;
+		if (symtab.type != MT_SHT_SYMTAB)
 			continue;
-		for (j = 0; j < object->symtab.size / object->symtab.entry_size; ++j) {
-			if (mt_elf64_get_symbol(object->data, object->size,
-			                        &object->symtab, j, &symbol) != MT_ELF_OK)
-				return ld_errorf(ctx, "invalid symbol", object->name);
-			if (symbol.name == 0 ||
-			    mt_elf64_get_string(object->data, object->size,
-			                       &object->strtab, symbol.name, &name) != MT_ELF_OK)
-				continue;
-			if (register_global_symbol(ctx, object, j, &symbol, name) != 0)
+		if (symtab.link >= view.section_count ||
+		    mt_elf64_get_section(data, size, &view, (uint16_t)symtab.link,
+		                         &strtab) != MT_ELF_OK)
+			return -1;
+		for (j = 0; j < symtab.size / symtab.entry_size; ++j) {
+			struct ld_global *global;
+			if (mt_elf64_get_symbol(data, size, &symtab, j, &symbol) != MT_ELF_OK)
 				return -1;
+			binding = symbol.info >> LD_STB_SHIFT;
+			if (binding == LD_STB_LOCAL || symbol.section == MT_SHN_UNDEF ||
+			    symbol.name == 0 ||
+			    mt_elf64_get_string(data, size, &strtab, symbol.name,
+			                       &name) != MT_ELF_OK)
+				continue;
+			global = find_global(ctx, name);
+			if (global && !global->defined)
+				return 1;
 		}
+		break;
 	}
+	return 0;
+}
+
+static int
+extract_archive_member(const struct mt_ar_member *member,
+                       const unsigned char *data, void *context)
+{
+	struct archive_extract_context *extract =
+	    (struct archive_extract_context *)context;
+	struct ld_context *ctx = extract->ctx;
+	char display[512];
+	size_t index;
+	int needed = archive_member_needed(ctx, data, (size_t)member->size);
+	if (needed < 0)
+		return ld_errorf(ctx, "invalid archive member", member->name);
+	if (!needed)
+		return 0;
+	snprintf(display, sizeof(display), "%s(%s)", extract->archive, member->name);
+	index = ctx->objects.count;
+	if (append_object(ctx, display, data, (size_t)member->size) != 0 ||
+	    collect_one_object_sections(ctx, index) != 0 ||
+	    collect_one_object_symbols(ctx, index) != 0)
+		return -1;
+	extract->added = 1;
+	return 0;
+}
+
+static int
+extract_archives(struct ld_context *ctx)
+{
+	int changed;
+	size_t i;
+	do {
+		changed = 0;
+		for (i = 0; i < ctx->archives.count; ++i) {
+			struct archive_extract_context extract = {
+				.ctx = ctx, .archive = ctx->archives.paths[i], .added = 0
+			};
+			if (mt_ar_foreach(ctx->archives.paths[i], extract_archive_member,
+			                  &extract) != 0)
+				return ld_errorf(ctx, "cannot extract archive",
+				                 ctx->archives.paths[i]);
+			if (extract.added)
+				changed = 1;
+		}
+	} while (changed);
 	return 0;
 }
 
@@ -867,6 +1032,13 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 		width = 4;
 	} else if (type == LD_R_X86_64_PC32 || type == LD_R_X86_64_PLT32) {
 		value = resolved_value + addend - place;
+		width = 4;
+	} else if (type == LD_R_X86_64_TPOFF32) {
+		/* Static TLS: the tpoff of a non-TLS symbol is the negative
+		 * offset from %fs:0 to the symbol's runtime address.  Because
+		 * %fs points at the end of the static TLS block, this value is
+		 * stored as a signed 32-bit delta. */
+		value = (uint64_t)(-(int64_t)resolved_value) + addend;
 		width = 4;
 	} else if (type == LD_R_X86_64_64) {
 		value = resolved_value + addend;
@@ -1179,7 +1351,8 @@ mt_ld_link(const char *output, const char *entry,
 		goto out;
 	}
 	if (collect_sections(&ctx) != 0 || collect_symbols(&ctx) != 0 ||
-	    allocate_common(&ctx) != 0 || collect_got_relocations(&ctx) != 0)
+	    extract_archives(&ctx) != 0 || allocate_common(&ctx) != 0 ||
+	    collect_got_relocations(&ctx) != 0)
 		goto out;
 	if (ctx.got.count != 0)
 		ctx.got.group = find_group(&ctx, ".got");

@@ -35,3 +35,10 @@
 
 - 支持 C 风格块注释、GNU numeric labels（`1f/1b`）、SIB 地址、`lock xadd/cmpxchg`、`xchg`、`mfence`、`hlt`、`syscall`。
 - 新增 `test/as_libc_x86_64.sh`，crt1、atomic、setjmp、sigreturn、thread_clone、syscall gate 六个 MeuOS libc x86_64 汇编文件均可由 mt/as 生成 ET_REL。
+
+## 2026-07-22：ld sysroot 集成
+
+- 加入按需抽取 `mt_ar_foreach`，并把归档移动到 `mt_ld_link` 后置的迭代 `extract_archives`，从而让 ld 自动从 `.a` 抽取被引用成员。
+- 实现 R_X86_64_TPOFF32 relocation（`-(symbol_address)`），覆盖 MeuOS libc 中 `errno_value` 等静态 TLS 引用。
+- `test/ld_sysroot.sh` 使用宿主 `/workspace/MeuOS-Kit/sysroot`：mcc 生成 `printf` 测试 → mt/as → mt/ld 与 `crt1.o` + `libc-meuos.a` + `libatomic-meuos.a` 链接为可在宿主 Linux 上输出 `toolchain = 42` 的可执行文件。
+- 后续：浮点/SSE 完整编码、多架构 ELF/CPIO、MeuOS QEMU sysroot 验证 `counter = 2000`、mcc driver 集成。

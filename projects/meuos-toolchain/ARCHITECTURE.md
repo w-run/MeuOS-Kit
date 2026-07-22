@@ -143,7 +143,7 @@ make -C projects/meuos-toolchain check-ld-x86_64
 - mt as + mt ar + mt ld 的 syscall-only ET_EXEC 可在宿主 x86_64 运行；
 - 归档输入、GOT/PLT、`.text/.data/.bss`、PC-relative 和绝对 relocation 已覆盖；
 - 未定义符号有明确诊断；
-- 后续生产门禁：MeuOS libc/crt1、stdio、C11 atomic/threads 和 QEMU 运行。
+- 后续生产门禁：C11 atomic/threads `counter = 2000` 验证、QEMU 运行、其他架构 ELF 重定位。
 
 ### P3：mcc 集成
 

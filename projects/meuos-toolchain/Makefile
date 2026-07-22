@@ -117,9 +117,8 @@ check-as-x86_64: $(AS_BIN)
 
 check-ld-x86_64: $(AS_BIN) $(AR_BIN) $(LD_BIN)
 	sh test/ld_smoke.sh "$(abspath $(AS_BIN))" "$(abspath $(AR_BIN))" "$(abspath $(LD_BIN))"
+	sh test/ld_sysroot.sh "$(abspath $(AS_BIN))" "$(abspath $(LD_BIN))"
 
-check-as-libc-x86_64: $(AS_BIN)
-	sh test/as_libc_x86_64.sh "$(abspath $(AS_BIN))"
 
 check-elf: $(ELF_PROBE) $(TEST_FIXTURE_OBJ)
 	$(ELF_PROBE) $(TEST_FIXTURE_OBJ)
