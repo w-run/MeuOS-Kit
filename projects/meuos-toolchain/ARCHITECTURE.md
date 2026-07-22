@@ -47,8 +47,11 @@ src/target/       架构相关编码、重定位和反汇编
 - 静态链接 MeuOS libc 和 `crt1.o`；
 - 宿主 Linux 上的 `make check`，以及 QEMU x86_64 上的端到端运行。
 
-首期明确不承诺：完整 gas 兼容、GNU long-name table、archive symbol index、
-动态链接器、DWARF、TLS 动态模型和非 x86_64 运行验证。
+首期范围（P0-P2 已全部完成）：GNU // long-name table、archive symbol index、
+SSE/SSE2 标量编码、TLS 静态模型（IE/LE + PT_TLS + TPOFF32）、BSD #1/ 格式读取、
+ranlib、-L/-l/--sysroot 库搜索。
+首期不包含（后续阶段）：完整 gas 兼容、动态链接器、DWARF 调试信息、
+TLS 动态模型（GD/LD）、非 x86_64 架构运行验证。
 
 ## 2. 分阶段开发任务
 
