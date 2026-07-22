@@ -18,6 +18,7 @@
 - `meuos-toolchain` - 底层工具链（as/ld/ar/ranlib，完全取缔 binutils）
 - `meuos-utils` - 核心工具集（coreutils/diffutils/findutils 完整替代）
 - `meuos-shell`（msh）- Shell 终端（完整 Shell，可选 bash 兼容与 zsh 插件/主题）
+- `meuos-buildtools` - 构建工具（m4/bison/flex/gperf，取代 GNU 构建工具链依赖）
 
 **交付对象**：具备系统编程和编译器经验的大型 AI Agent（兆级上下文）。
 
@@ -177,6 +178,31 @@ meow --bootstrap         # 自举模式：用宿主编译自己
 
 ---
 
+### 2.7 meuos-buildtools - 构建工具
+
+**目标**：提供构建真实软件包时所需的代码生成和宏处理工具，取代 GNU 构建工具链依赖。
+
+**工具清单**：
+
+| 工具 | 功能 | 取代 | 典型依赖场景 |
+|------|------|------|-------------|
+| `m4` | 宏处理器 | GNU m4 | autoconf 的 configure 生成、 Bison 输出后处理 |
+| `bison` | 解析器生成器（.y -> .c/.h） | GNU Bison | binutils, bash, gawk, flex 等的语法分析 |
+| `flex` | 词法分析器生成器（.l -> .c） | Flex | binutils, bash, gawk, wc 等的词法扫描 |
+| `gperf` | 完美哈希函数生成器 | GNU gperf | glib, libidn2 等的关键字查找 |
+
+**设计原则**：
+- 用 C 编写（mcc 编译），依赖 meuos-libc
+- 兼容 GNU 对应工具的命令行选项、输入语法和输出格式
+- 独立项目，不复制 GNU 源码
+- 输出必须能被 mcc 正确编译
+
+**与 meow 的关系**：meow 负责调度构建流程，meuos-buildtools 提供被调用的工具。meow 的 YAML 配方中 `bison`/`flex` 等命令直接调用这些工具。
+
+**自举顺序**：在 Phase 5（工具链完善）之后、Phase 6（用户空间）之前构建。部分软件包（如 bash、binutils）的构建需要这些工具。
+
+---
+
 ## 3. 自举流程
 
 Agent 必须严格遵循以下阶段，每步都要验证：
@@ -206,7 +232,11 @@ Agent 必须严格遵循以下阶段，每步都要验证：
 - mcc driver 集成 mt 工具，消除对宿主 `cc` 的最后依赖。
 - 验证：Kit 全程零宿主依赖。
 
-**Phase 6 - 用户空间**
+**Phase 6 - 构建工具**
+- 构建 `meuos-buildtools`（m4/bison/flex/gperf）。
+- 验证：能用 meow + buildtools 构建需要 bison/flex 的软件包。
+
+**Phase 7 - 用户空间**
 - 构建 `meuos-utils`、`meuos-shell`。
 - 验证：MeuOS Next 最小 sysroot 可运行、可交互。
 
@@ -219,7 +249,7 @@ Agent 必须严格遵循以下阶段，每步都要验证：
 - **禁止**使用 autotools、cmake、meson 作为 Kit 自身的构建系统（Kit 自身组件必须用简单 Makefile 或 shell 脚本构建）。
 - **禁止**系统调用通过 libc 封装，必须直接 `syscall()` 或内联汇编。
 - **禁止**预编译二进制提交到仓库（宿主 bootstrapper 除外）。
-- **禁止**在 MeuOS Next 环境中依赖 GNU 工具（make/autoconf/binutils/coreutils/bash 等）。
+- **禁止**在 MeuOS Next 环境中依赖 GNU 工具（make/autoconf/binutils/coreutils/bash/m4/bison/flex 等）。
 - **要求**构建可重现（无时间戳、无绝对路径硬编码）。
 
 ---
@@ -254,6 +284,7 @@ Agent 必须严格遵循以下阶段，每步都要验证：
 - **构建系统**：redo、tup、ninja、bear-make
 - **工具集**：Rust uutils、BusyBox、serenityOS Utilities
 - **Shell**：dash（POSIX sh 参考）、serenityOS Shell
+- **构建工具**：GNU m4/Bison/Flex/Gperf（参考行为和语法兼容性，不复制源码）
 - **通用知识库**：OSDev Wiki、Linux man-pages、各 arch 的 ELF/ABI spec
 
 ### 边界（与 §4 禁止事项一致）

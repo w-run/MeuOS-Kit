@@ -38,6 +38,7 @@ MeuOS-Kit/
 | `meuos-toolchain` | 取缔 binutils（as/ld/ar/ranlib/nm/objdump/readelf/strip/objcopy） | P0-P2 完成，P3-P11 规划中 |
 | `meuos-utils` | coreutils/diffutils/findutils 完整替代 | 待启动 |
 | `meuos-shell` (msh) | POSIX sh + 可选 bash 兼容 + zsh 插件/主题 | 待启动 |
+| `meuos-buildtools` | m4/bison/flex/gperf（取代 GNU 构建工具） | 待启动 |
 
 ## 快速开始
 
@@ -71,11 +72,12 @@ Phase 2  诞生 libc     mcc 编译 meuos-libc
 Phase 3  诞生 meow     mcc + libc 编译 meow
 Phase 4  自举验证      sysroot 内自重建 Kit
 Phase 5  工具链完善     mcc driver 集成 mt，消除宿主 cc 依赖
-Phase 6  用户空间      构建 meuos-utils + meuos-shell
+Phase 6  构建工具      构建 m4/bison/flex/gperf
+Phase 7  用户空间      构建 meuos-utils + meuos-shell
 ```
 
 当前 Phase 0–3 与 5（LFS 包验证）均已 PASS。Phase 4 由 `env/` QEMU 验证。
-Phase 5-6 进行中。
+Phase 5-7 进行中。
 
 ## 测试环境（env/）
 
