@@ -10,7 +10,10 @@
  * instructions. */
 #include "irgen.h"
 
-struct func *
+/* Current function context for statement-expression ({}) parsing.
+ * Set by stmt() before entering expression parsing; used by
+ * parse_stmt_expr_body() to pass stmt() control-flow constructs. */
+struct func *curfunc;struct func *
 mkfunc(struct decl *decl, char *name, struct type *t, struct scope *s)
 {
 	struct func *f;

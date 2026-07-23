@@ -236,6 +236,7 @@ enum exprkind {
 	EXPRBUILTIN,
 	EXPRTEMP,
 	EXPRSIZEOF,
+	EXPRSTMTEXPR,
 };
 
 struct stringlit {
@@ -297,6 +298,10 @@ struct expr {
 			struct type *type;
 		} szof;
 		struct value *temp;
+		struct {
+			struct stmt_expr_item *items;
+			struct expr *last_expr;
+		} stmt_expr;
 	} u;
 };
 
@@ -305,6 +310,22 @@ struct init {
 	struct expr *expr;
 	struct bitfield bits;
 	struct init *next;
+};
+
+/* Item in a GNU statement-expression ({...}) block: a declaration with
+ * optional initialiser, or an expression statement.  The list is built
+ * during parsing and consumed during IR generation (funcexpr). */
+struct stmt_expr_item {
+	enum { STMTEXPR_DECL, STMTEXPR_EXPR } kind;
+	union {
+		struct {
+			struct decl *decl;
+			struct init *init;
+			bool hasinit;
+		} decl_item;
+		struct expr *expr;
+	} u;
+	struct stmt_expr_item *next;
 };
 
 /* token */
@@ -477,9 +498,17 @@ struct expr *eval(struct expr *);
 struct init *mkinit(unsigned long long, unsigned long long, struct bitfield, struct expr *);
 struct init *parseinit(struct scope *, struct type *);
 
+/* statement-expression parsing — returns an EXPRSTMTEXPR node */
+struct expr *parse_stmt_expr_body(struct scope *);
+
 /* stmt */
 
 void stmt(struct func *, struct scope *);
+
+/* current function context, set by stmt() for statement expression
+ * ({...}) parsing — enables parse_stmt_expr_body to call stmt() for
+ * control-flow constructs (if/while/for/...) inside the body. */
+extern struct func *curfunc;
 
 /* backend */
 

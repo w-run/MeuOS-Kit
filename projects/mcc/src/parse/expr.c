@@ -110,6 +110,13 @@ delexpr(struct expr *e)
 			delexpr(sub);
 		}
 		break;
+	case EXPRSTMTEXPR: {
+		/* items were freed during parsing after funcinit; only
+		 * the result expression (if any) needs cleanup here. */
+		if (e->u.stmt_expr.last_expr)
+			delexpr(e->u.stmt_expr.last_expr);
+		break;
+	}
 	}
 	free(e);
 }

@@ -158,6 +158,17 @@ castexpr(struct scope *s)
 		tq = QUALNONE;
 		t = typename(s, &tq, &toeval);
 		if (!t) {
+			/* GNU statement expression ({...}) — handled before
+			 * falling through to parenthesised expression so that
+			 * `({` inside function-call arguments is caught here
+			 * (castexpr steals the leading `(` before primaryexpr
+			 * ever sees it). */
+			if (tok.kind == TLBRACE) {
+				e = parse_stmt_expr_body(s);
+				expect(TRPAREN, "after statement expression");
+				e = postfixexpr(s, e);
+				goto done;
+			}
 			e = expr(s);
 			expect(TRPAREN, "after expression to match '('");
 			e = postfixexpr(s, e);

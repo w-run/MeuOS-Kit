@@ -187,4 +187,12 @@ check-sysroot-static: $(BIN)
 # Compatibility alias for existing scripts.
 check-la64: check-loongarch64
 
-.PHONY: all clean check check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-la64 check-c11-atomic check-c11 check-c23 check-driver check-abi check-sysroot-static
+.PHONY: all clean check check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-la64 check-c11-atomic check-c11 check-c23 check-driver check-abi check-sysroot-static check-chibicc check-community
+
+# chibicc community functional test suite (C11/C23 conformance).
+# Runs test/community/chibicc/run.sh against the MeuOS sysroot.
+# See test/community/chibicc/REPORT.md for results and classification.
+check-chibicc: $(BIN)
+	@sh test/community/chibicc/run.sh
+
+check-community: check-chibicc

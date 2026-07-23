@@ -231,8 +231,15 @@ typecompatible(struct type *t1, struct type *t2)
 	case TYPEFUNC:
 		if (t1->u.func.isvararg != t2->u.func.isvararg)
 			return false;
+		/* C11 6.7.6.3p10: an old-style declaration (params == NULL, no
+		 * parameter information) is compatible with a prototype; prefer
+		 * the prototype's parameter information. */
+		if (!t1->u.func.params || !t2->u.func.params)
+			goto derived;
+		/* Parameter types ignore top-level qualifiers for compatibility
+		 * (C11 6.7.6.3p15); compare their unqualified forms. */
 		for (p1 = t1->u.func.params, p2 = t2->u.func.params; p1 && p2; p1 = p1->next, p2 = p2->next) {
-			if (!typecompatible(p1->type, p2->type))
+			if (!typecompatible(typeunqual(p1->type, NULL), typeunqual(p2->type, NULL)))
 				return false;
 		}
 		if (p1 || p2)
@@ -325,6 +332,12 @@ typecomposite(struct type *t1, struct type *t2)
 		return t1;
 	case TYPEFUNC:
 		if (t1->u.func.isvararg != t2->u.func.isvararg)
+			return t1;
+		/* C11 6.7.6.3p10: an old-style declaration is compatible with a
+		 * prototype; the composite keeps the prototype's parameters. */
+		if (!t1->u.func.params)
+			return t2;
+		if (!t2->u.func.params)
 			return t1;
 		p1 = t1->u.func.params;
 		p2 = t2->u.func.params;
@@ -450,4 +463,17 @@ typehasint(struct type *t, unsigned long long i, bool sign)
 	if (sign && i >= -1ull << 63)
 		return t->u.arith.issigned && i >= -1ull << (t->size << 3) - 1;
 	return i <= 0xffffffffffffffffull >> (8 - t->size << 3) + t->u.arith.issigned;
+}
+
+struct type *
+typeunqual(struct type *t, enum typequal *q)
+{
+	if (q)
+		*q = t->qual;
+	if (t->qual == QUALNONE)
+		return t;
+	struct type *r = xmalloc(sizeof *r);
+	*r = *t;
+	r->qual = QUALNONE;
+	return r;
 }

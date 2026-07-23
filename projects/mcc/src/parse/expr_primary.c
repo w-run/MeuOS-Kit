@@ -115,6 +115,12 @@ primaryexpr(struct scope *s)
 		break;
 	case TLPAREN:
 		next();
+		if (tok.kind == TLBRACE) {
+			/* GNU statement expression ({...}) */
+			e = parse_stmt_expr_body(s);
+			expect(TRPAREN, "after statement expression");
+			break;
+		}
 		e = expr(s);
 		expect(TRPAREN, "after expression");
 		break;

@@ -401,6 +401,15 @@ funcexpr(struct func *f, struct expr *e)
 		for (e = e->base; e->next; e = e->next)
 			funcexpr(f, e);
 		return funcexpr(f, e);
+	case EXPRSTMTEXPR: {
+		/* GNU statement expression ({...}).
+		 * All declarations, side-effect expressions, and control-flow
+		 * statements were emitted to curfunc during parsing.  Here we
+		 * only evaluate the result expression (if any). */
+		if (e->u.stmt_expr.last_expr)
+			return funcexpr(f, e->u.stmt_expr.last_expr);
+		return NULL;
+	}
 	case EXPRBUILTIN:
 		switch (e->u.builtin.kind) {
 		case BUILTINATOMICFETCHADD:

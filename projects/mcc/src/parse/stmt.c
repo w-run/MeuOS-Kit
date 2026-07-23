@@ -126,6 +126,8 @@ stmt(struct func *f, struct scope *s)
 	struct block *b[4];
 	struct switchcases swtch;
 
+	curfunc = f;
+
 	attr(NULL, 0);
 	switch (tok.kind) {
 	/* 6.8.2 Compound statement */
