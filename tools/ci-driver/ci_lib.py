@@ -130,6 +130,10 @@ def list_todos(
         if not todo_dir.is_dir():
             continue
         for f in sorted(todo_dir.glob("*.md")):
+            # Skip archived todos (under .todo/archive/). Active todo
+            # files live at the .todo/ top level only.
+            if "archive" in f.relative_to(todo_dir).parts:
+                continue
             t = parse_todo(f, project_root, sub.name)
             if t is None:
                 continue

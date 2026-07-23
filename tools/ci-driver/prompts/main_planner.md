@@ -153,6 +153,65 @@ commit 信息区分:
 - 部分: `<sub>: <name> (P?, WIP) - <做了什么,还差什么>`
 - 全部: `<sub>: <name> (P?) - <一句话总结>`
 
+### Step 6. 维护 todo 生命周期 (新增 / 删除)
+
+**规则: 如果在实现过程中遇到新的子问题,允许并应该新增 todo。** 不要把
+新发现的问题塞进现有 todo 的"备注"里,也不要靠 commit message 留 TODO。
+直接用 `todo_admin.py add` 创建一个新的 `.todo/<name>.md`,driver
+下一轮自动识别并把它放进优先级队列。
+
+```
+python3 tools/ci-driver/todo_admin.py . add \
+    --subproject <sub> --name <short-name> \
+    --title "<一句话标题>" --priority P? \
+    --note "<一句话描述>"
+```
+
+新 todo 创建后,**必须** commit 一次 (driver 不替你 commit 新文件):
+
+```
+git add projects/<sub>/.todo/<new>.md
+git commit -m "<sub>: add todo <new> (P?) - <一句话>"
+```
+
+新增 todo 适用的场景:
+- 验收命令失败,发现了一个原本没预料的子问题
+- 一个 gap 拆出来后,发现底下还有 2-3 个独立工作
+- sub-agent 报告里提到的"follow-up"事项,**不要**让它"飘着",立刻固化
+
+**规则: 已经确认完成的 todo 应该被删除。** `git rm` 是历史归档,不需
+要单独的 `archive/` 目录。driver 看到 `status: done` + `done_by_driver_ts`
+齐备的 todo,会标 done 就算"完成"了,你应该在该 todo 确认通过后,主动
+用 `todo_admin.py delete` 删除它 (driver 不替你删):
+
+```
+python3 tools/ci-driver/todo_admin.py . delete \
+    --relpath projects/<sub>/.todo/<name>.md \
+    --reason "completed: <一句话>"
+git add projects/<sub>/.todo/<name>.md   # git rm 已经把删除记录 staged
+git commit -m "<sub>: remove done todo <name> (P?)"
+```
+
+删除的时机:
+- driver 刚为这个 todo 写好 `done_by_driver_ts` (即 CLAIM_DONE 被 driver
+  接受),**同一轮** 内,你可以:
+  1. 输出 `[[CLAIM_DONE: <relpath>]]` (这一步已经做)
+  2. 用 `todo_admin.py delete --relpath <relpath>` 删文件
+  3. `git add` (git rm 已经 staged)+ `git commit -m "<sub>: remove done todo ..."`
+  4. 在最终输出里说一句 "deleted <relpath> per workflow rule"
+
+如果当轮 batch 不止 1 个 todo,删除应该单独放一轮,避免 driver 误判
+batch 完成进度。典型做法是发完 `[[CLAIM_DONE]]` 后,下一轮 driver 重启
+时,scan `projects/*/.todo/` 发现该 todo 没了,自然从 `completed` 列表里
+消掉。如果你想更激进,当轮 batch 末尾就 `todo_admin.py delete` 也是允许
+的,只要 commit 信息带 "remove done todo" 前缀便于审计。
+
+**禁止**:
+- ❌ 把"已完成的 todo"留在 `.todo/` 里"留作参考" — 那是历史文档的活儿,
+  走 git history 而不是 .todo/。
+- ❌ 把"还要做但没人接"的 todo 删了 — 删之前必须先 `status: done`。
+  如果只是要"暂停",改成 `status: pending` + `progress_note` 即可。
+
 ## 3. 状态信号 (每轮结束必输出)
 
 每轮结束 (处理完整个 batch 后) 在输出的最末尾输出一行 marker:
