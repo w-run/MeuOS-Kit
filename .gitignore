@@ -36,7 +36,6 @@ experiments/
 .*.swp
 .DS_Store
 *~
-.codebuddy/
 
 # QEMU test environment (env/) - large binaries, not tracked
 env/build/
