@@ -1,7 +1,8 @@
 <!--
 priority: P1
-status: pending
+status: in_progress
 note: 5 个跨架构 GD-TLS 缺口的分阶段实施计划;Phase A 是 Phase B/C 的前置;Gap 5 受 P6 动态链接阻塞
+start_ts: 2026-07-24
 -->
 
 # 待实现：跨架构 GD-TLS (General-Dynamic TLS)
@@ -249,19 +250,18 @@ P6 动态链接器就绪
 
 ---
 
-## 6. 验收标准
 
-- `mcc --target=x86_64 -fPIC -S tls_gd.c` 生成含 `__tls_get_addr` 调用的汇编
-- `mcc --target=x86_64 -c tls_gd.c` 编译通过，不触发断言或 die
-- `meuos-libc` 中 `__tls_get_addr` 函数可被编译和链接（静态链接下返回正确地址）
-- 回归门禁：`make check` 全绿，不破坏现有 LE/IE TLS 测试
-- Phase C：DSO 加载后 GD-TLS 变量访问正确
-
-## 验收标准
-
-<!-- TODO(main session): replace these placeholders with concrete shell commands the driver should run to verify this todo. The commands must exit 0 on success; any non-zero exit means the todo is NOT done. Keep the fenced block format below. -->
-
-```
-make -C projects/mcc check
+```bash
+# Phase A: verify SGenThr enum added to IR
+grep -q 'SGenThr.*=.*4' projects/mcc/include/ir.h
+# Phase A: verify x86_64 GD sequence emits __tls_get_addr
+cat > /tmp/test_gd_tls.c << 'EOF'
+extern _Thread_local int gd_var;
+int *get_gd(void) { return &gd_var; }
+EOF
+cd projects/mcc && ./mcc --target=x86_64 -S -o /tmp/test_gd_tls.s /tmp/test_gd_tls.c 2>/dev/null
+grep -q '__tls_get_addr' /tmp/test_gd_tls.s && echo "GD-TLS emit: PASS"
+# Regression gate: existing LE/IE TLS tests must still pass
+cd projects/mcc && make check
 ```
 

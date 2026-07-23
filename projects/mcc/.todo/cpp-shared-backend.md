@@ -1,7 +1,8 @@
 <!--
 priority: P2
-status: pending
+status: in_progress
 note: mcc/m++ 共享后端架构(libmcc 化)的分阶段计划;阶段 A 已落地,阶段 B/C/D 待 m++ 启动时实施
+start_ts: 2026-07-24
 -->
 
 # 待规划：mcc/m++ 共享后端架构调整（libmcc 化）
@@ -194,9 +195,12 @@ projects/
 
 ## 验收标准
 
-<!-- TODO(main session): replace these placeholders with concrete shell commands the driver should run to verify this todo. The commands must exit 0 on success; any non-zero exit means the todo is NOT done. Keep the fenced block format below. -->
-
-```
-make -C projects/mcc check
+```bash
+# Phase A: verify libmcc.a exists
+test -f projects/mcc/build/libmcc.a
+# Phase A: verify existing tests still pass
+cd projects/mcc && make check
+# Phase A: verify libmcc.a contains backend symbols (not frontend-only)
+nm build/libmcc.a | grep -q 'T.*isel' && echo "backend symbols in libmcc: PASS"
 ```
 
