@@ -1,0 +1,15 @@
+# 运行时状态与日志（可丢失，用于恢复），不提交
+state/locks/*.lock
+state/sessions/mapping.json
+state/balance_snapshots/*.json
+state/retry_counters/*.json
+state/abandoned/*.json
+state/task_status.json
+state/driver.lock
+.plan/*.json
+logs/
+__pycache__/
+*.pyc
+
+# 密钥不入仓
+config/secret.yaml
