@@ -30,9 +30,28 @@
 
 set -euo pipefail
 
+# ---- 路径 ----------------------------------------------------------------
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECTS_DIR="${REPO_ROOT}/projects"
 CI_DRIVER="${REPO_ROOT}/tools/ci-driver/ci_driver.py"
+
+# ---- 项目级默认值 --------------------------------------------------------
+# 这里给 ci-driver 的环境变量**默认值** (用户已在 shell 里 export 的优先)。
+# 改这里的 default 即可集中切模型,不用 grep 文档/prompt。**不**在
+# main_planner prompt / README 描述里硬编码模型名 — 改这里才是单一来源。
+#
+# 解析顺序(由 ci_lib.resolve_sub_model / resolve_main_model 实现):
+#   1) 命令行 --sub-model / --main-model
+#   2) CI_DRIVER_SUB_MODEL / CI_DRIVER_MAIN_MODEL (本段 export 的)
+#   3) CI_DRIVER_MODEL (主+sub 一起设的兜底)
+#   4) codebuddy 自己的默认 (`codebuddy config get model`)
+export CI_DRIVER_SUB_MODEL="${CI_DRIVER_SUB_MODEL:-hy3}"
+# 主会话不设默认 — 让 codebuddy 用自己的 (deepseek-v4-flash / ark-coding-plan
+# 等都按用户全局 config 走);想锁死某模型 export CI_DRIVER_MAIN_MODEL=... 即可。
+#
+# 注意: **不**在此 export CI_DRIVER_PROJECT_ROOT — 那是 ci-driver 内部
+# 给 MCP sub-agent 作 fallback workdir 用的 (ci_server.py:143),归
+# ci_driver 自己在 call_codebuddy 时设,quickstart 不抢这个名字。
 
 # 唯一允许的"硬编码名字":绑定组别名
 # 含义:用户写 mcc-libc 时,quickstart 解析为 mcc,meuos-libc 两个 sub
@@ -162,6 +181,7 @@ RESOLVED="$(resolve_subprojects "${SUBS_TOKEN}")"
 log "subprojects: ${RESOLVED}"
 log "ci-driver:   ${CI_DRIVER}"
 [[ ${#CI_ARGS[@]} -gt 0 ]] && log "ci-args:     ${CI_ARGS[*]}"
+log "sub-model:   ${CI_DRIVER_SUB_MODEL:-<codebuddy-default>}"
 
 # 透传给 ci_driver run: project_root (位置) + --projects + 剩余 args
 # 注意 Python argparse 不接受 `--` token,所以 `--` 已经在上面被吞掉了
