@@ -1,3 +1,9 @@
+<!--
+priority: P1
+status: pending
+note: -W/-w 当前 no-op；与 opt-warn-levels 同主题
+-->
+
 # 待实现：-W / -w 诊断系统
 
 ## 背景

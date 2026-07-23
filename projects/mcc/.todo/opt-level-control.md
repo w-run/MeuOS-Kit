@@ -1,3 +1,9 @@
+<!--
+priority: P1
+status: pending
+note: -O0/-O1/-O2 当前 no-op；阻塞未来优化调度与回归分级
+-->
+
 # 待实现：真正的 -O 优化级别控制
 
 ## 背景

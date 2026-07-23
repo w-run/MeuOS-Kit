@@ -1,3 +1,9 @@
+<!--
+priority: P1
+status: pending
+note: 5 个子缺口；Phase A（IR 类型 + x86_64 emit + __tls_get_addr）无阻塞可立即开始
+-->
+
 # 待实现：跨架构 GD-TLS (General-Dynamic TLS)
 
 > 日期：2026-07-23

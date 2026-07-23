@@ -1,3 +1,10 @@
+<!--
+priority: P3
+status: done
+done_ts: 2026-07-23
+note: 已并入 gd-tls.md（更详细的 5 缺口分解），本文件留档
+-->
+
 # 待实现：General-Dynamic TLS 地址模型
 
 ## 背景

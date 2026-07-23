@@ -1,3 +1,10 @@
+<!--
+priority: P3
+status: done
+done_ts: 2026-07-23
+note: 类型 / syscall / qemu runtime gate 全部就位；剩边界测试增强
+-->
+
 # 32 位目标统一使用 64 位 time_t — 类型与 ABI 基石已完成
 
 > Update 2026-07-23：类型层与 syscall 层已全部落地，qemu 端到端门禁已

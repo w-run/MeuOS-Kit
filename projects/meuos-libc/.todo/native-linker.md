@@ -1,3 +1,9 @@
+<!--
+priority: P0
+status: pending
+note: 完整自举硬阻塞；零 GNU 目标要求 mcc + libc + meld 脱宿主 ld
+-->
+
 # 待实现：纯原生链接器（脱离宿主 ld）
 
 ## 背景

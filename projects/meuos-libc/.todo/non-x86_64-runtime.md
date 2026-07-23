@@ -1,3 +1,9 @@
+<!--
+priority: P1
+status: pending
+note: 多 arch 端到端门禁；aarch64 已完成，i386 已完成，riscv64 / loongarch64 未开始
+-->
+
 # 待实现：非 x86_64 完整 runtime 验证
 
 ## 背景

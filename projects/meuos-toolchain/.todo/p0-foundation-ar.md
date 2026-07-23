@@ -1,3 +1,10 @@
+<!--
+priority: P3
+status: done
+done_ts: 2026-07-22
+note: libelf / ar / ranlib / 宿主 ld 链接 / r-q-t-p-x 全部完成，进入 P1
+-->
+
 # P0：基础层与 ar（P0a/P0b 已完成）
 
 ## 背景

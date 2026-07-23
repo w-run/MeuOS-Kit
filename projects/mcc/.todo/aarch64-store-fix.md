@@ -1,3 +1,10 @@
+<!--
+priority: P3
+status: done
+done_ts: 2026-07-23
+note: 已修复（omap Ki 化 + isel store 特殊处理），留为永久参考
+-->
+
 # 待修复：mcc aarch64 后端存储到全局变量崩溃 — ✅ 已修复
 
 ## 背景

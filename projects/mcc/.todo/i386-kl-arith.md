@@ -1,3 +1,10 @@
+<!--
+priority: P3
+status: done
+done_ts: 2026-07-23
+note: i386_sysv_abi 预扫描重写为 libc 软算术调用，剩 qemu 真 32 位内核回归验证
+-->
+
 # 已完成：i386 Kl（64 位整数）乘法 / 除法 / 取余
 
 > Update 2026-07-23：已通过 i386_sysv_abi() 预扫描解决。所有 Omul/Odiv/

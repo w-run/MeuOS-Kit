@@ -1,3 +1,10 @@
+<!--
+priority: P1
+status: done
+done_ts: 2026-07-23
+note: 9e1811b 已实现 -O0/1/2/3/s + -w/-Wall/-Werror 真实联动，剩余 -O3/Os/Ofast 与 -W 分类为非阻塞待补
+-->
+
 # 已完成：-O 优化级别实现（警告系统基础设施就位）
 
 > Update 2026-07-23：`-O0/1/2/3/s` 和 `-w`/`-Wall`/`-Werror` **已真实实现**。

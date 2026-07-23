@@ -1,3 +1,9 @@
+<!--
+priority: P1
+status: pending
+note: 用 meow 原生构建 mcc / meuos-libc / meow；Phase 4 自举链前置
+-->
+
 # 待实现：用 meow 原生构建 MeuOS Kit 自身
 
 ## 背景

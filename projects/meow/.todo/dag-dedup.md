@@ -1,3 +1,9 @@
+<!--
+priority: P2
+status: pending
+note: -jN 并行执行的间接依赖重复问题；非阻塞，按需优化
+-->
+
 # 待实现：完整 DAG 去重
 
 ## 背景

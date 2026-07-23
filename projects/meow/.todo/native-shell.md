@@ -1,3 +1,9 @@
+<!--
+priority: P2
+status: pending
+note: 切到 ${MEUOS_SYSROOT}/bin/sh；前置 MeuOS userspace 自身 shell 完成
+-->
+
 # 待实现：MeuOS 原生 shell 替代 /bin/sh
 
 ## 背景

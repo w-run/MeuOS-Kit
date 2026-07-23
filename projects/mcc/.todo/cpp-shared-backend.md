@@ -1,3 +1,9 @@
+<!--
+priority: P2
+status: pending
+note: m++ 启动前置，libmcc 化阶段 A 已完成；阶段 B/C 暂不阻塞
+-->
+
 # 待规划：mcc/m++ 共享后端架构调整（libmcc 化）
 
 ## 背景

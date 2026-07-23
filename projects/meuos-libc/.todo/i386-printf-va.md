@@ -1,3 +1,10 @@
+<!--
+priority: P3
+status: done
+done_ts: 2026-07-23
+note: targ.c typevalist 改 struct，跨函数 va_list 永久参考
+-->
+
 # i386 printf %d 跨函数 va_list — 已修复（永久参考）
 
 > Update 2026-07-23：根因定位并修复，qemu 端到端验证已通过。本文件
