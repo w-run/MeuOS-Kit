@@ -1,7 +1,8 @@
 <!--
 priority: P2
-status: pending
+status: in_progress
 note: partial 场景 — 加 mul() + div(), 验收只测 mul
+start_ts: 2026-07-24
 -->
 
 # 测试: 在 calc.c 加 mul() 和 div()
@@ -23,6 +24,6 @@ main session 如果两个都实现了,CLAIM_DONE 会通过;如果只实现 add
 
 ```
 printf 'int main(void){return mul(2,3)==6?0:1;}' > /tmp/ci-test-mul-main.c
-cc -Iprojects/ci-test/src /tmp/ci-test-mul-main.c projects/ci-test/src/calc.c -o /tmp/ci-test-mul
+cc -Wno-implicit-function-declaration -Iprojects/ci-test/src /tmp/ci-test-mul-main.c projects/ci-test/src/calc.c -o /tmp/ci-test-mul
 /tmp/ci-test-mul
 ```
