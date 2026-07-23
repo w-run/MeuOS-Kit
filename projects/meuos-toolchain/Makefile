@@ -22,6 +22,10 @@ LIBELF_SRCS := $(sort $(wildcard src/libelf/*.c))
 LIBELF_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(LIBELF_SRCS))
 LIBELF_LIB := $(BUILD)/lib/libelf.a
 
+LIBDISASM_SRCS := $(sort $(wildcard src/libdisasm/*.c))
+LIBDISASM_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(LIBDISASM_SRCS))
+LIBDISASM_LIB := $(BUILD)/lib/libdisasm.a
+
 AR_SRCS := $(sort $(wildcard src/ar/*.c))
 AR_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(AR_SRCS))
 AR_BIN := $(BUILD)/bin/ar
@@ -53,15 +57,23 @@ OBJCOPY_SRCS := $(sort $(wildcard src/objcopy/*.c))
 OBJCOPY_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(OBJCOPY_SRCS))
 OBJCOPY_BIN := $(BUILD)/bin/objcopy
 
+OBJDUMP_SRCS := $(sort $(wildcard src/objdump/*.c))
+OBJDUMP_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(OBJDUMP_SRCS))
+OBJDUMP_BIN := $(BUILD)/bin/objdump
+
 ELF_PROBE := $(BUILD)/test/elf_probe
 TEST_FIXTURE_OBJ := $(BUILD)/test/hello.o
 TEST_ARCHIVE := $(BUILD)/test/libhello.a
 TEST_EXEC := $(BUILD)/test/hello.exec
-DEPS := $(LIBELF_OBJS:.o=.d) $(AR_OBJS:.o=.d) $(AS_OBJS:.o=.d) $(LD_OBJS:.o=.d) $(RANLIB_OBJS:.o=.d) $(NM_OBJS:.o=.d) $(READELF_OBJS:.o=.d) $(STRIP_OBJS:.o=.d) $(OBJCOPY_OBJS:.o=.d) $(ELF_PROBE).d
+DEPS := $(LIBELF_OBJS:.o=.d) $(LIBDISASM_OBJS:.o=.d) $(AR_OBJS:.o=.d) $(AS_OBJS:.o=.d) $(LD_OBJS:.o=.d) $(RANLIB_OBJS:.o=.d) $(NM_OBJS:.o=.d) $(READELF_OBJS:.o=.d) $(STRIP_OBJS:.o=.d) $(OBJCOPY_OBJS:.o=.d) $(OBJDUMP_OBJS:.o=.d) $(ELF_PROBE).d
 
-all: $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(STRIP_BIN) $(OBJCOPY_BIN)
+all: $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(STRIP_BIN) $(OBJCOPY_BIN) $(OBJDUMP_BIN)
 
 $(LIBELF_LIB): $(LIBELF_OBJS)
+	@mkdir -p $(dir $@)
+	$(HOST_AR) rcs $@ $^
+
+$(LIBDISASM_LIB): $(LIBDISASM_OBJS)
 	@mkdir -p $(dir $@)
 	$(HOST_AR) rcs $@ $^
 
@@ -97,6 +109,10 @@ $(OBJCOPY_BIN): $(OBJCOPY_OBJS) $(LIBELF_LIB)
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(LDFLAGS) -o $@ $(OBJCOPY_OBJS) $(LIBELF_LIB) $(LDLIBS)
 
+$(OBJDUMP_BIN): $(OBJDUMP_OBJS) $(LIBELF_LIB) $(LIBDISASM_LIB)
+	@mkdir -p $(dir $@)
+	$(HOST_CC) $(LDFLAGS) -o $@ $(OBJDUMP_OBJS) $(LIBELF_LIB) $(LIBDISASM_LIB) $(LDLIBS)
+
 $(ELF_PROBE): test/elf_probe.c $(LIBELF_LIB)
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< $(LIBELF_LIB) $(LDFLAGS) $(LDLIBS)
@@ -119,7 +135,7 @@ build/%.o: %.c
 
 -include $(DEPS)
 
-check: check-as-x86_64 check-as-sse-x86_64 check-as-libc-x86_64 check-ld-x86_64 check-ar-bsd check-ld-libpath check-ranlib check-libelf check-nm check-readelf check-strip check-objcopy $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(STRIP_BIN) $(OBJCOPY_BIN) $(ELF_PROBE) $(TEST_ARCHIVE)
+check: check-as-x86_64 check-as-sse-x86_64 check-as-libc-x86_64 check-ld-x86_64 check-ar-bsd check-ld-libpath check-ranlib check-libelf check-nm check-readelf check-strip check-objcopy check-objdump $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(STRIP_BIN) $(OBJCOPY_BIN) $(OBJDUMP_BIN) $(ELF_PROBE) $(TEST_ARCHIVE)
 	@set -eu; \
 	test "$$($(AR_BIN) --version)" = "meuos-toolchain ar 0.2.0 (x86_64 bootstrap)"; \
 	test "$$($(AR_BIN) t $(TEST_ARCHIVE))" = hello.o; \
@@ -200,7 +216,10 @@ check-strip: $(STRIP_BIN) $(TEST_FIXTURE_OBJ) $(TEST_EXEC)
 check-objcopy: $(OBJCOPY_BIN) $(TEST_FIXTURE_OBJ) $(TEST_EXEC)
 	sh test/objcopy_basic.sh "$(abspath $(OBJCOPY_BIN))" "$(abspath $(TEST_FIXTURE_OBJ))" "$(abspath $(TEST_EXEC))"
 
-install: $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(STRIP_BIN) $(OBJCOPY_BIN)
+check-objdump: $(OBJDUMP_BIN) $(TEST_EXEC)
+	sh test/objdump_basic.sh "$(abspath $(OBJDUMP_BIN))" "$(abspath $(TEST_EXEC))"
+
+install: $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(STRIP_BIN) $(OBJCOPY_BIN) $(OBJDUMP_BIN)
 	@mkdir -p $(DESTDIR)$(PREFIX)/bin
 	cp $(AR_BIN) $(DESTDIR)$(PREFIX)/bin/ar
 	cp $(AS_BIN) $(DESTDIR)$(PREFIX)/bin/as
@@ -210,8 +229,9 @@ install: $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(
 	cp $(READELF_BIN) $(DESTDIR)$(PREFIX)/bin/readelf
 	cp $(STRIP_BIN) $(DESTDIR)$(PREFIX)/bin/strip
 	cp $(OBJCOPY_BIN) $(DESTDIR)$(PREFIX)/bin/objcopy
+	cp $(OBJDUMP_BIN) $(DESTDIR)$(PREFIX)/bin/objdump
 
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all check check-elf check-ar check-as-x86_64 check-as-sse-x86_64 check-as-libc-x86_64 check-ld-x86_64 check-ar-bsd check-ld-libpath check-ranlib check-libelf check-nm check-readelf check-strip check-objcopy install clean
+.PHONY: all check check-elf check-ar check-as-x86_64 check-as-sse-x86_64 check-as-libc-x86_64 check-ld-x86_64 check-ar-bsd check-ld-libpath check-ranlib check-libelf check-nm check-readelf check-strip check-objcopy check-objdump install clean
