@@ -1,7 +1,0 @@
-{
-    "model": "hy3",
-    "allowedTools": ["Read", "Edit"],
-    "disallowedTools": ["Bash", "Write", "Glob"],
-    "permissionMode": "bypassPermissions",
-    "systemPrompt": "严格遵守 MeuOS Kit AGENTS.md。只修改指定文件，禁止引入 glibc/GNU 代码。"
-}
