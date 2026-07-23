@@ -37,12 +37,29 @@ AR_CORE_OBJ := $(BUILD)/src/ar/archive.o
 RANLIB_OBJS := $(BUILD)/src/ranlib/main.o $(AR_CORE_OBJ)
 RANLIB_BIN := $(BUILD)/bin/ranlib
 
+NM_SRCS := $(sort $(wildcard src/nm/*.c))
+NM_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(NM_SRCS))
+NM_BIN := $(BUILD)/bin/nm
+
+READELF_SRCS := $(sort $(wildcard src/readelf/*.c))
+READELF_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(READELF_SRCS))
+READELF_BIN := $(BUILD)/bin/readelf
+
+STRIP_SRCS := $(sort $(wildcard src/strip/*.c))
+STRIP_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(STRIP_SRCS))
+STRIP_BIN := $(BUILD)/bin/strip
+
+OBJCOPY_SRCS := $(sort $(wildcard src/objcopy/*.c))
+OBJCOPY_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(OBJCOPY_SRCS))
+OBJCOPY_BIN := $(BUILD)/bin/objcopy
+
 ELF_PROBE := $(BUILD)/test/elf_probe
 TEST_FIXTURE_OBJ := $(BUILD)/test/hello.o
 TEST_ARCHIVE := $(BUILD)/test/libhello.a
-DEPS := $(LIBELF_OBJS:.o=.d) $(AR_OBJS:.o=.d) $(AS_OBJS:.o=.d) $(LD_OBJS:.o=.d) $(RANLIB_OBJS:.o=.d) $(ELF_PROBE).d
+TEST_EXEC := $(BUILD)/test/hello.exec
+DEPS := $(LIBELF_OBJS:.o=.d) $(AR_OBJS:.o=.d) $(AS_OBJS:.o=.d) $(LD_OBJS:.o=.d) $(RANLIB_OBJS:.o=.d) $(NM_OBJS:.o=.d) $(READELF_OBJS:.o=.d) $(STRIP_OBJS:.o=.d) $(OBJCOPY_OBJS:.o=.d) $(ELF_PROBE).d
 
-all: $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN)
+all: $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(STRIP_BIN) $(OBJCOPY_BIN)
 
 $(LIBELF_LIB): $(LIBELF_OBJS)
 	@mkdir -p $(dir $@)
@@ -64,6 +81,22 @@ $(RANLIB_BIN): $(RANLIB_OBJS) $(LIBELF_LIB)
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(LDFLAGS) -o $@ $(RANLIB_OBJS) $(LIBELF_LIB) $(LDLIBS)
 
+$(NM_BIN): $(NM_OBJS) $(LIBELF_LIB)
+	@mkdir -p $(dir $@)
+	$(HOST_CC) $(LDFLAGS) -o $@ $(NM_OBJS) $(LIBELF_LIB) $(LDLIBS)
+
+$(READELF_BIN): $(READELF_OBJS) $(LIBELF_LIB)
+	@mkdir -p $(dir $@)
+	$(HOST_CC) $(LDFLAGS) -o $@ $(READELF_OBJS) $(LIBELF_LIB) $(LDLIBS)
+
+$(STRIP_BIN): $(STRIP_OBJS) $(LIBELF_LIB)
+	@mkdir -p $(dir $@)
+	$(HOST_CC) $(LDFLAGS) -o $@ $(STRIP_OBJS) $(LIBELF_LIB) $(LDLIBS)
+
+$(OBJCOPY_BIN): $(OBJCOPY_OBJS) $(LIBELF_LIB)
+	@mkdir -p $(dir $@)
+	$(HOST_CC) $(LDFLAGS) -o $@ $(OBJCOPY_OBJS) $(LIBELF_LIB) $(LDLIBS)
+
 $(ELF_PROBE): test/elf_probe.c $(LIBELF_LIB)
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< $(LIBELF_LIB) $(LDFLAGS) $(LDLIBS)
@@ -71,6 +104,10 @@ $(ELF_PROBE): test/elf_probe.c $(LIBELF_LIB)
 $(TEST_FIXTURE_OBJ): test/fixtures/hello.c
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
+
+$(TEST_EXEC): test/fixtures/exec_main.c
+	@mkdir -p $(dir $@)
+	$(HOST_CC) $(CPPFLAGS) $(CFLAGS) -o $@ $<
 
 $(TEST_ARCHIVE): $(AR_BIN) $(TEST_FIXTURE_OBJ)
 	@mkdir -p $(dir $@)
@@ -82,7 +119,7 @@ build/%.o: %.c
 
 -include $(DEPS)
 
-check: check-as-x86_64 check-as-sse-x86_64 check-as-libc-x86_64 check-ld-x86_64 check-ar-bsd check-ld-libpath check-ranlib check-libelf $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(ELF_PROBE) $(TEST_ARCHIVE)
+check: check-as-x86_64 check-as-sse-x86_64 check-as-libc-x86_64 check-ld-x86_64 check-ar-bsd check-ld-libpath check-ranlib check-libelf check-nm check-readelf check-strip check-objcopy $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(STRIP_BIN) $(OBJCOPY_BIN) $(ELF_PROBE) $(TEST_ARCHIVE)
 	@set -eu; \
 	test "$$($(AR_BIN) --version)" = "meuos-toolchain ar 0.2.0 (x86_64 bootstrap)"; \
 	test "$$($(AR_BIN) t $(TEST_ARCHIVE))" = hello.o; \
@@ -151,13 +188,30 @@ check-ar: $(AR_BIN) $(TEST_ARCHIVE)
 check-libelf: $(ELF_PROBE) $(AS_BIN) $(LD_BIN) $(AR_BIN)
 	sh test/libelf_roundtrip.sh "$(abspath $(ELF_PROBE))" "$(abspath $(AS_BIN))" "$(abspath $(LD_BIN))" "$(abspath $(AR_BIN))"
 
-install: $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN)
+check-nm: $(NM_BIN) $(TEST_FIXTURE_OBJ)
+	sh test/nm_basic.sh "$(abspath $(NM_BIN))" "$(abspath $(TEST_FIXTURE_OBJ))"
+
+check-readelf: $(READELF_BIN) $(TEST_FIXTURE_OBJ) $(TEST_EXEC)
+	sh test/readelf_basic.sh "$(abspath $(READELF_BIN))" "$(abspath $(TEST_FIXTURE_OBJ))" "$(abspath $(TEST_EXEC))"
+
+check-strip: $(STRIP_BIN) $(TEST_FIXTURE_OBJ) $(TEST_EXEC)
+	sh test/strip_basic.sh "$(abspath $(STRIP_BIN))" "$(abspath $(TEST_FIXTURE_OBJ))" "$(abspath $(TEST_EXEC))"
+
+check-objcopy: $(OBJCOPY_BIN) $(TEST_FIXTURE_OBJ) $(TEST_EXEC)
+	sh test/objcopy_basic.sh "$(abspath $(OBJCOPY_BIN))" "$(abspath $(TEST_FIXTURE_OBJ))" "$(abspath $(TEST_EXEC))"
+
+install: $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(STRIP_BIN) $(OBJCOPY_BIN)
 	@mkdir -p $(DESTDIR)$(PREFIX)/bin
 	cp $(AR_BIN) $(DESTDIR)$(PREFIX)/bin/ar
 	cp $(AS_BIN) $(DESTDIR)$(PREFIX)/bin/as
 	cp $(LD_BIN) $(DESTDIR)$(PREFIX)/bin/ld
+	cp $(RANLIB_BIN) $(DESTDIR)$(PREFIX)/bin/ranlib
+	cp $(NM_BIN) $(DESTDIR)$(PREFIX)/bin/nm
+	cp $(READELF_BIN) $(DESTDIR)$(PREFIX)/bin/readelf
+	cp $(STRIP_BIN) $(DESTDIR)$(PREFIX)/bin/strip
+	cp $(OBJCOPY_BIN) $(DESTDIR)$(PREFIX)/bin/objcopy
 
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all check check-elf check-ar check-as-x86_64 check-as-sse-x86_64 check-as-libc-x86_64 check-ld-x86_64 check-ar-bsd check-ld-libpath check-ranlib check-libelf install clean
+.PHONY: all check check-elf check-ar check-as-x86_64 check-as-sse-x86_64 check-as-libc-x86_64 check-ld-x86_64 check-ar-bsd check-ld-libpath check-ranlib check-libelf check-nm check-readelf check-strip check-objcopy install clean
