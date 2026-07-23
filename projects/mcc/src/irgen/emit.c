@@ -190,7 +190,12 @@ valref(struct value *v, Fn *fn)
 		c.type = CAddr;
 		c.sym.id = intern(fullname);
 		if (v->kind & VALUE_EXTERN) c.sym.type |= SExt;
-		if (v->kind & VALUE_THREAD) c.sym.type |= SThr;
+		if (v->kind & VALUE_THREAD) {
+			if ((v->kind & VALUE_EXTERN) && T.pic)
+				c.sym.type = SGenThr;  /* GD for extern TLS under -fPIC */
+			else
+				c.sym.type |= SThr;
+		}
 		return newcon(&c, fn);
 	case VALUE_TYPE:
 		/* IR encodes aggregate-type references as TYPE(n) where n is the
