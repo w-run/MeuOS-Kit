@@ -74,7 +74,7 @@ declaratortypes(struct scope *s, struct list *result, char **name, int *align, s
 		max_align_t from gcc/clang (used with glibc),
 		dragonflybsd, freebsd, and openbsd
 		*/
-		allowedattr = align ? ATTRALIGNED : 0;
+		allowedattr = align ? ATTRALIGNED : (ATTRFALLTHROUGH | ATTRNODISCARD | ATTRMAYBEUNUSED | ATTRDEPRECATED);
 	}
 	for (;;) {
 		switch (tok.kind) {

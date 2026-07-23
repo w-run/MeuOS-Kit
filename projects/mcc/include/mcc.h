@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdbool.h>
 
 struct func;
 
@@ -32,7 +33,8 @@ enum typequal {
 	QUALCONST    = 1<<1,
 	QUALRESTRICT = 1<<2,
 	QUALVOLATILE = 1<<3,
-	QUALATOMIC   = 1<<4
+	QUALATOMIC   = 1<<4,
+	QUALCONSTEXPR = 1<<5
 };
 
 enum typekind {
@@ -56,6 +58,10 @@ enum typekind {
 	TYPEUNION,
 	TYPENULLPTR,
 	TYPEBITINT,
+	TYPEATOMIC,
+	TYPEDECIMAL32,
+	TYPEDECIMAL64,
+	TYPEDECIMAL128,
 };
 
 enum typeprop {
@@ -69,6 +75,7 @@ enum typeprop {
 	PROPFLOAT   = 1<<5,
 	PROPVM      = 1<<6, /* variably-modified type */
 	PROPFLEX    = 1<<7, /* struct with flexible array member */
+	PROPCOMPLEX = 1<<8, /* complex type */
 };
 
 struct bitfield {
@@ -115,6 +122,9 @@ struct type {
 			char *tag;
 			struct member *members;
 		} structunion;
+		struct {
+			enum typequal basequal;
+		} atomic;
 	} u;
 };
 
@@ -308,6 +318,9 @@ char *tokenstr(enum tokenkind);
 char *tokencheck(const struct token *, enum tokenkind, const char *);
 void diagloc(const struct location *);
 noreturn void error(const struct location *, const char *, ...);
+void cc_warn(const struct location *, int, const char *, ...) __attribute__((format(printf, 3, 4)));
+extern int warn_level;
+extern bool warn_as_error;
 
 /* scan */
 
@@ -352,6 +365,10 @@ struct type *mktype(enum typekind, enum typeprop);
 struct type *mkpointertype(struct type *, enum typequal);
 struct type *mkarraytype(struct type *, enum typequal, unsigned long long);
 struct type *mkbitinttype(int width, bool sign);
+struct type *mkatomictype(struct type *, enum typequal);
+struct type *mkcomplextype(struct type *);
+struct type *mkimaginarytype(struct type *);
+struct type *mkdecimaltype(int);
 
 bool typecompatible(struct type *, struct type *);
 bool typesame(struct type *, struct type *);
@@ -392,6 +409,7 @@ void targinit(const char *);
 
 enum attrkind {
 	ATTRNORETURN    = 1<<0,
+	ATTRFALLTHROUGH = 1<<1,
 
 	/* GNU attributes */
 	ATTRALIGNED     = 1<<2,
@@ -399,6 +417,9 @@ enum attrkind {
 	ATTRDESTRUCTOR  = 1<<4,
 	ATTRPACKED      = 1<<5,
 	ATTRSECTION     = 1<<6,
+	ATTRNODISCARD   = 1<<7,
+	ATTRMAYBEUNUSED = 1<<8,
+	ATTRDEPRECATED  = 1<<9,
 };
 
 struct attr {

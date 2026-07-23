@@ -163,7 +163,7 @@ funcexpr(struct func *f, struct expr *e)
 		break;
 	case EXPRCONST:
 		t = e->type;
-		if (t->prop & PROPINT || t->kind == TYPEPOINTER)
+		if (t->prop & PROPINT || t->kind == TYPEPOINTER || t->kind == TYPENULLPTR)
 			return mkintconst(e->u.constant.u);
 		assert(t->prop & PROPFLOAT);
 		return mkfltconst(t->size == 4 ? VALUE_FLTCONST : VALUE_DBLCONST, e->u.constant.f);

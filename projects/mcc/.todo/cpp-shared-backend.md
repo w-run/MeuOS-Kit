@@ -182,4 +182,6 @@ projects/
 - **参考实现**：
     - LLVM 的 clang/clang++ 共用 libLLVM（动态库模式）
     - GCC 的 cc1/cc1plus 共用 libbackend + libcommon
+    - cxx-frontend（robertoraggi/cplusplus）：独立 C++23 前端，词法/语法/语义完整流程，AST 节点设计参考
+    - aburi（serjective/aburi）：C/C++ 前端全流程（lex→preprocess→parse→ast→constexpr→ast2llvm），类/继承/虚派发/模板/异常/Itanium C++ ABI 参考
     - 本项目走 libmcc 静态库为主、动态为辅（更易自举、零运行时依赖）

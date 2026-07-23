@@ -9,6 +9,10 @@
 #include "mcc.h"
 #include "pp_internal.h"
 
+/* Forward declarations for functions defined later */
+static FILE *openinclude(const char *, bool, char **);
+static char *stripquotes(const char *);
+
 struct macroparam {
 	char *name;
 	enum {
@@ -419,6 +423,81 @@ evalexpr(void)
 		}
 	}
 
+	/* 2.5 resolve __has_include("header") / __has_include(<header>) */
+	{
+		enum tokenkind hastk = tokenget("__has_include", 13);
+		size_t j, newn = defline.len / sizeof(struct token);
+
+		for (j = 0; j < newn; ) {
+			t = (struct token *)defline.val + j;
+			if (t->kind == hastk) {
+				struct token *name;
+				bool found = false;
+				size_t nextj = j + 1;
+
+				if (nextj < newn && ((struct token *)defline.val)[nextj].kind == TLPAREN) {
+					nextj++;
+					if (nextj < newn && ((struct token *)defline.val)[nextj].kind == TSTRINGLIT) {
+						/* __has_include("header.h") */
+						char *hdr = stripquotes(((struct token *)defline.val)[nextj].lit);
+						char *path = NULL;
+						FILE *f = openinclude(hdr, false, &path);
+						found = (f != NULL);
+						if (f) fclose(f);
+						free(path);
+						free(hdr);
+						nextj += 2;  /* skip "header" and ) */
+					} else if (nextj < newn && ((struct token *)defline.val)[nextj].kind == TLESS) {
+						/* __has_include(<header.h>) - scan until > */
+						char *hdr = xmalloc(256);
+						size_t hlen = 0;
+
+						nextj++;
+						while (nextj < newn) {
+							struct token *ct = &((struct token *)defline.val)[nextj];
+							if (ct->kind == TGREATER)
+								break;
+							if (hlen + strlen(ct->lit) + 1 < 256) {
+								memcpy(hdr + hlen, ct->lit, strlen(ct->lit));
+								hlen += strlen(ct->lit);
+							}
+							nextj++;
+						}
+						hdr[hlen] = '\0';
+						if (nextj < newn && ((struct token *)defline.val)[nextj].kind == TGREATER) {
+							char *path = NULL;
+							FILE *f = openinclude(hdr, true, &path);
+							found = (f != NULL);
+							if (f) fclose(f);
+							free(path);
+							nextj++;
+						}
+						free(hdr);
+					}
+					if (nextj < newn && ((struct token *)defline.val)[nextj].kind == TRPAREN)
+						nextj++;
+				}
+				{
+					struct token num = { .kind = TNUMBER, .lit = found ? "1" : "0" };
+					/* Replace the __has_include(...) sequence with the result token.
+					 * We rebuild defline by copying unprocessed tokens. */
+					struct array tmp = {0};
+					size_t k;
+					for (k = 0; k < j; k++)
+						arrayaddbuf(&tmp, (struct token *)defline.val + k, sizeof(struct token));
+					arrayaddbuf(&tmp, &num, sizeof num);
+					for (k = nextj; k < newn; k++)
+						arrayaddbuf(&tmp, (struct token *)defline.val + k, sizeof(struct token));
+					defline = tmp;
+					newn = defline.len / sizeof(struct token);
+					j++;  /* advance past the inserted number */
+				}
+			} else {
+				j++;
+			}
+		}
+	}
+
 	/* 3. macro-expand by pushing defline onto the context and pulling
 	 *    tokens via next(); PPNEWLINE keeps the trailing sentinel so the
 	 *    pull stops without falling through to the main input scanner. */
@@ -444,6 +523,10 @@ evalexpr(void)
 
 	return evalconst(exp.val, exp.len / sizeof *t) != 0;
 }
+
+/* Forward declarations for functions called before their definition */
+static FILE *openinclude(const char *, bool, char **);
+static char *stripquotes(const char *);
 
 /* ----- #include ----- */
 
@@ -597,25 +680,49 @@ skipbody(void)
 			condstack.len -= sizeof(struct condframe);
 			expectnewline();
 			return;
-		case TELIF:
-			if (depth > 0) {
+	case TELIF:
+		if (depth > 0) {
+			expectnewline();
+			break;
+		}
+		{
+			struct condframe *f = arraylast(&condstack, sizeof *f);
+			if (f->parentactive && !f->anytaken) {
+				bool val = evalexpr();  /* tok == TNEWLINE */
+				f->istaken = val;
+				if (val) {
+					f->anytaken = true;
+					return;  /* now active */
+				}
+			} else {
 				expectnewline();
-				break;
 			}
-			{
-				struct condframe *f = arraylast(&condstack, sizeof *f);
-				if (f->parentactive && !f->anytaken) {
-					bool val = evalexpr();  /* tok == TNEWLINE */
-					f->istaken = val;
-					if (val) {
-						f->anytaken = true;
-						return;  /* now active */
-					}
-				} else {
-					expectnewline();
+		}
+		break;
+	case TELIFDEF:
+	case TELIFNDEF:
+		if (depth > 0) {
+			expectnewline();
+			break;
+		}
+		{
+			struct condframe *f = arraylast(&condstack, sizeof *f);
+			if (f->parentactive && !f->anytaken) {
+				bool is_ndef = (tok.kind == TELIFNDEF);
+				scan(&tok);
+				bool defined = false;
+				if (tok.kind >= TPPIDENT)
+					defined = macroget(tok.kind) != NULL;
+				bool val = is_ndef ? !defined : defined;
+				f->istaken = val;
+				if (val) {
+					f->anytaken = true;
+					return;
 				}
 			}
-			break;
+			expectnewline();
+		}
+		break;
 		case TELSE:
 			if (depth > 0) {
 				expectnewline();
@@ -767,6 +874,33 @@ directive(void)
 			skipbody();
 		break;
 	}
+	case TELIFDEF:
+	case TELIFNDEF: {
+		struct condframe *f = arraylast(&condstack, sizeof *f);
+		if (!f)
+			error(&tok.loc, "#elifdef without #if");
+		if (!f->parentactive) {
+			f->istaken = false;
+			expectnewline();
+		} else if (f->anytaken) {
+			f->istaken = false;
+			expectnewline();
+		} else {
+			bool is_ndef = (tok.kind == TELIFNDEF);
+			scan(&tok);
+			bool defined = false;
+			if (tok.kind >= TPPIDENT)
+				defined = macroget(tok.kind) != NULL;
+			bool val = is_ndef ? !defined : defined;
+			f->istaken = val;
+			if (val)
+				f->anytaken = true;
+			expectnewline();
+		}
+		if (!condactive())
+			skipbody();
+		break;
+	}
 	case TELSE: {
 		struct condframe *f = arraylast(&condstack, sizeof *f);
 		if (!f)
@@ -798,6 +932,76 @@ directive(void)
 		else
 			doinclude();
 		break;
+	case TEMBED: {
+		/* #embed "filename" [limit(N)] — embed file as comma-separated
+		 * byte literal tokens pushed via ctxpush. */
+		struct array toks = {0};
+		char *name, *path = NULL;
+		FILE *f;
+		unsigned char buf[4096];
+		size_t nread, total = 0, limit = (size_t)-1;
+		long i;
+
+		if (!condactive()) {
+			expectnewline();
+			break;
+		}
+		scan(&tok);
+		if (tok.kind != TSTRINGLIT)
+			error(&tok.loc, "#embed expects \"filename\"");
+		name = stripquotes(tok.lit);
+		/* Parse optional parameter: limit(N).
+		 * Note: scan() does NOT set tok.lit for identifiers,
+		 * so we must use tokenstr() to compare. */
+		scan(&tok);
+		if (tok.kind >= TPPIDENT || tok.kind == TIDENT) {
+			const char *id = tokenstr(tok.kind);
+			if (id && strcmp(id, "limit") == 0) {
+				scan(&tok);
+				if (tok.kind == TLPAREN) {
+					scan(&tok);
+					if (tok.kind == TNUMBER)
+						limit = strtoul(tok.lit, NULL, 0);
+					scan(&tok);
+				}
+			}
+		}
+		expectnewline();
+		/* Open and read the file */
+		f = openinclude(name, false, &path);
+		if (!f)
+			error(&tok.loc, "cannot open #embed file '%s'", name);
+		while ((nread = fread(buf, 1, sizeof(buf), f)) > 0 && total < limit) {
+			size_t nwrite = nread;
+			if (total + nwrite > limit)
+				nwrite = limit - total;
+			for (i = 0; i < (long)nwrite; i++) {
+				struct token num;
+				char litbuf[8];
+
+				num.kind = TNUMBER;
+				num.hide = false;
+				num.space = (total + i > 0);
+				num.loc = tok.loc;
+				snprintf(litbuf, sizeof(litbuf), "%u", buf[i]);
+				num.lit = xmalloc(strlen(litbuf) + 1);
+				strcpy(num.lit, litbuf);
+				arrayaddbuf(&toks, &num, sizeof num);
+				if (total + i + 1 < nwrite || total + nwrite < limit) {
+					struct token comma = { .kind = TCOMMA, .space = false };
+					arrayaddbuf(&toks, &comma, sizeof comma);
+				}
+			}
+			total += nwrite;
+		}
+		fclose(f);
+		free(name);
+		free(path);
+		if (toks.len > 0)
+			ctxpush(toks.val, toks.len / sizeof(struct token), NULL, false);
+		expectnewline();
+		break;
+	}
 	case TDEFINE:
 		scan(&tok);
 		define();
@@ -864,6 +1068,15 @@ nextinto(struct token *t)
 		scan(t);
 		if (newline && t->kind == THASH) {
 			directive();
+			/* After directive returns, if tokens were pushed to context
+			 * (e.g. #embed), consume them here instead of scanning source. */
+			if (ctx.len > 0) {
+				struct token *ct = ctxnext();
+				if (ct) {
+					*t = *ct;
+					break;
+				}
+			}
 		} else {
 			newline = tok.kind == TNEWLINE;
 			break;

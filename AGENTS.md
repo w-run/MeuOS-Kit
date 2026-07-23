@@ -357,11 +357,14 @@ Agent 必须严格遵循以下阶段，每步都要验证：
 | `reference/qbe/`   | mcc 后端设计参考（IR/指令选择/寄存器分配/各 arch emit） |
 | `reference/musl/`   | meuos-libc 算法参考（mallocng/stdio/pthread/...） |
 | `reference/tinycc/` | 轻量 C 编译器参考（快速编译、简单后端、tcc 的 preprocessor） |
+| `reference/cxx-frontend/` | m++ C++ 前端参考（C++23 词法/语法/语义解析、AST 设计） |
+| `reference/aburi/` | m++ C++ 前端参考（lexer/parser/preprocessor/ast/constexpr、Itanium ABI 降级） |
 
 #### 鼓励参考的其他社区资源
 
 - **libc 算法**：musl（首选，已 vendored）、Cosmopolitan Libc、serenityOS LibC、PDCLib
-- **编译器设计**：cproc/QBE（已 vendored）、chibicc、9cc、lacc、cparser
+- **编译器设计（C）**：cproc/QBE（已 vendored）、chibicc、9cc、lacc、cparser
+- **编译器设计（C++）**：cxx-frontend（C++23 完整前端，已 vendored）、aburi（C/C++ 前端全流程，已 vendored）
 - **构建系统**：redo、tup、ninja、bear-make
 - **工具集**：Rust uutils、BusyBox、serenityOS Utilities
 - **Shell**：dash（POSIX sh 参考）、serenityOS Shell

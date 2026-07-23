@@ -8,6 +8,7 @@
 #include <string.h>
 #include "util.h"
 #include "mcc.h"
+#include "ir.h"
 
 struct token tok;
 static struct map tokmap;  /* maps string to token */
@@ -173,4 +174,29 @@ error(const struct location *loc, const char *fmt, ...)
 	va_end(ap);
 	putc('\n', stderr);
 	exit(1);
+}
+
+int warn_level = WARN_ALL;
+bool warn_as_error;
+
+void
+cc_warn(const struct location *loc, int kind, const char *fmt, ...)
+{
+	va_list ap;
+
+	if (!(warn_level & kind))
+		return;
+
+	if (loc)
+		fprintf(stderr, "%s:%zu:%zu: ", loc->file, loc->line, loc->col);
+	else
+		fprintf(stderr, "%s: ", argv0);
+	fputs("warning: ", stderr);
+	va_start(ap, fmt);
+	vfprintf(stderr, fmt, ap);
+	va_end(ap);
+	putc('\n', stderr);
+
+	if (warn_as_error)
+		error(loc, "warning treated as error");
 }

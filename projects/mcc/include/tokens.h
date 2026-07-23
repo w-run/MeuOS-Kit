@@ -121,7 +121,10 @@ TOKEN(T__EXTENSION__, "__extension__")
 
 /* other identifiers */
 TOKEN(TDEFINE,        "define")
+TOKEN(TEMBED,         "embed")
 TOKEN(TELIF,          "elif")
+TOKEN(TELIFDEF,       "elifdef")
+TOKEN(TELIFNDEF,      "elifndef")
 TOKEN(TENDIF,         "endif")
 TOKEN(TERROR,         "error")
 TOKEN(TIFDEF,         "ifdef")

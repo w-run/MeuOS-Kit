@@ -344,6 +344,8 @@ Read-only reference source lives in `../reference/` (gitignored):
 | `reference/cproc/` | HEAD | `d1c53ddf` | frontend design reference |
 | `reference/qbe/` | v1.3 | `c0818978` | backend design reference |
 | `reference/musl/` | v1.2.6 | `9fa28ece` | meuos-libc algorithm reference (not used by mcc) |
+| `reference/cxx-frontend/` | HEAD | `master` | m++ C++23 frontend reference (lex/parse/sema/AST) |
+| `reference/aburi/` | v0.1.1 | `master` | m++ C++ frontend full-pipeline reference |
 
 When investigating an IR pass behavior, the canonical source is
 `reference/qbe/<file>.c`. The corresponding mcc copy lives in

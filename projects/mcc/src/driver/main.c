@@ -33,7 +33,7 @@
 Target T;
 char debug['Z' + 1];
 int opt_level = 2;    /* -O2 default */
-int warn_level = WARN_ALL;
+/* warn_level and warn_as_error are defined in src/lex/token.c */
 
 int
 main(int argc, char *argv[])
@@ -107,6 +107,7 @@ main(int argc, char *argv[])
 	}
 	if (strcmp(a, "-Werror") == 0) {
 		warn_level |= WARN_ERROR;
+		warn_as_error = true;
 		continue;
 	}
 	if (a[1] == 'W') continue;   /* other -Wxxx warning flags */

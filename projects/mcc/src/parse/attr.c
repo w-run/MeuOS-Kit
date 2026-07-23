@@ -51,6 +51,22 @@ parseattr(struct attr *a, enum attrkind allowed, enum attrprefix prefix)
 	case PREFIXNONE:
 		if (strcmp(name, "noreturn") == 0 || strcmp(name, "_Noreturn") == 0)
 			kind = ATTRNORETURN;
+		else if (strcmp(name, "fallthrough") == 0)
+			kind = ATTRFALLTHROUGH;
+		else if (strcmp(name, "nodiscard") == 0) {
+			kind = ATTRNODISCARD;
+			if (consume(TLPAREN))
+				expect(TRPAREN, "after nodiscard");
+		} else if (strcmp(name, "maybe_unused") == 0)
+			kind = ATTRMAYBEUNUSED;
+		else if (strcmp(name, "deprecated") == 0) {
+			kind = ATTRDEPRECATED;
+			if (consume(TLPAREN)) {
+				if (tok.kind == TSTRINGLIT)
+					next();
+				expect(TRPAREN, "after deprecated message");
+			}
+		}
 		break;
 	case PREFIXGNU:
 		prefixname = "GNU ";
