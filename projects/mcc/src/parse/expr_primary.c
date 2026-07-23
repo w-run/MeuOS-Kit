@@ -77,7 +77,9 @@ primaryexpr(struct scope *s)
 		} else {
 			base = 10;
 		}
-		if (strpbrk(tok.lit, base == 16 ? ".pP" : ".eE")) {
+		/* C23: 100f / 42F float suffix without '.' or exponent (6.4.4.2).
+		 * Only add fF for decimal; hex with .pP already works. */
+		if (strpbrk(tok.lit, base == 16 ? ".pP" : ".eEfF")) {
 			/* floating constant */
 			e->u.constant.f = strtod(tok.lit, &end);
 			if (end == tok.lit)

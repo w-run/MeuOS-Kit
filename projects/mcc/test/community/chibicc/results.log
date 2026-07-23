@@ -29,7 +29,7 @@ PASS        decl
 COMPILEFAIL enum
     /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/enum.c:4:39: error: expected '(' or identifier
 COMPILEFAIL extern
-    /usr/bin/ld: /tmp/cc8EOEIT.o: in function `main':
+    /usr/bin/ld: /tmp/cc2yD9WX.o: in function `main':
     (.text+0xf): undefined reference to `ext1'
     /usr/bin/ld: (.text+0x29): undefined reference to `ext2'
     /usr/bin/ld: (.text+0x46): undefined reference to `ext3'
@@ -40,15 +40,13 @@ COMPILEFAIL extern
 PASS        float
 COMPILEFAIL function
     /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/function.c:92:47: error: function 'vsprintf' redeclared with incompatible type
-COMPILEFAIL generic
-    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/generic.c:8:22: error: invalid integer constant suffix 'f'
+PASS        generic
 COMPILEFAIL initializer
     /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/initializer.c:16:19: error: base types of pointer assignment must be compatible or void
-RUNFAIL     line (rc=1)
-COMPILEFAIL literal
-    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/literal.c:45:14: error: no suitable type for constant '18446744073709551615'
+PASS        line
+PASS        literal
 COMPILEFAIL macro
-    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/macro.c:121:0: error: redefinition of macro 'M1'
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/macro.c:399:45: error: expected ',' or ')' after function call argument, saw identifier '__VA_OPT__'
 PASS        offsetof
 COMPILEFAIL pointer
     /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/pointer.c:16:35: error: base types of pointer assignment must be compatible or void
@@ -67,7 +65,7 @@ COMPILEFAIL typedef
     /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/typedef.c:11:24: error: declaration has no type specifier
 PASS        typeof
 COMPILEFAIL unicode
-    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/unicode.c:9:5: error: expected '(' or identifier
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/unicode.c:15:32: error: invalid escape sequence
 COMPILEFAIL union
     mcc: invalid alloc size -12
 COMPILEFAIL usualconv
@@ -78,4 +76,4 @@ COMPILEFAIL variable
     /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/variable.c:51:48: error: base types of pointer assignment must be compatible or void
 COMPILEFAIL vla
     /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/vla.c:18:51: error: base types of pointer assignment must be compatible or void
-==== SUMMARY: PASS=7 RUNFAIL=2 COMPILEFAIL=32 (total 41) ====
+==== SUMMARY: PASS=10 RUNFAIL=1 COMPILEFAIL=30 (total 41) ====

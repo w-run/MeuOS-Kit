@@ -82,6 +82,12 @@ inttype(unsigned long long val, bool decimal, char *suffix)
 		if (typehasint(t, val, false))
 			return t;
 	}
+	/* C 6.4.4.1: decimal constant beyond signed max overflows to the
+	 * largest signed type (signed two's complement).  Hex/oct/bin
+	 * constants have unsigned types in their list so they reach
+	 * &typeullong naturally via the step=1 loop above. */
+	if (decimal && !(flags & U) && typehasint(&typeullong, val, false))
+		return &typellong;
 notype:
 	error(&tok.loc, "no suitable type for constant '%s'", tok.lit);
 }

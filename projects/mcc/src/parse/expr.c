@@ -245,7 +245,8 @@ exprassign(struct expr *e, struct type *t)
 			error(&tok.loc, "assignment to pointer must be from pointer or null pointer constant");
 		if (t->base != &typevoid && et->base != &typevoid && !typecompatible(t->base, et->base))
 			error(&tok.loc, "base types of pointer assignment must be compatible or void");
-		if ((et->qual & t->qual) != et->qual)
+		/* void* accepts any qualified pointer (C11 6.3.2.3p1). */
+		if (t->base != &typevoid && (et->qual & t->qual) != et->qual)
 			error(&tok.loc, "assignment to pointer discards qualifiers");
 		break;
 	case TYPENULLPTR:

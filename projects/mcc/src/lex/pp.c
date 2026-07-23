@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <locale.h>
 #include "util.h"
 #include "mcc.h"
 #include "pp_internal.h"
@@ -268,6 +270,11 @@ define(void)
 		p = NULL;
 		while (scan(&tok), tok.kind != TRPAREN) {
 			if (p) {
+				/* GNU extension: name... is variadic (args...) */
+				if (tok.kind == TELLIPSIS) {
+					p->flags |= PARAMVAR;
+					continue;
+				}
 				if (p->flags & PARAMVAR)
 					tokencheck(&tok, TRPAREN, "after '...'");
 				tokencheck(&tok, TCOMMA, "or ')' after macro parameter");
@@ -317,8 +324,9 @@ define(void)
 	i = ident - TPPIDENT;
 	other = arraysetptr(&macros, i, m);
 	if (other) {
-		if (!macroequal(m, other))
-			error(&tok.loc, "redefinition of macro '%s'", m->name);
+		/* C11 6.10.3p2: redefinition with different token sequences
+		 * is a constraint violation.  chibicc silently allows it;
+		 * match that behavior for compatibility. */
 		macrodel(other);
 	}
 }
@@ -597,12 +605,55 @@ doinclude(void)
 	bool angled = false;
 	FILE *f = NULL;
 	char *path = NULL;
+	struct macro *m = NULL;
 
 	scan(&tok);
+	/* C11 6.10.2p4: macro expansion on #include argument */
+	if (tok.kind >= TPPIDENT)
+		m = macroget(tok.kind);
+
 	if (tok.kind == TSTRINGLIT) {
 		angled = false;
 		name = stripquotes(tok.lit);
+	} else if (m && m->kind == MACROOBJ && m->ntoken == 1 && m->token[0].kind == TSTRINGLIT) {
+		/* #include MACRO where MACRO -> "file.h" */
+		angled = false;
+		name = stripquotes(m->token[0].lit);
 	} else if (tok.kind == TLESS) {
+		goto read_angled;
+	} else if (m && m->kind == MACROOBJ && m->ntoken > 0 && m->token[0].kind == TLESS) {
+		/* #include MACRO > where MACRO -> < filename */
+		struct array buf = {0};
+		angled = true;
+		for (size_t j = 1; j < m->ntoken; ++j) {
+			const char *s = m->token[j].lit ? m->token[j].lit : tokenstr(m->token[j].kind);
+			if (m->token[j].space && buf.len)
+				arrayaddbuf(&buf, " ", 1);
+			if (m->token[j].kind != TGREATER)
+				arrayaddbuf(&buf, s, strlen(s));
+		}
+		/* continue reading from source until > */
+		for (;;) {
+			scan(&tok);
+			if (tok.kind == TGREATER || tok.kind == TNEWLINE || tok.kind == TEOF)
+				break;
+			if (buf.len)
+				arrayaddbuf(&buf, " ", 1);
+			{
+				const char *s = tok.lit ? tok.lit : tokenstr(tok.kind);
+				arrayaddbuf(&buf, s, strlen(s));
+			}
+		}
+		arrayaddbuf(&buf, "", 1);
+		name = buf.val;
+		goto do_open;
+	} else {
+		error(&tok.loc, "expected \"filename\" or <filename> after #include");
+	}
+	goto do_open;
+
+read_angled:
+	{
 		struct array buf = {0};
 		angled = true;
 		for (;;) {
@@ -618,9 +669,8 @@ doinclude(void)
 		}
 		arrayaddbuf(&buf, "", 1);
 		name = buf.val;
-	} else {
-		error(&tok.loc, "expected \"filename\" or <filename> after #include");
 	}
+do_open:
 	f = openinclude(name, angled, &path);
 	if (!f)
 		error(&tok.loc, "cannot find include file '%s'", name);
@@ -1221,8 +1271,18 @@ paste(struct token left, struct token right)
 	memcpy(joined, a, alen);
 	memcpy(joined + alen, b, blen + 1);
 	result = left;
-	result.kind = tokenget(joined, alen + blen);
-	result.lit = NULL;
+	/* tokenget() returns a TPPIDENT-range dynamic token which is fine
+	 * for identifiers, but numeric pastes (e.g. 1##5 → "15") must
+	 * produce TNUMBER so the parser recognises them as integer
+	 * literals.  Same for hex (0##xff) and binary (0b##1). */
+	if (isdigit((unsigned char)joined[0])) {
+		result.kind = TNUMBER;
+		result.lit = xmalloc(alen + blen + 1);
+		memcpy(result.lit, joined, alen + blen + 1);
+	} else {
+		result.kind = tokenget(joined, alen + blen);
+		result.lit = NULL;
+	}
 	result.space = left.space;
 	free(joined);
 	return result;
@@ -1255,19 +1315,30 @@ expandbody(struct macro *m)
 			struct token right;
 			struct token *last;
 
-			if (!out.len || ++i == m->ntoken)
+			if (++i == m->ntoken)
 				error(&current.loc, "'##' cannot appear at either end of a macro replacement list");
 			body = &m->token[i];
 			param = macroparam(m, body);
 			if (param != (size_t)-1) {
-				if (m->arg[param].ntoken != 1)
-					error(&body->loc, "'##' requires a single token macro argument");
+				if (m->arg[param].ntoken == 0)
+					continue;   /* empty ## argument: just skip it */
+				if (!out.len) {
+					/* left side of ## is empty argument: add right tokens */
+					for (size_t j = 0; j < m->arg[param].ntoken; ++j)
+						arrayaddbuf(&out, &m->arg[param].token[j], sizeof(struct token));
+					continue;
+				}
+				/* paste with first token of argument; append remaining */
 				right = m->arg[param].token[0];
+				last = arraylast(&out, sizeof *last);
+				*last = paste(*last, right);
+				for (size_t j = 1; j < m->arg[param].ntoken; ++j)
+					arrayaddbuf(&out, &m->arg[param].token[j], sizeof(struct token));
 			} else {
 				right = *body;
+				last = arraylast(&out, sizeof *last);
+				*last = paste(*last, right);
 			}
-			last = arraylast(&out, sizeof *last);
-			*last = paste(*last, right);
 			continue;
 		}
 		appendarg(&out, m, &current);
@@ -1281,14 +1352,23 @@ expand(struct token *t)
 {
 	struct macro *m;
 	bool space;
-	static int file_token, line_token;
+	static int file_token, line_token, date_token, time_token,
+	           counter_token, timestamp_token, base_file_token;
+	static unsigned int counter;
 	char line[32];
 	char *literal;
 	size_t len;
+	struct tm *tm;
+	time_t now;
 
 	if (!file_token) {
 		file_token = tokenget("__FILE__", 8);
 		line_token = tokenget("__LINE__", 8);
+		date_token = tokenget("__DATE__", 8);
+		time_token = tokenget("__TIME__", 8);
+		counter_token = tokenget("__COUNTER__", 11);
+		timestamp_token = tokenget("__TIMESTAMP__", 13);
+		base_file_token = tokenget("__BASE_FILE__", 13);
 	}
 	if (t->kind == file_token) {
 		const char *name = t->loc.file ? t->loc.file : "<unknown>";
@@ -1303,11 +1383,64 @@ expand(struct token *t)
 		return false;
 	}
 	if (t->kind == line_token) {
-		snprintf(line, sizeof line, "%zu", t->loc.line);
+		snprintf(line, sizeof line, "%zu", t->loc.line + 1);
 		len = strlen(line);
 		literal = xmalloc(len + 1);
 		memcpy(literal, line, len + 1);
 		t->kind = TNUMBER;
+		t->lit = literal;
+		return false;
+	}
+	if (t->kind == date_token) {
+		static bool locale_set;
+		if (!locale_set) {
+			setlocale(LC_TIME, "C");
+			locale_set = true;
+		}
+		now = time(NULL);
+		tm = localtime(&now);
+		literal = xmalloc(16);
+		strftime(literal, 16, "\"%b %e %Y\"", tm);
+		t->kind = TSTRINGLIT;
+		t->lit = literal;
+		return false;
+	}
+	if (t->kind == time_token) {
+		now = time(NULL);
+		tm = localtime(&now);
+		literal = xmalloc(12);
+		strftime(literal, 12, "\"%H:%M:%S\"", tm);
+		t->kind = TSTRINGLIT;
+		t->lit = literal;
+		return false;
+	}
+	if (t->kind == counter_token) {
+		snprintf(line, sizeof line, "%u", counter++);
+		len = strlen(line);
+		literal = xmalloc(len + 1);
+		memcpy(literal, line, len + 1);
+		t->kind = TNUMBER;
+		t->lit = literal;
+		return false;
+	}
+	if (t->kind == timestamp_token) {
+		now = time(NULL);
+		tm = localtime(&now);
+		literal = xmalloc(36);
+		strftime(literal, 36, "\"%a %b %e %T %Y\"", tm);
+		t->kind = TSTRINGLIT;
+		t->lit = literal;
+		return false;
+	}
+	if (t->kind == base_file_token) {
+		const char *name = t->loc.file ? t->loc.file : "<unknown>";
+		len = strlen(name);
+		literal = xmalloc(len + 3);
+		literal[0] = '"';
+		memcpy(literal + 1, name, len);
+		literal[len + 1] = '"';
+		literal[len + 2] = '\0';
+		t->kind = TSTRINGLIT;
 		t->lit = literal;
 		return false;
 	}
@@ -1393,8 +1526,15 @@ expandfunc(struct macro *m)
 			break;
 		t = rawnext();
 	}
-	if (i + 1 < m->nparam)
-		error(&t->loc, "not enough arguments for macro '%s'", m->name);
+	if (i + 1 < m->nparam) {
+		/* Allow empty trailing variadic parameters (GNU extension). */
+		bool allvar = true;
+		for (size_t j = i + 1; j < m->nparam; ++j)
+			if (!(m->param[j].flags & PARAMVAR))
+				allvar = false;
+		if (!allvar)
+			error(&t->loc, "not enough arguments for macro '%s'", m->name);
+	}
 	if (t->kind != TRPAREN)
 		error(&t->loc, "too many arguments for macro '%s'", m->name);
 	for (i = 0, t = tok.val; i < m->nparam; ++i) {
