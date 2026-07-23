@@ -1,7 +1,8 @@
 <!--
 priority: P2
-status: pending
+status: in_progress
 note: -jN 并行执行的间接依赖重复问题；非阻塞，按需优化
+start_ts: 2026-07-24
 -->
 
 # 待实现：完整 DAG 去重

@@ -1,7 +1,8 @@
 <!--
 priority: P1
-status: pending
+status: in_progress
 note: 用 meow 原生构建 mcc / meuos-libc / meow；Phase 4 自举链前置
+start_ts: 2026-07-24
 -->
 
 # 待实现：用 meow 原生构建 MeuOS Kit 自身
