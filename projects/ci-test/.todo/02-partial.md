@@ -1,8 +1,11 @@
 <!--
 priority: P2
-status: in_progress
+status: done
 note: partial 场景 — 加 mul() + div(), 验收只测 mul
 start_ts: 2026-07-24
+done_ts: 2026-07-24
+done_by_driver_ts: 2026-07-23T18:24:36Z
+done_note: driver accepted; all cmds passed
 -->
 
 # 测试: 在 calc.c 加 mul() 和 div()

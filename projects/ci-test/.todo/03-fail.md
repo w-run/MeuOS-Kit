@@ -1,7 +1,8 @@
 <!--
 priority: P3
-status: pending
+status: in_progress
 note: accept-fail 场景 — 验收命令故意 false, 测 driver 拒绝 CLAIM_DONE
+start_ts: 2026-07-24
 -->
 
 # 测试: 创建 fail.c (验收故意失败)

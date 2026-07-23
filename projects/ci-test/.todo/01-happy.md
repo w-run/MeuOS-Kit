@@ -1,7 +1,11 @@
 <!--
 priority: P1
-status: pending
+status: done
 note: happy-path 场景 — 创建 calc.c 实现 add(), 验收编译通过
+start_ts: 2026-07-24
+done_ts: 2026-07-24
+done_by_driver_ts: 2026-07-23T18:24:36Z
+done_note: driver accepted; all cmds passed
 -->
 
 # 测试: 创建 calc.c 实现 add()
