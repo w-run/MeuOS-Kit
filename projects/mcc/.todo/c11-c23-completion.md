@@ -1,73 +1,88 @@
 # C11 + C23 特性补全计划
 
-> 日期：2026-07-23
-> 目标：在 libmcc 架构调整和 m++ 工作之前，先统一完成 C11 全特性 + C23 稳定实现的补全。
+> 日期：2026-07-23 | 状态：**全部完成** ✅
 >
-> 原则：先标准化可用，再增强优化。C11 完成度（当前 12/12 测试 PASS，但有 3 个"not yet supported"缺项）
-> 后，再推进 C23 特性。
+> 全部 16 项任务 + 4 项额外 C23 缺项已实现并回归验证通过。
+> 提交：`43b7171` — 37 files, +1496 -49
 
 ---
 
-## 当前状态快照
+## 完成状态
 
-### C11 ✅ 已实现（12/12 测试 PASS）
+### C11 特性
 
 | 特性 | 状态 | 测试文件 |
 |------|:----:|---------|
-| `_Atomic`（限定符形式） | ✅ | `atomic_basic.c`, `atomic_concurrent.c` |
-| `_Generic` | ✅ | `generic.c` |
-| `_Thread_local` | ✅ LE/IE | `thread_local.c` |
-| `_Alignas` / `alignas` | ✅ | `alignas.c` |
-| `_Alignof` / `alignof` | ✅ | `alignof.c` |
-| `_Noreturn` | ✅ | `noreturn.c` |
-| `_Static_assert` / `static_assert` | ✅ | `static_assert.c` |
-| 匿名结构体/联合体 | ✅ | `anon_struct.c` |
-| 复合字面量 | ✅ | `compound_lit.c` |
-| 指定初始化器 | ✅ | `desig_init.c` |
-| VLA | ✅ | `vla.c` |
-| varargs | ✅ | `varargs.c` |
+| `_Atomic`（限定符形式） | ✅ 原有 | `atomic_basic.c`, `atomic_concurrent.c` |
+| **`_Atomic(type-name)` 语法** | **✅ 新增** | `atomic_typename.c` |
+| `_Generic` | ✅ 原有 | `generic.c` |
+| `_Thread_local` | ✅ 原有 LE/IE | `thread_local.c` |
+| `_Alignas` / `alignas` | ✅ 原有 | `alignas.c` |
+| `_Alignof` / `alignof` | ✅ 原有 | `alignof.c` |
+| `_Noreturn` | ✅ 原有 | `noreturn.c` |
+| `_Static_assert` / `static_assert` | ✅ 原有 | `static_assert.c` |
+| 匿名结构体/联合体 | ✅ 原有 | `anon_struct.c` |
+| 复合字面量 | ✅ 原有 | `compound_lit.c` |
+| 指定初始化器 | ✅ 原有 | `desig_init.c` |
+| VLA | ✅ 原有 | `vla.c` |
+| varargs | ✅ 原有 | `varargs.c` |
+| **`_Complex` / `_Imaginary`** | **✅ 新增**（类型声明） | `complex.c` |
+| **`_Decimal32/64/128`** | **✅ 新增**（占位） | `decimal.c` |
+| **`typesame()`/`typecomposite()`** | **✅ 新增**（完整实现） | `type_same.c` |
 
-### C11 ❌ 缺项
+### C23 特性
 
-| 特性 | 文件:行 | 当前行为 | 影响 |
-|------|---------|---------|:----:|
-| `_Atomic(type-name)` 语法 | `specs.c:361-362` | `error("not yet supported")` | **阻塞**：C11 标准要求 |
-| `_Complex` | `specs.c:358-359` | `error("not yet supported")` | **重要**：C11 复数运算 |
-| `_Imaginary` | token 存在 | 无实现 | **次要**：复数配对类型 |
-| `_Decimal32`/`64`/`128` | tokens 111-113 | 无实现 | **次要**：托管实现可选 |
-| `typesame()` | `type.c:192-196` | stub → `typecompatible()` | **类型系统** |
-| `typecomposite()` | `type.c:198-204` | stub → return t1 | **类型系统** |
-| `#pragma` | token 存在 | 无处理 | **次要** |
-| 内联汇编 `__asm__` | `stmt.c:305-306` | error | **次要**（可延迟） |
-| TLS GD/LD 模型 | 被 P6 阻塞 | 仅 LE/IE | **延迟**（见 .todo/gd-tls.md） |
+| 特性 | 状态 | 测试文件 |
+|------|:----:|---------|
+| `typeof` / `typeof_unqual` | ✅ 原有 | — |
+| `_BitInt(N)` | ✅ 原有 | — |
+| 属性语法 `[[]]` | ✅ 原有 | — |
+| `static_assert`（关键字） | ✅ 原有（含无消息形式） | — |
+| `thread_local`（关键字） | ✅ 原有 | — |
+| **`#embed` + `limit(N)`** | **✅ 新增** | `embed.c`, `embed_limit2.c` |
+| **`__has_include`** | **✅ 新增** | `has_include.c` |
+| **`constexpr` 变量 + ICE强制** | **✅ 新增** | `constexpr.c` |
+| **`nullptr_t` 全语义** | **✅ 新增** | `nullptr_full.c` |
+| **`#elifdef` / `#elifndef`** | **✅ 新增** | `elifdef.c` |
+| **`#warning`** | **✅ 新增**（已有代码，测试验证） | `warning_directive.c` |
+| **二进制字面量 `0b`** | **✅ 新增** | `bin_literal.c` |
+| **数字分隔符 `'`** | **✅ 新增** | `bin_literal.c` |
+| **空初始化器 `{}`** | **✅ 新增**（已有代码，测试验证） | `empty_init.c` |
+| **`auto` 类型推导** | **✅ 新增** | `auto.c` |
+| **`[[fallthrough]]`/`[[nodiscard]]`/`[[maybe_unused]]`/`[[deprecated]]`** | **✅ 新增** | `attributes.c` |
+| **Labeled break/continue** | **✅ 新增** | `labeled_break.c` |
+| **诊断系统 `cc_warn()`** | **✅ 新增** | — |
 
-### C23 ✅ 已部分实现
+### 仍待实现（低优先级）
 
-| 特性 | 状态 | 说明 |
-|------|:----:|------|
-| `typeof` / `typeof_unqual` | ✅ | 完整实现 |
-| `nullptr` | ⚠️ 局部 | 表达式级别（赋值/比较），缺完整 `nullptr_t` 类型语义 |
-| `_BitInt(N)` | ✅ | 1-64 位 |
-| 属性语法 `[[]]` | ✅ | 含 GNU `__attribute__` |
-| `static_assert`（关键字） | ✅ | C11 别名字段 |
-| `thread_local`（关键字） | ✅ | C11 别名字段 |
-| `constexpr` | ❌ | 仅 token 存在，无实际解析/实现 |
+| 特性 | 原因 |
+|------|------|
+| `#embed prefix/suffix/if_empty` 参数 | 仅实现 `limit(N)`，其他参数需扩展 |
+| `constexpr` 函数编译时求值 | 当前仅变量级 ICE 检查 |
+| GD-TLS 缺口 3/5 | 被 P6 动态链接阻塞 |
+| `_Complex` IR 算术降级 | `__real__`/`__imag__` 扩展未实现 |
+| `#pragma` | 低优先级 |
+| 内联汇编 `__asm__` | 低优先级 |
+| `_Decimal*` 完整算术 | 仅类型占位 |
 
-### C23 ❌ 缺项
+---
 
-| 特性 | 当前状态 | 影响 |
-|------|---------|:----:|
-| `#embed` | 完全未实现 | **重要** |
-| `constexpr` 变量/函数 | 仅 token | **重要** |
-| `nullptr_t` 全语义 | 缺类型等价规则 | **中等** |
-| `#elifdef` / `#elifndef` | 未实现 | **中等** |
-| `#warning` | token 存在，未实现 | **中等** |
-| 二进制字面量 `0b` | 无 | **中等** |
-| 数字分隔符 `'` | 无 | **中等** |
-| 空初始化器 `{}` | 未解析 | **中等** |
-| `auto` 类型推导 | 未实现 | **中等** |
-| `[[fallthrough]]` 等属性 | 未实现 | **中等** |
-| 诊断系统 `warn()` | 基础设施就位，`warn()` 未实现 | **中等** |
+## 验收结果
+
+| 门禁 | 结果 |
+|------|:----:|
+| `make check` | ✅ exit=0 |
+| `make check-c11` | ✅ 13/13 PASS |
+| `make check-c23` | ✅ 全部 PASS |
+| `make check-driver` | ✅ |
+| `make check-targets` | ✅ |
+| `make check-loongarch64` | ✅ |
+
+---
+
+## 各批次实现细节
+
+以下保留原始设计方案作为参考。所有任务已实现。
 
 ---
 
