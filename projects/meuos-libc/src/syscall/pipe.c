@@ -2,7 +2,7 @@
 #include <unistd.h>
 #include "../internal/syscall.h"
 
-#if defined(__aarch64__)
+#if defined(__aarch64__) || defined(__riscv) || defined(__loongarch64)
 /* aarch64 没有 pipe(22)，改用 pipe2(fds, flags)。flags=0 等价 pipe()。 */
 #define LINUX_SYS_PIPE2 293
 

@@ -202,7 +202,8 @@ See `../../STATE.md` for the canonical status. Quick reference:
 | 1a - hello | PASS | `make check` exits 0 |
 | 1b - control flow + call | PASS | fib(10)=55, for/while, gcd all exit 0 |
 | 1c - compound types | PASS | strlen + struct pass/return (small/large/nested) + union + global init, 9/9 exit 0 |
-| 1d - C11 features | PASS (mcc host gate) | `make check-c11`: 12 runtime tests |
+| 1d - C11 features | PASS (mcc host gate) | `make check-c11`: 13 runtime tests |
+| 1e - C23 features | PASS (mcc host gate) | `make check-c23`: 14 runtime tests |
 | 2 - meuos-libc | not started | installed headers, crt objects, atomic runtime |
 | 3 - meow | blocked on 2 | `meow build dash` |
 | 4 - bootstrap | blocked on 3 | chroot self-rebuild |
@@ -319,8 +320,9 @@ artifacts and structural integration of the two source trees. Status:
 - Comments throughout `src/` and `src/target/` that reference QBE
   source files by name (these are accurate provenance notes and may
   be worth keeping for cross-referencing during the bootstrap audit).
-- Implement true `-O` level control (mcc currently always optimizes).
-- Implement warning system for `-W`/`-w` (currently accepted but no-op).
+- ✅ `-O` level control (done: O0/O1/O2/O3/s, pass gating in run_passes).
+- ⚠️ `-W`/`-w` warning system (flag parsing + Fn infrastructure done;
+  actual warn() function and per-pass warning calls not yet implemented).
 - i386 64-bit mul/div/rem (`Omul/Odiv/Orem/Oudiv/Ourem Kl`): solved via
   `i386_sysv_abi()` pre-pass that rewrites to libc soft-arith calls
   (see `.todo/i386-kl-arith.md` for implementation details).
@@ -343,6 +345,8 @@ Read-only reference source lives in `../reference/` (gitignored):
 | `reference/cproc/` | HEAD | `d1c53ddf` | frontend design reference |
 | `reference/qbe/` | v1.3 | `c0818978` | backend design reference |
 | `reference/musl/` | v1.2.6 | `9fa28ece` | meuos-libc algorithm reference (not used by mcc) |
+| `reference/cxx-frontend/` | HEAD | `master` | m++ C++23 frontend reference (lex/parse/sema/AST) |
+| `reference/aburi/` | v0.1.1 | `master` | m++ C++ frontend full-pipeline reference |
 
 When investigating an IR pass behavior, the canonical source is
 `reference/qbe/<file>.c`. The corresponding mcc copy lives in

@@ -77,7 +77,9 @@ primaryexpr(struct scope *s)
 		} else {
 			base = 10;
 		}
-		if (strpbrk(tok.lit, base == 16 ? ".pP" : ".eE")) {
+		/* C23: 100f / 42F float suffix without '.' or exponent (6.4.4.2).
+		 * Only add fF for decimal; hex with .pP already works. */
+		if (strpbrk(tok.lit, base == 16 ? ".pP" : ".eEfF")) {
 			/* floating constant */
 			e->u.constant.f = strtod(tok.lit, &end);
 			if (end == tok.lit)
@@ -115,11 +117,26 @@ primaryexpr(struct scope *s)
 		break;
 	case TLPAREN:
 		next();
+		if (tok.kind == TLBRACE) {
+			/* GNU statement expression ({...}) */
+			e = parse_stmt_expr_body(s);
+			expect(TRPAREN, "after statement expression");
+			break;
+		}
 		e = expr(s);
 		expect(TRPAREN, "after expression");
 		break;
 	case T_GENERIC:
 		e = generic(s);
+		break;
+	case T__PRAGMA__:
+		/* _Pragma("string") — C99/C23 pragma operator, treated as no-op */
+		next();
+		expect(TLPAREN, "after _Pragma");
+		if (tok.kind == TSTRINGLIT) next();
+		expect(TRPAREN, "after _Pragma argument");
+		e = mkexpr(EXPRCONST, &typevoid, NULL);
+		e->u.constant.u = 0;
 		break;
 	default:
 		if (tok.kind >= TIDENT) {

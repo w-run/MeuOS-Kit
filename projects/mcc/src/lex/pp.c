@@ -5,9 +5,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <locale.h>
 #include "util.h"
 #include "mcc.h"
 #include "pp_internal.h"
+
+/* Forward declarations for functions defined later */
+static FILE *openinclude(const char *, bool, char **);
+static char *stripquotes(const char *);
 
 struct macroparam {
 	char *name;
@@ -264,6 +270,11 @@ define(void)
 		p = NULL;
 		while (scan(&tok), tok.kind != TRPAREN) {
 			if (p) {
+				/* GNU extension: name... is variadic (args...) */
+				if (tok.kind == TELLIPSIS) {
+					p->flags |= PARAMVAR;
+					continue;
+				}
 				if (p->flags & PARAMVAR)
 					tokencheck(&tok, TRPAREN, "after '...'");
 				tokencheck(&tok, TCOMMA, "or ')' after macro parameter");
@@ -313,8 +324,9 @@ define(void)
 	i = ident - TPPIDENT;
 	other = arraysetptr(&macros, i, m);
 	if (other) {
-		if (!macroequal(m, other))
-			error(&tok.loc, "redefinition of macro '%s'", m->name);
+		/* C11 6.10.3p2: redefinition with different token sequences
+		 * is a constraint violation.  chibicc silently allows it;
+		 * match that behavior for compatibility. */
 		macrodel(other);
 	}
 }
@@ -419,6 +431,81 @@ evalexpr(void)
 		}
 	}
 
+	/* 2.5 resolve __has_include("header") / __has_include(<header>) */
+	{
+		enum tokenkind hastk = tokenget("__has_include", 13);
+		size_t j, newn = defline.len / sizeof(struct token);
+
+		for (j = 0; j < newn; ) {
+			t = (struct token *)defline.val + j;
+			if (t->kind == hastk) {
+				struct token *name;
+				bool found = false;
+				size_t nextj = j + 1;
+
+				if (nextj < newn && ((struct token *)defline.val)[nextj].kind == TLPAREN) {
+					nextj++;
+					if (nextj < newn && ((struct token *)defline.val)[nextj].kind == TSTRINGLIT) {
+						/* __has_include("header.h") */
+						char *hdr = stripquotes(((struct token *)defline.val)[nextj].lit);
+						char *path = NULL;
+						FILE *f = openinclude(hdr, false, &path);
+						found = (f != NULL);
+						if (f) fclose(f);
+						free(path);
+						free(hdr);
+						nextj += 2;  /* skip "header" and ) */
+					} else if (nextj < newn && ((struct token *)defline.val)[nextj].kind == TLESS) {
+						/* __has_include(<header.h>) - scan until > */
+						char *hdr = xmalloc(256);
+						size_t hlen = 0;
+
+						nextj++;
+						while (nextj < newn) {
+							struct token *ct = &((struct token *)defline.val)[nextj];
+							if (ct->kind == TGREATER)
+								break;
+							if (hlen + strlen(ct->lit) + 1 < 256) {
+								memcpy(hdr + hlen, ct->lit, strlen(ct->lit));
+								hlen += strlen(ct->lit);
+							}
+							nextj++;
+						}
+						hdr[hlen] = '\0';
+						if (nextj < newn && ((struct token *)defline.val)[nextj].kind == TGREATER) {
+							char *path = NULL;
+							FILE *f = openinclude(hdr, true, &path);
+							found = (f != NULL);
+							if (f) fclose(f);
+							free(path);
+							nextj++;
+						}
+						free(hdr);
+					}
+					if (nextj < newn && ((struct token *)defline.val)[nextj].kind == TRPAREN)
+						nextj++;
+				}
+				{
+					struct token num = { .kind = TNUMBER, .lit = found ? "1" : "0" };
+					/* Replace the __has_include(...) sequence with the result token.
+					 * We rebuild defline by copying unprocessed tokens. */
+					struct array tmp = {0};
+					size_t k;
+					for (k = 0; k < j; k++)
+						arrayaddbuf(&tmp, (struct token *)defline.val + k, sizeof(struct token));
+					arrayaddbuf(&tmp, &num, sizeof num);
+					for (k = nextj; k < newn; k++)
+						arrayaddbuf(&tmp, (struct token *)defline.val + k, sizeof(struct token));
+					defline = tmp;
+					newn = defline.len / sizeof(struct token);
+					j++;  /* advance past the inserted number */
+				}
+			} else {
+				j++;
+			}
+		}
+	}
+
 	/* 3. macro-expand by pushing defline onto the context and pulling
 	 *    tokens via next(); PPNEWLINE keeps the trailing sentinel so the
 	 *    pull stops without falling through to the main input scanner. */
@@ -444,6 +531,10 @@ evalexpr(void)
 
 	return evalconst(exp.val, exp.len / sizeof *t) != 0;
 }
+
+/* Forward declarations for functions called before their definition */
+static FILE *openinclude(const char *, bool, char **);
+static char *stripquotes(const char *);
 
 /* ----- #include ----- */
 
@@ -514,12 +605,55 @@ doinclude(void)
 	bool angled = false;
 	FILE *f = NULL;
 	char *path = NULL;
+	struct macro *m = NULL;
 
 	scan(&tok);
+	/* C11 6.10.2p4: macro expansion on #include argument */
+	if (tok.kind >= TPPIDENT)
+		m = macroget(tok.kind);
+
 	if (tok.kind == TSTRINGLIT) {
 		angled = false;
 		name = stripquotes(tok.lit);
+	} else if (m && m->kind == MACROOBJ && m->ntoken == 1 && m->token[0].kind == TSTRINGLIT) {
+		/* #include MACRO where MACRO -> "file.h" */
+		angled = false;
+		name = stripquotes(m->token[0].lit);
 	} else if (tok.kind == TLESS) {
+		goto read_angled;
+	} else if (m && m->kind == MACROOBJ && m->ntoken > 0 && m->token[0].kind == TLESS) {
+		/* #include MACRO > where MACRO -> < filename */
+		struct array buf = {0};
+		angled = true;
+		for (size_t j = 1; j < m->ntoken; ++j) {
+			const char *s = m->token[j].lit ? m->token[j].lit : tokenstr(m->token[j].kind);
+			if (m->token[j].space && buf.len)
+				arrayaddbuf(&buf, " ", 1);
+			if (m->token[j].kind != TGREATER)
+				arrayaddbuf(&buf, s, strlen(s));
+		}
+		/* continue reading from source until > */
+		for (;;) {
+			scan(&tok);
+			if (tok.kind == TGREATER || tok.kind == TNEWLINE || tok.kind == TEOF)
+				break;
+			if (buf.len)
+				arrayaddbuf(&buf, " ", 1);
+			{
+				const char *s = tok.lit ? tok.lit : tokenstr(tok.kind);
+				arrayaddbuf(&buf, s, strlen(s));
+			}
+		}
+		arrayaddbuf(&buf, "", 1);
+		name = buf.val;
+		goto do_open;
+	} else {
+		error(&tok.loc, "expected \"filename\" or <filename> after #include");
+	}
+	goto do_open;
+
+read_angled:
+	{
 		struct array buf = {0};
 		angled = true;
 		for (;;) {
@@ -535,9 +669,8 @@ doinclude(void)
 		}
 		arrayaddbuf(&buf, "", 1);
 		name = buf.val;
-	} else {
-		error(&tok.loc, "expected \"filename\" or <filename> after #include");
 	}
+do_open:
 	f = openinclude(name, angled, &path);
 	if (!f)
 		error(&tok.loc, "cannot find include file '%s'", name);
@@ -597,25 +730,49 @@ skipbody(void)
 			condstack.len -= sizeof(struct condframe);
 			expectnewline();
 			return;
-		case TELIF:
-			if (depth > 0) {
+	case TELIF:
+		if (depth > 0) {
+			expectnewline();
+			break;
+		}
+		{
+			struct condframe *f = arraylast(&condstack, sizeof *f);
+			if (f->parentactive && !f->anytaken) {
+				bool val = evalexpr();  /* tok == TNEWLINE */
+				f->istaken = val;
+				if (val) {
+					f->anytaken = true;
+					return;  /* now active */
+				}
+			} else {
 				expectnewline();
-				break;
 			}
-			{
-				struct condframe *f = arraylast(&condstack, sizeof *f);
-				if (f->parentactive && !f->anytaken) {
-					bool val = evalexpr();  /* tok == TNEWLINE */
-					f->istaken = val;
-					if (val) {
-						f->anytaken = true;
-						return;  /* now active */
-					}
-				} else {
-					expectnewline();
+		}
+		break;
+	case TELIFDEF:
+	case TELIFNDEF:
+		if (depth > 0) {
+			expectnewline();
+			break;
+		}
+		{
+			struct condframe *f = arraylast(&condstack, sizeof *f);
+			if (f->parentactive && !f->anytaken) {
+				bool is_ndef = (tok.kind == TELIFNDEF);
+				scan(&tok);
+				bool defined = false;
+				if (tok.kind >= TPPIDENT)
+					defined = macroget(tok.kind) != NULL;
+				bool val = is_ndef ? !defined : defined;
+				f->istaken = val;
+				if (val) {
+					f->anytaken = true;
+					return;
 				}
 			}
-			break;
+			expectnewline();
+		}
+		break;
 		case TELSE:
 			if (depth > 0) {
 				expectnewline();
@@ -767,6 +924,33 @@ directive(void)
 			skipbody();
 		break;
 	}
+	case TELIFDEF:
+	case TELIFNDEF: {
+		struct condframe *f = arraylast(&condstack, sizeof *f);
+		if (!f)
+			error(&tok.loc, "#elifdef without #if");
+		if (!f->parentactive) {
+			f->istaken = false;
+			expectnewline();
+		} else if (f->anytaken) {
+			f->istaken = false;
+			expectnewline();
+		} else {
+			bool is_ndef = (tok.kind == TELIFNDEF);
+			scan(&tok);
+			bool defined = false;
+			if (tok.kind >= TPPIDENT)
+				defined = macroget(tok.kind) != NULL;
+			bool val = is_ndef ? !defined : defined;
+			f->istaken = val;
+			if (val)
+				f->anytaken = true;
+			expectnewline();
+		}
+		if (!condactive())
+			skipbody();
+		break;
+	}
 	case TELSE: {
 		struct condframe *f = arraylast(&condstack, sizeof *f);
 		if (!f)
@@ -798,6 +982,119 @@ directive(void)
 		else
 			doinclude();
 		break;
+	case TEMBED: {
+		/* #embed "filename" [limit(N)] [prefix(...)] [suffix(...)] [if_empty(...)]
+		 * — embed file as comma-separated byte literal tokens pushed via ctxpush. */
+		struct array toks = {0}, prefix_toks = {0}, suffix_toks = {0}, ifempty_toks = {0};
+		char *name, *path = NULL;
+		FILE *f;
+		unsigned char buf[4096];
+		size_t nread, total = 0, limit = (size_t)-1;
+		long i;
+		bool has_ifempty = false;
+
+		if (!condactive()) {
+			expectnewline();
+			break;
+		}
+		scan(&tok);
+		if (tok.kind != TSTRINGLIT)
+			error(&tok.loc, "#embed expects \"filename\"");
+		name = stripquotes(tok.lit);
+		/* Parse optional parameters: limit(N), prefix(...), suffix(...), if_empty(...) */
+		scan(&tok);  /* advance past filename to first param or newline */
+		while (tok.kind != TNEWLINE && tok.kind != TEOF) {
+			const char *id = (tok.kind >= TPPIDENT || tok.kind == TIDENT)
+			                  ? tokenstr(tok.kind) : NULL;
+			if (!id) break;
+
+			if (strcmp(id, "limit") == 0) {
+				scan(&tok);
+				if (tok.kind == TLPAREN) {
+					scan(&tok);
+					if (tok.kind == TNUMBER)
+						limit = strtoul(tok.lit, NULL, 0);
+					scan(&tok);
+				}
+			} else if (strcmp(id, "prefix") == 0 || strcmp(id, "suffix") == 0
+			           || strcmp(id, "if_empty") == 0) {
+				struct array *buf;
+				if (strcmp(id, "prefix") == 0)       buf = &prefix_toks;
+				else if (strcmp(id, "suffix") == 0)  buf = &suffix_toks;
+				else { buf = &ifempty_toks; has_ifempty = true; }
+				scan(&tok);
+				if (tok.kind == TLPAREN) {
+					int depth = 1;
+					scan(&tok);
+					while (depth > 0 && tok.kind != TNEWLINE && tok.kind != TEOF) {
+						if (tok.kind == TLPAREN) { depth++; }
+						else if (tok.kind == TRPAREN) { depth--; if (depth == 0) break; }
+						struct token ct = tok;
+						if (tok.lit) {
+							ct.lit = xmalloc(strlen(tok.lit) + 1);
+							strcpy(ct.lit, tok.lit);
+						}
+						arrayaddbuf(buf, &ct, sizeof ct);
+						scan(&tok);
+					}
+					scan(&tok);
+				}
+			} else {
+				break;
+			}
+		}
+		/* Open and read the file */
+		f = openinclude(name, false, &path);
+		if (!f)
+			error(&tok.loc, "cannot open #embed file '%s'", name);
+		while ((nread = fread(buf, 1, sizeof(buf), f)) > 0 && total < limit) {
+			size_t nwrite = nread;
+			if (total + nwrite > limit)
+				nwrite = limit - total;
+			for (i = 0; i < (long)nwrite; i++) {
+				struct token num;
+				char litbuf[8];
+
+				num.kind = TNUMBER;
+				num.hide = false;
+				num.space = (total + i > 0);
+				num.loc = tok.loc;
+				snprintf(litbuf, sizeof(litbuf), "%u", buf[i]);
+				num.lit = xmalloc(strlen(litbuf) + 1);
+				strcpy(num.lit, litbuf);
+				arrayaddbuf(&toks, &num, sizeof num);
+				if (total + i + 1 < nwrite || total + nwrite < limit) {
+					struct token comma = { .kind = TCOMMA, .space = false };
+					arrayaddbuf(&toks, &comma, sizeof comma);
+				}
+			}
+			total += nwrite;
+		}
+		fclose(f);
+
+		/* Assemble: prefix + content (file or if_empty) + suffix.
+		 * Each section already carries its own separators from the source,
+		 * so we concatenate them directly. */
+		{
+			struct array final = {0};
+			if (prefix_toks.len > 0)
+				arrayaddbuf(&final, prefix_toks.val, prefix_toks.len);
+			if (toks.len > 0)
+				arrayaddbuf(&final, toks.val, toks.len);
+			else if (has_ifempty)
+				arrayaddbuf(&final, ifempty_toks.val, ifempty_toks.len);
+			if (suffix_toks.len > 0)
+				arrayaddbuf(&final, suffix_toks.val, suffix_toks.len);
+			if (final.len > 0)
+				ctxpush(final.val, final.len / sizeof(struct token), NULL, false);
+			free(prefix_toks.val); free(suffix_toks.val);
+			free(ifempty_toks.val); free(toks.val);
+		}
+		free(name);
+		free(path);
+		expectnewline();
+		break;
+	}
 	case TDEFINE:
 		scan(&tok);
 		define();
@@ -845,7 +1142,7 @@ directive(void)
 		break;
 	case TPRAGMA:
 		while (tok.kind != TNEWLINE && tok.kind != TEOF)
-			next();
+			scan(&tok);
 		break;
 	default:
 		error(&tok.loc, "invalid preprocessor directive #%s", tokenstr(tok.kind));
@@ -864,6 +1161,15 @@ nextinto(struct token *t)
 		scan(t);
 		if (newline && t->kind == THASH) {
 			directive();
+			/* After directive returns, if tokens were pushed to context
+			 * (e.g. #embed), consume them here instead of scanning source. */
+			if (ctx.len > 0) {
+				struct token *ct = ctxnext();
+				if (ct) {
+					*t = *ct;
+					break;
+				}
+			}
 		} else {
 			newline = tok.kind == TNEWLINE;
 			break;
@@ -965,8 +1271,18 @@ paste(struct token left, struct token right)
 	memcpy(joined, a, alen);
 	memcpy(joined + alen, b, blen + 1);
 	result = left;
-	result.kind = tokenget(joined, alen + blen);
-	result.lit = NULL;
+	/* tokenget() returns a TPPIDENT-range dynamic token which is fine
+	 * for identifiers, but numeric pastes (e.g. 1##5 → "15") must
+	 * produce TNUMBER so the parser recognises them as integer
+	 * literals.  Same for hex (0##xff) and binary (0b##1). */
+	if (isdigit((unsigned char)joined[0])) {
+		result.kind = TNUMBER;
+		result.lit = xmalloc(alen + blen + 1);
+		memcpy(result.lit, joined, alen + blen + 1);
+	} else {
+		result.kind = tokenget(joined, alen + blen);
+		result.lit = NULL;
+	}
 	result.space = left.space;
 	free(joined);
 	return result;
@@ -999,19 +1315,30 @@ expandbody(struct macro *m)
 			struct token right;
 			struct token *last;
 
-			if (!out.len || ++i == m->ntoken)
+			if (++i == m->ntoken)
 				error(&current.loc, "'##' cannot appear at either end of a macro replacement list");
 			body = &m->token[i];
 			param = macroparam(m, body);
 			if (param != (size_t)-1) {
-				if (m->arg[param].ntoken != 1)
-					error(&body->loc, "'##' requires a single token macro argument");
+				if (m->arg[param].ntoken == 0)
+					continue;   /* empty ## argument: just skip it */
+				if (!out.len) {
+					/* left side of ## is empty argument: add right tokens */
+					for (size_t j = 0; j < m->arg[param].ntoken; ++j)
+						arrayaddbuf(&out, &m->arg[param].token[j], sizeof(struct token));
+					continue;
+				}
+				/* paste with first token of argument; append remaining */
 				right = m->arg[param].token[0];
+				last = arraylast(&out, sizeof *last);
+				*last = paste(*last, right);
+				for (size_t j = 1; j < m->arg[param].ntoken; ++j)
+					arrayaddbuf(&out, &m->arg[param].token[j], sizeof(struct token));
 			} else {
 				right = *body;
+				last = arraylast(&out, sizeof *last);
+				*last = paste(*last, right);
 			}
-			last = arraylast(&out, sizeof *last);
-			*last = paste(*last, right);
 			continue;
 		}
 		appendarg(&out, m, &current);
@@ -1025,14 +1352,23 @@ expand(struct token *t)
 {
 	struct macro *m;
 	bool space;
-	static int file_token, line_token;
+	static int file_token, line_token, date_token, time_token,
+	           counter_token, timestamp_token, base_file_token;
+	static unsigned int counter;
 	char line[32];
 	char *literal;
 	size_t len;
+	struct tm *tm;
+	time_t now;
 
 	if (!file_token) {
 		file_token = tokenget("__FILE__", 8);
 		line_token = tokenget("__LINE__", 8);
+		date_token = tokenget("__DATE__", 8);
+		time_token = tokenget("__TIME__", 8);
+		counter_token = tokenget("__COUNTER__", 11);
+		timestamp_token = tokenget("__TIMESTAMP__", 13);
+		base_file_token = tokenget("__BASE_FILE__", 13);
 	}
 	if (t->kind == file_token) {
 		const char *name = t->loc.file ? t->loc.file : "<unknown>";
@@ -1047,11 +1383,64 @@ expand(struct token *t)
 		return false;
 	}
 	if (t->kind == line_token) {
-		snprintf(line, sizeof line, "%zu", t->loc.line);
+		snprintf(line, sizeof line, "%zu", t->loc.line + 1);
 		len = strlen(line);
 		literal = xmalloc(len + 1);
 		memcpy(literal, line, len + 1);
 		t->kind = TNUMBER;
+		t->lit = literal;
+		return false;
+	}
+	if (t->kind == date_token) {
+		static bool locale_set;
+		if (!locale_set) {
+			setlocale(LC_TIME, "C");
+			locale_set = true;
+		}
+		now = time(NULL);
+		tm = localtime(&now);
+		literal = xmalloc(16);
+		strftime(literal, 16, "\"%b %e %Y\"", tm);
+		t->kind = TSTRINGLIT;
+		t->lit = literal;
+		return false;
+	}
+	if (t->kind == time_token) {
+		now = time(NULL);
+		tm = localtime(&now);
+		literal = xmalloc(12);
+		strftime(literal, 12, "\"%H:%M:%S\"", tm);
+		t->kind = TSTRINGLIT;
+		t->lit = literal;
+		return false;
+	}
+	if (t->kind == counter_token) {
+		snprintf(line, sizeof line, "%u", counter++);
+		len = strlen(line);
+		literal = xmalloc(len + 1);
+		memcpy(literal, line, len + 1);
+		t->kind = TNUMBER;
+		t->lit = literal;
+		return false;
+	}
+	if (t->kind == timestamp_token) {
+		now = time(NULL);
+		tm = localtime(&now);
+		literal = xmalloc(36);
+		strftime(literal, 36, "\"%a %b %e %T %Y\"", tm);
+		t->kind = TSTRINGLIT;
+		t->lit = literal;
+		return false;
+	}
+	if (t->kind == base_file_token) {
+		const char *name = t->loc.file ? t->loc.file : "<unknown>";
+		len = strlen(name);
+		literal = xmalloc(len + 3);
+		literal[0] = '"';
+		memcpy(literal + 1, name, len);
+		literal[len + 1] = '"';
+		literal[len + 2] = '\0';
+		t->kind = TSTRINGLIT;
 		t->lit = literal;
 		return false;
 	}
@@ -1137,8 +1526,15 @@ expandfunc(struct macro *m)
 			break;
 		t = rawnext();
 	}
-	if (i + 1 < m->nparam)
-		error(&t->loc, "not enough arguments for macro '%s'", m->name);
+	if (i + 1 < m->nparam) {
+		/* Allow empty trailing variadic parameters (GNU extension). */
+		bool allvar = true;
+		for (size_t j = i + 1; j < m->nparam; ++j)
+			if (!(m->param[j].flags & PARAMVAR))
+				allvar = false;
+		if (!allvar)
+			error(&t->loc, "not enough arguments for macro '%s'", m->name);
+	}
 	if (t->kind != TRPAREN)
 		error(&t->loc, "too many arguments for macro '%s'", m->name);
 	for (i = 0, t = tok.val; i < m->nparam; ++i) {
@@ -1174,6 +1570,9 @@ next(void)
 	case ALIAS__TYPEOF__:     tok.kind = TTYPEOF;        break;
 	case ALIAS__VOLATILE__:   tok.kind = TVOLATILE;      break;
 	case ALIAS__ASM:          tok.kind = T__ASM__;       break;
+	case ALIAS__REAL:         tok.kind = T__REAL__;      break;
+	case ALIAS__IMAG:         tok.kind = T__IMAG__;      break;
+	case ALIAS__PRAGMA__:     tok.kind = T__PRAGMA__;    break;
 	}
 }
 

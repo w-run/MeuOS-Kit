@@ -1,4 +1,16 @@
-# 待实现：RISC-V 64-bit crt1.S
+# RISC-V 64-bit crt1.S —— 已完成
 
-`_start` 入口：设置 TLS（tp 寄存器）、传入 argc/argv/envp、调用 `main`、
-`exit`。参考 `crt/x86_64/crt1.S`。完整计划见 `../src/arch/riscv64/.todo`。
+`_start` 入口：从内核栈解析 argc/argv/envp/auxv，16 字节栈对齐，设置
+全局 `environ`，调用 `__meuos_tls_init(envp)` 取得 TLS 基址后用
+`mv tp, a0` 安装线程指针（riscv64 无 arch_prctl 等价 syscall），随后
+`call main`，最后 `tail exit`（让 atexit/fflush 生效）。
+
+参考 `crt/aarch64/crt1.S`，差异：aarch64 用 `msr tpidr_el0` 设置 tp，
+riscv64 直接用 `mv tp, a0`。
+
+完整运行时计划见 `../src/arch/riscv64/.todo`。
+
+## 验收（受环境限制，静态核实 + 交叉汇编待工具链）
+- `crt/riscv64/crt1.S` 已写入，汇编语义核对通过（栈解析/对齐/tp 安装/main/exit）。
+- 真机/交叉汇编验证待 `riscv64-linux-gnu-gcc` 与 qemu-riscv64 就绪后由
+  `make check-riscv64-bootstrap` 完成（脚本与 Makefile 目标已注册）。

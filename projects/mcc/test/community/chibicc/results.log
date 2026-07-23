@@ -1,0 +1,79 @@
+COMPILEFAIL alignof
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/alignof.c:26:48: error: expected '(' or identifier
+COMPILEFAIL alloca
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/alloca.c:8:14: error: undeclared identifier: alloca
+COMPILEFAIL arith
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/arith.c:122:20: error: invalid operands to conditional operator
+COMPILEFAIL asm
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/asm.c:4:3: error: undeclared identifier: asm
+COMPILEFAIL atomic
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/atomic.c:42:35: error: base types of pointer assignment must be compatible or void
+COMPILEFAIL attribute
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/attribute.c:5:63: error: GNU attribute 'packed' is not supported here
+COMPILEFAIL bitfield
+    mcc: invalid alloc size -12
+PASS        builtin
+COMPILEFAIL cast
+    mcc: invalid alloc size -12
+RUNFAIL     commonsym (rc=1)
+COMPILEFAIL compat
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/compat.c:3:11: error: declaration has no type specifier
+PASS        complit
+COMPILEFAIL const
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/const.c:4:11: error: declaration has no type specifier
+COMPILEFAIL constexpr
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/constexpr.c:4:68: error: initializer is not a constant expression
+COMPILEFAIL control
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/control.c:24:37: error: expected ';' after expression in statement expression, saw '='
+PASS        decl
+COMPILEFAIL enum
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/enum.c:4:39: error: expected '(' or identifier
+COMPILEFAIL extern
+    /usr/bin/ld: /tmp/cc2yD9WX.o: in function `main':
+    (.text+0xf): undefined reference to `ext1'
+    /usr/bin/ld: (.text+0x29): undefined reference to `ext2'
+    /usr/bin/ld: (.text+0x46): undefined reference to `ext3'
+    /usr/bin/ld: (.text+0x63): undefined reference to `ext_fn1'
+    /usr/bin/ld: (.text+0x83): undefined reference to `ext_fn2'
+    collect2: 错误：ld 返回 1
+    mcc: host assembler/linker failed
+PASS        float
+COMPILEFAIL function
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/function.c:92:47: error: function 'vsprintf' redeclared with incompatible type
+PASS        generic
+COMPILEFAIL initializer
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/initializer.c:16:19: error: base types of pointer assignment must be compatible or void
+PASS        line
+PASS        literal
+COMPILEFAIL macro
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/macro.c:399:45: error: expected ',' or ')' after function call argument, saw identifier '__VA_OPT__'
+PASS        offsetof
+COMPILEFAIL pointer
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/pointer.c:16:35: error: base types of pointer assignment must be compatible or void
+COMPILEFAIL pragma-once
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/pragma-once.c:5:10: error: cannot find include file 'test/pragma-once.c'
+COMPILEFAIL sizeof
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/sizeof.c:41:32: error: duplicate 'signed'
+PASS        stdhdr
+COMPILEFAIL string
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/string.c:20:16: error: invalid escape sequence
+COMPILEFAIL struct
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/struct.c:10:56: error: base types of pointer assignment must be compatible or void
+COMPILEFAIL tls
+    /workspace/MeuOS-Kit-wt-mcc-libc/sysroot/usr/include/string.h:6:59: error: function 'memcpy' redeclared with incompatible type
+COMPILEFAIL typedef
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/typedef.c:11:24: error: declaration has no type specifier
+PASS        typeof
+COMPILEFAIL unicode
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/unicode.c:15:32: error: invalid escape sequence
+COMPILEFAIL union
+    mcc: invalid alloc size -12
+COMPILEFAIL usualconv
+    mcc: invalid alloc size -13
+COMPILEFAIL varargs
+    /workspace/MeuOS-Kit-wt-mcc-libc/sysroot/usr/include/stdarg.h:8:45: error: va_end argument must have type va_list
+COMPILEFAIL variable
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/variable.c:51:48: error: base types of pointer assignment must be compatible or void
+COMPILEFAIL vla
+    /workspace/MeuOS-Kit-wt-mcc-libc/projects/mcc/test/community/chibicc/vla.c:18:51: error: base types of pointer assignment must be compatible or void
+==== SUMMARY: PASS=10 RUNFAIL=1 COMPILEFAIL=30 (total 41) ====

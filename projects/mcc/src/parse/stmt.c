@@ -6,6 +6,52 @@
 #include "util.h"
 #include "mcc.h"
 
+/* C23 labeled break/continue: maps label names to loop/switch targets */
+#define MAX_LABELED 64
+static struct {
+	char *name;
+	struct block *break_target;
+	struct block *continue_target;
+} labeled_blocks[MAX_LABELED];
+static int n_labeled_blocks;
+
+static void
+register_labeled(const char *name, struct block *brk, struct block *cont)
+{
+	if (n_labeled_blocks < MAX_LABELED) {
+		labeled_blocks[n_labeled_blocks].name = xmalloc(strlen(name) + 1);
+		strcpy(labeled_blocks[n_labeled_blocks].name, name);
+		labeled_blocks[n_labeled_blocks].break_target = brk;
+		labeled_blocks[n_labeled_blocks].continue_target = cont;
+		n_labeled_blocks++;
+	}
+}
+
+static struct block *
+find_labeled_break(const char *name)
+{
+	int i;
+	for (i = n_labeled_blocks - 1; i >= 0; i--) {
+		if (strcmp(labeled_blocks[i].name, name) == 0)
+			return labeled_blocks[i].break_target;
+	}
+	return NULL;
+}
+
+static struct block *
+find_labeled_continue(const char *name)
+{
+	int i;
+	for (i = n_labeled_blocks - 1; i >= 0; i--) {
+		if (strcmp(labeled_blocks[i].name, name) == 0)
+			return labeled_blocks[i].continue_target;
+	}
+	return NULL;
+}
+
+/* Track the label name from label() so break/continue can use it */
+static const char *pending_label;
+
 /* 6.8.1 Labeled statements */
 static bool
 label(struct func *f, struct scope *s)
@@ -46,6 +92,7 @@ label(struct func *f, struct scope *s)
 		g = funcgoto(f, name);
 		g->defined = true;
 		funclabel(f, g->label);
+		pending_label = name;
 		break;
 	}
 	return true;
@@ -54,9 +101,18 @@ label(struct func *f, struct scope *s)
 static void
 labelstmt(struct func *f, struct scope *s)
 {
-	while (label(f, s))
-		;
+	const char *saved_label = NULL;
+
+	pending_label = NULL;
+	while (label(f, s)) {
+		/* Last label wins for labeled break/continue */
+		if (pending_label)
+			saved_label = pending_label;
+		pending_label = NULL;
+	}
+	pending_label = saved_label;
 	stmt(f, s);
+	pending_label = NULL;
 }
 
 /* 6.8 Statements and blocks */
@@ -69,6 +125,8 @@ stmt(struct func *f, struct scope *s)
 	struct value *v;
 	struct block *b[4];
 	struct switchcases swtch;
+
+	curfunc = f;
 
 	attr(NULL, 0);
 	switch (tok.kind) {
@@ -150,6 +208,10 @@ stmt(struct func *f, struct scope *s)
 		v = funcexpr(f, e);
 		funcjmp(f, b[0]);
 		s = mkscope(s);
+		if (pending_label) {
+			register_labeled(pending_label, b[1], NULL);
+			pending_label = NULL;
+		}
 		s->breaklabel = b[1];
 		s->switchcases = &swtch;
 		labelstmt(f, s);
@@ -182,6 +244,10 @@ stmt(struct func *f, struct scope *s)
 		funcbranch(f, e, b[1], b[2]);
 		funclabel(f, b[1]);
 		s = mkscope(s);
+		if (pending_label) {
+			register_labeled(pending_label, b[2], b[0]);
+			pending_label = NULL;
+		}
 		s->continuelabel = b[0];
 		s->breaklabel = b[2];
 		labelstmt(f, s);
@@ -199,6 +265,10 @@ stmt(struct func *f, struct scope *s)
 
 		s = mkscope(s);
 		s = mkscope(s);
+		if (pending_label) {
+			register_labeled(pending_label, b[2], b[1]);
+			pending_label = NULL;
+		}
 		s->continuelabel = b[1];
 		s->breaklabel = b[2];
 		funclabel(f, b[0]);
@@ -252,6 +322,10 @@ stmt(struct func *f, struct scope *s)
 
 		funclabel(f, b[1]);
 		s = mkscope(s);
+		if (pending_label) {
+			register_labeled(pending_label, b[3], b[2]);
+			pending_label = NULL;
+		}
 		s->breaklabel = b[3];
 		s->continuelabel = b[2];
 		labelstmt(f, s);
@@ -276,16 +350,40 @@ stmt(struct func *f, struct scope *s)
 		break;
 	case TCONTINUE:
 		next();
-		if (!s->continuelabel)
-			error(&tok.loc, "'continue' statement must be in loop");
-		funcjmp(f, s->continuelabel);
+		if (tok.kind >= TIDENT) {
+			/* C23: continue LABEL */
+			name = tokenstr(tok.kind);
+			{
+				struct block *target = find_labeled_continue(name);
+				if (!target)
+					error(&tok.loc, "label '%s' for continue not found", name);
+				funcjmp(f, target);
+			}
+			next();
+		} else {
+			if (!s->continuelabel)
+				error(&tok.loc, "'continue' statement must be in loop");
+			funcjmp(f, s->continuelabel);
+		}
 		expect(TSEMICOLON, "after 'continue' statement");
 		break;
 	case TBREAK:
 		next();
-		if (!s->breaklabel)
-			error(&tok.loc, "'break' statement must be in loop or switch");
-		funcjmp(f, s->breaklabel);
+		if (tok.kind >= TIDENT) {
+			/* C23: break LABEL */
+			name = tokenstr(tok.kind);
+			{
+				struct block *target = find_labeled_break(name);
+				if (!target)
+					error(&tok.loc, "label '%s' for break not found", name);
+				funcjmp(f, target);
+			}
+			next();
+		} else {
+			if (!s->breaklabel)
+				error(&tok.loc, "'break' statement must be in loop or switch");
+			funcjmp(f, s->breaklabel);
+		}
 		expect(TSEMICOLON, "after 'break' statement");
 		break;
 	case TRETURN:
@@ -302,7 +400,35 @@ stmt(struct func *f, struct scope *s)
 		expect(TSEMICOLON, "after 'return' statement");
 		break;
 
-	case T__ASM__:
-		error(&tok.loc, "inline assembly is not yet supported");
+	case T__ASM__: {
+		/* Basic inline asm — no-op that compiles through.
+		 * Supports __asm__ [volatile]("instructions" [: [outputs] [: [inputs] [: clobbers]]]) */
+		next();
+		if (tok.kind == TVOLATILE || tok.kind == TCONST || tok.kind == TRESTRICT)
+			next();
+		if (tok.kind == TLPAREN) {
+			next();
+			while (tok.kind == TSTRINGLIT) {
+				next();
+				if (tok.kind == TCOLON) {
+					while (tok.kind != TRPAREN && tok.kind != TNEWLINE && tok.kind != TEOF) {
+						if (tok.kind == TLPAREN) {
+							int depth = 1;
+							while (depth > 0 && tok.kind != TEOF) {
+								if (tok.kind == TLPAREN) depth++;
+								if (tok.kind == TRPAREN) depth--;
+								if (depth > 0) next();
+							}
+						}
+						if (tok.kind != TRPAREN) next();
+					}
+				}
+				if (tok.kind == TCOMMA) next();
+			}
+			expect(TRPAREN, "after asm statement");
+		}
+		expect(TSEMICOLON, "after asm statement");
+		break;
+	}
 	}
 }

@@ -163,7 +163,7 @@ funcexpr(struct func *f, struct expr *e)
 		break;
 	case EXPRCONST:
 		t = e->type;
-		if (t->prop & PROPINT || t->kind == TYPEPOINTER)
+		if (t->prop & PROPINT || t->kind == TYPEPOINTER || t->kind == TYPENULLPTR)
 			return mkintconst(e->u.constant.u);
 		assert(t->prop & PROPFLOAT);
 		return mkfltconst(t->size == 4 ? VALUE_FLTCONST : VALUE_DBLCONST, e->u.constant.f);
@@ -240,6 +240,18 @@ funcexpr(struct func *f, struct expr *e)
 		case TSUB:
 			r = funcexpr(f, e->base);
 			return funcinst(f, INEG, irtype(e->type).base, r, NULL);
+		case T__REAL__:
+			/* __real__ complex_value — load first sizeof(base) bytes */
+			lval = funclval(f, e->base);
+			return funcload(f, e->type, lval);
+		case T__IMAG__:
+			/* __imag__ complex_value — load second sizeof(base) bytes */
+			lval = funclval(f, e->base);
+			{
+				struct value *addr = lval.addr;
+				addr = funcinst(f, IADD, ptrclass(), addr, mkintconst(e->type->size));
+				return funcload(f, e->type, (struct lvalue){addr});
+			}
 		}
 		fatal("internal error; unknown unary expression");
 		break;
@@ -389,6 +401,15 @@ funcexpr(struct func *f, struct expr *e)
 		for (e = e->base; e->next; e = e->next)
 			funcexpr(f, e);
 		return funcexpr(f, e);
+	case EXPRSTMTEXPR: {
+		/* GNU statement expression ({...}).
+		 * All declarations, side-effect expressions, and control-flow
+		 * statements were emitted to curfunc during parsing.  Here we
+		 * only evaluate the result expression (if any). */
+		if (e->u.stmt_expr.last_expr)
+			return funcexpr(f, e->u.stmt_expr.last_expr);
+		return NULL;
+	}
 	case EXPRBUILTIN:
 		switch (e->u.builtin.kind) {
 		case BUILTINATOMICFETCHADD:

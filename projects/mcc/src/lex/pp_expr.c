@@ -39,7 +39,15 @@ evaladv(struct evalctx *e)
 static long long
 parseint(const struct token *t)
 {
-	return strtoll(t->lit, NULL, 0);
+	const char *lit = t->lit;
+	if (lit[0] == '0' && (lit[1] == 'b' || lit[1] == 'B')) {
+		unsigned long long val = 0;
+		const char *s = lit + 2;
+		while (*s == '0' || *s == '1')
+			val = (val << 1) | (*s++ - '0');
+		return (long long)val;
+	}
+	return strtoll(lit, NULL, 0);
 }
 
 static long long

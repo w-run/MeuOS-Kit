@@ -152,6 +152,26 @@ check-c11: $(BIN)
 		$$out || exit $$?; \
 	done
 
+# C99 standard feature tests (§6).
+check-c99: $(BIN)
+	@for t in test/c99/*.c; do \
+		out=/tmp/mcc-c99-$$(basename $$t .c); \
+		case $$t in \
+			*extern_defs*) true ;; \
+			*extern*)    ./$(BIN) -Itest/c99 -o $$out $$t test/c99/extern_defs.c || exit $$?; \
+			             $$out || exit $$? ;; \
+			*)           ./$(BIN) -Itest/c99 -o $$out $$t || exit $$?; \
+			             $$out || exit $$? ;; \
+		esac; \
+	done
+
+check-c23: $(BIN)
+	@for t in test/c23/*.c; do \
+		out=/tmp/mcc-c23-$$(basename $$t .c); \
+		./$(BIN) -o $$out $$t 2>&1 || exit $$?; \
+		$$out || exit $$?; \
+	done
+
 check-driver: $(BIN)
 	sh test/driver/sysroot.sh ./$(BIN)
 	sh test/driver/feature-regress.sh ./$(BIN)
@@ -197,4 +217,12 @@ check-sysroot-static: $(BIN)
 # Compatibility alias for existing scripts.
 check-la64: check-loongarch64
 
-.PHONY: all clean check check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-la64 check-c11-atomic check-c11 check-driver check-mt-integration check-abi check-sysroot-static
+.PHONY: all clean check check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community
+
+# chibicc community functional test suite (C11/C23 conformance).
+# Runs test/community/chibicc/run.sh against the MeuOS sysroot.
+# See test/community/chibicc/REPORT.md for results and classification.
+check-chibicc: $(BIN)
+	@sh test/community/chibicc/run.sh
+
+check-community: check-c99 check-chibicc

@@ -100,6 +100,13 @@ defineobj(struct decl *d, struct init *init, bool hasinit, struct func *f)
 		error(&tok.loc, "object '%s' has incomplete type", d->name);
 	if (d->u.obj.align < d->type->align)
 		d->u.obj.align = d->type->align;
+	/* C23: constexpr variable must have a constant expression initializer */
+	if ((d->qual & QUALCONSTEXPR) && hasinit && init->expr) {
+		struct expr *e = eval(init->expr);
+		if (e->kind != EXPRCONST)
+			error(&tok.loc, "constexpr variable '%s' requires a constant expression initializer", d->name);
+		init->expr = e;
+	}
 	if (d->u.obj.storage == SDAUTO)
 		funcinit(f, d, init, hasinit);
 	else
@@ -127,7 +134,7 @@ decl(struct scope *s, struct func *f)
 	if (staticassert(s))
 		return true;
 	a.kind = 0;
-	if (attr(&a, ATTRNORETURN) && consume(TSEMICOLON))
+	if (attr(&a, ATTRNORETURN | ATTRFALLTHROUGH | ATTRNODISCARD | ATTRMAYBEUNUSED | ATTRDEPRECATED) && consume(TSEMICOLON))
 		return true;
 	base = declspecs(s, &sc, &fs, &align);
 	if (!base.type)

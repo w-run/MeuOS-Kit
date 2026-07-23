@@ -1,6 +1,8 @@
 #ifndef MCC_UTIL_H
 #define MCC_UTIL_H
 
+#include <stdbool.h>
+
 #ifndef noreturn
 #if __STDC_VERSION__ >= 202311L
 #define noreturn [[noreturn]]
@@ -35,7 +37,6 @@ extern char *argv0;
 #define ALIGNDOWN(x, n) ((x) & -(n))
 #define ALIGNUP(x, n) ALIGNDOWN((x) + (n) - 1, n)
 
-void warn(const char *, ...);
 noreturn void fatal(const char *fmt, ...);
 
 void *reallocarray(void *, size_t, size_t);

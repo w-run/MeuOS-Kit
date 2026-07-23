@@ -1,8 +1,9 @@
 # MeuOS Kit - Agent 初始化 Prompt
 
-> Update: 2026-07-22
+> Update: 2026-07-23
 >
 > IMPORTANT: 全程思考/回复/文档优先使用简体中文
+> [你必须称呼用户为大喵 (she/her) ]
 >
 > **分支策略**：尽量使用工作分支（如 `feat/i386-float`、`fix/va-list`）进行变更，
 > 完成后合并回 `main`。本次会话可直接在 `main` 提交，但需在提交信息中注明可直接
@@ -59,9 +60,10 @@
 **架构**：**源码级整合** cproc 编译器前端 + QBE 编译器后端。单体可执行文件，不区分前后端。cproc 的语义阶段直接调用 IR 构造 API，无文本 IR 序列化。所有模块共享统一的内存管理、错误报告、符号表。
 
 **C 语言目标**：
+
 - **C99**：完整实现
 - **C11**：完整实现（`_Atomic`、`_Generic`、`_Thread_local`、`_Alignas`、`_Alignof`、`_Noreturn`、`_Static_assert`、匿名结构体/联合体、复合字面量、指定初始化器、变长数组）
-- **C23**：稳定实现（`constexpr`、`typeof`、`nullptr`、`#embed`、属性语法等）
+- **C23**：完整实现（`constexpr`、`typeof`/`typeof_unqual`、`nullptr_t`、`#embed`+`limit(N)`/`prefix`/`suffix`/`if_empty`、`__has_include`、属性语法 `[[]]`、`#elifdef`/`#elifndef`、`#warning`、二进制字面量`0b`/数字分隔符`'`、空初始化器`{}`、`auto`类型推导、Labeled break/continue、`bool`/`true`/`false`关键字、`_BitInt(N)`、`_Decimal32`/`64`/`128`、`static_assert`无消息形式）
 
 **C++ 目标（m++）**：C 语言功能稳定后启动。m++ 复用 mcc 的后端（IR/指令选择/寄存器分配/汇编输出），通过 `libmcc` 共享后端库实现。m++ 前端独立实现 C++ 语法/语义。
 
@@ -133,17 +135,17 @@ meow --bootstrap         # 自举模式：用宿主编译自己
 
 **工具清单**：
 
-| 工具 | 功能 | 取代 |
-|------|------|------|
-| `as` | 汇编器（.s -> .o） | gas |
-| `ld` | 链接器（.o/.a -> ELF） | GNU ld |
-| `ar` | 归档器（.o[] -> .a） | GNU ar |
-| `ranlib` | 归档索引生成 | GNU ranlib |
-| `nm` | 符号列表 | GNU nm |
-| `objdump` | 反汇编和节区查看 | GNU objdump |
-| `readelf` | ELF 结构查看 | GNU readelf |
-| `strip` | 删除调试/非必要符号 | GNU strip |
-| `objcopy` | 节区和格式复制 | GNU objcopy |
+| 工具        | 功能                   | 取代        |
+| ----------- | ---------------------- | ----------- |
+| `as`      | 汇编器（.s -> .o）     | gas         |
+| `ld`      | 链接器（.o/.a -> ELF） | GNU ld      |
+| `ar`      | 归档器（.o[] -> .a）   | GNU ar      |
+| `ranlib`  | 归档索引生成           | GNU ranlib  |
+| `nm`      | 符号列表               | GNU nm      |
+| `objdump` | 反汇编和节区查看       | GNU objdump |
+| `readelf` | ELF 结构查看           | GNU readelf |
+| `strip`   | 删除调试/非必要符号    | GNU strip   |
+| `objcopy` | 节区和格式复制         | GNU objcopy |
 
 **设计原则**：不包含宿主 `<elf.h>`，所有 ELF 常量自带。代码零 GNU/binutils 依赖。内部共享 `libelf` 库。
 
@@ -157,16 +159,17 @@ meow --bootstrap         # 自举模式：用宿主编译自己
 
 **工具范围**：
 
-| 类别 | 工具 |
-|------|------|
+| 类别      | 工具                                                                                                                                                                                                      |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | coreutils | `ls`/`cp`/`mv`/`rm`/`cat`/`echo`/`mkdir`/`rmdir`/`touch`/`ln`/`chmod`/`chown`/`wc`/`head`/`tail`/`sort`/`uniq`/`cut`/`tr`/`tee`/`dd`/`df`/`du`/`which` 等 |
-| diffutils | `diff`/`cmp`/`patch` |
-| findutils | `find`/`locate`/`xargs` |
-| 文本处理 | `grep`/`sed`/`awk` |
-| 归档 | `tar`（创建/解包，支持 gzip/bzip2/xz/zstd 格式透传） |
-| 压缩 | `gzip`/`bzip2`/`xz`/`zstd`/`unzip` |
+| diffutils | `diff`/`cmp`/`patch`                                                                                                                                                                                |
+| findutils | `find`/`locate`/`xargs`                                                                                                                                                                             |
+| 文本处理  | `grep`/`sed`/`awk`                                                                                                                                                                                  |
+| 归档      | `tar`（创建/解包，支持 gzip/bzip2/xz/zstd 格式透传）                                                                                                                                                    |
+| 压缩      | `gzip`/`bzip2`/`xz`/`zstd`/`unzip`                                                                                                                                                              |
 
 **设计原则**：
+
 - 用 C 编写（mcc 编译），依赖 meuos-libc
 - 兼容 GNU 对应工具的命令行选项和行为（`--help`/`--version`）
 - 可选的多调用二进制（multi-call binary，类似 BusyBox）
@@ -186,6 +189,7 @@ meow --bootstrap         # 自举模式：用宿主编译自己
 4. **可选 zsh 插件/主题**：插件系统、主题引擎（参考 zsh 的 oh-my-zsh 生态）
 
 **设计原则**：
+
 - 用 C 编写（mcc 编译），依赖 meuos-libc
 - 独立项目，不复制 bash/zsh 源码
 - 模块化设计：核心 Shell 引擎 + 可选的 bash 兼容层 + 可选的插件/主题系统
@@ -198,16 +202,17 @@ meow --bootstrap         # 自举模式：用宿主编译自己
 
 **工具清单**：
 
-| 工具 | 功能 | 取代 | 典型依赖场景 |
-|------|------|------|-------------|
-| `m4` | 宏处理器 | GNU m4 | autoconf 的 configure 生成、 Bison 输出后处理 |
-| `bison` | 解析器生成器（.y -> .c/.h） | GNU Bison | binutils, bash, gawk, flex 等的语法分析 |
-| `flex` | 词法分析器生成器（.l -> .c） | Flex | binutils, bash, gawk, wc 等的词法扫描 |
-| `gperf` | 完美哈希函数生成器 | GNU gperf | glib, libidn2 等的关键字查找 |
-| `msgfmt`/`msgmerge` | i18n 翻译编译器 | GNU gettext | 构建需要 i18n 的软件包（.po -> .mo） |
-| `pkg-config` | 包查询工具 | pkg-config | 查询已安装库的编译/链接参数 |
+| 工具                    | 功能                         | 取代        | 典型依赖场景                                  |
+| ----------------------- | ---------------------------- | ----------- | --------------------------------------------- |
+| `m4`                  | 宏处理器                     | GNU m4      | autoconf 的 configure 生成、 Bison 输出后处理 |
+| `bison`               | 解析器生成器（.y -> .c/.h）  | GNU Bison   | binutils, bash, gawk, flex 等的语法分析       |
+| `flex`                | 词法分析器生成器（.l -> .c） | Flex        | binutils, bash, gawk, wc 等的词法扫描         |
+| `gperf`               | 完美哈希函数生成器           | GNU gperf   | glib, libidn2 等的关键字查找                  |
+| `msgfmt`/`msgmerge` | i18n 翻译编译器              | GNU gettext | 构建需要 i18n 的软件包（.po -> .mo）          |
+| `pkg-config`          | 包查询工具                   | pkg-config  | 查询已安装库的编译/链接参数                   |
 
 **设计原则**：
+
 - 用 C 编写（mcc 编译），依赖 meuos-libc
 - 兼容 GNU 对应工具的命令行选项、输入语法和输出格式
 - 独立项目，不复制 GNU 源码
@@ -227,36 +232,37 @@ meow --bootstrap         # 自举模式：用宿主编译自己
 
 Kit 组件是构建其他软件的基础设施，必须由 Kit 自己实现，不依赖 GNU 对应物：
 
-| LFS 软件包 | Kit 组件 | 状态 |
-|-----------|---------|------|
-| Glibc | meuos-libc | ✅ |
-| GCC | mcc/m++ | ✅ C11，C23/m++ 待 |
-| Binutils | meuos-toolchain | ✅ P0-P2 |
-| Make | meow | ✅ |
-| M4/Bison/Flex/Gperf | meuos-buildtools | 待启动 |
-| Coreutils/Diffutils/Findutils | meuos-utils | 待启动 |
-| Gawk/Sed/Grep | meuos-utils（文本处理） | 待启动 |
-| Bash | meuos-shell (msh) | 待启动 |
-| Autoconf/Automake/Libtool | 被 meow 取代（特性检测/包查询/库构建内置） | 内置 |
-| CMake/Ninja | 被 meow 取代（并行构建/多平台内置） | 内置 |
+| LFS 软件包                    | Kit 组件                                   | 状态                   |
+| ----------------------------- | ------------------------------------------ | ---------------------- |
+| Glibc                         | meuos-libc                                 | ✅                     |
+| GCC                           | mcc/m++                                    | ✅ C11，✅ C23，m++ 待 |
+| Binutils                      | meuos-toolchain                            | ✅ P0-P2               |
+| Make                          | meow                                       | ✅                     |
+| M4/Bison/Flex/Gperf           | meuos-buildtools                           | 待启动                 |
+| Coreutils/Diffutils/Findutils | meuos-utils                                | 待启动                 |
+| Gawk/Sed/Grep                 | meuos-utils（文本处理）                    | 待启动                 |
+| Bash                          | meuos-shell (msh)                          | 待启动                 |
+| Autoconf/Automake/Libtool     | 被 meow 取代（特性检测/包查询/库构建内置） | 内置                   |
+| CMake/Ninja                   | 被 meow 取代（并行构建/多平台内置）        | 内置                   |
 
 ### meow 软件包（从源码构建，不自己实现）
 
 这些是应用级库和软件，用 Kit 工具从源码编译安装，通过 `meow build <package>`：
 
-| 类别 | 软件包 | 说明 |
-|------|--------|------|
-| 数学库 | GMP, MPFR, MPC | GCC 的依赖，mcc 不需要；Python/加密库等需要时通过 meow 构建 |
-| 数据库 | GDBM, Berkeley DB | 应用级存储库 |
-| 压缩 | Zlib, Bzip2, Xz, Zstd | 基础依赖库 |
-| 终端 | Ncurses, Readline | msh 可自实现行编辑；其他软件需要时通过 meow 构建 |
-| 正则 | Pcre2 | grep 可用 POSIX 正则；需要 PCRE 的软件通过 meow 构建 |
-| 加密 | OpenSSL/LibreSSL, GnuPG | 安全库 |
-| 解释器 | Python, Perl | 脚本语言 |
-| 系统工具 | Util-linux, Procps, E2fsprogs | 系统管理工具 |
-| init | — | MeuOS Next 自有 init，不用 systemd/sysvinit |
+| 类别     | 软件包                        | 说明                                                        |
+| -------- | ----------------------------- | ----------------------------------------------------------- |
+| 数学库   | GMP, MPFR, MPC                | GCC 的依赖，mcc 不需要；Python/加密库等需要时通过 meow 构建 |
+| 数据库   | GDBM, Berkeley DB             | 应用级存储库                                                |
+| 压缩     | Zlib, Bzip2, Xz, Zstd         | 基础依赖库                                                  |
+| 终端     | Ncurses, Readline             | msh 可自实现行编辑；其他软件需要时通过 meow 构建            |
+| 正则     | Pcre2                         | grep 可用 POSIX 正则；需要 PCRE 的软件通过 meow 构建        |
+| 加密     | OpenSSL/LibreSSL, GnuPG       | 安全库                                                      |
+| 解释器   | Python, Perl                  | 脚本语言                                                    |
+| 系统工具 | Util-linux, Procps, E2fsprogs | 系统管理工具                                                |
+| init     | —                            | MeuOS Next 自有 init，不用 systemd/sysvinit                 |
 
 **判断原则**：
+
 - 自举链直接需要的工具 → Kit 实现
 - MeuOS Next 中不可依赖 GNU 的工具 → Kit 实现
 - 应用级库和软件 → meow 软件包（用 Kit 工具从源码构建）
@@ -269,35 +275,43 @@ Kit 组件是构建其他软件的基础设施，必须由 Kit 自己实现，�
 Agent 必须严格遵循以下阶段，每步都要验证：
 
 **Phase 0 - 准备**
+
 - 宿主编译器可用（gcc 或 tcc）。
 - 设定 `MEUOS_SYSROOT` 环境变量指向目标根文件系统路径。
 
 **Phase 1 - 诞生 mcc**
+
 - 用宿主编译器编译 mcc 源码，产出第一代 `mcc` 二进制。
 - 验证：`mcc` 能编译 `int main(){return 0;}` 并输出可执行文件。
 
 **Phase 2 - 诞生 meuos-libc**
+
 - 用 Phase 1 的 `mcc` 编译 meuos-libc（含 compat 层）。
 - 安装到 `${MEUOS_SYSROOT}/lib` 和 `${MEUOS_SYSROOT}/include`。
 
 **Phase 3 - 诞生 meow**
+
 - 用 `mcc` + `meuos-libc` 编译 meow。
 - 验证：`meow build` 能读取 YAML 配方并执行。
 
 **Phase 4 - 自举验证**
+
 - 用 sysroot 内的 `mcc` + `meow` 重新编译 mcc、meuos-libc、meow。
 - 比较两次产物的行为一致性（功能等价即可，不要求 bit 级相同）。
 
 **Phase 5 - 工具链完善**
+
 - 用 `mcc` + `meuos-libc` 构建 `meuos-toolchain`（as/ld/ar/ranlib）。
 - mcc driver 集成 mt 工具，消除对宿主 `cc` 的最后依赖。
 - 验证：Kit 全程零宿主依赖。
 
 **Phase 6 - 构建工具**
+
 - 构建 `meuos-buildtools`（m4/bison/flex/gperf）。
 - 验证：能用 meow + buildtools 构建需要 bison/flex 的软件包。
 
 **Phase 7 - 用户空间**
+
 - 构建 `meuos-utils`、`meuos-shell`。
 - 验证：MeuOS Next 最小 sysroot 可运行、可交互。
 
@@ -351,17 +365,20 @@ Agent 必须严格遵循以下阶段，每步都要验证：
 
 #### 本仓库已提供的只读参考树（`reference/`，gitignored，勿改勿提交）
 
-| 路径 | 用途 |
-|------|------|
-| `reference/cproc/` | mcc 前端设计参考（词法/语法/语义/类型系统） |
-| `reference/qbe/`   | mcc 后端设计参考（IR/指令选择/寄存器分配/各 arch emit） |
-| `reference/musl/`   | meuos-libc 算法参考（mallocng/stdio/pthread/...） |
-| `reference/tinycc/` | 轻量 C 编译器参考（快速编译、简单后端、tcc 的 preprocessor） |
+| 路径                        | 用途                                                                          |
+| --------------------------- | ----------------------------------------------------------------------------- |
+| `reference/cproc/`        | mcc 前端设计参考（词法/语法/语义/类型系统）                                   |
+| `reference/qbe/`          | mcc 后端设计参考（IR/指令选择/寄存器分配/各 arch emit）                       |
+| `reference/musl/`         | meuos-libc 算法参考（mallocng/stdio/pthread/...）                             |
+| `reference/tinycc/`       | 轻量 C 编译器参考（快速编译、简单后端、tcc 的 preprocessor）                  |
+| `reference/cxx-frontend/` | m++ C++ 前端参考（C++23 词法/语法/语义解析、AST 设计）                        |
+| `reference/aburi/`        | m++ C++ 前端参考（lexer/parser/preprocessor/ast/constexpr、Itanium ABI 降级） |
 
 #### 鼓励参考的其他社区资源
 
 - **libc 算法**：musl（首选，已 vendored）、Cosmopolitan Libc、serenityOS LibC、PDCLib
-- **编译器设计**：cproc/QBE（已 vendored）、chibicc、9cc、lacc、cparser
+- **编译器设计（C）**：cproc/QBE（已 vendored）、chibicc、9cc、lacc、cparser
+- **编译器设计（C++）**：cxx-frontend（C++23 完整前端，已 vendored）、aburi（C/C++ 前端全流程，已 vendored）
 - **构建系统**：redo、tup、ninja、bear-make
 - **工具集**：Rust uutils、BusyBox、serenityOS Utilities
 - **Shell**：dash（POSIX sh 参考）、serenityOS Shell
@@ -375,3 +392,103 @@ Agent 必须严格遵循以下阶段，每步都要验证：
 - 所有实现必须能被 mcc 自身编译（自举验证），并过对应 `make check`。
 
 **一句话**：站在巨人肩膀上--读参考实现理解算法，再用自己的手写出来，不要把算力花在重新发明轮子上。
+
+---
+
+## 7. 任务编排策略
+
+> 本条是一般性方法论，适用于本项目所有复杂任务的规划与执行。
+> 不只是移植工作，编译器特性实现、libc 函数实现、工具链开发等任何需要多步骤完成的任务，都应遵循此策略。
+
+### 7.1 任务颗粒度原则
+
+任务必须拆到足够细，使得**免费或低推理度模型也能独立完成**。
+
+验收标准：
+
+- 每个任务只做**一件事**：一个文件 / 一处修改 / 一个函数的实现
+- 单任务上下文在 200 行以内，避免膨胀
+- 禁止一个任务跨越多个不相关的文件或模块
+
+反例（禁止）："实现 riscv64 的 7 个运行时文件"
+正例："创建 `src/arch/riscv64/atomic.S`（380 行，25 个原子函数）"
+
+### 7.2 任务卡片四要素
+
+每个任务必须包含以下四项，缺一不可：
+
+| 要素                  | 说明                                                | 示例                                                                                         |
+| --------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| **1. 任务范围** | 精确的文件路径和修改内容                            | 创建`src/arch/riscv64/atomic.S`，实现 `__atomic_*` 系列                                  |
+| **2. 参考来源** | 本仓库已验证实现（最优先）+ 社区标准实现 + 规范文档 | `src/arch/aarch64/atomic.S`（本仓库模板）+ `musl arch/riscv64/atomic_arch.h`（社区参考） |
+| **3. 验收标准** | 可写成 shell 单行断言的检查项                       | `riscv64-linux-gnu-gcc -c atomic.S` 通过 && `nm atomic.o                                   |
+| **4. 依赖关系** | 仅依赖已完成的**前置**任务，线性单向无回溯    | 依赖 task-01（syscall.S）已完成                                                              |
+
+### 7.3 线性单向任务流
+
+- 将任务 DAG **拉平成线性阶段**，每个阶段内无交叉依赖
+- 阶段内互不依赖的独立任务可**并行分派**给 subagent
+- 每个阶段完成后**立即验证**，失败不回退、不被后续任务污染
+- **禁止回溯**：不允许 task-N 完成后发现 task-M（M < N）有问题再回去改
+
+### 7.4 Subagent 并行开发
+
+识别同一阶段内互不依赖的并行任务窗口：
+
+```
+Phase A: task-01（基础，必须串行先做）
+  → task-02, task-03, task-04（互不依赖，可 3 个 subagent 并行）
+  → task-05（依赖 02-04 全部完成，串行收尾）
+```
+
+并行分派要点：
+
+- 每个 subagent 卡片**自包含**（含参考路径 + 验收命令），不依赖外部上下文
+- 并行任务完成后，**主 agent** 统一验收和集成
+- 并行数量 ≤ 4 个，避免上下文过大
+
+### 7.5 参考来源收集（算力节约的核心）
+
+**在开始编码前**，先用 code-explorer subagent 收集：
+
+1. **本仓库已验证的同类实现**（最优先）：同项目其他架构的对应文件，直接对照转录
+2. **社区标准实现**：musl 对应目录、Linux 内核 UAPI 头文件
+3. **规范文档**：ELF ABI spec 对应章节、syscall 编号表、指令集手册
+
+关键是制作**架构差异对照表**，一次性消除重复推导：
+
+| 功能               | 参考架构 (aarch64) | 目标架构 (riscv64) | 目标架构 (loongarch64) |
+| ------------------ | ------------------ | ------------------ | ---------------------- |
+| syscall 指令       | svc#0              | ecall              | syscall 0              |
+| syscall 号寄存器   | x8                 | a7                 | $a7                    |
+| 线程指针           | tpidr_el0          | tp                 | $tp                    |
+| 原子 load-reserved | ldaxr              | lr.w/lr.d          | ll.w/ll.d              |
+| TLS 变体           | variant I (GAP=16) | variant I (GAP=0)  | variant I (GAP=0)      |
+
+对照表一旦建立，所有 subagent 共享，避免各自重复查询。
+
+### 7.6 阶段归档
+
+每个阶段完成后**必须归档**，然后才能进入下一阶段：
+
+1. 更新对应 `.todo` 文件（标记 `[x]` 完成项）
+2. 更新 `ARCHITECTURE.md` / `PORTING.md` 中的状态表和路线图
+3. Git 提交，提交信息格式：`<组件>: <阶段描述>（<文件清单>）`
+   - 示例：`meuos-libc: riscv64 runtime 完成 (crt1/syscall/atomic/setjmp/sigreturn/thread_clone/tls)`
+4. **禁止未归档就进入下一阶段**——归档是阶段完成的唯一定义
+
+### 7.7 完整执行模板
+
+```
+Phase 0: 环境确认（1 步，code-explorer subagent）
+  → 验证参考文件存在、工具链就绪
+
+Phase N: 主体实现（M 步，按依赖 DAG 串行+并行）
+  → 基础文件（串行）→ 独立文件（并行 subagent）→ 集成收尾（串行）
+  → 每步验证 → 阶段归档
+
+Phase N+1: 下一阶段（复用上一阶段的框架和对照表）
+  → 适配差异项 → 验证 → 归档
+
+Phase Final: 公共层清理 + 生成报告
+```

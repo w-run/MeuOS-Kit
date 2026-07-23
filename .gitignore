@@ -36,7 +36,6 @@ experiments/
 .*.swp
 .DS_Store
 *~
-.codebuddy/
 
 # QEMU test environment (env/) - large binaries, not tracked
 env/build/
@@ -57,3 +56,4 @@ projects/mcc/mcc
 # only its README is tracked.
 env/share/*
 !env/share/README.txt
+.vscode/

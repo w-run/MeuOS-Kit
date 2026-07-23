@@ -2,7 +2,7 @@
 #include <unistd.h>
 #include "../internal/syscall.h"
 
-#if defined(__aarch64__)
+#if defined(__aarch64__) || defined(__riscv) || defined(__loongarch64)
 /* aarch64 没有 dup2(33)，改用 dup3(oldfd, newfd, flags)。dup3 要求
  * oldfd != newfd，否则返回 EINVAL；dup2 在 old==new 时直接返回该 fd。
  * 这里显式处理这一边界以保持 dup2 语义。flags=0 等价无 CLOEXEC。 */

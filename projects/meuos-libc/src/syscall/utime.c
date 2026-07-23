@@ -4,7 +4,7 @@
 #include <time.h>
 #include "../internal/syscall.h"
 
-#if defined(__i386__) || defined(__aarch64__)
+#if defined(__i386__) || defined(__aarch64__) || defined(__riscv) || defined(__loongarch64)
 /* i386: legacy utime (syscall 132) 只接受 32 位 time_t，与本库 64 位
  *   time_t 不兼容，改用 utimensat_time64(412) 取 64 位时间戳。
  * aarch64: 没有 utime(132)，直接用 utimensat（x86_64 内部号 412，

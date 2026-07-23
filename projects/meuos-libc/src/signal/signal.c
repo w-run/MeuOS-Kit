@@ -20,9 +20,9 @@ extern void __meuos_restore_rt(void);
  *   handler, flags, restorer, mask(8 bytes).  This differs from the
  *   userspace struct sigaction, so we translate here rather than expose
  *   the kernel shape to applications. */
-#if defined(__aarch64__)
-/* aarch64 内核的 k_sigaction 只有 3 字段（handler, flags, mask），没有
- * sa_restorer——内核自行安装信号返回 trampoline，不依赖 userspace 提供
+#if defined(__aarch64__) || defined(__riscv) || defined(__loongarch64)
+/* aarch64/riscv64/loongarch64 内核的 k_sigaction 只有 3 字段（handler, flags, mask），
+ * 没有 sa_restorer——内核自行安装信号返回 trampoline，不依赖 userspace 提供
  * restorer，也不定义 SA_RESTORER 位。rt_sigaction 只按 sigsetsize 读取
  * mask 字段，因此 struct 总大小与 x86_64 不同也不影响。 */
 struct k_sigaction {
@@ -65,12 +65,12 @@ sigaction(int signum, const struct sigaction *act,
 	}
 	if (act) {
 		kact.handler = act->sa_handler;
-#ifndef __aarch64__
+#if !defined(__aarch64__) && !defined(__riscv) && !defined(__loongarch64)
 		kact.flags = (unsigned long)act->sa_flags | SA_RESTORER;
 		kact.restorer = act->sa_restorer ? act->sa_restorer
 		    : __meuos_restore_rt;
 #else
-		/* aarch64 内核不使用 SA_RESTORER，也不读取 restorer 字段。 */
+		/* aarch64/riscv64/loongarch64 内核不使用 SA_RESTORER，也不读取 restorer 字段。 */
 		kact.flags = (unsigned long)act->sa_flags;
 #endif
 		kact.mask = act->sa_mask;
@@ -83,7 +83,7 @@ sigaction(int signum, const struct sigaction *act,
 	if (oldact) {
 		oldact->sa_handler = kold.handler;
 		oldact->sa_flags = (int)kold.flags;
-#ifndef __aarch64__
+#if !defined(__aarch64__) && !defined(__riscv) && !defined(__loongarch64)
 		oldact->sa_restorer = kold.restorer;
 #endif
 		oldact->sa_mask = kold.mask;

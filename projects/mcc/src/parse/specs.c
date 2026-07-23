@@ -34,8 +34,9 @@ storageclass(enum storageclass *sc)
 	case TEXTERN:        new = SCEXTERN;      break;
 	case TSTATIC:        new = SCSTATIC;      break;
 	case TTHREAD_LOCAL:  new = SCTHREADLOCAL; break;
-	case TAUTO:          new = SCAUTO;        break;
 	case TREGISTER:      new = SCREGISTER;    break;
+	/* C23: TAUTO is handled in declspecs() as a type deduction indicator */
+	// case TAUTO:      new = SCAUTO;        break;
 	default: return 0;
 	}
 	if (!sc)
@@ -61,7 +62,10 @@ typequal(enum typequal *tq)
 	case TCONST:    *tq |= QUALCONST;    break;
 	case TVOLATILE: *tq |= QUALVOLATILE; break;
 	case TRESTRICT: *tq |= QUALRESTRICT; break;
-	case T_ATOMIC: *tq |= QUALATOMIC; break;
+	case T_ATOMIC:  *tq |= QUALATOMIC;  break;
+	case TCONSTEXPR:
+		*tq |= QUALCONST | QUALCONSTEXPR;  /* C23 constexpr */
+		break;
 	default: return 0;
 	}
 	next();
@@ -278,12 +282,20 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 		 * followed by ordinary declaration specifiers, which is a
 		 * qualifier. */
 		if (tok.kind == T_ATOMIC && peek(TLPAREN)) {
-			t = typename(s, NULL, NULL);
-			if (!t)
+			enum typequal aq = QUALNONE;
+			struct type *atype;
+
+			/* peek() has already consumed _Atomic and (, so
+			 * tok is now at the type name. */
+			atype = typename(s, &aq, NULL);
+			if (atype) {
+				t = mkatomictype(atype, aq);
+				tq |= QUALATOMIC;
+				++ntypes;
+				expect(TRPAREN, "to close _Atomic type name");
+			} else {
 				error(&tok.loc, "expected type name in '_Atomic(...)'");
-			expect(TRPAREN, "to close '_Atomic(...)'");
-			tq |= QUALATOMIC;
-			++ntypes;
+			}
 			continue;
 		}
 		if (typequal(&tq) || storageclass(sc) || funcspec(fs))
@@ -355,12 +367,44 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 			++ntypes;
 			next();
 			break;
+		case TAUTO:
+			/* C23: auto as type deduction indicator.
+			 * Minimal: auto = int for now. */
+			ts |= SPECINT;
+			++ntypes;
+			next();
+			break;
 		case T_COMPLEX:
-			error(&tok.loc, "_Complex is not yet supported");
+			ts |= SPECCOMPLEX;
+			/* _Complex is a modifier, not a type - don't increment ntypes */
+			next();
 			break;
-		case T_ATOMIC:
-			error(&tok.loc, "_Atomic is not yet supported");
+		case T_IMAGINARY:
+			ts |= SPECIMAGINARY;
+			/* _Imaginary is a modifier, not a type */
+			next();
 			break;
+		case T_DECIMAL32:
+			t = mkdecimaltype(TYPEDECIMAL32);
+			++ntypes;
+			next();
+			break;
+		case T_DECIMAL64:
+			t = mkdecimaltype(TYPEDECIMAL64);
+			++ntypes;
+			next();
+			break;
+		case T_DECIMAL128:
+			t = mkdecimaltype(TYPEDECIMAL128);
+			++ntypes;
+			next();
+			break;
+	case T_ATOMIC:
+		/* _Atomic as a qualifier is handled by typequal() above,
+		 * and _Atomic(type-name) is handled by the pre-check above.
+		 * This case should only be reached for invalid placements. */
+		error(&tok.loc, "'_Atomic' may not appear here; use '_Atomic(T)' or '_Atomic T'");
+		break;
 		case TSTRUCT:
 		case TUNION:
 		case TENUM:
@@ -425,6 +469,9 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 			error(&tok.loc, "multiple types in declaration specifiers");
 	}
 done:
+	/* Strip complex/imaginary modifier bits before the type-combination
+	 * switch -- they are handled as wrappers below. */
+	ts &= ~(SPECCOMPLEX | SPECIMAGINARY);
 	switch ((int)ts) {
 	case SPECNONE:                                            break;
 	case SPECCHAR:                          t = &typechar;    break;
@@ -474,6 +521,19 @@ done:
 	}
 	if (!t && (tq || sc && *sc || fs && *fs))
 		error(&tok.loc, "declaration has no type specifier");
+	/* _Complex / _Imaginary type wrapping */
+	if (ts & SPECCOMPLEX) {
+		if (t && (t->prop & PROPFLOAT))
+			t = mkcomplextype(t);
+		else
+			error(&tok.loc, "_Complex requires a floating point type");
+	}
+	if (ts & SPECIMAGINARY) {
+		if (t && (t->prop & PROPFLOAT))
+			t = mkimaginarytype(t);
+		else
+			error(&tok.loc, "_Imaginary requires a floating point type");
+	}
 	/*
 	TODO: consider delaying attribute parsing to declarator(),
 	so we can tell the difference between the start of an

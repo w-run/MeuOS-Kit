@@ -202,38 +202,43 @@ valref(struct value *v, Fn *fn)
 }
 
 /* Run the full IR optimization + codegen pipeline on a function.
- * Mirrors the pass ordering of qbe/main.c's func() callback. */
+ * Mirrors the pass ordering of qbe/main.c's func() callback.
+ * Some passes are gated on fn->optlevel:
+ *   O0: promote/loadopt/coalesce/gvn/simplcfg/gcm/ifconvert/simpl  skipped
+ *   O1: gcm/ifconvert  skipped
+ *   O2: all (default, current behaviour) */
 static void
 run_passes(Fn *fn)
 {
 	uint n;
+	int ol = fn->optlevel;
 #define P(name) name(fn)
 
 	P(T.abi0);
 	P(fillcfg);
 	P(filluse);
-	P(promote);
+	if (ol >= 1) P(promote);
 	P(filluse);
 	P(ssa);
 	P(filluse);
 	P(ssacheck);
 	P(fillalias);
-	P(loadopt);
+	if (ol >= 1) P(loadopt);
 	P(filluse);
 	P(fillalias);
-	P(coalesce);
+	if (ol >= 1) P(coalesce);
 	P(filluse);
 	P(filldom);
 	P(ssacheck);
-	P(gvn);
+	if (ol >= 1) P(gvn);
 	P(fillcfg);
-	P(simplcfg);
+	if (ol >= 1) P(simplcfg);
 	P(filluse);
 	P(filldom);
-	P(gcm);
+	if (ol >= 2) P(gcm);
 	P(filluse);
 	P(ssacheck);
-	if (T.cansel) {
+	if (T.cansel && ol >= 2) {
 		P(ifconvert);
 		P(fillcfg);
 		P(filluse);
@@ -241,7 +246,7 @@ run_passes(Fn *fn)
 		P(ssacheck);
 	}
 	P(T.abi1);
-	P(simpl);
+	if (ol >= 1) P(simpl);
 	P(fillcfg);
 	P(filluse);
 	P(T.isel);
@@ -311,6 +316,8 @@ emitfunc(struct func *f, bool global)
 	fn->lnk.export = global;
 	fn->leaf = 1;
 	fn->vararg = f->type->u.func.isvararg;
+	fn->optlevel = opt_level;
+	fn->warnlevel = warn_level;
 	/* `slot` counts the stack frame size in 4-byte units; the IR
 	 * parser zero-inits it via alloc() (parse.c parsefn). mcc builds
 	 * Fn directly so we must match: 0, not -1. Leaving it negative

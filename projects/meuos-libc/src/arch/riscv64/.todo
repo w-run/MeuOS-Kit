@@ -1,23 +1,27 @@
-# 待实现：RISC-V 64-bit (riscv64) 运行时移植
+# RISC-V 64-bit (riscv64) 运行时移植 —— 已完成（代码）
 
 ## 背景
 mcc 已有 riscv64 后端代码生成基线（整数 ABI + 浮点汇编回归通过），
-libc/运行时尚未移植。TARGETS.md 将其列为 64 位非宿主 target 候选之一。
+libc/运行时现已移植完成。TARGETS.md 将其列为 64 位非宿主 target 候选之一。
 
-## 需要实现的文件
-- `src/arch/riscv64/atomic.S`        - 原子操作（lr.w/sc.w / lr.d/sc.d）
-- `src/arch/riscv64/setjmp.S`        - setjmp/longjmp（保存 ra/sp/s0-s11）
-- `src/arch/riscv64/sigreturn.S`     - rt_sigreturn restorer
-- `src/arch/riscv64/thread_clone.S` - clone + 子线程 TLS（tp 寄存器）
-- `src/arch/riscv64/tls.c`           - TLS 初始化
-- `crt/riscv64/crt1.S`               - _start 入口
-- `src/internal/arch/riscv64/syscall.S` - syscall gate（a7 传号，a0-a5 传参）
+## 已实现的文件
+- `src/arch/riscv64/atomic.S`        - 原子操作（lr.w/lr.d + sc.w/sc.d .aqrl；子字节掩码法）
+- `src/arch/riscv64/setjmp.S`        - setjmp/longjmp（保存 s0-s11/sp/ra/fs0-fs11，jmp_buf[26]）
+- `src/arch/riscv64/sigreturn.S`     - rt_sigreturn restorer（li a7,139; ecall）
+- `src/arch/riscv64/thread_clone.S`  - clone + 子线程 TLS（CLONE_SETTLS 经 a3，tp 由内核设置）
+- `src/arch/riscv64/tls.c`           - TLS 初始化（GAP_ABOVE_TP=0，返回 tp 基址）
+- `crt/riscv64/crt1.S`               - _start 入口（`mv tp, a0` 安装 tp）
+- `src/internal/arch/riscv64/syscall.S` - syscall gate（a7 传号，a0-a5 传参，ecall）
 
-## 关联修改
-- `src/internal/syscall.h`：riscv64 syscall 编号（asm-generic/unistd.h）。
-- `include/sys/syscall.h`：补 riscv64 `SYS_*` 宏。
-- `Makefile`：`ARCH=riscv64` 构建规则。
+## 关联修改（已完成）
+- `src/internal/syscall.h`：riscv64 复用 aarch64 的 asm-generic 翻译表（`#elif defined(__aarch64__) || defined(__riscv)`）。
+- `include/setjmp.h`：新增 `__riscv` 分支，`jmp_buf[26]` / `sigjmp_buf[28]`。
+- `Makefile`：`ARCH=riscv64` 构建规则（CC=mcc --target=riscv64，AS=riscv64-linux-gnu-gcc，无 set_tls.o）+ `check-riscv64-bootstrap`。
+- `test/riscv64-bootstrap.sh`：6 测试 + ELF Machine=RISC-V 检查 + 可选 qemu 门禁。
 
 ## 验收
-- `make ARCH=riscv64` 全量编译通过。
-- qemu-riscv64 下运行 Phase-2 测试程序。
+- `make ARCH=riscv64` 产出 crt1.o / libc-meuos.a / libatomic-meuos.a（待交叉工具链就绪）。
+- qemu-riscv64 下运行 Phase-2 测试（hello/atomic/setjmp/phase2_counter=2000/bare_tls=main=5 child=9/errno=31·47/malloc_threads）。
+- 当前环境无 `riscv64-linux-gnu-gcc` 与 qemu-riscv64，真机/交叉汇编验证待工具链安装；
+  代码经静态核对，`tls.c` 经 `mcc --target=riscv64 -S` 编译通过，
+  syscall.h riscv 分支命中 asm-generic 表已确认。

@@ -1,9 +1,20 @@
-# 待实现：-O 优化级别与 -W/-w 警告控制
+# 已完成：-O 优化级别实现（警告系统基础设施就位）
 
-> 日期：2026-07-23
+> Update 2026-07-23：`-O0/1/2/3/s` 和 `-w`/`-Wall`/`-Werror` **已真实实现**。
 >
-> 当前 `-O`、`-W`、`-w` 被 mcc driver 接受但不产生效果。本文规划真正的
-> 优化级别控制和警告系统。
+> 具体变更（`9e1811b` on `work/mcc-libc`）：
+> - `include/ir.h`：Fn 新增 `optlevel`/`warnlevel` 字段；WARN_* bitmask 宏
+> - `src/driver/main.c`：`-O`(0..3/s/f) 解析 → `opt_level` 全局；
+>   `-w`/`-Wall`/`-Werror` 解析 → `warn_level` 全局
+> - `src/irgen/emit.c`：`emitfunc()` 传递全局到 `fn->optlevel/warnlevel`；
+>   `run_passes()` 按 `fn->optlevel` 门禁优化 pass
+>
+> 待补（非阻塞）：
+> - `src/diag/warn.c` 警告输出函数（目前无任何 pass 触发警告，纯基础设施）
+> - `-W` 按类别过滤（目前仅 -Wall/-Werror）
+> - `-O3` 内联、`-Os` 代码体积优化、`-Ofast` 快速数学
+>
+> 以下为原始规划文档，保留供参考。
 
 ---
 

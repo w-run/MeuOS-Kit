@@ -1,4 +1,18 @@
-# 待实现：LoongArch64 crt1.S
+# LoongArch64 crt1.S —— 已完成
 
-`_start` 入口：设置 TLS（$tp 寄存器）、传入 argc/argv/envp、调用 `main`、
-`exit`。参考 `crt/x86_64/crt1.S`。完整计划见 `../src/arch/loongarch64/.todo`。
+`_start` 入口：与 riscv64 同思路，从内核栈解析 argc/argv/envp/auxv，
+16 字节栈对齐（`bstrins.d $sp, $zero, 3, 0`），设置全局 `environ`，
+调用 `__meuos_tls_init(envp)` 取得 TLS 基址后用 `move $tp, $a0` 安装
+线程指针（loongarch64 的 $tp=r21 是用户态可写 GPR，无 arch_prctl 等价
+syscall），随后 `bl main`，最后 `b exit`（让 atexit/fflush 生效）。
+
+参考 `crt/riscv64/crt1.S`，差异：riscv64 用 `mv tp, a0`，loongarch64 用
+`move $tp, $a0`；栈对齐用 `bstrins.d`。
+
+完整运行时计划见 `../src/arch/loongarch64/.todo`。
+
+## 验收（受环境限制，静态核实 + 交叉汇编待工具链）
+- `crt/loongarch64/crt1.S` 已写入，汇编语义核对通过。
+- mcc loongarch64 后端有浮点比较 bug 限制 C 代码编译（已知问题），
+  汇编文件需待 loongarch64-linux-gnu-gcc 与 qemu-loongarch64 就绪后由
+  `make check-loongarch64-bootstrap` 验证。
