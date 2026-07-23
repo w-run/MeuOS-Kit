@@ -219,12 +219,23 @@ batch 完成进度。典型做法是发完 `[[CLAIM_DONE]]` 后,下一轮 driver
 | Marker                                          | 含义                                                         |
 | ----------------------------------------------- | ------------------------------------------------------------ |
 | `[[RESTART]]`                                   | 本轮 batch 完成,还有未处理的 todo。让 driver 启动下一轮。   |
-| `[[DONE]]`                                      | 所有 actionable todo 已完成 (你刚才扫了 `projects/*/.todo/`)。 |
+| `[[DONE]]`                                      | **所有** actionable todo 的 `status` 都已是 `done` (driver 写的)。你刚才扫了 `projects/*/.todo/`,**没有任何** pending/in_progress/CLAIM_FAILED 的 todo 剩下。 |
 | `[[FAIL: <one-line>]]`                          | 不可恢复错误 (sub-agent 持续崩溃 / 项目结构异常 / 验收脚本本身坏)。driver 会丢弃 session。 |
 | `[[CLAIM_DONE: <relpath>]]`                     | 这个 todo 验收通过且已 commit,请 driver 跑最终验收后写 `status: done`。 |
 | `[[CLAIM_FAILED: <relpath>: <reason>]]`         | 这个 todo 验收失败,保留 in_progress。                       |
 
 **禁止**省略 marker;driver 靠它判断下一步动作。
+
+**`[[DONE]]` 的精确语义 (CRITICAL)**:
+- `[[DONE]]` **只**在你扫了 `projects/*/.todo/` 后确认**没有任何** actionable todo
+  (即所有 todo 文件的 `status` 都是 `done` 且有 `done_by_driver_ts`) 时才发。
+- 发了 `[[CLAIM_FAILED]]` 的 todo **仍然是 actionable** — 它的 status 是
+  `in_progress`,不是 `done`。你不能因为"我处理过了"就发 `[[DONE]]`。
+- 发了 `[[CLAIM_DONE]]` 但 driver 还没验收的 todo **仍然算 actionable** —
+  你不知道 driver 会不会拒绝。
+- **如果本轮有 `[[CLAIM_FAILED]]`**,你必须发 `[[RESTART]]`,**不能**发 `[[DONE]]`。
+- driver 会在收到 `[[DONE]]` 后**自己重新扫** todo 文件;如果发现还有
+  actionable 的,会拒绝退出 (`fake-DONE defense`) 并强制开新 session。
 
 `[[CLAIM_DONE: ...]]` 和 `[[CLAIM_FAILED: ...]]` 是**每个 todo** 单独发,
 可以发多个;而 `[[RESTART]]` / `[[DONE]]` / `[[FAIL: ...]]` 是**整轮**

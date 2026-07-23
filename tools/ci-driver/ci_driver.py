@@ -564,6 +564,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 0
 
     round_no = 0
+    fake_done_count = 0  # track consecutive fake-DONE refusals
+    MAX_FAKE_DONE = 3    # after this many, give up and exit (avoid infinite loop)
     while round_no < args.max_rounds:
         round_no += 1
 
@@ -795,32 +797,46 @@ def cmd_run(args: argparse.Namespace) -> int:
             if still_actionable:
                 n = len(still_actionable)
                 rels = [t.rel_path for t in still_actionable]
+                fake_done_count += 1
                 ci_lib.log(
                     f"main session signalled [[DONE]] but {n} todo(s) still "
-                    f"actionable on disk; REFUSING to exit. Actionable: {rels}. "
+                    f"actionable on disk; REFUSING to exit (fake-done #{fake_done_count}/{MAX_FAKE_DONE}). "
+                    f"Actionable: {rels}. "
                     f"Likely cause: main session confused [[DONE]] with 'abandon' "
-                    f"after [[CLAIM_DONE]] was REFUSED/REJECTED. Should have used "
-                    f"[[RESTART]] or [[FAIL: <reason>]].",
+                    f"after [[CLAIM_DONE]] was REFUSED/REJECTED or [[CLAIM_FAILED]] was sent. "
+                    f"Should have used [[RESTART]].",
                     name="ci_driver",
                 )
                 print(
                     f"[WARN] main session sent [[DONE]] but {n} todo(s) still "
-                    f"actionable: {rels}. Forcing continue (next round will get "
-                    f"a fresh session because the current one is confused). "
-                    f"Please use [[RESTART]] or [[FAIL: <reason>]] in future."
+                    f"actionable: {rels}. Forcing continue (fake-done #{fake_done_count}/{MAX_FAKE_DONE}). "
+                    f"Please use [[RESTART]] in future."
                 )
+                if fake_done_count >= MAX_FAKE_DONE:
+                    ci_lib.log(
+                        f"hit MAX_FAKE_DONE={MAX_FAKE_DONE}; main session keeps "
+                        f"sending [[DONE]] with actionable todos remaining. Giving up.",
+                        name="ci_driver",
+                    )
+                    print(
+                        f"[ERROR] hit MAX_FAKE_DONE={MAX_FAKE_DONE}; main session "
+                        f"repeatedly sent [[DONE]] with actionable todos. Exiting."
+                    )
+                    return 2
                 # Drop the confused session so the next round starts clean.
                 state["session_id"] = None
                 ci_lib.save_state("main_session", state)
                 if args.once:
-                    # In --once mode we can't continue; signal the situation
-                    # to the caller via a distinct exit code (2 = "fake DONE").
+                    # In --once mode we can't continue; signal via exit code 2.
                     return 2
                 time.sleep(5)
                 continue
             ci_lib.log("main session signalled DONE; no actionable todos remain "
                        "— exiting cleanly", name="ci_driver")
             return 0
+        # Reset fake-done counter on any non-DONE round (main session behaved)
+        if not markers["done"]:
+            fake_done_count = 0
         if markers["fail"]:
             # Abandon session; next round will be fresh
             state["session_id"] = None
