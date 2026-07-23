@@ -299,6 +299,41 @@ check: $(ATOMIC_LIB)
 	/tmp/meuos-libc-check/bare-process
 	@$(MAKE) -C src/compat check MCC=$(abspath $(MCC)) SYSROOT=$(abspath $(SYSROOT)) HOST_CC=$(HOST_CC) ARCH=$(ARCH)
 
+# Verify the full C library links through MeuOS's native linker (mt/ld)
+# without calling the host ld.  SKIPs gracefully when meuos-toolchain
+# has not been built.
+check-native-linker:
+	@MT_DIR=$(abspath ../meuos-toolchain/build); \
+	if [ ! -x "$$MT_DIR/bin/ld" ] || [ ! -x "$$MT_DIR/bin/as" ]; then \
+		echo "check-native-linker: SKIP (meuos-toolchain not built)"; \
+		exit 0; \
+	fi; \
+	$(MAKE) install DESTDIR=$(abspath $(SYSROOT)) PREFIX=/usr; \
+	export MT_AS="$$MT_DIR/bin/as"; \
+	export MT_LD="$$MT_DIR/bin/ld"; \
+	export LC_ALL=C; \
+	rm -rf /tmp/meuos-libc-native-linker; \
+	mkdir -p /tmp/meuos-libc-native-linker; \
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-native-linker/hello test/native_linker_hello.c || { echo "FAIL: native link failed"; exit 1; }; \
+	out=$$(/tmp/meuos-libc-native-linker/hello); \
+	echo "$$out"; \
+	if [ "$$out" != "native linker ok" ]; then \
+		echo "FAIL: unexpected output: $$out"; exit 1; \
+	fi; \
+		if command -v strace >/dev/null 2>&1; then \
+			strace -f -e trace=execve $(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-native-linker/hello2 test/native_linker_hello.c 2>/tmp/meuos-libc-native-linker/strace.log >/dev/null || true; \
+			if grep 'execve' /tmp/meuos-libc-native-linker/strace.log 2>/dev/null \
+			    | grep -v 'meuos-toolchain' \
+			    | grep -v '/mcc' \
+			    | grep -qE '"[^"]*/(ld|gcc|cc|clang)"' ; then \
+				echo "FAIL: host ld/cc was invoked for --specs=meuos link"; \
+				grep 'execve' /tmp/meuos-libc-native-linker/strace.log | grep -E '/(ld|gcc|cc|clang)"' | head -5; \
+				exit 1; \
+			fi; \
+		fi; \
+	rm -rf /tmp/meuos-libc-native-linker; \
+	echo "PASS: native linker check"
+
 check-mcc:
 	$(MAKE) BUILD=build/mcc CC=$(MCC) check
 
@@ -343,5 +378,5 @@ clean:
 	rm -rf build
 	@$(MAKE) -C src/compat clean 2>/dev/null || true
 
-.PHONY: all compat install check check-mcc check-i386-bootstrap \
+.PHONY: all compat install check check-native-linker check-mcc check-i386-bootstrap \
         check-aarch64-bootstrap check-riscv64-bootstrap check-loongarch64-bootstrap check-all clean

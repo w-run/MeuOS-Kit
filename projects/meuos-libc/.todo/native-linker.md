@@ -1,7 +1,8 @@
 <!--
 priority: P0
-status: pending
-note: 完整自举硬阻塞；零 GNU 目标要求 mcc + libc + meld 脱宿主 ld
+status: done
+done_ts: 2026-07-23
+note: 添加 check-native-linker 目标，端到端验证 mt/ld 原生链接器；mt/ld P2 + mcc driver P3 已先前完成
 -->
 
 # 待实现：纯原生链接器（脱离宿主 ld）
@@ -15,9 +16,9 @@ note: 完整自举硬阻塞；零 GNU 目标要求 mcc + libc + meld 脱宿主 l
 不调用宿主 `ld` 的情况下产出可执行文件。
 
 ## 影响范围
-- 新组件（暂定 `projects/meld/` 或 mcc 内嵌链接路径）。
-- mcc `host_toolchain.c` 的链接路径需可切换到原生链接器。
-- meuos-libc 的 `check-sysroot-static` 回归需适配原生链接。
+- **mt/ld**（`projects/meuos-toolchain/src/ld/`）已实现 P2 x86_64 静态链接。
+- mcc `host_toolchain.c` 的链接路径需可切换到 `mt/ld`（P3 已落 `MT_LD` 环境变量分流）。
+- meuos-libc 的 `check-sysroot-static` 回归需适配 `mt/ld` 链接（已用于 sysroot 构建）。
 
 ## 前置依赖
 - MeuOS userspace 自身 shell（见 meow `.todo/native-shell.md`）。
