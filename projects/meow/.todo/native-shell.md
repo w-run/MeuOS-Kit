@@ -1,7 +1,7 @@
 <!--
 priority: P2
 status: pending
-note: 切到 ${MEUOS_SYSROOT}/bin/sh；前置 MeuOS userspace 自身 shell 完成
+note: 切到 ${MEUOS_SYSROOT}/bin/sh;前置是 MeuOS userspace 自身的 shell 落地
 -->
 
 # 待实现：MeuOS 原生 shell 替代 /bin/sh
@@ -20,3 +20,12 @@ MeuOS sysroot 内的 shell（例如 `${MEUOS_SYSROOT}/bin/sh`）。
 
 ## 验收
 - 在 chroot 到 `${MEUOS_SYSROOT}` 时，`meow build` 仍能执行配方命令。
+
+## 验收标准
+
+<!-- TODO(main session): fill in concrete commands. -->
+
+```
+make -C projects/meow check
+```
+

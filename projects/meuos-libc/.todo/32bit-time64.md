@@ -2,7 +2,7 @@
 priority: P3
 status: done
 done_ts: 2026-07-23
-note: 类型 / syscall / qemu runtime gate 全部就位；剩边界测试增强
+note: 32 位 time64 支持的类型 / syscall / qemu runtime gate
 -->
 
 # 32 位目标统一使用 64 位 time_t — 类型与 ABI 基石已完成
@@ -28,3 +28,12 @@ note: 类型 / syscall / qemu runtime gate 全部就位；剩边界测试增强
 4. ⬜ time64 专项边界测试（INT32_MAX 附近 / 2038+ / 负值）待补独立测试用例。
 
 > 原为「待实现」— 类型/syscall/runtime gate 均已完成，剩余仅为增强测试覆盖。
+
+## 验收标准
+
+<!-- TODO(main session): fill in concrete commands. -->
+
+```
+make -C projects/meuos-libc check
+```
+

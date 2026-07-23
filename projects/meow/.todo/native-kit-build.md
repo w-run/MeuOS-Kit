@@ -22,3 +22,12 @@ STATE.md §4 下一步优先级 列出的后续项：用 meow 原生构建 mcc /
 ## 验收
 - `meow build meow` 能重建 meow 二进制（等价当前 `make -C meow all`）。
 - mcc 与 meuos-libc 的原生构建产物与 Makefile 产物功能等价。
+
+## 验收标准
+
+<!-- TODO(main session): fill in concrete commands. -->
+
+```
+make -C projects/meow check
+```
+

@@ -2,7 +2,7 @@
 priority: P3
 status: done
 done_ts: 2026-07-22
-note: libelf / ar / ranlib / 宿主 ld 链接 / r-q-t-p-x 全部完成，进入 P1
+note: meuos-toolchain P0 阶段: libelf / ar / ranlib 等归档基础设施
 -->
 
 # P0：基础层与 ar（P0a/P0b 已完成）
@@ -35,3 +35,12 @@ make -C projects/meuos-toolchain check
 已通过：symbol index、GNU long-name、宿主 ld 链接、r/q、t/p/x 和 x86_64
 ELF fixture。后续进入 P1 x86_64 汇编器；不允许用宿主 `ar` 代替项目二进制完成
 ar 行为测试。
+
+## 验收标准
+
+<!-- TODO(main session): fill in concrete commands. -->
+
+```
+make -C projects/meuos-toolchain check
+```
+

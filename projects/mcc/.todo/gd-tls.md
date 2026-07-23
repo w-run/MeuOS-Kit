@@ -1,7 +1,7 @@
 <!--
 priority: P1
 status: pending
-note: 5 个子缺口；Phase A（IR 类型 + x86_64 emit + __tls_get_addr）无阻塞可立即开始
+note: 5 个跨架构 GD-TLS 缺口的分阶段实施计划;Phase A 是 Phase B/C 的前置;Gap 5 受 P6 动态链接阻塞
 -->
 
 # 待实现：跨架构 GD-TLS (General-Dynamic TLS)
@@ -256,3 +256,12 @@ P6 动态链接器就绪
 - `meuos-libc` 中 `__tls_get_addr` 函数可被编译和链接（静态链接下返回正确地址）
 - 回归门禁：`make check` 全绿，不破坏现有 LE/IE TLS 测试
 - Phase C：DSO 加载后 GD-TLS 变量访问正确
+
+## 验收标准
+
+<!-- TODO(main session): replace these placeholders with concrete shell commands the driver should run to verify this todo. The commands must exit 0 on success; any non-zero exit means the todo is NOT done. Keep the fenced block format below. -->
+
+```
+make -C projects/mcc check
+```
+

@@ -21,3 +21,12 @@ note: -jN 并行执行的间接依赖重复问题；非阻塞，按需优化
 ## 验收
 - 构造 `A -> B -> C`、`A -> C` 的依赖图，`C` 的命令只执行一次。
 - 现有 `meow-parallel` 回归仍通过。
+
+## 验收标准
+
+<!-- TODO(main session): fill in concrete commands. -->
+
+```
+make -C projects/meow check
+```
+

@@ -120,3 +120,12 @@ i386 无 64 位 `mul`/`div` 单指令（edx:eax 只覆盖 32×32→64 与
 - 通用状态文件：`src/target/i386/.todo`（OPEN 清单）。
 - libc 侧软算术：`meuos-libc/.todo/non-x86_64-runtime.md`（i386 段
   交叉引用本缺口）。
+
+## 验收标准
+
+<!-- TODO(main session): replace these placeholders with concrete shell commands the driver should run to verify this todo. The commands must exit 0 on success; any non-zero exit means the todo is NOT done. Keep the fenced block format below. -->
+
+```
+make -C projects/mcc check
+```
+

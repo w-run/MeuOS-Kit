@@ -29,3 +29,12 @@ local-exec TLS 地址生成回归；x86_64 也覆盖了外部 TLS 的 initial-ex
 ## 验收
 - 在 `--shared` 产物中访问外部 `_Thread_local` 变量得到正确值。
 - 现有 local-exec / initial-exec 回归不退化。
+
+## 验收标准
+
+<!-- TODO(main session): replace these placeholders with concrete shell commands the driver should run to verify this todo. The commands must exit 0 on success; any non-zero exit means the todo is NOT done. Keep the fenced block format below. -->
+
+```
+make -C projects/mcc check
+```
+

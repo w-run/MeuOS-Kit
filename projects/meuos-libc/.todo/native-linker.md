@@ -2,7 +2,7 @@
 priority: P0
 status: done
 done_ts: 2026-07-23
-note: 添加 check-native-linker 目标，端到端验证 mt/ld 原生链接器；mt/ld P2 + mcc driver P3 已先前完成
+note: 为 mt/ld 原生链接器添加端到端 check-native-linker 验证目标
 -->
 
 # 待实现：纯原生链接器（脱离宿主 ld）
@@ -26,3 +26,12 @@ note: 添加 check-native-linker 目标，端到端验证 mt/ld 原生链接器�
 ## 验收
 - 在 chroot 到 `${MEUOS_SYSROOT}` 时，`mcc -o hello hello.c` 不调用宿主 ld。
 - Phase-4 自举验证使用原生链接器全链通过。
+
+## 验收标准
+
+<!-- TODO(main session): fill in concrete commands. -->
+
+```
+make -C projects/meuos-libc check
+```
+

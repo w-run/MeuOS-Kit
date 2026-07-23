@@ -2,7 +2,7 @@
 priority: P3
 status: done
 done_ts: 2026-07-23
-note: 已修复（omap Ki 化 + isel store 特殊处理），留为永久参考
+note: aarch64 store 相关:omap Ki 化 + isel store 特殊处理;作为永久参考保留
 -->
 
 # 待修复：mcc aarch64 后端存储到全局变量崩溃 — ✅ 已修复
@@ -79,3 +79,12 @@ if (isstore(i.op)) {
 ## 影响范围
 - `src/target/aarch64/aarch64_emit.c` L65-70（omap 存储条目）。
 - `src/target/aarch64/aarch64_isel.c` L200-233（`sel()` 函数）。
+
+## 验收标准
+
+<!-- TODO(main session): replace these placeholders with concrete shell commands the driver should run to verify this todo. The commands must exit 0 on success; any non-zero exit means the todo is NOT done. Keep the fenced block format below. -->
+
+```
+make -C projects/mcc check
+```
+

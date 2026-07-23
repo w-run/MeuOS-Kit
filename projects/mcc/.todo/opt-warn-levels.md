@@ -174,3 +174,12 @@ void warn(Fn *fn, int kind, const char *fmt, ...);
   器分配，不是优化 pass），不需要额外修改。
 - 潜在的 **unreachable code** 问题：某些 fold/simpl 产生的简化结果（如 dead code
   消除）在 `-O0` 时不会发生，但这是正确行为——`-O0` 代码质量差但不影响正确性。
+
+## 验收标准
+
+<!-- TODO(main session): replace these placeholders with concrete shell commands the driver should run to verify this todo. The commands must exit 0 on success; any non-zero exit means the todo is NOT done. Keep the fenced block format below. -->
+
+```
+make -C projects/mcc check
+```
+

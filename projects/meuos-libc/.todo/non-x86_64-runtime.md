@@ -2,7 +2,7 @@
 priority: P1
 status: done
 done_ts: 2026-07-23
-note: x86_64 / aarch64 / i386 / riscv64 / loongarch64 5 架构端到端门禁全部就位
+note: x86_64 / aarch64 / i386 / riscv64 / loongarch64 5 架构端到端门禁
 -->
 
 # 非 x86_64 完整 runtime 验证 — 5 架构全部完成
@@ -82,3 +82,12 @@ Makefile 关键点:
 - 新增 armv7 / powerpc64le / s390x 时,按上述模板填空即可
 - GD-TLS（见 [mcc/.todo/gd-tls.md](../mcc/.todo/gd-tls.md)）就位后,
   各架构 TLS 模型选择可从 LE-only 扩展为 LE+IE+GD
+
+## 验收标准
+
+<!-- TODO(main session): fill in concrete commands. -->
+
+```
+make -C projects/meuos-libc check
+```
+

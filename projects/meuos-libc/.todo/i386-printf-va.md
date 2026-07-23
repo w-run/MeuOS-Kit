@@ -51,3 +51,12 @@ riscv64/loongarch64 的 struct 型 va_list 不一致）。
   `runtime.sh` 和 `qemu-runtime.sh` 双门禁中通过端到端数值验证。
 
 > 本文件为根因分析永久参考文档，非待办项。
+
+## 验收标准
+
+<!-- TODO(main session): fill in concrete commands. -->
+
+```
+make -C projects/meuos-libc check
+```
+
