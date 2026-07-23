@@ -37,6 +37,9 @@ experiments/
 .DS_Store
 *~
 
+# AI agent local data (codebuddy session db, etc.)
+.codebuddy/
+
 # QEMU test environment (env/) - large binaries, not tracked
 env/build/
 env/run/
