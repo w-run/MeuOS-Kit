@@ -22,6 +22,14 @@ typedef unsigned long jmp_buf[22];
 #ifndef __STRICT_ANSI__
 typedef unsigned long sigjmp_buf[24];
 #endif
+#elif defined(__riscv)
+/* riscv64 LP64D（硬浮点 ABI）：setjmp.S 保存 s0-s11、sp、ra 共 14 字，
+ * 以及 fs0-fs11 共 12 字，合计 26 字；sigjmp_buf 追加 mask 标志位与
+ * sigset_t（各 1 字），共 28 字。 */
+typedef unsigned long jmp_buf[26];
+#ifndef __STRICT_ANSI__
+typedef unsigned long sigjmp_buf[28];
+#endif
 #else
 typedef unsigned long jmp_buf[8];
 #ifndef __STRICT_ANSI__

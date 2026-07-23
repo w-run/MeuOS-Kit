@@ -61,7 +61,7 @@ __syscall_number(long number)
 	case 234: return 270; /* tgkill */
 	default: return number;
 	}
-#elif defined(__aarch64__)
+#elif defined(__aarch64__) || defined(__riscv)
 	/* aarch64 使用 asm-generic syscall 号表，与 x86_64 完全不同。这里把
 	 * 包装器使用的 x86_64 内部号翻译成 aarch64 原生号。aarch64 不存在
 	 * 的旧 syscall（open/stat/mkdir/link/unlink/chmod/access/...）由各

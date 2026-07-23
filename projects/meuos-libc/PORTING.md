@@ -18,7 +18,7 @@ mcc 已有代码生成基线、libc 运行时仍待移植；x86_64 和 aarch64 �
 | **aarch64**     | **运行验证**     | libc runtime 完整（crt1/syscall/atomic/setjmp/sigreturn/thread_clone/set_tls/tls.c）；`make ARCH=aarch64` + `test/aarch64-bootstrap.sh` qemu gate 通过 | 64 位次级基石；hello/atomic/phase2/bare_tls 端到端输出已固化，详见 §5 |
 | **loongarch64** | **已确认基石**   | mcc 后端有 ABI/汇编回归基线；libc runtime 尚未落地                                | 龙芯新生态；syscall 编号、ABI、TLS 和内核接口必须按最新 Linux UAPI 校准                |
 | **i386**        | **运行验证**     | x87 浮点完整（运算/比较/signed·unsigned 转换/ABI）、FPR 收口（nfpr=0）、跨函数 `va_list` 已修复；`make check-i386` + `make check-i386-qemu` 双门禁全绿 | 32 位兼容基石；`time_t`=int64_t、statx(383)、mmap2(192)、socketcall(102) 均就位；剩余 Kl 软算术库 + TLS/信号端到端 |
-| **riscv64**     | **强烈建议新增** | mcc 后端有基线；libc runtime 尚未落地                                             | 无历史包袱的 64 位架构，用于检验 syscall/TLS/原子等抽象是否干净                        |
+| **riscv64**     | **已落地代码**   | libc runtime 已实现（crt1/syscall/atomic/setjmp/sigreturn/thread_clone/tls.c）；`make ARCH=riscv64` 与 `test/riscv64-bootstrap.sh` 已注册 | 无历史包袱的 64 位架构，用于检验 syscall/TLS/原子等抽象是否干净；代码经静态核对，真机门禁待交叉工具链/qemu 就绪 |
 | **armv7**       | **强烈建议新增** | 当前只有占位 TODO，没有 libc runtime 或构建目标                                   | ARMv7 hard-float EABI；同时验证 32 位指针、VFP/硬浮点 ABI、原子、TLS 与 64 位 `time_t` |
 | **ppc64le**     | **按需可选**     | 当前未实现、未纳入默认构建                                                        | POWER 服务器目标；在基础多架构 runtime 稳定后再投入，重点验证多寄存器调用约定          |
 | **s390x**       | **按需可选**     | 当前未实现、未纳入默认构建                                                        | IBM 大型机目标；重点验证独特 syscall 机制、寄存器约定和信号上下文                      |
@@ -148,10 +148,15 @@ TLS 由 `msr tpidr_el0` 设置，CLONE_SETTLS 直接交给 kernel。
 
 ### riscv64
 
-使用 RV64 ABI，syscall 号在 `a7`、参数在 `a0`–`a5`、通过 `ecall` 进入内核；
-线程指针为 `tp`。原子使用 `lr/sc` 或目标扩展允许时的原子指令，`setjmp` 至少
-保存 `ra/sp/s0`–`s11` 和必要的浮点状态。它是验证“架构差异只存在于边界层”的
-优先新目标。
+使用 RV64 ABI（LP64D 硬浮点），syscall 号在 `a7`、参数在 `a0`–`a5`、通过
+`ecall` 进入内核；线程指针为 `tp`（x4），主线程 tp 在 `crt1.S` 用 `mv tp, a0`
+设置，子线程经 `CLONE_SETTLS` 由内核设置（无 arch_prctl 等价 syscall）。
+原子使用 `lr.w/lr.d` + `sc.w/sc.d`（`.aqrl`）实现 C11 原子 runtime，`setjmp`
+保存 `s0`–`s11`/`sp`/`ra` 与 `fs0`–`fs11`（共 26 字，`jmp_buf[26]`）。
+TLS 用 variant I 且 `GAP_ABOVE_TP = 0`（musl riscv64 ABI）：tp 直接指向 TLS
+镜像起点，`.tdata` 复制到 mmap 基址 +0。它是验证“架构差异只存在于边界层”的
+优先新目标，runtime 代码已落地，移植自 aarch64 模板。syscall 编号复用
+asm-generic 表（`__aarch64__ || __riscv` 合流）。
 
 ### armv7
 
@@ -173,8 +178,12 @@ TLS 由 `msr tpidr_el0` 设置，CLONE_SETTLS 直接交给 kernel。
    64 位跨 ISA 完整链，riscv64/loongarch64 可参照其工作流。
 4. **loongarch64**：按最新 ABI/UAPI 完成同样的门禁，独立验证 syscall 编号、TLS、
    原子和信号布局。
-5. **riscv64**：借助较干净的 ABI 抽象完成第三条 64 位完整链，反向清理公共层的
-   架构泄漏。
+5. ~~riscv64~~ ✅：crt1 + syscall gate + atomic + setjmp + sigreturn +
+   thread_clone + tls.c 全套到位（移植自 aarch64），`Makefile ARCH=riscv64`
+   规则注册，`test/riscv64-bootstrap.sh` 提供跨编译自检 + 可选 qemu-riscv64
+   运行时门禁。代码经静态核对，真机门禁待交叉工具链/qemu 就绪。作为第三条
+   64 位完整链，反向校验了公共层架构抽象（syscall.h 合流 asm-generic、setjmp.h
+   增量分支）。
 6. **armv7**：在 64 位目标稳定后加入，重点验证 32/64 位变体和 hard-float；先以
    QEMU + 交叉汇编器为门禁，不影响默认 x86_64 构建。
 7. **ppc64le/s390x**：仅在明确用户空间需求或有可用 QEMU/硬件门禁时排期。
