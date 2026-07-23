@@ -183,8 +183,75 @@ log "ci-driver:   ${CI_DRIVER}"
 [[ ${#CI_ARGS[@]} -gt 0 ]] && log "ci-args:     ${CI_ARGS[*]}"
 log "sub-model:   ${CI_DRIVER_SUB_MODEL:-<codebuddy-default>}"
 
+# ---- post-mortem helper (defined BEFORE use) -----------------------------
+# 读 tools/ci-driver/state/main_session.json 的最后一条 history entry,把
+# 上轮的关键信号 (done/fail/restart/claim outcomes/rollbacks) 打到 stderr,
+# 让 quickstart 用户立刻看出"是真完成、还是假 DONE、还是 FAIL"。
+#
+# 必须放在 main code 之前 — 后面用 `_summarize_exit "$rc"`,函数如果
+# 定义在 exit 之后会被 shell 解析时漏掉 (实际: `未找到命令` 错误)。
+_summarize_exit() {
+    local rc="$1"
+    local state_file="${REPO_ROOT}/tools/ci-driver/state/main_session.json"
+    [[ -f "${state_file}" ]] || {
+        log "exit_code=${rc} (no state file to summarize)"
+        return
+    }
+    # exit code 语义: 0=真完成, 1=FAIL, 2=fake-DONE (driver 拒绝 + --once),
+    # 其他=driver 异常
+    case "${rc}" in
+        0) local rc_meaning="clean exit" ;;
+        1) local rc_meaning="main session sent [[FAIL]]" ;;
+        2) local rc_meaning="FAKE DONE — driver refused + --once" ;;
+        *) local rc_meaning="unexpected" ;;
+    esac
+    log "driver exit_code=${rc} (${rc_meaning})"
+    python3 - "${state_file}" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    s = json.load(open(sys.argv[1]))
+except Exception as e:
+    print(f"[quickstart] failed to read state: {e}")
+    sys.exit(0)
+hist = s.get("history") or []
+if not hist:
+    print("[quickstart] no history entries yet (driver did not complete a round)")
+    sys.exit(0)
+last = hist[-1]
+done   = bool(last.get("done"))
+fail   = bool(last.get("fail"))
+restart = bool(last.get("restart"))
+claim_out = last.get("claim_outcomes") or {}
+rollbacks = last.get("rollbacks") or {}
+n_acc = sum(1 for o in claim_out.values() if o.get("status") == "done")
+n_rej = sum(1 for o in claim_out.values() if o.get("status") == "rejected")
+n_ref = sum(1 for o in claim_out.values() if o.get("status") == "refused")
+ts = last.get("ts", "?")
+parts = [
+    f"last round @ {ts}",
+    f"done={done}", f"fail={fail}", f"restart={restart}",
+    f"claim_outcomes(accepted={n_acc} rejected={n_rej} refused={n_ref})",
+    f"unauthorized_done_rollbacks={len(rollbacks)}",
+]
+print("[quickstart] " + " ".join(parts))
+# 把假 DONE 单独高亮 (即 done=True 但有 refused/rejected) — 这是历史 bug
+# 容易重现的模式
+if done and (n_rej or n_ref):
+    bad = [k for k, v in claim_out.items()
+           if v.get("status") in ("rejected", "refused")]
+    print(f"[quickstart] WARNING: this round claimed [[DONE]] while "
+          f"{len(bad)} claim(s) were REJECTED/REFUSED: {bad}")
+PY
+}
+
 # 透传给 ci_driver run: project_root (位置) + --projects + 剩余 args
-# 注意 Python argparse 不接受 `--` token,所以 `--` 已经在上面被吞掉了
-exec python3 "${CI_DRIVER}" "${REPO_ROOT}" \
+# 注意 Python argparse 不接受 `--` token,所以 `--` 已经在上面被吞掉了。
+# **不**用 exec — quickstart 需要在 ci_driver 退出后,读
+# state/main_session.json 显示本轮"为什么退出",这样假 DONE 之类的情况
+# 一眼能看出来 (见 _summarize_exit 函数)。
+python3 "${CI_DRIVER}" "${REPO_ROOT}" \
     --projects "${RESOLVED}" \
     "${CI_ARGS[@]}"
+rc=$?
+_summarize_exit "$rc"
+exit "$rc"

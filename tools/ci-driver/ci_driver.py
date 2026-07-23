@@ -779,8 +779,47 @@ def cmd_run(args: argparse.Namespace) -> int:
               f"unauthorized_done_rollbacks={n_rolled} "
               f"-> log: {result['log']}")
 
+        # Fake-DONE defense: before honouring an explicit [[DONE]], re-check
+        # whether actionable todos still remain. The main session may send
+        # [[DONE]] as a misguided "I'm stuck / abandon this round" signal when
+        # in fact [[CLAIM_DONE]] was REFUSED (no 验收标准) or REJECTED
+        # (acceptance commands failed). Blindly returning 0 in that case
+        # makes the driver look like it ran one batch and quit. We refuse
+        # to honour a [[DONE]] that contradicts the file-system state.
         if markers["done"]:
-            ci_lib.log("main session signalled DONE", name="ci_driver")
+            todos_recheck = ci_lib.list_todos(root, subs)
+            still_actionable = [
+                t for t in todos_recheck
+                if t.is_actionable() and t.name not in completed
+            ]
+            if still_actionable:
+                n = len(still_actionable)
+                rels = [t.rel_path for t in still_actionable]
+                ci_lib.log(
+                    f"main session signalled [[DONE]] but {n} todo(s) still "
+                    f"actionable on disk; REFUSING to exit. Actionable: {rels}. "
+                    f"Likely cause: main session confused [[DONE]] with 'abandon' "
+                    f"after [[CLAIM_DONE]] was REFUSED/REJECTED. Should have used "
+                    f"[[RESTART]] or [[FAIL: <reason>]].",
+                    name="ci_driver",
+                )
+                print(
+                    f"[WARN] main session sent [[DONE]] but {n} todo(s) still "
+                    f"actionable: {rels}. Forcing continue (next round will get "
+                    f"a fresh session because the current one is confused). "
+                    f"Please use [[RESTART]] or [[FAIL: <reason>]] in future."
+                )
+                # Drop the confused session so the next round starts clean.
+                state["session_id"] = None
+                ci_lib.save_state("main_session", state)
+                if args.once:
+                    # In --once mode we can't continue; signal the situation
+                    # to the caller via a distinct exit code (2 = "fake DONE").
+                    return 2
+                time.sleep(5)
+                continue
+            ci_lib.log("main session signalled DONE; no actionable todos remain "
+                       "— exiting cleanly", name="ci_driver")
             return 0
         if markers["fail"]:
             # Abandon session; next round will be fresh
