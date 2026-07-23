@@ -61,6 +61,7 @@ RE_RESTART = re.compile(r"\[\[RESTART(:([^\]]*))?\]\]")
 RE_DONE = re.compile(r"\[\[DONE(:([^\]]*))?\]\]")
 RE_FAIL = re.compile(r"\[\[FAIL(:([^\]]*))?\]\]")
 RE_SESSION = re.compile(r"\[\[SESSION_ID:([^\]]+)\]\]")
+RE_TASK_READY = re.compile(r"\[\[TASK_READY\]\]")
 # Per-todo claim markers. Format: [[CLAIM_DONE: <relpath>]] or
 # [[CLAIM_FAILED: <relpath>: <reason>]]
 RE_CLAIM_DONE = re.compile(
@@ -510,6 +511,78 @@ def cmd_list_todos(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_task_generation(
+    root: Path, subs: list[str] | None, main_model: str,
+    system_prompt: str, task_mode: dict, state: dict, args,
+) -> None:
+    """Round 0: ask main session to generate .todo files from task description.
+
+    The main session reads the task description, decomposes it into 1-N
+    todos, creates them via todo_admin.py, and signals [[TASK_READY]].
+    After the call, we scan for todos with the matching task_id and record
+    them in task_mode.todo_names.
+    """
+    sub_str = args.projects or "(all)"
+    tid = task_mode["task_id"]
+    task_prompt = (
+        f"## Task Mode — Todo Generation (Round 0)\n\n"
+        f"You are in **task generation** mode. The user has given a task\n"
+        f"description. Your job is to decompose it into 1-N actionable\n"
+        f"todos, write them as `.todo` files, then signal ready.\n\n"
+        f"### Task description\n{task_mode['task_desc']}\n\n"
+        f"### Instructions\n"
+        f"1. Read the task description carefully.\n"
+        f"2. Decompose into 1-N independent todos. Each must be small enough\n"
+        f"   for a sub-agent to complete in one micro-task (≤200 lines context).\n"
+        f"3. For EACH todo, create a `.todo` file using `todo_admin.py add`:\n"
+        f"   ```\n"
+        f"   python3 tools/ci-driver/todo_admin.py {root} add \\\n"
+        f"       --subproject <{sub_str}> --name task-{tid}-<NN> \\\n"
+        f"       --title \"<one-line title>\" --priority P? \\\n"
+        f"       --note \"task-{tid} — <short desc>\"\n"
+        f"   ```\n"
+        f"   Use NN = 01, 02, 03... as sequence numbers.\n"
+        f"4. After creating each todo, **edit it** to add:\n"
+        f"   - `task_id: {tid}` in the front matter (so the driver can track it)\n"
+        f"   - A `## 验收标准` section with concrete shell commands in a\n"
+        f"     fenced code block (the driver will run these to verify done)\n"
+        f"5. `git add` all new todo files and `git commit`:\n"
+        f"   `git commit -m \"<sub>: add task-{tid} todos - <one-line>\"`\n"
+        f"6. Output `[[TASK_READY]]` when done.\n\n"
+        f"### Rules\n"
+        f"- Subprojects: {sub_str}\n"
+        f"- Each todo must be independently verifiable (has 验收标准).\n"
+        f"- Don't execute the todos yet — just generate them.\n"
+        f"- Use real priorities (P0=blocker, P1=high, P2=medium, P3=low).\n"
+    )
+    result = _run_main_round(
+        project_root=root, main_model=main_model, session_id=None,
+        system_prompt=system_prompt, user_prompt=task_prompt,
+        round_timeout=args.round_timeout, use_mcp=True, batch_no=0,
+        live_echo=not args.no_echo,
+    )
+    # Scan for todos with this task_id (includes derivative ones)
+    task_todos = ci_lib.scan_task_todos(
+        root, subs or [s.name for s in (root / "projects").iterdir()
+                       if s.is_dir()], tid,
+    )
+    task_mode["todo_names"] = [t.name for t in task_todos]
+    ci_lib.save_task_mode(task_mode)
+    ci_lib.log(
+        f"task generation complete: {len(task_mode['todo_names'])} todos: "
+        f"{task_mode['todo_names']}", name="ci_driver",
+    )
+    # Save session for continuation
+    state["session_id"] = result["session_id"]
+    state["task_mode"] = task_mode
+    ci_lib.save_state("main_session", state)
+    if not task_mode["todo_names"]:
+        ci_lib.log("WARNING: task generation produced 0 todos; check main "
+                   "session log for errors", name="ci_driver")
+        print("[task] WARNING: 0 todos generated; task may need manual "
+              "todo creation")
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     root = Path(args.project_root).resolve()
     if not (root / "AGENTS.md").is_file():
@@ -548,6 +621,36 @@ def cmd_run(args: argparse.Namespace) -> int:
     completed_log: dict[str, str] = {}
 
     system_prompt = _load_main_prompt()
+
+    # ---- Task mode initialization (--task / --task-file / --task-resume) ----
+    task_mode = state.get("task_mode") or {}
+    if args.task_resume:
+        if not task_mode.get("active"):
+            sys.exit("FATAL: --task-resume but no active task_mode in state; "
+                     "use --task <desc> to start a new one")
+        ci_lib.log(f"task mode resume: task_id={task_mode['task_id']} "
+                   f"desc={task_mode.get('task_desc', '')[:80]}",
+                   name="ci_driver")
+    elif args.task or args.task_file:
+        if not args.projects:
+            sys.exit("FATAL: --task requires --projects <subproject> to know "
+                     "where to generate .todo files")
+        desc = args.task or ""
+        if args.task_file:
+            desc = (sys.stdin.read() if args.task_file == "-"
+                    else Path(args.task_file).read_text(encoding="utf-8"))
+        desc = desc.strip()
+        if not desc:
+            sys.exit("FATAL: --task/--task-file given but description is empty")
+        task_mode = ci_lib.init_task_mode(desc)
+        state["task_mode"] = task_mode
+        ci_lib.save_state("main_session", state)
+        ci_lib.log(f"task mode start: task_id={task_mode['task_id']} "
+                   f"desc={desc[:80]}", name="ci_driver")
+        # Round 0: ask main session to generate todos from the description
+        _run_task_generation(root, subs, main_model, system_prompt,
+                             task_mode, state, args)
+
     if args.dry_run:
         print("=== DRY-RUN ===")
         print(f"project: {root}")
@@ -574,6 +677,26 @@ def cmd_run(args: argparse.Namespace) -> int:
         manifest_path = ci_lib.dump_todo_priority(root, subs)
         todos_all = ci_lib.list_todos(root, subs)
         actionable = [t for t in todos_all if t.is_actionable()]
+
+        # ---- Task mode: exclusive batch filter ----
+        # In task mode, only process todos belonging to this task (by
+        # task_id in front matter). This includes derivative todos created
+        # by main session during execution. Existing .todo files are excluded.
+        if task_mode.get("active"):
+            tid = task_mode["task_id"]
+            # Re-scan for task todos (picks up newly created derivative ones)
+            task_todos = ci_lib.scan_task_todos(root, subs or [], tid)
+            task_names = {t.name for t in task_todos}
+            # Update todo_names in state (derivative detection)
+            new_names = task_names - set(task_mode["todo_names"])
+            if new_names:
+                task_mode["todo_names"].extend(sorted(new_names))
+                ci_lib.save_task_mode(task_mode)
+                ci_lib.log(f"task mode: {len(new_names)} derivative todo(s) "
+                           f"detected: {sorted(new_names)}", name="ci_driver")
+            # Filter actionable to only task todos
+            actionable = [t for t in actionable if t.name in task_names]
+
         if not actionable:
             ci_lib.log("no actionable todos; exiting", name="ci_driver")
             print(f"[round {round_no}] no actionable todos; done.")
@@ -790,6 +913,14 @@ def cmd_run(args: argparse.Namespace) -> int:
         # to honour a [[DONE]] that contradicts the file-system state.
         if markers["done"]:
             todos_recheck = ci_lib.list_todos(root, subs)
+            # In task mode, only check task-specific todos for "still actionable"
+            if task_mode.get("active"):
+                tid = task_mode["task_id"]
+                task_recheck = ci_lib.scan_task_todos(
+                    root, subs or [], tid)
+                recheck_names = {t.name for t in task_recheck}
+                todos_recheck = [t for t in todos_recheck
+                                 if t.name in recheck_names]
             still_actionable = [
                 t for t in todos_recheck
                 if t.is_actionable() and t.name not in completed
@@ -833,10 +964,45 @@ def cmd_run(args: argparse.Namespace) -> int:
                 continue
             ci_lib.log("main session signalled DONE; no actionable todos remain "
                        "— exiting cleanly", name="ci_driver")
+            # Mark task as finished if in task mode
+            if task_mode.get("active"):
+                task_mode["active"] = False
+                task_mode["finished_ts"] = ci_lib.now_ts()
+                ci_lib.save_task_mode(task_mode)
+                ci_lib.log(f"task {task_mode['task_id']} completed successfully",
+                           name="ci_driver")
+                print(f"[task] {task_mode['task_id']} completed: "
+                      f"{len(task_mode['todo_names'])} todo(s) done")
             return 0
         # Reset fake-done counter on any non-DONE round (main session behaved)
         if not markers["done"]:
             fake_done_count = 0
+
+        # ---- Task mode: dual exit condition (queue empty + [[DONE]]) ----
+        # If all task todos are done but main session didn't send [[DONE]],
+        # log it and give one more round. In --once mode, accept the exit
+        # (task is objectively done).
+        if task_mode.get("active") and not markers["done"]:
+            tid = task_mode["task_id"]
+            task_recheck = ci_lib.scan_task_todos(
+                root, subs or [], tid)
+            task_remaining = [
+                t for t in task_recheck
+                if t.is_actionable() and t.name not in completed
+            ]
+            if not task_remaining:
+                ci_lib.log(
+                    f"task queue empty (all {len(task_mode['todo_names'])} "
+                    f"todo(s) done) but main session didn't send [[DONE]]; "
+                    f"{'exiting (--once)' if args.once else 'giving one more round'}",
+                    name="ci_driver",
+                )
+                if args.once:
+                    task_mode["active"] = False
+                    task_mode["finished_ts"] = ci_lib.now_ts()
+                    ci_lib.save_task_mode(task_mode)
+                    return 0
+
         if markers["fail"]:
             # Abandon session; next round will be fresh
             state["session_id"] = None
@@ -891,6 +1057,13 @@ def main() -> int:
                    help="Disable live stream-json echo; only log to files")
     p.add_argument("--include-done", action="store_true",
                    help="When listing, include already-done todos")
+    p.add_argument("--task", default=None,
+                   help="Task description: main session generates 1-N todos "
+                        "from this text, then executes them exclusively")
+    p.add_argument("--task-file", default=None,
+                   help="Read task description from a file (use '-' for stdin)")
+    p.add_argument("--task-resume", action="store_true",
+                   help="Resume a previously interrupted --task session")
     args = p.parse_args()
 
     if args.list_todos:

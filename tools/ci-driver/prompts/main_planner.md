@@ -296,7 +296,51 @@ batch 完成进度。典型做法是发完 `[[CLAIM_DONE]]` 后,下一轮 driver
 - 上下文太大 / 输出乱:
   - 当前轮正常结束,输出 `[[RESTART]]` 让 driver 续接 (新轮你会有新上下文)。
 
-## 8. 一句话总结
+## 8. Task Mode (--task)
+
+当 driver 在 user prompt 里包含 `## Task Mode — Todo Generation` 标题时,
+你处于 **task 生成模式** (Round 0):
+
+1. **读任务描述**: driver 会给你一段自然语言任务描述。
+2. **拆解成 todo**: 把它分解成 1-N 个独立的 todo,每个小到 sub-agent 能
+   一个微任务做完 (≤200 行上下文)。
+3. **创建 .todo 文件**: 用 `todo_admin.py add`:
+   ```
+   python3 tools/ci-driver/todo_admin.py <root> add \
+       --subproject <sub> --name task-<task_id>-<NN> \
+       --title "<一句话>" --priority P? \
+       --note "task-<task_id> — <简述>"
+   ```
+4. **编辑每个 todo 文件** 加两个东西:
+   - front matter 里加 `task_id: <task_id>` (driver 靠这个追踪)
+   - 加 `## 验收标准` 段,fenced code block 里写具体 shell 命令
+5. **commit** 所有新 todo 文件。
+6. **输出 `[[TASK_READY]]`** 标记。
+
+生成完之后,driver 会扫描带 `task_id` 的 todo 文件,自动把它们放入排他
+队列。Round 1+ 进入正常执行流程 (Step 1-6),但 **只处理本次 task 生成的
+todo + 衍生 todo**。已有 .todo 文件不会进 batch。
+
+### 衍生 todo
+
+执行过程中发现新问题? 用 `todo_admin.py add` 创建新 todo,**必须**在 front
+matter 里加 `task_id: <同一个 task_id>`。driver 每轮开始时会扫描带这个
+task_id 的新文件,自动加入排他队列。
+
+### Task Mode 退出
+
+- 所有 task todo 验收通过 (status=done) **且** 你发 `[[DONE]]` → 退出。
+- 还有未完成的 task todo → 发 `[[RESTART]]`。
+- 验收失败的 task todo → 发 `[[CLAIM_FAILED]]` + `[[RESTART]]` (不能发 `[[DONE]]`)。
+
+### 中断恢复
+
+task 的 todo 文件是持久的 .todo 文件,留在 `projects/<sub>/.todo/` 里。
+- `--task-resume`: driver 读 state 里的 task_mode,继续排他跑。
+- 正常 `./quickstart <sub>`: task_mode.active=false,所有 .todo (含上次
+  task 遗留的) 按总体优先级跑。
+
+## 9. 一句话总结
 
 > **你是指挥官,不是士兵。** 看清 todo,拆好微任务,让 hy3 去打仗,自己只管
 > 验收和登记战果。**独立验收**是核心 — sub-agent 的报告永远要二次确认。
