@@ -240,6 +240,18 @@ funcexpr(struct func *f, struct expr *e)
 		case TSUB:
 			r = funcexpr(f, e->base);
 			return funcinst(f, INEG, irtype(e->type).base, r, NULL);
+		case T__REAL__:
+			/* __real__ complex_value — load first sizeof(base) bytes */
+			lval = funclval(f, e->base);
+			return funcload(f, e->type, lval);
+		case T__IMAG__:
+			/* __imag__ complex_value — load second sizeof(base) bytes */
+			lval = funclval(f, e->base);
+			{
+				struct value *addr = lval.addr;
+				addr = funcinst(f, IADD, ptrclass(), addr, mkintconst(e->type->size));
+				return funcload(f, e->type, (struct lvalue){addr});
+			}
 		}
 		fatal("internal error; unknown unary expression");
 		break;

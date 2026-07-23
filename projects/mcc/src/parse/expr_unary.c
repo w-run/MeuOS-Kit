@@ -123,6 +123,21 @@ unaryexpr(struct scope *s)
 			e = mkconstexpr(&typeulong, op == TSIZEOF ? t->size : t->align);
 		}
 		break;
+	case T__REAL__:
+	case T__IMAG__: {
+		/* __real__ expr / __imag__ expr — complex real/imaginary part access */
+		struct type *realt;
+
+		next();
+		e = unaryexpr(s);
+		realt = e->type->base ? e->type->base : e->type;
+		if (!realt)
+			error(&tok.loc, "complex type has no base type");
+		e = mkexpr(EXPRUNARY, realt, e);
+		e->op = op;
+		e->lvalue = true;
+		break;
+	}
 	default:
 		e = postfixexpr(s, NULL);
 	}

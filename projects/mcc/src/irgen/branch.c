@@ -48,9 +48,16 @@ funclval(struct func *f, struct expr *e)
 		lval.addr = d->value;
 		break;
 	case EXPRUNARY:
-		if (e->op != TMUL)
+		if (e->op == TMUL) {
+			lval.addr = funcexpr(f, e->base);
+		} else if (e->op == T__REAL__ || e->op == T__IMAG__) {
+			lval = funclval(f, e->base);
+			if (e->op == T__IMAG__)
+				lval.addr = funcinst(f, IADD, ptrclass(), lval.addr,
+				                     mkintconst(e->type->size));
+		} else {
 			error(&tok.loc, "expression is not an object");
-		lval.addr = funcexpr(f, e->base);
+		}
 		break;
 	default:
 		if (e->type->kind != TYPESTRUCT && e->type->kind != TYPEUNION)

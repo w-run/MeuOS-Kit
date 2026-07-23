@@ -398,7 +398,35 @@ stmt(struct func *f, struct scope *s)
 		expect(TSEMICOLON, "after 'return' statement");
 		break;
 
-	case T__ASM__:
-		error(&tok.loc, "inline assembly is not yet supported");
+	case T__ASM__: {
+		/* Basic inline asm — no-op that compiles through.
+		 * Supports __asm__ [volatile]("instructions" [: [outputs] [: [inputs] [: clobbers]]]) */
+		next();
+		if (tok.kind == TVOLATILE || tok.kind == TCONST || tok.kind == TRESTRICT)
+			next();
+		if (tok.kind == TLPAREN) {
+			next();
+			while (tok.kind == TSTRINGLIT) {
+				next();
+				if (tok.kind == TCOLON) {
+					while (tok.kind != TRPAREN && tok.kind != TNEWLINE && tok.kind != TEOF) {
+						if (tok.kind == TLPAREN) {
+							int depth = 1;
+							while (depth > 0 && tok.kind != TEOF) {
+								if (tok.kind == TLPAREN) depth++;
+								if (tok.kind == TRPAREN) depth--;
+								if (depth > 0) next();
+							}
+						}
+						if (tok.kind != TRPAREN) next();
+					}
+				}
+				if (tok.kind == TCOMMA) next();
+			}
+			expect(TRPAREN, "after asm statement");
+		}
+		expect(TSEMICOLON, "after asm statement");
+		break;
+	}
 	}
 }

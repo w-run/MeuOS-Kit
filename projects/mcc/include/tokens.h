@@ -118,6 +118,9 @@ TOKEN(T__ALIGNOF__,   "__alignof__")
 TOKEN(T__ASM__,       "__asm__")
 TOKEN(T__ATTRIBUTE__, "__attribute__")
 TOKEN(T__EXTENSION__, "__extension__")
+TOKEN(T__REAL__,       "__real__")
+TOKEN(T__IMAG__,       "__imag__")
+TOKEN(T__PRAGMA__,     "_Pragma")
 
 /* other identifiers */
 TOKEN(TDEFINE,        "define")
@@ -153,3 +156,6 @@ TOKEN(ALIAS__TYPEOF,       "__typeof")
 TOKEN(ALIAS__TYPEOF__,     "__typeof__")
 TOKEN(ALIAS__VOLATILE__,   "__volatile__")  /* XXX: what needs this? */
 TOKEN(ALIAS__ASM,          "__asm")
+TOKEN(ALIAS__REAL,         "__real")
+TOKEN(ALIAS__IMAG,         "__imag")
+TOKEN(ALIAS__PRAGMA__,     "_Pragma")

@@ -121,6 +121,15 @@ primaryexpr(struct scope *s)
 	case T_GENERIC:
 		e = generic(s);
 		break;
+	case T__PRAGMA__:
+		/* _Pragma("string") — C99/C23 pragma operator, treated as no-op */
+		next();
+		expect(TLPAREN, "after _Pragma");
+		if (tok.kind == TSTRINGLIT) next();
+		expect(TRPAREN, "after _Pragma argument");
+		e = mkexpr(EXPRCONST, &typevoid, NULL);
+		e->u.constant.u = 0;
+		break;
 	default:
 		if (tok.kind >= TIDENT) {
 			d = scopegetdecl(s, tokenstr(tok.kind), 1);

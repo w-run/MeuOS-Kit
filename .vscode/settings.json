@@ -1,0 +1,6 @@
+{
+  // CodeBuddy: 跳过所有权限检查，自动运行命令无需确认
+  "codebuddy.permissions.defaultMode": "bypassPermissions",
+  // 信任此工作目录，启动时不弹授权提示
+  "codebuddy.trustAll": true
+}

@@ -933,14 +933,15 @@ directive(void)
 			doinclude();
 		break;
 	case TEMBED: {
-		/* #embed "filename" [limit(N)] — embed file as comma-separated
-		 * byte literal tokens pushed via ctxpush. */
-		struct array toks = {0};
+		/* #embed "filename" [limit(N)] [prefix(...)] [suffix(...)] [if_empty(...)]
+		 * — embed file as comma-separated byte literal tokens pushed via ctxpush. */
+		struct array toks = {0}, prefix_toks = {0}, suffix_toks = {0}, ifempty_toks = {0};
 		char *name, *path = NULL;
 		FILE *f;
 		unsigned char buf[4096];
 		size_t nread, total = 0, limit = (size_t)-1;
 		long i;
+		bool has_ifempty = false;
 
 		if (!condactive()) {
 			expectnewline();
@@ -950,13 +951,14 @@ directive(void)
 		if (tok.kind != TSTRINGLIT)
 			error(&tok.loc, "#embed expects \"filename\"");
 		name = stripquotes(tok.lit);
-		/* Parse optional parameter: limit(N).
-		 * Note: scan() does NOT set tok.lit for identifiers,
-		 * so we must use tokenstr() to compare. */
-		scan(&tok);
-		if (tok.kind >= TPPIDENT || tok.kind == TIDENT) {
-			const char *id = tokenstr(tok.kind);
-			if (id && strcmp(id, "limit") == 0) {
+		/* Parse optional parameters: limit(N), prefix(...), suffix(...), if_empty(...) */
+		scan(&tok);  /* advance past filename to first param or newline */
+		while (tok.kind != TNEWLINE && tok.kind != TEOF) {
+			const char *id = (tok.kind >= TPPIDENT || tok.kind == TIDENT)
+			                  ? tokenstr(tok.kind) : NULL;
+			if (!id) break;
+
+			if (strcmp(id, "limit") == 0) {
 				scan(&tok);
 				if (tok.kind == TLPAREN) {
 					scan(&tok);
@@ -964,9 +966,33 @@ directive(void)
 						limit = strtoul(tok.lit, NULL, 0);
 					scan(&tok);
 				}
+			} else if (strcmp(id, "prefix") == 0 || strcmp(id, "suffix") == 0
+			           || strcmp(id, "if_empty") == 0) {
+				struct array *buf;
+				if (strcmp(id, "prefix") == 0)       buf = &prefix_toks;
+				else if (strcmp(id, "suffix") == 0)  buf = &suffix_toks;
+				else { buf = &ifempty_toks; has_ifempty = true; }
+				scan(&tok);
+				if (tok.kind == TLPAREN) {
+					int depth = 1;
+					scan(&tok);
+					while (depth > 0 && tok.kind != TNEWLINE && tok.kind != TEOF) {
+						if (tok.kind == TLPAREN) { depth++; }
+						else if (tok.kind == TRPAREN) { depth--; if (depth == 0) break; }
+						struct token ct = tok;
+						if (tok.lit) {
+							ct.lit = xmalloc(strlen(tok.lit) + 1);
+							strcpy(ct.lit, tok.lit);
+						}
+						arrayaddbuf(buf, &ct, sizeof ct);
+						scan(&tok);
+					}
+					scan(&tok);
+				}
+			} else {
+				break;
 			}
 		}
-		expectnewline();
 		/* Open and read the file */
 		f = openinclude(name, false, &path);
 		if (!f)
@@ -995,10 +1021,27 @@ directive(void)
 			total += nwrite;
 		}
 		fclose(f);
+
+		/* Assemble: prefix + content (file or if_empty) + suffix.
+		 * Each section already carries its own separators from the source,
+		 * so we concatenate them directly. */
+		{
+			struct array final = {0};
+			if (prefix_toks.len > 0)
+				arrayaddbuf(&final, prefix_toks.val, prefix_toks.len);
+			if (toks.len > 0)
+				arrayaddbuf(&final, toks.val, toks.len);
+			else if (has_ifempty)
+				arrayaddbuf(&final, ifempty_toks.val, ifempty_toks.len);
+			if (suffix_toks.len > 0)
+				arrayaddbuf(&final, suffix_toks.val, suffix_toks.len);
+			if (final.len > 0)
+				ctxpush(final.val, final.len / sizeof(struct token), NULL, false);
+			free(prefix_toks.val); free(suffix_toks.val);
+			free(ifempty_toks.val); free(toks.val);
+		}
 		free(name);
 		free(path);
-		if (toks.len > 0)
-			ctxpush(toks.val, toks.len / sizeof(struct token), NULL, false);
 		expectnewline();
 		break;
 	}
@@ -1049,7 +1092,7 @@ directive(void)
 		break;
 	case TPRAGMA:
 		while (tok.kind != TNEWLINE && tok.kind != TEOF)
-			next();
+			scan(&tok);
 		break;
 	default:
 		error(&tok.loc, "invalid preprocessor directive #%s", tokenstr(tok.kind));
@@ -1387,6 +1430,9 @@ next(void)
 	case ALIAS__TYPEOF__:     tok.kind = TTYPEOF;        break;
 	case ALIAS__VOLATILE__:   tok.kind = TVOLATILE;      break;
 	case ALIAS__ASM:          tok.kind = T__ASM__;       break;
+	case ALIAS__REAL:         tok.kind = T__REAL__;      break;
+	case ALIAS__IMAG:         tok.kind = T__IMAG__;      break;
+	case ALIAS__PRAGMA__:     tok.kind = T__PRAGMA__;    break;
 	}
 }
 
