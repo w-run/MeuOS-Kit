@@ -21,7 +21,9 @@ strip    删除调试/非必要符号
 objcopy  节区和格式复制
 ```
 
-当前已实现 `ar`、`ranlib`、`as`、`ld` 和内部 `libelf`；`nm`/`objdump`/`readelf`/`strip`/`objcopy` 在 P4 实现。
+当前已实现 `ar`、`ranlib`、`as`、`ld`、`nm`、`readelf`、`objdump`、`strip`、`objcopy`
+和内部 `libelf`、`libdisasm`。P3（mcc driver 集成 MT_AS/MT_LD/MT_AR）与 P4（二进制
+辅助工具）已完成。
 
 ### 1.2 内部共享层
 
