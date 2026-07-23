@@ -30,8 +30,15 @@ typedef unsigned long jmp_buf[26];
 #ifndef __STRICT_ANSI__
 typedef unsigned long sigjmp_buf[28];
 #endif
+#elif defined(__loongarch64)
+/* loongarch64 LP64D（硬浮点 ABI）：setjmp.S 保存 $s0-$s8、$fp、$sp、$ra 共 12 字，
+ * 以及 $fs0-$fs7 共 8 字，合计 20 字 + 3 预留 = 23 字；sigjmp_buf 追加 mask 标志位与
+ * sigset_t（各 1 字），共 25 字。 */
+typedef unsigned long jmp_buf[23];
+#ifndef __STRICT_ANSI__
+typedef unsigned long sigjmp_buf[25];
+#endif
 #else
-typedef unsigned long jmp_buf[8];
 #ifndef __STRICT_ANSI__
 typedef unsigned long sigjmp_buf[16];
 #endif

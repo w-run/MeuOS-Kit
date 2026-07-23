@@ -1,7 +1,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include "../internal/syscall.h"
-#if defined(__aarch64__)
+#if defined(__aarch64__) || defined(__riscv) || defined(__loongarch64)
 /* aarch64 没有 readlink(2)，改用 readlinkat(AT_FDCWD, path, buf, size)。 */
 #define AT_FDCWD (-100)
 #define LINUX_SYS_READLINKAT 267

@@ -16,7 +16,7 @@ mcc 已有代码生成基线、libc 运行时仍待移植；x86_64 和 aarch64 �
 | --------------- | ---------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | **x86_64**      | **已确认基石**   | libc runtime 完整；`counter = 2000`、线程、TLS、stdio、静态链接和 QEMU 回归已通过 | 主开发平台、参考实现和每次变更的回归基线                                               |
 | **aarch64**     | **运行验证**     | libc runtime 完整（crt1/syscall/atomic/setjmp/sigreturn/thread_clone/set_tls/tls.c）；`make ARCH=aarch64` + `test/aarch64-bootstrap.sh` qemu gate 通过 | 64 位次级基石；hello/atomic/phase2/bare_tls 端到端输出已固化，详见 §5 |
-| **loongarch64** | **已确认基石**   | mcc 后端有 ABI/汇编回归基线；libc runtime 尚未落地                                | 龙芯新生态；syscall 编号、ABI、TLS 和内核接口必须按最新 Linux UAPI 校准                |
+| **loongarch64** | **已落地代码**   | mcc 后端有 ABI/汇编回归基线；libc runtime 已实现（crt1/syscall/atomic/setjmp/sigreturn/thread_clone/tls.c，移植自 riscv64）；`make ARCH=loongarch64` 与 `test/loongarch64-bootstrap.sh` 已注册 | 龙芯新生态；syscall 编号、ABI、TLS 和内核接口按最新 Linux UAPI 校准；移植自 riscv64 模板，随带补全了 riscv64 遗漏的 wrapper 条件分支 |
 | **i386**        | **运行验证**     | x87 浮点完整（运算/比较/signed·unsigned 转换/ABI）、FPR 收口（nfpr=0）、跨函数 `va_list` 已修复；`make check-i386` + `make check-i386-qemu` 双门禁全绿 | 32 位兼容基石；`time_t`=int64_t、statx(383)、mmap2(192)、socketcall(102) 均就位；剩余 Kl 软算术库 + TLS/信号端到端 |
 | **riscv64**     | **已落地代码**   | libc runtime 已实现（crt1/syscall/atomic/setjmp/sigreturn/thread_clone/tls.c）；`make ARCH=riscv64` 与 `test/riscv64-bootstrap.sh` 已注册 | 无历史包袱的 64 位架构，用于检验 syscall/TLS/原子等抽象是否干净；代码经静态核对，真机门禁待交叉工具链/qemu 就绪 |
 | **armv7**       | **强烈建议新增** | 当前只有占位 TODO，没有 libc runtime 或构建目标                                   | ARMv7 hard-float EABI；同时验证 32 位指针、VFP/硬浮点 ABI、原子、TLS 与 64 位 `time_t` |
@@ -125,10 +125,23 @@ TLS 由 `msr tpidr_el0` 设置，CLONE_SETTLS 直接交给 kernel。
 
 ### loongarch64
 
-使用 Linux LoongArch LP64D/LP64S 对应的目标 ABI，syscall、TLS（`$tp`）、
-原子 ll/sc 序列、信号上下文和浮点 ABI 必须以当前内核 UAPI 与 ABI 文档为准；
-不要从 MIPS 复制 syscall 或寄存器假设。先完成整数/无浮点依赖的 Phase-2
-闭环，再补齐浮点和完整线程回归。
+使用 Linux LoongArch LP64D ABI（硬浮点），syscall 用 `syscall 0` 指令，
+编号在 `$a7`、参数 `$a0–$a5`、返回值 `$a0`；线程指针为 `$tp`（r21，
+用户态可写 GPR），主线程 tp 在 `crt1.S` 用 `move $tp, $a0` 设置，子线程
+经 `CLONE_SETTLS` 由内核设置（无 arch_prctl 等价 syscall）。
+原子使用 `ll.w/sc.w + ll.d/sc.d + dbar 0`（全屏障），子字节(1/2)原子用
+字级 `ll.w/sc.w` 掩码法；`setjmp` 保存 `$s0-$s8/$fp/$sp/$ra` 与
+`$fs0-$fs7`（共 23 字，`jmp_buf[23]`；`sigjmp_buf[25]`）。
+TLS 用 variant I 且 `GAP_ABOVE_TP = 0`（musl loongarch64 ABI，与 riscv64
+相同）：tp 直接指向 TLS 镜像起点，`.tdata` 复制到 mmap 基址 +0。
+
+syscall 编号：LoongArch64 采用 asm-generic 编号（与 aarch64/riscv64 完全
+相同），因此 syscall.h 的翻译表通过 `|| defined(__loongarch64)` 合流到
+asm-generic 分支（零重复）。运行时移植自 riscv64 模板（适配寄存器名/指令）。
+
+当前环境 mcc loongarch64 后端有浮点比较 bug（已知问题），且无
+loongarch64-linux-gnu-gcc 与 qemu-loongarch64，真机门禁待工具链就绪后
+运行 `make check-loongarch64-bootstrap`。
 
 ### i386
 
@@ -176,8 +189,12 @@ asm-generic 表（`__aarch64__ || __riscv` 合流）。
    `test/aarch64-bootstrap.sh` 提供跨编译自检 + 可选 qemu-aarch64-static
    运行时 gate（hello/atomic/phase2_counter=2000/bare_tls）。作为第一条
    64 位跨 ISA 完整链，riscv64/loongarch64 可参照其工作流。
-4. **loongarch64**：按最新 ABI/UAPI 完成同样的门禁，独立验证 syscall 编号、TLS、
-   原子和信号布局。
+4. ✅ **loongarch64**：crt1 + syscall gate + atomic + setjmp + sigreturn +
+   thread_clone + tls.c 全套到位（移植自 riscv64），`Makefile ARCH=loongarch64`
+   规则注册，`test/loongarch64-bootstrap.sh` 提供跨编译自检 + 可选
+   qemu-loongarch64 运行时门禁。移植过程中发现了 riscv64 遗漏的 21 个 wrapper
+   条件分支 bug（`__aarch64__` 路径未含 `__riscv`），已一并修复。代码经静态
+   核对，真机门禁待交叉工具链/qemu 就绪。
 5. ~~riscv64~~ ✅：crt1 + syscall gate + atomic + setjmp + sigreturn +
    thread_clone + tls.c 全套到位（移植自 aarch64），`Makefile ARCH=riscv64`
    规则注册，`test/riscv64-bootstrap.sh` 提供跨编译自检 + 可选 qemu-riscv64

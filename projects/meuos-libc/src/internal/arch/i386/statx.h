@@ -27,7 +27,7 @@
 #define LINUX_SYS_STATX_I386     383
 
 /* aarch64 走 x86_64 内部号 332，由 syscall.h 翻译表转 aarch64 291。 */
-#if defined(__aarch64__)
+#if defined(__aarch64__) || defined(__riscv) || defined(__loongarch64)
 #define LINUX_SYS_STATX          332
 #endif
 
