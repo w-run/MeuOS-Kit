@@ -57,3 +57,4 @@ projects/mcc/mcc
 # only its README is tracked.
 env/share/*
 !env/share/README.txt
+.vscode/
