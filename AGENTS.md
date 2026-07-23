@@ -61,7 +61,7 @@
 **C 语言目标**：
 - **C99**：完整实现
 - **C11**：完整实现（`_Atomic`、`_Generic`、`_Thread_local`、`_Alignas`、`_Alignof`、`_Noreturn`、`_Static_assert`、匿名结构体/联合体、复合字面量、指定初始化器、变长数组）
-- **C23**：稳定实现（`constexpr`、`typeof`、`nullptr`、`#embed`、属性语法等）
+- **C23**：完整实现（`constexpr`、`typeof`/`typeof_unqual`、`nullptr_t`、`#embed`+`limit(N)`/`prefix`/`suffix`/`if_empty`、`__has_include`、属性语法 `[[]]`、`#elifdef`/`#elifndef`、`#warning`、二进制字面量`0b`/数字分隔符`'`、空初始化器`{}`、`auto`类型推导、Labeled break/continue、`bool`/`true`/`false`关键字、`_BitInt(N)`、`_Decimal32`/`64`/`128`、`static_assert`无消息形式）
 
 **C++ 目标（m++）**：C 语言功能稳定后启动。m++ 复用 mcc 的后端（IR/指令选择/寄存器分配/汇编输出），通过 `libmcc` 共享后端库实现。m++ 前端独立实现 C++ 语法/语义。
 
@@ -230,7 +230,7 @@ Kit 组件是构建其他软件的基础设施，必须由 Kit 自己实现，�
 | LFS 软件包 | Kit 组件 | 状态 |
 |-----------|---------|------|
 | Glibc | meuos-libc | ✅ |
-| GCC | mcc/m++ | ✅ C11，C23/m++ 待 |
+| GCC | mcc/m++ | ✅ C11，✅ C23，m++ 待 |
 | Binutils | meuos-toolchain | ✅ P0-P2 |
 | Make | meow | ✅ |
 | M4/Bison/Flex/Gperf | meuos-buildtools | 待启动 |

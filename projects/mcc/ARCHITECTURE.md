@@ -202,7 +202,8 @@ See `../../STATE.md` for the canonical status. Quick reference:
 | 1a - hello | PASS | `make check` exits 0 |
 | 1b - control flow + call | PASS | fib(10)=55, for/while, gcd all exit 0 |
 | 1c - compound types | PASS | strlen + struct pass/return (small/large/nested) + union + global init, 9/9 exit 0 |
-| 1d - C11 features | PASS (mcc host gate) | `make check-c11`: 12 runtime tests |
+| 1d - C11 features | PASS (mcc host gate) | `make check-c11`: 13 runtime tests |
+| 1e - C23 features | PASS (mcc host gate) | `make check-c23`: 14 runtime tests |
 | 2 - meuos-libc | not started | installed headers, crt objects, atomic runtime |
 | 3 - meow | blocked on 2 | `meow build dash` |
 | 4 - bootstrap | blocked on 3 | chroot self-rebuild |
