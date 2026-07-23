@@ -99,9 +99,55 @@ atomic、fence、string、write、stdio、malloc、stdlib、ctype、assert、`c1
 
 **独立验证**：`test/c11/stmt_expr.c` 涵盖 7 种场景（简单值、声明+值、侧效+值、if、for、嵌套、void），全部 PASS。
 
-## 9. 结论与建议
+## 9. C99 标准测试覆盖
+
+### 背景
+
+此前 mcc 有 `test/c11/`（C11）和 `test/c23/`（C23）专项测试目录，但 **C99 无独立测试目录**，是最大覆盖缺口。C99 核心特性的覆盖依赖 C11 测试的顺带覆盖，系统性不足。
+
+### 新增 test/c99/ 目录
+
+在本次审阅会话中创建了 `test/c99/` 目录（13 个 `.c` 文件 + 配套 `extern_defs.c` + 本地 `stddef.h`/`stdarg.h`/`stdint.h`），覆盖 C99 核心特性：
+
+| 文件名 | 测试的 C99 特性 | 标准参考 |
+|--------|---------------|---------|
+| `bool.c` | `_Bool` 类型、`(_Bool)` 转换 | §6.2.5, §6.3.1.2 |
+| `complex.c` | `_Complex double/float` 类型（从 `test/c11/` 提取） | §6.2.5p10 |
+| `compound_lit.c` | 复合字面量（从 `test/c11/` 提取） | §6.5.2.5 |
+| `desig_init.c` | 指定初始化器 `.field` / `[index]`（从 `test/c11/` 提取） | §6.7.8 |
+| `extern.c` + `extern_defs.c` | 外部链接、`extern` 函数声明 | §6.7.4 |
+| `flex_array_member.c` | 柔性数组成员 `[]` | §6.7.2.1 |
+| `float.c` | float/double 类型转换、浮点比较与算术 | C99 隐式转换规则 |
+| `long_long.c` | `long long` / `unsigned long long` 类型 | §5.2.4.2.1 |
+| `offsetof.c` | `offsetof` 宏（从 chibicc 改写） | §7.17 |
+| `pragma_operator.c` | `_Pragma()` 预处理操作符 | §6.10.6 |
+| `restrict.c` | `restrict` 指针限定符（从 chibicc 改写） | §6.7.3 |
+| `stdint.c` | `<stdint.h>` 精确宽度类型 | §7.18 |
+| `varargs.c` | `<stdarg.h>` 可变参数（从 `test/c11/` 提取） | §7.15 |
+| `vla.c` | 变长数组（从 `test/c11/` 提取） | §6.7.5.2 |
+
+**测试来源**：从 `test/c11/` 提取共性测试（`complex`/`compound_lit`/`desig_init`/`varargs`/`vla`）、从 chibicc 改写（`offsetof`/`restrict`/`float`/`extern`）、以及新编写（`bool`/`long_long`/`flex_array_member`/`stdint`/`pragma_operator`）。
+
+### 运行
+
+```
+make -C projects/mcc check-c99
+```
+
+结果：**13/13 PASS**（含 extern_defs.c 作为多文件编译验证）。
+
+### 测试格式
+
+所有测试使用 mcc 自有风格（`extern int puts(const char *)` + `return 0/1`），不依赖 `test.h` 或外部适配层。需要头文件的测试使用本地 `test/c99/stddef.h`/`stdarg.h`/`stdint.h`（与 `test/c11/` 做法一致）。
+
+Makefile 集成：
+- 新增 `check-c99` 目标（`.PHONY` 注册）
+- `check-community` 现在依赖 `check-c99` + `check-chibicc`
+
+## 10. 结论与建议
 
 1. **libc C11 实现完整**：meuos-libc 自带 C11 测试全 PASS，原子/线程/TLS/IO 等均正确。
-2. **mcc 标准 conformance 仍有缺口**：chibicc 测试暴露的 §5.B 各项（浮点后缀、字面量类型回退、宏重定义、限定指针转换、`__LINE__`、common 合并、Unicode 标识符、va_end 内建）是 mcc 真实的标准/C 缺陷，建议按优先级修复。`§5.A` 的 GNU 扩展为合理不支持，§5.C 为测试集自身偏差。
-3. **补充纯标准集**：chibicc 依赖 GNU 扩展，对纯标准度量偏差大。建议后续引入 `c-tests`（nlsandler）或 musl `libc-test`（MIT）作纯标准 C11/C23 + libc 头 conformance 度量（当前网络不可达，待可达后补齐）。
-4. **`({})` 扩展已完成**（§8）—— mcc 现在支持 GNU 语句表达式，16 个 chibicc 测试经 `({})` 推进到后续处理阶段，其中 4 个转为 PASS。
+2. **C99 测试覆盖已建立**：`test/c99/` 目录 13 个测试覆盖了 C99 的核心新特性（`_Bool`、`long long`、`restrict`、`_Complex`、VLA、复合字面量、指定初始化器、柔性数组成员、`offsetof`、`_Pragma`、`<stdint.h>`、可变参数）。当前 `make check-c99` 全部 PASS。
+3. **C11 + C23 + C99 三标准回归均通过**：`check-c11`（19 测试）、`check-c23`（16 测试）、`check-c99`（13 测试）、`check-chibicc`（PASS=7）全部 PASS，`meuos-libc check` 全部 PASS。
+4. **mcc 标准 conformance 仍有缺口**：chibicc 测试暴露的 §5.B 各项（浮点后缀、字面量类型回退、宏重定义、限定指针转换、`__LINE__`、common 合并、Unicode 标识符、va_end 内建）是 mcc 真实的标准/C 缺陷，建议按优先级修复。`§5.A` 的 GNU 扩展为合理不支持，§5.C 为测试集自身偏差。
+5. **补充纯标准集**：chibicc 依赖 GNU 扩展，对纯标准度量偏差大。建议后续引入 `c-tests`（nlsandler）或 musl `libc-test`（MIT）作纯标准 C11/C23 + libc 头 conformance 度量（当前网络不可达，待可达后补齐）。

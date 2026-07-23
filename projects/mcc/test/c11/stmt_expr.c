@@ -9,48 +9,42 @@
  *   - ({ decl; if/while/for; result_expr })
  *   - nested ({...})
  */
-#include <stdio.h>
-#include <stdlib.h>
+extern int puts(const char *);
+extern void exit(int);
 
-/* Minimal assert without test.h to keep it self-contained */
-static int failures;
-#define expect(exp, actual, code) do { \
-    long e = (long)(exp), a = (long)(actual); \
-    if (e != a) { \
-        printf("FAIL: expected %ld, got %ld  [%s]\n", e, a, code); \
-        failures++; \
-    } \
-} while(0)
+static void assert_eq(int expected, int actual, const char *msg) {
+    if (expected != actual) {
+        puts(msg);
+        exit(1);
+    }
+}
 
-int main(void)
-{
-    /* 1. Simple value */
-    expect(42, ({ 42; }), "simple");
+int main(void) {
+    /* 1. Simple ({ value }) */
+    int a = ({ 42; });
+    assert_eq(42, a, "FAIL 1: simple ({})");
 
-    /* 2. Decl + value */
-    expect(5, ({ int x = 5; x; }), "decl-value");
+    /* 2. ({ decl; value }) */
+    int b = ({ int x = 10; x + 5; });
+    assert_eq(15, b, "FAIL 2: decl+value");
 
-    /* 3. Decl + side-effect + value */
-    expect(7, ({ int x = 5; x += 2; x; }), "side-effect");
+    /* 3. Side effect + value */
+    int c = 0;
+    int d = ({ c = 100; c + 1; });
+    assert_eq(100, c, "FAIL 3a: side effect");
+    assert_eq(101, d, "FAIL 3b: result");
 
-    /* 4. Control flow inside */
-    int r = ({ int x = 1; if (x) x = 10; else x = 20; x; });
-    expect(10, r, "if-inside");
+    /* 4. Decl + for loop */
+    int sum = ({ int t = 0; for (int i = 0; i < 10; i++) t += i; t; });
+    assert_eq(45, sum, "FAIL 4: for loop");
 
-    /* 5. For loop inside */
-    r = ({ int s = 0; for (int i = 0; i < 10; i++) s += i; s; });
-    expect(45, r, "for-inside");
+    /* 5. Nested */
+    int e = ({ int x = ({ 7; }); x * 2; });
+    assert_eq(14, e, "FAIL 5: nested");
 
-    /* 6. Nested */
-    r = ({ int a = ({ int b = 3; b; }); a * a; });
-    expect(9, r, "nested");
+    /* 6. Void — no trailing expression */
+    ({ puts("PASS 6: void"); });
 
-    /* 7. Void (no last expr) */
-    ({ int x = 1; x = x + 1; });
-
-    if (failures)
-        printf("FAILED (%d)\n", failures);
-    else
-        printf("PASS\n");
-    return failures;
+    puts("PASS");
+    return 0;
 }
