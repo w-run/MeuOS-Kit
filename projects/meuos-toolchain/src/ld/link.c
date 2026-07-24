@@ -1054,6 +1054,14 @@ layout_output(struct ld_context *ctx)
 		}
 	}
 
+	/* Advance offset past non-TLS sections so TLS does not overlap .bss */
+	for (i = 0; i < ctx->group_count; ++i) {
+		struct ld_group *g = &ctx->groups[i];
+		if (is_tls_group(ctx, (int)i)) continue;
+		uint64_t e = g->file_offset + g->size;
+		if (e > offset) offset = e;
+	}
+
 	/* TLS sections: lay out .tdata (needs file space) then .tbss (NOBITS). */
 	if (ctx->tls_tdata_group >= 0) {
 		struct ld_group *g = &ctx->groups[ctx->tls_tdata_group];
@@ -1069,21 +1077,15 @@ layout_output(struct ld_context *ctx)
 			g->file_offset = td->file_offset + td->size;
 			g->address = td->address + td->size;
 		} else {
-			/* No .tdata: .tbss shares address with .data for section header
-			 * purposes, but does not consume PT_LOAD file or memory space. */
-			int dg = find_group(ctx, ".data");
-			if (dg >= 0) {
-				g->file_offset = ctx->groups[dg].file_offset;
-				g->address = ctx->groups[dg].address;
-			} else {
-				g->file_offset = offset;
-				g->address = LD_BASE + offset;
+			/* No .tdata: allocate beyond non-TLS sections */
+			g->file_offset = offset;
+			g->address = LD_BASE + offset;
+			offset += g->size;
 			}
 		}
+		return 0;
 	}
 
-	return 0;
-}
 
 static int
 symbol_tls_offset(struct ld_context *ctx, struct ld_object *object,
@@ -1158,6 +1160,14 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 	if (strcmp(ctx->target->name, "loongarch64") == 0) {
 		uint64_t la64_got_addr;
 		size_t la64_got_idx;
+
+		/* TLS LE relocations need TP-relative offset, not full VA */
+		if (type == 83 || type == 84 || type == 85 || type == 86) {
+			uint64_t tls_off;
+			if (symbol_tls_offset(ctx, object, symbol_index, &tls_off) != 0)
+				return ld_errorf(ctx, "unsupported TLS relocation", name);
+			resolved_value = tls_off;
+		}
 
 		/* GOT-based relocations: route via GOT entry (fill_got handles the data) */
 		if (type == 75 || type == 76) { /* R_LARCH_GOT_PC_HI20 / GOT_PC_LO12 */
@@ -1398,8 +1408,6 @@ write_executable(struct ld_context *ctx, const char *path,
 			memory_end = group->file_offset + group->size;
 	}
 	for (i = 0; i < ctx->group_count; ++i) {
-		if (is_tls_group(ctx, (int)i))
-			continue;
 		if ((ctx->groups[i].flags & MT_SHF_ALLOC) &&
 		    ctx->groups[i].type == MT_SHT_NOBITS &&
 		    memory_end < ctx->groups[i].file_offset + ctx->groups[i].size)
@@ -1473,6 +1481,14 @@ write_executable(struct ld_context *ctx, const char *path,
 		uint64_t single_end = memory_end > rx_end ? memory_end : rx_end;
 		uint64_t filesz = alloc_file_end > LD_PAGE ? alloc_file_end : LD_PAGE;
 		uint64_t memsz = single_end > LD_PAGE ? single_end : LD_PAGE;
+		/* Extend LOAD FileSiz to cover .tdata so __meuos_tls_init
+		 * can read the TLS initial values via the LOAD mapping. */
+		if (ctx->tls_tdata_group >= 0) {
+			uint64_t tde = ctx->groups[ctx->tls_tdata_group].file_offset
+			  + ctx->groups[ctx->tls_tdata_group].size;
+			if (tde > filesz) filesz = tde;
+			if (tde > memsz) memsz = tde;
+		}
 		if (write_program_header(file, LD_PF_R | LD_PF_W | LD_PF_X,
 		                         0, LD_BASE, filesz, memsz) != 0)
 			goto out_file;
