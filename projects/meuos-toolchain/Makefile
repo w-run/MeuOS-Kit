@@ -175,8 +175,8 @@ check-as-x86_64: $(AS_BIN)
 	trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; \
 	printf '%s\n' '.text' '.globl main' 'main:' 'endbr64' 'movl $$0, %eax' 'ret' > "$$tmp/main.s"; \
 	$(AS_BIN) -o "$$tmp/main.o" "$$tmp/main.s"; \
-	readelf -h "$$tmp/main.o" | grep -Eq 'Type:[[:space:]]+REL'; \
-	readelf -s "$$tmp/main.o" | grep -Eq '[[:space:]]main$$'; \
+	LANG=C readelf -h "$$tmp/main.o" | grep -Eq 'Type:[[:space:]]+REL'; \
+	LANG=C readelf -s "$$tmp/main.o" | grep -Eq '[[:space:]]main$$'; \
 	printf 'mt as x86_64 check: PASS\n'
 
 check-target-dispatch: $(AS_BIN) $(LD_BIN)
@@ -185,15 +185,15 @@ check-target-dispatch: $(AS_BIN) $(LD_BIN)
 	trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; \
 	printf '%s\n' '.text' '.globl main' 'main:' 'ret' > "$$tmp/min.s"; \
 	$(AS_BIN) --target=x86_64 -o "$$tmp/main.o" "$$tmp/min.s"; \
-	printf '%s' '--target=x86_64 as: '; readelf -h "$$tmp/main.o" | grep 'Machine:'; \
+	printf '%s' '--target=x86_64 as: '; LANG=C readelf -h "$$tmp/main.o" | grep 'Machine:'; \
 	$(AS_BIN) --target=aarch64 -o "$$tmp/main.o" "$$tmp/min.s"; \
-	printf '%s' '--target=aarch64 as: '; readelf -h "$$tmp/main.o" | grep 'Machine:'; \
+	printf '%s' '--target=aarch64 as: '; LANG=C readelf -h "$$tmp/main.o" | grep 'Machine:'; \
 	$(AS_BIN) --target=i386 -o "$$tmp/main.o" "$$tmp/min.s"; \
-	printf '%s' '--target=i386 as: '; readelf -h "$$tmp/main.o" | grep 'Machine:'; \
+	printf '%s' '--target=i386 as: '; LANG=C readelf -h "$$tmp/main.o" | grep 'Machine:'; \
 	$(AS_BIN) --target=riscv64 -o "$$tmp/main.o" "$$tmp/min.s"; \
-	printf '%s' '--target=riscv64 as: '; readelf -h "$$tmp/main.o" | grep 'Machine:'; \
+	printf '%s' '--target=riscv64 as: '; LANG=C readelf -h "$$tmp/main.o" | grep 'Machine:'; \
 	$(AS_BIN) --target=loongarch64 -o "$$tmp/main.o" "$$tmp/min.s"; \
-	printf '%s' '--target=loongarch64 as: '; readelf -h "$$tmp/main.o" | grep 'Machine:'; \
+	printf '%s' '--target=loongarch64 as: '; LANG=C readelf -h "$$tmp/main.o" | grep 'Machine:'; \
 	$(AS_BIN) --target=armv7 "$$tmp/min.s" 2>&1 && exit 1 || printf 'unsupported target rejected: PASS\n'; \
 	$(LD_BIN) --target=x86_64 --version | grep -q 'x86_64' && printf 'ld --target=x86_64 --version: PASS\n'; \
 	$(LD_BIN) --target=i386 --version | grep -q 'i386' && printf 'ld --target=i386 --version: PASS\n'; \
