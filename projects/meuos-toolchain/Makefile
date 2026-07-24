@@ -26,7 +26,7 @@ LIBDISASM_SRCS := $(sort $(wildcard src/libdisasm/*.c))
 LIBDISASM_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(LIBDISASM_SRCS))
 LIBDISASM_LIB := $(BUILD)/lib/libdisasm.a
 
-TARGET_SRCS := $(sort $(wildcard src/target/*.c) $(wildcard src/target/x86_64/*.c))
+TARGET_SRCS := $(sort $(wildcard src/target/*.c) $(wildcard src/target/x86_64/*.c) $(wildcard src/target/i386/*.c) $(wildcard src/target/aarch64/*.c))
 TARGET_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(TARGET_SRCS))
 
 AR_SRCS := $(sort $(wildcard src/ar/*.c))
@@ -183,18 +183,18 @@ check-target-dispatch: $(AS_BIN) $(LD_BIN)
 	@set -eu; \
 	tmp=$$(mktemp -d /tmp/meuos-toolchain-dispatch.XXXXXX); \
 	trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; \
-	printf '%s\n' '.text' '.globl main' 'main:' 'endbr64' 'movl $$0, %eax' 'ret' > "$$tmp/main.s"; \
-	$(AS_BIN) --target=x86_64 -o "$$tmp/main.o" "$$tmp/main.s"; \
+	printf '%s\n' '.text' '.globl main' 'main:' 'ret' > "$$tmp/min.s"; \
+	$(AS_BIN) --target=x86_64 -o "$$tmp/main.o" "$$tmp/min.s"; \
 	printf '%s' '--target=x86_64 as: '; readelf -h "$$tmp/main.o" | grep 'Machine:'; \
-	$(AS_BIN) --target=aarch64 -o "$$tmp/main.o" "$$tmp/main.s"; \
+	$(AS_BIN) --target=aarch64 -o "$$tmp/main.o" "$$tmp/min.s"; \
 	printf '%s' '--target=aarch64 as: '; readelf -h "$$tmp/main.o" | grep 'Machine:'; \
-	$(AS_BIN) --target=i386 -o "$$tmp/main.o" "$$tmp/main.s"; \
+	$(AS_BIN) --target=i386 -o "$$tmp/main.o" "$$tmp/min.s"; \
 	printf '%s' '--target=i386 as: '; readelf -h "$$tmp/main.o" | grep 'Machine:'; \
-	$(AS_BIN) --target=riscv64 -o "$$tmp/main.o" "$$tmp/main.s"; \
+	$(AS_BIN) --target=riscv64 -o "$$tmp/main.o" "$$tmp/min.s"; \
 	printf '%s' '--target=riscv64 as: '; readelf -h "$$tmp/main.o" | grep 'Machine:'; \
-	$(AS_BIN) --target=loongarch64 -o "$$tmp/main.o" "$$tmp/main.s"; \
+	$(AS_BIN) --target=loongarch64 -o "$$tmp/main.o" "$$tmp/min.s"; \
 	printf '%s' '--target=loongarch64 as: '; readelf -h "$$tmp/main.o" | grep 'Machine:'; \
-	$(AS_BIN) --target=armv7 "$$tmp/main.s" 2>&1 && exit 1 || printf 'unsupported target rejected: PASS\n'; \
+	$(AS_BIN) --target=armv7 "$$tmp/min.s" 2>&1 && exit 1 || printf 'unsupported target rejected: PASS\n'; \
 	$(LD_BIN) --target=x86_64 --version | grep -q 'x86_64' && printf 'ld --target=x86_64 --version: PASS\n'; \
 	$(LD_BIN) --target=i386 --version | grep -q 'i386' && printf 'ld --target=i386 --version: PASS\n'; \
 	printf 'check-target-dispatch: PASS\n'

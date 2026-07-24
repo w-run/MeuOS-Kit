@@ -1,6 +1,8 @@
 /* assemble.c - AT&T subset assembler and ELF ET_REL writer. */
 #include "mt/as.h"
+#include "mt/as_int.h"
 #include "mt/elf.h"
+#include "mt/elf32.h"
 #include "mt/target.h"
 
 #include <ctype.h>
@@ -13,68 +15,6 @@
 #include <string.h>
 
 #define MT_ST_INFO(bind, type) MT_ELF64_ST_INFO(bind, type)
-
-struct as_section {
-	char *name;
-	uint32_t type;
-	uint64_t flags;
-	uint64_t align;
-	unsigned char *data;
-	size_t size;
-	size_t capacity;
-};
-
-struct as_symbol {
-	char *name;
-	int section;
-	uint64_t value;
-	uint64_t size;
-	unsigned bind;
-	unsigned type;
-	unsigned other;
-	int defined;
-	uint32_t output_index;
-};
-
-struct as_fixup {
-	int section;
-	size_t offset;
-	unsigned type;
-	unsigned width;
-	int64_t addend;
-	char *symbol;
-};
-
-struct as_file {
-	struct as_section *sections;
-	size_t section_count;
-	size_t section_capacity;
-	struct as_symbol *symbols;
-	size_t symbol_count;
-	size_t symbol_capacity;
-	struct as_fixup *fixups;
-	size_t fixup_count;
-	size_t fixup_capacity;
-	int current;
-	const char *filename;
-	unsigned line;
-	char error[256];
-	size_t numeric_counts[10];
-	int block_comment;
-};
-
-struct as_operand {
-	enum { OP_INVALID, OP_IMM, OP_REG, OP_MEM, OP_SYMBOL } kind;
-	int reg;
-	int width;
-	int base;
-	int index;
-	int scale;
-	int64_t displacement;
-	char *symbol;
-	char modifier[16];
-	int64_t addend;
-};
 
 struct out_section {
 	const char *name;
@@ -132,7 +72,7 @@ mt_strdup(const char *text)
 	return copy;
 }
 
-static int
+int
 as_error(struct as_file *as, const char *format, ...)
 {
 	va_list ap;
@@ -224,8 +164,8 @@ free_as(struct as_file *as)
 	memset(as, 0, sizeof(*as));
 }
 
-static int
-append_bytes(struct as_file *as, struct as_section *section,
+int
+as_append_bytes(struct as_file *as, struct as_section *section,
              const void *data, size_t size)
 {
 	size_t capacity;
@@ -264,7 +204,7 @@ append_zeroes(struct as_file *as, struct as_section *section, size_t count)
 	static const unsigned char zero[256];
 	while (count != 0) {
 		size_t n = count < sizeof(zero) ? count : sizeof(zero);
-		if (append_bytes(as, section, zero, n) != 0)
+		if (as_append_bytes(as, section, zero, n) != 0)
 			return -1;
 		count -= n;
 	}
@@ -288,7 +228,7 @@ align_section(struct as_file *as, struct as_section *section, uint64_t align)
 	    section->type != MT_SHT_NOBITS) {
 		static const unsigned char nop = 0x90;
 		while (padding != 0) {
-			if (append_bytes(as, section, &nop, 1) != 0)
+			if (as_append_bytes(as, section, &nop, 1) != 0)
 				return -1;
 			--padding;
 		}
@@ -405,8 +345,8 @@ get_symbol(struct as_file *as, const char *name)
 	return symbol;
 }
 
-static int
-add_fixup(struct as_file *as, struct as_section *section, size_t offset,
+int
+as_add_fixup(struct as_file *as, struct as_section *section, size_t offset,
           unsigned width, unsigned type, int64_t addend, const char *symbol)
 {
 	struct as_fixup *fixups;
@@ -722,29 +662,29 @@ split_operands(char *text, char *operands[4])
 	return count;
 }
 
-static int
-emit_u8(struct as_file *as, struct as_section *section, unsigned value)
+int
+as_emit_u8(struct as_file *as, struct as_section *section, unsigned value)
 {
 	unsigned char byte = (unsigned char)value;
-	return append_bytes(as, section, &byte, 1);
+	return as_append_bytes(as, section, &byte, 1);
 }
 
-static int
-emit_le(struct as_file *as, struct as_section *section, uint64_t value,
+int
+as_emit_le(struct as_file *as, struct as_section *section, uint64_t value,
         unsigned width)
 {
 	unsigned char bytes[8];
 	unsigned i;
 	for (i = 0; i < width; ++i)
 		bytes[i] = (unsigned char)(value >> (i * 8));
-	return append_bytes(as, section, bytes, width);
+	return as_append_bytes(as, section, bytes, width);
 }
 
 static int
 emit_rex(struct as_file *as, struct as_section *section, int w, int r, int b)
 {
 	if (w || r >= 8 || b >= 8)
-		return emit_u8(as, section, 0x40 | (w ? 8 : 0) |
+		return as_emit_u8(as, section, 0x40 | (w ? 8 : 0) |
 		               (r >= 8 ? 4 : 0) | (b >= 8 ? 1 : 0));
 	return 0;
 }
@@ -753,7 +693,7 @@ static int
 emit_byte_rex(struct as_file *as, struct as_section *section, int reg, int rm)
 {
 	if ((reg >= 4 && reg < 8) || (rm >= 4 && rm < 8))
-		return emit_u8(as, section, 0x40);
+		return as_emit_u8(as, section, 0x40);
 	return 0;
 }
 
@@ -770,7 +710,7 @@ emit_modrm(struct as_file *as, struct as_section *section, int reg,
 
 	if (rm->kind == OP_REG) {
 		modrm = 0xc0 | ((unsigned)reg & 7) << 3 | ((unsigned)rm->reg & 7);
-		return emit_u8(as, section, modrm);
+		return as_emit_u8(as, section, modrm);
 	}
 	if (rm->kind != OP_MEM)
 		return as_error(as, "operand is not register or memory");
@@ -778,15 +718,15 @@ emit_modrm(struct as_file *as, struct as_section *section, int reg,
 	disp = rm->displacement;
 	if (base == -2) {
 		modrm = ((unsigned)reg & 7) << 3 | 5;
-		if (emit_u8(as, section, modrm) != 0)
+		if (as_emit_u8(as, section, modrm) != 0)
 			return -1;
 		fix_offset = section->size;
 		if (rm->symbol) {
-			if (emit_le(as, section, 0, 4) != 0 ||
-			    add_fixup(as, section, fix_offset, 4, fix_type,
+			if (as_emit_le(as, section, 0, 4) != 0 ||
+			    as_add_fixup(as, section, fix_offset, 4, fix_type,
 			               fix_addend, rm->symbol) != 0)
 				return -1;
-		} else if (emit_le(as, section, (uint32_t)disp, 4) != 0)
+		} else if (as_emit_le(as, section, (uint32_t)disp, 4) != 0)
 			return -1;
 		return 0;
 	}
@@ -805,20 +745,20 @@ emit_modrm(struct as_file *as, struct as_section *section, int reg,
 		                 rm->scale == 2 ? 1 : 0;
 		unsigned index = rm->index >= 0 ? (unsigned)rm->index : 4;
 		modrm = ((unsigned)mod << 6) | ((unsigned)reg & 7) << 3 | 4;
-		if (emit_u8(as, section, modrm) != 0 ||
-		    emit_u8(as, section, (scale << 6) | (index << 3) |
+		if (as_emit_u8(as, section, modrm) != 0 ||
+		    as_emit_u8(as, section, (scale << 6) | (index << 3) |
 		             ((unsigned)base & 7)) != 0)
 			return -1;
 	} else {
 		modrm = ((unsigned)mod << 6) | ((unsigned)reg & 7) << 3 |
 		        ((unsigned)base & 7);
-		if (emit_u8(as, section, modrm) != 0)
+		if (as_emit_u8(as, section, modrm) != 0)
 			return -1;
 	}
 	if (mod == 1)
-		return emit_le(as, section, (uint8_t)disp, 1);
+		return as_emit_le(as, section, (uint8_t)disp, 1);
 	if (mod == 2 || (mod == 0 && (base == 5 || base == 13)))
-		return emit_le(as, section, (uint32_t)disp, 4);
+		return as_emit_le(as, section, (uint32_t)disp, 4);
 	return 0;
 }
 
@@ -850,7 +790,7 @@ emit_rm_reg(struct as_file *as, struct as_section *section, unsigned opcode,
 	                               rm->kind == OP_REG ? rm->reg : -1) != 0) ||
 	    emit_rex(as, section, width == 8, reg,
 	              rm->kind == OP_REG ? rm->reg : rm->base) != 0 ||
-	    emit_u8(as, section, opcode) != 0)
+	    as_emit_u8(as, section, opcode) != 0)
 		return -1;
 	return emit_modrm(as, section, reg, rm, fix_type, rm->addend - 4);
 }
@@ -867,10 +807,10 @@ emit_binary_immediate(struct as_file *as, struct as_section *section,
 	                               dst->kind == OP_REG ? dst->reg : -1) != 0) ||
 	    emit_rex(as, section, width == 8, 0,
 	             dst->kind == OP_REG ? dst->reg : dst->base) != 0 ||
-	    emit_u8(as, section, width == 1 ? 0x80 : 0x81) != 0 ||
+	    as_emit_u8(as, section, width == 1 ? 0x80 : 0x81) != 0 ||
 	    emit_modrm(as, section, ext, dst, MT_R_X86_64_PC32, -4) != 0)
 		return -1;
-	return emit_le(as, section, (uint32_t)src->displacement, width == 1 ? 1 : 4);
+	return as_emit_le(as, section, (uint32_t)src->displacement, width == 1 ? 1 : 4);
 }
 
 static int
@@ -900,12 +840,12 @@ emit_symbol_branch(struct as_file *as, struct as_section *section,
 	size_t offset;
 	if (target->kind != OP_SYMBOL)
 		return as_error(as, "branch target must be a symbol");
-	if (emit_u8(as, section, opcode) != 0)
+	if (as_emit_u8(as, section, opcode) != 0)
 		return -1;
 	offset = section->size;
-	if (emit_le(as, section, 0, 4) != 0)
+	if (as_emit_le(as, section, 0, 4) != 0)
 		return -1;
-	return add_fixup(as, section, offset, 4, reloc_type, -4,
+	return as_add_fixup(as, section, offset, 4, reloc_type, -4,
 	                 target->symbol);
 }
 
@@ -929,14 +869,14 @@ emit_sse(struct as_file *as, struct as_section *s,
 	int rm_num = (rm->kind == OP_REG) ? rm->reg : rm->base;
 	unsigned char rex = 0;
 
-	if (mandatory_prefix && emit_u8(as, s, mandatory_prefix) != 0)
+	if (mandatory_prefix && as_emit_u8(as, s, mandatory_prefix) != 0)
 		return -1;
 	if (need_w) rex |= 0x48;
 	if (reg_num >= 8) rex |= 0x44;
 	if (rm_num >= 8) rex |= 0x41;
-	if (rex && emit_u8(as, s, rex) != 0)
+	if (rex && as_emit_u8(as, s, rex) != 0)
 		return -1;
-	if (emit_u8(as, s, 0x0F) != 0 || emit_u8(as, s, opcode2) != 0)
+	if (as_emit_u8(as, s, 0x0F) != 0 || as_emit_u8(as, s, opcode2) != 0)
 		return -1;
 	return emit_modrm(as, s, reg_num, rm, fix_type, fix_addend);
 }
@@ -970,6 +910,28 @@ static int
 emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 {
 	struct as_section *section = &as->sections[as->current];
+
+	/* If the target has its own encoder, delegate entirely. */
+	if (as->target && as->target->encode_insn) {
+		struct mt_insn insn;
+		if (as->target->encode_insn(as->target, mnemonic, operand_text,
+		                             &insn) < 0) {
+			return as_error(as, "unsupported instruction: %s", mnemonic);
+		}
+		if (as_append_bytes(as, section, insn.bytes, insn.size) != 0)
+			return -1;
+		if (!insn.fixed && insn.fixup_symbol) {
+			size_t section_offset = section->size - insn.size;
+			return as_add_fixup(as, section,
+			                    section_offset + insn.fixup_offset,
+			                    insn.fixup_width,
+			                    insn.reloc_type, insn.fixup_addend,
+			                    insn.fixup_symbol);
+		}
+		return 0;
+	}
+
+	/* x86_64 inline encoder (fallback when target->encode_insn is NULL). */
 	struct as_operand op[4];
 	char *operands[4];
 	char base[32];
@@ -988,23 +950,23 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 		base[i] = (char)tolower((unsigned char)mnemonic[i]);
 	base[i] = '\0';
 	if (strcmp(base, "endbr64") == 0)
-		return emit_u8(as, section, 0xf3) || emit_u8(as, section, 0x0f) ||
-		       emit_u8(as, section, 0x1e) || emit_u8(as, section, 0xfa);
+		return as_emit_u8(as, section, 0xf3) || as_emit_u8(as, section, 0x0f) ||
+		       as_emit_u8(as, section, 0x1e) || as_emit_u8(as, section, 0xfa);
 	if (strcmp(base, "ret") == 0)
-		return emit_u8(as, section, 0xc3);
+		return as_emit_u8(as, section, 0xc3);
 	if (strcmp(base, "leave") == 0)
-		return emit_u8(as, section, 0xc9);
+		return as_emit_u8(as, section, 0xc9);
 	if (strcmp(base, "nop") == 0)
-		return emit_u8(as, section, 0x90);
+		return as_emit_u8(as, section, 0x90);
 	if (strcmp(base, "ud2") == 0)
-		return emit_u8(as, section, 0x0f) || emit_u8(as, section, 0x0b);
+		return as_emit_u8(as, section, 0x0f) || as_emit_u8(as, section, 0x0b);
 	if (strcmp(base, "syscall") == 0)
-		return emit_u8(as, section, 0x0f) || emit_u8(as, section, 0x05);
+		return as_emit_u8(as, section, 0x0f) || as_emit_u8(as, section, 0x05);
 	if (strcmp(base, "mfence") == 0)
-		return emit_u8(as, section, 0x0f) || emit_u8(as, section, 0xae) ||
-		       emit_u8(as, section, 0xf0);
+		return as_emit_u8(as, section, 0x0f) || as_emit_u8(as, section, 0xae) ||
+		       as_emit_u8(as, section, 0xf0);
 	if (strcmp(base, "hlt") == 0)
-		return emit_u8(as, section, 0xf4);
+		return as_emit_u8(as, section, 0xf4);
 	if (strcmp(base, "lock") == 0) {
 		char *inner = trim(operand_text);
 		char *inner_operands;
@@ -1015,14 +977,14 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 			return as_error(as, "lock requires an instruction");
 		*split++ = '\0';
 		inner_operands = trim(split);
-		if (emit_u8(as, section, 0xf0) != 0)
+		if (as_emit_u8(as, section, 0xf0) != 0)
 			return -1;
 		return emit_instruction(as, inner, inner_operands);
 	}
 	if (strcmp(base, "cqto") == 0)
-		return emit_u8(as, section, 0x48) || emit_u8(as, section, 0x99);
+		return as_emit_u8(as, section, 0x48) || as_emit_u8(as, section, 0x99);
 	if (strcmp(base, "cltd") == 0)
-		return emit_u8(as, section, 0x99);
+		return as_emit_u8(as, section, 0x99);
 	if (strcmp(base, "pushq") == 0 || strcmp(base, "push") == 0 ||
 	    strcmp(base, "popq") == 0 || strcmp(base, "pop") == 0) {
 		n = split_operands(operand_text, operands);
@@ -1030,13 +992,13 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 		    op[0].kind != OP_REG)
 			return as_error(as, "push/pop requires one register");
 		if (strncmp(base, "push", 4) == 0) {
-			if (op[0].reg >= 8 && emit_u8(as, section, 0x41) != 0)
+			if (op[0].reg >= 8 && as_emit_u8(as, section, 0x41) != 0)
 				return -1;
-			return emit_u8(as, section, 0x50 + (op[0].reg & 7));
+			return as_emit_u8(as, section, 0x50 + (op[0].reg & 7));
 		}
-		if (op[0].reg >= 8 && emit_u8(as, section, 0x41) != 0)
+		if (op[0].reg >= 8 && as_emit_u8(as, section, 0x41) != 0)
 			return -1;
-		return emit_u8(as, section, 0x58 + (op[0].reg & 7));
+		return as_emit_u8(as, section, 0x58 + (op[0].reg & 7));
 	}
 	n = split_operands(operand_text, operands);
 	if (n < 0)
@@ -1054,7 +1016,7 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 		}
 		if (op[0].kind == OP_REG) {
 			if (emit_rex(as, section, 0, 0, op[0].reg) != 0 ||
-			    emit_u8(as, section, 0xff) != 0 ||
+			    as_emit_u8(as, section, 0xff) != 0 ||
 			    emit_modrm(as, section, 2, &op[0], MT_R_X86_64_PC32, -4) != 0)
 				goto fail;
 			goto done;
@@ -1071,14 +1033,14 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 			                       MT_R_X86_64_PC32) != 0)
 				goto fail;
 		} else {
-			if (emit_u8(as, section, 0x0f) != 0 ||
-			    emit_u8(as, section, 0x80 | code) != 0 ||
+			if (as_emit_u8(as, section, 0x0f) != 0 ||
+			    as_emit_u8(as, section, 0x80 | code) != 0 ||
 			    op[0].kind != OP_SYMBOL)
 				goto unsupported;
 			{
 				size_t off = section->size;
-				if (emit_le(as, section, 0, 4) != 0 ||
-				    add_fixup(as, section, off, 4, MT_R_X86_64_PC32,
+				if (as_emit_le(as, section, 0, 4) != 0 ||
+				    as_add_fixup(as, section, off, 4, MT_R_X86_64_PC32,
 				               -4, op[0].symbol) != 0)
 					goto fail;
 			}
@@ -1090,8 +1052,8 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 		if (code < 0 || op[0].kind != OP_REG)
 			goto unsupported;
 		if (emit_rex(as, section, 0, 0, op[0].reg) != 0 ||
-		    emit_u8(as, section, 0x0f) != 0 ||
-		    emit_u8(as, section, 0x90 | code) != 0 ||
+		    as_emit_u8(as, section, 0x0f) != 0 ||
+		    as_emit_u8(as, section, 0x90 | code) != 0 ||
 		    emit_modrm(as, section, 0, &op[0], MT_R_X86_64_PC32, -4) != 0)
 			goto fail;
 		goto done;
@@ -1103,8 +1065,8 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 		width = op[1].width;
 		if (emit_rex(as, section, width == 8, op[1].reg,
 		              op[0].kind == OP_REG ? op[0].reg : -1) != 0 ||
-		    emit_u8(as, section, 0x0f) != 0 ||
-		    emit_u8(as, section, 0x40 | code) != 0 ||
+		    as_emit_u8(as, section, 0x0f) != 0 ||
+		    as_emit_u8(as, section, 0x40 | code) != 0 ||
 		    emit_modrm(as, section, op[1].reg, &op[0],
 		               MT_R_X86_64_PC32, -4) != 0)
 			goto fail;
@@ -1122,14 +1084,14 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 		if (op[0].kind == OP_IMM) {
 			if (emit_rex(as, section, width == 8, 0,
 			              op[1].kind == OP_REG ? op[1].reg : op[1].base) != 0 ||
-			    emit_u8(as, section, width == 1 ? 0xc0 : 0xc1) != 0 ||
+			    as_emit_u8(as, section, width == 1 ? 0xc0 : 0xc1) != 0 ||
 			    emit_modrm(as, section, ext, &op[1], MT_R_X86_64_PC32, -4) != 0 ||
-			    emit_le(as, section, (uint8_t)op[0].displacement, 1) != 0)
+			    as_emit_le(as, section, (uint8_t)op[0].displacement, 1) != 0)
 				goto fail;
 		} else if (op[0].kind == OP_REG && op[0].reg == 1 && op[0].width == 1) {
 			if (emit_rex(as, section, width == 8, 0,
 			              op[1].kind == OP_REG ? op[1].reg : op[1].base) != 0 ||
-			    emit_u8(as, section, width == 1 ? 0xd2 : 0xd3) != 0 ||
+			    as_emit_u8(as, section, width == 1 ? 0xd2 : 0xd3) != 0 ||
 			    emit_modrm(as, section, ext, &op[1], MT_R_X86_64_PC32, -4) != 0)
 				goto fail;
 		} else
@@ -1146,7 +1108,7 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 			goto unsupported;
 		if (emit_rex(as, section, width == 8, 0,
 		              op[0].kind == OP_REG ? op[0].reg : -1) != 0 ||
-		    emit_u8(as, section, width == 1 ? 0xf6 : 0xf7) != 0 ||
+		    as_emit_u8(as, section, width == 1 ? 0xf6 : 0xf7) != 0 ||
 		    emit_modrm(as, section, ext, &op[0], MT_R_X86_64_PC32, -4) != 0)
 			goto fail;
 		goto done;
@@ -1304,7 +1266,7 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 		if (source_width == 4 && width == 8) {
 			if (emit_rex(as, section, 1, op[1].reg,
 			              op[0].kind == OP_REG ? op[0].reg : -1) != 0 ||
-			    emit_u8(as, section, 0x63) != 0 ||
+			    as_emit_u8(as, section, 0x63) != 0 ||
 			    emit_modrm(as, section, op[1].reg, &op[0],
 			               MT_R_X86_64_PC32, -4) != 0)
 				goto fail;
@@ -1315,7 +1277,7 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 				goto unsupported;
 			if (emit_rex(as, section, width == 8, op[1].reg,
 			              op[0].kind == OP_REG ? op[0].reg : -1) != 0 ||
-			    emit_u8(as, section, 0x0f) != 0 || emit_u8(as, section, opcode) != 0 ||
+			    as_emit_u8(as, section, 0x0f) != 0 || as_emit_u8(as, section, opcode) != 0 ||
 			    emit_modrm(as, section, op[1].reg, &op[0],
 			               MT_R_X86_64_PC32, -4) != 0)
 				goto fail;
@@ -1330,13 +1292,13 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 			if (width == 8 && (op[0].displacement > INT32_MAX ||
 			                   op[0].displacement < INT32_MIN)) {
 				if (emit_rex(as, section, 1, 0, op[1].reg) != 0 ||
-				    emit_u8(as, section, 0xb8 + (op[1].reg & 7)) != 0 ||
-				    emit_le(as, section, (uint64_t)op[0].displacement, 8) != 0)
+				    as_emit_u8(as, section, 0xb8 + (op[1].reg & 7)) != 0 ||
+				    as_emit_le(as, section, (uint64_t)op[0].displacement, 8) != 0)
 					goto fail;
 			} else if (emit_rex(as, section, width == 8, 0, op[1].reg) != 0 ||
-			           emit_u8(as, section, width == 1 ? 0xb0 : 0xb8 +
+			           as_emit_u8(as, section, width == 1 ? 0xb0 : 0xb8 +
 			                    (op[1].reg & 7)) != 0 ||
-			           emit_le(as, section, (uint64_t)op[0].displacement,
+			           as_emit_le(as, section, (uint64_t)op[0].displacement,
 			                   width == 1 ? 1 : width == 2 ? 2 : 4) != 0)
 				goto fail;
 			goto done;
@@ -1345,9 +1307,9 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 		                              op[1].kind == OP_REG)) {
 			if (emit_rex(as, section, width == 8, 0,
 			              op[1].kind == OP_REG ? op[1].reg : op[1].base) != 0 ||
-			    emit_u8(as, section, width == 1 ? 0xc6 : 0xc7) != 0 ||
+			    as_emit_u8(as, section, width == 1 ? 0xc6 : 0xc7) != 0 ||
 			    emit_modrm(as, section, 0, &op[1], MT_R_X86_64_PC32, -4) != 0 ||
-			    emit_le(as, section, (uint64_t)op[0].displacement,
+			    as_emit_le(as, section, (uint64_t)op[0].displacement,
 			            width == 1 ? 1 : 4) != 0)
 				goto fail;
 			goto done;
@@ -1366,7 +1328,7 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 		width = op[1].width;
 		if (emit_rex(as, section, width == 8, op[1].reg,
 		              op[0].kind == OP_REG ? op[0].reg : -1) != 0 ||
-		    emit_u8(as, section, 0x8d) != 0 ||
+		    as_emit_u8(as, section, 0x8d) != 0 ||
 		    emit_modrm(as, section, op[1].reg, &op[0],
 		               MT_R_X86_64_PC32, -4) != 0)
 			goto fail;
@@ -1393,7 +1355,7 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 			    emit_rex(as, section, width == 8,
 			              op[0].kind == OP_REG ? op[0].reg : op[1].reg,
 			              op[1].kind == OP_REG ? op[1].reg : op[1].base) != 0 ||
-			    emit_u8(as, section, 0x0f) != 0 || emit_u8(as, section, opcode) != 0 ||
+			    as_emit_u8(as, section, 0x0f) != 0 || as_emit_u8(as, section, opcode) != 0 ||
 			    emit_modrm(as, section, op[0].kind == OP_REG ? op[0].reg : op[1].reg,
 			               &op[1], MT_R_X86_64_PC32, -4) != 0)
 				goto fail;
@@ -1407,7 +1369,7 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 		opcode = strncmp(base, "inc", 3) == 0 ? 0 : 1;
 		if (emit_rex(as, section, width == 8, 0,
 		              op[0].kind == OP_REG ? op[0].reg : -1) != 0 ||
-		    emit_u8(as, section, width == 1 ? 0xfe : 0xff) != 0 ||
+		    as_emit_u8(as, section, width == 1 ? 0xfe : 0xff) != 0 ||
 		    emit_modrm(as, section, opcode, &op[0], MT_R_X86_64_PC32, -4) != 0)
 			goto fail;
 		goto done;
@@ -1417,10 +1379,10 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 			width = op[2].width;
 			if (emit_rex(as, section, width == 8, op[2].reg,
 			              op[1].kind == OP_REG ? op[1].reg : op[1].base) != 0 ||
-			    emit_u8(as, section, 0x69) != 0 ||
+			    as_emit_u8(as, section, 0x69) != 0 ||
 			    emit_modrm(as, section, op[2].reg, &op[1],
 			               MT_R_X86_64_PC32, -4) != 0 ||
-			    emit_le(as, section, (uint32_t)op[0].displacement, 4) != 0)
+			    as_emit_le(as, section, (uint32_t)op[0].displacement, 4) != 0)
 				goto fail;
 			goto done;
 		}
@@ -1428,7 +1390,7 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 			width = op[1].width;
 			if (emit_rex(as, section, width == 8, op[1].reg,
 			              op[0].kind == OP_REG ? op[0].reg : -1) != 0 ||
-			    emit_u8(as, section, 0x0f) != 0 || emit_u8(as, section, 0xaf) != 0 ||
+			    as_emit_u8(as, section, 0x0f) != 0 || as_emit_u8(as, section, 0xaf) != 0 ||
 			    emit_modrm(as, section, op[1].reg, &op[0],
 			               MT_R_X86_64_PC32, -4) != 0)
 				goto fail;
@@ -1463,7 +1425,7 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 		                               op[0].kind == OP_REG ? op[0].reg : -1) != 0) ||
 		    emit_rex(as, section, width == 8, 0,
 		             op[0].kind == OP_REG ? op[0].reg : -1) != 0 ||
-		    emit_u8(as, section, width == 1 ? 0xf6 : 0xf7) != 0 ||
+		    as_emit_u8(as, section, width == 1 ? 0xf6 : 0xf7) != 0 ||
 		    emit_modrm(as, section, 3, &op[0], MT_R_X86_64_PC32, -4) != 0)
 			goto fail;
 		goto done;
@@ -1540,14 +1502,14 @@ parse_string_bytes(struct as_file *as, struct as_section *section,
 				break;
 			}
 		}
-		if (append_bytes(as, section, &byte, 1) != 0)
+		if (as_append_bytes(as, section, &byte, 1) != 0)
 			return -1;
 	}
 	if (*p != '"' || *trim((char *)(p + 1)) != '\0')
 		return as_error(as, "malformed string directive");
 	if (terminate) {
 		byte = 0;
-		if (append_bytes(as, section, &byte, 1) != 0)
+		if (as_append_bytes(as, section, &byte, 1) != 0)
 			return -1;
 	}
 	return 0;
@@ -1594,7 +1556,7 @@ parse_data_value(struct as_file *as, struct as_section *section,
 	if (is_number) {
 		value = (uint64_t)addend;
 		free(symbol);
-		return emit_le(as, section, value, width);
+		return as_emit_le(as, section, value, width);
 	}
 	{
 		struct as_symbol *referenced = get_symbol(as, symbol);
@@ -1605,8 +1567,8 @@ parse_data_value(struct as_file *as, struct as_section *section,
 		if (!referenced->defined && symbol[0] != '.')
 			referenced->bind = MT_STB_GLOBAL;
 	}
-	if (emit_le(as, section, 0, width) != 0 ||
-	    add_fixup(as, section, offset, width,
+	if (as_emit_le(as, section, 0, width) != 0 ||
+	    as_add_fixup(as, section, offset, width,
 	               width == 8 ? MT_R_X86_64_64 : MT_R_X86_64_32,
 	               addend, symbol) != 0) {
 		free(symbol);
@@ -1775,7 +1737,7 @@ parse_directive(struct as_file *as, char *directive, char *rest)
 		if (parse_integer(item, &fill_value) != 0 || (uint64_t)count > (uint64_t)SIZE_MAX)
 			return as_error(as, "invalid .fill value");
 		while (count-- > 0)
-			if (emit_u8(as, &as->sections[as->current], (unsigned)fill_value) != 0)
+			if (as_emit_u8(as, &as->sections[as->current], (unsigned)fill_value) != 0)
 				return -1;
 		return 0;
 	}
@@ -2212,17 +2174,43 @@ write_elf_header(FILE *file, const struct mt_target *target,
 {
 	unsigned char ident[16] = {0x7f, 'E', 'L', 'F',
 	                           target->elf_class, target->elf_endian, 1, 0};
-	uint16_t ehdr_size = target->ehdr_size;
-	uint16_t shdr_size = target->shdr_size;
-	if (fseek(file, 0, SEEK_SET) != 0 || fwrite(ident, 1, sizeof(ident), file) != sizeof(ident) ||
-	    write_u16(file, 1) != 0 || write_u16(file, target->emachine) != 0 ||
-	    write_u32(file, 1) != 0 || write_u64(file, 0) != 0 ||
-	    write_u64(file, 0) != 0 || write_u64(file, section_offset) != 0 ||
-	    write_u32(file, target->e_flags) != 0 || write_u16(file, ehdr_size) != 0 ||
-	    write_u16(file, 0) != 0 || write_u16(file, 0) != 0 ||
-	    write_u16(file, shdr_size) != 0 ||
-	    write_u16(file, section_count) != 0 || write_u16(file, section_string_index) != 0)
-		return -1;
+	if (target->elf_class == 1) {
+		/* ELF32 header (52 bytes) */
+		if (fseek(file, 0, SEEK_SET) != 0 ||
+		    fwrite(ident, 1, sizeof(ident), file) != sizeof(ident) ||
+		    write_u16(file, 1) != 0 ||
+		    write_u16(file, target->emachine) != 0 ||
+		    write_u32(file, 1) != 0 ||
+		    write_u32(file, 0) != 0 ||          /* entry */
+		    write_u32(file, 0) != 0 ||          /* phoff */
+		    write_u32(file, (uint32_t)section_offset) != 0 ||
+		    write_u32(file, target->e_flags) != 0 ||
+		    write_u16(file, target->ehdr_size) != 0 ||
+		    write_u16(file, 0) != 0 ||          /* phentsize */
+		    write_u16(file, 0) != 0 ||          /* phnum */
+		    write_u16(file, target->shdr_size) != 0 ||
+		    write_u16(file, section_count) != 0 ||
+		    write_u16(file, section_string_index) != 0)
+			return -1;
+	} else {
+		/* ELF64 header (64 bytes) */
+		if (fseek(file, 0, SEEK_SET) != 0 ||
+		    fwrite(ident, 1, sizeof(ident), file) != sizeof(ident) ||
+		    write_u16(file, 1) != 0 ||
+		    write_u16(file, target->emachine) != 0 ||
+		    write_u32(file, 1) != 0 ||
+		    write_u64(file, 0) != 0 ||
+		    write_u64(file, 0) != 0 ||
+		    write_u64(file, section_offset) != 0 ||
+		    write_u32(file, target->e_flags) != 0 ||
+		    write_u16(file, target->ehdr_size) != 0 ||
+		    write_u16(file, 0) != 0 ||
+		    write_u16(file, 0) != 0 ||
+		    write_u16(file, target->shdr_size) != 0 ||
+		    write_u16(file, section_count) != 0 ||
+		    write_u16(file, section_string_index) != 0)
+			return -1;
+	}
 	return 0;
 }
 
@@ -2517,6 +2505,7 @@ mt_as_assemble(const char *input, const char *output,
 	}
 
 	memset(&as, 0, sizeof(as));
+	as.target = target;
 	as.filename = input;
 	as.line = 0;
 	file = fopen(input, "r");

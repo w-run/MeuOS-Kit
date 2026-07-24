@@ -4,16 +4,24 @@
 
 #include <string.h>
 
+/* Forward declarations for target-specific instruction encoders. */
+extern int i386_encode_insn(const struct mt_target *target,
+                            const char *mnemonic, const char *operands,
+                            struct mt_insn *out);
+extern int aarch64_encode_insn(const struct mt_target *target,
+                               const char *mnemonic, const char *operands,
+                               struct mt_insn *out);
+
 static const struct mt_target targets[] = {
-	{"x86_64",      MT_EM_X86_64,     2, 1, 0,                64, 64},
-	{"aarch64",     MT_EM_AARCH64,    2, 1, 0,                64, 64},
-	{"riscv64",     MT_EM_RISCV,      2, 1, 0,                64, 64},
-	{"loongarch64", MT_EM_LOONGARCH,  2, 1, 0x43,             64, 64},
-	{"i386",        MT_EM_386,        1, 1, 0,                52, 40},
+	{"x86_64",      MT_EM_X86_64,     2, 1, 0,                64, 64, NULL},
+	{"aarch64",     MT_EM_AARCH64,    2, 1, 0,                64, 64, aarch64_encode_insn},
+	{"riscv64",     MT_EM_RISCV,      2, 1, 0,                64, 64, NULL},
+	{"loongarch64", MT_EM_LOONGARCH,  2, 1, 0x43,             64, 64, NULL},
+	{"i386",        MT_EM_386,        1, 1, 0,                52, 40, i386_encode_insn},
 };
 
 const struct mt_target mt_target_x86_64 = {
-	"x86_64", MT_EM_X86_64, 2, 1, 0, 64, 64,
+	"x86_64", MT_EM_X86_64, 2, 1, 0, 64, 64, NULL,
 };
 
 const struct mt_target *
