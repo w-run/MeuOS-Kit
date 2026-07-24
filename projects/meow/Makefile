@@ -86,6 +86,25 @@ check: $(BUILD)/meow
 	cd .. && CC=cc ./meow/$(BUILD)/meow --bootstrap
 	cd .. && $(MAKE) -C meow clean all
 
+# Verify --arch flag injection by creating a minimal recipe that echoes
+# ARCH, then checking the output contains the expected value.
+check-meow-multiarch: $(BUILD)/meow
+	@set -eu; \
+	tmp=$$(mktemp -d /tmp/meow-arch-check.XXXXXX); \
+	trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; \
+	mkdir -p "$$tmp/pkgs/arch-test"; \
+	output="$$tmp/output"; \
+	printf '%s\n' \
+		'variables:' \
+		'  CC: mcc' \
+		'targets:' \
+		'  build:' \
+		'    commands:' \
+		"      - echo \"ARCH=\$${ARCH}\" > \"$$output\"" \
+		> "$$tmp/pkgs/arch-test/meow.yaml"; \
+	cd "$$tmp" && $(abspath $(BUILD))/meow --arch=aarch64 build arch-test; \
+	grep -q 'ARCH=aarch64' "$$output" && echo "multi-arch: PASS"
+
 # Build a standalone meow against the MeuOS sysroot and exercise the native
 # YAML target graph.  The shell used by recipes is intentionally the host's
 # /bin/sh until the MeuOS userspace supplies its own shell.
@@ -107,4 +126,4 @@ install: $(BUILD)/meow
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all check check-sysroot-static install clean
+.PHONY: all check check-sysroot-static check-meow-multiarch install clean
