@@ -235,7 +235,7 @@ __atomic_exchange_2:
 	slli.d $t0, $t0, 3		/* halfword shift: 0 or 16 */
 	li.w $t1, 0xffff
 	sll.d $t1, $t1, $t0		/* mask */
-	andi $t2, $a1, 0xffff
+	bstrpick.d $t2, $a1, 15, 0	/* zero-extend $a1 to 16 bits */
 	sll.d $t2, $t2, $t0		/* newval in position */
 	or $t3, $a0, $zero
 	bstrins.d $t3, $zero, 1, 0	/* word-aligned address */
