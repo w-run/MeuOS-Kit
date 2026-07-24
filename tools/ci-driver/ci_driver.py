@@ -406,6 +406,49 @@ def _run_acceptance_cmds(
     return True, "\n".join(combined_out), "\n".join(combined_err)
 
 
+def _has_code_commit_since(todo: ci_lib.Todo, project_root: Path) -> tuple[bool, str]:
+    """B 方案:检查 impl 类 todo 自 start_ts 以来是否有源码 commit。
+
+    防止 main_planner 只改 todo 文档不派 sub-agent 改代码,却凭"验收命令
+    通过"(可能是早已存在的产物)就发 CLAIM_DONE。对 kind: impl 的 todo,
+    要求 start_ts 之后在该 subproject 的 src/include 目录下至少有一个新 commit。
+
+    Returns (ok, reason). ok=False 时 reason 给出拒绝原因。
+    """
+    if todo.kind != "impl":
+        return True, ""  # only enforce on impl todos
+    try:
+        meta = json.loads(todo.raw_head) if todo.raw_head else {}
+    except json.JSONDecodeError:
+        meta = {}
+    since = meta.get("start_ts", "").strip()
+    if not since:
+        # no start_ts recorded — cannot enforce, allow through
+        return True, ""
+    # Check for code commits in src/include/test since start_ts.
+    # git log --since accepts ISO dates (YYYY-MM-DD) and full timestamps.
+    sub = todo.subproject
+    for subpath in (f"projects/{sub}/src", f"projects/{sub}/include",
+                    f"projects/{sub}/test"):
+        try:
+            proc = subprocess.run(
+                ["git", "log", f"--since={since}", "--format=%H",
+                 "--", subpath],
+                cwd=str(project_root),
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, timeout=15,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            continue
+        if proc.stdout.strip():
+            return True, ""  # at least one code commit found
+    return False, (
+        f"no code commit in projects/{sub}/{{src,include,test}} since "
+        f"start_ts={since}; impl todo requires actual code changes "
+        f"(not just todo edits). Did main_planner dispatch a sub-agent?"
+    )
+
+
 def _process_claim_markers(
     markers: dict, batch: list[ci_lib.Todo], project_root: Path,
     acceptance_log: Path, completed: set[str], completed_log: dict,
@@ -448,7 +491,24 @@ def _process_claim_markers(
         except OSError:
             pass
         if ok:
-            note = "driver accepted; all cmds passed"
+            # B 方案: 对 kind: impl 的 todo, 验收命令通过后还要检查本轮
+            # 是否有真实的源码 commit. 防止 "空跑标 done" —— main_planner
+            # 只改了 todo 文档没派 sub-agent 改代码, 但验收命令因为产物
+            # 早已存在而通过 (如 cpp-shared-backend / gd-tls 误标 done 事件).
+            code_ok, code_reason = _has_code_commit_since(todo, project_root)
+            if not code_ok:
+                ci_lib.rollback_unauthorized_done(
+                    todo, reason=f"no_code_commit:{code_reason}")
+                ci_lib.log(
+                    f"CLAIM_DONE [{relpath}] REJECTED; reason={code_reason}",
+                    name="ci_driver",
+                )
+                outcomes[relpath] = {
+                    "status": "rejected", "ok": False,
+                    "reason": code_reason,
+                }
+                continue
+            note = "driver accepted; all cmds passed + code commit verified"
             ci_lib.mark_todo_done_by_driver(todo, note=note)
             completed.add(todo.name)
             completed_log[todo.name] = "done_via_driver"

@@ -85,6 +85,24 @@ sub-agent 返回后:
 
 ### Step 5. 标记 todo 完成 — **CLAIM_DONE 协议** (CRITICAL)
 
+**前置:识别 todo 的 `kind` 字段(C 方案)**:
+
+todo front matter 现在支持 `kind` 字段,取值:
+- `kind: impl`(默认) — 实现类,需要改代码,**可发 CLAIM_DONE**
+- `kind: plan` — 规划/方向类,只记录架构方向,验收命令只验既有产物
+- `kind: doc` — 文档类
+
+**禁止对 `kind: plan` / `kind: doc` 的 todo 发 `[[CLAIM_DONE]]`**。这类 todo
+的验收命令只验证"早已存在的产物"(如 libmcc.a 早在之前 commit 落地),
+driver 跑过就标 done 会造成"零代码改动却 done"的假完成。正确做法:
+- 规划类 todo 保持 `status: in_progress`,加 `progress_note` 说明进度
+- 若规划类 todo 里的某个阶段确实要实现,拆成新的 `kind: impl` todo
+
+**driver 侧的 B 方案拦截**:即使你误发了 CLAIM_DONE,driver 对 `kind: impl`
+的 todo 会额外检查 `git log --since=<start_ts> -- projects/<sub>/{src,include,test}/`
+是否有新 commit;无代码 commit 则拒绝 CLAIM_DONE(reason 含 "no_code_commit")。
+所以"只改 todo 不改代码"的空跑会被 driver 拦下。
+
 **核心规则：你不得自己写 `status: done` 或 `done_ts:`.** 这两个字段只能由
 `ci_driver` 写。如果你直接编辑 todo 文件把 status 改成 done,driver 的
 post-round check 会发现缺失 `done_by_driver_ts` 字段,自动回滚到
