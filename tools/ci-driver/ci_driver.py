@@ -100,7 +100,24 @@ def _materialize_mcp_config(project_root: Path) -> Path:
 def _load_main_prompt() -> str:
     if not MAIN_PROMPT_PATH.exists():
         sys.exit(f"FATAL: main prompt missing: {MAIN_PROMPT_PATH}")
-    return MAIN_PROMPT_PATH.read_text(encoding="utf-8")
+    prompt = MAIN_PROMPT_PATH.read_text(encoding="utf-8")
+    # 把项目根的 AGENTS.md 拼进 system_prompt,确保 main session 能看到
+    # 项目规约 (分支策略、命名、许可、禁止事项、自举流程等)。之前只在
+    # main_planner.md 行 293 "口头声明" 要遵守 AGENTS.md, 但没把内容
+    # 注入上下文, main session 偷懒不读就完全看不到规约, 导致 driver
+    # 工作时无视 AGENTS.md 的约束 (如不按分支策略提交、命名不规范等)。
+    agents_md = ci_lib.DRIVER_DIR.parent.parent / "AGENTS.md"
+    if agents_md.exists():
+        body = agents_md.read_text(encoding="utf-8")
+        prompt = (
+            prompt
+            + "\n\n---\n\n"
+            + "# 项目规约 AGENTS.md (自动注入, 必须遵守)\n\n"
+            + "<agents-md-content>\n"
+            + body
+            + "\n</agents-md-content>\n"
+        )
+    return prompt
 
 
 def _format_todo_block(todos: list[ci_lib.Todo]) -> str:
