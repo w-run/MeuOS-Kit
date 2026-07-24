@@ -157,9 +157,9 @@ selcmp(Ins i, int k, int op, Fn *fn)
 		negate(&i.to, fn);
 		/* fall through */
 	case NCmpI+Cfo:
-		r0 = newtmp("isel", i.cls, fn);
-		r1 = newtmp("isel", i.cls, fn);
-		emit(Oand, i.cls, i.to, r0, r1);
+		r0 = newtmp("isel", Kl, fn);
+		r1 = newtmp("isel", Kl, fn);
+		emit(Oand, Kl, i.to, r0, r1);
 		op = KWIDE(k) ? Oceqd : Oceqs;
 		emit(op, i.cls, r0, i.arg[0], i.arg[0]);
 		icmp = curi;
