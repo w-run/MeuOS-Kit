@@ -1,9 +1,69 @@
-[x] mcc+mt: integrate .msys single-file sysroot
-[x] meow: add --arch flag
-[x] mcc: integrate mt/as + mt/ld for all 5 archs
-[x] meuos-toolchain: loongarch64 as+ld (instruction encoding + relocations)
-[x] meuos-toolchain: fix all LA64 relocation bugs
-[ ] LA64 libc functions (printf, threads) get SIGILL - systematic link bug
-    Cause: 0xFFFFFFEC corruption at offset +0x20 in libc functions.
-    Suspect: B26 relocation handler or archive member extraction order.
-    Workaround: test specific functions (getpid, write, exit) work.
+# MeuOS Kit 五架构完善 — 待办清单
+# 架构：x86_64 i386 aarch64 riscv64 loongarch64
+# QEMU: 10.1.0（自编译，env/qemu/qemu-{arch}）
+
+## P0 — 测试基础设施（阻塞回归）
+
+[ ] 修复 check-ld-x86_64 / check-ld-sysroot：因 sysroot 未安装 libc 头文件而跳过
+    -> make ARCH=loongarch64 install DESTDIR=/workspace/MeuOS-Kit/sysroot PREFIX=/usr
+    -> 安装所有架构的头文件和库到统一 sysroot
+
+[ ] make -C projects/mcc check 全量通过
+    -> 当前因 check-driver sysroot 测试跳过
+
+[ ] make -C projects/meuos-toolchain check 全量通过
+    -> check-ld-x86_64 因 sysroot 问题失败
+    -> check-as-libc-x86_64: nothing to be done（测试 fixture 需要重建）
+
+## P1 — loongarch64 核心补齐
+
+[ ] mt/as loongarch64 编码器扩增
+    -> 当前 640 行 / 1 个编码函数，缺伪指令 (move, st.d 别名等)
+    -> 参考 aarch64: 971 行 / 2 个编码函数
+    -> 需要补充：beqz/bnez/blt/bge 等条件分支的编码
+
+[ ] mcc loongarch64 isel + emit 完善
+    -> 当前 isel=284 行 + emit=447 行（全架构最小）
+    -> 对比 x86_64: 946+885 行
+    -> 重点：浮点代码生成、大循环优化、函数调用约定细节
+
+[ ] libc loongarch64 exit() 后 cleanup SIGSEGV
+    -> bare_tls 输出数据正确（main=5 child=9 errno=31/47），exit 时 crash
+    -> 地址 0x41ed08 附近，疑似 TLS cleanup 或 thread TSS free 路径
+    -> 可能原因：__meuos_tss_cleanup 或 munmap 顺序问题
+
+## P2 — 跨架构完善
+
+[ ] mt/as riscv64 编码器扩展
+    -> 当前 802 行 / 1 个函数，适中
+    -> 需要补充更多伪指令和重定位类型
+
+[ ] mt/as aarch64 编码器扩展
+    -> 当前 971 行 / 2 个函数，相对完整
+    -> 补充 NEON/SVE 指令的编码支持（可选）
+
+[ ] mcc C23 特性持续完善
+    -> #embed suffix/prefix/if_empty
+    -> _BitInt(N) 支持
+    -> 属性语法 [[]] 完整实现
+
+## P3 — 自举验证
+
+[ ] Phase 4: 用 sysroot 内的 mcc + meow 重新编译全套工具
+    -> mcc 自己编译自己
+    -> meuo-libc 用自产 mcc 编译
+    -> mt 用自产 as/ld 汇编+链接
+
+[ ] meow 多架构 YAML 配方
+    -> 为所有 5 架构提供完整的 meow.yaml
+    -> 验证 meow build --arch=loongarch64 dash / bzip2 等
+
+## P4 — 长期
+
+[ ] m++ C++ 前端启动
+    -> 参考 reference/cxx-frontend/ 和 reference/aburi/
+    -> C++23 标准逐步实现
+
+[ ] meow 取代 make
+    -> 本项目的 Makefile → meow.yaml 迁移
+    -> 增量构建、依赖 DAG 完善
