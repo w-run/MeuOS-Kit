@@ -14,7 +14,7 @@ kernel/fs/9p/9p.ko.gz
 kernel/net/9p/9pnet_virtio.ko.gz
 "
 
-for arch in x86_64 aarch64 x86; do
+for arch in x86_64 aarch64 i386 riscv64; do
   echo "=== building initramfs for $arch ==="
   stage="$ENV/rootfs/$arch-stage"
   rm -rf "$stage"

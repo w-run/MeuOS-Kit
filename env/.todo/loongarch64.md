@@ -1,20 +1,18 @@
-# 待实现：loongarch64 测试环境
+# loongarch64 测试环境
 
-## 背景
-用户要求 loongarch64 后续逐步完善。mcc 已有 loongarch64 后端（专项
-ABI/VLA/TLS 汇编回归通过），但 QEMU 测试环境尚未覆盖。
+## 2026-07-24 状态
 
-## 需要的工作
-1. **内核**：Alpine v3.20 的 loongarch64 仓库若提供 `linux-virt-6.6.x`，
-   下载 apk 提取 vmlinuz；否则从 kernel.org 取 6.6.x 源码用
-   `loongarch64-linux-gnu-gcc` 交叉编译最小内核。
-2. **rootfs**：下载 `alpine-minirootfs-3.20.x-loongarch64.tar.gz`，
-   用 `bin/build-initramfs.sh` 增加 loongarch64 分支（提取对应 arch 的 9p 模块）。
-3. **QEMU**：当前自建 qemu 未含 `loongarch64-softmmu` target。在
-   `build/build-qemu.sh` 的 `--target-list` 增加 `loongarch64-softmmu` 重建。
-4. **qvm**：在 `bin/qvm` 增加 loongarch64 映射（机器 `virt`，CPU `la464`，
-   控制台 `ttyS0`）。
+### 已完成
+- [x] `env/qemu/qemu-loongarch64-static` — qemu-user 已下载（v7.2.0）
+- [x] `env/build/qemu-install/bin/qemu-system-loongarch64` — qemu-system 已自建（v10.1.0）
+- [x] `env/kernels/loongarch64/vmlinuz` — Linux 6.6.142 内核已交叉编译（34MB）
+- [x] `env/bin/qvm` — 已添加 loongarch64 支持
+- [x] `projects/sysroot-loongarch64` — crt1.o + libatomic-meuos.a + 头文件已安装
+- [x] `projects/meuos-libc/test/loongarch64-bootstrap.sh` — 已注册
 
-## 验收
-- `qvm boot loongarch64` + `qvm run loongarch64 'uname -m'` 返回 `loongarch64`。
-- mcc `--target=loongarch64` 产出的静态二进制能在 loongarch64 VM 中运行。
+### 待实现
+- [ ] 内核 i8042 配置修复：在 defconfig 基础上禁用 `CONFIG_SERIO_I8042` 并重建
+- [ ] 构建 initramfs（LoongArch 无 Alpine 端口，需用 busybox 静态编译或 buildroot 构建最小 rootfs）
+- [ ] 修复后验证 `qvm boot loongarch64` 引导到 shel
+- [ ] loong64 libc-meuos.a 完整编译（mcc emit 格式需持续完善）
+- [ ] loong64 bootstrap 运行时测试（qemu-user + qemu-system）

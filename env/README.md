@@ -5,13 +5,29 @@
 
 ## 支持的架构
 
-| 架构 | QEMU 二进制 | 机器类型 | 控制台 |
-|------|------------|---------|--------|
-| x86_64 | qemu-system-x86_64 | pc | ttyS0 |
-| i386   | qemu-system-i386   | pc | ttyS0 |
-| aarch64| qemu-system-aarch64 | virt (cortex-a72) | ttyAMA0 |
+### qemu-system（完整 VM 仿真）
 
-`loongarch64` / `riscv64` 待后续完善（见 `src/` 下各项目的 `.todo`）。
+| 架构 | QEMU 二进制 | 机器类型 | 控制台 | 内核 | rootfs |
+|------|------------|---------|--------|------|--------|
+| x86_64 | qemu-system-x86_64 | pc | ttyS0 | ✅ | ✅ |
+| i386   | qemu-system-i386   | pc | ttyS0 | ✅ | ✅ |
+| aarch64 | qemu-system-aarch64 | virt (cortex-a72) | ttyAMA0 | ✅ | ✅ |
+| riscv64 | qemu-system-riscv64 | — | — | ⏳ 待实现 | ⏳ 待实现 |
+| loongarch64 | qemu-system-loongarch64 | — | — | ⏳ 待实现 | ⏳ 待实现 |
+
+### qemu-user（单个 ELF 运行时验证）
+
+`env/qemu/` 下提供多架构静态 qemu-user 二进制：
+
+| 架构 | 文件 | 运行时验证 |
+|------|------|-----------|
+| aarch64 | `qemu-aarch64-static` v7.2.0 | ✅ 6/6 测试通过 |
+| riscv64 | `qemu-riscv64-static` v7.2.0 | ✅ 3/3 非线程测试通过 |
+| loongarch64 | `qemu-loongarch64-static` v7.2.0 | ⏳ 待验证 |
+| x86_64 | 无需（宿主直接运行） | ✅ |
+| i386 | 无需（IA32 仿真） | ✅ |
+
+详见 `qemu/README.md`。
 
 ## 目录结构
 
@@ -29,7 +45,7 @@ env/
 │   ├── qemu-10.1.0.tar.xz
 │   ├── qemu-10.1.0/
 │   ├── build-qemu.sh       # 构建 qemu（3 targets + 9p）
-│   └── qemu-install/bin/   # qemu-system-{x86_64,i386,aarch64}
+│   └── qemu-install/bin/   # qemu-system-{x86_64,i386,aarch64,riscv64,loongarch64}
 ├── run/                     # 运行时（pid/sock，gitignored）
 └── README.md
 ```
