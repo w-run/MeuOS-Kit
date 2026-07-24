@@ -2,7 +2,7 @@
 priority: P1
 status: in_progress
 kind: impl
-progress_note: Phase A 部分落地 (SGenThr enum + 4 架构 emit case + libc __tls_get_addr); SSA 错误未解决 (valref 内部 emit Ocall 触发 'used undefined'); Gap 3/5 未做
+progress_note: Phase A 完成 (SGenThr enum + 4 架构 GD emit + expand_gd_tls + libc __tls_get_addr); SSA 错误已修复 (commit 871d748); Gap 3 委托给 tls-model-select todo; Gap 5 被 P6 阻塞
 note: 5 个跨架构 GD-TLS 缺口的分阶段实施计划;Phase A 是 Phase B/C 的前置;Gap 5 受 P6 动态链接阻塞
 start_ts: 2026-07-24
 rollback_ts: 2026-07-24
