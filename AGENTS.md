@@ -28,6 +28,7 @@
 - `mcc` / `m++` - 编译器（C99+C11 完整实现 + C23 稳定实现；后续 C++ 共享后端）
 - `meow` - 构建系统（取代 make + autoconf，MeuOS 中不依赖 make）
 - `meuos-toolchain` - 底层工具链（as/ld/ar/ranlib，完全取缔 binutils）
+- `meuos-sysroot` - 单文件 sysroot 系统（.msys 格式，mcc/mt/meow 原生读取，无需解压到文件系统）
 - `meuos-utils` - 核心工具集（coreutils/diffutils/findutils 完整替代）
 - `meuos-shell`（msh）- Shell 终端（完整 Shell，可选 bash 兼容与 zsh 插件/主题）
 - `meuos-buildtools` - 构建工具（m4/bison/flex/gperf，取代 GNU 构建工具链依赖）

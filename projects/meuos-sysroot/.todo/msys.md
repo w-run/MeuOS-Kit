@@ -37,18 +37,18 @@ Data blocks: 按 data_offset 排列，4 字节对齐
 - [x] 支持 `-o <output>`、`--list` 列出内容
 - [x] 支持 `--arch <name>` 写入元数据键 `meuos_arch`
 
-### Phase 2 — mcc 集成
+### Phase 2 — mcc 集成 ✅
 
-- [ ] `mcc/src/driver/msys.c`：sysroot 抽象层，检测 `.msys` 后缀走 libmsys 读取
-- [ ] preprocessor include 搜索支持 .msys
-- [ ] 未显式传 `--target` 时，从 .msys 提取 `meuos_arch`
+- [x] `mcc/src/driver/msys.c`：sysroot 抽象层，检测 `.msys` 后缀走 libmsys 读取
+- [x] preprocessor include 搜索支持 .msys
+- [x] 未显式传 `--target` 时，从 .msys 提取 `meuos_arch`
 
-### Phase 3 — mt/ld 集成
+### Phase 3 — mt/ld 集成 ⬜ 待启动
 
 - [ ] mt/ld 的 `-L` 参数识别 .msys
 - [ ] 从 .msys 索引中读取 .a/.o 参与链接
 
-### Phase 4 — 构建流水线
+### Phase 4 — 构建流水线 ⬜ 待启动
 
 - [ ] `make msys`：自动从 sysroot 目录生成 .msys
 - [ ] `bootstrap.sh` 阶段产出 .msys
