@@ -1,6 +1,7 @@
 <!--
 priority: P2
-status: pending
+status: in_progress
+kind: impl
 start_ts: 2026-07-24
 note: GD-TLS Gap 3: 在 targ.c/expr.c 中实现 -fPIC 和 --shared 时外部 _Thread_local 自动降级为 GD, 支持 -ftls-model={global-dynamic,initial-exec,local-exec} 和 -fno-plt
 -->
@@ -45,8 +46,12 @@ make -C projects/mcc -j4
 echo 'extern _Thread_local int ext_tls; int *get_ext(void) { return &ext_tls; }' > /tmp/tls_model_test.c; projects/mcc/mcc --target=x86_64 -S -o /tmp/tls_model_le.s /tmp/tls_model_test.c 2>/dev/null; ! grep -q '__tls_get_addr' /tmp/tls_model_le.s && echo "Non-PIC extern TLS uses IE: PASS"
 # 3. -fPIC extern TLS produces GD
 projects/mcc/mcc --target=x86_64 -fPIC -S -o /tmp/tls_model_gd.s /tmp/tls_model_test.c 2>/dev/null; grep -q '__tls_get_addr' /tmp/tls_model_gd.s && echo "-fPIC extern TLS uses GD: PASS"
-# 4. Non-extern TLS stays LE in all modes
-echo '_Thread_local int local_tls; int *get_local(void) { return &local_tls; }' > /tmp/tls_model_local.c; projects/mcc/mcc --target=x86_64 -fPIC -S -o /tmp/tls_model_local.s /tmp/tls_model_local.c 2>/dev/null; ! grep -q '__tls_get_addr' /tmp/tls_model_local.s && echo "Local TLS stays LE under -fPIC: PASS"
-# 5. Full regression
+# 4. Static TLS under -fPIC does not use GD (IE is acceptable in DSO)
+echo 'static _Thread_local int local_tls; int *get_local(void) { return &local_tls; }' > /tmp/tls_model_local.c; projects/mcc/mcc --target=x86_64 -fPIC -S -o /tmp/tls_model_local.s /tmp/tls_model_local.c 2>/dev/null; ! grep -q '__tls_get_addr' /tmp/tls_model_local.s && echo "Static TLS under -fPIC avoids GD: PASS"
+# 5. -ftls-model=global-dynamic forces GD even without -fPIC
+projects/mcc/mcc --target=x86_64 -ftls-model=global-dynamic -S -o /tmp/tls_model_force_gd.s /tmp/tls_model_test.c 2>/dev/null; grep -q '__tls_get_addr' /tmp/tls_model_force_gd.s && echo "-ftls-model=global-dynamic forces GD: PASS"
+# 6. -ftls-model=local-exec forces LE even for extern
+projects/mcc/mcc --target=x86_64 -fPIC -ftls-model=local-exec -S -o /tmp/tls_model_force_le.s /tmp/tls_model_test.c 2>/dev/null; ! grep -q '__tls_get_addr' /tmp/tls_model_force_le.s && echo "-ftls-model=local-exec forces LE/IE: PASS"
+# 7. Full regression
 make -C projects/mcc check
 ```
