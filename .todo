@@ -5,15 +5,15 @@
 ## P0 — 测试基础设施（阻塞回归）
 
 [ ] 修复 check-ld-x86_64 / check-ld-sysroot：因 sysroot 未安装 libc 头文件而跳过
-    -> make ARCH=loongarch64 install DESTDIR=/workspace/MeuOS-Kit/sysroot PREFIX=/usr
-    -> 安装所有架构的头文件和库到统一 sysroot
-
-[ ] make -C projects/mcc check 全量通过
-    -> 当前因 check-driver sysroot 测试跳过
+    -> make -C projects/meuos-libc install 到统一 sysroot
+    -> 当前：check-ld-x86_64 通过 ld_smoke, check-ld-sysroot 缺 stdio.h
 
 [ ] make -C projects/meuos-toolchain check 全量通过
-    -> check-ld-x86_64 因 sysroot 问题失败
-    -> check-as-libc-x86_64: nothing to be done（测试 fixture 需要重建）
+    -> 当前 pass: check-as-x86_64, check-as-sse, check-ld-x86_64 smoke,
+       check-target-dispatch(5 arch), check-libelf, check-nm,
+       check-readelf, check-strip, check-objcopy
+    -> 仍 fail: check-ld-x86_64 (sysroot), check-ld-libpath (sysroot)
+    -> mcc check ✅ 已通过（之前因 libmsys.a 缺失而 fail）
 
 ## P1 — loongarch64 核心补齐
 
@@ -30,22 +30,25 @@
 [ ] libc loongarch64 exit() 后 cleanup SIGSEGV
     -> bare_tls 输出数据正确（main=5 child=9 errno=31/47），exit 时 crash
     -> 地址 0x41ed08 附近，疑似 TLS cleanup 或 thread TSS free 路径
-    -> 可能原因：__meuos_tss_cleanup 或 munmap 顺序问题
+    -> QEMU 7.2→10.1 后数据正确，退出时仍 crash
 
 ## P2 — 跨架构完善
 
 [ ] mt/as riscv64 编码器扩展
-    -> 当前 802 行 / 1 个函数，适中
+    -> 当前 802 行 / 1 个函数
     -> 需要补充更多伪指令和重定位类型
 
 [ ] mt/as aarch64 编码器扩展
     -> 当前 971 行 / 2 个函数，相对完整
     -> 补充 NEON/SVE 指令的编码支持（可选）
 
+[ ] mt/as x86_64: 无独立编码器，依赖 host cc
+    -> 当前：x86_64 的架构目标直接透传到 host cc
+    -> 不是 bug，但自举后需要自己实现
+
 [ ] mcc C23 特性持续完善
-    -> #embed suffix/prefix/if_empty
-    -> _BitInt(N) 支持
-    -> 属性语法 [[]] 完整实现
+    -> check-c23 已通过，但 #embed suffix/prefix/if_empty、
+       _BitInt(N)、属性语法 [[]] 等可选项目待补充
 
 ## P3 — 自举验证
 
