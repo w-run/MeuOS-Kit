@@ -2,7 +2,7 @@
 priority: P2
 status: in_progress
 kind: impl
-start_ts: 2026-07-24
+start_ts: 2026-07-23
 note: GD-TLS Gap 3: 在 targ.c/expr.c 中实现 -fPIC 和 --shared 时外部 _Thread_local 自动降级为 GD, 支持 -ftls-model={global-dynamic,initial-exec,local-exec} 和 -fno-plt
 -->
 

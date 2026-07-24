@@ -4,7 +4,7 @@ status: in_progress
 kind: impl
 progress_note: Phase A 完成 (SGenThr enum + 4 架构 GD emit + expand_gd_tls + libc __tls_get_addr); SSA 错误已修复 (commit 871d748); Gap 3 已完成 (tls-model-select commit c9a002b); Gap 5 仍被 P6 阻塞
 note: 5 个跨架构 GD-TLS 缺口的分阶段实施计划;Phase A 是 Phase B/C 的前置;Gap 5 受 P6 动态链接阻塞
-start_ts: 2026-07-24
+start_ts: 2026-07-23
 rollback_ts: 2026-07-24
 rollback_reason: driver 误标 done (验收命令只跑 LE/IE 回归, 未测 GD 端到端); GD-TLS SSA 错误未解决, 详见顶部任务断点
 -->
