@@ -24,23 +24,27 @@ __meuos_thread_clone:
 	sd a3, 16(a2)		/* child[2] = control */
 	sd a4, 24(a2)		/* child[3] = tls */
 
-	/* clone(flags=0x013d0f00, child_stack=a2, ptid=control,
-	 *      tls=tls, ctid=control) */
-	li a0, 0x013d0f00
+	/* clone(flags=0x001d0f00, child_stack=a2, ptid=control, tls=tls, ctid=0)
+	 * Set: VM|FS|FILES|SIGHAND|THREAD|SYSVSEM|SETTLS|PARENT_SETTID
+	 * No CHILD_CLEARTID — __meuos_thread_finish manually sets tid=0
+	 * and does FUTEX_WAKE, so the kernel-side write is redundant.
+	 * Avoiding CHILD_CLEARTID works around qemu-user 7.2 CLONE_THREAD
+	 * bug where child _exit() after cleartid corrupts parent's TID. */
+	li a0, 0x001d0f00
 	mv a1, a2		/* child_stack */
-	mv a5, a3		/* save control (a3 is clobbered below) */
-	mv a2, a5		/* ptid = control */
+	mv a5, a3		/* save control */
+	mv a2, a5		/* ptid = control (PARENT_SETTID) */
 	mv a3, a4		/* tls */
-	mv a4, a5		/* ctid = control */
+	mv a4, zero		/* ctid = 0 (no CHILD_CLEARTID/SETTID) */
 	li a7, 220		/* SYS_clone (riscv64/asm-generic) */
 	ecall
 	bnez a0, 1f		/* parent returns child tid / error */
 
 	/* ---- child: a0 == 0, sp == child_stack ---- */
-	ld a0, 0(sp)		/* start */
-	ld a1, 8(sp)		/* arg */
+	ld a5, 0(sp)		/* start */
+	ld a0, 8(sp)		/* arg */
 	ld a2, 16(sp)		/* control */
-	jalr a0			/* start(arg) -> result in a0 */
+	jalr a5			/* start(arg) -> result in a0 */
 	mv a1, a2		/* control */
 	call __meuos_thread_finish
 	/* unreachable: __meuos_thread_finish is _Noreturn */

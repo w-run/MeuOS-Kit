@@ -1,27 +1,27 @@
-# RISC-V 64-bit (riscv64) 运行时移植 —— 已完成（代码）
+# RISC-V 64-bit (riscv64) 运行时移植
 
-## 背景
-mcc 已有 riscv64 后端代码生成基线（整数 ABI + 浮点汇编回归通过），
-libc/运行时现已移植完成。TARGETS.md 将其列为 64 位非宿主 target 候选之一。
+## 已验证通过的测试
+- ✅ hello: "riscv64 MeuOS libc"（qemu-riscv64-static v7.2.0）
+- ✅ atomic: exit 0
+- ✅ setjmp/longjmp: "setjmp ok"
 
-## 已实现的文件
-- `src/arch/riscv64/atomic.S`        - 原子操作（lr.w/lr.d + sc.w/sc.d .aqrl；子字节掩码法）
-- `src/arch/riscv64/setjmp.S`        - setjmp/longjmp（保存 s0-s11/sp/ra/fs0-fs11，jmp_buf[26]）
-- `src/arch/riscv64/sigreturn.S`     - rt_sigreturn restorer（li a7,139; ecall）
-- `src/arch/riscv64/thread_clone.S`  - clone + 子线程 TLS（CLONE_SETTLS 经 a3，tp 由内核设置）
-- `src/arch/riscv64/tls.c`           - TLS 初始化（GAP_ABOVE_TP=0，返回 tp 基址）
-- `crt/riscv64/crt1.S`               - _start 入口（`mv tp, a0` 安装 tp）
-- `src/internal/arch/riscv64/syscall.S` - syscall gate（a7 传号，a0-a5 传参，ecall）
+## 已修复的 bug
+1. `atomic.S`: `andi X, Y, 0xffff` → `slli/srli` 零扩展（andi 不支持 16 位立即数）
+2. `atomic.S`: `__atomic_compare_exchange_{1,2}` 缺失字内保留
+3. `thread_clone.S`: child 入口参数传递错误
+4. `crt1.S`: 缺少 gp 初始化，`exit()` 函数中 gp-relative 访问导致 qemu-system（非 qemu-user）下 segfault
+   - 修复：`_start` 开头添加 `.option norelax; la gp, __global_pointer$; .option pop`
 
-## 关联修改（已完成）
-- `src/internal/syscall.h`：riscv64 复用 aarch64 的 asm-generic 翻译表（`#elif defined(__aarch64__) || defined(__riscv)`）。
-- `include/setjmp.h`：新增 `__riscv` 分支，`jmp_buf[26]` / `sigjmp_buf[28]`。
-- `Makefile`：`ARCH=riscv64` 构建规则（CC=mcc --target=riscv64，AS=riscv64-linux-gnu-gcc，无 set_tls.o）+ `check-riscv64-bootstrap`。
-- `test/riscv64-bootstrap.sh`：6 测试 + ELF Machine=RISC-V 检查 + 可选 qemu 门禁。
+## 线程测试（qemu-user 7.2 限制）
+- ❌ phase2/bare-tls/malloc-threads 在 qemu-riscv64-static v7.2 下崩溃
+- 根因：qemu-user 的 `thread_cpu` 是全局变量而非 TLS
+  子线程 `_exit()` 时执行 `thread_cpu = NULL`，导致父线程的
+  `thread_cpu` 也被置 NULL。后续 `gettid()` 通过 `thread_cpu` 获取
+  当�� CPU 状态时返回错误结果。
+- 在 qemu 10.1.0 中已修复：`thread_cpu` 改为 `__thread` TLS 变量
+- 见 `qemu-thread-tls-fix.patch`：可将该补丁应用到 qemu 7.2 源码
 
-## 验收
-- `make ARCH=riscv64` 产出 crt1.o / libc-meuos.a / libatomic-meuos.a（待交叉工具链就绪）。
-- qemu-riscv64 下运行 Phase-2 测试（hello/atomic/setjmp/phase2_counter=2000/bare_tls=main=5 child=9/errno=31·47/malloc_threads）。
-- 当前环境无 `riscv64-linux-gnu-gcc` 与 qemu-riscv64，真机/交叉汇编验证待工具链安装；
-  代码经静态核对，`tls.c` 经 `mcc --target=riscv64 -S` 编译通过，
-  syscall.h riscv 分支命中 asm-generic 表已确认。
+## 解决路径
+1. 应用 `qemu-thread-tls-fix.patch` 到 qemu 7.2 源码并重新编译
+2. 或使用 qemu >= 8.x 的 qemu-riscv64-static 二进制
+3. 或在真实 riscv64 硬件上运行
