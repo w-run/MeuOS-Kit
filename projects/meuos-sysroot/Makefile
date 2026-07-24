@@ -8,15 +8,16 @@
 
 HOST_CC ?= cc
 AR      ?= ar
-CFLAGS  ?= -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror
+CFLAGS  ?= -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -D_POSIX_C_SOURCE=200809L
 BUILD   ?= build
+OBJDIR  ?= $(BUILD)/obj
 
 MSYS_SRCS := src/libmsys/msys.c
-MSYS_OBJS := $(patsubst src/%.c,$(BUILD)/%.o,$(MSYS_SRCS))
+MSYS_OBJS := $(patsubst src/%.c,$(OBJDIR)/%.o,$(MSYS_SRCS))
 MSYS_LIB  := $(BUILD)/libmsys.a
 
 MKMSYS_SRCS := src/mkmsys/main.c
-MKMSYS_OBJS := $(patsubst src/%.c,$(BUILD)/%.o,$(MKMSYS_SRCS))
+MKMSYS_OBJS := $(patsubst src/%.c,$(OBJDIR)/%.o,$(MKMSYS_SRCS))
 MKMSYS_BIN  := $(BUILD)/mkmsys
 
 TEST_SRCS := test/msys_test.c
@@ -31,7 +32,7 @@ $(MSYS_LIB): $(MSYS_OBJS)
 	@mkdir -p $(dir $@)
 	$(AR) rcs $@ $^
 
-$(BUILD)/%.o: src/%.c include/mt/msys.h
+$(OBJDIR)/%.o: src/%.c include/mt/msys.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(CFLAGS) -Iinclude -c -o $@ $<
 
@@ -40,7 +41,7 @@ $(MKMSYS_BIN): $(MKMSYS_OBJS) $(MSYS_LIB)
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(CFLAGS) -o $@ $(MKMSYS_OBJS) $(MSYS_LIB)
 
-$(BUILD)/mkmsys/main.o: src/mkmsys/main.c include/mt/msys.h
+$(OBJDIR)/mkmsys/main.o: src/mkmsys/main.c include/mt/msys.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(CFLAGS) -Iinclude -c -o $@ $<
 

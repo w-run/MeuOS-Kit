@@ -25,17 +25,17 @@ Data blocks: 按 data_offset 排列，4 字节对齐
 
 ## 任务清单
 
-### Phase 1A — libmsys 核心库
+### Phase 1A — libmsys 核心库 ✅
 
-- [ ] `include/mt/msys.h`：声明 `msys_open()`, `msys_close()`, `msys_read()`, `msys_search()`
-- [ ] `src/libmsys/msys.c`：mmap → 解析 header → 索引二分查找 → 返回数据指针
-- [ ] 集成到 Makefile：产出 `build/libmsys.a`
+- [x] `include/mt/msys.h`：声明 `msys_open()`, `msys_close()`, `msys_read()`, `msys_search()`
+- [x] `src/libmsys/msys.c`：mmap → 解析 header → 索引二分查找 → 返回数据指针
+- [x] 集成到 Makefile：产出 `build/libmsys.a`
 
-### Phase 1B — mkmsys 打包工具
+### Phase 1B — mkmsys 打包工具 ✅
 
-- [ ] `src/mkmsys/main.c`：遍历目录 → FNV-1a 哈希 → 排序 → 写入 .msys
-- [ ] 支持 `-o <output>`、`--list` 列出内容
-- [ ] 支持 `--arch <name>` 写入元数据键 `meuos_arch`
+- [x] `src/mkmsys/main.c`：遍历目录 → FNV-1a 哈希 → 排序 → 写入 .msys
+- [x] 支持 `-o <output>`、`--list` 列出内容
+- [x] 支持 `--arch <name>` 写入元数据键 `meuos_arch`
 
 ### Phase 2 — mcc 集成
 
