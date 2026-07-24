@@ -58,6 +58,7 @@ __syscall_number(long number)
 	case 130: return 179; /* rt_sigsuspend */
 	case 131: return 186; /* sigaltstack */
 	case 62:  return 37;  /* kill */
+	case 63:  return 122; /* uname */
 	case 234: return 270; /* tgkill */
 	default: return number;
 	}
@@ -91,6 +92,7 @@ __syscall_number(long number)
 	case 60:  return 93;   /* exit */
 	case 61:  return 260;  /* wait4 */
 	case 62:  return 129;  /* kill */
+	case 63:  return 160;  /* uname */
 	case 72:  return 25;   /* fcntl */
 	case 73:  return 32;   /* flock */
 	case 79:  return 17;   /* getcwd */

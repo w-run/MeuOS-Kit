@@ -1500,17 +1500,21 @@ write_executable(struct ld_context *ctx, const char *path,
 			tls_off = ctx->groups[ctx->tls_tdata_group].file_offset;
 			tls_filesz = ctx->groups[ctx->tls_tdata_group].size;
 		} else if (ctx->tls_tbss_group >= 0) {
-			/* QEMU 7.2 loongarch64 rejects PT_TLS with filesz=0 that
-			 * overlaps a PT_LOAD.  Skip the TLS segment for .tbss-only;
-			 * the crt1 handles TLS init from section headers. */
-			goto skip_tls;
+			/* .tbss-only TLS: emit PT_TLS with filesz=0.
+			 * The .tbss group has a valid address beyond the LOAD
+			 * segments (layout pass allocates it at LD_BASE+offset),
+			 * so PT_TLS does NOT overlap PT_LOAD.  The old workaround
+			 * (goto skip_tls) was for QEMU 7.2 loongarch64 which
+			 * rejected overlapping PT_TLS with PT_LOAD; with proper
+			 * .tbss address assignment this no longer occurs. */
+			tls_addr = ctx->groups[ctx->tls_tbss_group].address;
+			tls_off = ctx->groups[ctx->tls_tbss_group].file_offset;
 		}
 		if (write_program_header_type(file, LD_PT_TLS, LD_PF_R, tls_off,
 		                               tls_addr, tls_filesz, ctx->tls_size,
 		                               ctx->tls_align > 0x1000 ? ctx->tls_align : 0x1000) != 0)
 			goto out_file;
 	}
-skip_tls:
 	for (i = 0; i < ctx->group_count; ++i) {
 		struct ld_group *group = &ctx->groups[i];
 		if (group->type == MT_SHT_NOBITS || group->size == 0)
