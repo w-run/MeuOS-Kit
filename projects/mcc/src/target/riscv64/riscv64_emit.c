@@ -132,7 +132,8 @@ static void
 emitaddr(Con *c, FILE *f)
 {
 	assert((c->sym.type & ~SExt) == SGlo
-	    || c->sym.type == SGenThr);
+	    || c->sym.type == SGenThr
+	    || c->sym.type == SExtThr);
 	fputs(str(c->sym.id), f);
 	if (c->bits.i)
 		fprintf(f, "+%"PRIi64, c->bits.i);
@@ -258,7 +259,12 @@ loadaddr(Con *c, char *rn, FILE *f)
 			rn, rn, str(c->sym.id), off);
 		break;
 	case SExtThr:
-		die("extern thread unavailable on rv64");
+		/* Initial-exec TLS: la.tls.ie is a GAS pseudo-instruction
+		 * for the IE GOT-load sequence (lui+addi+ld+add tp). */
+		fprintf(f, "\tla.tls.ie %s, ", rn);
+		emitaddr(c, f);
+		fprintf(f, "\n\tadd %s, %s, tp\n", rn, rn);
+		break;
 	case SGenThr:
 		/* general-dynamic TLS descriptor address: la.tls.gd expands to
 		 * auipc + addi with R_RISCV_TLS_GD_HI20 and the paired

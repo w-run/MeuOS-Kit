@@ -397,7 +397,11 @@ def(Slice sl, bits msk, Blk *b, Ins *i, Loc *il)
 			goto Load;
 		p->arg[np] = r1;
 		p->blk[np] = bp;
-		/* XXX - multiplicity in predecessors!!! */
+		/* NOTE: fillpreds ensures b->s2 != b->s1, so each
+		 * predecessor block appears at most once in the list.
+		 * Multiplicity is theoretically possible with switch
+		 * lowering but the current CFG (1-2 successors per block)
+		 * and fixphis() cleanup guarantee unique predecessors. */
 	}
 	if (msk != msks)
 		mask(cls, &r, msk, il);

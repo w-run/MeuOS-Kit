@@ -185,7 +185,17 @@ loadaddr(Con *c, char *rn, FILE *f)
 		fprintf(f, ")\n\tadd.d %s, %s, $tp\n", rn, rn);
 		break;
 	case SExtThr:
-		die("extern thread-local address unavailable on loongarch64");
+		/* Initial-exec TLS via GOT:
+		 *   pcalau12i rd, %ie_pc_hi20(sym)
+		 *   ld.d      rd, rd, %ie_pc_lo12(sym)
+		 *   add.d     rd, rd, tp
+		 */
+		fprintf(f, "\tpcalau12i %s, %%ie_pc_hi20(", rn);
+		emitaddr(c, f);
+		fprintf(f, ")\n\tld.d %s, %s, %%ie_pc_lo12(", rn, rn);
+		emitaddr(c, f);
+		fprintf(f, ")\n\tadd.d %s, %s, $tp\n", rn, rn, rn);
+		break;
 	case SGenThr:
 		/* general-dynamic TLS descriptor address: pcalau12i + addi.d
 		 * compute the @tlsgd descriptor's address into rn (LoongArch

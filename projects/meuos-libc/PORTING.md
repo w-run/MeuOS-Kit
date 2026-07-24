@@ -1,6 +1,6 @@
 # meuos-libc 多架构移植说明
 
-> 更新：2026-07-23
+> 更新：2026-07-25
 >
 > 本文记录 `meuos-libc` 的架构取舍、移植边界与验收顺序。它是移植路线的
 > 动态说明；代码当前是否已经落地，以仓库中的源码、`.todo/` 和 `STATE.md`
@@ -139,9 +139,11 @@ syscall 编号：LoongArch64 采用 asm-generic 编号（与 aarch64/riscv64 完
 相同），因此 syscall.h 的翻译表通过 `|| defined(__loongarch64)` 合流到
 asm-generic 分支（零重复）。运行时移植自 riscv64 模板（适配寄存器名/指令）。
 
-当前环境 mcc loongarch64 后端有浮点比较 bug（已知问题），且无
-loongarch64-linux-gnu-gcc 与 qemu-loongarch64，真机门禁待工具链就绪后
+当前环境无 loongarch64-linux-gnu-gcc 与 qemu-loongarch64，真机门禁待工具链就绪后
 运行 `make check-loongarch64-bootstrap`。
+- mcc loongarch64 后端 emit 语法不兼容问题：commit 4e99492 已修复（指令格式、寄存器命名、内存语法）
+- 浮点有序/无序比较崩溃：commit 8063fbf 已修复
+- riscv64/loongarch64 SExtThr (Initial-Exec TLS): 已实现
 
 ### i386
 

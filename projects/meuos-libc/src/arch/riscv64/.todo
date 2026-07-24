@@ -5,6 +5,9 @@
 - ✅ atomic: exit 0
 - ✅ setjmp/longjmp: "setjmp ok"
 
+## mcc 后端状态
+- ✅ SExtThr (Initial-Exec TLS): 已实现，`la.tls.ie` + `add tp` 序列可被 riscv64-linux-gnu-as 正确汇编
+
 ## 已修复的 bug
 1. `atomic.S`: `andi X, Y, 0xffff` → `slli/srli` 零扩展（andi 不支持 16 位立即数）
 2. `atomic.S`: `__atomic_compare_exchange_{1,2}` 缺失字内保留

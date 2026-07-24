@@ -70,8 +70,8 @@ done_note: driver accepted; all cmds passed + code commit verified
 | --------------- | :--------------------------: | :------------------: | :-: | :-: | ----------------------------------- |
 | **x86_64**      |    ✅ `%fs:0` + `@tpoff`     | ✅ `@gottpoff(%rip)` | ❌  | ❌  | 最完整，`--shared` 时自动降级 IE    |
 | **aarch64**     | ✅ `tpidr_el0` + `:tprel_*:` |          ❌          | ❌  | ❌  | Linux 无 IE；macOS 独占 `@tlvppage` |
-| **riscv64**     |        ✅ `%tprel_*`         |    ❌ `die(...)`     | ❌  | ❌  | IE emit 显式 die                    |
-| **loongarch64** |      ✅ `TP` + `%le_*`       |    ❌ `die(...)`     | ❌  | ❌  | IE emit 显式 die                    |
+| **riscv64**     |        ✅ `%tprel_*`         |  ✅ `la.tls.ie`  | ❌  | ❌  | 2026-07-25 实现                           |
+| **loongarch64** |      ✅ `TP` + `%le_*`       |  ✅ `%ie_pc_*`   | ❌  | ❌  | 2026-07-25 实现                           |
 | **i386**        |     ✅ `%gs:...@ntpoff`      |          ❌          | ❌  | ❌  | TLS 整体未端到端验证                |
 
 ### 1.2 GD-TLS 是什么

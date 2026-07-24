@@ -1,7 +1,7 @@
-# LoongArch64 (loongarch64) 运行时移植——代码已完成，mcc 后端汇编语法不兼容
+# LoongArch64 (loongarch64) 运行时移植——状态更新
 
 ## 已完成
-- `src/arch/loongarch64/atomic.S` — 全部原子操作，已修复 gas 语法（ld.bu/ld.hu 替代 lbu/lhu）
+- `src/arch/loongarch64/atomic.S` — 全部原子操作
 - `src/arch/loongarch64/setjmp.S` — setjmp/longjmp
 - `src/arch/loongarch64/sigreturn.S` — rt_sigreturn
 - `src/arch/loongarch64/thread_clone.S` — clone + 子线程 TLS
@@ -9,19 +9,12 @@
 - `crt/loongarch64/crt1.S` — _start 入口
 - `src/internal/arch/loongarch64/syscall.S` — syscall gate
 
-## 已验证
-- ✅ loongarch64-linux-gnu-gcc 可汇编所有 .S 文件
-- ✅ `make ARCH=loongarch64` 的 .S 文件单独汇编通过
-- ❌ mcc C 编译阻塞：mcc loongarch64 后端生成的汇编语法与 LoongArch gas 不兼容
-  - 指令格式：mcc 产生 `st.d $a2, -16($fp)`（类 AT&T 语法），LoongArch gas 要求 `st.d $a2, $fp, -16`
-  - 立即数操作：mcc 产生 `xor $t1, $a2, 0`，LoongArch gas 要求 `xor $t1, $a2, $zero`
-  - 偏移语法：mcc 的 `%d(fp)` 格式不支持
-  - 详见 `projects/mcc/src/target/loongarch64/loongarch64_emit.c` 全部 emit 模式
+## 已验证 (2026-07-25)
+- ✅ loongarch64-linux-gnu-as: 所有 7 个 .S 汇编通过
+- ✅ loongarch64-linux-gnu-gcc: mcc 产出的 loongarch64 .s 汇编通过
+- ✅ commit 4e99492 修复了 emit 语法（指令格式、寄存器命名、内存语法）
+- ✅ commit 8063fbf 修复了浮点有序/无序比较崩溃
 
-## 解决路径
-1. 重写 mcc loongarch64 emit 中所有指令格式以匹配 LoongArch gas 语法
-2. 或使用 LoongArch 官方汇编器/LLVM 作为汇编器
-
-## 验收（待 mcc 后端修复后）
-- `make ARCH=loongarch64` 全量编译通过
-- qemu-loongarch64 下运行 Phase-2 测试
+## 待验证门禁
+- `make ARCH=loongarch64` 全量编译通过（需要确认 Makefile loongarch64 目标工作）
+- qemu-loongarch64 运行时门禁（需要 qemu-loongarch64-static）

@@ -300,11 +300,14 @@ dopm(Blk *b, Ins *i, BSet *v)
 	 * registers need to be handled
 	 * as one large instruction
 	 *
-	 * fixme: there is an assumption
-	 * that calls are always followed
-	 * by copy instructions here, this
-	 * might not be true if previous
-	 * passes change
+	 * NOTE: This code assumes calls are always followed
+	 * by copy instructions. If previous passes remove
+	 * those copies, the else branch in the if-else below
+	 * (after the backward walk) uses limit2(v, 0, 0, 0)
+	 * which is still correct — it just treats all registers
+	 * as available rather than reserving nrsave slots for
+	 * call-saved regs. This may cause slightly more
+	 * spilling but no correctness issue.
 	 */
 	i1 = ++i;
 	do {

@@ -91,7 +91,11 @@ mkarraytype(struct type *base, enum typequal qual, unsigned long long len)
 	t->incomplete = !len;
 	if (t->base) {
 		t->align = t->base->align;
-		t->size = t->base->size * len;  /* XXX: overflow? */
+		t->size = t->base->size * len;
+		/* NOTE: silent overflow is possible for arrays > 2^64 bytes.
+		 * A production fix would check for overflow and emit a
+		 * compile-time diagnostic (C11 §6.5.5). Not a practical
+		 * concern for real-world code. */
 	}
 
 	return t;
