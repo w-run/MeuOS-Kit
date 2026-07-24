@@ -9,7 +9,7 @@ static struct {
 } omap[] = {
 	{ Oadd, Ki, "add.%k %=, %0, %1" }, { Oadd, Ka, "fadd.%k %=, %0, %1" },
 	{ Osub, Ki, "sub.%k %=, %0, %1" }, { Osub, Ka, "fsub.%k %=, %0, %1" },
-	{ Oneg, Ki, "sub.%k %=, zero, %0" }, { Oneg, Ka, "fneg.%k %=, %0" },
+	{ Oneg, Ki, "sub.%k %=, $zero, %0" }, { Oneg, Ka, "fneg.%k %=, %0" },
 	{ Omul, Ki, "mul.%k %=, %0, %1" }, { Omul, Ka, "fmul.%k %=, %0, %1" },
 	{ Odiv, Ki, "div.%k %=, %0, %1" }, { Odiv, Ka, "fdiv.%k %=, %0, %1" },
 	{ Orem, Ki, "mod.%k %=, %0, %1" },
@@ -30,38 +30,38 @@ static struct {
 	{ Oload, Kd, "fld.d %=, %M0" },
 	{ Oextsb, Ki, "ext.w.b %=, %0" }, { Oextub, Ki, "bstrpick.d %=, %0, 7, 0" },
 	{ Oextsh, Ki, "ext.w.h %=, %0" }, { Oextuh, Ki, "bstrpick.d %=, %0, 15, 0" },
-	{ Oextsw, Kl, "add.w %=, %0, zero" }, { Oextuw, Kl, "bstrpick.d %=, %0, 31, 0" },
+	{ Oextsw, Kl, "add.w %=, %0, $zero" }, { Oextuw, Kl, "bstrpick.d %=, %0, 31, 0" },
 	{ Otruncd, Ks, "fcvt.s.d %=, %0" }, { Oexts, Kd, "fcvt.d.s %=, %0" },
-	{ Ostosi, Kw, "ftintrz.w.s ft15, %0\n\tmovfr2gr.s %=, ft15" },
-	{ Ostosi, Kl, "ftintrz.l.s ft15, %0\n\tmovfr2gr.d %=, ft15" },
-	{ Ostoui, Kw, "ftintrz.wu.s ft15, %0\n\tmovfr2gr.s %=, ft15" },
-	{ Ostoui, Kl, "ftintrz.lu.s ft15, %0\n\tmovfr2gr.d %=, ft15" },
-	{ Odtosi, Kw, "ftintrz.w.d ft15, %0\n\tmovfr2gr.s %=, ft15" },
-	{ Odtosi, Kl, "ftintrz.l.d ft15, %0\n\tmovfr2gr.d %=, ft15" },
-	{ Odtoui, Kw, "ftintrz.wu.d ft15, %0\n\tmovfr2gr.s %=, ft15" },
-	{ Odtoui, Kl, "ftintrz.lu.d ft15, %0\n\tmovfr2gr.d %=, ft15" },
-	{ Oswtof, Ka, "movgr2fr.w ft15, %0\n\tffint.%k.w %=, ft15" },
-	{ Ouwtof, Ka, "movgr2fr.w ft15, %0\n\tffint.%k.wu %=, ft15" },
-	{ Osltof, Ka, "movgr2fr.d ft15, %0\n\tffint.%k.l %=, ft15" },
-	{ Oultof, Ka, "movgr2fr.d ft15, %0\n\tffint.%k.lu %=, ft15" },
+	{ Ostosi, Kw, "ftintrz.w.s $ft15, %0\n\tmovfr2gr.s %=, $ft15" },
+	{ Ostosi, Kl, "ftintrz.l.s $ft15, %0\n\tmovfr2gr.d %=, $ft15" },
+	{ Ostoui, Kw, "ftintrz.wu.s $ft15, %0\n\tmovfr2gr.s %=, $ft15" },
+	{ Ostoui, Kl, "ftintrz.lu.s $ft15, %0\n\tmovfr2gr.d %=, $ft15" },
+	{ Odtosi, Kw, "ftintrz.w.d $ft15, %0\n\tmovfr2gr.s %=, $ft15" },
+	{ Odtosi, Kl, "ftintrz.l.d $ft15, %0\n\tmovfr2gr.d %=, $ft15" },
+	{ Odtoui, Kw, "ftintrz.wu.d $ft15, %0\n\tmovfr2gr.s %=, $ft15" },
+	{ Odtoui, Kl, "ftintrz.lu.d $ft15, %0\n\tmovfr2gr.d %=, $ft15" },
+	{ Oswtof, Ka, "movgr2fr.w $ft15, %0\n\tffint.%k.w %=, $ft15" },
+	{ Ouwtof, Ka, "movgr2fr.w $ft15, %0\n\tffint.%k.wu %=, $ft15" },
+	{ Osltof, Ka, "movgr2fr.d $ft15, %0\n\tffint.%k.l %=, $ft15" },
+	{ Oultof, Ka, "movgr2fr.d $ft15, %0\n\tffint.%k.lu %=, $ft15" },
 	{ Ocast, Kw, "movfr2gr.s %=, %0" }, { Ocast, Kl, "movfr2gr.d %=, %0" },
 	{ Ocast, Ks, "movgr2fr.w %=, %0" }, { Ocast, Kd, "movgr2fr.d %=, %0" },
-	{ Ocopy, Ki, "or %=, %0, zero" }, { Ocopy, Ka, "fmov.%k %=, %0" },
-	{ Oswap, Ki, "or %?, %0, zero\n\tor %0, %1, zero\n\tor %1, %?, zero" },
+	{ Ocopy, Ki, "or %=, %0, $zero" }, { Ocopy, Ka, "fmov.%k %=, %0" },
+	{ Oswap, Ki, "or %?, %0, $zero\n\tor %0, %1, $zero\n\tor %1, %?, $zero" },
 	{ Oswap, Ka, "fmov.%k %?, %0\n\tfmov.%k %0, %1\n\tfmov.%k %1, %?" },
-	{ Oreqz, Ki, "sltiu %=, %0, 1" }, { Ornez, Ki, "sltu %=, zero, %0" },
-	{ Ocall, Kl, "jirl ra, %0, 0" }, { NOp, 0, 0 }
+	{ Oreqz, Ki, "sltui %=, %0, 1" }, { Ornez, Ki, "sltu %=, $zero, %0" },
+	{ Ocall, Kl, "jirl $ra, %0, 0" }, { NOp, 0, 0 }
 };
 
 static char *rname[] = {
-	[FP] = "fp", [SP] = "sp", [TP] = "tp", [RA] = "ra",
-	[T0] = "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8",
-	[A0] = "a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7",
-	[S0] = "s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8",
-	[FT0] = "ft0", "ft1", "ft2", "ft3", "ft4", "ft5", "ft6", "ft7",
-	         "ft8", "ft9", "ft10", "ft11", "ft12", "ft13", "ft14", "ft15",
-	[FA0] = "fa0", "fa1", "fa2", "fa3", "fa4", "fa5", "fa6", "fa7",
-	[FS0] = "fs0", "fs1", "fs2", "fs3", "fs4", "fs5", "fs6", "fs7",
+	[FP] = "$fp", [SP] = "$sp", [TP] = "$tp", [RA] = "$ra",
+	[T0] = "$t0", "$t1", "$t2", "$t3", "$t4", "$t5", "$t6", "$t7", "$t8",
+	[A0] = "$a0", "$a1", "$a2", "$a3", "$a4", "$a5", "$a6", "$a7",
+	[S0] = "$s0", "$s1", "$s2", "$s3", "$s4", "$s5", "$s6", "$s7", "$s8",
+	[FT0] = "$ft0", "$ft1", "$ft2", "$ft3", "$ft4", "$ft5", "$ft6", "$ft7",
+	         "$ft8", "$ft9", "$ft10", "$ft11", "$ft12", "$ft13", "$ft14", "$ft15",
+	[FA0] = "$fa0", "$fa1", "$fa2", "$fa3", "$fa4", "$fa5", "$fa6", "$fa7",
+	[FS0] = "$fs0", "$fs1", "$fs2", "$fs3", "$fs4", "$fs5", "$fs6", "$fs7",
 };
 
 static int64_t
@@ -75,9 +75,20 @@ slot(Ref r, Fn *fn)
 static void
 emitaddr(Con *c, FILE *f)
 {
+	const char *name;
 	assert((c->sym.type & ~(SExt|SThr)) == SGlo
 	    || c->sym.type == SGenThr);
-	fputs(str(c->sym.id), f);
+	name = str(c->sym.id);
+	if (name[0] == '"') name++;
+	if (name[strlen(name)-1] == '"') {
+		int len = strlen(name)-1;
+		char buf[128];
+		memcpy(buf, name, len);
+		buf[len] = 0;
+		fputs(buf, f);
+	} else {
+		fputs(name, f);
+	}
 	if (c->bits.i)
 		fprintf(f, "+%"PRIi64, c->bits.i);
 }
@@ -103,7 +114,7 @@ emitf(char *s, Ins *i, Fn *fn, FILE *f)
 		}
 		switch ((c = *s++)) {
 		default: die("invalid escape");
-		case '?': fputs(KBASE(k) == 0 ? "t8" : "ft15", f); break;
+		case '?': fputs(KBASE(k) == 0 ? "$t8" : "$ft15", f); break;
 		case 'k': fputc(clschr[i->cls], f); break;
 		case '=':
 		case '0':
@@ -127,11 +138,11 @@ emitf(char *s, Ins *i, Fn *fn, FILE *f)
 			c = *s++;
 			r = i->arg[c - '0'];
 			if (rtype(r) == RTmp)
-				fprintf(f, "%d(%s)", 0, rname[r.val]);
+				fprintf(f, "%s, 0", rname[r.val]);
 			else if (rtype(r) == RSlot) {
 				offset = slot(r, fn);
 				assert(offset >= -2048 && offset <= 2047);
-				fprintf(f, "%d(fp)", (int)offset);
+				fprintf(f, "$fp, %d", (int)offset);
 			} else {
 				pc = &fn->con[r.val];
 				assert(rtype(r) == RCon && pc->type == CAddr);
@@ -171,7 +182,7 @@ loadaddr(Con *c, char *rn, FILE *f)
 		emitaddr(c, f);
 		fprintf(f, ")\n\tlu52i.d %s, %s, %%le64_hi12(", rn, rn);
 		emitaddr(c, f);
-		fprintf(f, ")\n\tadd.d %s, %s, tp\n", rn, rn);
+		fprintf(f, ")\n\tadd.d %s, %s, $tp\n", rn, rn);
 		break;
 	case SExtThr:
 		die("extern thread-local address unavailable on loongarch64");
@@ -219,7 +230,7 @@ fixmem(Ref *pr, Fn *fn, FILE *f)
 	if (rtype(r) == RSlot) {
 		s = slot(r, fn);
 		if (s < -2048 || s > 2047) {
-			fprintf(f, "\tli.d t8, %"PRId64"\n\tadd.d t8, fp, t8\n", s);
+			fprintf(f, "\tli.d $t8, %"PRId64"\n\tadd.d $t8, $fp, $t8\n", s);
 			*pr = TMP(T8);
 		}
 	}
@@ -232,10 +243,23 @@ emitcmp(Ins *i, int c, FILE *f)
 		[Cfeq] = "ceq", [Cfge] = "cge", [Cfgt] = "cgt", [Cfle] = "cle", [Cflt] = "clt", [Cfne] = "cne",
 		[Cfo] = "cor", [Cfuo] = "cun"
 	};
+	/* LoongArch has no cgt/cge; swap operands and use clt/cle instead. */
+	int swap = 0;
+	static const char *loongarch_name[] = {
+		"ceq", "cle", "clt", "cle", "clt", "cne", "cor", "cun"
+	};
 	c -= NCmpI;
 	if (c < 0 || c >= NCmpF || !name[c])
 		die("unsupported floating comparison");
-	fprintf(f, "\tfcmp.%s.%c $fcc0, %s, %s\n\tmovcf2gr %s, $fcc0\n", name[c], i->cls == Ks ? 's' : 'd', rname[i->arg[0].val], rname[i->arg[1].val], rname[i->to.val]);
+	/* Cfge (c=1) → cle with swapped args; Cfgt (c=2) → clt with swapped args */
+	if (c == (Cfge - Cfeq) || c == (Cfgt - Cfeq))
+		swap = 1;
+	fprintf(f, "\tfcmp.%s.%c $fcc0, %s, %s\n\tmovcf2gr %s, $fcc0\n",
+		loongarch_name[c],
+		i->cls == Ks ? 's' : 'd',
+		swap ? rname[i->arg[1].val] : rname[i->arg[0].val],
+		swap ? rname[i->arg[0].val] : rname[i->arg[1].val],
+		rname[i->to.val]);
 }
 
 static void
@@ -244,7 +268,7 @@ emitins(Ins *i, Fn *fn, FILE *f)
 	int o, k;
 	int64_t offset;
 	Con *c;
-	if (iscmp(i->op, &k, &o) && o >= Cfeq) {
+	if (iscmp(i->op, &k, &o) && o >= NCmpI) {
 		emitcmp(i, o, f);
 		return;
 	}
@@ -258,7 +282,66 @@ emitins(Ins *i, Fn *fn, FILE *f)
 			     omap[o].cls == Ka || (omap[o].cls == Ki && KBASE(i->cls) == 0)))
 				break;
 		if (omap[o].op == NOp) die("no match for %s(%c)", optab[i->op].name, "wlsd"[i->cls]);
-		emitf(omap[o].fmt, i, fn, f);
+		/* LoongArch: immediate-variant mnemonic when arg[1] is constant */
+		if (!isload(i->op) && !isstore(i->op) && rtype(i->arg[1]) == RCon) {
+			const char *fmt = omap[o].fmt;
+			static char buf[128];
+			static char cls[] = {'w','d','s','d'};
+			int64_t imm = fn->con[i->arg[1].val].bits.i;
+			/* Check if the immediate fits in the instruction's bounds.
+			 * andi/ori/xori: 12-bit unsigned (0..4095)
+			 * addi: 12-bit signed (-2048..2047)
+			 * shifts: 0..63 (5-bit for w, 6-bit for d) */
+			int fits = 1;
+			if (fmt[0] == 'a' && fmt[1] == 'd' && fmt[2] == 'd' && fmt[3] == '.')
+				fits = (imm >= -2048 && imm <= 2047);
+			else if (fmt[0] == 's' && (fmt[1] == 'l' || fmt[1] == 'r' || fmt[1] == 'a'))
+				fits = (imm >= 0 && imm <= 63);
+			else if (fmt[0] == 'a' || fmt[0] == 'o' || fmt[0] == 'x' || strncmp(fmt, "slt", 3) == 0)
+				fits = (imm >= 0 && imm <= 4095);
+			if (!fits) {
+				/* Large immediate: materialize in $t8, then use reg-reg form */
+				fprintf(f, "\tli.d $t8, %ld\n", (long)imm);
+				/* Replace %1 with $t8 in the format string */
+				for (o = 0; omap[o].op != NOp && omap[o].fmt != fmt; o++);
+				if (omap[o].op != NOp && strstr(fmt, "%1")) {
+					char fmt2[128]; const char *p = fmt, *q;
+					/* Find %1 in format and replace with $t8 */
+					q = strstr(fmt, "%1");
+					snprintf(fmt2, sizeof fmt2, "%.*s$t8%s", (int)(q - fmt), fmt, q + 2);
+					emitf(fmt2, i, fn, f);
+				} else
+					emitf(fmt, i, fn, f);
+				break;
+			}
+			if (strncmp(fmt, "add", 3) == 0 && fmt[3] == '.')
+				snprintf(buf, sizeof buf, "addi.%c %%=, %0, %1", cls[i->cls]);
+			else if (strncmp(fmt, "and", 3) == 0)
+				snprintf(buf, sizeof buf, "andi %%=, %0, %1");
+			else if (strncmp(fmt, "or ", 3) == 0)
+				snprintf(buf, sizeof buf, "ori %%=, %0, %1");
+			else if (strncmp(fmt, "xor", 3) == 0) {
+				if (fn->con[i->arg[1].val].bits.i == 0)
+					snprintf(buf, sizeof buf, "or %%=, %0, $zero");
+				else
+					snprintf(buf, sizeof buf, "xori %%=, %0, %1");
+			} else if (strncmp(fmt, "sltu", 4) == 0)
+				snprintf(buf, sizeof buf, "sltui %%=, %0, %1");
+			else if (strncmp(fmt, "slt ", 4) == 0)
+				snprintf(buf, sizeof buf, "slti %%=, %0, %1");
+			else if (strncmp(fmt, "sll", 3) == 0)
+				snprintf(buf, sizeof buf, "slli.%c %%=, %0, %1", cls[i->cls]);
+			else if (strncmp(fmt, "srl", 3) == 0)
+				snprintf(buf, sizeof buf, "srli.%c %%=, %0, %1", cls[i->cls]);
+			else if (strncmp(fmt, "sra", 3) == 0)
+				snprintf(buf, sizeof buf, "srai.%c %%=, %0, %1", cls[i->cls]);
+			else {
+				emitf(omap[o].fmt, i, fn, f);
+				break;
+			}
+			emitf(buf, i, fn, f);
+		} else
+			emitf(omap[o].fmt, i, fn, f);
 		break;
 	case Onop: break;
 	case Ocopy:
@@ -277,15 +360,15 @@ emitins(Ins *i, Fn *fn, FILE *f)
 		else if (rtype(i->arg[0]) == RSlot) {
 			i->op = Oload;
 			emitins(i, fn, f);
-		} else emitf(KBASE(i->cls) ? "fmov.%k %=, %0" : "or %=, %0, zero", i, fn, f);
+		} else emitf(KBASE(i->cls) ? "fmov.%k %=, %0" : "or %=, %0, $zero", i, fn, f);
 		break;
 	case Oaddr:
 		assert(rtype(i->arg[0]) == RSlot);
 		offset = slot(i->arg[0], fn);
 		if (offset >= -2048 && offset <= 2047)
-			fprintf(f, "\taddi.d %s, fp, %"PRId64"\n", rname[i->to.val], offset);
+			fprintf(f, "\taddi.d %s, $fp, %"PRId64"\n", rname[i->to.val], offset);
 		else
-			fprintf(f, "\tli.d %s, %"PRId64"\n\tadd.d %s, fp, %s\n",
+			fprintf(f, "\tli.d %s, %"PRId64"\n\tadd.d %s, $fp, %s\n",
 				rname[i->to.val], offset, rname[i->to.val], rname[i->to.val]);
 		break;
 	case Ocall:
@@ -293,7 +376,7 @@ emitins(Ins *i, Fn *fn, FILE *f)
 			c = &fn->con[i->arg[0].val];
 			if (c->type != CAddr || c->bits.i || (c->sym.type & SThr)) die("invalid call argument");
 			fprintf(f, "\tbl %s\n", str(c->sym.id));
-		} else emitf("jirl ra, %0, 0", i, fn, f);
+		} else emitf("jirl $ra, %0, 0", i, fn, f);
 		break;
 	case Osalloc:
 		emitf("sub.d sp, sp, %0", i, fn, f);
@@ -317,15 +400,15 @@ la64_emitfn(Fn *fn, FILE *f)
 	for (pr = la64_rclob; *pr >= 0; pr++) if (fn->reg & BIT(*pr)) frame += 8;
 	frame = (frame + 15) & -16;
 	if (fn->vararg) {
-		fprintf(f, "\taddi.d sp, sp, -64\n");
+		fprintf(f, "\taddi.d $sp, $sp, -64\n");
 		for (r=A0+fn->va_gpregs; r<=A7; r++)
-			fprintf(f, "\tst.d %s, sp, %d\n", rname[r], 8*(r-A0));
+			fprintf(f, "\tst.d %s, $sp, %d\n", rname[r], 8*(r-A0));
 	}
-	fprintf(f, "\taddi.d sp, sp, -16\n\tst.d fp, sp, 0\n\tst.d ra, sp, 8\n\taddi.d fp, sp, 0\n");
-	if (frame <= 2047) fprintf(f, "\taddi.d sp, sp, -%d\n", frame);
-	else fprintf(f, "\tli.d t8, %d\n\tsub.d sp, sp, t8\n", frame);
+	fprintf(f, "\taddi.d $sp, $sp, -16\n\tst.d $fp, $sp, 0\n\tst.d $ra, $sp, 8\n\taddi.d $fp, $sp, 0\n");
+	if (frame <= 2047) fprintf(f, "\taddi.d $sp, $sp, -%d\n", frame);
+	else fprintf(f, "\tli.d $t8, %d\n\tsub.d $sp, $sp, $t8\n", frame);
 	for (pr = la64_rclob, off = 0; *pr >= 0; pr++) if (fn->reg & BIT(*pr)) {
-		fprintf(f, "\t%s %s, sp, %d\n", *pr < FT0 ? "st.d" : "fst.d", rname[*pr], off);
+		fprintf(f, "\t%s %s, $sp, %d\n", *pr < FT0 ? "st.d" : "fst.d", rname[*pr], off);
 		off += 8;
 	}
 	for (lbl = 0, b = fn->start; b; b = b->link) {
@@ -337,15 +420,15 @@ la64_emitfn(Fn *fn, FILE *f)
 		case Jret0:
 			if (fn->dynalloc) {
 				if (frame <= 2047)
-					fprintf(f, "\taddi.d sp, fp, -%d\n", frame);
+					fprintf(f, "\taddi.d $sp, $fp, -%d\n", frame);
 				else
-					fprintf(f, "\tli.d t8, %d\n\tsub.d sp, fp, t8\n", frame);
+					fprintf(f, "\tli.d $t8, %d\n\tsub.d $sp, $fp, $t8\n", frame);
 			}
 			for (pr = la64_rclob, off = 0; *pr >= 0; pr++) if (fn->reg & BIT(*pr)) {
-				fprintf(f, "\t%s %s, sp, %d\n", *pr < FT0 ? "ld.d" : "fld.d", rname[*pr], off);
+				fprintf(f, "\t%s %s, $sp, %d\n", *pr < FT0 ? "ld.d" : "fld.d", rname[*pr], off);
 				off += 8;
 			}
-			fprintf(f, "\taddi.d sp, fp, 0\n\tld.d ra, sp, 8\n\tld.d fp, sp, 0\n\taddi.d sp, sp, %d\n\tjirl zero, ra, 0\n", 16 + 64*fn->vararg);
+			fprintf(f, "\taddi.d $sp, $fp, 0\n\tld.d $ra, $sp, 8\n\tld.d $fp, $sp, 0\n\taddi.d $sp, $sp, %d\n\tjirl $zero, $ra, 0\n", 16 + 64*fn->vararg);
 			break;
 		case Jjmp:
 		Jmp:
@@ -354,8 +437,8 @@ la64_emitfn(Fn *fn, FILE *f)
 		case Jjnz:
 			neg = 0;
 			if (b->link == b->s2) { s = b->s1; b->s1 = b->s2; b->s2 = s; neg = 1; }
-			if (rtype(b->jmp.arg) == RSlot) { ii.arg[0] = b->jmp.arg; emitf("ld.w t8, %M0", &ii, fn, f); b->jmp.arg = TMP(T8); }
-			fprintf(f, "\tb%s %s, zero, .L%d\n", neg ? "ne" : "eq", rname[b->jmp.arg.val], id0 + b->s2->id);
+			if (rtype(b->jmp.arg) == RSlot) { ii.arg[0] = b->jmp.arg; emitf("ld.w $t8, %M0", &ii, fn, f); b->jmp.arg = TMP(T8); }
+			fprintf(f, "\tb%s %s, $zero, .L%d\n", neg ? "ne" : "eq", rname[b->jmp.arg.val], id0 + b->s2->id);
 			goto Jmp;
 		}
 	}
