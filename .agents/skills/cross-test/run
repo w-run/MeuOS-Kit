@@ -1,0 +1,16 @@
+#!/bin/bash
+# cross-test — 跨架构 QEMU 运行器
+# 用法: cross-test --arch=<arch> <binary>
+
+set -eu
+ROOT="$(cd "$(dirname "$0")/../../../" && pwd)"
+ARCH="" BIN=""
+while [ $# -gt 0 ]; do
+    case "$1" in --arch=*) ARCH="${1#*=}" ;; *) BIN="$1" ;; esac
+    shift
+done
+[ -n "$ARCH" ] && [ -n "$BIN" ] || { echo "Usage: cross-test --arch=<arch> <binary>"; exit 1; }
+QEMU="$ROOT/env/qemu/qemu-$ARCH"
+[ -x "$QEMU" ] || { echo "No QEMU for $ARCH"; exit 1; }
+[ -f "$BIN" ] || { echo "File not found: $BIN"; exit 1; }
+exec "$QEMU" "$BIN"
