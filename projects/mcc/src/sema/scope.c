@@ -32,6 +32,7 @@ scopeinit(void)
 		{.name = "__builtin_atomic_compare_exchange", .kind = DECLBUILTIN, .u.builtin = BUILTINATOMICCOMPAREEXCHANGE},
 	};
 	static struct decl valist;
+	static struct decl nullptr_t_decl;
 	struct decl *d;
 
 	for (d = builtins; d < builtins + countof(builtins); ++d)
@@ -40,6 +41,14 @@ scopeinit(void)
 	valist.kind = DECLTYPE;
 	valist.type = targ->typevalist;
 	scopeputdecl(&filescope, &valist);
+	/* C23: nullptr_t is the (unqualified) type of the nullptr
+	 * constant; equivalent to `typedef typeof(nullptr) nullptr_t;`
+	 * which <stddef.h> would provide.  Register it as a builtin
+	 * typedef so the type name is usable without headers. */
+	nullptr_t_decl.name = "nullptr_t";
+	nullptr_t_decl.kind = DECLTYPE;
+	nullptr_t_decl.type = &typenullptr;
+	scopeputdecl(&filescope, &nullptr_t_decl);
 }
 
 struct scope *

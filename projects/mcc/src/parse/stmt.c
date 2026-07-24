@@ -61,7 +61,7 @@ label(struct func *f, struct scope *s)
 	struct block *b;
 	unsigned long long i;
 
-	attr(NULL, 0);
+	attr(NULL, ATTRFALLTHROUGH);
 	switch (tok.kind) {
 	case TCASE:
 		next();
@@ -128,7 +128,7 @@ stmt(struct func *f, struct scope *s)
 
 	curfunc = f;
 
-	attr(NULL, 0);
+	attr(NULL, ATTRFALLTHROUGH);
 	switch (tok.kind) {
 	/* 6.8.2 Compound statement */
 	case TLBRACE:

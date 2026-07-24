@@ -250,7 +250,9 @@ exprassign(struct expr *e, struct type *t)
 			error(&tok.loc, "assignment to pointer discards qualifiers");
 		break;
 	case TYPENULLPTR:
-		if (!nullpointer(e))
+		/* A null pointer constant (incl. the nullptr keyword) or any
+		 * expression already of type nullptr_t is assignable. */
+		if (!nullpointer(e) && et->kind != TYPENULLPTR)
 			error(&tok.loc, "assignment to nullptr_t must be from null pointer constant or expression with type nullptr_t");
 		break;
 	case TYPESTRUCT:
@@ -322,6 +324,40 @@ mkbinaryexpr(struct location *loc, enum tokenkind op, struct expr *l, struct exp
 		if (lp & PROPARITH && rp & PROPARITH) {
 			commonreal(&l, &r);
 			break;
+		}
+		/* C23: nullptr_t is compatible with any pointer type and
+		 * with null pointer constants, so it is a valid operand of
+		 * == / != alongside another nullptr_t, a pointer, or 0/nullptr.
+		 * We never ask the backend to convert to/from TYPENULLPTR.
+		 * In particular, a bare integer null constant (0) is replaced
+		 * by a nullptr constant: comparing two TYPENULLPTR values
+		 * keeps both operands at the 8-byte pointer size, and it
+		 * avoids the branch optimization that would branch on the
+		 * nullptr_t value directly (which would require a nullptr_t
+		 * -> bool conversion the backend does not implement). */
+		if (l->type->kind == TYPENULLPTR || r->type->kind == TYPENULLPTR) {
+			struct expr *np, *other;
+
+			if (l->type->kind == TYPENULLPTR) {
+				np = l;
+				other = r;
+			} else {
+				np = r;
+				other = l;
+			}
+			if (nullpointer(np) || nullpointer(other)
+			    || other->type->kind == TYPEPOINTER
+			    || other->type->kind == TYPENULLPTR) {
+				if (other->type->kind != TYPEPOINTER
+				    && other->type->kind != TYPENULLPTR) {
+					other = mkexpr(EXPRCONST, &typenullptr, NULL);
+					other->u.constant.u = 0;
+				}
+				l = np;
+				r = other;
+				break;
+			}
+			error(loc, "invalid operands to '%s' operator", tokenstr(op));
 		}
 		if (l->type->kind != TYPEPOINTER)
 			e = l, l = r, r = e;

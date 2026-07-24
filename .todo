@@ -19,10 +19,11 @@
 
 ## P1 — loongarch64 核心补齐
 
-[ ] mt/as loongarch64 编码器扩增
-    -> 当前 640 行 / 1 个编码函数，缺伪指令 (move, st.d 别名等)
-    -> 参考 aarch64: 971 行 / 2 个编码函数
-    -> 需要补充：beqz/bnez/blt/bge 等条件分支的编码
+[x] mt/as loongarch64 编码器扩增 + bug 修复
+    -> 新增 jirl/syscall/move/nop/ret/jr/conditional branch 等编码
+    -> 修复 parse_operands 把立即数当符号的错误（缺 strtol 判断）
+    -> 修复 ALU 2RI12 块条件过于宽泛截胡 jirl/beq/syscall 的 bug
+    -> 全链路验证：mcc --target=loongarch64 → mt/as → GNU ld → qemu (exit=42)
 
 [x] mcc loongarch64 isel + emit 完善
     -> 基线功能完整：all patterns + O0/O1/O2 + float + struct + VLA + ABI
@@ -30,9 +31,10 @@
     -> 持续优化方向：更多模式规则、寄存器分配 hint、条件移动
 
 [ ] libc loongarch64 exit() 后 cleanup SIGSEGV
-    -> bare_tls 输出数据正确（main=5 child=9 errno=31/47），exit 时 crash
-    -> 地址 0x41ed08 附近，疑似 TLS cleanup 或 thread TSS free 路径
-    -> QEMU 7.2→10.1 后数据正确，退出时仍 crash
+    -> 阻塞：GNU LD 2.41 loongarch64 TLS LE reloc BFD 断言失败
+    -> bare_tls 无法链接（R_LARCH_TLS_LE_HI20/LO12 等触发断言）
+    -> 最小测试（int main(void){return 42;} + meuos-libc）在 qemu 上 exit=42 正常
+    -> 等待 mt/ld loongarch64 支持就绪后（P1.1），用 mt/ld 链接复现
 
 ## P2 — 跨架构完善
 

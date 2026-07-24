@@ -1006,7 +1006,14 @@ directive(void)
 		while (tok.kind != TNEWLINE && tok.kind != TEOF) {
 			const char *id = (tok.kind >= TPPIDENT || tok.kind == TIDENT)
 			                  ? tokenstr(tok.kind) : NULL;
-			if (!id) break;
+			if (!id) {
+				/* Not a parameter keyword (e.g. the closing ')'
+				 * left over after `limit(N)`). Skip it and keep
+				 * scanning so that multiple parameters can be
+				 * combined: limit(N) prefix(...) suffix(...) if_empty(...). */
+				scan(&tok);
+				continue;
+			}
 
 			if (strcmp(id, "limit") == 0) {
 				scan(&tok);
@@ -1063,7 +1070,11 @@ directive(void)
 				num.lit = xmalloc(strlen(litbuf) + 1);
 				strcpy(num.lit, litbuf);
 				arrayaddbuf(&toks, &num, sizeof num);
-				if (total + i + 1 < nwrite || total + nwrite < limit) {
+				/* Separate every embedded byte by a comma. A trailing
+				 * comma is always valid in an initializer list, and it
+				 * also provides the separator between the data and any
+				 * following prefix/suffix tokens. */
+				{
 					struct token comma = { .kind = TCOMMA, .space = false };
 					arrayaddbuf(&toks, &comma, sizeof comma);
 				}

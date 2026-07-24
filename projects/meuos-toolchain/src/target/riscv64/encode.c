@@ -102,27 +102,24 @@ parse_operands(const char *text, struct rv_op ops[4], int *nops)
 		ops[*nops].addend = 0;
 		ops[*nops].mem_reg = -1;
 
-		/* Check for immediate: $number, $symbol, or bare number */
-		if (tok[0] == '$' || tok[0] == '-' || (tok[0] >= '0' && tok[0] <= '9')) {
-			const char *val = (tok[0] == '$') ? tok + 1 : tok;
-			char *end;
-			long nv = strtol(val, &end, 0);
-			if (end != val && *end == '\0') {
-				ops[*nops].kind = 2; /* imm */
-				ops[*nops].imm = nv;
+		/* GAS modifier form: %hi(sym) / %lo(sym). Must be checked
+		 * before the memory branch because it also contains '('. */
+		if (tok[0] == '%') {
+			char *paren = strchr(tok, '(');
+			char *endp = strchr(tok, ')');
+			if (paren && endp && endp > paren) {
+				*endp = '\0';
+				ops[*nops].kind = 4; /* symbol */
+				ops[*nops].sym = paren + 1;
 				(*nops)++;
 				tok = strtok(NULL, ",");
 				continue;
 			}
-			/* Symbol reference */
-			ops[*nops].kind = 4; /* symbol */
-			ops[*nops].sym = val;
-			(*nops)++;
-			tok = strtok(NULL, ",");
-			continue;
 		}
 
-		/* Check for memory: offset(reg) or (reg) */
+		/* Memory: offset(reg) or (reg). Must be checked before the
+		 * digit/'-' immediate branch because operands like 0(reg)
+		 * or -16(reg) start with a digit or '-'. */
 		{
 			const char *paren = strchr(tok, '(');
 			if (paren) {
@@ -152,12 +149,36 @@ parse_operands(const char *text, struct rv_op ops[4], int *nops)
 			}
 		}
 
-		/* Register */
+		/* Immediate: $number, $symbol, or bare number */
+		if (tok[0] == '$' || tok[0] == '-' || (tok[0] >= '0' && tok[0] <= '9')) {
+			const char *val = (tok[0] == '$') ? tok + 1 : tok;
+			char *end;
+			long nv = strtol(val, &end, 0);
+			if (end != val && *end == '\0') {
+				ops[*nops].kind = 2; /* imm */
+				ops[*nops].imm = nv;
+				(*nops)++;
+				tok = strtok(NULL, ",");
+				continue;
+			}
+			/* Symbol reference */
+			ops[*nops].kind = 4; /* symbol */
+			ops[*nops].sym = val;
+			(*nops)++;
+			tok = strtok(NULL, ",");
+			continue;
+		}
+
+		/* Register, or fall back to a symbol reference (label / undefined
+		 * symbol). An unrecognized token is a symbol, not an invalid reg. */
 		{
 			int r = parse_reg(tok);
 			if (r >= 0) {
 				ops[*nops].kind = 1;
 				ops[*nops].reg = r;
+			} else {
+				ops[*nops].kind = 4; /* symbol */
+				ops[*nops].sym = tok;
 			}
 			(*nops)++;
 		}
@@ -457,135 +478,122 @@ riscv64_encode_insn(const struct mt_target *target,
 		return 0;
 	}
 
-	/* R-type: add, sub, sll, slt, sltu, xor, srl, sra, or, and */
+	/* add/sub (+W) with immediate (GAS-style pseudo):
+	 *   add rd, rs, imm  → addi rd, rs, imm
+	 *   sub rd, rs, imm  → addi rd, rs, -imm   (RV has no subi)
+	 *   addw/subw similarly with addiw. */
+	if ((strcmp(mnemonic, "add") == 0 || strcmp(mnemonic, "sub") == 0 ||
+	     strcmp(mnemonic, "addw") == 0 || strcmp(mnemonic, "subw") == 0) &&
+	    nops == 3 && ops[0].kind == 1 && ops[1].kind == 1 &&
+	    ops[2].kind == 2) {
+		int w = (mnemonic[mlen-1] == 'w') ? 1 : 0;
+		int32_t imm = (int32_t)ops[2].imm;
+		if (strcmp(mnemonic, "sub") == 0 || strcmp(mnemonic, "subw") == 0)
+			imm = -imm;
+		emit32(out->bytes, i_type(w ? 0x1B : 0x13, (unsigned)ops[0].reg,
+		                          0, (unsigned)ops[1].reg, imm));
+		return 0;
+	}
+
+	/* R-type integer ops (3 registers). Each matched mnemonic returns
+	 * directly; an unmatched mnemonic falls through to the next group so
+	 * that e.g. addw/subw (W group) are not shadowed by the plain add
+	 * block's trailing return -1. */
 	if (nops == 3 && ops[0].kind == 1 && ops[1].kind == 1 && ops[2].kind == 1) {
 		unsigned rd = (unsigned)ops[0].reg, rs1 = (unsigned)ops[1].reg, rs2 = (unsigned)ops[2].reg;
-		if (strcmp(mnemonic, "add") == 0)
-			emit32(out->bytes, r_type(0x33, rd, 0, rs1, rs2, 0x00));
-		else if (strcmp(mnemonic, "sub") == 0)
-			emit32(out->bytes, r_type(0x33, rd, 0, rs1, rs2, 0x20));
-		else if (strcmp(mnemonic, "sll") == 0)
-			emit32(out->bytes, r_type(0x33, rd, 1, rs1, rs2, 0x00));
-		else if (strcmp(mnemonic, "slt") == 0)
-			emit32(out->bytes, r_type(0x33, rd, 2, rs1, rs2, 0x00));
-		else if (strcmp(mnemonic, "sltu") == 0)
-			emit32(out->bytes, r_type(0x33, rd, 3, rs1, rs2, 0x00));
-		else if (strcmp(mnemonic, "xor") == 0)
-			emit32(out->bytes, r_type(0x33, rd, 4, rs1, rs2, 0x00));
-		else if (strcmp(mnemonic, "srl") == 0)
-			emit32(out->bytes, r_type(0x33, rd, 5, rs1, rs2, 0x00));
-		else if (strcmp(mnemonic, "sra") == 0)
-			emit32(out->bytes, r_type(0x33, rd, 5, rs1, rs2, 0x20));
-		else if (strcmp(mnemonic, "or") == 0)
-			emit32(out->bytes, r_type(0x33, rd, 6, rs1, rs2, 0x00));
-		else if (strcmp(mnemonic, "and") == 0)
-			emit32(out->bytes, r_type(0x33, rd, 7, rs1, rs2, 0x00));
-		else
-			return -1;
-		return 0;
+		if (strcmp(mnemonic, "add") == 0)  { emit32(out->bytes, r_type(0x33, rd, 0, rs1, rs2, 0x00)); return 0; }
+		if (strcmp(mnemonic, "sub") == 0)  { emit32(out->bytes, r_type(0x33, rd, 0, rs1, rs2, 0x20)); return 0; }
+		if (strcmp(mnemonic, "sll") == 0)  { emit32(out->bytes, r_type(0x33, rd, 1, rs1, rs2, 0x00)); return 0; }
+		if (strcmp(mnemonic, "slt") == 0)  { emit32(out->bytes, r_type(0x33, rd, 2, rs1, rs2, 0x00)); return 0; }
+		if (strcmp(mnemonic, "sltu") == 0) { emit32(out->bytes, r_type(0x33, rd, 3, rs1, rs2, 0x00)); return 0; }
+		if (strcmp(mnemonic, "xor") == 0)  { emit32(out->bytes, r_type(0x33, rd, 4, rs1, rs2, 0x00)); return 0; }
+		if (strcmp(mnemonic, "srl") == 0)  { emit32(out->bytes, r_type(0x33, rd, 5, rs1, rs2, 0x00)); return 0; }
+		if (strcmp(mnemonic, "sra") == 0)  { emit32(out->bytes, r_type(0x33, rd, 5, rs1, rs2, 0x20)); return 0; }
+		if (strcmp(mnemonic, "or") == 0)   { emit32(out->bytes, r_type(0x33, rd, 6, rs1, rs2, 0x00)); return 0; }
+		if (strcmp(mnemonic, "and") == 0)  { emit32(out->bytes, r_type(0x33, rd, 7, rs1, rs2, 0x00)); return 0; }
 	}
 
 	/* R-type with W suffix (RV64): addw, subw, sllw, srlw, sraw */
 	if (nops == 3 && ops[0].kind == 1 && ops[1].kind == 1 && ops[2].kind == 1) {
 		unsigned rd = (unsigned)ops[0].reg, rs1 = (unsigned)ops[1].reg, rs2 = (unsigned)ops[2].reg;
-		if (strcmp(mnemonic, "addw") == 0)
-			emit32(out->bytes, r_type(0x3B, rd, 0, rs1, rs2, 0x00));
-		else if (strcmp(mnemonic, "subw") == 0)
-			emit32(out->bytes, r_type(0x3B, rd, 0, rs1, rs2, 0x20));
-		else if (strcmp(mnemonic, "sllw") == 0)
-			emit32(out->bytes, r_type(0x3B, rd, 1, rs1, rs2, 0x00));
-		else if (strcmp(mnemonic, "srlw") == 0)
-			emit32(out->bytes, r_type(0x3B, rd, 5, rs1, rs2, 0x00));
-		else if (strcmp(mnemonic, "sraw") == 0)
-			emit32(out->bytes, r_type(0x3B, rd, 5, rs1, rs2, 0x20));
-		else
-			return -1;
-		return 0;
+		if (strcmp(mnemonic, "addw") == 0) { emit32(out->bytes, r_type(0x3B, rd, 0, rs1, rs2, 0x00)); return 0; }
+		if (strcmp(mnemonic, "subw") == 0) { emit32(out->bytes, r_type(0x3B, rd, 0, rs1, rs2, 0x20)); return 0; }
+		if (strcmp(mnemonic, "sllw") == 0) { emit32(out->bytes, r_type(0x3B, rd, 1, rs1, rs2, 0x00)); return 0; }
+		if (strcmp(mnemonic, "srlw") == 0) { emit32(out->bytes, r_type(0x3B, rd, 5, rs1, rs2, 0x00)); return 0; }
+		if (strcmp(mnemonic, "sraw") == 0) { emit32(out->bytes, r_type(0x3B, rd, 5, rs1, rs2, 0x20)); return 0; }
 	}
 
 	/* mul, mulh, mulhu, mulhsu, div, divu, rem, remu */
 	if (nops == 3 && ops[0].kind == 1 && ops[1].kind == 1 && ops[2].kind == 1) {
 		unsigned rd = (unsigned)ops[0].reg, rs1 = (unsigned)ops[1].reg, rs2 = (unsigned)ops[2].reg;
-		if (strcmp(mnemonic, "mul") == 0)
-			emit32(out->bytes, r_type(0x33, rd, 0, rs1, rs2, 0x01));
-		else if (strcmp(mnemonic, "mulh") == 0)
-			emit32(out->bytes, r_type(0x33, rd, 1, rs1, rs2, 0x01));
-		else if (strcmp(mnemonic, "mulhu") == 0)
-			emit32(out->bytes, r_type(0x33, rd, 3, rs1, rs2, 0x01));
-		else if (strcmp(mnemonic, "mulhsu") == 0)
-			emit32(out->bytes, r_type(0x33, rd, 2, rs1, rs2, 0x01));
-		else if (strcmp(mnemonic, "div") == 0)
-			emit32(out->bytes, r_type(0x33, rd, 4, rs1, rs2, 0x01));
-		else if (strcmp(mnemonic, "divu") == 0)
-			emit32(out->bytes, r_type(0x33, rd, 5, rs1, rs2, 0x01));
-		else if (strcmp(mnemonic, "rem") == 0)
-			emit32(out->bytes, r_type(0x33, rd, 6, rs1, rs2, 0x01));
-		else if (strcmp(mnemonic, "remu") == 0)
-			emit32(out->bytes, r_type(0x33, rd, 7, rs1, rs2, 0x01));
-		else
-			return -1;
-		return 0;
+		if (strcmp(mnemonic, "mul") == 0)    { emit32(out->bytes, r_type(0x33, rd, 0, rs1, rs2, 0x01)); return 0; }
+		if (strcmp(mnemonic, "mulh") == 0)   { emit32(out->bytes, r_type(0x33, rd, 1, rs1, rs2, 0x01)); return 0; }
+		if (strcmp(mnemonic, "mulhu") == 0)  { emit32(out->bytes, r_type(0x33, rd, 3, rs1, rs2, 0x01)); return 0; }
+		if (strcmp(mnemonic, "mulhsu") == 0) { emit32(out->bytes, r_type(0x33, rd, 2, rs1, rs2, 0x01)); return 0; }
+		if (strcmp(mnemonic, "div") == 0)    { emit32(out->bytes, r_type(0x33, rd, 4, rs1, rs2, 0x01)); return 0; }
+		if (strcmp(mnemonic, "divu") == 0)   { emit32(out->bytes, r_type(0x33, rd, 5, rs1, rs2, 0x01)); return 0; }
+		if (strcmp(mnemonic, "rem") == 0)    { emit32(out->bytes, r_type(0x33, rd, 6, rs1, rs2, 0x01)); return 0; }
+		if (strcmp(mnemonic, "remu") == 0)   { emit32(out->bytes, r_type(0x33, rd, 7, rs1, rs2, 0x01)); return 0; }
 	}
 
-	/* W-suffix multiply: mulw, divw, divuw, remw, remuw */
+	/* W-suffix multiply/divide: mulw, divw, divuw, remw, remuw */
 	if (nops == 3 && ops[0].kind == 1 && ops[1].kind == 1 && ops[2].kind == 1) {
 		unsigned rd = (unsigned)ops[0].reg, rs1 = (unsigned)ops[1].reg, rs2 = (unsigned)ops[2].reg;
-		if (strcmp(mnemonic, "mulw") == 0)
-			emit32(out->bytes, r_type(0x3B, rd, 0, rs1, rs2, 0x01));
-		else if (strcmp(mnemonic, "divw") == 0)
-			emit32(out->bytes, r_type(0x3B, rd, 4, rs1, rs2, 0x01));
-		else if (strcmp(mnemonic, "divuw") == 0)
-			emit32(out->bytes, r_type(0x3B, rd, 5, rs1, rs2, 0x01));
-		else if (strcmp(mnemonic, "remw") == 0)
-			emit32(out->bytes, r_type(0x3B, rd, 6, rs1, rs2, 0x01));
-		else if (strcmp(mnemonic, "remuw") == 0)
-			emit32(out->bytes, r_type(0x3B, rd, 7, rs1, rs2, 0x01));
-		else
-			return -1;
-		return 0;
+		if (strcmp(mnemonic, "mulw") == 0)  { emit32(out->bytes, r_type(0x3B, rd, 0, rs1, rs2, 0x01)); return 0; }
+		if (strcmp(mnemonic, "divw") == 0)  { emit32(out->bytes, r_type(0x3B, rd, 4, rs1, rs2, 0x01)); return 0; }
+		if (strcmp(mnemonic, "divuw") == 0) { emit32(out->bytes, r_type(0x3B, rd, 5, rs1, rs2, 0x01)); return 0; }
+		if (strcmp(mnemonic, "remw") == 0)  { emit32(out->bytes, r_type(0x3B, rd, 6, rs1, rs2, 0x01)); return 0; }
+		if (strcmp(mnemonic, "remuw") == 0) { emit32(out->bytes, r_type(0x3B, rd, 7, rs1, rs2, 0x01)); return 0; }
 	}
 
-	/* Load: lb, lh, lw, ld, lbu, lhu, lwu — I-type */
+	/* Load/Store (integer + float) — single dispatch on mem operand.
+	 * Unmatched mem mnemonics fall through to the atomic handlers. */
 	if (nops == 2 && ops[1].kind == 3) {
-		unsigned rd = (unsigned)ops[0].reg;
-		unsigned rs1 = (unsigned)ops[1].mem_reg;
+		int is_load = 0;
 		unsigned funct3 = 0;
-		if (strcmp(mnemonic, "lb") == 0) funct3 = 0;
-		else if (strcmp(mnemonic, "lh") == 0) funct3 = 1;
-		else if (strcmp(mnemonic, "lw") == 0) funct3 = 2;
-		else if (strcmp(mnemonic, "ld") == 0) funct3 = 3;
-		else if (strcmp(mnemonic, "lbu") == 0) funct3 = 4;
-		else if (strcmp(mnemonic, "lhu") == 0) funct3 = 5;
-		else if (strcmp(mnemonic, "lwu") == 0) funct3 = 6;
-		else return -1;
-		if (ops[1].sym) {
-			emit32(out->bytes, i_type(0x03, rd, funct3, rs1, 0));
-			set_fixup(out, 0, 4, 24 /* R_RISCV_LO12_I */,
-			           ops[1].sym, ops[1].addend);
-		} else {
-			emit32(out->bytes, i_type(0x03, rd, funct3, rs1,
-			                          (int32_t)ops[1].imm));
-		}
-		return 0;
-	}
+		uint32_t op = 0;
+		/* integer loads (I-type, opcode 0x03) */
+		if (strcmp(mnemonic, "lb") == 0)  { is_load = 1; op = 0x03; funct3 = 0; }
+		else if (strcmp(mnemonic, "lh") == 0)  { is_load = 1; op = 0x03; funct3 = 1; }
+		else if (strcmp(mnemonic, "lw") == 0)  { is_load = 1; op = 0x03; funct3 = 2; }
+		else if (strcmp(mnemonic, "ld") == 0)  { is_load = 1; op = 0x03; funct3 = 3; }
+		else if (strcmp(mnemonic, "lbu") == 0) { is_load = 1; op = 0x03; funct3 = 4; }
+		else if (strcmp(mnemonic, "lhu") == 0) { is_load = 1; op = 0x03; funct3 = 5; }
+		else if (strcmp(mnemonic, "lwu") == 0) { is_load = 1; op = 0x03; funct3 = 6; }
+		/* integer stores (S-type, opcode 0x23) */
+		else if (strcmp(mnemonic, "sb") == 0) { op = 0x23; funct3 = 0; }
+		else if (strcmp(mnemonic, "sh") == 0) { op = 0x23; funct3 = 1; }
+		else if (strcmp(mnemonic, "sw") == 0) { op = 0x23; funct3 = 2; }
+		else if (strcmp(mnemonic, "sd") == 0) { op = 0x23; funct3 = 3; }
+		/* float loads (I-type, opcode 0x07) */
+		else if (strcmp(mnemonic, "flw") == 0) { is_load = 1; op = 0x07; funct3 = 2; }
+		else if (strcmp(mnemonic, "fld") == 0) { is_load = 1; op = 0x07; funct3 = 3; }
+		/* float stores (S-type, opcode 0x27) */
+		else if (strcmp(mnemonic, "fsw") == 0) { op = 0x27; funct3 = 2; }
+		else if (strcmp(mnemonic, "fsd") == 0) { op = 0x27; funct3 = 3; }
+		else goto try_atomic;
 
-	/* Store: sb, sh, sw, sd — S-type */
-	if (nops == 2 && ops[1].kind == 3) {
-		unsigned rs2 = (unsigned)ops[0].reg;
+		unsigned regA = (unsigned)ops[0].reg;
 		unsigned rs1 = (unsigned)ops[1].mem_reg;
-		unsigned funct3 = 0;
-		if (strcmp(mnemonic, "sb") == 0) funct3 = 0;
-		else if (strcmp(mnemonic, "sh") == 0) funct3 = 1;
-		else if (strcmp(mnemonic, "sw") == 0) funct3 = 2;
-		else if (strcmp(mnemonic, "sd") == 0) funct3 = 3;
-		else return -1;
-		if (ops[1].sym) {
-			emit32(out->bytes, s_type(0x23, funct3, rs1, rs2, 0));
-			set_fixup(out, 0, 4, 25 /* R_RISCV_LO12_S */,
-			           ops[1].sym, ops[1].addend);
-		} else {
-			emit32(out->bytes, s_type(0x23, funct3, rs1, rs2,
-			                          (int32_t)ops[1].imm));
+		if (is_load) {
+			if (ops[1].sym) {
+				emit32(out->bytes, i_type(op, regA, funct3, rs1, 0));
+				set_fixup(out, 0, 4, 24 /* R_RISCV_LO12_I */,
+				           ops[1].sym, ops[1].addend);
+			} else {
+				emit32(out->bytes, i_type(op, regA, funct3, rs1,
+				                          (int32_t)ops[1].imm));
+			}
+		} else { /* store (is_load == 0 here) */
+			unsigned rs2 = regA;
+			if (ops[1].sym) {
+				emit32(out->bytes, s_type(op, funct3, rs1, rs2, 0));
+				set_fixup(out, 0, 4, 25 /* R_RISCV_LO12_S */,
+				           ops[1].sym, ops[1].addend);
+			} else {
+				emit32(out->bytes, s_type(op, funct3, rs1, rs2,
+				                          (int32_t)ops[1].imm));
+			}
 		}
 		return 0;
 	}
@@ -711,38 +719,79 @@ riscv64_encode_insn(const struct mt_target *target,
 		return 0;
 	}
 
-	/* Float loads/stores (input to fmv.x.w/d): flw, fld, fsw, fsd */
-	if (nops == 2 && ops[1].kind == 3) {
+	/* Float loads/stores (flw/fld/fsw/fsd) are handled by the combined
+	 * load/store dispatch above. */
+
+	/* ---- Pseudoinstructions (mcc / GAS compatibility) ---- */
+
+	/* not rd, rs  →  xori rd, rs, -1 */
+	if (strcmp(mnemonic, "not") == 0 && nops == 2 &&
+	    ops[0].kind == 1 && ops[1].kind == 1) {
+		emit32(out->bytes, i_type(0x13, (unsigned)ops[0].reg, 4,
+		                          (unsigned)ops[1].reg, -1));
+		return 0;
+	}
+
+	/* negw rd, rs  →  subw rd, x0, rs */
+	if (strcmp(mnemonic, "negw") == 0 && nops == 2 &&
+	    ops[0].kind == 1 && ops[1].kind == 1) {
+		emit32(out->bytes, r_type(0x3B, (unsigned)ops[0].reg, 0, 0,
+		                          (unsigned)ops[1].reg, 0x20));
+		return 0;
+	}
+
+	/* j offset  →  jal x0, offset ;  j label  →  jal x0, label (JAL fixup) */
+	if (strcmp(mnemonic, "j") == 0 && nops == 1) {
+		if (ops[0].kind == 2) {
+			emit32(out->bytes, j_type(0x6F, 0, (int32_t)ops[0].imm));
+			return 0;
+		} else if (ops[0].kind == 4) {
+			emit32(out->bytes, j_type(0x6F, 0, 0));
+			set_fixup(out, 0, 4, 17 /* R_RISCV_JAL */,
+			           ops[0].sym, ops[0].addend);
+			return 0;
+		}
+	}
+
+	/* jr rs  →  jalr x0, rs, 0 */
+	if (strcmp(mnemonic, "jr") == 0 && nops == 1 && ops[0].kind == 1) {
+		emit32(out->bytes, i_type(0x67, 0, 0, (unsigned)ops[0].reg, 0));
+		return 0;
+	}
+
+	/* li rd, imm  — materialize a constant (addi for 12-bit, else lui+addi) */
+	if (strcmp(mnemonic, "li") == 0 && nops == 2 && ops[0].kind == 1 &&
+	    ops[1].kind == 2) {
 		unsigned rd = (unsigned)ops[0].reg;
-		unsigned rs1 = (unsigned)ops[1].mem_reg;
-		unsigned funct3 = 2;
-		uint32_t op = 0x07; /* load-fp */
-		if (strcmp(mnemonic, "flw") == 0) { funct3 = 2; op = 0x07; }
-		else if (strcmp(mnemonic, "fld") == 0) { funct3 = 3; op = 0x07; }
-		else { return -1; }
-		if (ops[1].sym) {
-			emit32(out->bytes, i_type(op, rd, funct3, rs1, 0));
-			set_fixup(out, 0, 4, 24, ops[1].sym, ops[1].addend);
+		int64_t imm = ops[1].imm;
+		if (imm >= -2048 && imm <= 2047) {
+			emit32(out->bytes, i_type(0x13, rd, 0, 0, (int32_t)imm));
 		} else {
-			emit32(out->bytes, i_type(op, rd, funct3, rs1, (int32_t)ops[1].imm));
+			uint64_t u = (uint64_t)imm;
+			uint32_t hi20 = (uint32_t)(((u + 0x800) >> 12) & 0xFFFFF);
+			uint32_t lo12 = (uint32_t)(u & 0xFFF);
+			out->size = 8;
+			emit32(out->bytes, u_type(0x37, rd, hi20));
+			emit32(out->bytes + 4,
+			       i_type(0x13, rd, 0, rd, (int32_t)(int16_t)lo12));
 		}
 		return 0;
 	}
-	{
-		unsigned rs2 = (unsigned)ops[0].reg;
-		unsigned rs1 = (unsigned)ops[1].mem_reg;
-		unsigned funct3 = 2;
-		uint32_t op = 0x27;
-		if (strcmp(mnemonic, "fsw") == 0) { funct3 = 2; op = 0x27; }
-		else if (strcmp(mnemonic, "fsd") == 0) { funct3 = 3; op = 0x27; }
-		else { goto try_atomic; }
-		if (ops[1].sym) {
-			emit32(out->bytes, s_type(op, funct3, rs1, rs2, 0));
-			set_fixup(out, 0, 4, 25, ops[1].sym, ops[1].addend);
-		} else {
-			emit32(out->bytes, s_type(op, funct3, rs1, rs2, (int32_t)ops[1].imm));
+
+	/* call sym  →  auipc ra, %pcrel_hi(sym); jalr ra, ra, %lo(sym)
+	 * Emitted as an 8-byte auipc+jalr pair patched by R_RISCV_CALL (18). */
+	if (strcmp(mnemonic, "call") == 0 && nops == 1) {
+		if (ops[0].kind == 4) {
+			out->size = 8;
+			emit32(out->bytes, u_type(0x17, 1, 0));            /* auipc ra, 0 */
+			emit32(out->bytes + 4, i_type(0x67, 1, 0, 1, 0)); /* jalr ra, ra, 0 */
+			set_fixup(out, 0, 4, 18 /* R_RISCV_CALL */,
+			           ops[0].sym, ops[0].addend);
+			return 0;
+		} else if (ops[0].kind == 2) {
+			emit32(out->bytes, j_type(0x6F, 1, (int32_t)ops[0].imm));
+			return 0;
 		}
-		return 0;
 	}
 
 try_atomic:
