@@ -186,16 +186,48 @@ valref(struct value *v, Fn *fn)
 			fullname = strf(PFn, ".L%s.%u", v->u.name, v->id);
 		else
 			fullname = v->u.name;
+		/* General-Dynamic TLS: for an extern _Thread_local under -fPIC
+		 * the address cannot be computed by a plain load — it requires
+		 * a call to __tls_get_addr(&sym@tlsgd).  Emit that call here
+		 * (Oarg + Ocall) so the IR optimizer sees a real call: this
+		 * forces fn->leaf=0 and lets caller-save clobber be modeled,
+		 * which matters on aarch64/riscv64/loongarch64 where bl/ret
+		 * reuse the link register (unlike x86_64's stack-based call).
+		 * The descriptor constant keeps sym.type=SGenThr so each
+		 * backend's loadaddr emits the @tlsgd relocation; the call
+		 * itself is a normal Ocall, not an emit-layer inline. */
+		if ((v->kind & VALUE_THREAD) && (v->kind & VALUE_EXTERN) && T.pic) {
+			Con cc;
+			Ref desc, callee, result;
+
+			fprintf(stderr, "DBG gd-tls valref: fn=%s curi_off=%td fullname=%s\n",
+			        fn->name, curi - insb, fullname);
+			memset(&c, 0, sizeof c);
+			c.type = CAddr;
+			c.sym.id = intern(fullname);
+			c.sym.type = SGenThr;
+			desc = newcon(&c, fn);
+
+			memset(&cc, 0, sizeof cc);
+			cc.type = CAddr;
+			cc.sym.id = intern("__tls_get_addr");
+			cc.sym.type = SExt;
+			callee = newcon(&cc, fn);
+
+			result = newtmp("tlsgd", Kl, fn);
+			*curi++ = (Ins){.op=Oarg, .cls=Kl, .to=R,
+			                .arg={desc, R}};
+			*curi++ = (Ins){.op=Ocall, .cls=Kl, .to=result,
+			                .arg={callee, R}};
+			fn->leaf = 0;
+			return result;
+		}
 		memset(&c, 0, sizeof c);
 		c.type = CAddr;
 		c.sym.id = intern(fullname);
 		if (v->kind & VALUE_EXTERN) c.sym.type |= SExt;
-		if (v->kind & VALUE_THREAD) {
-			if ((v->kind & VALUE_EXTERN) && T.pic)
-				c.sym.type = SGenThr;  /* GD for extern TLS under -fPIC */
-			else
-				c.sym.type |= SThr;
-		}
+		if (v->kind & VALUE_THREAD)
+			c.sym.type |= SThr;
 		return newcon(&c, fn);
 	case VALUE_TYPE:
 		/* IR encodes aggregate-type references as TYPE(n) where n is the

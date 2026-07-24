@@ -175,6 +175,20 @@ loadaddr(Con *c, char *rn, FILE *f)
 		break;
 	case SExtThr:
 		die("extern thread-local address unavailable on loongarch64");
+	case SGenThr:
+		/* general-dynamic TLS descriptor address: pcalau12i + addi.d
+		 * compute the @tlsgd descriptor's address into rn (LoongArch
+		 * psABI R_LARCH_TLS_GD_PC_HI20 / R_LARCH_TLS_GD_PC_LO12).  The
+		 * __tls_get_addr call is emitted as a real Ocall by IR generation
+		 * (irgen/emit.c valref), so it is visible to the optimizer and
+		 * forces fn->leaf=0 — the prologue saves $ra, fixing the leaf-
+		 * function bl/ret hazard on loongarch64. */
+		fprintf(f, "\tpcalau12i %s, %%gd_pc_hi20(", rn);
+		emitaddr(c, f);
+		fprintf(f, ")\n\taddi.d %s,%s,%%gd_pc_lo12(", rn, rn);
+		emitaddr(c, f);
+		fprintf(f, ")\n");
+		break;
 	default:
 		die("invalid address relocation class");
 	}

@@ -685,14 +685,16 @@ emitins(Ins i, E *e)
 				regtoa(i.to.val, SLong));
 			break;
 		case SGenThr:
-			/* general-dynamic TLS: call __tls_get_addr with
-			 * @tlsgd descriptor.  The result arrives in %rax;
-			 * move to the destination register. */
+			/* general-dynamic TLS descriptor address: load the
+			 * @tlsgd descriptor's address into %to.  The call to
+			 * __tls_get_addr is emitted as a real Ocall by IR
+			 * generation (irgen/emit.c valref), so it is visible to
+			 * the optimizer and ABI passes on every architecture.
+			 * Here we only materialize the descriptor pointer that
+			 * __tls_get_addr receives as its argument. */
 			assert(!con->bits.i);
 			fprintf(e->f,
-				"\tleaq %s%s@tlsgd(%%rip), %%rdi\n"
-				"\tcall __tls_get_addr@plt\n"
-				"\tmovq %%rax, %%%s\n",
+				"\tleaq %s%s@tlsgd(%%rip), %%%s\n",
 				sym[0] == '"' ? "" : T.assym, sym,
 				regtoa(i.to.val, SLong));
 			break;
