@@ -22,7 +22,7 @@ static const struct mt_target targets[] = {
 	{"x86_64",      MT_EM_X86_64,     2, 1, 0,                64, 64, NULL},
 	{"aarch64",     MT_EM_AARCH64,    2, 1, 0,                64, 64, aarch64_encode_insn},
 	{"riscv64",     MT_EM_RISCV,      2, 1, 0,                64, 64, riscv64_encode_insn},
-	{"loongarch64", MT_EM_LOONGARCH,  2, 1, 0x43,             64, 64, la64_encode_insn},
+	{"loongarch64", MT_EM_LOONGARCH,  2, 1, 0,                 64, 64, la64_encode_insn},
 	{"i386",        MT_EM_386,        1, 1, 0,                52, 40, i386_encode_insn},
 };
 

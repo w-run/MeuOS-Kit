@@ -14,6 +14,8 @@
 /* Per-architecture relocation application */
 extern int mt_apply_aarch64_reloc(unsigned type, unsigned char *loc,
                                   uint64_t S, int64_t A, uint64_t P);
+extern int la64_apply_reloc(unsigned type, unsigned char *loc,
+                            uint64_t S, int64_t A, uint64_t P);
 
 #define LD_SHF_WRITE 0x1ULL
 #define LD_SHF_ALLOC 0x2ULL
@@ -962,8 +964,15 @@ collect_got_relocations(struct ld_context *ctx)
 			for (n = 0; n < section.size / section.entry_size; ++n) {
 				const unsigned char *p = object->data + section.offset + n * section.entry_size;
 				info = read64(p + 8);
-				if ((unsigned)info != LD_R_X86_64_GOTPCREL)
-					continue;
+		if ((unsigned)info != LD_R_X86_64_GOTPCREL) {
+				/* Also collect GOT-based relocations for other architectures */
+				unsigned rel_type = (unsigned)(info & 0xffffffff);
+				/* LoongArch64 GOT_PC_HI20 (75) and GOT_PC_LO12 (76) */
+				if (rel_type == 75 || rel_type == 76)
+					goto collect_got;
+				continue;
+			}
+			collect_got:;
 				if (get_symbol_by_index(ctx, object, info >> 32, &symbol,
 				                        &name) != 0 || add_got_entry(ctx, name) != 0)
 					return -1;
@@ -1139,6 +1148,43 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 		return -1;
 	target_offset = (uint64_t)object->maps[reloc_section->info].offset + offset;
 	place = target->address + target_offset;
+
+	/* Per-architecture relocation dispatch.
+	 *
+	 * WARNING: Architecture-specific relocation type numbers may overlap
+	 * with x86_64's LD_R_X86_64_* constants (e.g. R_LARCH_64 == 2 ==
+	 * LD_R_X86_64_PC32).  The per-arch check MUST come before the x86_64
+	 * type-number comparisons so that the correct formula is used. */
+	if (strcmp(ctx->target->name, "loongarch64") == 0) {
+		uint64_t la64_got_addr;
+		size_t la64_got_idx;
+
+		/* GOT-based relocations: route via GOT entry (fill_got handles the data) */
+		if (type == 75 || type == 76) { /* R_LARCH_GOT_PC_HI20 / GOT_PC_LO12 */
+			if (got_index(ctx, name, &la64_got_idx) != 0)
+				return ld_errorf(ctx, "missing GOT entry", name);
+			la64_got_addr = ctx->groups[ctx->got.group].address +
+			                ctx->got.items[la64_got_idx].offset;
+			if (la64_apply_reloc(type, target->data + target_offset,
+			                     la64_got_addr, addend, place) == 0)
+				return 0;
+		} else if (la64_apply_reloc(type, target->data + target_offset,
+		                            resolved_value, addend, place) == 0) {
+			return 0;
+		}
+		return ld_errorf(ctx, "unsupported relocation type", name);
+	}
+	if (strcmp(ctx->target->name, "aarch64") == 0) {
+		if (mt_apply_aarch64_reloc(type, target->data + target_offset,
+		                           resolved_value, addend, place) == 0)
+			return 0;
+		return ld_errorf(ctx, "unsupported relocation type", name);
+	}
+
+	/* x86_64-specific type dispatch.  These type numbers are ONLY valid
+	 * for x86_64 — arch-specific dispatch above handles all others. */
+	if (strcmp(ctx->target->name, "x86_64") != 0)
+		return ld_errorf(ctx, "unsupported relocation type", name);
 	if (type == LD_R_X86_64_GOTPCREL) {
 		if (got_index(ctx, name, &got) != 0)
 			return ld_errorf(ctx, "missing GOT entry", name);
@@ -1162,12 +1208,6 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 	} else if (type == LD_R_X86_64_32 || type == LD_R_X86_64_32S) {
 		value = resolved_value + addend;
 		width = 4;
-	} else if (strcmp(ctx->target->name, "aarch64") == 0 &&
-	           mt_apply_aarch64_reloc(type,
-	                                  target->data + target_offset,
-	                                  resolved_value, addend, place) == 0) {
-		/* aarch64 relocation applied directly, no write needed below */
-		return 0;
 	} else {
 		return ld_errorf(ctx, "unsupported relocation type", name);
 	}
@@ -1328,7 +1368,7 @@ write_executable(struct ld_context *ctx, const char *path,
 	uint64_t file_end = LD_PAGE;
 	uint64_t memory_end = LD_PAGE;
 	uint64_t section_offset;
-	uint64_t load_file_end;
+	uint64_t alloc_file_end;
 	uint32_t shstr_index;
 	size_t i;
 	int output_count;
@@ -1349,16 +1389,19 @@ write_executable(struct ld_context *ctx, const char *path,
 			          group->file_offset + group->size : rx_end;
 		else if (rw_start == UINT64_MAX || group->file_offset < rw_start)
 			rw_start = group->file_offset;
-		if (group->type != MT_SHT_NOBITS &&
+		if ((group->flags & MT_SHF_ALLOC) &&
+		    group->type != MT_SHT_NOBITS &&
 		    file_end < group->file_offset + group->size)
 			file_end = group->file_offset + group->size;
-		if (memory_end < group->file_offset + group->size)
+		if ((group->flags & MT_SHF_ALLOC) &&
+		    memory_end < group->file_offset + group->size)
 			memory_end = group->file_offset + group->size;
 	}
 	for (i = 0; i < ctx->group_count; ++i) {
 		if (is_tls_group(ctx, (int)i))
 			continue;
-		if (ctx->groups[i].type == MT_SHT_NOBITS &&
+		if ((ctx->groups[i].flags & MT_SHF_ALLOC) &&
+		    ctx->groups[i].type == MT_SHT_NOBITS &&
 		    memory_end < ctx->groups[i].file_offset + ctx->groups[i].size)
 			memory_end = ctx->groups[i].file_offset + ctx->groups[i].size;
 	}
@@ -1383,8 +1426,8 @@ write_executable(struct ld_context *ctx, const char *path,
 		if (strings_add(&shstr, sections[i + 1].name, &name_offsets[i + 1]) != 0)
 			goto out_strings;
 	}
+	alloc_file_end = file_end;
 	shstr_index = (uint32_t)(output_count - 1);
-	load_file_end = file_end;
 	sections[shstr_index].name = ".shstrtab";
 	sections[shstr_index].type = MT_SHT_STRTAB;
 	sections[shstr_index].flags = 0;
@@ -1409,25 +1452,31 @@ write_executable(struct ld_context *ctx, const char *path,
 		write64(h + 24, entry_address);
 		write64(h + 32, target->ehdr_size);
 		write64(h + 40, section_offset);
-		write32(h + 36, target->e_flags);
+		write32(h + 48, target->e_flags);
 		write16(h + 52, target->ehdr_size);
 		write16(h + 54, 56);
-		write16(h + 56, ctx->tls_size ? 3 : 2);
+		write16(h + 56, 2); /* e_phnum: always 2 (single LOAD + optional TLS) */
 		write16(h + 58, target->shdr_size);
 		write16(h + 60, (uint16_t)output_count);
 		write16(h + 62, (uint16_t)shstr_index);
 		if (fwrite(h, 1, sizeof(h), file) != sizeof(h))
 			goto out_file;
 	}
-	if (write_program_header(file, LD_PF_R | LD_PF_X, 0, LD_BASE,
-	                        rx_end, rx_end) != 0)
-		goto out_file;
-	if (rw_start != UINT64_MAX &&
-	    write_program_header(file, LD_PF_R | LD_PF_W, rw_start,
-	                         LD_BASE + rw_start,
-	                         load_file_end > rw_start ? load_file_end - rw_start : 0,
-	                         memory_end - rw_start) != 0)
-		goto out_file;
+	/* QEMU 7.2 loongarch64 user-mode loader has a bug: it crashes
+	 * (SEGV_ACCERR) when executing code from the first LOAD segment
+	 * if a second non-empty PT_LOAD exists.  Workaround: emit a single
+	 * LOAD segment covering both RX and RW data with RWX permissions.
+	 *
+	 * Set FileSiz to load_file_end (non-NOBITS data only) so the kernel
+	 * zero-fills the BSS area (between load_file_end and memory_end). */
+	{
+		uint64_t single_end = memory_end > rx_end ? memory_end : rx_end;
+		uint64_t filesz = alloc_file_end > LD_PAGE ? alloc_file_end : LD_PAGE;
+		uint64_t memsz = single_end > LD_PAGE ? single_end : LD_PAGE;
+		if (write_program_header(file, LD_PF_R | LD_PF_W | LD_PF_X,
+		                         0, LD_BASE, filesz, memsz) != 0)
+			goto out_file;
+	}
 	if (ctx->tls_size) {
 		uint64_t tls_addr = 0, tls_off = 0, tls_filesz = 0;
 		if (ctx->tls_tdata_group >= 0) {
@@ -1435,14 +1484,17 @@ write_executable(struct ld_context *ctx, const char *path,
 			tls_off = ctx->groups[ctx->tls_tdata_group].file_offset;
 			tls_filesz = ctx->groups[ctx->tls_tdata_group].size;
 		} else if (ctx->tls_tbss_group >= 0) {
-			tls_addr = ctx->groups[ctx->tls_tbss_group].address;
-			tls_off = ctx->groups[ctx->tls_tbss_group].file_offset;
+			/* QEMU 7.2 loongarch64 rejects PT_TLS with filesz=0 that
+			 * overlaps a PT_LOAD.  Skip the TLS segment for .tbss-only;
+			 * the crt1 handles TLS init from section headers. */
+			goto skip_tls;
 		}
 		if (write_program_header_type(file, LD_PT_TLS, LD_PF_R, tls_off,
 		                               tls_addr, tls_filesz, ctx->tls_size,
-		                               ctx->tls_align) != 0)
+		                               ctx->tls_align > 0x1000 ? ctx->tls_align : 0x1000) != 0)
 			goto out_file;
 	}
+skip_tls:
 	for (i = 0; i < ctx->group_count; ++i) {
 		struct ld_group *group = &ctx->groups[i];
 		if (group->type == MT_SHT_NOBITS || group->size == 0)
