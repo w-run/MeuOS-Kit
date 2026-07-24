@@ -493,6 +493,15 @@ extern char debug['Z'+1];
 extern int opt_level;   /* -O0..3, default 2 */
 extern int warn_level;  /* WARN_* bitmask, default WARN_ALL */
 
+/* TLS access model */
+enum tls_model {
+	TLSM_DEFAULT = 0,     /* auto: PIC->GD, non-PIC->IE */
+	TLSM_GLOBAL_DYNAMIC,  /* -ftls-model=global-dynamic: force GD */
+	TLSM_INITIAL_EXEC,    /* -ftls-model=initial-exec: force IE */
+	TLSM_LOCAL_EXEC,      /* -ftls-model=local-exec: force LE */
+};
+extern enum tls_model tls_model;
+
 /* util.c */
 typedef enum {
 	PHeap, /* free() necessary */

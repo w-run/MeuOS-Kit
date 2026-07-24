@@ -189,12 +189,29 @@ valref(struct value *v, Fn *fn)
 		memset(&c, 0, sizeof c);
 		c.type = CAddr;
 		c.sym.id = intern(fullname);
-		if ((v->kind & VALUE_THREAD) && (v->kind & VALUE_EXTERN) && T.pic) {
-			/* GD-TLS: pure descriptor constant. The caller expands via expand_gd_tls. */
-			c.sym.type = SGenThr;
+		if (v->kind & VALUE_THREAD) {
+			switch (tls_model) {
+			case TLSM_GLOBAL_DYNAMIC:
+				c.sym.type = SGenThr;
+				break;
+			case TLSM_INITIAL_EXEC:
+				c.sym.type = SExt | SThr;
+				break;
+			case TLSM_LOCAL_EXEC:
+				c.sym.type = SThr;
+				break;
+			case TLSM_DEFAULT:
+			default:
+				if (v->kind & VALUE_EXTERN && T.pic)
+					c.sym.type = SGenThr;
+				else if (v->kind & VALUE_EXTERN)
+					c.sym.type = SExt | SThr;
+				else
+					c.sym.type = SThr;
+				break;
+			}
 		} else {
 			if (v->kind & VALUE_EXTERN) c.sym.type |= SExt;
-			if (v->kind & VALUE_THREAD) c.sym.type |= SThr;
 		}
 		return newcon(&c, fn);
 	case VALUE_TYPE:

@@ -34,6 +34,7 @@ Target T;
 char debug['Z' + 1];
 int opt_level = 2;    /* -O2 default */
 /* warn_level and warn_as_error are defined in src/lex/token.c */
+enum tls_model tls_model = TLSM_DEFAULT;
 
 int
 main(int argc, char *argv[])
@@ -111,6 +112,18 @@ main(int argc, char *argv[])
 		continue;
 	}
 	if (a[1] == 'W') continue;   /* other -Wxxx warning flags */
+	if (strncmp(a, "-ftls-model=", 12) == 0) {
+		const char *val = a + 12;
+		if (strcmp(val, "global-dynamic") == 0)
+			tls_model = TLSM_GLOBAL_DYNAMIC;
+		else if (strcmp(val, "initial-exec") == 0)
+			tls_model = TLSM_INITIAL_EXEC;
+		else if (strcmp(val, "local-exec") == 0)
+			tls_model = TLSM_LOCAL_EXEC;
+		else
+			fatal("unknown TLS model '%s'", val);
+		continue;
+	}
 	if (a[1] == 'f') continue;   /* -fxxx feature flags */
 	if (a[1] == 'm') {           /* -march= etc. */
 		continue;
