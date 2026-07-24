@@ -1,6 +1,7 @@
 <!--
 priority: P1
 status: in_progress
+progress_note: Phase A 已完成（SGenThr enum + emit case + libc __tls_get_addr + SSA fix）;Gap 3 (TLS 模型选择) 部分完成;Gap 5 (链接器 GD 重定位) 阻塞于 P6 动态链接
 note: 5 个跨架构 GD-TLS 缺口的分阶段实施计划;Phase A 是 Phase B/C 的前置;Gap 5 受 P6 动态链接阻塞
 start_ts: 2026-07-24
 -->
@@ -20,44 +21,13 @@ start_ts: 2026-07-24
 > - `meuos-libc/src/thread/__tls_get_addr.c`:已加 4 架构(x86_64/aarch64/
 >   riscv64/loongarch64)实现,通过读 thread pointer + ti_offset 返回地址。
 >
-> **阻塞问题(必须修复)**:
 >
-> `valref()` 是纯翻译函数(`Translate a frontend struct value * to a IR Ref`,
-> emit.c 行 152),**不应该 `*curi++` emit 指令**。当前 GD 分支在 valref 内部
-> emit Oarg/Ocall,触发:
+> **修复完成 (2026-07-24, commit 871d748)**:
 >
-> ```
-> mcc: ssa temporary %tlsgd.1 is used undefined in @body
-> ```
->
-> 复现命令:`./mcc --target=x86_64 -fPIC -S -o /tmp/x.s /tmp/gd_tls_test.c`
-> 测试用例:`extern _Thread_local int gd_var; int *get_gd(void){return &gd_var;}`
->
-> 根因分析:`valref()` 在 emitfunc 主循环(行 451-608)的多个位置被调用
-> (行 477/481/492/497-498/526-527/539/557/564/603-605/629/640),通常作为
-> `*curi++ = (Ins){..., .arg={valref(...), ...}}` 的参数被求值。C 求值顺序
-> 下,valref 内部 emit 的 Oarg/Ocall 会先写入 curi,外层指令后写入,顺序本身
-> 正确。但 SSA 检查报告 result(`%tlsgd.1`)在 `@body` 块被使用但"未定义"。
-> 怀疑 valref 在某些调用点(如行 629 `qb->jmp.arg = valref(...)`)被调用时,
-> emit 的 Ocall 落到了与前一个块共享的 insb 缓冲,导致 def-use 链跨块断裂。
->
-> **后续模型可选方案(推荐顺序)**:
->
-> - **方案 B(推荐)**:把 GD-TLS 的 Oarg/Ocall 生成移出 valref,放到 stmt 级别。
->   在 frontend(`src/irgen/` 或 `src/sema/`)处理 `&extern_thread_local` 表达式
->   时,识别 GD 场景,生成独立的中间指令序列(desc = addr SGenThr; result =
->   call \_\_tls_get_addr(desc)),把 result 作为表达式结果。参考 `case ICALL`
->   (emit.c 行 526-583)的 Oarg/Ocall 处理模式。
-> - **方案 C**:新增 IR 操作码 `Ogenthr`(类似 `Oaddr` 但语义为"GD TLS 取地址"),
->   在 irgen 层生成,emit 层 lowering。改动面较大但语义最干净。
-> - **方案 D**:在 `case Oaddr`(emit.c 默认分支)中识别 a0 是 SGenThr 常量,
->   就地生成 Oarg/Ocall 替换 Oaddr。改动最小但破坏 Oaddr 的纯地址语义。
->
-> **已就绪无需重做**:
->
-> - `SGenThr = 4` 枚举(`include/ir.h`)及各 emit/ir_util/printfn 的断言宽松
-> - 4 架构 emitter 的 `case SGenThr` 描述符地址生成
-> - libc 4 架构 `__tls_get_addr` 运行时
+> 已将 GD-TLS 的 Oarg/Ocall 生成从 `valref()` 中剥离，放入新增的 `expand_gd_tls()`
+> 函数。该函数在 stmt 级别对所有指令参数和 jump 参数做 SGenThr 展开：
+> 识别 SGenThr 常量 → emit Oarg(desc) + Ocall(__tls_get_addr) → 返回 result temp。
+> 方案 B 落地，SSA 错误消除。
 >
 > **验证命令**:
 >
@@ -329,13 +299,17 @@ P6 动态链接器就绪
 ```bash
 # Phase A: verify SGenThr enum added to IR
 grep -q 'SGenThr.*=.*4' projects/mcc/include/ir.h
-# Phase A: verify x86_64 GD sequence emits __tls_get_addr
+# Phase A: verify x86_64 GD sequence emits __tls_get_addr (requires -fPIC)
 cat > /tmp/test_gd_tls.c << 'EOF'
 extern _Thread_local int gd_var;
 int *get_gd(void) { return &gd_var; }
 EOF
-cd projects/mcc && ./mcc --target=x86_64 -S -o /tmp/test_gd_tls.s /tmp/test_gd_tls.c 2>/dev/null
+cd projects/mcc && ./mcc --target=x86_64 -fPIC -S -o /tmp/test_gd_tls.s /tmp/test_gd_tls.c 2>/dev/null
 grep -q '__tls_get_addr' /tmp/test_gd_tls.s && echo "GD-TLS emit: PASS"
+# Multi-arch GD emission
+for a in x86_64 aarch64 riscv64 loongarch64; do
+  ./mcc --target=$a -fPIC -S -o /dev/null /tmp/test_gd_tls.c 2>/dev/null || echo "FAIL: $a"
+done
 # Regression gate: existing LE/IE TLS tests must still pass
 cd projects/mcc && make check
 ```
