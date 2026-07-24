@@ -44,9 +44,8 @@ env/build/
 env/run/
 env/kernels/*.apk
 env/kernels/*/vmlinuz
-env/rootfs/minirootfs-*.tar.gz
-env/rootfs/*-stage/
-env/rootfs/initramfs-*.cpio.gz
+env/kernels/*/Image
+env/rootfs/
 
 # Auto-generated bootstrap run report
 bootstrap-report.md
