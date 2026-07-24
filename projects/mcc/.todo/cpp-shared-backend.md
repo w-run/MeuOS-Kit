@@ -1,6 +1,7 @@
 <!--
 priority: P2
 status: in_progress
+progress_note: Phase A 已验证 (libmcc.a build OK, make check 全绿); Phase B/C/D 待 m++ 启动时实施
 note: mcc/m++ 共享后端架构(libmcc 化)的分阶段计划;阶段 A 已落地,阶段 B/C/D 待 m++ 启动时实施
 start_ts: 2026-07-24
 -->
