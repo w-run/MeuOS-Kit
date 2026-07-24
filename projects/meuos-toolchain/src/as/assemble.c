@@ -1,6 +1,7 @@
-/* assemble.c - x86_64 AT&T subset assembler and ELF64 ET_REL writer. */
+/* assemble.c - AT&T subset assembler and ELF ET_REL writer. */
 #include "mt/as.h"
 #include "mt/elf.h"
+#include "mt/target.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -2205,17 +2206,21 @@ align_up_u64(uint64_t value, uint64_t align)
 }
 
 static int
-write_elf_header(FILE *file, uint64_t section_offset, uint16_t section_count,
+write_elf_header(FILE *file, const struct mt_target *target,
+                 uint64_t section_offset, uint16_t section_count,
                  uint16_t section_string_index)
 {
-	unsigned char ident[16] = {0x7f, 'E', 'L', 'F', 2, 1, 1, 0};
+	unsigned char ident[16] = {0x7f, 'E', 'L', 'F',
+	                           target->elf_class, target->elf_endian, 1, 0};
+	uint16_t ehdr_size = target->ehdr_size;
+	uint16_t shdr_size = target->shdr_size;
 	if (fseek(file, 0, SEEK_SET) != 0 || fwrite(ident, 1, sizeof(ident), file) != sizeof(ident) ||
-	    write_u16(file, 1) != 0 || write_u16(file, MT_EM_X86_64) != 0 ||
+	    write_u16(file, 1) != 0 || write_u16(file, target->emachine) != 0 ||
 	    write_u32(file, 1) != 0 || write_u64(file, 0) != 0 ||
 	    write_u64(file, 0) != 0 || write_u64(file, section_offset) != 0 ||
-	    write_u32(file, 0) != 0 || write_u16(file, MT_ELF64_EHDR_SIZE) != 0 ||
+	    write_u32(file, target->e_flags) != 0 || write_u16(file, ehdr_size) != 0 ||
 	    write_u16(file, 0) != 0 || write_u16(file, 0) != 0 ||
-	    write_u16(file, MT_ELF64_SHDR_SIZE) != 0 ||
+	    write_u16(file, shdr_size) != 0 ||
 	    write_u16(file, section_count) != 0 || write_u16(file, section_string_index) != 0)
 		return -1;
 	return 0;
@@ -2296,7 +2301,8 @@ free_reloc_groups(struct reloc_group *groups, size_t count)
 }
 
 static int
-write_object(struct as_file *as, const char *output_path)
+write_object(struct as_file *as, const struct mt_target *target,
+             const char *output_path)
 {
 	struct reloc_group *groups = NULL;
 	struct out_section *out = NULL;
@@ -2429,7 +2435,7 @@ write_object(struct as_file *as, const char *output_path)
 		build_reloc_data(out[reloc_output_map[i]].data, &groups[i]);
 	}
 	/* Assign file offsets. NOBITS reserves virtual size but no file bytes. */
-	offset = MT_ELF64_EHDR_SIZE;
+	offset = target->ehdr_size;
 	for (i = 1; i < out_count; ++i) {
 		align = out[i].align ? out[i].align : 1;
 		offset = align_up_u64(offset, align);
@@ -2446,7 +2452,7 @@ write_object(struct as_file *as, const char *output_path)
 		as_error(as, "cannot open output %s: %s", output_path, strerror(errno));
 		goto out;
 	}
-	if (write_elf_header(file, section_offset, (uint16_t)out_count,
+	if (write_elf_header(file, target, section_offset, (uint16_t)out_count,
 	                     (uint16_t)shstrtab_index) != 0)
 		goto out;
 	for (i = 1; i < out_count; ++i) {
@@ -2457,7 +2463,7 @@ write_object(struct as_file *as, const char *output_path)
 			goto out;
 	}
 	if (fseek(file, (long)section_offset, SEEK_SET) != 0 ||
-	    write_zeros(file, 64) != 0)
+	    write_zeros(file, target->shdr_size) != 0)
 		goto out;
 	for (i = 1; i < out_count; ++i)
 		if (write_section_header(file, &out[i], section_name_offsets[i]) != 0)
@@ -2491,11 +2497,24 @@ out:
 
 int
 mt_as_assemble(const char *input, const char *output,
+               const char *target_name,
                const char **error_message, unsigned *error_line)
 {
 	struct as_file as;
 	FILE *file;
+	const struct mt_target *target;
 	int result;
+
+	if (target_name) {
+		target = mt_target_lookup(target_name);
+		if (!target) {
+			if (error_message)
+				*error_message = "unsupported target architecture";
+			return 1;
+		}
+	} else {
+		target = &mt_target_x86_64;
+	}
 
 	memset(&as, 0, sizeof(as));
 	as.filename = input;
@@ -2510,7 +2529,7 @@ mt_as_assemble(const char *input, const char *output,
 		result = parse_source(&as, file);
 		fclose(file);
 		if (result == 0)
-			result = write_object(&as, output);
+			result = write_object(&as, target, output);
 	}
 	if (result != 0) {
 		static char reported_error[256];

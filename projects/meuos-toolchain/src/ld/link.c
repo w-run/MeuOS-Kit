@@ -1,7 +1,8 @@
-/* link.c - x86_64 static ET_REL -> ET_EXEC linker. */
+/* link.c - static ET_REL -> ET_EXEC linker. */
 #include "mt/ld.h"
 #include "mt/archive.h"
 #include "mt/elf.h"
+#include "mt/target.h"
 
 #include <errno.h>
 #include <stdint.h>
@@ -107,6 +108,7 @@ struct ld_got {
 };
 
 struct ld_context {
+	const struct mt_target *target;
 	struct ld_objects objects;
 	struct ld_archives archives;
 	struct ld_group *groups;
@@ -268,7 +270,7 @@ append_object(struct ld_context *ctx, const char *name,
 	object->size = size;
 	status = mt_elf64_parse(object->data, object->size, &object->view);
 	if (status != MT_ELF_OK || object->view.type != MT_ET_REL ||
-	    object->view.machine != MT_EM_X86_64) {
+	    object->view.machine != ctx->target->emachine) {
 		free_object(object);
 		return ld_errorf(ctx, "unsupported input object", name);
 	}
@@ -735,7 +737,7 @@ archive_member_needed(struct ld_context *ctx, const unsigned char *data,
 	unsigned binding;
 
 	if (mt_elf64_parse(data, size, &view) != MT_ELF_OK ||
-	    view.type != MT_ET_REL || view.machine != MT_EM_X86_64)
+	    view.type != MT_ET_REL || view.machine != ctx->target->emachine)
 		return 0;
 	for (i = 0; i < view.section_count; ++i) {
 		if (mt_elf64_get_section(data, size, &view, i, &symtab) != MT_ELF_OK)
@@ -1302,7 +1304,7 @@ write_program_header(FILE *file, uint32_t flags, uint64_t offset,
 
 static int
 write_executable(struct ld_context *ctx, const char *path,
-                 const char *entry)
+                 const char *entry, const struct mt_target *target)
 {
 	struct ld_group *entry_group = NULL;
 	struct ld_global *entry_symbol;
@@ -1387,19 +1389,21 @@ write_executable(struct ld_context *ctx, const char *path,
 	file = fopen(path, "wb+");
 	if (!file)
 		goto out_strings;
-	/* ELF64 header plus two PT_LOAD entries. */
+	/* ELF header — set fields from target descriptor. */
 	{
-		unsigned char h[64] = {0x7f, 'E', 'L', 'F', 2, 1, 1, 0};
+		unsigned char h[64] = {0x7f, 'E', 'L', 'F',
+		                       target->elf_class, target->elf_endian, 1, 0};
 		write16(h + 16, 2);
-		write16(h + 18, MT_EM_X86_64);
+		write16(h + 18, target->emachine);
 		write32(h + 20, 1);
 		write64(h + 24, entry_address);
-		write64(h + 32, 64);
+		write64(h + 32, target->ehdr_size);
 		write64(h + 40, section_offset);
-		write16(h + 52, 64);
+		write32(h + 36, target->e_flags);
+		write16(h + 52, target->ehdr_size);
 		write16(h + 54, 56);
 		write16(h + 56, ctx->tls_size ? 3 : 2);
-		write16(h + 58, 64);
+		write16(h + 58, target->shdr_size);
 		write16(h + 60, (uint16_t)output_count);
 		write16(h + 62, (uint16_t)shstr_index);
 		if (fwrite(h, 1, sizeof(h), file) != sizeof(h))
@@ -1478,12 +1482,23 @@ out:
 int
 mt_ld_link(const char *output, const char *entry,
            const char *const *inputs, size_t input_count,
+           const char *target_name,
            const char **error_message)
 {
 	struct ld_context ctx;
 	size_t i;
 	int result = -1;
 	memset(&ctx, 0, sizeof(ctx));
+	if (target_name) {
+		ctx.target = mt_target_lookup(target_name);
+		if (!ctx.target) {
+			if (error_message)
+				*error_message = "unsupported target architecture";
+			return 1;
+		}
+	} else {
+		ctx.target = &mt_target_x86_64;
+	}
 	ctx.got.group = -1;
 	for (i = 0; i < input_count; ++i)
 		if (load_input(&ctx, inputs[i]) != 0)
@@ -1499,7 +1514,8 @@ mt_ld_link(const char *output, const char *entry,
 	if (ctx.got.count != 0)
 		ctx.got.group = find_group(&ctx, ".got");
 	if (layout_output(&ctx) != 0 || fill_got(&ctx) != 0 ||
-	    apply_relocations(&ctx) != 0 || write_executable(&ctx, output, entry) != 0)
+	    apply_relocations(&ctx) != 0 ||
+	    write_executable(&ctx, output, entry, ctx.target) != 0)
 		goto out;
 	result = 0;
 out:

@@ -1,5 +1,6 @@
-/* ld - x86_64 static MeuOS Toolchain linker. */
+/* ld - MeuOS Toolchain static linker with multi-arch ELF output. */
 #include "mt/ld.h"
+#include "mt/target.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,10 +16,12 @@ usage(FILE *out)
 {
 	fprintf(out,
 	        "usage: ld [-static] [-e entry] [-Ldir...] [-llib...] [--sysroot=dir]\n"
-	        "          -o output input.o [input.a ...]\n"
+	        "          [--target=<arch>] -o output input.o [input.a ...]\n"
 	        "       ld --help\n"
 	        "       ld --version\n"
+	        "supported targets: x86_64, i386, aarch64, riscv64, loongarch64\n"
 	        "options:\n"
+	        "  --target=<arch>  set target architecture (default: x86_64)\n"
 	        "  -L<dir>          add library search path\n"
 	        "  -l<lib>          link lib<lib>.a (searched in -L paths and sysroot)\n"
 	        "  --sysroot=<dir>  set system root (adds <dir>/usr/lib to search path)\n"
@@ -46,6 +49,7 @@ main(int argc, char **argv)
 {
 	const char *output = "a.out";
 	const char *entry = "_start";
+	const char *target_name = NULL;
 	const char *inputs[MAX_INPUTS];
 	const char *libpaths[MAX_LIBPATHS];
 	const char *sysroot = NULL;
@@ -60,7 +64,12 @@ main(int argc, char **argv)
 			return 0;
 		}
 		if (strcmp(argv[i], "--version") == 0) {
-			printf("meuos-toolchain ld %s (x86_64 static)\n", MT_LD_VERSION);
+			const struct mt_target *t = target_name
+				? mt_target_lookup(target_name)
+				: &mt_target_x86_64;
+			printf("meuos-toolchain ld %s (%s)\n",
+			       MT_LD_VERSION,
+			       t ? t->name : "unknown");
 			return 0;
 		}
 		if (strcmp(argv[i], "-static") == 0 || strcmp(argv[i], "--static") == 0)
@@ -87,6 +96,18 @@ main(int argc, char **argv)
 		}
 		if (strncmp(argv[i], "--entry=", 8) == 0) {
 			entry = argv[i] + 8;
+			continue;
+		}
+		/* --target=<arch> */
+		if (strncmp(argv[i], "--target=", 9) == 0) {
+			const char *name = argv[i] + 9;
+			if (strcmp(name, "x86_64-linux") == 0)
+				name = "x86_64";
+			if (!mt_target_lookup(name)) {
+				fprintf(stderr, "ld: unsupported target: %s\n", name);
+				return 2;
+			}
+			target_name = name;
 			continue;
 		}
 		/* --sysroot=<dir> */
@@ -172,7 +193,8 @@ main(int argc, char **argv)
 		usage(stderr);
 		return 2;
 	}
-	if (mt_ld_link(output, entry, inputs, (size_t)input_count, &error) != 0) {
+	if (mt_ld_link(output, entry, inputs, (size_t)input_count,
+	               target_name, &error) != 0) {
 		fprintf(stderr, "ld: %s\n", error ? error : "link failed");
 		return 1;
 	}
