@@ -1400,8 +1400,6 @@ write_executable(struct ld_context *ctx, const char *path,
 			memory_end = group->file_offset + group->size;
 	}
 	for (i = 0; i < ctx->group_count; ++i) {
-		if (is_tls_group(ctx, (int)i))
-			continue;
 		if ((ctx->groups[i].flags & MT_SHF_ALLOC) &&
 		    ctx->groups[i].type == MT_SHT_NOBITS &&
 		    memory_end < ctx->groups[i].file_offset + ctx->groups[i].size)
