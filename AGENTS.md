@@ -5,9 +5,11 @@
 > IMPORTANT: 全程思考/回复/文档优先使用简体中文
 > [你必须称呼用户为大喵 (she/her) ]
 >
-> **分支策略**：尽量使用工作分支（如 `feat/i386-float`、`fix/va-list`）进行变更，
-> 完成后合并回 `main`。本次会话可直接在 `main` 提交，但需在提交信息中注明可直接
-> 提交的原因（一次性审查修复、文档同步等）。
+> **分支与提交策略**：
+> - **新任务必须创建分支**，禁止在 `main` 上直接开发（格式：`feat/<描述>`、`fix/<描述>`、`doc/<描述>`）。
+> - 仅在以下情况可提交到 `main`：一次性修复（如 typo、编译报错修正）、文档同步、`.todo` 状态更新、纯重构不涉及功能变更。
+> - 每次提交前必须跑对应组件的 `make check`，确保不引入回归。
+> - 提交信息格式：`<组件>: <描述>`，例如 `mcc: fix va_list alignment on i386`。
 >
 > **会话恢复**：因不可抗力会话可能中断。新会话先读对应子项目的 `ARCHITECTURE.md`（结构/模块/状态/路线图）与 `.todo/`（待实现项），再按需读本文件（项目规约）。各子项目独立维护状态，无全局 STATE 文件。
 
@@ -331,11 +333,53 @@ Agent 必须严格遵循以下阶段，每步都要验证：
 
 ## 5. 项目组织
 
-- 根目录有 `README.md`（项目说明 + 构建方法）。
-- 每个组件可独立编译（但共享公共头文件和构建逻辑）。
-- 每个组件有 `ARCHITECTURE.md`（结构/模块/状态/路线图）与 `.todo/`（待实现项）。
-- 编译产物放入独立输出目录，不污染源码树。
-- `MEUOS_SYSROOT` 环境变量控制安装目标路径。
+### 5.1 目录结构
+
+```
+MeuOS-Kit/
+├── AGENTS.md               项目规约（本文件，harness 自动加载）
+├── README.md               项目说明与构建方法
+├── bootstrap.sh            Phase 0–5 全流程自举脚本
+├── projects/
+│   ├── mcc/                C/C++ 编译器（C99+C11+C23；m++ 待启动）
+│   ├── meuos-libc/         标准 C 库（ISO C11 + POSIX；含 compat 兼容层）
+│   ├── meow/               构建系统（取代 make + autoconf）
+│   ├── meuos-toolchain/    底层工具链（as/ld/ar/ranlib/nm/readelf/strip/objcopy/objdump）
+│   ├── meuos-utils/        核心工具集（待启动）
+│   ├── meuos-shell/        Shell 终端（待启动）
+│   ├── pkgs -> ../pkgs     meow 构建配方软链接
+│   └── sysroot{-<arch>}/   安装目标根文件系统（多架构）
+├── env/                    QEMU 多架构测试环境（6.6.142 内核 + 9p 共享）
+│   ├── bin/qvm             VM 管理器
+│   ├── qemu/               静态 qemu-user 二进制（aarch64/riscv64/loongarch64）
+│   ├── kernels/<arch>/     Alpine linux-virt 6.6.142 内核
+│   └── rootfs/             initramfs 镜像
+├── pkgs/                   meow 构建配方（YAML；dash/bzip2/binutils 等）
+├── sysroot/                安装目标根文件系统（默认 MEUOS_SYSROOT）
+└── reference/              cproc/QBE/musl 只读参考源（gitignored）
+```
+
+每个组件目录含 `ARCHITECTURE.md`（结构/模块/状态/路线图）与 `.todo/`（待实现项）。
+
+### 5.2 构建约定
+
+- 每个组件用**简单 Makefile** 构建（§4 禁止 autotools/cmake/meson）。
+- 编译产物放入独立输出目录（通常是 `build/`），不污染源码树。
+- `MEUOS_SYSROOT` 环境变量控制安装目标路径（默认 `<repo-root>/sysroot`）。
+- 跨架构时 `ARCH=<arch>` 切换目标（x86_64/aarch64/riscv64/loongarch64/i386）。
+- 每个 `.S` 文件通过宿主 cc 或交叉 gcc 汇编（mcc 不处理内联汇编指令）。
+
+### 5.3 QEMU 测试环境
+
+`env/` 提供基于 Alpine Linux 6.6.142 内核的 QEMU 测试环境，支持完整系统仿真和
+单 ELF 运行时验证：
+
+- **qemu-system VM**（完整系统仿真）：x86_64 / i386 / aarch64 / riscv64 / loongarch64
+- **qemu-user**（单 ELF 运行时验证）：aarch64 / riscv64 / loongarch64 静态二进制可用
+- **qvm 管理器**（`env/bin/qvm`）：`qvm boot|console|run|stop <arch>`
+- **9p 共享**：宿主 `share/` 挂载到 guest 的 `/mnt/host`
+
+详见 `env/README.md` 和 §8.1 命令。
 
 ---
 
@@ -477,13 +521,15 @@ Phase A: task-01（基础，必须串行先做）
 
 ### 7.6 阶段归档
 
-每个阶段完成后**必须归档**，然后才能进入下一阶段：
+每个阶段完成后**必须归档**，然后才能进入下一阶段。归档是提交的前置条件：
 
-1. 更新对应 `.todo` 文件（标记 `[x]` 完成项）
-2. 更新 `ARCHITECTURE.md` / `PORTING.md` 中的状态表和路线图
-3. Git 提交，提交信息格式：`<组件>: <阶段描述>（<文件清单>）`
+1. **运行 `make check`**（必须通过）。跨架构变更还需运行对应 `check-<arch>-bootstrap` 或 `check-<arch>-runtime`。如有回归**必须修复后才能提交**。
+2. **更新 `.todo` 文件**，将完成项标记为 `[x]`。
+3. **更新 `ARCHITECTURE.md` / `PORTING.md`** 中的状态表和路线图。
+4. **Git 提交**，提交信息格式：`<组件>: <阶段描述>（<文件清单>）`
    - 示例：`meuos-libc: riscv64 runtime 完成 (crt1/syscall/atomic/setjmp/sigreturn/thread_clone/tls)`
-4. **禁止未归档就进入下一阶段**——归档是阶段完成的唯一定义
+5. **合并到 `main`**（如果在工作分支上开发），合并后删除工作分支。
+6. **禁止未通过 `make check` 就提交**，**禁止未归档就进入下一阶段**——归档是阶段完成的唯一定义。
 
 ### 7.7 完整执行模板
 
@@ -501,4 +547,164 @@ Phase N+1: 下一阶段（复用上一阶段的框架和对照表）
   → 适配差异项 → 验证 → 归档
 
 Phase Final: 公共层清理 + 生成报告
+```
+
+---
+
+## 8. 构建与测试命令参考
+
+> 本节提供操作该仓库时最常用的命令速查。所有组件均位于 `projects/<name>/` 下，
+> 使用简单 Makefile 构建（§4 禁止 autotools/cmake/meson）。
+> `make -C projects/<name> <target>` 是通用调用形式。
+
+### 8.1 环境准备
+
+```sh
+# 设置 sysroot（必须）
+export MEUOS_SYSROOT=/workspace/MeuOS-Kit/sysroot
+
+# 检查宿主编译器
+gcc --version || tcc --version
+
+# QEMU VM 管理（env/ 目录下）
+env/bin/qvm boot aarch64          # 启动 arm64 VM
+env/bin/qvm run aarch64 '<cmd>'   # 在 VM 内执行命令
+env/bin/qvm console aarch64       # 进入控制台
+env/bin/qvm stop aarch64          # 停止 VM
+```
+
+### 8.2 组件构建
+
+```sh
+# mcc（默认宿主架构，5 个后端全部内置）
+make -C projects/mcc                          # 构建 mcc 二进制
+make -C projects/mcc HOST_CC=tcc              # 用 tcc 替代 gcc
+
+# meuos-libc（默认 x86_64）
+make -C projects/meuos-libc                   # 构建 x86_64 libc 核心
+make -C projects/meuos-libc ARCH=aarch64      # 交叉编译 aarch64
+make -C projects/meuos-libc ARCH=riscv64      # riscv64
+make -C projects/meuos-libc ARCH=loongarch64  # LoongArch64
+make -C projects/meuos-libc ARCH=i386         # i386
+make -C projects/meuos-libc install DESTDIR=$PWD/sysroot PREFIX=/usr  # 安装到 sysroot
+
+# meow
+make -C projects/meow                         # 默认 mcc + sysroot
+make -C projects/meow CC=cc                   # 使用宿主 cc（编译环境初始阶段）
+
+# meuos-toolchain（一次性构建全部 9 个工具）
+make -C projects/meuos-toolchain              # 构建 as/ld/ar/ranlib/nm/readelf/strip/objcopy/objdump
+```
+
+### 8.3 测试
+
+#### mcc 测试
+
+```sh
+# 基础门禁
+make -C projects/mcc check                    # Phase 1a: hello world exit=0
+
+# 标准回归
+make -C projects/mcc check-c99                # C99 标准特性测试
+make -C projects/mcc check-c11                # C11 全部（atomic/thread_local/varargs 等）
+make -C projects/mcc check-c11-atomic         # C11 原子测试
+make -C projects/mcc check-c23                # C23 测试（constexpr/embed/typeof）
+
+# 后端回归（汇编级验证）
+make -C projects/mcc check-targets            # 全后端目标汇编验证
+make -C projects/mcc check-i386               # i386 后端回归
+make -C projects/mcc check-loongarch64        # LoongArch64 后端回归
+
+# 运行时回归（需要对应架构 sysroot/QEMU）
+make -C projects/mcc check-i386-runtime       # i386 运行时（需 sysroot-i386）
+make -C projects/mcc check-i386-qemu          # i386 QEMU VM 运行时
+make -C projects/mcc check-aarch64-runtime    # aarch64 QEMU VM 运行时
+
+# 驱动/集成
+make -C projects/mcc check-driver             # 驱动测试（sysroot/feature）
+make -C projects/mcc check-abi                # ABI 回归（bit-field aggregate）
+make -C projects/mcc check-mt-integration     # mt 工具链集成（需已构建 meuos-toolchain）
+make -C projects/mcc check-sysroot-static     # sysroot 内自重建验证
+
+# 社区测试套件
+make -C projects/mcc check-chibicc            # chibicc 社区测试
+make -C projects/mcc check-community          # check-c99 + check-chibicc
+```
+
+#### meuos-libc 测试
+
+```sh
+# 宿主全套回归
+make -C projects/meuos-libc check             # 编译+运行约 25 个测试程序
+
+# 跨架构自检
+make -C projects/meuos-libc check-aarch64-bootstrap      # aarch64 跨编译+可选 qemu 运行时
+make -C projects/meuos-libc check-riscv64-bootstrap      # riscv64
+make -C projects/meuos-libc check-loongarch64-bootstrap  # LoongArch64
+make -C projects/meuos-libc check-i386-bootstrap         # i386
+
+# 原生链接器验证
+make -C projects/meuos-libc check-native-linker          # 通过 mt/ld 链接验证
+make -C projects/meuos-libc check-mcc                    # 用 mcc 编译 libc 测试
+
+# 全架构一步式
+make -C projects/meuos-libc check-all                    # check + 全架构 bootstrap
+```
+
+跨架构运行时验证需要设置环境变量：
+
+```sh
+# aarch64 qemu-user 运行时
+MEUOS_AARCH64_RUN=1 MEUOS_AARCH64_QEMU=env/qemu/qemu-aarch64-static \
+  make -C projects/meuos-libc check-aarch64-bootstrap
+
+# riscv64 qemu-user 运行时
+MEUOS_RISCV64_RUN=1 MEUOS_RISCV64_QEMU=env/qemu/qemu-riscv64-static \
+  make -C projects/meuos-libc check-riscv64-bootstrap
+```
+
+#### meow 测试
+
+```sh
+make -C projects/meow check                   # YAML 配方+Makefile 兼容+--bootstrap
+make -C projects/meow check-sysroot-static    # sysroot 下自重建
+```
+
+#### meuos-toolchain 测试
+
+```sh
+make -C projects/meuos-toolchain check        # 全部 10+ 项测试
+make -C projects/meuos-toolchain check-as-x86_64       # 汇编器基本测试
+make -C projects/meuos-toolchain check-as-sse-x86_64   # SSE 汇编 golden bytes
+make -C projects/meuos-toolchain check-ld-x86_64       # 链接器端到端
+make -C projects/meuos-toolchain check-ar-bsd          # BSD 归档格式
+make -C projects/meuos-toolchain check-libelf          # ELF 解析轮转
+```
+
+### 8.4 自举
+
+```sh
+./bootstrap.sh                                # Phase 0→1（默认）
+./bootstrap.sh --phase 0                      # 仅 Phase 0
+./bootstrap.sh --phase 2                      # Phase 0→2
+./bootstrap.sh --phase 5                      # Phase 0→5 全流程
+```
+
+### 8.5 跨架构构建须知
+
+| 架构 | mcc 编译 C | 汇编器 | 系统依赖 |
+|------|-----------|--------|---------|
+| x86_64 | `$(HOST_CC)` | `$(HOST_CC)` | 无需交叉工具链 |
+| i386 | `$(MCC) --target=i386` | `$(HOST_CC) -m32` | 需要 32-bit glibc 开发包 |
+| aarch64 | `$(MCC) --target=aarch64` | `aarch64-linux-gnu-gcc` | 需要交叉 gcc |
+| riscv64 | `$(MCC) --target=riscv64` | `riscv64-linux-gnu-gcc` | 需要交叉 gcc |
+| loongarch64 | `$(MCC) --target=loongarch64` | `loongarch64-linux-gnu-gcc` | 需要交叉 gcc |
+
+### 8.6 清理
+
+```sh
+make -C projects/mcc clean
+make -C projects/meuos-libc clean
+make -C projects/meow clean
+make -C projects/meuos-toolchain clean
 ```
