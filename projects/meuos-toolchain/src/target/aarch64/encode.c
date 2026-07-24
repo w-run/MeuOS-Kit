@@ -9,7 +9,6 @@
 #include "mt/target.h"
 
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -303,6 +302,9 @@ aarch64_encode_insn(const struct mt_target *target,
 						ops[i].sym_start = end_mod + 1;
 					}
 				}
+			} else {
+				/* Simple symbol name — point into trim(ed) opbuf */
+				ops[i].sym_start = s;
 			}
 			continue;
 		}
@@ -312,12 +314,6 @@ aarch64_encode_insn(const struct mt_target *target,
 	}
 
 	size_t off = 0;
-
-	/* Debug: Dump parsed operands */
-	(void)fprintf(stderr, "D: mne='%s' nops=%d op0.k=%d op1.k=%d op0.r=%d op0.i=%ld\n",
-	              mnemonic, nops,
-	              nops>0?ops[0].kind:-1, nops>1?ops[1].kind:-1,
-	              nops>0?ops[0].reg:-1, nops>1?(long)ops[1].imm:-1);
 
 	/* ---- instruction dispatch ---- */
 

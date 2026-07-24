@@ -132,7 +132,11 @@ strip_comments(struct as_file *as, char *line)
 			source += 2;
 			continue;
 		}
-		if (!quote && *source == '#')
+		if (!quote && source[0] == '/' && source[1] == '/') {
+			break; /* GAS line comment */
+		}
+		if (!quote && *source == '#' &&
+		    as->target && strcmp(as->target->name, "x86_64") == 0)
 			break;
 		*destination++ = *source++;
 	}

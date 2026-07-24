@@ -11,6 +11,10 @@
 #include <string.h>
 #include <sys/stat.h>
 
+/* Per-architecture relocation application */
+extern int mt_apply_aarch64_reloc(unsigned type, unsigned char *loc,
+                                  uint64_t S, int64_t A, uint64_t P);
+
 #define LD_SHF_WRITE 0x1ULL
 #define LD_SHF_ALLOC 0x2ULL
 #define LD_SHF_EXECINSTR 0x4ULL
@@ -1158,6 +1162,12 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 	} else if (type == LD_R_X86_64_32 || type == LD_R_X86_64_32S) {
 		value = resolved_value + addend;
 		width = 4;
+	} else if (strcmp(ctx->target->name, "aarch64") == 0 &&
+	           mt_apply_aarch64_reloc(type,
+	                                  target->data + target_offset,
+	                                  resolved_value, addend, place) == 0) {
+		/* aarch64 relocation applied directly, no write needed below */
+		return 0;
 	} else {
 		return ld_errorf(ctx, "unsupported relocation type", name);
 	}
