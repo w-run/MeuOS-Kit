@@ -186,48 +186,16 @@ valref(struct value *v, Fn *fn)
 			fullname = strf(PFn, ".L%s.%u", v->u.name, v->id);
 		else
 			fullname = v->u.name;
-		/* General-Dynamic TLS: for an extern _Thread_local under -fPIC
-		 * the address cannot be computed by a plain load — it requires
-		 * a call to __tls_get_addr(&sym@tlsgd).  Emit that call here
-		 * (Oarg + Ocall) so the IR optimizer sees a real call: this
-		 * forces fn->leaf=0 and lets caller-save clobber be modeled,
-		 * which matters on aarch64/riscv64/loongarch64 where bl/ret
-		 * reuse the link register (unlike x86_64's stack-based call).
-		 * The descriptor constant keeps sym.type=SGenThr so each
-		 * backend's loadaddr emits the @tlsgd relocation; the call
-		 * itself is a normal Ocall, not an emit-layer inline. */
-		if ((v->kind & VALUE_THREAD) && (v->kind & VALUE_EXTERN) && T.pic) {
-			Con cc;
-			Ref desc, callee, result;
-
-			fprintf(stderr, "DBG gd-tls valref: fn=%s curi_off=%td fullname=%s\n",
-			        fn->name, curi - insb, fullname);
-			memset(&c, 0, sizeof c);
-			c.type = CAddr;
-			c.sym.id = intern(fullname);
-			c.sym.type = SGenThr;
-			desc = newcon(&c, fn);
-
-			memset(&cc, 0, sizeof cc);
-			cc.type = CAddr;
-			cc.sym.id = intern("__tls_get_addr");
-			cc.sym.type = SExt;
-			callee = newcon(&cc, fn);
-
-			result = newtmp("tlsgd", Kl, fn);
-			*curi++ = (Ins){.op=Oarg, .cls=Kl, .to=R,
-			                .arg={desc, R}};
-			*curi++ = (Ins){.op=Ocall, .cls=Kl, .to=result,
-			                .arg={callee, R}};
-			fn->leaf = 0;
-			return result;
-		}
 		memset(&c, 0, sizeof c);
 		c.type = CAddr;
 		c.sym.id = intern(fullname);
-		if (v->kind & VALUE_EXTERN) c.sym.type |= SExt;
-		if (v->kind & VALUE_THREAD)
-			c.sym.type |= SThr;
+		if ((v->kind & VALUE_THREAD) && (v->kind & VALUE_EXTERN) && T.pic) {
+			/* GD-TLS: pure descriptor constant. The caller expands via expand_gd_tls. */
+			c.sym.type = SGenThr;
+		} else {
+			if (v->kind & VALUE_EXTERN) c.sym.type |= SExt;
+			if (v->kind & VALUE_THREAD) c.sym.type |= SThr;
+		}
 		return newcon(&c, fn);
 	case VALUE_TYPE:
 		/* IR encodes aggregate-type references as TYPE(n) where n is the
@@ -305,6 +273,31 @@ run_passes(Fn *fn)
 		} else
 			fn->rpo[n]->link = fn->rpo[n+1];
 #undef P
+}
+
+/* If `r` references an SGenThr constant, emit Oarg + Ocall(__tls_get_addr)
+ * and return the result temp (the TLS address). Otherwise return r unchanged. */
+static Ref
+expand_gd_tls(Ref r, Fn *fn)
+{
+	Con *c;
+	if (rtype(r) != RCon)
+		return r;
+	c = &fn->con[r.val];
+	if (c->type != CAddr || c->sym.type != SGenThr)
+		return r;
+
+	Con cc;
+	memset(&cc, 0, sizeof cc);
+	cc.type = CAddr;
+	cc.sym.id = intern("__tls_get_addr");
+	cc.sym.type = SExt;
+
+	Ref result = newtmp("tlsgd", Kl, fn);
+	*curi++ = (Ins){.op = Oarg, .cls = Kl, .to = R, .arg = {r, R}};
+	*curi++ = (Ins){.op = Ocall, .cls = Kl, .to = result, .arg = {newcon(&cc, fn), R}};
+	fn->leaf = 0;
+	return result;
 }
 
 void
@@ -555,15 +548,15 @@ emitfunc(struct func *f, bool global)
 							*curi++ = (Ins){
 								.op = Oargc, .cls = Kl,
 								.to = R,
-								.arg = {TYPE(ai->arg[1]->id),
-								        valref(ai->arg[0], fn)}
+							.arg = {TYPE(ai->arg[1]->id),
+							        expand_gd_tls(valref(ai->arg[0], fn), fn)}
 							};
 						} else {
 							*curi++ = (Ins){
 								.op = Oarg,
 								.cls = char_to_cls(ai->class),
 								.to = R,
-								.arg = {valref(ai->arg[0], fn), R}
+								.arg = {expand_gd_tls(valref(ai->arg[0], fn), fn), R}
 							};
 						}
 					} else if (ai->kind == IVARARG) {
@@ -602,11 +595,24 @@ emitfunc(struct func *f, bool global)
 				case Ostores: cls = Ks; break;
 				case Ostored: cls = Kd; break;
 				}
-			Ref to = in->res.kind ? valref(&in->res, fn) : R;
-			Ref a0 = in->arg[0] ? valref(in->arg[0], fn) : R;
-			Ref a1 = in->arg[1] ? valref(in->arg[1], fn) : R;
-			*curi++ = (Ins){.op = qop, .cls = cls, .to = to, .arg = {a0, a1}};
+		Ref to = in->res.kind ? valref(&in->res, fn) : R;
+		Ref a0 = in->arg[0] ? valref(in->arg[0], fn) : R;
+		Ref a1 = in->arg[1] ? valref(in->arg[1], fn) : R;
+		a0 = expand_gd_tls(a0, fn);
+		a1 = expand_gd_tls(a1, fn);
+		*curi++ = (Ins){.op = qop, .cls = cls, .to = to, .arg = {a0, a1}};
 		}
+
+		/* Pre-evaluate jump args that need GD-TLS expansion BEFORE
+		 * idup/reset, so the Oarg+Ocall they emit get committed to
+		 * qb->ins (valref() alone would orphan them in insb[0..1]). */
+		Ref retval = R;   /* for JUMP_RET */
+		Ref jnz_val = R;  /* for JUMP_JNZ */
+		if (b->jump.kind == JUMP_RET && b->jump.arg)
+			retval = expand_gd_tls(valref(b->jump.arg, fn), fn);
+		if (b->jump.kind == JUMP_JNZ && b->jump.arg)
+			jnz_val = expand_gd_tls(valref(b->jump.arg, fn), fn);
+
 		idup(qb, insb, curi - insb);
 		curi = insb;
 
@@ -628,7 +634,7 @@ emitfunc(struct func *f, bool global)
 					 * (Kw..Kd).  Void returns take Jret0 below. */
 					qb->jmp.type = Jretw + retty;
 				}
-				qb->jmp.arg = valref(b->jump.arg, fn);
+				qb->jmp.arg = retval;
 			} else {
 				qb->jmp.type = Jret0;
 			}
@@ -639,7 +645,7 @@ emitfunc(struct func *f, bool global)
 			break;
 		case JUMP_JNZ:
 			qb->jmp.type = Jjnz;
-			qb->jmp.arg = valref(b->jump.arg, fn);
+			qb->jmp.arg = jnz_val;
 			qb->s1 = b->jump.blk[0]->ir;
 			qb->s2 = b->jump.blk[1]->ir;
 			break;

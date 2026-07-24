@@ -324,7 +324,7 @@ P6 动态链接器就绪
 | `meuos-toolchain/ld/` | PLT/GOT 重定位          |
 | `meuos-toolchain/ld/` | GD DTPMOD/DTPOFF 重定位 |
 
----
+## 验收标准
 
 ```bash
 # Phase A: verify SGenThr enum added to IR
