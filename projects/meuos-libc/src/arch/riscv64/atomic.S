@@ -185,7 +185,10 @@ __atomic_compare_exchange_1:
 1:	lr.w.aqrl a2, 0(a5)	/* current word */
 	and a0, a2, a4		/* current byte (masked) */
 	bne a0, a7, 2f
-	sc.w.aqrl x28, a6, 0(a5)	/* store desired */
+	not a7, a4		/* ~mask */
+	and a7, a2, a7		/* word with target byte zeroed */
+	or a6, a7, a6		/* insert desired byte */
+	sc.w.aqrl x28, a6, 0(a5)	/* store corrected word */
 	bnez x28, 1b
 	li a0, 1
 	ret
@@ -217,7 +220,8 @@ __atomic_exchange_2:
 	slli a2, a2, 3
 	li a3, 0xffff
 	sll a3, a3, a2
-	andi a4, a1, 0xffff
+	slli a4, a1, 48
+	srli a4, a4, 48
 	sll a4, a4, a2
 	and a5, a0, -4
 1:	lr.w.aqrl a6, 0(a5)
@@ -233,7 +237,8 @@ __atomic_exchange_2:
 .globl __atomic_fetch_add_2
 .type __atomic_fetch_add_2,@function
 __atomic_fetch_add_2:
-	andi a1, a1, 0xffff
+	slli a1, a1, 48
+	srli a1, a1, 48
 	andi a2, a0, 2
 	slli a2, a2, 3
 	li a3, 0xffff
@@ -255,7 +260,8 @@ __atomic_fetch_add_2:
 .globl __atomic_fetch_sub_2
 .type __atomic_fetch_sub_2,@function
 __atomic_fetch_sub_2:
-	andi a1, a1, 0xffff
+	slli a1, a1, 48
+	srli a1, a1, 48
 	andi a2, a0, 2
 	slli a2, a2, 3
 	li a3, 0xffff
@@ -277,7 +283,8 @@ __atomic_fetch_sub_2:
 .globl __atomic_fetch_and_2
 .type __atomic_fetch_and_2,@function
 __atomic_fetch_and_2:
-	andi a1, a1, 0xffff
+	slli a1, a1, 48
+	srli a1, a1, 48
 	andi a2, a0, 2
 	slli a2, a2, 3
 	li a3, 0xffff
@@ -299,7 +306,8 @@ __atomic_fetch_and_2:
 .globl __atomic_fetch_or_2
 .type __atomic_fetch_or_2,@function
 __atomic_fetch_or_2:
-	andi a1, a1, 0xffff
+	slli a1, a1, 48
+	srli a1, a1, 48
 	andi a2, a0, 2
 	slli a2, a2, 3
 	li a3, 0xffff
@@ -321,7 +329,8 @@ __atomic_fetch_or_2:
 .globl __atomic_fetch_xor_2
 .type __atomic_fetch_xor_2,@function
 __atomic_fetch_xor_2:
-	andi a1, a1, 0xffff
+	slli a1, a1, 48
+	srli a1, a1, 48
 	andi a2, a0, 2
 	slli a2, a2, 3
 	li a3, 0xffff
@@ -347,7 +356,8 @@ __atomic_compare_exchange_2:
 	slli a3, a3, 3		/* shift in a3 */
 	li a4, 0xffff
 	sll a4, a4, a3		/* mask in a4 */
-	andi a6, a2, 0xffff
+	slli a6, a2, 48
+	srli a6, a6, 48
 	sll a6, a6, a3		/* desired (masked, in position) in a6 */
 	and a5, a0, -4		/* word-aligned address in a5 */
 	lhu a7, 0(a1)
@@ -355,7 +365,10 @@ __atomic_compare_exchange_2:
 1:	lr.w.aqrl a2, 0(a5)	/* current word */
 	and a0, a2, a4		/* current halfword (masked) */
 	bne a0, a7, 2f
-	sc.w.aqrl x28, a6, 0(a5)	/* store desired */
+	not a7, a4		/* ~mask */
+	and a7, a2, a7		/* word with target halfword zeroed */
+	or a6, a7, a6		/* insert desired halfword */
+	sc.w.aqrl x28, a6, 0(a5)	/* store corrected word */
 	bnez x28, 1b
 	li a0, 1
 	ret

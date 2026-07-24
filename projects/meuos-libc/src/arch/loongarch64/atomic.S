@@ -29,7 +29,7 @@ atomic_signal_fence:
 .globl __atomic_load_1
 .type __atomic_load_1,@function
 __atomic_load_1:
-	lbu $a0, $a0, 0
+	ld.bu $a0, $a0, 0
 	dbar 0
 	jr $ra
 
@@ -193,7 +193,7 @@ __atomic_compare_exchange_1:
 	sll.d $t2, $t2, $t0		/* desired in position */
 	or $t3, $a0, $zero
 	bstrins.d $t3, $zero, 1, 0	/* word-aligned address */
-	lbu $t4, $a1, 0			/* expected byte */
+	ld.bu $t4, $a1, 0			/* expected byte */
 	sll.d $t4, $t4, $t0		/* expected in position */
 1:
 	ll.w $t5, $t3, 0		/* current word */
@@ -217,7 +217,7 @@ __atomic_compare_exchange_1:
 .globl __atomic_load_2
 .type __atomic_load_2,@function
 __atomic_load_2:
-	lhu $a0, $a0, 0
+	ld.hu $a0, $a0, 0
 	dbar 0
 	jr $ra
 
@@ -381,7 +381,7 @@ __atomic_compare_exchange_2:
 	sll.d $t2, $t2, $t0
 	or $t3, $a0, $zero
 	bstrins.d $t3, $zero, 1, 0
-	lhu $t4, $a1, 0
+	ld.hu $t4, $a1, 0
 	sll.d $t4, $t4, $t0
 1:
 	ll.w $t5, $t3, 0

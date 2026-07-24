@@ -1,38 +1,27 @@
-# LoongArch64 (loongarch64) 运行时移植 —— 已完成（代码）
+# LoongArch64 (loongarch64) 运行时移植——代码已完成，mcc 后端汇编语法不兼容
 
-## 背景
-mcc 已有 loongarch64 后端代码生成基线（整数 ABI + 浮点汇编回归通过），
-libc/运行时现已移植完成（移植自 riscv64 模板）。
+## 已完成
+- `src/arch/loongarch64/atomic.S` — 全部原子操作，已修复 gas 语法（ld.bu/ld.hu 替代 lbu/lhu）
+- `src/arch/loongarch64/setjmp.S` — setjmp/longjmp
+- `src/arch/loongarch64/sigreturn.S` — rt_sigreturn
+- `src/arch/loongarch64/thread_clone.S` — clone + 子线程 TLS
+- `src/arch/loongarch64/tls.c` — TLS 初始化（GAP_ABOVE_TP=0）
+- `crt/loongarch64/crt1.S` — _start 入口
+- `src/internal/arch/loongarch64/syscall.S` — syscall gate
 
-## 已实现的文件
-- `src/arch/loongarch64/atomic.S`        - 原子操作（ll.w/sc.w + ll.d/sc.d + dbar 0；
-                                           子字节掩码法与 riscv64 同思路）
-- `src/arch/loongarch64/setjmp.S`        - setjmp/longjmp（保存 $s0-$s8/$fp/$sp/$ra/
-                                           $fs0-$fs7，jmp_buf[23]; sigjmp_buf[25]）
-- `src/arch/loongarch64/sigreturn.S`     - rt_sigreturn restorer（li.w $a7,139; syscall 0）
-- `src/arch/loongarch64/thread_clone.S`  - clone + 子线程 TLS（CLONE_SETTLS 经 $a3，
-                                           tp 由内核设置，jirl $ra,$a0 调用 start）
-- `src/arch/loongarch64/tls.c`           - TLS 初始化（GAP_ABOVE_TP=0，返回 tp 基址）
-- `crt/loongarch64/crt1.S`               - _start 入口（`move $tp, $a0` 安装 tp）
-- `src/internal/arch/loongarch64/syscall.S` - syscall gate（$a7 传号，$a0-$a5 传参，
-                                               `syscall 0`）
+## 已验证
+- ✅ loongarch64-linux-gnu-gcc 可汇编所有 .S 文件
+- ✅ `make ARCH=loongarch64` 的 .S 文件单独汇编通过
+- ❌ mcc C 编译阻塞：mcc loongarch64 后端生成的汇编语法与 LoongArch gas 不兼容
+  - 指令格式：mcc 产生 `st.d $a2, -16($fp)`（类 AT&T 语法），LoongArch gas 要求 `st.d $a2, $fp, -16`
+  - 立即数操作：mcc 产生 `xor $t1, $a2, 0`，LoongArch gas 要求 `xor $t1, $a2, $zero`
+  - 偏移语法：mcc 的 `%d(fp)` 格式不支持
+  - 详见 `projects/mcc/src/target/loongarch64/loongarch64_emit.c` 全部 emit 模式
 
-## 关联修改（已完成）
-- `src/internal/syscall.h`：loongarch64 复用 aarch64/riscv64 的 asm-generic
-  翻译表（`|| defined(__loongarch64)`）。
-- `include/setjmp.h`：新增 `__loongarch64` 分支，`jmp_buf[23]` / `sigjmp_buf[25]`。
-- `Makefile`：`ARCH=loongarch64` 构建规则（CC=mcc --target=loongarch64，
-  AS=loongarch64-linux-gnu-gcc，无 set_tls.o）+ `check-loongarch64-bootstrap`。
-- 21 个 syscall/signal wrapper `.c` 文件：`__aarch64__` 与 `__riscv` 条件
-  加入 `|| defined(__loongarch64)`，确保 loongarch64 走 *at-variant 代码路径
-  （同时也补全了 riscv64 此前遗漏的同路径条件）。
-- `test/loongarch64-bootstrap.sh`：6 测试 + ELF Machine=LoongArch 检查 +
-  可选 qemu 门禁。
+## 解决路径
+1. 重写 mcc loongarch64 emit 中所有指令格式以匹配 LoongArch gas 语法
+2. 或使用 LoongArch 官方汇编器/LLVM 作为汇编器
 
-## 验收
-- `make ARCH=loongarch64` 产出 crt1.o / libc-meuos.a / libatomic-meuos.a
-  （待交叉工具链就绪）。
-- qemu-loongarch64 下运行 Phase-2 测试。
-- 当前环境无 `loongarch64-linux-gnu-gcc` 与 qemu-loongarch64，且 mcc
-  loongarch64 后端有浮点比较 bug（已知限制），真机/交叉汇编验证待工具链
-  安装与 mcc 后端修复。代码经静态核对。
+## 验收（待 mcc 后端修复后）
+- `make ARCH=loongarch64` 全量编译通过
+- qemu-loongarch64 下运行 Phase-2 测试

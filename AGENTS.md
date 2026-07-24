@@ -399,6 +399,12 @@ Agent 必须严格遵循以下阶段，每步都要验证：
 
 > 本条是一般性方法论，适用于本项目所有复杂任务的规划与执行。
 > 不只是移植工作，编译器特性实现、libc 函数实现、工具链开发等任何需要多步骤完成的任务，都应遵循此策略。
+>
+> **强制约定**：所有任务执行必须使用 Codebuddy 无头模式（hy3 模型，允许多轮对话），
+> 取代普通 SubAgent。不允许使用默认的 SubAgent 模型执行实质性编码任务。
+> hy3 无头 agent 可通过 Agent 工具 `subagent_type: "fork"` + `run_in_background: true`
+> 或直接设置 `model: "hy3"` 模式发起。主 agent 使用 Agent 工具 spawn，子 agent 自动获得
+> 多轮对话能力，无需手动续接上下文。
 
 ### 7.1 任务颗粒度原则
 
@@ -427,29 +433,31 @@ Agent 必须严格遵循以下阶段，每步都要验证：
 ### 7.3 线性单向任务流
 
 - 将任务 DAG **拉平成线性阶段**，每个阶段内无交叉依赖
-- 阶段内互不依赖的独立任务可**并行分派**给 subagent
+- 阶段内互不依赖的独立任务可**并行分派**给 hy3 无头 agent（使用 Agent 工具 `run_in_background: true` + `model: "hy3"`）
 - 每个阶段完成后**立即验证**，失败不回退、不被后续任务污染
 - **禁止回溯**：不允许 task-N 完成后发现 task-M（M < N）有问题再回去改
 
-### 7.4 Subagent 并行开发
+### 7.4 hy3 无头 agent 并行开发
 
 识别同一阶段内互不依赖的并行任务窗口：
 
 ```
 Phase A: task-01（基础，必须串行先做）
-  → task-02, task-03, task-04（互不依赖，可 3 个 subagent 并行）
+  → task-02, task-03, task-04（互不依赖，可 3 个 hy3 无头 agent 并行）
   → task-05（依赖 02-04 全部完成，串行收尾）
 ```
 
 并行分派要点：
 
-- 每个 subagent 卡片**自包含**（含参考路径 + 验收命令），不依赖外部上下文
-- 并行任务完成后，**主 agent** 统一验收和集成
+- 每个 hy3 无头 agent 卡片**自包含**（含参考路径 + 验收命令），不依赖外部上下文
+- 使用 `Agent` 工具发起时设置 `model: "hy3"`、`run_in_background: true`，确保子 agent 使用正确的无头模式模型
+- 并行任务完成后，**主 agent** 使用 `TaskOutput` 收集结果，统一验收和集成
 - 并行数量 ≤ 4 个，避免上下文过大
+- hy3 无头模式天然支持多轮对话，子 agent 可自主进行多步操作（读文件、修改、验证）无需主 agent 干预
 
 ### 7.5 参考来源收集（算力节约的核心）
 
-**在开始编码前**，先用 code-explorer subagent 收集：
+**在开始编码前**，先用 Explore 子 agent（`subagent_type: "Explore"`）收集：
 
 1. **本仓库已验证的同类实现**（最优先）：同项目其他架构的对应文件，直接对照转录
 2. **社区标准实现**：musl 对应目录、Linux 内核 UAPI 头文件
@@ -465,7 +473,7 @@ Phase A: task-01（基础，必须串行先做）
 | 原子 load-reserved | ldaxr              | lr.w/lr.d          | ll.w/ll.d              |
 | TLS 变体           | variant I (GAP=16) | variant I (GAP=0)  | variant I (GAP=0)      |
 
-对照表一旦建立，所有 subagent 共享，避免各自重复查询。
+对照表一旦建立，所有 hy3 无头 agent 共享，避免各自重复查询。
 
 ### 7.6 阶段归档
 
@@ -480,11 +488,13 @@ Phase A: task-01（基础，必须串行先做）
 ### 7.7 完整执行模板
 
 ```
-Phase 0: 环境确认（1 步，code-explorer subagent）
+Phase 0: 环境确认（1 步，Explore 子 agent）
   → 验证参考文件存在、工具链就绪
 
 Phase N: 主体实现（M 步，按依赖 DAG 串行+并行）
-  → 基础文件（串行）→ 独立文件（并行 subagent）→ 集成收尾（串行）
+  → 基础文件（串行）
+  → 独立文件（并行 hy3 无头 agent，使用 Agent tool model:"hy3" run_in_background:true）
+  → 集成收尾（串行，TaskOutput 收集结果）
   → 每步验证 → 阶段归档
 
 Phase N+1: 下一阶段（复用上一阶段的框架和对照表）

@@ -138,7 +138,27 @@ EOF
 	"$sysroot/usr/lib/libc-meuos.a"
 i386_check_elf "$work/phase2-test"
 
-# ===== Run tests (if runtime enabled) =====
+# ===== Test 5: bare_tls (_Thread_local + errno isolation) =====
+cat > "$work/bare_tls.c" <<'EOF'
+#include <errno.h>
+#include <stdio.h>
+#include <threads.h>
+static _Thread_local int local_value = 5;
+static int worker_value, worker_errno;
+static int worker(void *arg) { (void)arg; local_value = 9; errno = 47; worker_value = local_value; worker_errno = errno; return 0; }
+int main(void) {
+	thrd_t thread;
+	errno = 31;
+	if (thrd_create(&thread, worker, 0) != thrd_success || thrd_join(thread, 0) != thrd_success) return 1;
+	printf("tls main=%d child=%d errno=%d/%d\n", local_value, worker_value, errno, worker_errno);
+	return local_value != 5 || worker_value != 9 || errno != 31 || worker_errno != 47;
+}
+EOF
+"$mcc" --target=i386 -I"$root/include" -c -o "$work/bare_tls.o" "$work/bare_tls.c"
+"$cc" -m32 -nostdlib -static -o "$work/bare-tls" \
+	"$sysroot/usr/lib/crt1.o" "$work/bare_tls.o" \
+	"$sysroot/usr/lib/libc-meuos.a"
+i386_check_elf "$work/bare-tls"
 if [ "$run_tests" = 1 ]; then
 	printf '%s\n' "i386 runtime: hello"
 	"$work/hello"
@@ -151,10 +171,14 @@ if [ "$run_tests" = 1 ]; then
 
 	printf '%s\n' "i386 runtime: phase2"
 	"$work/phase2-test"
+
+	printf '%s\n' "i386 runtime: bare_tls"
+	"$work/bare-tls"
 fi
-# NOTE: bare_tls (_Thread_local + errno isolation) is NOT included because
-# mcc's i386 backend emits IE relocs (@gotntpoff) for all TLS variables,
-# which the static linker cannot transition to LE (@ntpoff).  This is a
-# known mcc i386 TLS model selection gap (see projects/mcc/.todo/gd-tls.md).
+# NOTE: bare_tls test is now included.  mcc's i386 backend emits LE
+# relocs (@ntpoff) for static _Thread_local variables, which the
+# static linker handles correctly.  Non-static _Thread_local globals
+# still get IE (@gotntpoff) which the linker cannot transition in
+# fully-static builds — see projects/mcc/.todo/gd-tls.md.
 
 printf '%s\n' 'i386 bootstrap ELF32 check passed'

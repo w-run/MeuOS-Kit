@@ -16,6 +16,20 @@
 .globl _start
 .type _start,@function
 _start:
+	/* Initialize global pointer (gp/x3) to __global_pointer$ so that
+	 * gp-relative accesses to .sdata/.sbss work.  This is required by
+	 * the RISC-V ABI; the linker sets up __global_pointer$ to point to
+	 * the middle of the small data area, and functions like exit() use
+	 * gp-relative loads for global variables (handler_count, handlers).
+	 * Without this, gp-relative accesses segfault on real hardware/VM
+	 * (qemu-user tolerates a zero/uninitialized gp).
+	 * NOTE: .option norelax is required — without it, the assembler
+	 * relaxes "la gp, __global_pointer$" into a gp-relative access,
+	 * creating a circular dependency. */
+	.option push
+	.option norelax
+	la gp, __global_pointer$
+	.option pop
 	mv s0, sp			/* save kernel sp (argc/argv/envp/auxv) */
 	andi sp, sp, -16		/* align sp for the calls below */
 

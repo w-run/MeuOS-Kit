@@ -18,8 +18,8 @@
 #   - GAP_ABOVE_TP = 0 (musl loongarch64 ABI): tp points at the TLS image
 #     start, so .tdata is copied to mmap_base + 0.
 #
-# qemu lookup order: $MEUOS_LOONGARCH64_QEMU > env/qemu/qemu-loongarch64 >
-# PATH (qemu-loongarch64 / qemu-loongarch64-static).
+# qemu lookup order: $MEUOS_LOONGARCH64_QEMU > env/qemu/qemu-loongarch64-static >
+# env/qemu/qemu-loongarch64 > PATH (qemu-loongarch64 / qemu-loongarch64-static).
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -175,7 +175,9 @@ done
 # # ===== Optional runtime gate =====
 if [ "${MEUOS_LOONGARCH64_RUN:-0}" = 1 ]; then
 	if [ -z "$qemu" ]; then
-		for candidate in "$root/env/qemu/qemu-loongarch64" \
+		for candidate in "$root/env/qemu/qemu-loongarch64-static" \
+		                  "$root/env/qemu/qemu-loongarch64" \
+		                  "$root/../env/qemu/qemu-loongarch64-static" \
 		                  "$root/../env/qemu/qemu-loongarch64" \
 		                  qemu-loongarch64 qemu-loongarch64-static; do
 			if command -v "$candidate" >/dev/null 2>&1 || [ -x "$candidate" ]; then

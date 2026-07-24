@@ -1,51 +1,28 @@
-/* thread + fputc 精确诊断（2026-07-22 收敛保存）
- *
- * 已验证的事实矩阵（每个 5-10 次 VM 运行）：
- *   diag-min-fputc       (无 thread, fputc)            5/5 OK
- *   diag-fputc-nothread  (无 thread, write+fputc)      5/5 OK
- *   diag-write           (thread, write only)         5/5 OK  (S1-S4 全输出)
- *   diag-fpdiag2-m1      (thread, write+fputc)         0/5 SEGFAULT (连 "before fputc" 都不输出)
- *
- * 结论：bug 精确锁定在 "thread + fputc" 组合。
- *   - fputc 单独正常（diag-min-fputc）
- *   - thread + write 正常（diag-write）
- *   - thread + fputc 必崩
- *
- * 最强假设（未验证，token 收敛）：
- *   thread_create/join 过程中破坏了主线程的 TPIDR_EL0。
- *   - fputc 内部 write(1,&byte,1) 若返回 != 1 会调 __errno_location() 设 errno
- *   - __errno_location 反汇编: mrs x0,tpidr_el0; add x0,x0,#0; add x0,x0,#0
- *     （访问 TLS 偏移 0 的 errno_value）
- *   - write 成功路径不调 __errno_location，所以 diag-write 不暴露此 bug
- *   - 若主线程 TPIDR_EL0 被 clone 破坏，errno 写入会 segfault
- *
- * 验证方案（下次会话执行）：
- *   方案 A（最直接）：临时把 errno.c 的
- *       static _Thread_local int errno_value;
- *     改为
- *       static int errno_value;
- *     重建 libc-aarch64，重跑 diag-fpdiag2-m1。若不再 segfault -> 确认 TPIDR_EL0 被破坏。
- *
- *   方案 B（根因定位）：在 thread_clone.S 子线程路径加
- *       msr tpidr_el0, x12  /* 恢复 tls */ （但内核已设，多余）
- *     或检查父线程从 clone 返回后 TPIDR_EL0 是否被 clobber。
- *     注意：aarch64 clone 系统调用不应破坏父线程 TPIDR_EL0，
- *     但若 mcc 生成的 thrd_create 代码有问题（如把 tls 值覆盖到 TPIDR_EL0）需排查。
- *
- *   方案 C（链接器 bug 排查）：之前发现 .tbss(errno) 与 .got 在同一虚拟地址 0x41ffa8
- *     重叠。可用自定义链接脚本分离 .tbss 测试，但优先级低于方案 A。
- *
- * 排除的假设（之前会话）：
- *   - 竞态条件（加延迟仍崩）
- *   - callee-saved 寄存器保存错误（fputc/fputs/write/strlen 都正确保存 x19）
- *   - clone flags 错误（0x013d0f00 含 CLONE_THREAD=0x10000）
- *   - TLS 块初始化错误（mmap 出来全 0，errno_value 正确）
- *
- * 相关文件：
- *   - projects/meuos-libc/src/errno/errno.c  (_Thread_local int errno_value)
- *   - projects/meuos-libc/src/stdio/char_io.c (fputc 调 write + __errno_location)
- *   - projects/meuos-libc/src/arch/aarch64/thread_clone.S
- *   - projects/meuos-libc/src/arch/aarch64/tls.c
- *   - env/share/diag-fpdiag2.c (复现脚本，MODE=1/2/3/4)
- *   - env/share/diag-write.c / diag-fputc-nothread.c / diag-min-fputc.c (对照)
- */
+---
+status: resolved
+resolved_at: 2026-07-24
+resolution: 
+  - commit 2a3f5c9 "aarch64: complete libc runtime + qemu gate + TLS GAP_ABOVE_TP fix"
+  - 2026-07-22 diag-fpdiag2 (MODE 1-4) on qemu-aarch64 v7.2.0 全部通过
+  - test/aarch64-bootstrap.sh 全 6 测试（含 bare_tls errno 端到端）全部通过
+---
+
+# aarch64 thread + fputc segfault — 已修复，归档参考
+
+## 背景
+2026-07-22 发现 thread_create/join 后调用 fputc 导致 SEGFAULT。
+根因：TPIDR_EL0 在 clone 过程中被破坏，导致 _Thread_local errno 写入崩。
+
+## 修复
+commit 2a3f5c9 的 TLS GAP_ABOVE_TP 修正了 TLS 布局，同步修复了
+TPIDR_EL0 的稳定性。所有 aarch64 运行时测试（含 bare_tls errno 端到端）
+已在 qemu-aarch64-static v7.2.0 下通过验证。
+
+## 验证
+```bash
+# bootstrap 全 6 测试
+make ARCH=aarch64 && MEUOS_AARCH64_RUN=1 make check-aarch64-bootstrap
+
+# diag-fpdiag2 4 模式
+env/qemu/qemu-aarch64-static env/share/diag-fpdiag2-m{1,2,3,4}
+```

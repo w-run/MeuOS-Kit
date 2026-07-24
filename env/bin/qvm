@@ -7,14 +7,14 @@
 # console on a UNIX socket, and shares a host directory via 9p at /mnt/host.
 #
 # Usage:
-#   qvm boot <arch>       start the VM for <arch> (x86_64|i386|aarch64)
+#   qvm boot <arch>       start the VM for <arch> (x86_64|i386|aarch64|riscv64|loongarch64)
 #   qvm console <arch>    attach to the VM serial console (Ctrl-a x to exit)
 #   qvm stop <arch>       stop the VM
 #   qvm status            list VMs and their state
 #   qvm run <arch> <cmd>  run a one-shot command in the VM via serial (best-effort)
 #   qvm share             print the host share path (mounted at /mnt/host in guests)
 #
-# Environments: x86_64, i386, aarch64  (loongarch64/riscv64 planned, see .todo)
+# Environments: x86_64, i386, aarch64, riscv64, loongarch64
 
 set -eu
 ENV=/workspace/MeuOS-Kit/env
@@ -31,16 +31,15 @@ qemu_bin() {
     x86_64) echo "${QEMU_PREFIX}/bin/qemu-system-x86_64" ;;
     i386)   echo "${QEMU_PREFIX}/bin/qemu-system-i386" ;;
     aarch64)echo "${QEMU_PREFIX}/bin/qemu-system-aarch64" ;;
-    *) echo "qvm: unknown arch '$arch' (use x86_64|i386|aarch64)" >&2; exit 2 ;;
+    riscv64)echo "${QEMU_PREFIX}/bin/qemu-system-riscv64" ;;
+    loongarch64) echo "${QEMU_PREFIX}/bin/qemu-system-loongarch64" ;;
+    *) echo "qvm: unknown arch '$arch' (use x86_64|i386|aarch64|riscv64|loongarch64)" >&2; exit 2 ;;
   esac
 }
 
-# Translate user arch -> kernel dir / initramfs name. i386 uses the x86 apk.
+# Translate user arch -> kernel dir / initramfs name.
 resolve() {
-  case "$1" in
-    i386) echo "x86" ;;
-    *) echo "$1" ;;
-  esac
+  echo "$1"
 }
 
 is_running() {
@@ -73,6 +72,8 @@ cmd_boot() {
   case "$arch" in
     x86_64|i386) machine="pc"; cpu="max"; append="console=ttyS0 quiet" ;;
     aarch64)     machine="virt"; cpu="cortex-a72"; append="console=ttyAMA0 quiet" ;;
+    riscv64)     machine="virt"; cpu="rv64"; append="console=ttyS0 quiet" ;;
+    loongarch64) machine="virt"; cpu="la464"; append="console=ttyS0 quiet" ;;
   esac
   echo "qvm: booting $arch (kernel $kernel)..."
   "$bin" \
