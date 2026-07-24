@@ -1,9 +1,12 @@
 <!--
 priority: P2
 status: in_progress
+kind: plan
 progress_note: Phase A 已验证 (libmcc.a build OK, make check 全绿); Phase B/C/D 待 m++ 启动时实施
-note: mcc/m++ 共享后端架构(libmcc 化)的分阶段计划;阶段 A 已落地,阶段 B/C/D 待 m++ 启动时实施
+note: mcc/m++ 共享后端架构(libmcc 化)的分阶段计划;阶段 A 已落地,阶段 B/C/D 待 m++ 启动时实施。本 todo 属规划类(kind: plan),验收命令只验证 Phase A 既有产物,driver 不应据此标 done。
 start_ts: 2026-07-24
+rollback_ts: 2026-07-24
+rollback_reason: driver 误标 done (验收命令只验 Phase A 既有产物, 无本轮代码改动); 改为 kind: plan, 不进 driver actionable 队列
 -->
 
 # 待规划：mcc/m++ 共享后端架构调整（libmcc 化）
@@ -204,4 +207,3 @@ cd projects/mcc && make check
 # Phase A: verify libmcc.a contains backend symbols (full path from project root)
 nm projects/mcc/build/libmcc.a | grep -q 'T.*isel' && echo "backend symbols in libmcc: PASS"
 ```
-

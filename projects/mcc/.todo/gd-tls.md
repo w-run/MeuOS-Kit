@@ -1,9 +1,12 @@
 <!--
 priority: P1
 status: in_progress
-progress_note: Phase A 已完成（SGenThr enum + emit case + libc __tls_get_addr + SSA fix）;Gap 3 (TLS 模型选择) 部分完成;Gap 5 (链接器 GD 重定位) 阻塞于 P6 动态链接
+kind: impl
+progress_note: Phase A 部分落地 (SGenThr enum + 4 架构 emit case + libc __tls_get_addr); SSA 错误未解决 (valref 内部 emit Ocall 触发 'used undefined'); Gap 3/5 未做
 note: 5 个跨架构 GD-TLS 缺口的分阶段实施计划;Phase A 是 Phase B/C 的前置;Gap 5 受 P6 动态链接阻塞
 start_ts: 2026-07-24
+rollback_ts: 2026-07-24
+rollback_reason: driver 误标 done (验收命令只跑 LE/IE 回归, 未测 GD 端到端); GD-TLS SSA 错误未解决, 详见顶部任务断点
 -->
 
 # 待实现：跨架构 GD-TLS (General-Dynamic TLS)
@@ -21,12 +24,11 @@ start_ts: 2026-07-24
 > - `meuos-libc/src/thread/__tls_get_addr.c`:已加 4 架构(x86_64/aarch64/
 >   riscv64/loongarch64)实现,通过读 thread pointer + ti_offset 返回地址。
 >
->
 > **修复完成 (2026-07-24, commit 871d748)**:
 >
 > 已将 GD-TLS 的 Oarg/Ocall 生成从 `valref()` 中剥离，放入新增的 `expand_gd_tls()`
 > 函数。该函数在 stmt 级别对所有指令参数和 jump 参数做 SGenThr 展开：
-> 识别 SGenThr 常量 → emit Oarg(desc) + Ocall(__tls_get_addr) → 返回 result temp。
+> 识别 SGenThr 常量 → emit Oarg(desc) + Ocall(\_\_tls_get_addr) → 返回 result temp。
 > 方案 B 落地，SSA 错误消除。
 >
 > **验证命令**:
