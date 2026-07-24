@@ -41,23 +41,12 @@ note: GD-TLS Gap 3: 在 targ.c/expr.c 中实现 -fPIC 和 --shared 时外部 _Th
 ```bash
 # 1. Build succeeds
 make -C projects/mcc -j4
-# 2. Non-PIC extern TLS produces IE (not GD)
-cat > /tmp/tls_model_test.c << 'EOF'
-extern _Thread_local int ext_tls;
-int *get_ext(void) { return &ext_tls; }
-EOF
-projects/mcc/mcc --target=x86_64 -S -o /tmp/tls_model_le.s /tmp/tls_model_test.c 2>/dev/null
-! grep -q '__tls_get_addr' /tmp/tls_model_le.s && echo "Non-PIC extern TLS uses IE: PASS"
+# 2. Non-PIC extern TLS produces IE (not GD) — use echo, no heredoc
+echo 'extern _Thread_local int ext_tls; int *get_ext(void) { return &ext_tls; }' > /tmp/tls_model_test.c; projects/mcc/mcc --target=x86_64 -S -o /tmp/tls_model_le.s /tmp/tls_model_test.c 2>/dev/null; ! grep -q '__tls_get_addr' /tmp/tls_model_le.s && echo "Non-PIC extern TLS uses IE: PASS"
 # 3. -fPIC extern TLS produces GD
-projects/mcc/mcc --target=x86_64 -fPIC -S -o /tmp/tls_model_gd.s /tmp/tls_model_test.c 2>/dev/null
-grep -q '__tls_get_addr' /tmp/tls_model_gd.s && echo "-fPIC extern TLS uses GD: PASS"
+projects/mcc/mcc --target=x86_64 -fPIC -S -o /tmp/tls_model_gd.s /tmp/tls_model_test.c 2>/dev/null; grep -q '__tls_get_addr' /tmp/tls_model_gd.s && echo "-fPIC extern TLS uses GD: PASS"
 # 4. Non-extern TLS stays LE in all modes
-cat > /tmp/tls_model_local.c << 'EOF'
-_Thread_local int local_tls;
-int *get_local(void) { return &local_tls; }
-EOF
-projects/mcc/mcc --target=x86_64 -fPIC -S -o /tmp/tls_model_local.s /tmp/tls_model_local.c 2>/dev/null
-! grep -q '__tls_get_addr' /tmp/tls_model_local.s && echo "Local TLS stays LE under -fPIC: PASS"
+echo '_Thread_local int local_tls; int *get_local(void) { return &local_tls; }' > /tmp/tls_model_local.c; projects/mcc/mcc --target=x86_64 -fPIC -S -o /tmp/tls_model_local.s /tmp/tls_model_local.c 2>/dev/null; ! grep -q '__tls_get_addr' /tmp/tls_model_local.s && echo "Local TLS stays LE under -fPIC: PASS"
 # 5. Full regression
 make -C projects/mcc check
 ```

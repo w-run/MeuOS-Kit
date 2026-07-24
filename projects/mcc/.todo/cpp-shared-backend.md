@@ -197,11 +197,11 @@ projects/
 ## 验收标准
 
 ```bash
-# Phase A: verify libmcc.a exists
+# Phase A: verify libmcc.a exists (full path from project root)
 test -f projects/mcc/build/libmcc.a
 # Phase A: verify existing tests still pass
 cd projects/mcc && make check
-# Phase A: verify libmcc.a contains backend symbols (not frontend-only)
-nm build/libmcc.a | grep -q 'T.*isel' && echo "backend symbols in libmcc: PASS"
+# Phase A: verify libmcc.a contains backend symbols (full path from project root)
+nm projects/mcc/build/libmcc.a | grep -q 'T.*isel' && echo "backend symbols in libmcc: PASS"
 ```
 

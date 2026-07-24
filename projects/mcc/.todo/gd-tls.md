@@ -299,17 +299,14 @@ P6 动态链接器就绪
 ```bash
 # Phase A: verify SGenThr enum added to IR
 grep -q 'SGenThr.*=.*4' projects/mcc/include/ir.h
+# Phase A: create test file (single echo, no heredoc)
+echo 'extern _Thread_local int gd_var; int *get_gd(void) { return &gd_var; }' > /tmp/test_gd_tls.c
 # Phase A: verify x86_64 GD sequence emits __tls_get_addr (requires -fPIC)
-cat > /tmp/test_gd_tls.c << 'EOF'
-extern _Thread_local int gd_var;
-int *get_gd(void) { return &gd_var; }
-EOF
-cd projects/mcc && ./mcc --target=x86_64 -fPIC -S -o /tmp/test_gd_tls.s /tmp/test_gd_tls.c 2>/dev/null
-grep -q '__tls_get_addr' /tmp/test_gd_tls.s && echo "GD-TLS emit: PASS"
-# Multi-arch GD emission
-for a in x86_64 aarch64 riscv64 loongarch64; do
-  ./mcc --target=$a -fPIC -S -o /dev/null /tmp/test_gd_tls.c 2>/dev/null || echo "FAIL: $a"
-done
+cd projects/mcc && ./mcc --target=x86_64 -fPIC -S -o /tmp/test_gd_tls.s /tmp/test_gd_tls.c 2>/dev/null; grep -q '__tls_get_addr' /tmp/test_gd_tls.s && echo "x86_64 GD: PASS"
+# Multi-arch GD emission (each as independent one-liner)
+cd projects/mcc && ./mcc --target=aarch64 -fPIC -S -o /dev/null /tmp/test_gd_tls.c 2>/dev/null; echo "aarch64 GD: $?"
+cd projects/mcc && ./mcc --target=riscv64 -fPIC -S -o /dev/null /tmp/test_gd_tls.c 2>/dev/null; echo "riscv64 GD: $?"
+cd projects/mcc && ./mcc --target=loongarch64 -fPIC -S -o /dev/null /tmp/test_gd_tls.c 2>/dev/null; echo "loongarch64 GD: $?"
 # Regression gate: existing LE/IE TLS tests must still pass
 cd projects/mcc && make check
 ```
