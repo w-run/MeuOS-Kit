@@ -259,6 +259,20 @@ loadaddr(Con *c, char *rn, FILE *f)
 		break;
 	case SExtThr:
 		die("extern thread unavailable on rv64");
+	case SGenThr:
+		/* general-dynamic TLS descriptor address: la.tls.gd expands to
+		 * auipc + addi with R_RISCV_TLS_GD_HI20 and the paired
+		 * R_RISCV_PCREL_LO12_I, computing the @tlsgd descriptor's
+		 * address into rn (the local label + pairing are handled by the
+		 * assembler, per RISC-V psABI / gas docs).  The __tls_get_addr
+		 * call is emitted as a real Ocall by IR generation
+		 * (irgen/emit.c valref), so it is visible to the optimizer and
+		 * forces fn->leaf=0 — the prologue saves ra, fixing the leaf-
+		 * function bl/ret hazard on rv64. */
+		fprintf(f, "\tla.tls.gd %s, ", rn);
+		emitaddr(c, f);
+		fputc('\n', f);
+		break;
 	}
 }
 

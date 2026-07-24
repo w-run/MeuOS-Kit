@@ -40,6 +40,7 @@ class Todo:
     name: str                 # basename without .md
     priority: str             # P0..P5, "" if missing
     status: str               # "pending" | "in_progress" | "done" | ""
+    kind: str                 # "impl" (default) | "plan" | "doc" — impl todos need code changes
     title: str                # first H1/H2 line
     raw_head: str             # raw <!-- ... --> block (for context)
     priority_rank: int        # numeric rank for sorting (lowest first)
@@ -47,6 +48,11 @@ class Todo:
     def is_actionable(self) -> bool:
         # in_progress is also actionable: a previous round may have crashed
         # mid-batch and we want to resume. Only `done` is terminal.
+        # kind: plan/doc todos are NOT actionable — they record direction or
+        # docs, their acceptance commands only verify pre-existing artifacts,
+        # so driver must not pick them up or mark them done via CLAIM_DONE.
+        if self.kind in ("plan", "doc"):
+            return False
         return self.status != "done" and self.priority in PRIORITY_RANK
 
 
@@ -88,6 +94,13 @@ def parse_todo(path: Path, project_root: Path, subproject: str) -> Todo | None:
     kv, _ = _parse_front(text)
     priority = kv.get("priority", "").upper()
     status = kv.get("status", "").lower()
+    # kind defaults to "impl" for backward compatibility (existing todos
+    # without an explicit kind field are treated as implementation todos).
+    # "plan"/"doc" todos are filtered out of the actionable queue by
+    # is_actionable() so driver won't pick them up or auto-mark done.
+    kind = kv.get("kind", "impl").lower()
+    if kind not in ("impl", "plan", "doc", "refactor", "test"):
+        kind = "impl"
     if priority and priority not in PRIORITY_RANK:
         return None
     if status and status not in ("pending", "in_progress", "done"):
@@ -99,6 +112,7 @@ def parse_todo(path: Path, project_root: Path, subproject: str) -> Todo | None:
         name=path.stem,
         priority=priority,
         status=status,
+        kind=kind,
         title=_first_title(text),
         raw_head=json.dumps(kv, ensure_ascii=False, sort_keys=True),
         priority_rank=PRIORITY_RANK.get(priority, 99),

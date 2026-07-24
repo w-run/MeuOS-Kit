@@ -305,6 +305,19 @@ loadaddr(Con *c, char *rn, E *e)
 			s = "\tadrp\tR, :got:SO\n"
 			    "\tldr\tR, [R, #:got_lo12:SO]\n";
 		break;
+	case SGenThr:
+		/* general-dynamic TLS descriptor address: adrp+add compute
+		 * the :tlsgd: descriptor's address into R.  The call to
+		 * __tls_get_addr is emitted as a real Ocall by IR generation
+		 * (irgen/emit.c valref), so it is visible to the optimizer and
+		 * ABI passes; here we only materialize the descriptor pointer
+		 * that __tls_get_addr receives (in x0 via the ABI).  Linker
+		 * GD->LE relaxation, which needs a trailing nop after bl, is
+		 * not modeled — the GD call stays, which is functionally
+		 * correct for local defs too. */
+		s = "\tadrp\tR, :tlsgd:S\n"
+		    "\tadd\tR, R, :tlsgd_lo12:S\n";
+		break;
 	}
 
 	l = str(c->sym.id);
