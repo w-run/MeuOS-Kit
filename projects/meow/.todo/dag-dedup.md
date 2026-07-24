@@ -1,6 +1,7 @@
 <!--
 priority: P2
 status: in_progress
+kind: impl
 note: -jN 并行执行的间接依赖重复问题；非阻塞，按需优化
 start_ts: 2026-07-24
 -->

@@ -1,6 +1,7 @@
 <!--
 priority: P2
 status: pending
+kind: impl
 note: 切到 ${MEUOS_SYSROOT}/bin/sh;前置是 MeuOS userspace 自身的 shell 落地
 -->
 
