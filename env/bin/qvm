@@ -112,7 +112,7 @@ cmd_stop() {
 }
 
 cmd_status() {
-  for arch in x86_64 i386 aarch64; do
+  for arch in x86_64 i386 aarch64 riscv64 loongarch64; do
     if is_running "$arch"; then
       printf "  %-10s RUNNING  pid %s\n" "$arch" "$(cat "$RUN/$arch.pid")"
     else
