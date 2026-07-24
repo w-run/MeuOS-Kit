@@ -26,6 +26,9 @@ LIBDISASM_SRCS := $(sort $(wildcard src/libdisasm/*.c))
 LIBDISASM_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(LIBDISASM_SRCS))
 LIBDISASM_LIB := $(BUILD)/lib/libdisasm.a
 
+TARGET_SRCS := $(sort $(wildcard src/target/*.c) $(wildcard src/target/x86_64/*.c) $(wildcard src/target/i386/*.c) $(wildcard src/target/aarch64/*.c) $(wildcard src/target/riscv64/*.c) $(wildcard src/target/loongarch64/*.c))
+TARGET_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(TARGET_SRCS))
+
 AR_SRCS := $(sort $(wildcard src/ar/*.c))
 AR_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(AR_SRCS))
 AR_BIN := $(BUILD)/bin/ar
@@ -65,7 +68,7 @@ ELF_PROBE := $(BUILD)/test/elf_probe
 TEST_FIXTURE_OBJ := $(BUILD)/test/hello.o
 TEST_ARCHIVE := $(BUILD)/test/libhello.a
 TEST_EXEC := $(BUILD)/test/hello.exec
-DEPS := $(LIBELF_OBJS:.o=.d) $(LIBDISASM_OBJS:.o=.d) $(AR_OBJS:.o=.d) $(AS_OBJS:.o=.d) $(LD_OBJS:.o=.d) $(RANLIB_OBJS:.o=.d) $(NM_OBJS:.o=.d) $(READELF_OBJS:.o=.d) $(STRIP_OBJS:.o=.d) $(OBJCOPY_OBJS:.o=.d) $(OBJDUMP_OBJS:.o=.d) $(ELF_PROBE).d
+DEPS := $(LIBELF_OBJS:.o=.d) $(LIBDISASM_OBJS:.o=.d) $(AR_OBJS:.o=.d) $(AS_OBJS:.o=.d) $(LD_OBJS:.o=.d) $(RANLIB_OBJS:.o=.d) $(NM_OBJS:.o=.d) $(READELF_OBJS:.o=.d) $(STRIP_OBJS:.o=.d) $(OBJCOPY_OBJS:.o=.d) $(OBJDUMP_OBJS:.o=.d) $(TARGET_OBJS:.o=.d) $(ELF_PROBE).d
 
 all: $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(STRIP_BIN) $(OBJCOPY_BIN) $(OBJDUMP_BIN)
 
@@ -81,13 +84,13 @@ $(AR_BIN): $(AR_OBJS) $(LIBELF_LIB)
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(LDFLAGS) -o $@ $(AR_OBJS) $(LIBELF_LIB) $(LDLIBS)
 
-$(AS_BIN): $(AS_OBJS) $(LIBELF_LIB)
+$(AS_BIN): $(AS_OBJS) $(TARGET_OBJS) $(LIBELF_LIB)
 	@mkdir -p $(dir $@)
-	$(HOST_CC) $(LDFLAGS) -o $@ $(AS_OBJS) $(LIBELF_LIB) $(LDLIBS)
+	$(HOST_CC) $(LDFLAGS) -o $@ $(AS_OBJS) $(TARGET_OBJS) $(LIBELF_LIB) $(LDLIBS)
 
-$(LD_BIN): $(LD_OBJS) $(AR_CORE_OBJ) $(LIBELF_LIB)
+$(LD_BIN): $(LD_OBJS) $(AR_CORE_OBJ) $(TARGET_OBJS) $(LIBELF_LIB)
 	@mkdir -p $(dir $@)
-	$(HOST_CC) $(LDFLAGS) -o $@ $(LD_OBJS) $(AR_CORE_OBJ) $(LIBELF_LIB) $(LDLIBS)
+	$(HOST_CC) $(LDFLAGS) -o $@ $(LD_OBJS) $(AR_CORE_OBJ) $(TARGET_OBJS) $(LIBELF_LIB) $(LDLIBS)
 
 $(RANLIB_BIN): $(RANLIB_OBJS) $(LIBELF_LIB)
 	@mkdir -p $(dir $@)
@@ -172,9 +175,29 @@ check-as-x86_64: $(AS_BIN)
 	trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; \
 	printf '%s\n' '.text' '.globl main' 'main:' 'endbr64' 'movl $$0, %eax' 'ret' > "$$tmp/main.s"; \
 	$(AS_BIN) -o "$$tmp/main.o" "$$tmp/main.s"; \
-	readelf -h "$$tmp/main.o" | grep -Eq 'Type:[[:space:]]+REL'; \
-	readelf -s "$$tmp/main.o" | grep -Eq '[[:space:]]main$$'; \
+	LANG=C readelf -h "$$tmp/main.o" | grep -Eq 'Type:[[:space:]]+REL'; \
+	LANG=C readelf -s "$$tmp/main.o" | grep -Eq '[[:space:]]main$$'; \
 	printf 'mt as x86_64 check: PASS\n'
+
+check-target-dispatch: $(AS_BIN) $(LD_BIN)
+	@set -eu; \
+	tmp=$$(mktemp -d /tmp/meuos-toolchain-dispatch.XXXXXX); \
+	trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; \
+	printf '%s\n' '.text' '.globl main' 'main:' 'ret' > "$$tmp/min.s"; \
+	$(AS_BIN) --target=x86_64 -o "$$tmp/main.o" "$$tmp/min.s"; \
+	printf '%s' '--target=x86_64 as: '; LANG=C readelf -h "$$tmp/main.o" | grep 'Machine:'; \
+	$(AS_BIN) --target=aarch64 -o "$$tmp/main.o" "$$tmp/min.s"; \
+	printf '%s' '--target=aarch64 as: '; LANG=C readelf -h "$$tmp/main.o" | grep 'Machine:'; \
+	$(AS_BIN) --target=i386 -o "$$tmp/main.o" "$$tmp/min.s"; \
+	printf '%s' '--target=i386 as: '; LANG=C readelf -h "$$tmp/main.o" | grep 'Machine:'; \
+	$(AS_BIN) --target=riscv64 -o "$$tmp/main.o" "$$tmp/min.s"; \
+	printf '%s' '--target=riscv64 as: '; LANG=C readelf -h "$$tmp/main.o" | grep 'Machine:'; \
+	$(AS_BIN) --target=loongarch64 -o "$$tmp/main.o" "$$tmp/min.s"; \
+	printf '%s' '--target=loongarch64 as: '; LANG=C readelf -h "$$tmp/main.o" | grep 'Machine:'; \
+	$(AS_BIN) --target=armv7 "$$tmp/min.s" 2>&1 && exit 1 || printf 'unsupported target rejected: PASS\n'; \
+	$(LD_BIN) --target=x86_64 --version | grep -q 'x86_64' && printf 'ld --target=x86_64 --version: PASS\n'; \
+	$(LD_BIN) --target=i386 --version | grep -q 'i386' && printf 'ld --target=i386 --version: PASS\n'; \
+	printf 'check-target-dispatch: PASS\n'
 
 
 check-as-sse-x86_64: $(AS_BIN)
@@ -234,4 +257,4 @@ install: $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all check check-elf check-ar check-as-x86_64 check-as-sse-x86_64 check-as-libc-x86_64 check-ld-x86_64 check-ar-bsd check-ld-libpath check-ranlib check-libelf check-nm check-readelf check-strip check-objcopy check-objdump install clean
+.PHONY: all check check-elf check-ar check-as-x86_64 check-target-dispatch check-as-sse-x86_64 check-as-libc-x86_64 check-ld-x86_64 check-ar-bsd check-ld-libpath check-ranlib check-libelf check-nm check-readelf check-strip check-objcopy check-objdump install clean

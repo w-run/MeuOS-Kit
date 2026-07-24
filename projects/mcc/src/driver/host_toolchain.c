@@ -129,26 +129,56 @@ mt_mode_enabled(void)
 	return getenv("MT_AS") != NULL && getenv("MT_LD") != NULL;
 }
 
-/* mt/as currently supports only x86_64.  A NULL target means "host",
- * which for the bootstrap is x86_64; any other triplet (i386, aarch64,
- * riscv64, loongarch64, ...) stays on the cc handoff. */
+/* Convert mcc target triplet to the target name expected by mt tools.
+ * Returns NULL for null/unknown triplet (means "host arch", which mt
+ * defaults to x86_64). */
+static const char *
+mt_target_name(const char *target_triple)
+{
+	if (!target_triple || !*target_triple)
+		return NULL;
+	if (strncmp(target_triple, "x86_64", 6) == 0)
+		return "x86_64";
+	if (strncmp(target_triple, "aarch64", 7) == 0)
+		return "aarch64";
+	if (strncmp(target_triple, "riscv64", 7) == 0)
+		return "riscv64";
+	if (strncmp(target_triple, "loongarch64", 11) == 0)
+		return "loongarch64";
+	if (strncmp(target_triple, "i386", 4) == 0 ||
+	    strncmp(target_triple, "i486", 4) == 0 ||
+	    strncmp(target_triple, "i586", 4) == 0 ||
+	    strncmp(target_triple, "i686", 4) == 0)
+		return "i386";
+	/* Unknown triplet: return NULL to let caller fall back to host cc. */
+	return NULL;
+}
+
+/* mt/as now supports all 5 architectures (x86_64, aarch64, riscv64,
+ * loongarch64, i386).  A NULL target means "host" (x86_64).  Only return
+ * false when the triplet is genuinely unknown. */
 static bool
 mt_target_supported(const char *target_triple)
 {
 	if (target_triple == NULL)
 		return true;
-	return strncmp(target_triple, "x86_64", 6) == 0;
+	return mt_target_name(target_triple) != NULL;
 }
 
 /* Assemble a single .s to a .o via mt/as.  mt/as takes the output path
- * explicitly via -o and does not honour a -c flag. */
+ * explicitly via -o and does not honour a -c flag.  target_triple is
+ * passed as --target= so mt/as uses the correct architecture. */
 static void
-run_mt_as(const char *asm_path, const char *output, bool verbose)
+run_mt_as(const char *asm_path, const char *output, bool verbose,
+          const char *target_triple)
 {
 	struct array cmd = {0};
 	const char *as = getenv("MT_AS");
+	const char *mt_target = mt_target_name(target_triple);
 
 	cmdadd(&cmd, as);
+	arrayaddbuf(&cmd, " --target=", 10);
+	cmdadd(&cmd, mt_target ? mt_target : "x86_64");
 	arrayaddbuf(&cmd, " -o ", 4);
 	cmdadd(&cmd, output);
 	arrayaddbuf(&cmd, " ", 1);
@@ -172,15 +202,18 @@ static void
 run_mt_ld(struct array *objects, const char *output, bool verbose,
     struct array *libdirs, struct array *libs, bool static_link,
     bool nostdlib, bool nodefaultlibs, bool meuos_specs,
-    const char *asm_path_for_atomic)
+    const char *asm_path_for_atomic, const char *target_triple)
 {
 	struct array cmd = {0};
 	const char *ld = getenv("MT_LD");
 	const char *sysroot;
+	const char *mt_target = mt_target_name(target_triple);
 	char **p;
 	size_t i;
 
 	cmdadd(&cmd, ld);
+	arrayaddbuf(&cmd, " --target=", 10);
+	cmdadd(&cmd, mt_target ? mt_target : "x86_64");
 	/* mt/ld is static by default; -static is accepted for compatibility. */
 	if (static_link)
 		arrayaddbuf(&cmd, " -static", 8);
@@ -240,20 +273,21 @@ run_host_cc(const char *asm_path, const char *output, bool compile_only,
 	size_t i;
 
 	/* P3: mt integration.  Bypass the host cc when MT_AS/MT_LD are set
-	 * and the target is x86_64 (the only arch mt/as supports).  -shared
-	 * still needs the host cc because mt/ld does not emit shared objects.
+	 * and the target is supported (all 5 architectures: x86_64, aarch64,
+	 * riscv64, loongarch64, i386).  -shared still needs the host cc
+	 * because mt/ld does not emit shared objects.
 	 *
 	 * -c (assemble only): mt/as needs no CRT/libc, so any MT-enabled
-	 *   x86_64 build assembles via mt/as.
+	 *   build assembles via mt/as.
 	 * full link: mt/ld has no startup objects or libc of its own; it
 	 *   only works when mcc manages the CRT/libc via --specs=meuos.
 	 *   Without specs the host cc still provides the host libc/CRT, so
 	 *   fall back to it (this preserves `mcc hello.c -o hello` and the
 	 *   `make check` smoke link). */
-	if (mt_mode_enabled() && !shared && !target_is_i386(target_triple) &&
+	if (mt_mode_enabled() && !shared &&
 	    mt_target_supported(target_triple)) {
 		if (compile_only) {
-			run_mt_as(asm_path, output, verbose);
+			run_mt_as(asm_path, output, verbose, target_triple);
 			return;
 		}
 		if (meuos_specs) {
@@ -267,12 +301,12 @@ run_host_cc(const char *asm_path, const char *output, bool compile_only,
 			if (fd < 0)
 				fatal("mkstemp:");
 			close(fd);
-			run_mt_as(asm_path, tmpl, verbose);
+			run_mt_as(asm_path, tmpl, verbose, target_triple);
 			struct array objs = {0};
 			arrayaddptr(&objs, tmpl);
 			run_mt_ld(&objs, output, verbose, libdirs, libs,
 			    static_link, nostdlib, nodefaultlibs, meuos_specs,
-			    asm_path);
+			    asm_path, target_triple);
 			unlink(tmpl);
 			return;
 		}
@@ -342,14 +376,13 @@ run_host_link(struct array *objects, const char *output, bool verbose,
 	char **p;
 	size_t i;
 
-	/* P3: mt integration.  Drive mt/ld directly for x86_64 static links
+	/* P3: mt integration.  Drive mt/ld directly for any supported target
 	 * under --specs=meuos (the only mode where mcc manages crt1.o and
-	 * libc-meuos).  -shared, non-meuos-specs, i386 and other non-x86_64
-	 * targets fall back to the host cc. */
-	if (mt_mode_enabled() && !shared && !target_is_i386(target_triple) &&
+	 * libc-meuos).  -shared and non-meuos-specs fall back to the host cc. */
+	if (mt_mode_enabled() && !shared &&
 	    mt_target_supported(target_triple) && meuos_specs) {
 		run_mt_ld(objects, output, verbose, libdirs, libs, static_link,
-		    nostdlib, nodefaultlibs, meuos_specs, NULL);
+		    nostdlib, nodefaultlibs, meuos_specs, NULL, target_triple);
 		return;
 	}
 

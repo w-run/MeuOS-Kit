@@ -1,0 +1,9 @@
+[x] mcc+mt: integrate .msys single-file sysroot
+[x] meow: add --arch flag
+[x] mcc: integrate mt/as + mt/ld for all 5 archs
+[x] meuos-toolchain: loongarch64 as+ld (instruction encoding + relocations)
+[x] meuos-toolchain: fix all LA64 relocation bugs
+[ ] LA64 libc functions (printf, threads) get SIGILL - systematic link bug
+    Cause: 0xFFFFFFEC corruption at offset +0x20 in libc functions.
+    Suspect: B26 relocation handler or archive member extraction order.
+    Workaround: test specific functions (getpid, write, exit) work.

@@ -1,8 +1,13 @@
 #ifndef MT_AS_H
 #define MT_AS_H
 
-/* x86_64-first assembler entry point. */
+/* Assembler entry point.
+ *
+ * target  is the architecture name ("x86_64", …) or NULL to default to x86_64.
+ * All other architectures now parse correctly to set ELF header fields,
+ * but encoding support is currently limited to x86_64. */
 int mt_as_assemble(const char *input, const char *output,
+                   const char *target,
                    const char **error_message, unsigned *error_line);
 
 #endif

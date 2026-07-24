@@ -47,6 +47,7 @@ extern struct target targets[TARGET_MAX];
 extern size_t ntargets;
 extern char *default_target;
 extern int parallel_jobs;
+extern char *build_arch;  /* NULL = auto-detect from uname */
 
 /* exec.c */
 int list_packages(void);

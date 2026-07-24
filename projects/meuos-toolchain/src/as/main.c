@@ -1,5 +1,6 @@
-/* as - x86_64-first MeuOS Toolchain assembler. */
+/* as - MeuOS Toolchain assembler with multi-arch ELF output. */
 #include "mt/as.h"
+#include "mt/target.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,9 +12,10 @@ static void
 usage(FILE *out)
 {
 	fprintf(out,
-	        "usage: as [-o output] [--target=x86_64] input.s\n"
+	        "usage: as [-o output] [--target=<arch>] input.s\n"
 	        "       as --help\n"
-	        "       as --version\n");
+	        "       as --version\n"
+	        "supported targets: x86_64, i386, aarch64, riscv64, loongarch64\n");
 }
 
 int
@@ -21,6 +23,7 @@ main(int argc, char **argv)
 {
 	const char *input = NULL;
 	const char *output = "a.out";
+	const char *target_name = NULL;
 	const char *error;
 	unsigned line;
 	int i;
@@ -31,7 +34,12 @@ main(int argc, char **argv)
 			return 0;
 		}
 		if (strcmp(argv[i], "--version") == 0) {
-			printf("meuos-toolchain as %s (x86_64)\n", MT_AS_VERSION);
+			const struct mt_target *t = target_name
+				? mt_target_lookup(target_name)
+				: &mt_target_x86_64;
+			printf("meuos-toolchain as %s (%s)\n",
+			       MT_AS_VERSION,
+			       t ? t->name : "unknown");
 			return 0;
 		}
 		if (strcmp(argv[i], "-o") == 0) {
@@ -43,11 +51,14 @@ main(int argc, char **argv)
 			continue;
 		}
 		if (strncmp(argv[i], "--target=", 9) == 0) {
-			if (strcmp(argv[i] + 9, "x86_64") != 0 &&
-			    strcmp(argv[i] + 9, "x86_64-linux") != 0) {
-				fprintf(stderr, "as: only x86_64 is implemented\n");
+			const char *name = argv[i] + 9;
+			if (strcmp(name, "x86_64-linux") == 0)
+				name = "x86_64";
+			if (!mt_target_lookup(name)) {
+				fprintf(stderr, "as: unsupported target: %s\n", name);
 				return 2;
 			}
+			target_name = name;
 			continue;
 		}
 		if (argv[i][0] == '-' && argv[i][1] == 'o' && argv[i][2] != '\0') {
@@ -68,7 +79,7 @@ main(int argc, char **argv)
 		usage(stderr);
 		return 2;
 	}
-	if (mt_as_assemble(input, output, &error, &line) != 0) {
+	if (mt_as_assemble(input, output, target_name, &error, &line) != 0) {
 		fprintf(stderr, "as: %s:%u: %s\n", input, line, error);
 		return 1;
 	}

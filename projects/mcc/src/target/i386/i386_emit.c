@@ -1600,6 +1600,16 @@ emitins(Ins i, E *e)
 				sym[0] == '"' ? "" : T.assym, sym,
 				regtoa(i.to.val, SLong));
 			break;
+		case SGenThr:
+			/* General-dynamic TLS descriptor address for i386.
+			 * leal sym@tlsgd(,%ebx,1), %eax loads the TLS GD descriptor
+			 * address.  The call to ___tls_get_addr is emitted by the IR
+			 * layer (irgen/emit.c expand_gd_tls), not here. */
+			assert(!con->bits.i);
+			fprintf(e->f, "\tleal %s%s@tlsgd,%s\n",
+				sym[0] == '"' ? "" : T.assym, sym,
+				regtoa(i.to.val, SLong));
+			break;
 		default:
 			goto Table;
 		}
