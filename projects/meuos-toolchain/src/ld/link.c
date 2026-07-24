@@ -1054,6 +1054,14 @@ layout_output(struct ld_context *ctx)
 		}
 	}
 
+	/* Advance offset past non-TLS sections so TLS does not overlap .bss */
+	for (i = 0; i < ctx->group_count; ++i) {
+		struct ld_group *g = &ctx->groups[i];
+		if (is_tls_group(ctx, (int)i)) continue;
+		uint64_t e = g->file_offset + g->size;
+		if (e > offset) offset = e;
+	}
+
 	/* TLS sections: lay out .tdata (needs file space) then .tbss (NOBITS). */
 	if (ctx->tls_tdata_group >= 0) {
 		struct ld_group *g = &ctx->groups[ctx->tls_tdata_group];
@@ -1069,21 +1077,15 @@ layout_output(struct ld_context *ctx)
 			g->file_offset = td->file_offset + td->size;
 			g->address = td->address + td->size;
 		} else {
-			/* No .tdata: .tbss shares address with .data for section header
-			 * purposes, but does not consume PT_LOAD file or memory space. */
-			int dg = find_group(ctx, ".data");
-			if (dg >= 0) {
-				g->file_offset = ctx->groups[dg].file_offset;
-				g->address = ctx->groups[dg].address;
-			} else {
-				g->file_offset = offset;
-				g->address = LD_BASE + offset;
+			/* No .tdata: allocate beyond non-TLS sections */
+			g->file_offset = offset;
+			g->address = LD_BASE + offset;
+			offset += g->size;
 			}
 		}
+		return 0;
 	}
 
-	return 0;
-}
 
 static int
 symbol_tls_offset(struct ld_context *ctx, struct ld_object *object,
