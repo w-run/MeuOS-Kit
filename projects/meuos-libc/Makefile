@@ -77,6 +77,7 @@ ARCH_RT_OBJS := $(BUILD)/arch/$(ARCH)/tls.o \
                 $(BUILD)/thread/__tls_get_addr.o
 # __tls_get_addr.c for x86_64 lives in src/thread/ (host cc w/ inline asm)
 $(BUILD)/thread/__tls_get_addr.o: src/thread/__tls_get_addr.c
+	@mkdir -p $(dir $@)
 	$(CC) -Iinclude -Isrc -c -o $@ $<
 else ifeq ($(ARCH),aarch64)
 ARCH_RT_OBJS := $(BUILD)/arch/$(ARCH)/tls.o \

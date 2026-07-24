@@ -39,8 +39,10 @@ typedef unsigned long jmp_buf[23];
 typedef unsigned long sigjmp_buf[25];
 #endif
 #else
+/* x86_64: setjmp.S saves rbx/rbp/r12/r13/r14/r15/rip/rsp = 8 words */
+typedef unsigned long jmp_buf[8];
 #ifndef __STRICT_ANSI__
-typedef unsigned long sigjmp_buf[16];
+typedef unsigned long sigjmp_buf[10];
 #endif
 #endif
 

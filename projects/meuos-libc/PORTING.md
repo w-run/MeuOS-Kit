@@ -17,7 +17,7 @@ mcc 已有代码生成基线、libc 运行时仍待移植；x86_64 和 aarch64 �
 | **x86_64**      | **已确认基石**   | libc runtime 完整；`counter = 2000`、线程、TLS、stdio、静态链接和 QEMU 回归已通过 | 主开发平台、参考实现和每次变更的回归基线                                               |
 | **aarch64**     | **运行验证**     | libc runtime 完整（crt1/syscall/atomic/setjmp/sigreturn/thread_clone/set_tls/tls.c）；`make ARCH=aarch64` + `test/aarch64-bootstrap.sh` qemu gate 通过 | 64 位次级基石；hello/atomic/phase2/bare_tls 端到端输出已固化，详见 §5 |
 | **loongarch64** | **已落地代码**   | mcc 后端有 ABI/汇编回归基线；libc runtime 已实现（crt1/syscall/atomic/setjmp/sigreturn/thread_clone/tls.c，移植自 riscv64）；`make ARCH=loongarch64` 与 `test/loongarch64-bootstrap.sh` 已注册 | 龙芯新生态；syscall 编号、ABI、TLS 和内核接口按最新 Linux UAPI 校准；移植自 riscv64 模板，随带补全了 riscv64 遗漏的 wrapper 条件分支 |
-| **i386**        | **运行验证**     | x87 浮点完整（运算/比较/signed·unsigned 转换/ABI）、FPR 收口（nfpr=0）、跨函数 `va_list` 已修复；`make check-i386` + `make check-i386-qemu` 双门禁全绿 | 32 位兼容基石；`time_t`=int64_t、statx(383)、mmap2(192)、socketcall(102) 均就位；剩余 Kl 软算术库 + TLS/信号端到端 |
+| **i386**        | **运行验证**     | x87 浮点完整（运算/比较/signed·unsigned 转换/ABI）、FPR 收口（nfpr=0）、跨函数 `va_list` 已修复；`make check-i386` + `make check-i386-qemu` 双门禁全绿 | 32 位兼容基石；`time_t`=int64_t、statx(383)、mmap2(192)、socketcall(102) 均就位；Kl 软算术库已完成（soft_arith.c）、TLS/信号端到端（bare_tls 被 mcc i386 TLS 模型缺口阻塞，见 `mcc/.todo/gd-tls.md`） |
 | **riscv64**     | **已落地代码**   | libc runtime 已实现（crt1/syscall/atomic/setjmp/sigreturn/thread_clone/tls.c）；`make ARCH=riscv64` 与 `test/riscv64-bootstrap.sh` 已注册 | 无历史包袱的 64 位架构，用于检验 syscall/TLS/原子等抽象是否干净；代码经静态核对，真机门禁待交叉工具链/qemu 就绪 |
 | **armv7**       | **强烈建议新增** | 当前只有占位 TODO，没有 libc runtime 或构建目标                                   | ARMv7 hard-float EABI；同时验证 32 位指针、VFP/硬浮点 ABI、原子、TLS 与 64 位 `time_t` |
 | **ppc64le**     | **按需可选**     | 当前未实现、未纳入默认构建                                                        | POWER 服务器目标；在基础多架构 runtime 稳定后再投入，重点验证多寄存器调用约定          |
@@ -153,9 +153,9 @@ loongarch64-linux-gnu-gcc 与 qemu-loongarch64，真机门禁待工具链就绪�
 - 跨函数 `va_list` 已修复（mcc `typevalist` 改 4 字节 struct）
 - 端到端双门禁：`runtime.sh`（宿主 ia32）+ `qemu-runtime.sh`（真 32 位内核）
   全套 runtime_kl/runtime_fp/runtime_time64/runtime_va/fp_unsigned/fp_arith 全绿
-（Kl mul/div/rem 已通过 sysv 预扫描+软算术库实现）
+（Kl mul/div/rem 已通过 sysv 预扫描+软算术库实现；`src/arch/i386/soft_arith.c` 提供 8 个完整函数）
 
-剩余：TLS/信号上下文端到端验证。
+剩余：TLS/信号上下文端到端验证（bare_tls 被 mcc i386 后端 TLS 模型选择缺口阻塞，见 `projects/mcc/.todo/gd-tls.md` Phase A）。
 
 强制 64 位 `time_t` 是公共 ABI 政策，不得用 `-D_TIME_BITS=64` 这种仅对某个构建命令生效的旁路替代。
 
@@ -183,7 +183,8 @@ asm-generic 表（`__aarch64__ || __riscv` 合流）。
 1. **x86_64 保持绿**：所有公共行为先通过现有 `make -C projects/meuos-libc check`。
 2. ✅ **i386 收口**：跨函数 `va_list`、time64 类型与 syscall、x87 浮点完整、
    FPR 收口、socketcall 多路复用、qemu 端到端 gate 均已完成
-   （`make check-i386-qemu` 全绿）。剩余 Kl 软算术/TLS/信号上下文。
+   （`make check-i386-qemu` 全绿）。剩余 TLS/信号上下文
+   （bare_tls 被 mcc i386 TLS 模型缺口阻塞，见 `projects/mcc/.todo/gd-tls.md`）。
 3. ~~aarch64~~ ✅：crt1 + syscall gate + atomic + setjmp + sigreturn +
    thread_clone + set_tls + tls.c 全套到位，`Makefile ARCH=aarch64` 规则注册，
    `test/aarch64-bootstrap.sh` 提供跨编译自检 + 可选 qemu-aarch64-static
