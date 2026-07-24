@@ -75,12 +75,12 @@ la64_apply_reloc(unsigned reloc_type, unsigned char *place,
 	case 0: /* R_LARCH_NONE */
 		return 0;
 
-	case 2: /* R_LARCH_64: S + A (64-bit) */
-		write64(place, S + (uint64_t)A);
-		return 0;
-
 	case 1: /* R_LARCH_32: S + A (32-bit) */
 		write32(place, (uint32_t)(S + (uint64_t)A));
+		return 0;
+
+	case 2: /* R_LARCH_64: S + A (64-bit) */
+		write64(place, S + (uint64_t)A);
 		return 0;
 
 	/* ==== PC-relative branch: R_LARCH_B26 (66) ====
@@ -104,12 +104,24 @@ la64_apply_reloc(unsigned reloc_type, unsigned char *place,
 
 	/* ==== PC-relative address: R_LARCH_PCALA_HI20 (71) ====
 	 * Page-relative: Page(S+A) - Page(P), upper 20 bits.
-	 *   imm20 = (S+A)>>12 - P>>12 = (S+A - (P & ~0xFFF)) >> 12
 	 * Instruction: pcalau12i (1RI20 format)
-	 *   base = 0x1A000000, insn = base | rd | (imm20 << 5) */
+	 *   base = 0x1A000000, insn = base | rd | (imm20 << 5)
+	 *
+	 * CRITICAL: addi.d uses a SIGNED 12-bit immediate.  When the LO12
+	 * offset has bit 11 set (value >= 0x800), the signed interpretation
+	 * becomes negative.  To compensate, the HI20 must be incremented
+	 * by 1 (round the page up).  This is the standard LA64 psABI rule:
+	 *   imm_hi20 = ((S+A)>>12) - (P>>12)
+	 *   if (((S+A) & 0x800)) imm_hi20++   // round up for negative LO12 */
 	case 71: /* R_LARCH_PCALA_HI20 */
-		write32(place, 0x1A000000 | (read32(place) & 0x1F) |
-		        ((uint32_t)(((S + (uint64_t)A) >> 12) - (P >> 12)) << 5));
+		{
+			uint32_t rd = read32(place) & 0x1F;
+			int64_t hi20 = (int64_t)(((S + (uint64_t)A) >> 12) - (P >> 12));
+			if ((S + (uint64_t)A) & 0x800)
+				hi20++;
+			write32(place, 0x1A000000 | rd |
+			        ((uint32_t)(hi20 & 0xFFFFF) << 5));
+		}
 		return 0;
 
 	/* ==== PC-relative offset: R_LARCH_PCALA_LO12 (72) ====
@@ -123,10 +135,16 @@ la64_apply_reloc(unsigned reloc_type, unsigned char *place,
 
 	/* ==== GOT page address: R_LARCH_GOT_PC_HI20 (75) ====
 	 * pcalau12i: Page(GOT) - Page(P), upper 20 bits.
-	 *   insn = 0x1A000000 | rd | (((S>>12)-(P>>12)) << 5) */
+	 * Same negative-LO12 compensation as PCALA_HI20. */
 	case 75: /* R_LARCH_GOT_PC_HI20 */
-		write32(place, 0x1A000000 | (read32(place) & 0x1F) |
-		        ((uint32_t)((S >> 12) - (P >> 12)) << 5));
+		{
+			uint32_t rd = read32(place) & 0x1F;
+			int64_t hi20 = (int64_t)((S >> 12) - (P >> 12));
+			if (S & 0x800)
+				hi20++;
+			write32(place, 0x1A000000 | rd |
+			        ((uint32_t)(hi20 & 0xFFFFF) << 5));
+		}
 		return 0;
 
 	/* ==== GOT page offset: R_LARCH_GOT_PC_LO12 (76) ====

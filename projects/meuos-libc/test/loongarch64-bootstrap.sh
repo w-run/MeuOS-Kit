@@ -25,6 +25,8 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 mcc=${MCC:-"$root/../mcc/mcc"}
 ascc=${ASCC:-loongarch64-linux-gnu-gcc}
+mt_ld=${MT_LD:-"$root/../meuos-toolchain/build/bin/ld"}
+mt_as=${MT_AS:-"$root/../meuos-toolchain/build/bin/as"}
 build=${BUILD:-"$root/build/loongarch64"}
 sysroot=${SYSROOT:-"$root/../sysroot-loongarch64"}
 qemu=${MEUOS_LOONGARCH64_QEMU:-}
@@ -150,10 +152,10 @@ arch_runtime_objs \
 	"$root/src/arch/loongarch64/sigreturn.S" \
 	"$root/src/arch/loongarch64/thread_clone.S"
 
-# # ===== Link =====
+# # ===== Link (via mt/ld: bypasses BFD 2.41 elfnn-loongarch.c assertion) =====
 link_full() {
 	local out=$1 main=$2; shift 2
-	"$ascc" -nostdlib -static -o "$out" "$work/crt1.o" "$main" "$work/asm-syscall.o" "$work/asm-atomic.o" \
+	"$mt_ld" --target=loongarch64 -static -o "$out" "$work/crt1.o" "$main" "$work/asm-syscall.o" "$work/asm-atomic.o" \
 		"$work/asm-setjmp.o" "$work/asm-sigreturn.o" "$work/asm-thread_clone.o" \
 		"$build/libc-meuos.a" "$build/libatomic-meuos.a" "$@"
 }
