@@ -257,7 +257,7 @@ __atomic_fetch_add_2:
 	slli.d $t0, $t0, 3
 	li.w $t1, 0xffff
 	sll.d $t1, $t1, $t0
-	andi $t2, $a1, 0xffff
+	bstrpick.d $t2, $a1, 15, 0
 	or $t3, $a0, $zero
 	bstrins.d $t3, $zero, 1, 0
 1:
@@ -281,7 +281,7 @@ __atomic_fetch_sub_2:
 	slli.d $t0, $t0, 3
 	li.w $t1, 0xffff
 	sll.d $t1, $t1, $t0
-	andi $t2, $a1, 0xffff
+	bstrpick.d $t2, $a1, 15, 0
 	or $t3, $a0, $zero
 	bstrins.d $t3, $zero, 1, 0
 1:
@@ -305,7 +305,7 @@ __atomic_fetch_and_2:
 	slli.d $t0, $t0, 3
 	li.w $t1, 0xffff
 	sll.d $t1, $t1, $t0
-	andi $t2, $a1, 0xffff
+	bstrpick.d $t2, $a1, 15, 0
 	or $t3, $a0, $zero
 	bstrins.d $t3, $zero, 1, 0
 1:
@@ -329,7 +329,7 @@ __atomic_fetch_or_2:
 	slli.d $t0, $t0, 3
 	li.w $t1, 0xffff
 	sll.d $t1, $t1, $t0
-	andi $t2, $a1, 0xffff
+	bstrpick.d $t2, $a1, 15, 0
 	or $t3, $a0, $zero
 	bstrins.d $t3, $zero, 1, 0
 1:
@@ -353,7 +353,7 @@ __atomic_fetch_xor_2:
 	slli.d $t0, $t0, 3
 	li.w $t1, 0xffff
 	sll.d $t1, $t1, $t0
-	andi $t2, $a1, 0xffff
+	bstrpick.d $t2, $a1, 15, 0
 	or $t3, $a0, $zero
 	bstrins.d $t3, $zero, 1, 0
 1:
@@ -377,7 +377,7 @@ __atomic_compare_exchange_2:
 	slli.d $t0, $t0, 3
 	li.w $t1, 0xffff
 	sll.d $t1, $t1, $t0
-	andi $t2, $a2, 0xffff
+	bstrpick.d $t2, $a2, 15, 0
 	sll.d $t2, $t2, $t0
 	or $t3, $a0, $zero
 	bstrins.d $t3, $zero, 1, 0
