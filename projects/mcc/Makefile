@@ -26,7 +26,7 @@ AR      ?= ar
 # (unused params, sign compares, missing braces in designated initializers,
 # pointer casts, etc.). Phase 1a gate is functional correctness, not warning
 # hygiene. We revisit warnings once mcc can self-host.
-CFLAGS  ?= -O2 -g -std=gnu11 -Iinclude -Wno-all
+CFLAGS  ?= -O2 -g -std=gnu11 -Iinclude -I../meuos-sysroot/include -Wno-all
 LDFLAGS ?=
 LDLIBS  ?=
 
@@ -77,7 +77,7 @@ all: $(BIN)
 
 # mcc = C frontend objects + libmcc.a (shared backend archive)
 $(BIN): $(FE_OBJS) $(LIB)
-	$(HOST_CC) $(CFLAGS) $(LDFLAGS) -o $@ $(FE_OBJS) $(LIB) $(LDLIBS)
+	$(HOST_CC) $(CFLAGS) $(LDFLAGS) -o $@ $(FE_OBJS) $(LIB) $(LDLIBS) -L../meuos-sysroot/build -lmsys
 
 # libmcc.a = backend objects (language-agnostic, future m++ shares this)
 $(LIB): $(BE_OBJS)
