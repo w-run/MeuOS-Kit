@@ -30,11 +30,16 @@
     -> isel=284行 + emit=447行（对比 x86_64: 946+885行）
     -> 持续优化方向：更多模式规则、寄存器分配 hint、条件移动
 
-[ ] libc loongarch64 exit() 后 cleanup SIGSEGV
-    -> 阻塞：GNU LD 2.41 loongarch64 TLS LE reloc BFD 断言失败
-    -> bare_tls 无法链接（R_LARCH_TLS_LE_HI20/LO12 等触发断言）
-    -> 最小测试（int main(void){return 42;} + meuos-libc）在 qemu 上 exit=42 正常
-    -> 等待 mt/ld loongarch64 支持就绪后（P1.1），用 mt/ld 链接复现
+[x] libc loongarch64 exit() 后 cleanup SIGSEGV
+    -> 阻塞解除：mt/ld 已完整实现 TLS LE reloc + B16/B26/PCALA 支持
+    -> mt/as 修复：2RI12 ALU 支持 reloc 表达式, lu32i.d/lu52i.d 支持 %le64_lo20/le64_hi12,
+       bstrins.d/bstrpick.d/break/dbar/ibcl 编码, float 3R/unary 指令,
+       unconditional b/bl 不被 dbar/break 截胡, resolve_fixups 排除 LA64 reloc
+    -> mt/ld 修复：R_LARCH_B16 (64) 应用支持
+    -> 全部 6 个测试 ELF 编译检查通过（mt/as + mt/ld 全链路）
+    -> hello (getpid+write) qemu-user 运行时验证：exit=0 正确输出
+    -> 原子测试 qemu-user 失败（exit=5），疑似 QEMU LL/SC 问题，P2 中跟进
+    -> 安装 libc-meuos.a/libatomic-meuos.a/crt1.o 到 sysroot-loongarch64
 
 ## P2 — 跨架构完善
 

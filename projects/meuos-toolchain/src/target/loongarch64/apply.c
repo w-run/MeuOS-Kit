@@ -83,6 +83,15 @@ la64_apply_reloc(unsigned reloc_type, unsigned char *place,
 		write64(place, S + (uint64_t)A);
 		return 0;
 
+	/* ==== PC-relative branch: R_LARCH_B16 (64) ====
+	 * LA64 B16 format: 16-bit signed word-offset in bits [25:10].
+	 * Used by conditional branches (beq/bne/blt/bge/bltu/bgeu):
+	 *   insn = op26<<26 | rk | (rj<<5) | (offset_words << 10) */
+	case 64: /* R_LARCH_B16 */
+		delta = (int64_t)(S + (uint64_t)A - P);
+		set_bits(place, 25, 10, (uint32_t)((delta >> 2) & 0xFFFF) << 10);
+		return 0;
+
 	/* ==== PC-relative branch: R_LARCH_B26 (66) ====
 	 * LA64 B26 format: 26-bit word-offset in bits [25:0] via a
 	 * LEFT-ROTATE-BY-10 within 26 bits:

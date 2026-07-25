@@ -39,6 +39,8 @@
 #define RLA_TLS_GD_PC_HI20 97
 #define RLA_TLS_LE_HI20    83
 #define RLA_TLS_LE_LO12    84
+#define RLA_TLS_LE64_LO20  85
+#define RLA_TLS_LE64_HI12  86
 
 /* ---- Local helpers ---- */
 
@@ -166,7 +168,8 @@ enum {
 	RELK_GOT_PC_HI20, RELK_GOT_PC_LO12,
 	RELK_IE_PC_HI20, RELK_IE_PC_LO12,
 	RELK_GD_PC_HI20,
-	RELK_LE_HI20, RELK_LE_LO12
+	RELK_LE_HI20, RELK_LE_LO12,
+	RELK_LE64_LO20, RELK_LE64_HI12
 };
 
 struct la_op {
@@ -192,6 +195,8 @@ reloc_kind_of(const char *tok)
 	else if (!strncmp(tok, "%gd_pc_hi20(",  13)) return RELK_GD_PC_HI20;
 	else if (!strncmp(tok, "%le_hi20(",     10)) return RELK_LE_HI20;
 	else if (!strncmp(tok, "%le_lo12(",     10)) return RELK_LE_LO12;
+	else if (!strncmp(tok, "%le64_lo20(",  12)) return RELK_LE64_LO20;
+	else if (!strncmp(tok, "%le64_hi12(",  12)) return RELK_LE64_HI12;
 	return RELK_PLAIN;
 }
 
@@ -354,6 +359,8 @@ relkind_to_type(int rk)
 	case RELK_GD_PC_HI20: return RLA_TLS_GD_PC_HI20;
 	case RELK_LE_HI20:    return RLA_TLS_LE_HI20;
 	case RELK_LE_LO12:    return RLA_TLS_LE_LO12;
+	case RELK_LE64_LO20:  return RLA_TLS_LE64_LO20;
+	case RELK_LE64_HI12:  return RLA_TLS_LE64_HI12;
 	default:              return 0;
 	}
 }
@@ -426,7 +433,24 @@ la64_encode_insn(const struct mt_target *target,
 		} \
 	} while (0)
 
-	/* === 3-address R-type === */
+	/* === 3-address floating-point R-type (before integer R-type to
+	 * avoid "all-register" block interception). ===
+	 * fadd.s/d, fsub.s/d, fmul.s/d, fdiv.s/d rd, fj, fk */
+	if (nops == 3 && ops[0].kind == 1 && ops[1].kind == 1 && ops[2].kind == 1 &&
+	    mnemonic[0] == 'f') {
+		rd = (unsigned)ops[0].reg;
+		rj = (unsigned)ops[1].reg;
+		rk = (unsigned)ops[2].reg;
+		int is_d = (strstr(mnemonic, ".d") != NULL);
+		uint32_t op_base = is_d ? 0xD << 24 : 0xC << 24;
+		if      (strcmp(mnemonic, "fadd.s") == 0 || strcmp(mnemonic, "fadd.d") == 0) { emit32(out->bytes, op_base | rd | (rj<<5) | (rk<<10) | (0<<15)); return 0; }
+		else if (strcmp(mnemonic, "fsub.s") == 0 || strcmp(mnemonic, "fsub.d") == 0) { emit32(out->bytes, op_base | rd | (rj<<5) | (rk<<10) | (1<<15)); return 0; }
+		else if (strcmp(mnemonic, "fmul.s") == 0 || strcmp(mnemonic, "fmul.d") == 0) { emit32(out->bytes, op_base | rd | (rj<<5) | (rk<<10) | (2<<15)); return 0; }
+		else if (strcmp(mnemonic, "fdiv.s") == 0 || strcmp(mnemonic, "fdiv.d") == 0) { emit32(out->bytes, op_base | rd | (rj<<5) | (rk<<10) | (3<<15)); return 0; }
+		else return -1;
+	}
+
+	/* === 3-address R-type (integer) === */
 	if (nops == 3 && ops[0].kind == 1 && ops[1].kind == 1 && ops[2].kind == 1) {
 		rd = (unsigned)ops[0].reg;
 		rj = (unsigned)ops[1].reg;
@@ -521,14 +545,56 @@ la64_encode_insn(const struct mt_target *target,
 		return 0;
 	}
 
+	/* === 2-register conditional branches: beq/bne/blt/bge/bltu/bgeu ===
+	 * Must come BEFORE the 2RI12 ALU block (which also matches
+	 * nops==3 with two registers but expects ALU mnemonics, not
+	 * branches with a label operand of kind==4). */
+	if (nops == 3 && ops[0].kind == 1 && ops[1].kind == 1) {
+		uint32_t op26 = 0;
+		if      (strcmp(mnemonic, "beq")  == 0) op26 = 0x16;
+		else if (strcmp(mnemonic, "bne")  == 0) op26 = 0x17;
+		else if (strcmp(mnemonic, "blt")  == 0) op26 = 0x18;
+		else if (strcmp(mnemonic, "bge")  == 0) op26 = 0x19;
+		else if (strcmp(mnemonic, "bltu") == 0) op26 = 0x1A;
+		else if (strcmp(mnemonic, "bgeu") == 0) op26 = 0x1B;
+		else if (strcmp(mnemonic, "lu52i.d") == 0) {
+			rd = (unsigned)ops[0].reg;
+			rj = (unsigned)ops[1].reg;
+			if (ops[2].kind == 4) {
+				emit32(out->bytes, 0x16800000 | rd | (rj << 5));
+				sym = ops[2].sym; relkind = ops[2].relkind;
+				reloc_type = relkind_to_type(relkind);
+				if (reloc_type == 0) reloc_type = RLA_TLS_LE64_HI12;
+				set_fixup(out, 0, 4, reloc_type, sym, 0);
+			} else if (ops[2].kind == 2) {
+				emit32(out->bytes, 0x16800000 | rd | (rj << 5) |
+				    ((uint32_t)(ops[2].imm & 0xFFF) << 10));
+			} else return -1;
+			return 0;
+		} else goto alu_or_shift;
+		rj = (unsigned)ops[0].reg;
+		rd = (unsigned)ops[1].reg;   /* rk */
+		if (ops[2].kind == 4) {
+			emit32(out->bytes, (op26 << 26) | rd | (rj << 5));
+			set_fixup(out, 0, 4, RLA_B16, ops[2].sym, 0);
+		} else if (ops[2].kind == 2) {
+			int32_t off = (int32_t)ops[2].imm;
+			emit32(out->bytes, (op26 << 26) | rd | (rj << 5) | ((uint32_t)(off & 0xFFFF) << 10));
+		} else return -1;
+		return 0;
+	}
+alu_or_shift:
+
 	/* === 2RI12 ALU: addi.w/d, slti, sltui, andi, ori, xori ===
-	 * ops[2] is always immediate (kind==2). Branch instructions with
-	 * labels (kind==4) do NOT enter this block. */
+	 * Imm can be kind==2 (plain immediate) or kind==4 (relocation
+	 * expression like %pc_lo12(sym) or %le_lo12(sym)).
+	 * NOTE: the conditional branch block above has already consumed
+	 * beq/bne/etc., so this block only sees genuine ALU mnemonics. */
 	if (nops == 3 && ops[0].kind == 1 && ops[1].kind == 1 &&
-	    ops[2].kind == 2) {
+	    (ops[2].kind == 2 || ops[2].kind == 4)) {
 		rd = (unsigned)ops[0].reg;
 		rj = (unsigned)ops[1].reg;
-		imm = ops[2].imm;
+		imm = (ops[2].kind == 2) ? ops[2].imm : 0;
 		uint32_t op = 0;
 		if      (strcmp(mnemonic, "addi.w") == 0) op = 0x0A << 22;
 		else if (strcmp(mnemonic, "addi.d") == 0) op = 0x0B << 22;
@@ -538,7 +604,14 @@ la64_encode_insn(const struct mt_target *target,
 		else if (strcmp(mnemonic, "ori")    == 0) op = 0x0E << 22;
 		else if (strcmp(mnemonic, "xori")   == 0) op = 0x0F << 22;
 		else return -1;
-		emit32(out->bytes, ri12(op, rd, rj, (int32_t)imm));
+		if (ops[2].kind == 4) {
+			emit32(out->bytes, ri12(op, rd, rj, 0));
+			set_fixup(out, 0, 4,
+			    relkind_to_type(ops[2].relkind) ? relkind_to_type(ops[2].relkind) : RLA_PCALA_LO12,
+			    ops[2].sym, 0);
+		} else {
+			emit32(out->bytes, ri12(op, rd, rj, (int32_t)imm));
+		}
 		return 0;
 	}
 
@@ -576,6 +649,22 @@ la64_encode_insn(const struct mt_target *target,
 		return 0;
 	}
 
+	/* === 1RI20: lu32i.d rd, imm20 or %le64_lo20(sym) (bits 51:32) === */
+	if (nops == 2 && ops[0].kind == 1 && strcmp(mnemonic, "lu32i.d") == 0) {
+		rd = (unsigned)ops[0].reg;
+		if (ops[1].kind == 4) {
+			sym = ops[1].sym; relkind = ops[1].relkind;
+			reloc_type = relkind_to_type(relkind);
+			if (reloc_type == 0) reloc_type = RLA_TLS_LE64_LO20;
+			emit32(out->bytes, 0x16 << 24 | rd);
+			set_fixup(out, 0, 4, reloc_type, sym, 0);
+		} else if (ops[1].kind == 2) {
+			uint32_t imm20 = (uint32_t)(ops[1].imm & 0xFFFFF);
+			emit32(out->bytes, 0x16 << 24 | rd | (imm20 << 5));
+		} else return -1;
+		return 0;
+	}
+
 	/* === 1RI20: pcalau12i rd, imm20 (PC-relative relocations) === */
 	if (nops == 2 && ops[0].kind == 1 && strcmp(mnemonic, "pcalau12i") == 0) {
 		rd = (unsigned)ops[0].reg;
@@ -591,30 +680,6 @@ la64_encode_insn(const struct mt_target *target,
 		} else return -1;
 		return 0;
 	}
-
-	/* === 2-register conditional branches: beq/bne/blt/bge/bltu/bgeu ===
-	 * GNU: beq rj, rk, off  -> op(26..31) | rk | (rj<<5) | (off<<10) */
-	if (nops == 3 && ops[0].kind == 1 && ops[1].kind == 1) {
-		uint32_t op26 = 0;
-		if      (strcmp(mnemonic, "beq")  == 0) op26 = 0x16;
-		else if (strcmp(mnemonic, "bne")  == 0) op26 = 0x17;
-		else if (strcmp(mnemonic, "blt")  == 0) op26 = 0x18;
-		else if (strcmp(mnemonic, "bge")  == 0) op26 = 0x19;
-		else if (strcmp(mnemonic, "bltu") == 0) op26 = 0x1A;
-		else if (strcmp(mnemonic, "bgeu") == 0) op26 = 0x1B;
-		else goto branch1;
-		rj = (unsigned)ops[0].reg;
-		rd = (unsigned)ops[1].reg;   /* rk */
-		if (ops[2].kind == 4) {
-			emit32(out->bytes, (op26 << 26) | rd | (rj << 5));
-			set_fixup(out, 0, 4, RLA_B16, ops[2].sym, 0);
-		} else if (ops[2].kind == 2) {
-			int32_t off = (int32_t)ops[2].imm;
-			emit32(out->bytes, (op26 << 26) | rd | (rj << 5) | ((uint32_t)(off & 0xFFFF) << 10));
-		} else return -1;
-		return 0;
-	}
-branch1:
 
 	/* === 1-register conditional branches: beqz, bnez, bltz, bgez ===
 	 * beqz/bnez: op(24..31) | (rj<<5) | (off<<10)
@@ -650,6 +715,23 @@ branch1:
 		return 0;
 	}
 branch2:
+
+	/* === dbar / ibcl / break (must come before b/bl, which also
+	 * matches nops==1 && ops[0].kind==2). === */
+	if (strcmp(mnemonic, "dbar") == 0) {
+		int32_t hint = (nops >= 1) ? (int32_t)ops[0].imm : 0;
+		emit32(out->bytes, 0x0B << 28 | (hint & 0x1F));
+		return 0;
+	}
+	if (strcmp(mnemonic, "ibcl") == 0) {
+		emit32(out->bytes, 0x0B << 28 | 0x20);
+		return 0;
+	}
+	if (strcmp(mnemonic, "break") == 0) {
+		int32_t code = (nops >= 1) ? (int32_t)ops[0].imm : 0;
+		emit32(out->bytes, 0xB0000000 | ((uint32_t)(code & 0x7FFF) << 10));
+		return 0;
+	}
 
 	/* === Unconditional branches: b / bl (B26) === */
 	if (nops == 1 && ops[0].kind == 2) {
@@ -705,17 +787,6 @@ branch2:
 		return 0;
 	}
 
-	/* === dbar / ibcl === */
-	if (strcmp(mnemonic, "dbar") == 0) {
-		int32_t hint = (nops >= 1) ? (int32_t)ops[0].imm : 0;
-		emit32(out->bytes, 0x0B << 28 | (hint & 0x1F));
-		return 0;
-	}
-	if (strcmp(mnemonic, "ibcl") == 0) {
-		emit32(out->bytes, 0x0B << 28 | 0x20);
-		return 0;
-	}
-
 	/* === Atomic: ll.w, ll.d, sc.w, sc.d === */
 	if (nops == 2 && ops[0].kind == 1 && ops[1].kind == 3) {
 		rd = (unsigned)ops[0].reg;
@@ -739,6 +810,25 @@ branch2:
 		rj = (unsigned)ops[1].reg;
 		if (strcmp(mnemonic, "ext.w.b") == 0) { emit32(out->bytes, (0x3<<20) | rd | (rj<<5) | (7<<8) | (0<<10)); return 0; }
 		if (strcmp(mnemonic, "ext.w.h") == 0) { emit32(out->bytes, (0x3<<20) | rd | (rj<<5) | (15<<8) | (0<<10)); return 0; }
+	}
+
+	/* === Bit field extract/insert: bstrpick.w/d, bstrins.w/d rd, rj, msbw, lsbw ===
+	 * LA64 3RI3 format: op=0x3, bit23=1(.d)/0(.w), bits 22:20 store operation
+	 * variant (000=pick, 001=ins), bits 20:16=lsbw, bits 15:10=msbw,
+	 * bits 9:5=rj, bits 4:0=rd. */
+	if (nops == 4 && ops[0].kind == 1 && ops[1].kind == 1 &&
+	    ops[2].kind == 2 && ops[3].kind == 2 &&
+	    (strncmp(mnemonic, "bstrpick.", 9) == 0 || strncmp(mnemonic, "bstrins.", 8) == 0)) {
+		rd = (unsigned)ops[0].reg;
+		rj = (unsigned)ops[1].reg;
+		uint32_t msbw = (uint32_t)(ops[2].imm & 0x3F);
+		uint32_t lsbw = (uint32_t)(ops[3].imm & 0x1F);
+		int is_d = (strstr(mnemonic, ".d") != NULL);
+		int is_ins = (mnemonic[4] == 'i'); /* bstrins vs bstrpick */
+		uint32_t variant = is_ins ? 0x00200000 : 0;
+		emit32(out->bytes, 0x03000000 | (is_d ? 0x00800000 : 0) | variant |
+		    (lsbw << 16) | (msbw << 10) | (rj << 5) | rd);
+		return 0;
 	}
 
 	/* === Float comparison: fcmp.cond.s/d $fccN, fj, fk === */
@@ -779,26 +869,27 @@ branch2:
 		if (strcmp(mnemonic, "movgr2fr.d") == 0) { emit32(out->bytes, (0x3<<20) | rj | (rd<<5) | (1<<15)); return 0; }
 	}
 
-	/* === fneg.s/d, fabs.s/d, fmov.s/d === */
-	if (nops == 2 && ops[0].kind == 1 && ops[1].kind == 1) {
+	/* === Float unary: fneg.s/d, fabs.s/d, fmov.s/d,
+	 * ffint.{s,d}.{w,l}, frint.s/d, fcvt.s.d, fcvt.d.s ===
+	 * Check operand pattern: 2 regs, mnemonic starts with 'f'. */
+	if (nops == 2 && ops[0].kind == 1 && ops[1].kind == 1 && mnemonic[0] == 'f') {
 		rd = (unsigned)ops[0].reg;
 		rj = (unsigned)ops[1].reg;
 		int is_d = (strstr(mnemonic, ".d") != NULL);
 		uint32_t op_base = is_d ? 0xD << 24 : 0xC << 24;
 		if (strcmp(mnemonic, "fneg.s") == 0 || strcmp(mnemonic, "fneg.d") == 0) { emit32(out->bytes, op_base | rd | (rj<<5) | (2<<15)); return 0; }
 		if (strcmp(mnemonic, "fabs.s") == 0 || strcmp(mnemonic, "fabs.d") == 0) { emit32(out->bytes, op_base | rd | (rj<<5) | (5<<15)); return 0; }
-	}
-
-	if (nops == 3 && ops[0].kind == 1 && ops[1].kind == 1 && ops[2].kind == 1) {
-		rd = (unsigned)ops[0].reg;
-		rj = (unsigned)ops[1].reg;
-		rk = (unsigned)ops[2].reg;
-		int is_d = (strstr(mnemonic, ".d") != NULL);
-		uint32_t op_base = is_d ? 0xD << 24 : 0xC << 24;
-		if (strcmp(mnemonic, "fadd.s") == 0 || strcmp(mnemonic, "fadd.d") == 0) { emit32(out->bytes, op_base | rd | (rj<<5) | (rk<<10) | (0<<15)); return 0; }
-		if (strcmp(mnemonic, "fsub.s") == 0 || strcmp(mnemonic, "fsub.d") == 0) { emit32(out->bytes, op_base | rd | (rj<<5) | (rk<<10) | (1<<15)); return 0; }
-		if (strcmp(mnemonic, "fmul.s") == 0 || strcmp(mnemonic, "fmul.d") == 0) { emit32(out->bytes, op_base | rd | (rj<<5) | (rk<<10) | (2<<15)); return 0; }
-		if (strcmp(mnemonic, "fdiv.s") == 0 || strcmp(mnemonic, "fdiv.d") == 0) { emit32(out->bytes, op_base | rd | (rj<<5) | (rk<<10) | (3<<15)); return 0; }
+		if (strcmp(mnemonic, "frint.s") == 0 || strcmp(mnemonic, "frint.d") == 0) { emit32(out->bytes, op_base | rd | (rj<<5) | (1<<15)); return 0; }
+		/* fcvt.s.d: result is .s (base=0xC), input is .d */
+		if (strcmp(mnemonic, "fcvt.s.d") == 0) { emit32(out->bytes, (0xC<<24) | rd | (rj<<5) | (2<<15)); return 0; }
+		/* fcvt.d.s: result is .d (base=0xD), input is .s */
+		if (strcmp(mnemonic, "fcvt.d.s") == 0) { emit32(out->bytes, (0xD<<24) | rd | (rj<<5) | (2<<15)); return 0; }
+		/* ffint.s.w / ffint.s.l */
+		if (strcmp(mnemonic, "ffint.s.w") == 0) { emit32(out->bytes, (0xC<<24) | rd | (rj<<5) | (12<<15)); return 0; }
+		if (strcmp(mnemonic, "ffint.s.l") == 0) { emit32(out->bytes, (0xC<<24) | rd | (rj<<5) | (13<<15)); return 0; }
+		/* ffint.d.w / ffint.d.l */
+		if (strcmp(mnemonic, "ffint.d.w") == 0) { emit32(out->bytes, (0xD<<24) | rd | (rj<<5) | (12<<15)); return 0; }
+		if (strcmp(mnemonic, "ffint.d.l") == 0) { emit32(out->bytes, (0xD<<24) | rd | (rj<<5) | (13<<15)); return 0; }
 	}
 
 	out->size = 0;

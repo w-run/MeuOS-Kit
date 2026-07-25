@@ -2108,7 +2108,11 @@ resolve_fixups(struct as_file *as, const int *section_map,
 		              fix->type != MT_R_X86_64_GOTPCREL &&
 		              fix->type != MT_R_X86_64_64 &&
 		              fix->type != MT_R_X86_64_32 &&
-		              fix->type != MT_R_X86_64_32S;
+		              fix->type != MT_R_X86_64_32S &&
+		              /* LoongArch relocs need proper instruction encoding,
+		               * not raw value patching. Skip assembly-time resolve
+		               * so the linker handles B26/B16/PCALA/GOT/TLS fixups. */
+		              fix->type < 64;
 		if (can_resolve) {
 			value = (int64_t)symbol->value + fix->addend -
 			        (fix->type == MT_R_X86_64_PC32 ||
