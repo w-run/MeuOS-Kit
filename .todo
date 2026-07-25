@@ -76,9 +76,9 @@
 
 [x] meow 多架构 YAML 配方
     -> meow 新增 HOST= autoconf triplet 导出（arch -> triplet 自动推导）
-    -> dash 配方已用 ${HOST:-x86_64-unknown-linux}，自动适配 meow --arch
-    -> bzip2/binutils 配方直接用 mcc 编译，不依赖 configure
-    -> 测试：meow --arch=loongarch64 build meow-env-test 输出 ARCH/HOST 正确
+    -> bzip2: 纯 meow YAML 构建，零 make/autoconf 依赖（模式规则 + 依赖 DAG）
+       mcc 编译 + ar 归档，压缩/解压验证通过
+    -> dash/binutils: 当前仍用 ./configure/make，需要预生成 config.h 后迁移
 
 ## P4 — 长期
 
