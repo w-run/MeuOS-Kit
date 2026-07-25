@@ -51,6 +51,7 @@ mktype(enum typekind kind, enum typeprop prop)
 	t = xmalloc(sizeof(*t));
 	t->kind = kind;
 	t->prop = prop;
+	t->qual = QUALNONE;
 	t->value = NULL;
 	t->incomplete = false;
 
@@ -240,17 +241,27 @@ typecompatible(struct type *t1, struct type *t2)
 		 * the prototype's parameter information. */
 		if (!t1->u.func.params || !t2->u.func.params)
 			goto derived;
-		/* Parameter types ignore top-level qualifiers for compatibility
-		 * (C11 6.7.6.3p15); compare their unqualified forms. */
-		for (p1 = t1->u.func.params, p2 = t2->u.func.params; p1 && p2; p1 = p1->next, p2 = p2->next) {
-			if (!typecompatible(typeunqual(p1->type, NULL), typeunqual(p2->type, NULL)))
-				return false;
-		}
+	/* Parameter types ignore top-level qualifiers for compatibility
+	 * (C11 6.7.6.3p15); compare their unqualified forms. */
+	for (p1 = t1->u.func.params, p2 = t2->u.func.params; p1 && p2; p1 = p1->next, p2 = p2->next) {
+		if (!typecompatible(typeunqual(p1->type, NULL), typeunqual(p2->type, NULL)))
+			return false;
+	}
 		if (p1 || p2)
 			return false;
 		goto derived;
 	case TYPEATOMIC:
 		return typecompatible(t1->base, t2->base);
+	case TYPESTRUCT:
+	case TYPEUNION:
+	case TYPEENUM:
+		/* Struct/union/enum types are singletons in mcc: each definition
+		 * creates exactly one type object.  Pointer equality is sufficient
+		 * for type compatibility (same tag -> same type).
+		 * Without this case the switch would fall through to `return false`,
+		 * breaking function redeclaration checking whenever a struct/union/
+		 * enum appears in parameter lists. */
+		return t1 == t2;
 	derived:
 		return t1->qual == t2->qual && typecompatible(t1->base, t2->base);
 	}

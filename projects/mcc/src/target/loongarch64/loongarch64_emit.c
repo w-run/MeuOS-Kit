@@ -94,7 +94,7 @@ emitaddr(Con *c, FILE *f)
 }
 
 static void
-emitf(char *s, Ins *i, Fn *fn, FILE *f)
+emitf(const char *s, Ins *i, Fn *fn, FILE *f)
 {
 	static char clschr[] = {'w', 'd', 's', 'd'};
 	Ref r;

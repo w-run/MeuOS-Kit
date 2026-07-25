@@ -40,7 +40,7 @@ static int nptr = 1;
 static Bucket itbl[IMask+1]; /* string interning table */
 
 uint32_t
-hash(char *s)
+hash(const char *s)
 {
 	uint32_t h;
 
@@ -210,7 +210,7 @@ strf(Pool pool, char *s, ...)
 }
 
 uint32_t
-intern(char *s)
+intern(const char *s)
 {
 	Bucket *b;
 	uint32_t h;

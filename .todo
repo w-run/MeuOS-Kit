@@ -66,12 +66,13 @@
 
 ## P3 — 自举验证
 
-[/] Phase 4: 用 sysroot 内的 mcc + meow 重新编译全套工具
-    -> check-sysroot-static 流程：安装 libc → 复制 mcc 源码 → mcc 自编译
-    -> 进展：fe/driver/lex/parse/sema/irgen 约 40 个 .c 文件编译成功
-    -> 阻塞：mcc 类型比较 bug（funcstore enums/lvalue 在 mein libc 头下不一致）
-    -> 已修障碍：msys.h packed 属性去除、msys.c 加 unistd.h、CFLAGS 加 meus-sysroot inc
-    -> meow 自身已能通过 mcc + sysroot 构建（make -C projects/meow 的 sysroot 构建步骤验证通过）
+[x] Phase 4: 用 sysroot 内的 mcc + meow 重新编译全套工具
+    -> check-sysroot-static 全部通过：82 个 .c 编译 + libmcc.a + mcc 链接
+    -> 自产 mcc 运行 --version 验证通过，hello world 编译+运行验证通过
+    -> 需修复：type.c: mktype 加 qual=QUALNONE, typecompatible 加 TYPESTRUCT/UNION/ENUM
+       locale.h/time.h 新增, time_stubs.c (strftime/localtime/setlocale/mkdtemp)
+       ir.h/ir_util.c const char* 签名, emitf 函数 const char* 签名
+    -> meow 已可通过 mcc + sysroot 构建（check 中的 --bootstrap 步骤）
 
 [/] meow 多架构 YAML 配方
     -> dash/bzip2/binutils 三个真实软件包已有 meow.yaml

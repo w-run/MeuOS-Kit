@@ -510,7 +510,7 @@ typedef enum {
 
 extern Typ *typ;
 extern Ins insb[NIns], *curi;
-uint32_t hash(char *);
+uint32_t hash(const char *);
 void die_(char *, char *, ...) __attribute__((noreturn));
 void *emalloc(size_t);
 void *alloc(size_t);
@@ -521,7 +521,7 @@ void vgrow(void *, ulong);
 void addins(Ins **, uint *, Ins *);
 void addbins(Ins **, uint *, Blk *);
 char *strf(Pool, char *, ...);
-uint32_t intern(char *);
+uint32_t intern(const char *);
 char *str(uint32_t);
 int argcls(Ins *, int);
 int isreg(Ref);

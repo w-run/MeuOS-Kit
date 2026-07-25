@@ -133,7 +133,7 @@ SYSCALL_OBJS   := $(addprefix $(BUILD)/syscall/, \
                   umask.o isatty.o fchdir.o symlink.o link.o readlink.o \
                   unlink.o mkdir.o rmdir.o rename.o mkstemp.o mkstemps.o \
                   time.o times.o utime.o gettimeofday.o sysconf.o flock.o \
-                  fcntl.o uname.o)
+                  fcntl.o uname.o time_stubs.o)
 # arch_prctl(2) 只存在于 x86_64；i386/aarch64 的 tls.c 都不引用它。
 # 链接器按需从 .a 抽取，未引用时不会进入最终二进制；这里仍按 arch
 # 过滤，避免给非 x86_64 build 列表里塞一条无意义的目标。

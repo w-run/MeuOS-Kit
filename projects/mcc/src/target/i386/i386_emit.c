@@ -174,7 +174,7 @@ slot(Ref r, E *e)
 
 /* Forward declarations for Kl decomposition helpers (defined below). */
 static char *regtoa(int reg, int sz);
-static void emitf(char *s, Ins *i, E *e);
+static void emitf(const char *s, Ins *i, E *e);
 
 /* ---- Kl (64-bit) decomposition helpers ----
  *
@@ -467,7 +467,7 @@ emitcopy(Ref r1, Ref r2, int k, E *e)
 }
 
 static void
-emitf(char *s, Ins *i, E *e)
+emitf(const char *s, Ins *i, E *e)
 {
 	static char clstoa[][3] = {"l", "l", "ss", "sd"};
 	char c;
