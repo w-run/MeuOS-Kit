@@ -1,60 +1,51 @@
-# Reference source trees (cproc + QBE), pulled read-only for design reference.
-# Do NOT edit or commit. MeuOS Kit is source-level integrated, not vendored.
-reference/
 
-# Build artifacts (per-component output dirs)
-meuos-libc/build/
-meuos-libc-compat/build/
-build/
-out/
-*.o
-*.a
-*.so
-*.so.*
-a.out
-
-# mcc / qbe intermediate files
-*.ssa
-*.s
-*.qbe
-
-# meow download/build staging
-dl/
-pkg-build/
-sources/
-
-# bootstrap staging
-sysroot/
-sysroot-*/
-stage/
-
-# experimentation sandboxes (Alpine rootfs, etc.)
-experiments/
-
-# Editor / OS noise
-.*.swp
-.DS_Store
 *~
-
+*.a
 # AI agent local data (codebuddy session db, etc.)
-.codebuddy/
-
-# QEMU test environment (env/) - large binaries, not tracked
-env/build/
-env/run/
-env/kernels/*.apk
-env/kernels/*/vmlinuz
-env/kernels/*/Image
-env/rootfs/
-
+a.out
 # Auto-generated bootstrap run report
 bootstrap-report.md
-
+# bootstrap staging
+build/
+# Build artifacts (per-component output dirs)
 # Built compiler/runtime binaries (not in build/ subdirs)
-projects/mcc/mcc
-
-# env/share/ is a runtime working dir for host<->guest file transfer;
-# only its README is tracked.
+.codebuddy/
+config.h
+dl/
+# Do NOT edit or commit. MeuOS Kit is source-level integrated, not vendored.
+.DS_Store
+# Editor / OS noise
+env/build/
+env/kernels/*.apk
+env/kernels/*/Image
+env/kernels/*/vmlinuz
+env/rootfs/
+env/run/
 env/share/*
+# env/share/ is a runtime working dir for host<->guest file transfer;
 !env/share/README.txt
+# experimentation sandboxes (Alpine rootfs, etc.)
+experiments/
+# mcc / qbe intermediate files
+# meow download/build staging
+meuos-libc/build/
+meuos-libc-compat/build/
+*.o
+# only its README is tracked.
+out/
+pkg-build/
+projects/mcc/mcc
+*.qbe
+# QEMU test environment (env/) - large binaries, not tracked
+reference/
+# Reference source trees (cproc + QBE), pulled read-only for design reference.
+*.s
+*.so
+*.so.*
+sources/
+*.ssa
+stage/
+.*.swp
+sysroot-*/
+sysroot/
 .vscode/
