@@ -16,6 +16,8 @@ extern int mt_apply_aarch64_reloc(unsigned type, unsigned char *loc,
                                   uint64_t S, int64_t A, uint64_t P);
 extern int la64_apply_reloc(unsigned type, unsigned char *loc,
                             uint64_t S, int64_t A, uint64_t P);
+extern int riscv64_apply_reloc(unsigned reloc_type, unsigned char *place,
+                               uint64_t S, int64_t A, uint64_t P);
 
 #define LD_SHF_WRITE 0x1ULL
 #define LD_SHF_ALLOC 0x2ULL
@@ -1187,6 +1189,12 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 	if (strcmp(ctx->target->name, "aarch64") == 0) {
 		if (mt_apply_aarch64_reloc(type, target->data + target_offset,
 		                           resolved_value, addend, place) == 0)
+			return 0;
+		return ld_errorf(ctx, "unsupported relocation type", name);
+	}
+	if (strcmp(ctx->target->name, "riscv64") == 0) {
+		if (riscv64_apply_reloc(type, target->data + target_offset,
+		                         resolved_value, addend, place) == 0)
 			return 0;
 		return ld_errorf(ctx, "unsupported relocation type", name);
 	}

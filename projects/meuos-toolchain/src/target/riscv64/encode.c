@@ -759,6 +759,94 @@ riscv64_encode_insn(const struct mt_target *target,
 		return 0;
 	}
 
+	/* ---- Branch pseudo-instructions (compare with zero) ---- */
+
+	/* beqz rs, offset  →  beq rs, x0, offset */
+	if (strcmp(mnemonic, "beqz") == 0 && nops == 2 && ops[0].kind == 1) {
+		if (ops[1].kind == 2) {
+			emit32(out->bytes, b_type(0x63, 0, (unsigned)ops[0].reg, 0, (int32_t)ops[1].imm));
+			return 0;
+		} else if (ops[1].kind == 4) {
+			emit32(out->bytes, b_type(0x63, 0, (unsigned)ops[0].reg, 0, 0));
+			set_fixup(out, 0, 4, 16, ops[1].sym, ops[1].addend);
+			return 0;
+		}
+	}
+
+	/* bnez rs, offset  →  bne rs, x0, offset */
+	if (strcmp(mnemonic, "bnez") == 0 && nops == 2 && ops[0].kind == 1) {
+		if (ops[1].kind == 2) {
+			emit32(out->bytes, b_type(0x63, 1, (unsigned)ops[0].reg, 0, (int32_t)ops[1].imm));
+			return 0;
+		} else if (ops[1].kind == 4) {
+			emit32(out->bytes, b_type(0x63, 1, (unsigned)ops[0].reg, 0, 0));
+			set_fixup(out, 0, 4, 16, ops[1].sym, ops[1].addend);
+			return 0;
+		}
+	}
+
+	/* blez rs, offset  →  bge x0, rs, offset (rs <= 0  ↔  0 >= rs) */
+	if (strcmp(mnemonic, "blez") == 0 && nops == 2 && ops[0].kind == 1) {
+		if (ops[1].kind == 2) {
+			emit32(out->bytes, b_type(0x63, 5, 0, (unsigned)ops[0].reg, (int32_t)ops[1].imm));
+			return 0;
+		} else if (ops[1].kind == 4) {
+			emit32(out->bytes, b_type(0x63, 5, 0, (unsigned)ops[0].reg, 0));
+			set_fixup(out, 0, 4, 16, ops[1].sym, ops[1].addend);
+			return 0;
+		}
+	}
+
+	/* bgez rs, offset  →  bge rs, x0, offset */
+	if (strcmp(mnemonic, "bgez") == 0 && nops == 2 && ops[0].kind == 1) {
+		if (ops[1].kind == 2) {
+			emit32(out->bytes, b_type(0x63, 5, (unsigned)ops[0].reg, 0, (int32_t)ops[1].imm));
+			return 0;
+		} else if (ops[1].kind == 4) {
+			emit32(out->bytes, b_type(0x63, 5, (unsigned)ops[0].reg, 0, 0));
+			set_fixup(out, 0, 4, 16, ops[1].sym, ops[1].addend);
+			return 0;
+		}
+	}
+
+	/* bltz rs, offset  →  blt rs, x0, offset */
+	if (strcmp(mnemonic, "bltz") == 0 && nops == 2 && ops[0].kind == 1) {
+		if (ops[1].kind == 2) {
+			emit32(out->bytes, b_type(0x63, 4, (unsigned)ops[0].reg, 0, (int32_t)ops[1].imm));
+			return 0;
+		} else if (ops[1].kind == 4) {
+			emit32(out->bytes, b_type(0x63, 4, (unsigned)ops[0].reg, 0, 0));
+			set_fixup(out, 0, 4, 16, ops[1].sym, ops[1].addend);
+			return 0;
+		}
+	}
+
+	/* bgtz rs, offset  →  blt x0, rs, offset (rs > 0  ↔  0 < rs) */
+	if (strcmp(mnemonic, "bgtz") == 0 && nops == 2 && ops[0].kind == 1) {
+		if (ops[1].kind == 2) {
+			emit32(out->bytes, b_type(0x63, 4, 0, (unsigned)ops[0].reg, (int32_t)ops[1].imm));
+			return 0;
+		} else if (ops[1].kind == 4) {
+			emit32(out->bytes, b_type(0x63, 4, 0, (unsigned)ops[0].reg, 0));
+			set_fixup(out, 0, 4, 16, ops[1].sym, ops[1].addend);
+			return 0;
+		}
+	}
+
+	/* tail symbol  →  auipc x6, %pcrel_hi(sym); jalr x0, x6, %pcrel_lo(sym)
+	 * Uses t0 (x6) for the jump target, R_RISCV_CALL for the pair. */
+	if (strcmp(mnemonic, "tail") == 0 && nops == 1 && ops[0].kind == 4) {
+		out->size = 8;
+		emit32(out->bytes, u_type(0x17, 6, 0));            /* auipc t0, 0 */
+		emit32(out->bytes + 4, i_type(0x67, 0, 0, 6, 0)); /* jalr x0, t0, 0 */
+		set_fixup(out, 0, 4, 18 /* R_RISCV_CALL */, ops[0].sym, ops[0].addend);
+		return 0;
+	}
+	if (strcmp(mnemonic, "tail") == 0 && nops == 1 && ops[0].kind == 2) {
+		emit32(out->bytes, j_type(0x6F, 0, (int32_t)ops[0].imm));
+		return 0;
+	}
+
 	/* li rd, imm  — materialize a constant (addi for 12-bit, else lui+addi) */
 	if (strcmp(mnemonic, "li") == 0 && nops == 2 && ops[0].kind == 1 &&
 	    ops[1].kind == 2) {
