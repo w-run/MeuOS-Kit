@@ -131,6 +131,16 @@ main(int argc, char **argv)
 	}
 	/* Inject ARCH into recipe environment after parse. */
 	set_arch_env();
+
+	/* Run inline feature detection (probe section) if any probes are
+	 * registered.  The generated config.h is placed in the current
+	 * directory; recipes reference it via -I. or $PWD. */
+	{	char *build_dir = getenv("BLD_DIR");
+		if (probe_run(build_dir ? build_dir : ".") != 0) {
+			printf("meow: probe failed for %s\n", arguments[1]);
+			return 1;
+		}
+	}
 	requested = strcmp(arguments[0], "clean") == 0 ? "clean" : count == 3 ? arguments[2] : default_target;
 	if (!requested)
 		requested = find_target("all") ? "all" : "build";

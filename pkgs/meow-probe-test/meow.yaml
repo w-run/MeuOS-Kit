@@ -1,0 +1,22 @@
+name: meow-probe-test
+version: 1
+probe:
+  cc: /workspace/MeuOS-Kit/projects/mcc/mcc
+  cflags: --specs=meuos --sysroot=/workspace/MeuOS-Kit/projects/sysroot
+  config: config.h
+  headers:
+    - stdlib.h
+    - stdio.h
+    - nonexistent/xyzzy.h
+  functions:
+    - printf
+    - strdup
+    - this_func_does_not_exist
+default: show
+targets:
+  show:
+    commands:
+      - echo "config.h generated"; head -20 ${BLD_DIR:-.}/config.h
+  clean:
+    commands:
+      - rm -f config.h

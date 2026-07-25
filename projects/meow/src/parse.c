@@ -199,13 +199,15 @@ add_command(struct target *target, char *command)
 int
 parse_recipe(char *data)
 {
-	enum { ROOT, VARIABLES, TARGETS, COMMANDS } section = ROOT;
+	enum { ROOT, PROBE, PROBE_HEADERS, PROBE_FUNCS, VARIABLES, TARGETS, COMMANDS } section = ROOT;
 	struct target *current = 0;
+	int probe_section = 0;  /* 0=none, 1=keyval, 2=list */
 	char *line = data;
 
 	recipe_environment[0] = 0;
 	ntargets = 0;
 	default_target = 0;
+	probe_reset();
 	while (*line) {
 		char *end = line;
 		char *text;
@@ -223,12 +225,41 @@ parse_recipe(char *data)
 		if (indent == 0) {
 			section = ROOT;
 			current = 0;
-			if (strcmp(text, "variables:") == 0 || strcmp(text, "env:") == 0)
+			probe_section = 0;
+			if (strcmp(text, "probe:") == 0)
+				section = PROBE;
+			else if (strcmp(text, "variables:") == 0 || strcmp(text, "env:") == 0)
 				section = VARIABLES;
 			else if (strcmp(text, "targets:") == 0 || strcmp(text, "steps:") == 0)
 				section = TARGETS;
 			else if (strncmp(text, "default:", 8) == 0)
 				default_target = trim(text + 8);
+		} else if ((section == PROBE || section == PROBE_HEADERS || section == PROBE_FUNCS) && indent == 2) {
+			section = PROBE;
+			if (strcmp(text, "headers:") == 0) {
+				section = PROBE_HEADERS;
+			} else if (strcmp(text, "functions:") == 0) {
+				section = PROBE_FUNCS;
+			} else {
+				/* key: value pairs */
+				char *colon = strchr(text, ':');
+				if (!colon) return -1;
+				*colon = 0;
+				char *key = trim(text);
+				char *val = trim(colon + 1);
+				if (strcmp(key, "cc") == 0) probe_set_cc(val);
+				else if (strcmp(key, "cflags") == 0) probe_set_cflags(val);
+				else if (strcmp(key, "config") == 0) probe_set_config(val);
+			}
+		} else if ((section == PROBE_HEADERS || section == PROBE_FUNCS) && indent == 4 && *text == '-') {
+			if (section == PROBE_HEADERS)
+				probe_add_header(trim(text + 1));
+			else
+				probe_add_function(trim(text + 1));
+		} else if (section == PROBE_FUNCS && indent == 4 && *text == '-') {
+			probe_add_function(trim(text + 1));
+		} else if (section == PROBE && indent > 2) {
+			/* skip unknown sub-items */
 		} else if (section == VARIABLES && indent == 2) {
 			char *colon = strchr(text, ':');
 			if (!colon)

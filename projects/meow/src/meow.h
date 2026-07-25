@@ -63,4 +63,13 @@ int parse_recipe(char *data);
 /* graph.c */
 int run_target(struct target *target);
 
+/* probe.c — inline feature detection (autoconf replacement) */
+void probe_reset(void);
+int probe_add_header(const char *name);
+int probe_add_function(const char *name);
+int probe_set_cc(const char *cc);
+int probe_set_cflags(const char *cflags);
+int probe_set_config(const char *name);
+int probe_run(const char *build_dir);
+
 #endif /* MEOW_H */
