@@ -7,16 +7,21 @@ probe:
   headers:
     - stdlib.h
     - stdio.h
-    - nonexistent/xyzzy.h
+    - sys/stat.h
+    - inttypes.h
+    - paths.h
   functions:
-    - printf
     - strdup
-    - this_func_does_not_exist
+    - getline
+  decls:
+    - isblank
+  codes:
+    - HAVE_ST_MTIM: '#include <sys/stat.h>\nint main(void){struct stat s;return (int)sizeof(s.st_mtim);}'
 default: show
 targets:
   show:
     commands:
-      - echo "config.h generated"; head -20 ${BLD_DIR:-.}/config.h
+      - echo "config.h:"; cat ${BLD_DIR:-.}/config.h
   clean:
     commands:
       - rm -f config.h

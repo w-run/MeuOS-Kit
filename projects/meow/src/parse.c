@@ -199,7 +199,7 @@ add_command(struct target *target, char *command)
 int
 parse_recipe(char *data)
 {
-	enum { ROOT, PROBE, PROBE_HEADERS, PROBE_FUNCS, VARIABLES, TARGETS, COMMANDS } section = ROOT;
+	enum { ROOT, PROBE, PROBE_HEADERS, PROBE_FUNCS, PROBE_CODES, PROBE_DECLS, VARIABLES, TARGETS, COMMANDS } section = ROOT;
 	struct target *current = 0;
 	int probe_section = 0;  /* 0=none, 1=keyval, 2=list */
 	char *line = data;
@@ -234,12 +234,16 @@ parse_recipe(char *data)
 				section = TARGETS;
 			else if (strncmp(text, "default:", 8) == 0)
 				default_target = trim(text + 8);
-		} else if ((section == PROBE || section == PROBE_HEADERS || section == PROBE_FUNCS) && indent == 2) {
+		} else if ((section == PROBE || section == PROBE_HEADERS || section == PROBE_FUNCS || section == PROBE_CODES || section == PROBE_DECLS) && indent == 2) {
 			section = PROBE;
 			if (strcmp(text, "headers:") == 0) {
 				section = PROBE_HEADERS;
 			} else if (strcmp(text, "functions:") == 0) {
 				section = PROBE_FUNCS;
+			} else if (strcmp(text, "codes:") == 0) {
+				section = PROBE_CODES;
+			} else if (strcmp(text, "decls:") == 0) {
+				section = PROBE_DECLS;
 			} else {
 				/* key: value pairs */
 				char *colon = strchr(text, ':');
@@ -251,13 +255,32 @@ parse_recipe(char *data)
 				else if (strcmp(key, "cflags") == 0) probe_set_cflags(val);
 				else if (strcmp(key, "config") == 0) probe_set_config(val);
 			}
-		} else if ((section == PROBE_HEADERS || section == PROBE_FUNCS) && indent == 4 && *text == '-') {
+		} else if ((section == PROBE_HEADERS || section == PROBE_FUNCS || section == PROBE_DECLS) && indent == 4 && *text == '-') {
 			if (section == PROBE_HEADERS)
 				probe_add_header(trim(text + 1));
+			else if (section == PROBE_DECLS)
+				probe_add_decl(trim(text + 1));
 			else
 				probe_add_function(trim(text + 1));
 		} else if (section == PROBE_FUNCS && indent == 4 && *text == '-') {
 			probe_add_function(trim(text + 1));
+		} else if ((section == PROBE_CODES) && indent == 4 && *text == '-') {
+			/* codes: "- NAME: inline C code" single-line format */
+			char *cp = trim(text + 1);
+			char *colon = strchr(cp, ':');
+			if (!colon) return -1;
+			*colon = 0;
+			char *codename = trim(cp);
+			char *codeval = trim(colon + 1);
+			/* Strip surrounding quotes if present */
+			size_t cvlen = strlen(codeval);
+			if (cvlen >= 2 &&
+			    ((codeval[0] == '\'' && codeval[cvlen-1] == '\'') ||
+			     (codeval[0] == '"' && codeval[cvlen-1] == '"'))) {
+				codeval[cvlen-1] = 0;
+				codeval++;
+			}
+			probe_add_code(codename, codeval);
 		} else if (section == PROBE && indent > 2) {
 			/* skip unknown sub-items */
 		} else if (section == VARIABLES && indent == 2) {

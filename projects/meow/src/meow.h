@@ -67,6 +67,8 @@ int run_target(struct target *target);
 void probe_reset(void);
 int probe_add_header(const char *name);
 int probe_add_function(const char *name);
+int probe_add_code(const char *name, const char *code);
+int probe_add_decl(const char *name);
 int probe_set_cc(const char *cc);
 int probe_set_cflags(const char *cflags);
 int probe_set_config(const char *name);
