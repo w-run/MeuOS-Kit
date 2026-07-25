@@ -66,14 +66,18 @@
 
 ## P3 — 自举验证
 
-[ ] Phase 4: 用 sysroot 内的 mcc + meow 重新编译全套工具
-    -> mcc 自己编译自己
-    -> meuo-libc 用自产 mcc 编译
-    -> mt 用自产 as/ld 汇编+链接
+[/] Phase 4: 用 sysroot 内的 mcc + meow 重新编译全套工具
+    -> check-sysroot-static 流程：安装 libc → 复制 mcc 源码 → mcc 自编译
+    -> 进展：fe/driver/lex/parse/sema/irgen 约 40 个 .c 文件编译成功
+    -> 阻塞：mcc 类型比较 bug（funcstore enums/lvalue 在 mein libc 头下不一致）
+    -> 已修障碍：msys.h packed 属性去除、msys.c 加 unistd.h、CFLAGS 加 meus-sysroot inc
+    -> meow 自身已能通过 mcc + sysroot 构建（make -C projects/meow 的 sysroot 构建步骤验证通过）
 
-[ ] meow 多架构 YAML 配方
-    -> 为所有 5 架构提供完整的 meow.yaml
-    -> 验证 meow build --arch=loongarch64 dash / bzip2 等
+[/] meow 多架构 YAML 配方
+    -> dash/bzip2/binutils 三个真实软件包已有 meow.yaml
+    -> 当前配方通过 ${HOST:-x86_64-unknown-linux} 透传架构，未原生支持 --arch
+    -> meow 自身需扩展：meow.yaml 中支持 arch 条件、target triplet 自动推导
+    -> 当 meow 支持后，dash/bzip2 可验证 meow build --arch=loongarch64
 
 ## P4 — 长期
 

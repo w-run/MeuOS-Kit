@@ -19,7 +19,7 @@ struct msys_header {
 	uint32_t index_count;    /* number of entries in index */
 	uint32_t flags;          /* flags */
 	uint8_t  reserved[8];    /* reserved, must be zero */
-} __attribute__((packed));
+};
 
 /* Index entry (16 + name_len bytes on disk, variable-length name tail) */
 struct msys_index_entry {
@@ -28,7 +28,10 @@ struct msys_index_entry {
 	uint8_t data_size[4];    /* uint32 little-endian */
 	uint8_t name_len[2];     /* uint16 little-endian */
 	/* name follows (name_len bytes, no NUL terminator) */
-} __attribute__((packed));
+};
+
+_Static_assert(sizeof(struct msys_header) == 32, "msys_header must be 32 bytes");
+_Static_assert(sizeof(struct msys_index_entry) == 16, "msys_index_entry must be 16 bytes");
 
 /* In-memory handle for an open .msys file */
 struct msys {

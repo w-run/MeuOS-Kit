@@ -146,8 +146,15 @@ THREAD_OBJS    := $(BUILD)/thread/state.o $(BUILD)/thread/c11_threads.o \
                   $(BUILD)/thread/tss.o $(BUILD)/thread/mutex.o \
                   $(BUILD)/thread/condvar.o $(BUILD)/thread/call_once.o \
                   $(BUILD)/thread/pthread.o
-SUPPORT_OBJS   := $(BUILD)/ctype/ctype.o $(BUILD)/errno/errno.o \
-                  $(BUILD)/signal/signal.o $(BUILD)/dirent/dirent.o
+SUPPORT_OBJS   := $(BUILD)/ctype/ctype.o $(BUILD)/signal/signal.o \
+                  $(BUILD)/dirent/dirent.o
+# errno: loongarch64 uses non-TLS version (binutils BFD assertion workaround)
+# Other architectures use the standard _Thread_local errno
+ifeq ($(ARCH),loongarch64)
+SUPPORT_OBJS   += $(BUILD)/errno/errno_la64.o
+else
+SUPPORT_OBJS   += $(BUILD)/errno/errno.o
+endif
 SYSCALL_GATE_OBJ := $(BUILD)/internal/arch/$(ARCH)/syscall.o
 CRT1_OBJ := $(BUILD)/crt1.o
 LIBC_LIB := $(BUILD)/libc-meuos.a
