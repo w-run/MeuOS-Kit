@@ -199,6 +199,10 @@ check-target-dispatch: $(AS_BIN) $(LD_BIN)
 	$(LD_BIN) --target=i386 --version | grep -q 'i386' && printf 'ld --target=i386 --version: PASS\n'; \
 	printf 'check-target-dispatch: PASS\n'
 
+# aarch64 e2e: 最小汇编端到端（无需 CRT/libc）
+QEMU_AARCH64 ?= ../../env/qemu/qemu-aarch64
+check-aarch64-e2e: $(AS_BIN) $(LD_BIN)
+	sh test/aarch64_e2e.sh "$(abspath $(AS_BIN))" "$(abspath $(LD_BIN))" "$(abspath $(QEMU_AARCH64))"
 
 check-as-sse-x86_64: $(AS_BIN)
 	sh test/as_sse_x86_64.sh "$(abspath $(AS_BIN))"

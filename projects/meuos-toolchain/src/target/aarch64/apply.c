@@ -140,6 +140,90 @@ mt_apply_aarch64_reloc(unsigned type, unsigned char *loc,
 		return 0;
 	}
 
+	case 286: { /* R_AARCH64_LDST64_ABS_LO12_NC */
+		/* Low 12 bits of (S + A) for 64-bit LDR/STR scaled addressing.
+		 * The value is placed in bits [21:10] of the instruction. */
+		uint64_t val = (uint64_t)(S + A);
+		uint32_t imm12 = (uint32_t)((val >> 3) & 0xFFF);
+		uint32_t insn = (uint32_t)loc[0] | ((uint32_t)loc[1] << 8) |
+		                ((uint32_t)loc[2] << 16) | ((uint32_t)loc[3] << 24);
+		insn = (insn & 0xFFC003FF) | (imm12 << 10);
+		loc[0] = (uint8_t)(insn);
+		loc[1] = (uint8_t)(insn >> 8);
+		loc[2] = (uint8_t)(insn >> 16);
+		loc[3] = (uint8_t)(insn >> 24);
+		return 0;
+	}
+
+	case 277: { /* R_AARCH64_ADD_ABS_LO12_NC */
+		/* Low 12 bits of (S + A) for ADD immediate.
+		 * Value placed in bits [21:10] of ADD (immediate) instruction. */
+		uint32_t imm12 = (uint32_t)(S + A) & 0xFFF;
+		uint32_t insn = (uint32_t)loc[0] | ((uint32_t)loc[1] << 8) |
+		                ((uint32_t)loc[2] << 16) | ((uint32_t)loc[3] << 24);
+		insn = (insn & 0xFFC003FF) | (imm12 << 10);
+		loc[0] = (uint8_t)(insn);
+		loc[1] = (uint8_t)(insn >> 8);
+		loc[2] = (uint8_t)(insn >> 16);
+		loc[3] = (uint8_t)(insn >> 24);
+		return 0;
+	}
+
+	case 311: { /* R_AARCH64_ADR_GOT_PAGE — ADRP to GOT page */
+		uint64_t page_got = (S + A) & ~0xFFFULL;
+		uint64_t page_p = P & ~0xFFFULL;
+		int64_t delta = (int64_t)(page_got - page_p);
+		if (delta < -(1LL << 32) || delta >= (1LL << 32))
+			return -1;
+		uint32_t insn = (uint32_t)loc[0] | ((uint32_t)loc[1] << 8) |
+		                ((uint32_t)loc[2] << 16) | ((uint32_t)loc[3] << 24);
+		uint32_t imm = (uint32_t)((delta >> 12) & 0x1FFFFF);
+		uint32_t immlo = imm & 3;
+		uint32_t immhi = imm >> 2;
+		insn = (insn & 0x9F00001F) | (immlo << 29) | (immhi << 5);
+		loc[0] = (uint8_t)(insn);
+		loc[1] = (uint8_t)(insn >> 8);
+		loc[2] = (uint8_t)(insn >> 16);
+		loc[3] = (uint8_t)(insn >> 24);
+		return 0;
+	}
+
+	case 312: { /* R_AARCH64_LD64_GOT_LO12_NC — LDR from GOT entry */
+		uint32_t imm12 = (uint32_t)((S + A) >> 3) & 0xFFF;
+		uint32_t insn = (uint32_t)loc[0] | ((uint32_t)loc[1] << 8) |
+		                ((uint32_t)loc[2] << 16) | ((uint32_t)loc[3] << 24);
+		insn = (insn & 0xFFC003FF) | (imm12 << 10);
+		loc[0] = (uint8_t)(insn);
+		loc[1] = (uint8_t)(insn >> 8);
+		loc[2] = (uint8_t)(insn >> 16);
+		loc[3] = (uint8_t)(insn >> 24);
+		return 0;
+	}
+
+	case 549: { /* R_AARCH64_TLSLE_ADD_TPREL_HI12 */
+		uint32_t imm12 = (uint32_t)((S + A) >> 12) & 0xFFF;
+		uint32_t insn = (uint32_t)loc[0] | ((uint32_t)loc[1] << 8) |
+		                ((uint32_t)loc[2] << 16) | ((uint32_t)loc[3] << 24);
+		insn = (insn & 0xFFC003FF) | (imm12 << 10);
+		loc[0] = (uint8_t)(insn);
+		loc[1] = (uint8_t)(insn >> 8);
+		loc[2] = (uint8_t)(insn >> 16);
+		loc[3] = (uint8_t)(insn >> 24);
+		return 0;
+	}
+
+	case 551: { /* R_AARCH64_TLSLE_ADD_TPREL_LO12_NC (actual GNU ABI) */
+		uint32_t imm12 = (uint32_t)(S + A) & 0xFFF;
+		uint32_t insn = (uint32_t)loc[0] | ((uint32_t)loc[1] << 8) |
+		                ((uint32_t)loc[2] << 16) | ((uint32_t)loc[3] << 24);
+		insn = (insn & 0xFFC003FF) | (imm12 << 10);
+		loc[0] = (uint8_t)(insn);
+		loc[1] = (uint8_t)(insn >> 8);
+		loc[2] = (uint8_t)(insn >> 16);
+		loc[3] = (uint8_t)(insn >> 24);
+		return 0;
+	}
+
 	default:
 		return -1;
 	}

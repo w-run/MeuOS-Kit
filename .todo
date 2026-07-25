@@ -43,21 +43,26 @@
 
 ## P2 — 跨架构完善
 
-[ ] mt/as riscv64 编码器扩展
-    -> 当前 802 行 / 1 个函数
-    -> 需要补充更多伪指令和重定位类型
+[x] mt/as riscv64 编码器扩展 + 链接器分发
+    -> 新增 beqz/bnez/blez/bgez/bltz/bgtz 分支伪指令 + tail 远跳转伪指令
+    -> 修复 link.c 缺少 riscv64 reloc 分发的 bug（riscv64_apply_reloc 从未被调用）
+    -> make -C projects/meuos-toolchain check 全量 20+ 项 PASS
+    -> 当前 900+ 行，支持 RV64I + A + F/D + 全部常用伪指令
 
-[ ] mt/as aarch64 编码器扩展
-    -> 当前 971 行 / 2 个函数，相对完整
-    -> 补充 NEON/SVE 指令的编码支持（可选）
+[x] mt/as aarch64 编码器扩展
+    -> 新增 20+ 编码指令（stp/ldp/cmn/msub/csinc/brk/hint/ldrsb/ldrsh/atomics/dmb/msr-tpidr）
+    -> 修复逗号分割嵌套方括号 bug（[sp, #-16]! 不再拆分）
+    -> make check 全量 20+ 项 PASS，encode.c 从 972 → 1248 行
 
-[ ] mt/as x86_64: 无独立编码器，依赖 host cc
-    -> 当前：x86_64 的架构目标直接透传到 host cc
-    -> 不是 bug，但自举后需要自己实现
+[x] mt/as x86_64: 独立编码器提取
+    -> x86_64 编码从 assemble.c 内联 (~500 行) 提取到独立 src/target/x86_64/encode.c
+    -> target.c 中 x86_64 的 encode_insn 从 NULL 改为指向 x86_64_encode_insn
+    -> 所有 5 架构统一通过 encode_insn 函数指针调度
+    -> make check 全 20+ 项 PASS
 
-[ ] mcc C23 特性持续完善
-    -> check-c23 已通过，但 #embed suffix/prefix/if_empty、
-       _BitInt(N)、属性语法 [[]] 等可选项目待补充
+[x] mcc C23 特性完善
+    -> check-c23 全 20 测试 PASS（embed 参数/BitInt/属性全部通过并验证）
+    -> .todo 已过时：所有 AGENTS.md §2.2 列出的 C23 特性均已完整实现
 
 ## P3 — 自举验证
 
