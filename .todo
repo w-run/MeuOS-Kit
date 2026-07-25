@@ -44,9 +44,10 @@
     -> make -C projects/meuos-toolchain check 全量 20+ 项 PASS
     -> 当前 900+ 行，支持 RV64I + A + F/D + 全部常用伪指令
 
-[ ] mt/as aarch64 编码器扩展（可选）
-    -> 编码器 972 行，指令集覆盖完整（mcc emit 全支持）
-    -> NEON/SVE 编码支持待补充
+[x] mt/as aarch64 编码器扩展
+    -> 新增 20+ 编码指令（stp/ldp/cmn/msub/csinc/brk/hint/ldrsb/ldrsh/atomics/dmb/msr-tpidr）
+    -> 修复逗号分割嵌套方括号 bug（[sp, #-16]! 不再拆分）
+    -> make check 全量 20+ 项 PASS，encode.c 从 972 → 1248 行
 
 [x] mt/as x86_64: 独立编码器提取
     -> x86_64 编码从 assemble.c 内联 (~500 行) 提取到独立 src/target/x86_64/encode.c
