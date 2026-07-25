@@ -12,9 +12,12 @@
 static void
 set_arch_env(void)
 {
-	/* Inject ARCH into recipe_environment so recipes can use $(ARCH). */
+	/* Inject ARCH and HOST into recipe_environment so recipes can use
+	 * $(ARCH) for cross-compiler dispatch and $(HOST) for autoconf-style
+	 * --host triplets. */
 	size_t len = strlen(recipe_environment);
 	const char *arch = build_arch;
+	const char *host = NULL;
 
 	if (!arch) {
 		/* Auto-detect from kernel. */
@@ -33,10 +36,19 @@ set_arch_env(void)
 	}
 	if (!arch)
 		arch = "x86_64";
-	if (len + 32 < sizeof(recipe_environment)) {
+
+	/* Derive autoconf HOST triplet from ARCH. */
+	if      (strcmp(arch, "x86_64")      == 0) host = "x86_64-unknown-linux-gnu";
+	else if (strcmp(arch, "aarch64")     == 0) host = "aarch64-unknown-linux-gnu";
+	else if (strcmp(arch, "riscv64")     == 0) host = "riscv64-unknown-linux-gnu";
+	else if (strcmp(arch, "loongarch64") == 0) host = "loongarch64-unknown-linux-gnu";
+	else if (strcmp(arch, "i386")        == 0) host = "i686-unknown-linux-gnu";
+
+	if (len + 64 < sizeof(recipe_environment)) {
 		size_t n = snprintf(recipe_environment + len,
 		                    sizeof(recipe_environment) - len,
-		                    "export ARCH='%s'; ", arch);
+		                    "export ARCH='%s'; export HOST='%s'; ",
+		                    arch, host ? host : "x86_64-unknown-linux-gnu");
 		if (n > 0)
 			recipe_environment[len + n] = '\0';
 	}

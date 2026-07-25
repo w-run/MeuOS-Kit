@@ -1,0 +1,10 @@
+name: meow-env-test
+version: 1
+default: show
+targets:
+  show:
+    commands:
+      - echo "ARCH=$ARCH HOST=$HOST"
+  clean:
+    commands:
+      - true
