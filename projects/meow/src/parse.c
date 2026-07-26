@@ -110,11 +110,60 @@ add_target(char *name)
 	return &targets[ntargets++];
 }
 
+/* Expand ${VAR_NAME} references in input string using the current
+ * recipe_environment.  Writes the result into output (output_size bytes).
+ * Returns 0 on success, -1 on truncation. */
+int
+expand_env_vars(const char *input, char *output, size_t output_size)
+{
+	size_t out_len = 0;
+	while (*input && out_len + 1 < output_size) {
+		if (input[0] == '$' && input[1] == '{') {
+			const char *close = strchr(input + 2, '}');
+			if (close) {
+				size_t key_len = (size_t)(close - input - 2);
+				char search_prefix[9 + 256];
+				char *found;
+				const char *val_start, *val_end;
+				size_t val_len;
+				if (key_len > 256) return -1;
+				memcpy(search_prefix, "export ", 7);
+				memcpy(search_prefix + 7, input + 2, key_len);
+				search_prefix[7 + key_len] = '=';
+				search_prefix[8 + key_len] = '\'';
+				search_prefix[9 + key_len] = 0;
+				found = strstr(recipe_environment, search_prefix);
+				if (found) {
+					val_start = found + 9 + key_len;
+					val_end = strchr(val_start, '\'');
+					val_len = val_end ? (size_t)(val_end - val_start) : strlen(val_start);
+					if (out_len + val_len + 1 > output_size) return -1;
+					memcpy(output + out_len, val_start, val_len);
+					out_len += val_len;
+				}
+				input = close + 1;
+				continue;
+			}
+		}
+		output[out_len++] = *input++;
+	}
+	output[out_len] = 0;
+	return 0;
+}
+
 static int
 append_environment(char *key, char *value)
 {
 	size_t key_length = strlen(key);
 	size_t length = strlen(recipe_environment);
+	char expanded[RECIPE_MAX];
+	const char *val = value;
+
+	if (strchr(value, '$') && strchr(value, '{')) {
+		if (expand_env_vars(value, expanded, sizeof(expanded)) != 0)
+			return -1;
+		val = expanded;
+	}
 
 	if (!key_length)
 		return -1;
@@ -123,7 +172,7 @@ append_environment(char *key, char *value)
 		      (key[i] >= 'a' && key[i] <= 'z') || key[i] == '_' ||
 		      (i && key[i] >= '0' && key[i] <= '9')))
 			return -1;
-	if (length + 8 + key_length + 2 * strlen(value) + 4 >= sizeof(recipe_environment))
+	if (length + 8 + key_length + 2 * strlen(val) + 4 >= sizeof(recipe_environment))
 		return -1;
 	memcpy(recipe_environment + length, "export ", 7);
 	length += 7;
@@ -132,18 +181,18 @@ append_environment(char *key, char *value)
 	recipe_environment[length++] = '=';
 	/* use single quotes; if value contains ', use '\\'' escape trick */
 	recipe_environment[length++] = '\'';
-	while (*value) {
-		if (*value == '\'') {
+	while (*val) {
+		if (*val == '\'') {
 			recipe_environment[length++] = '\\';
 			recipe_environment[length++] = '\'';
 			recipe_environment[length++] = '\'';
-			if (value[1]) {
+			if (val[1]) {
 				recipe_environment[length++] = '\'';
 			}
 		} else {
-			recipe_environment[length++] = *value;
+			recipe_environment[length++] = *val;
 		}
-		++value;
+		++val;
 	}
 	recipe_environment[length++] = '\'';
 	recipe_environment[length++] = ';';

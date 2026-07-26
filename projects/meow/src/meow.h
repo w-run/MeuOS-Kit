@@ -59,6 +59,7 @@ int load_recipe(const char *package, char *path, size_t path_size, char *data);
 /* parse.c - only find_target() and parse_recipe() are cross-file. */
 struct target *find_target(const char *name);
 int parse_recipe(char *data);
+int expand_env_vars(const char *input, char *output, size_t output_size);
 
 /* graph.c */
 int run_target(struct target *target);

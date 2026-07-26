@@ -7,7 +7,7 @@ variables:
   MSYS: /workspace/MeuOS-Kit/projects/meuos-sysroot
   BLD: /workspace/MeuOS-Kit/projects/mcc/build
   CC: cc
-  CFLAGS: -O2 -g -std=gnu11 -I/workspace/MeuOS-Kit/projects/mcc/include -I/workspace/MeuOS-Kit/projects/meuos-sysroot/include -Wno-all
+  CFLAGS: -O2 -g -std=gnu11 -I${MCCC}/include -I${MSYS}/include -Wno-all
   AR: ar
 
 targets:

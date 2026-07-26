@@ -11,6 +11,22 @@
 
 #include "meow.h"
 
+/* Forward declaration of expand_env_vars from parse.c */
+
+/* Expand ${VAR} in path, using a stack buffer for the result.
+ * Returns the original path if no expansion is needed, or a pointer
+ * to a static buffer with the expanded result. */
+static const char *
+expand_path(const char *path)
+{
+	static char buffer[RECIPE_MAX];
+	if (strchr(path, '$') && strchr(path, '{')) {
+		if (expand_env_vars(path, buffer, sizeof(buffer)) == 0)
+			return buffer;
+	}
+	return path;
+}
+
 /* File-local helpers (defined below; run_target() calls them). */
 static int target_out_of_date(struct target *);
 static int expand_command(struct target *, const char *, char *, size_t);
@@ -123,7 +139,7 @@ target_out_of_date(struct target *target)
 		return 1;
 	for (i = 0; i < target->ninputs; ++i) {
 		long seconds, nanoseconds;
-		if (file_mtime(target->inputs[i], &seconds, &nanoseconds) < 0)
+		if (file_mtime(expand_path(target->inputs[i]), &seconds, &nanoseconds) < 0)
 			return 1;
 		newer(seconds, nanoseconds, &newest_seconds, &newest_nanoseconds);
 	}
@@ -132,20 +148,20 @@ target_out_of_date(struct target *target)
 		if (dependency) {
 			for (size_t j = 0; j < dependency->noutputs; ++j) {
 				long seconds, nanoseconds;
-				if (file_mtime(dependency->outputs[j], &seconds, &nanoseconds) < 0)
+				if (file_mtime(expand_path(dependency->outputs[j]), &seconds, &nanoseconds) < 0)
 					return 1;
 				newer(seconds, nanoseconds, &newest_seconds, &newest_nanoseconds);
 			}
 		} else {
 			long seconds, nanoseconds;
-			if (file_mtime(target->deps[i], &seconds, &nanoseconds) < 0)
+			if (file_mtime(expand_path(target->deps[i]), &seconds, &nanoseconds) < 0)
 				return 1;
 			newer(seconds, nanoseconds, &newest_seconds, &newest_nanoseconds);
 		}
 	}
 	for (i = 0; i < target->noutputs; ++i) {
 		long seconds, nanoseconds;
-		if (file_mtime(target->outputs[i], &seconds, &nanoseconds) < 0)
+		if (file_mtime(expand_path(target->outputs[i]), &seconds, &nanoseconds) < 0)
 			return 1;
 		if (!i || seconds < oldest_seconds ||
 		 (seconds == oldest_seconds && nanoseconds < oldest_nanoseconds)) {

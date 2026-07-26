@@ -15,19 +15,15 @@ targets:
   libc-meuos.a:
     outputs: [${BLD}/libc-meuos.a]
     commands:
-      # 编译所有 C .o（跳过 src/compat/，它独立归档）
       - mkdir -p ${BLD}/arch ${BLD}/crt ${BLD}/internal ${BLD}/string ${BLD}/stdlib ${BLD}/stdio ${BLD}/syscall ${BLD}/thread ${BLD}/ctype ${BLD}/signal ${BLD}/dirent ${BLD}/errno
       - cd ${LIBC} && find src -path 'src/compat' -prune -o -name '*.c' -print | while read f; do mkdir -p "${BLD}/$(dirname "$f")"; $CC -I${LIBC}/include -I${LIBC}/src -c "$f" -o "${BLD}/${f%.c}.o"; done
-      # 汇编架构运行时 .S
       - $CC -c ${LIBC}/crt/x86_64/crt1.S -o ${BLD}/crt/crt1.o
       - $CC -c ${LIBC}/src/internal/arch/x86_64/syscall.S -o ${BLD}/internal/syscall.o
       - $CC -c ${LIBC}/src/arch/x86_64/atomic.S -o ${BLD}/arch/atomic.o
       - $CC -c ${LIBC}/src/arch/x86_64/setjmp.S -o ${BLD}/arch/setjmp.o
       - $CC -c ${LIBC}/src/arch/x86_64/sigreturn.S -o ${BLD}/arch/sigreturn.o
       - $CC -c ${LIBC}/src/arch/x86_64/thread_clone.S -o ${BLD}/arch/thread_clone.o
-      # 归档（不含 atomic.o 和 crt1.o）
       - cd ${BLD} && find . -name '*.o' ! -name 'atomic.o' ! -name 'crt1.o' ! -path './compat/*' | sort | xargs ${AR} rcs libc-meuos.a
-      # crt1.o 移到顶层
       - cp ${BLD}/crt/crt1.o ${BLD}/crt1.o
 
   libatomic-meuos.a:
