@@ -8,13 +8,19 @@
 - `src/arch/loongarch64/tls.c` — TLS 初始化（GAP_ABOVE_TP=0）
 - `crt/loongarch64/crt1.S` — _start 入口
 - `src/internal/arch/loongarch64/syscall.S` — syscall gate
+- `src/errno/errno_la64.c` — 非 TLS errno fallback（BFD 2.41 workaround）
 
-## 已验证 (2026-07-25)
-- ✅ loongarch64-linux-gnu-as: 所有 7 个 .S 汇编通过
-- ✅ loongarch64-linux-gnu-gcc: mcc 产出的 loongarch64 .s 汇编通过
-- ✅ commit 4e99492 修复了 emit 语法（指令格式、寄存器命名、内存语法）
-- ✅ commit 8063fbf 修复了浮点有序/无序比较崩溃
+## 已验证 (2026-07-26)
+- ✅ `make ARCH=loongarch64` 全量编译通过（3 个产物：libc-meuos.a/libatomic-meuos.a/crt1.o）
+- ✅ qemu-loongarch64-static (v7.2.0) 运行时：
+  - hello → "loongarch64 MeuOS libc" exit=0
+  - atomic → "PASS" exit=0
+  - setjmp → "setjmp ok" exit=0
+  - phase2_counter → "counter = 2000" exit=0（线程+原子）
+  - malloc_threads → "PASS concurrent malloc" exit=0（线程+malloc）
+  - bare_tls → 已知 qemu-user 7.2.0 TLS segfault（与 riscv64 相同限制）
 
-## 待验证门禁
-- `make ARCH=loongarch64` 全量编译通过（需要确认 Makefile loongarch64 目标工作）
-- qemu-loongarch64 运行时门禁（需要 qemu-loongarch64-static）
+## 已知限制
+- bare_tls 在 qemu-user 7.2.0 上 segfault（qemu loongarch64 的 TLS 模拟问题）
+- errno 使用非 TLS static int fallback（BFD 2.41 workaround），多线程 errno 不隔离
+- qemu-loongarch64-static 为 v7.2.0（多架构 release），升级到 v10.1.0 可能解决 bare_tls
