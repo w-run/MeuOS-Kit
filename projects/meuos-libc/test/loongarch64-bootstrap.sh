@@ -202,13 +202,18 @@ if [ "${MEUOS_LOONGARCH64_RUN:-0}" = 1 ]; then
 	# 4) phase2
 	out=$("$qemu" "$work/phase2" 2>&1) || { echo "phase2 failed: $out" >&2; exit 1; }
 	[ "$out" = "counter = 2000" ] || { echo "phase2 wrong output: $out" >&2; exit 1; }
-	# 5) bare_tls — known limitation: mt/ld loongarch64 TLS LE reloc corrupts .tdata
-	#    (verified: .o file has correct initializer 2a000000=42, but linked binary
-	#    has garbage 20c30000).  Note: also fails on QEMU 10.1.0 loongarch64 user-mode
-	#    self-built from source; root cause is mt/ld, not QEMU.
+	# 5) bare_tls — TLS 修复后应运行。exit=1 因 errno 使用非 TLS fallback
+	#    （BFD workaround），所以 errno 不是线程隔离的（输出 errno=47/47 而非 31/47）。
+	#    但 _Thread_local 变量隔离（main=5 child=9）是正确的。
+	#    同时需要 crt1.o/syscall.o/atomic.o/thread_clone.o。
 	out=$("$qemu" "$work/bare-tls" 2>&1) || {
-		echo "bare-tls: SKIP (mt/ld loongarch64 TLS LE reloc bug)" >&2
-		true
+		rc=$?
+		if [ "$rc" -eq 1 ]; then
+			# exit=1: TLS works, errno non-TLS as expected
+			echo "bare-tls: tls-ok errno-non-tls (expected with errno_la64 workaround)"
+		else
+			echo "bare-tls failed: $out" >&2; exit 1;
+		fi
 	}
 	# 6) malloc_threads
 	"$qemu" "$work/malloc-threads" || { echo "malloc-threads failed" >&2; exit 1; }

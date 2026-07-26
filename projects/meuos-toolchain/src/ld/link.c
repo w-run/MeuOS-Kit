@@ -1399,8 +1399,6 @@ write_executable(struct ld_context *ctx, const char *path,
 	entry_address = entry_group->address + entry_symbol->offset;
 	for (i = 0; i < ctx->group_count; ++i) {
 		struct ld_group *group = &ctx->groups[i];
-		if (is_tls_group(ctx, (int)i))
-			continue;
 		if (group->rank < 2)
 			rx_end = group->type == MT_SHT_NOBITS ? rx_end :
 			          group->file_offset + group->size > rx_end ?
