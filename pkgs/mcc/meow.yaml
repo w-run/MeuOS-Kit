@@ -12,11 +12,18 @@ variables:
 
 targets:
   mcc:
-    phony: true
+    outputs: [${MCCC}/mcc, ${BLD}/libmcc.a]
     commands:
+      - mkdir -p ${BLD}
       - cd ${MCCC} && find src -name '*.c' | while read f; do dir=$(dirname "${BLD}/$f"); mkdir -p "$dir"; $CC $CFLAGS -DMCC_DEFAULT_TARGET=\"x86_64\" -c "$f" -o "${BLD}/${f%.c}.o"; done
-      - cd ${BLD} && find src/target src/ir src/opt src/abi src/emit src/util -name '*.o' | sort | xargs $AR rcs libmcc.a
-      - cd ${MCCC} && FE_OBJS=$(find ${BLD}/src/driver ${BLD}/src/lex ${BLD}/src/parse ${BLD}/src/sema ${BLD}/src/irgen -name '*.o' | sort | tr '\n' ' '); $CC $CFLAGS -o mcc $FE_OBJS ${BLD}/libmcc.a -L${MSYS}/build -lmsys
+      - find ${BLD}/src/target ${BLD}/src/ir ${BLD}/src/opt ${BLD}/src/abi ${BLD}/src/emit ${BLD}/src/util -name '*.o' 2>/dev/null | sort | xargs $AR rcs ${BLD}/libmcc.a
+      - FE_OBJS=$(find ${BLD}/src/driver ${BLD}/src/lex ${BLD}/src/parse ${BLD}/src/sema ${BLD}/src/irgen -name '*.o' 2>/dev/null | sort | tr '\n' ' '); $CC $CFLAGS -o ${MCCC}/mcc $FE_OBJS ${BLD}/libmcc.a -L${MSYS}/build -lmsys
+
+  install:
+    deps: [mcc]
+    commands:
+      - mkdir -p /workspace/MeuOS-Kit/projects/sysroot/usr/bin
+      - cp ${MCCC}/mcc /workspace/MeuOS-Kit/projects/sysroot/usr/bin/
 
   clean:
     commands:

@@ -3,22 +3,29 @@ version: 1.0
 default: meow
 
 variables:
-  BLD: projects/meow/build
-  CFLAGS: --specs=meuos --sysroot=/workspace/MeuOS-Kit/projects/sysroot --nostdlib
+  BLD: /workspace/MeuOS-Kit/projects/meow/build
+  SRC: /workspace/MeuOS-Kit/projects/meow/src
+  CFLAGS: --specs=meuos --sysroot=/workspace/MeuOS-Kit/projects/sysroot --nostdlib -I${SRC}
+  LDLIBS: -l:libc-meuos.a
 
 targets:
   meow:
-    phony: true
+    outputs: [${BLD}/meow]
     commands:
       - mkdir -p ${BLD}
-      - projects/mcc/mcc ${CFLAGS} -Iprojects/meow/src -c projects/meow/src/main.c -o ${BLD}/main.o
-      - projects/mcc/mcc ${CFLAGS} -Iprojects/meow/src -c projects/meow/src/state.c -o ${BLD}/state.o
-      - projects/mcc/mcc ${CFLAGS} -Iprojects/meow/src -c projects/meow/src/exec.c -o ${BLD}/exec.o
-      - projects/mcc/mcc ${CFLAGS} -Iprojects/meow/src -c projects/meow/src/recipe.c -o ${BLD}/recipe.o
-      - projects/mcc/mcc ${CFLAGS} -Iprojects/meow/src -c projects/meow/src/parse.c -o ${BLD}/parse.o
-      - projects/mcc/mcc ${CFLAGS} -Iprojects/meow/src -c projects/meow/src/graph.c -o ${BLD}/graph.o
-      - projects/mcc/mcc ${CFLAGS} -Iprojects/meow/src -c projects/meow/src/probe.c -o ${BLD}/probe.o
-      - projects/mcc/mcc ${CFLAGS} -o ${BLD}/meow ${BLD}/main.o ${BLD}/state.o ${BLD}/exec.o ${BLD}/recipe.o ${BLD}/parse.o ${BLD}/graph.o ${BLD}/probe.o -l:libc-meuos.a
+      - /workspace/MeuOS-Kit/projects/mcc/mcc ${CFLAGS} -I${SRC} -c ${SRC}/main.c -o ${BLD}/main.o
+      - /workspace/MeuOS-Kit/projects/mcc/mcc ${CFLAGS} -I${SRC} -c ${SRC}/state.c -o ${BLD}/state.o
+      - /workspace/MeuOS-Kit/projects/mcc/mcc ${CFLAGS} -I${SRC} -c ${SRC}/exec.c -o ${BLD}/exec.o
+      - /workspace/MeuOS-Kit/projects/mcc/mcc ${CFLAGS} -I${SRC} -c ${SRC}/recipe.c -o ${BLD}/recipe.o
+      - /workspace/MeuOS-Kit/projects/mcc/mcc ${CFLAGS} -I${SRC} -c ${SRC}/parse.c -o ${BLD}/parse.o
+      - /workspace/MeuOS-Kit/projects/mcc/mcc ${CFLAGS} -I${SRC} -c ${SRC}/graph.c -o ${BLD}/graph.o
+      - /workspace/MeuOS-Kit/projects/mcc/mcc ${CFLAGS} -I${SRC} -c ${SRC}/probe.c -o ${BLD}/probe.o
+      - /workspace/MeuOS-Kit/projects/mcc/mcc ${CFLAGS} -o ${BLD}/meow ${BLD}/main.o ${BLD}/state.o ${BLD}/exec.o ${BLD}/recipe.o ${BLD}/parse.o ${BLD}/graph.o ${BLD}/probe.o ${LDLIBS}
+
+  install:
+    deps: [meow]
+    commands:
+      - cp ${BLD}/meow /workspace/MeuOS-Kit/projects/meow/build/meow
 
   clean:
     commands:
