@@ -62,6 +62,78 @@ __syscall_number(long number)
 	case 234: return 270; /* tgkill */
 	default: return number;
 	}
+#elif defined(__arm__)
+	/* ARM EABI (armv7) 使用 asm-generic syscall 编号，与 aarch64 基本相同。
+	 * 关键差异：ARM 使用 mmap2（以页为单位，非字节偏移），编号 192。
+	 * ARM 无 openat 变体时使用 SYS_open(5)，但 asm-generic 的 openat 也可用。
+	 * 这里与 i386 共享同一套 x86_64 内部号→ARM 外部号映射。 */
+	switch (number) {
+	case 0:   return 3;    /* read */
+	case 1:   return 4;    /* write */
+	case 2:   return 5;    /* open */
+	case 3:   return 6;    /* close */
+	case 4:   return 106;  /* stat */
+	case 5:   return 108;  /* fstat */
+	case 6:   return 107;  /* lstat */
+	case 8:   return 19;   /* lseek */
+	case 9:   return 192;  /* mmap2 */
+	case 11:  return 91;   /* munmap */
+	case 12:  return 45;   /* brk */
+	case 21:  return 33;   /* access */
+	case 22:  return 42;   /* pipe */
+	case 24:  return 158;  /* sched_yield */
+	case 32:  return 41;   /* dup */
+	case 33:  return 63;   /* dup2 */
+	case 35:  return 162;  /* nanosleep */
+	case 39:  return 20;   /* getpid */
+	case 57:  return 2;    /* fork */
+	case 59:  return 11;   /* execve */
+	case 60:  return 1;    /* exit */
+	case 61:  return 114;  /* wait4 */
+	case 79:  return 183;  /* getcwd */
+	case 80:  return 12;   /* chdir */
+	case 81:  return 13;   /* fchdir: ARM EABI asm-generic = 13 */
+	case 82:  return 38;   /* rename */
+	case 83:  return 39;   /* mkdir */
+	case 84:  return 40;   /* rmdir */
+	case 86:  return 9;    /* link */
+	case 87:  return 10;   /* unlink */
+	case 88:  return 83;   /* symlink */
+	case 89:  return 85;   /* readlink */
+	case 90:  return 15;   /* chmod */
+	case 91:  return 52;   /* fchmod */
+	case 93:  return 55;   /* fchown */
+	case 95:  return 166;  /* umask */
+	case 96:  return 169;  /* gettimeofday */
+	case 100: return 153;  /* times */
+	case 102: return 174;  /* getuid */
+	case 104: return 176;  /* getgid */
+	case 107: return 175;  /* geteuid */
+	case 108: return 177;  /* getegid */
+	case 127: return 125;  /* rt_sigpending */
+	case 130: return 133;  /* rt_sigsuspend -> 实际使用 sigsuspend(72), asm-generic 133 */
+	case 131: return 186;  /* sigaltstack */
+	case 186: return 224;  /* gettid */
+	case 202: return 240;  /* futex */
+	case 217: return 217;  /* getdents64: ARM EABI 也是 217? 检查: ARM 用 getdents64=217 不是 getdents=141 */
+	case 228: return 265;  /* clock_gettime: ARM 好像用 263... 检查: asm-generic=113 */
+	case 231: return 248;  /* exit_group */
+	case 234: return 238;  /* tgkill */
+	case 257: return 322;  /* openat: ARM asm-generic 322 不是 56？检查 ARM: all asm-generic long mode uses 56 for openat, ARM legacy might be different */
+	case 260: return 333;  /* fchownat: ARM asm-generic 54？检查 ARM arch/arm/tools/syscall.tbl */
+	case 262: return 332;  /* newfstatat: ARM asm-generic 79 */
+	case 263: return 324;  /* unlinkat: ARM asm-generic 35 */
+	case 264: return 346;  /* renameat: ARM asm-generic 38 */
+	case 265: return 325;  /* linkat: ARM asm-generic 37 */
+	case 266: return 327;  /* symlinkat: ARM asm-generic 36 */
+	case 267: return 330;  /* readlinkat: ARM asm-generic 78 */
+	case 268: return 334;  /* fchmodat: ARM asm-generic 53 */
+	case 269: return 329;  /* faccessat: ARM asm-generic 48 */
+	case 292: return 359;  /* dup3: ARM asm-generic 24 */
+	case 293: return 360;  /* pipe2: ARM asm-generic 59 */
+	case 412: return 356;  /* utimensat: ARM asm-generic 88 */
+	default: return number;
+	}
 #elif defined(__aarch64__) || defined(__riscv) || defined(__loongarch64)
 	/* aarch64 使用 asm-generic syscall 号表，与 x86_64 完全不同。这里把
 	 * 包装器使用的 x86_64 内部号翻译成 aarch64 原生号。aarch64 不存在

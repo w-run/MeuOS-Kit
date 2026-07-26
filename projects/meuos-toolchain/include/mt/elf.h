@@ -26,6 +26,7 @@
 #define MT_ET_EXEC 2
 #define MT_ET_DYN 3
 
+#define MT_EM_ARM 40
 #define MT_EM_386 3
 #define MT_EM_X86_64 62
 #define MT_EM_AARCH64 183

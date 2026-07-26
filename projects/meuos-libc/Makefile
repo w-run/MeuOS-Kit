@@ -50,6 +50,10 @@ else ifeq ($(ARCH),loongarch64)
 # loongarch64 的 .S 须经交叉 gcc 汇编（syscall 0/ll.sc/dbar 等指令 mcc 不内联）。
 CC := $(MCC) --target=loongarch64
 AS := loongarch64-linux-gnu-gcc
+else ifeq ($(ARCH),armv7)
+# armv7 的 .S 须经交叉 gcc 汇编（svc/ldrex/strex/mcr 等指令 mcc 不内联）。
+CC := $(MCC) --target=armv7
+AS := arm-linux-gnu-gcc -march=armv7-a -mfloat-abi=hard -mfpu=vfpv3-d16
 else
 CC := $(HOST_CC)
 AS := $(HOST_CC)
@@ -99,6 +103,14 @@ ARCH_RT_OBJS := $(BUILD)/arch/$(ARCH)/tls.o \
                 $(BUILD)/arch/$(ARCH)/setjmp.o \
                 $(BUILD)/arch/$(ARCH)/sigreturn.o \
                 $(BUILD)/arch/$(ARCH)/thread_clone.o
+else ifeq ($(ARCH),armv7)
+# armv7 使用协处理器 c13 设置线程指针（mcr p15,0,rd,c13,c0,3）。
+# 含 set_tls.S 用于主线程 TP 设置。
+ARCH_RT_OBJS := $(BUILD)/arch/$(ARCH)/tls.o \
+                $(BUILD)/arch/$(ARCH)/setjmp.o \
+                $(BUILD)/arch/$(ARCH)/sigreturn.o \
+                $(BUILD)/arch/$(ARCH)/thread_clone.o \
+                $(BUILD)/arch/$(ARCH)/set_tls.o
 else
 # i386 and other archs: __tls_get_addr is assembly (no inline asm in mcc)
 ARCH_RT_OBJS := $(BUILD)/arch/$(ARCH)/tls.o \
@@ -378,13 +390,21 @@ check-loongarch64-bootstrap:
 	fi
 	ASCC=loongarch64-linux-gnu-gcc sh test/loongarch64-bootstrap.sh
 
+# armv7-bootstrap.sh 跨编译自检 ELF32/ARM 头；MEUOS_ARMV7_RUN=1 且
+# MEUOS_ARMV7_QEMU=<path> 时附加 qemu-user 运行时 gate。
+check-armv7-bootstrap:
+	@if [ ! -f build/armv7/libc-meuos.a ] || [ ! -f build/armv7/libatomic-meuos.a ] || [ ! -f build/armv7/crt1.o ]; then \
+		$(MAKE) ARCH=armv7; \
+	fi
+	ASCC="arm-linux-gnu-gcc -march=armv7-a -mfloat-abi=hard -mfpu=vfpv3-d16" sh test/armv7-bootstrap.sh
+
 # 一步式：build + install + 全套检查（包括 atomic/tls/threads/stdio/process）
 # 默认 host 是 x86_64，跨架构检查通过 check-aarch64-bootstrap / check-i386-bootstrap。
-check-all: check check-aarch64-bootstrap check-i386-bootstrap check-riscv64-bootstrap check-loongarch64-bootstrap
+check-all: check check-aarch64-bootstrap check-i386-bootstrap check-riscv64-bootstrap check-loongarch64-bootstrap check-armv7-bootstrap
 
 clean:
 	rm -rf build
 	@$(MAKE) -C src/compat clean 2>/dev/null || true
 
 .PHONY: all compat install check check-native-linker check-mcc check-i386-bootstrap \
-        check-aarch64-bootstrap check-riscv64-bootstrap check-loongarch64-bootstrap check-all clean
+        check-aarch64-bootstrap check-riscv64-bootstrap check-loongarch64-bootstrap check-armv7-bootstrap check-all clean
