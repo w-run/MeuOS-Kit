@@ -1,0 +1,23 @@
+name: mcc
+version: 1.0
+default: mcc
+
+variables:
+  MCCC: /workspace/MeuOS-Kit/projects/mcc
+  MSYS: /workspace/MeuOS-Kit/projects/meuos-sysroot
+  BLD: /workspace/MeuOS-Kit/projects/mcc/build
+  CC: cc
+  CFLAGS: -O2 -g -std=gnu11 -I/workspace/MeuOS-Kit/projects/mcc/include -I/workspace/MeuOS-Kit/projects/meuos-sysroot/include -Wno-all
+  AR: ar
+
+targets:
+  mcc:
+    phony: true
+    commands:
+      - cd ${MCCC} && find src -name '*.c' | while read f; do dir=$(dirname "${BLD}/$f"); mkdir -p "$dir"; $CC $CFLAGS -DMCC_DEFAULT_TARGET=\"x86_64\" -c "$f" -o "${BLD}/${f%.c}.o"; done
+      - cd ${BLD} && find src/target src/ir src/opt src/abi src/emit src/util -name '*.o' | sort | xargs $AR rcs libmcc.a
+      - cd ${MCCC} && FE_OBJS=$(find ${BLD}/src/driver ${BLD}/src/lex ${BLD}/src/parse ${BLD}/src/sema ${BLD}/src/irgen -name '*.o' | sort | tr '\n' ' '); $CC $CFLAGS -o mcc $FE_OBJS ${BLD}/libmcc.a -L${MSYS}/build -lmsys
+
+  clean:
+    commands:
+      - rm -rf ${BLD} ${MCCC}/mcc
