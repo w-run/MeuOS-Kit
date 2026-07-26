@@ -22,27 +22,27 @@
  * links identically across architectures. */
 
 .globl atomic_thread_fence
-.type atomic_thread_fence,@function
+.type atomic_thread_fence,%function
 atomic_thread_fence:
 	dmb ish
 	bx lr
 
 .globl atomic_signal_fence
-.type atomic_signal_fence,@function
+.type atomic_signal_fence,%function
 atomic_signal_fence:
 	bx lr
 
 /* ===== 1-byte (byte) ===== */
 
 .globl __atomic_load_1
-.type __atomic_load_1,@function
+.type __atomic_load_1,%function
 __atomic_load_1:
 	ldrb r0, [r0]
 	dmb ish
 	bx lr
 
 .globl __atomic_store_1
-.type __atomic_store_1,@function
+.type __atomic_store_1,%function
 __atomic_store_1:
 	dmb ish
 	strb r1, [r0]
@@ -50,7 +50,7 @@ __atomic_store_1:
 	bx lr
 
 .globl __atomic_exchange_1
-.type __atomic_exchange_1,@function
+.type __atomic_exchange_1,%function
 __atomic_exchange_1:
 	dmb ish
 1:	ldrexb r2, [r0]
@@ -62,7 +62,7 @@ __atomic_exchange_1:
 	bx lr
 
 .globl __atomic_fetch_add_1
-.type __atomic_fetch_add_1,@function
+.type __atomic_fetch_add_1,%function
 __atomic_fetch_add_1:
 	dmb ish
 1:	ldrexb r2, [r0]
@@ -75,7 +75,7 @@ __atomic_fetch_add_1:
 	bx lr
 
 .globl __atomic_fetch_sub_1
-.type __atomic_fetch_sub_1,@function
+.type __atomic_fetch_sub_1,%function
 __atomic_fetch_sub_1:
 	dmb ish
 1:	ldrexb r2, [r0]
@@ -88,7 +88,7 @@ __atomic_fetch_sub_1:
 	bx lr
 
 .globl __atomic_fetch_and_1
-.type __atomic_fetch_and_1,@function
+.type __atomic_fetch_and_1,%function
 __atomic_fetch_and_1:
 	dmb ish
 1:	ldrexb r2, [r0]
@@ -101,7 +101,7 @@ __atomic_fetch_and_1:
 	bx lr
 
 .globl __atomic_fetch_or_1
-.type __atomic_fetch_or_1,@function
+.type __atomic_fetch_or_1,%function
 __atomic_fetch_or_1:
 	dmb ish
 1:	ldrexb r2, [r0]
@@ -114,7 +114,7 @@ __atomic_fetch_or_1:
 	bx lr
 
 .globl __atomic_fetch_xor_1
-.type __atomic_fetch_xor_1,@function
+.type __atomic_fetch_xor_1,%function
 __atomic_fetch_xor_1:
 	dmb ish
 1:	ldrexb r2, [r0]
@@ -127,7 +127,7 @@ __atomic_fetch_xor_1:
 	bx lr
 
 .globl __atomic_compare_exchange_1
-.type __atomic_compare_exchange_1,@function
+.type __atomic_compare_exchange_1,%function
 __atomic_compare_exchange_1:
 	ldrb r3, [r1]
 	dmb ish
@@ -148,14 +148,14 @@ __atomic_compare_exchange_1:
 /* ===== 2-byte (halfword) ===== */
 
 .globl __atomic_load_2
-.type __atomic_load_2,@function
+.type __atomic_load_2,%function
 __atomic_load_2:
 	ldrh r0, [r0]
 	dmb ish
 	bx lr
 
 .globl __atomic_store_2
-.type __atomic_store_2,@function
+.type __atomic_store_2,%function
 __atomic_store_2:
 	dmb ish
 	strh r1, [r0]
@@ -163,7 +163,7 @@ __atomic_store_2:
 	bx lr
 
 .globl __atomic_exchange_2
-.type __atomic_exchange_2,@function
+.type __atomic_exchange_2,%function
 __atomic_exchange_2:
 	dmb ish
 1:	ldrexh r2, [r0]
@@ -175,7 +175,7 @@ __atomic_exchange_2:
 	bx lr
 
 .globl __atomic_fetch_add_2
-.type __atomic_fetch_add_2,@function
+.type __atomic_fetch_add_2,%function
 __atomic_fetch_add_2:
 	dmb ish
 1:	ldrexh r2, [r0]
@@ -188,7 +188,7 @@ __atomic_fetch_add_2:
 	bx lr
 
 .globl __atomic_fetch_sub_2
-.type __atomic_fetch_sub_2,@function
+.type __atomic_fetch_sub_2,%function
 __atomic_fetch_sub_2:
 	dmb ish
 1:	ldrexh r2, [r0]
@@ -201,7 +201,7 @@ __atomic_fetch_sub_2:
 	bx lr
 
 .globl __atomic_fetch_and_2
-.type __atomic_fetch_and_2,@function
+.type __atomic_fetch_and_2,%function
 __atomic_fetch_and_2:
 	dmb ish
 1:	ldrexh r2, [r0]
@@ -214,7 +214,7 @@ __atomic_fetch_and_2:
 	bx lr
 
 .globl __atomic_fetch_or_2
-.type __atomic_fetch_or_2,@function
+.type __atomic_fetch_or_2,%function
 __atomic_fetch_or_2:
 	dmb ish
 1:	ldrexh r2, [r0]
@@ -227,7 +227,7 @@ __atomic_fetch_or_2:
 	bx lr
 
 .globl __atomic_fetch_xor_2
-.type __atomic_fetch_xor_2,@function
+.type __atomic_fetch_xor_2,%function
 __atomic_fetch_xor_2:
 	dmb ish
 1:	ldrexh r2, [r0]
@@ -240,7 +240,7 @@ __atomic_fetch_xor_2:
 	bx lr
 
 .globl __atomic_compare_exchange_2
-.type __atomic_compare_exchange_2,@function
+.type __atomic_compare_exchange_2,%function
 __atomic_compare_exchange_2:
 	ldrh r3, [r1]
 	dmb ish
@@ -261,14 +261,14 @@ __atomic_compare_exchange_2:
 /* ===== 4-byte (word) ===== */
 
 .globl __atomic_load_4
-.type __atomic_load_4,@function
+.type __atomic_load_4,%function
 __atomic_load_4:
 	ldr r0, [r0]
 	dmb ish
 	bx lr
 
 .globl __atomic_store_4
-.type __atomic_store_4,@function
+.type __atomic_store_4,%function
 __atomic_store_4:
 	dmb ish
 	str r1, [r0]
@@ -276,7 +276,7 @@ __atomic_store_4:
 	bx lr
 
 .globl __atomic_exchange_4
-.type __atomic_exchange_4,@function
+.type __atomic_exchange_4,%function
 __atomic_exchange_4:
 	dmb ish
 1:	ldrex r2, [r0]
@@ -288,7 +288,7 @@ __atomic_exchange_4:
 	bx lr
 
 .globl __atomic_fetch_add_4
-.type __atomic_fetch_add_4,@function
+.type __atomic_fetch_add_4,%function
 __atomic_fetch_add_4:
 	dmb ish
 1:	ldrex r2, [r0]
@@ -301,7 +301,7 @@ __atomic_fetch_add_4:
 	bx lr
 
 .globl __atomic_fetch_sub_4
-.type __atomic_fetch_sub_4,@function
+.type __atomic_fetch_sub_4,%function
 __atomic_fetch_sub_4:
 	dmb ish
 1:	ldrex r2, [r0]
@@ -314,7 +314,7 @@ __atomic_fetch_sub_4:
 	bx lr
 
 .globl __atomic_fetch_and_4
-.type __atomic_fetch_and_4,@function
+.type __atomic_fetch_and_4,%function
 __atomic_fetch_and_4:
 	dmb ish
 1:	ldrex r2, [r0]
@@ -327,7 +327,7 @@ __atomic_fetch_and_4:
 	bx lr
 
 .globl __atomic_fetch_or_4
-.type __atomic_fetch_or_4,@function
+.type __atomic_fetch_or_4,%function
 __atomic_fetch_or_4:
 	dmb ish
 1:	ldrex r2, [r0]
@@ -340,7 +340,7 @@ __atomic_fetch_or_4:
 	bx lr
 
 .globl __atomic_fetch_xor_4
-.type __atomic_fetch_xor_4,@function
+.type __atomic_fetch_xor_4,%function
 __atomic_fetch_xor_4:
 	dmb ish
 1:	ldrex r2, [r0]
@@ -353,7 +353,7 @@ __atomic_fetch_xor_4:
 	bx lr
 
 .globl __atomic_compare_exchange_4
-.type __atomic_compare_exchange_4,@function
+.type __atomic_compare_exchange_4,%function
 __atomic_compare_exchange_4:
 	ldr r3, [r1]
 	dmb ish
@@ -371,4 +371,4 @@ __atomic_compare_exchange_4:
 	mov r0, #0
 	bx lr
 
-.section .note.GNU-stack,"",@progbits
+.section .note.GNU-stack,"",%progbits

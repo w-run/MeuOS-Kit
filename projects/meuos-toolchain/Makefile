@@ -26,7 +26,7 @@ LIBDISASM_SRCS := $(sort $(wildcard src/libdisasm/*.c))
 LIBDISASM_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(LIBDISASM_SRCS))
 LIBDISASM_LIB := $(BUILD)/lib/libdisasm.a
 
-TARGET_SRCS := $(sort $(wildcard src/target/*.c) $(wildcard src/target/x86_64/*.c) $(wildcard src/target/i386/*.c) $(wildcard src/target/aarch64/*.c) $(wildcard src/target/riscv64/*.c) $(wildcard src/target/loongarch64/*.c))
+TARGET_SRCS := $(sort $(wildcard src/target/*.c) $(wildcard src/target/x86_64/*.c) $(wildcard src/target/i386/*.c) $(wildcard src/target/aarch64/*.c) $(wildcard src/target/riscv64/*.c) $(wildcard src/target/loongarch64/*.c) $(wildcard src/target/armv7/*.c))
 TARGET_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(TARGET_SRCS))
 
 AR_SRCS := $(sort $(wildcard src/ar/*.c))

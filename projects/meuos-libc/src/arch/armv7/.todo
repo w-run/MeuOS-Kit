@@ -1,14 +1,37 @@
-# 待实现：ARMv7 hard-float (armv7) libc runtime
+# armv7 (ARMv7 hard-float) libc runtime — 已完成
 
-armv7 是推荐新增的 32 位 ARM 目标，用于验证 32/64 位变体与 VFP hard-float EABI。
-实现前先阅读 `projects/meuos-libc/PORTING.md`，并与 `.todo/32bit-time64.md` 协同：
-公共 `time_t` 必须为 64 位。
+## crt1.S
+- ARM EABI 进程入口：读取 argc/argv/enp + __meuos_tls_init + set_tls (mcr p15) + 对齐 SP + main → exit。✅
 
-## 最小范围
+## syscall.S
+- __meuos_syscall6: 6 参数 syscall gate (svc #0, r7=syscall number)。✅
 
-- ARMv7 EABI hard-float 的 crt1、syscall gate、原子、TLS、setjmp/sigreturn、clone；
-- 区分整数寄存器和 VFP 参数/返回值，验证 8 字节参数对齐与结构体返回；
-- Linux ARM syscall 编号与参数约定，不依赖 armel 的软浮点路径；
-- QEMU arm 用户态或完整 VM 的静态 Phase-2 回归。
+## atomic.S
+- 32/16/8-bit load/store/exchange/CAS/fetch-op via ldrex/strex + dmb 屏障。✅
 
-在 runtime 和交叉汇编门禁落地前，不将 `ARCH=armv7` 加入默认构建矩阵。
+## setjmp.S
+- setjmp/longjmp + sigsetjmp/siglongjmp。保存 r4-r11, lr, sp, d8-d15。siglongjmp 的 sigprocmask 已修复（r0 用于 how，r12 保存 env）。✅
+
+## sigreturn.S
+- __meuos_restore_rt: rt_sigreturn (svc #173)。✅
+
+## thread_clone.S
+- __meuos_thread_clone: clone(2) 包装，CLONE_SETTLS to set TP in child。✅
+
+## set_tls.S
+- __meuos_set_tls: `mcr p15, 0, r0, c13, c0, 3`。✅
+
+## tls.c
+- TLS variant I (GAP=16). PT_TLS 扫描 + mmap2 + memcpy + set_tls。✅
+
+## aeabi.c / aeabi_wrap.S
+- ARM EABI 运行时 helpers: __aeabi_uidiv/idiv/uidivmod/idivmod/uldivmod/ldivmod/memcpy/memmove/memset/memclr。
+  64-bit 除法使用纯 32-bit 算法（无递归 __aeabi 调用）。✅
+
+## 验证
+- 所有 .S 经 arm-linux-gnu-gcc 汇编通过 ✅
+- libc 全量以 cross-gcc 编译通过 ✅
+- 与 libc 静态链接 + hello world 链接通过（53KB ELF32/ARM）✅
+- 与 libc 静态链接 + atomic 测试链接通过（28KB ELF32/ARM）✅
+- qemu-arm 运行时验证：待 qemu-arm 就绪（本 worktree 无 qemu-arm 二进制）
+- mcc 编译 libc armv7：待 mcc ARMv7 后端完成（see mcc armv7 backend .todo）

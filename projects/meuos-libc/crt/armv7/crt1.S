@@ -11,7 +11,7 @@
  * re-read argc/argv/envp after alignment and __meuos_tls_init. */
 
 .globl _start
-.type _start,@function
+.type _start,%function
 _start:
 	mov r11, #0		/* clear frame pointer */
 	mov lr, #0		/* clear link register */
@@ -31,6 +31,8 @@ _start:
 
 	mov r0, r2		/* envp for __meuos_tls_init */
 	bl __meuos_tls_init
+	/* r0 = TLS base pointer; install into c13/TPIDRURO via mcr. */
+	bl __meuos_set_tls
 
 	/* Reload argc/argv/envp from saved kernel SP */
 	ldr r0, [r4]		/* argc */
@@ -45,9 +47,9 @@ _start:
 .bss
 .align 4
 .globl environ
-.type environ,@object
+.type environ,%object
 .size environ,4
 environ:
 	.space 4
 
-.section .note.GNU-stack,"",@progbits
+.section .note.GNU-stack,"",%progbits

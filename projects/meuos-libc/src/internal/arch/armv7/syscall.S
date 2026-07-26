@@ -11,7 +11,7 @@
  * Target:  r7=num, r0=a1, r1=a2, r2=a3, r3=a4, r4=a5, r5=a6 */
 
 .globl __meuos_syscall6
-.type __meuos_syscall6,@function
+.type __meuos_syscall6,%function
 __meuos_syscall6:
 	push {r4, r5, r7, lr}
 	/* After push +16, stack args at [sp+16],[sp+20],[sp+24] */
@@ -42,4 +42,4 @@ __meuos_syscall6:
 	pop {r4, r5, r7, lr}
 	bx lr
 
-.section .note.GNU-stack,"",@progbits
+.section .note.GNU-stack,"",%progbits

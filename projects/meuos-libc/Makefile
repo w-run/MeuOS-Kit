@@ -51,8 +51,8 @@ else ifeq ($(ARCH),loongarch64)
 CC := $(MCC) --target=loongarch64
 AS := loongarch64-linux-gnu-gcc
 else ifeq ($(ARCH),armv7)
-# armv7 的 .S 须经交叉 gcc 汇编（svc/ldrex/strex/mcr 等指令 mcc 不内联）。
-CC := $(MCC) --target=armv7
+# armv7 暂时使用交叉 gcc 编译，等 mcc armv7 后端完成后切回 mcc。
+CC := arm-linux-gnu-gcc -march=armv7-a -mfloat-abi=hard -mfpu=vfpv3-d16
 AS := arm-linux-gnu-gcc -march=armv7-a -mfloat-abi=hard -mfpu=vfpv3-d16
 else
 CC := $(HOST_CC)
@@ -71,8 +71,8 @@ ATOMIC_OBJ := $(BUILD)/arch/$(ARCH)/atomic.o
 ATOMIC_LIB := $(BUILD)/libatomic-meuos.a
 
 # Per-arch runtime helpers (TLS, setjmp, sigreturn, thread clone).
-# load_gs.S and soft_arith.c are i386-only; set_tls.S is aarch64-only
-# (variant I TLS 用 msr tpidr_el0 直接设置线程指针，没有 arch_prctl 等价 syscall)。
+# load_gs.S and soft_arith.c are i386-only; set_tls.S is aarch64/armv7-only
+# (variant I TLS 用 msr tpidr_el0 / mcr p15 直接设置线程指针)。
 ifeq ($(ARCH),x86_64)
 ARCH_RT_OBJS := $(BUILD)/arch/$(ARCH)/tls.o \
                 $(BUILD)/arch/$(ARCH)/setjmp.o \
@@ -105,12 +105,15 @@ ARCH_RT_OBJS := $(BUILD)/arch/$(ARCH)/tls.o \
                 $(BUILD)/arch/$(ARCH)/thread_clone.o
 else ifeq ($(ARCH),armv7)
 # armv7 使用协处理器 c13 设置线程指针（mcr p15,0,rd,c13,c0,3）。
-# 含 set_tls.S 用于主线程 TP 设置。
+# 含 set_tls.S 用于主线程 TP 设置；aeabi.c 提供 __aeabi_* EABI 运行时
+# helper（64/32 位除法、memcpy 等）。
 ARCH_RT_OBJS := $(BUILD)/arch/$(ARCH)/tls.o \
                 $(BUILD)/arch/$(ARCH)/setjmp.o \
                 $(BUILD)/arch/$(ARCH)/sigreturn.o \
                 $(BUILD)/arch/$(ARCH)/thread_clone.o \
-                $(BUILD)/arch/$(ARCH)/set_tls.o
+                $(BUILD)/arch/$(ARCH)/set_tls.o \
+                $(BUILD)/arch/$(ARCH)/aeabi.o \
+                $(BUILD)/arch/$(ARCH)/aeabi_wrap.o
 else
 # i386 and other archs: __tls_get_addr is assembly (no inline asm in mcc)
 ARCH_RT_OBJS := $(BUILD)/arch/$(ARCH)/tls.o \
