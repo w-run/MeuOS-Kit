@@ -22,5 +22,7 @@
 - [x] qemu-system VM 中运行 mcc 产出的 loongarch64 静态二进制
 
 ### 已知限制
-- bare_tls（TLS+thread）在 qemu-user v7.2.0 上 segfault，不影响实际功能
+- TLS (_Thread_local) 在 mt/ld 链接的二进制中不可用：mt/ld loongarch64 TLS LE 重定位把 `.tdata` 初值写坏
 - errno 多线程隔离暂缺（BFD 2.41 TLS workaround）
+- qemu-loongarch64 已从 QEMU 10.1.0 源码自建（`env/build/build-qemu-loongarch64-user.sh`）
+- 非 TLS 功能全部通过：hello/atomic/setjmp/phase2_counter/malloc_threads

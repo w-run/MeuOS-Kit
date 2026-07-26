@@ -11,6 +11,11 @@ build/
 # Built compiler/runtime binaries (not in build/ subdirs)
 .codebuddy/
 config.h
+# QEMU configure generates temporary config-test files
+config-temp/
+config.log
+# Core dumps from test binaries under QEMU
+*.core
 dl/
 # Do NOT edit or commit. MeuOS Kit is source-level integrated, not vendored.
 .DS_Store

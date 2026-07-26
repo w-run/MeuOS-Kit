@@ -202,9 +202,12 @@ if [ "${MEUOS_LOONGARCH64_RUN:-0}" = 1 ]; then
 	# 4) phase2
 	out=$("$qemu" "$work/phase2" 2>&1) || { echo "phase2 failed: $out" >&2; exit 1; }
 	[ "$out" = "counter = 2000" ] || { echo "phase2 wrong output: $out" >&2; exit 1; }
-	# 5) bare_tls — known limitation: qemu-user 7.2.0 loongarch64 TLS segfaults
+	# 5) bare_tls — known limitation: mt/ld loongarch64 TLS LE reloc corrupts .tdata
+	#    (verified: .o file has correct initializer 2a000000=42, but linked binary
+	#    has garbage 20c30000).  Note: also fails on QEMU 10.1.0 loongarch64 user-mode
+	#    self-built from source; root cause is mt/ld, not QEMU.
 	out=$("$qemu" "$work/bare-tls" 2>&1) || {
-		echo "bare-tls: SKIP (qemu-user 7.2 loongarch64 TLS limitation)" >&2
+		echo "bare-tls: SKIP (mt/ld loongarch64 TLS LE reloc bug)" >&2
 		true
 	}
 	# 6) malloc_threads

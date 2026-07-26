@@ -18,9 +18,10 @@
   - setjmp → "setjmp ok" exit=0
   - phase2_counter → "counter = 2000" exit=0（线程+原子）
   - malloc_threads → "PASS concurrent malloc" exit=0（线程+malloc）
-  - bare_tls → 已知 qemu-user 7.2.0 TLS segfault（与 riscv64 相同限制）
+  - bare_tls → 自建 QEMU 10.1.0 仍 segfault。mt/ld 的 loongarch64 TLS LE 处理有 bug：
+    `.tdata` 初值（`2a000000`=42）链接后变为垃圾（`20c30000`），需修复 mt/ld`
 
 ## 已知限制
-- bare_tls 在 qemu-user 7.2.0 上 segfault（qemu loongarch64 的 TLS 模拟问题）
+- mt/ld loongarch64 TLS LE 重定位 bug：`.tdata` 初始值被破坏，单线程 TLS 不可用
 - errno 使用非 TLS static int fallback（BFD 2.41 workaround），多线程 errno 不隔离
-- qemu-loongarch64-static 为 v7.2.0（多架构 release），升级到 v10.1.0 可能解决 bare_tls
+- 不影响非 TLS 功能：hello/atomic/setjmp/phase2/malloc_threads 全部通过
