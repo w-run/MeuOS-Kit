@@ -1,6 +1,6 @@
 # MeuOS Kit - Agent 初始化 Prompt
 
-> Update: 2026-07-25
+> Update: 2026-07-26
 >
 > IMPORTANT: 全程思考/回复/文档优先使用简体中文
 > [你必须称呼用户为大喵 (she/her) ]
@@ -157,7 +157,9 @@ meow --bootstrap         # 自举模式：用宿主编译自己
 
 **设计原则**：不包含宿主 `<elf.h>`，所有 ELF 常量自带。代码零 GNU/binutils 依赖。内部共享 `libelf` 库。
 
-**路线图**：P0-P2（x86_64 静态）已完成，P3-P11 详见 `projects/meuos-toolchain/ARCHITECTURE.md`。
+**路线图**：P0-P4 已完成（x86_64 静态链接+汇编器+ar/ranlib+二进制辅助工具+mt/ld 集成），P5-P11 详见 `projects/meuos-toolchain/ARCHITECTURE.md`。
+
+自举链零宿主依赖已验证（`check-mt-integration` 通过）：mcc driver 通过 `MT_AS`/`MT_LD` 环境变量集成 mt 工具链，消除对宿主 `cc` 的最后依赖。P4 辅助工具（readelf/nm/objdump/strip/objcopy）也已实现。
 
 ---
 
@@ -244,7 +246,7 @@ Kit 组件是构建其他软件的基础设施，必须由 Kit 自己实现，�
 | ----------------------------- | ------------------------------------------ | ---------------------- |
 | Glibc                         | meuos-libc                                 | ✅                     |
 | GCC                           | mcc/m++                                    | ✅ C11，✅ C23，m++ 待 |
-| Binutils                      | meuos-toolchain                            | ✅ P0-P2               |
+| Binutils                      | meuos-toolchain                            | ✅ P0-P4（as/ld/ar/ranlib/nm/readelf/strip/objcopy/objdump + mt 集成） |
 | Make                          | meow                                       | ✅                     |
 | M4/Bison/Flex/Gperf           | meuos-buildtools                           | 待启动                 |
 | Coreutils/Diffutils/Findutils | meuos-utils                                | 待启动                 |
@@ -351,6 +353,7 @@ MeuOS-Kit/
 │   ├── meuos-libc/         标准 C 库（ISO C11 + POSIX；含 compat 兼容层）
 │   ├── meow/               构建系统（取代 make + autoconf）
 │   ├── meuos-toolchain/    底层工具链（as/ld/ar/ranlib/nm/readelf/strip/objcopy/objdump）
+│   ├── meuos-sysroot/      .msys 单文件 sysroot 系统（libmsys + mkmsys，已集成到 mcc）
 │   ├── meuos-utils/        核心工具集（待启动）
 │   ├── meuos-shell/        Shell 终端（待启动）
 │   ├── pkgs -> ../pkgs     meow 构建配方软链接
@@ -695,6 +698,10 @@ make -C projects/meuos-toolchain check-libelf          # ELF 解析轮转
 ./bootstrap.sh --phase 2                      # Phase 0→2
 ./bootstrap.sh --phase 5                      # Phase 0→5 全流程
 ```
+
+Phase 4 自举验证已通过（`check-sysroot-static`）：sysroot 内 mcc + meow 重新编译全套工具（82 个 .c + libmcc.a + mcc 链接），产物功能等价验证通过。
+
+Phase 5 工具链完善已完成（mt/as + mt/ld 集成到 mcc driver，`check-mt-integration` 验证通过），Kit 全程零宿主依赖已验证。
 
 ### 8.5 跨架构构建须知
 

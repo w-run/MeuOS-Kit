@@ -194,7 +194,7 @@ autotools/cmake/meson). Key Makefile mechanics:
 
 ## 7. Phase Status
 
-See `../../STATE.md` for the canonical status. Quick reference:
+See `../../AGENTS.md` §3 for the canonical status. Quick reference:
 
 | Phase | Status | Gate |
 |-------|--------|------|
@@ -204,9 +204,12 @@ See `../../STATE.md` for the canonical status. Quick reference:
 | 1c - compound types | PASS | strlen + struct pass/return (small/large/nested) + union + global init, 9/9 exit 0 |
 | 1d - C11 features | PASS (mcc host gate) | `make check-c11`: 13 runtime tests |
 | 1e - C23 features | PASS (mcc host gate) | `make check-c23`: 14 runtime tests |
-| 2 - meuos-libc | not started | installed headers, crt objects, atomic runtime |
-| 3 - meow | blocked on 2 | `meow build dash` |
-| 4 - bootstrap | blocked on 3 | chroot self-rebuild |
+| 2 - meuos-libc | PASS (5 arch runtime) | `make -C projects/meuos-libc check` (x86_64 full; aarch64/riscv64/loongarch64/i386 bootstrap) |
+| 3 - meow | PASS | `meow build bzip2` (pure YAML); `make -C projects/meow check` |
+| 4 - bootstrap | PASS | `check-sysroot-static`: sysroot 内自重建 82 .c + libmcc.a + mcc 链接 |
+| 5 - toolchain | PASS | `check-mt-integration`: MT_AS/MT_LD 集成，零宿主 cc 依赖 |
+| 6 - buildtools | PENDING | meuos-buildtools (m4/bison/flex/gperf) 待启动 |
+| 7 - userspace | PENDING | meuos-utils/meuos-shell 待启动 |
 
 ## 8. Progressive Cleanup Notes
 

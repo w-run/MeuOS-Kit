@@ -22,8 +22,8 @@ objcopy  节区和格式复制
 ```
 
 当前已实现 `ar`、`ranlib`、`as`、`ld`、`nm`、`readelf`、`objdump`、`strip`、`objcopy`
-和内部 `libelf`、`libdisasm`。P3（mcc driver 集成 MT_AS/MT_LD/MT_AR）与 P4（二进制
-辅助工具）已完成。
+和内部 `libelf`、`libdisasm`。P3（mcc driver 集成 MT_AS/MT_LD）与 P4（二进制
+辅助工具：readelf/nm/objdump/strip/objcopy）已完成。
 
 ### 1.2 内部共享层
 
@@ -153,17 +153,21 @@ make -C projects/meuos-toolchain check-ld-x86_64
 - `-L`/`-l`/`-l:`/`--sysroot` 库搜索路径已支持；
 - 后续：P3-P11（见下文）。
 
-### P3：mcc driver 集成
+### P3：mcc driver 集成（已完成）
 
 > 消除 Kit 自举链的最后一个外部依赖（宿主 `cc` 做汇编/链接）。
 
 **依赖**：P0-P2　**规模**：S
 
-产物：mcc 通过 `MT_AS`/`MT_LD`/`MT_AR` 调用 mt 工具，不再经宿主 `cc`。
+产物：mcc 通过 `MT_AS`/`MT_LD` 调用 mt 工具，不再经宿主 `cc`。
+
+**状态**：已完成。`src/mcc/src/driver/host_toolchain.c` 实现 `use_meuos_toolchain()`，
+当环境变量 `MT_AS`/`MT_LD` 设置时自动路由汇编和链接到 mt 工具链。
+`check-mt-integration` 验证通过。`MT_AR` 未在 driver 中使用（ar 被构建系统直接调用）。
 
 验收：
 ```sh
-MT_AS=<mt>/bin/as MT_LD=<mt>/bin/ld MT_AR=<mt>/bin/ar \
+MT_AS=<mt>/bin/as MT_LD=<mt>/bin/ld \
     make -C projects/mcc check check-sysroot-static
 strace -f mcc --specs=meuos test.c -o test 2>&1 \
     | grep execve | grep -v '/mt/' | grep -E 'cc|as|ld'   # 应为空
@@ -171,11 +175,14 @@ strace -f mcc --specs=meuos test.c -o test 2>&1 \
 
 ---
 
-### P4：二进制辅助工具
+### P4：二进制辅助工具（已完成）
 
 > 构建真实软件包时 configure/make 会调用 nm/readelf/objdump/strip/objcopy。
 
 **依赖**：P0（libelf）　**规模**：M
+
+**状态**：已完成。9 个工具（as/ld/ar/ranlib/nm/readelf/objdump/strip/objcopy）全部实现，
+`make check` 全量通过。
 
 产物：`readelf`、`nm`、`objdump`、`strip`、`objcopy`，全部复用 libelf。
 

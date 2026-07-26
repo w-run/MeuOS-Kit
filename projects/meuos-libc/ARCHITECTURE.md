@@ -11,8 +11,9 @@
 **aarch64** 已完成 libc runtime（crt1 + syscall gate + atomic + setjmp + sigreturn +
 thread_clone + set_tls + tls.c），`test/aarch64-bootstrap.sh` 提供跨编译自检 +
 qemu-aarch64-static 运行时 gate（hello/atomic/phase2_counter=2000/bare_tls 端到端通过）。
-loongarch64、riscv64 的 libc runtime 仍在移植路线中。目标是支撑 mcc 与 meow 的
-最小自举。
+**riscv64、loongarch64** 的 libc runtime 已落地代码（crt1/syscall/atomic/setjmp/sigreturn/
+thread_clone/tls.c 全部就绪），`make ARCH=riscv64`/`make ARCH=loongarch64` 已注册，
+qemu 运行时门禁待交叉工具链就绪。目标是支撑 mcc 与 meow 的最小自举。
 
 按 AGENTS.md §2.1，核心库只暴露标准符号；任何 GNU 扩展符号
 （`error_at_line`、`obstack`、`argp` 等）全部放入独立 `meuos-libc-compat`
@@ -32,13 +33,13 @@ meuos-libc/
 │   ├── x86_64/crt1.S
 │   ├── i386/crt1.S
 │   ├── aarch64/  (✅ 已完成：crt1.S / atomic.S / setjmp.S / sigreturn.S / thread_clone.S / set_tls.S / tls.c)
-│   ├── riscv64/  (待实现，见 .todo)
-│   └── loongarch64/ (待实现，见 .todo)
+│   ├── riscv64/  (✅ 已完成：crt1.S / atomic.S / setjmp.S / sigreturn.S / thread_clone.S / tls.c)
+│   └── loongarch64/ (✅ 已完成：crt1.S / atomic.S / setjmp.S / sigreturn.S / thread_clone.S / tls.c)
 ├── src/
 │   ├── arch/<arch>/          # arch 专属运行时（atomic / setjmp / sigreturn / thread_clone / tls）
 │   │   ├── x86_64/            #   完整实现
 │   │   ├── i386/              #   最小 bootstrap（含 load_gs / soft_arith）
-│   │   ├── aarch64/ (✅ 已完成)  riscv64/ loongarch64/  (待实现，见 .todo)
+│   │   ├── aarch64/ (✅ 已完成)  riscv64/ loongarch64/  (✅ 已完成：runtime 全部就绪，见 .todo 验证项)
 │   ├── internal/              # 内部头 + syscall gate
 │   │   ├── syscall.h          #   syscall 编号翻译 + __syscall6 声明
 │   │   └── arch/<arch>/syscall.S  # 每 arch 的 syscall 入口
