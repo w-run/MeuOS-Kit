@@ -1,8 +1,8 @@
 <!--
 priority: P1
-status: in_progress
+status: done
 kind: impl
-note: 用 meow 原生构建 mcc / meuos-libc / meow；Phase 4 自举链前置
+note: 已完成。三组件 meow.yaml 已验证通过，增量构建正常工作。
 start_ts: 2026-07-24
 -->
 

@@ -86,6 +86,7 @@
     -> 参考 reference/cxx-frontend/ 和 reference/aburi/
     -> C++23 标准逐步实现
 
-[ ] meow 取代 make
-    -> 本项目的 Makefile → meow.yaml 迁移
-    -> 增量构建、依赖 DAG 完善
+[x] meow 取代 make
+    -> 三组件 meow.yaml 已完成（mcc/meow/meuos-libc）
+    -> meow 源码：${VAR} 展开、增量路径检测已实现
+    -> 遗留：Makefile 暂保留作为 bootstrap 过渡路径
