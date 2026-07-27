@@ -26,8 +26,20 @@
 | mt/ld 集成 | ✅ | `msys_vfs_load` 回退加载库 |
 | `-L .msys` 搜索 | ✅ | ld 自动识别 .msys 扩展名 |
 | 内存版 archive 遍历 | ✅ | `mt_ar_foreach_mem()` |
-| `--compress=zstd` | 🟡 桩 | flags 已定义，代码待实现 |
-| `--incremental` 增量打包 | 🟡 桩 | CLI 已定义，逻辑待实现 |
+| `--compress=zstd` | ✅ | dlopen libzstd，~4:1 压缩比 |
+| `--incremental` 增量打包 | ✅ | @mt mtime 对比，不变文件复用旧数据 |
+| v2 格式 (Msys2) | ✅ | 64B header, 32B index entry, dir block |
+| v2 目录块 O(1) readdir | ✅ | 哈希截断 → 线性扫描 → O(dir_count) |
+| v2 完整元数据 (mode/uid/gid) | ✅ | file_type/mode/uid/gid in v2 index |
+| 符号链接 (SYMLINK) | ✅ | msys_readlink + msys_load 自动解析 |
+| SHA-256 内容校验 | ✅ | msys_verify / msys_verify_all |
+| 内容去重 (--dedup) | ✅ | SHA-256 → 相同数据共享 data_offset |
+| 分层/Overlay | ✅ | msys_overlay_open/add/search/readdir |
+| ed25519 签名 (--sign) | ✅ | 扩展块存储 + msys_verify_signature |
+| 流式消费 (--streaming) | ✅ | msys_stream_open/next/close |
+| 扩展块机制 | ✅ | type(4)+length(4)+data() after index |
+| xattr 扩展属性 | ✅ | @xattr/<name> 条目 + msys_getxattr |
+| msysctl 统一 CLI | ✅ | cat/ls/find/tree/extract/verify/stat |
 
 ## 设计原则
 
