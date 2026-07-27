@@ -33,11 +33,11 @@ MeuOS-Kit/
 
 | 组件 | 目标 | 当前状态 |
 |------|------|---------|
-| `meuos-libc` | ISO C11 + POSIX 标准实现；compat 层独立归档 | x86_64 完整；aarch64 端到端 qemu 验证（hello/atomic/setjmp/phase2/bare_tls/malloc_threads）；i386 整数 ABI bootstrap |
-| `mcc` / `m++` | C99+C11 完整，C23 稳定；后续 C++ 共享后端 | C11 核心 + 多架构 |
+| `meuos-libc` | ISO C11 + POSIX 标准实现；compat 层独立归档 | x86_64 完整；aarch64/arm qemu 端到端验证；i386 整数 ABI bootstrap；riscv64/loongarch64 代码落地 |
+| `mcc` / `m++` | C99+C11 完整，C23 稳定；后续 C++ 共享后端 | C11 核心 + 6 架构后端（x86_64/aarch64/riscv64/i386/loongarch64/arm） |
 | `meow` | 取代 make + autoconf | 原生 YAML + Makefile 兼容 |
-| `meuos-toolchain` | 取缔 binutils（as/ld/ar/ranlib/nm/objdump/readelf/strip/objcopy） | P0-P2 完成，P3-P11 规划中 |
-| `meuos-sysroot` | 单文件 sysroot 系统（.msys 格式，mcc/mt/meow 原生读取） | libmsys + mkmsys 完成，已集成到 mcc |
+| `meuos-toolchain` | 取缔 binutils（as/ld/ar/ranlib/nm/objdump/readelf/strip/objcopy） | P0-P4+P9-P11 完成（6 架构 as+ld + .msys Phase 3）；P6-P8 规划中 |
+| `meuos-sysroot` | 单文件 sysroot 系统（.msys 格式，mcc/mt/meow 原生读取） | libmsys + mkmsys 完成，已集成到 mcc/mt/ld |
 | `meuos-utils` | coreutils/diffutils/findutils 完整替代 | 待启动 |
 | `meuos-shell` (msh) | POSIX sh + 可选 bash 兼容 + zsh 插件/主题 | 待启动 |
 | `meuos-buildtools` | m4/bison/flex/gperf（取代 GNU 构建工具） | 待启动 |
@@ -77,7 +77,10 @@ setjmp / phase2 / bare_tls / malloc_threads 全部交叉编译成功）。设
 `MEUOS_AARCH64_RUN=1` 且 `MEUOS_AARCH64_QEMU` 指向 qemu-aarch64-static 时附加
 运行时 gate：hello 输出 `aarch64 MeuOS libc`、setjmp 输出 `setjmp ok`、
 phase2 输出 `counter = 2000`、bare_tls 输出 `tls main=5 child=9 errno=31/47`、
-atomic-test 与 malloc_threads exit 0。```
+atomic-test 与 malloc_threads exit 0。
+
+`make -C projects/meuos-libc ARCH=arm` 构建 ARM 32-bit libc，
+`test/arm-bootstrap.sh` 提供 qemu-arm 运行时验证（hello/atomic/setjmp/exit=42）。```
 
 ## 自举流程（AGENTS.md §3）
 
@@ -104,7 +107,7 @@ Phase 7  用户空间      构建 meuos-utils + meuos-shell
 
 ## 测试环境（env/）
 
-`env/bin/qvm` 管理基于 Alpine + 6.6.142 内核的 QEMU VM（x86_64/i386/aarch64），
+`env/bin/qvm` 管理基于 Alpine + 6.6.142 内核的 QEMU VM（x86_64/i386/aarch64/riscv64/loongarch64），
 9p 共享宿主目录到 guest `/mnt/host`：
 
 ```sh
@@ -112,6 +115,9 @@ env/bin/qvm boot aarch64       # 启动 arm64 VM
 env/bin/qvm console aarch64    # 进入控制台
 env/bin/qvm run aarch64 'uname -m; cat /mnt/host/<binary>'
 env/bin/qvm stop aarch64
+
+# ARM qemu-user 运行时
+env/qemu/qemu-arm-static ./a.out
 ```
 
 详见 [`env/README.md`](env/README.md)。

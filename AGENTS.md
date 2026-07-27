@@ -16,7 +16,13 @@
 > - 每次提交前必须跑对应组件的 `make check`，确保不引入回归。
 > - 提交信息格式：`<组件>: <描述>`，例如 `mcc: fix va_list alignment on i386`。
 >
-> **会话恢复**：因不可抗力会话可能中断。新会话先读对应子项目的 `ARCHITECTURE.md`（结构/模块/状态/路线图）与 `.todo/`（待实现项），再按需读本文件（项目规约）。各子项目独立维护状态，无全局 STATE 文件。
+> **会话恢复流程**（按顺序执行）：
+> 1. **IMA 知识库查询** — 搜索知识库中 MeuOS 相关文档（`search_knowledge`），查看是否有新的设计文档或决策记录。详见 §9。
+> 2. **子项目上下文加载** — 读目标子项目的 `ARCHITECTURE.md`（结构/模块/状态/路线图）与 `.todo/`（待实现项），了解项目当前进度。
+> 3. **AGENTS.md 规约确认** — 重新确认项目规约（§4 禁止事项、§7 任务编排策略）和当前状态速查（§10）。
+> 4. **环境检查** — 确认 `MEUOS_SYSROOT` 已设置，宿主编译器和交叉工具链可用。
+>
+> 各子项目独立维护状态，无全局 STATE 文件。.todo 和 ARCHITECTURE.md 是状态权威来源。
 
 **项目名称**：MeuOS Kit
 **项目定位**：MeuOS Next 的完整自举开发工具集。提供从零自举所需的全部工具：C/C++ 编译器、标准 C 库、构建系统、底层工具链、核心工具集与 Shell。
@@ -721,3 +727,171 @@ make -C projects/meuos-libc clean
 make -C projects/meow clean
 make -C projects/meuos-toolchain clean
 ```
+
+### 8.7 测试调试指引
+
+当 `make check` 或回归测试失败时，按以下路径排查：
+
+**编译错误 → 常见原因：**
+- **缺少 sysroot**：确认 `MEUOS_SYSROOT` 已设置，`$MEUOS_SYSROOT/usr/include` 存在
+- **mcc 自身编译失败**：先用 `make -C projects/mcc && make -C projects/mcc check` 确认基础门禁通过
+- **交叉工具链缺失**：检查对应架构的 gcc 交叉编译器是否存在（`aarch64-linux-gnu-gcc --version` 等）
+- **引用未实现符号**：检查 `.todo/` 排查是否依赖了未实现的功能
+
+**链接错误 → 常见原因：**
+- **-l\<lib\> 顺序错误**：mcc 的链接器要求库按依赖顺序排列（引用者在被引用者之前）
+- **MT_AS/MT_LD 集成问题**：用 `mcc -v` 查看实际调用的汇编/链接命令，确认走的是 mt 工具链
+- **crt1.o 找不到**：确认 `$MEUOS_SYSROOT/usr/lib/crt1.o` 存在
+
+**运行时崩溃 → 快速诊断：**
+- **单步调试**：mcc 生成的可执行文件可用宿主 `gdb` 调试（静态链接，含 `-g` 调试信息）
+- **qemu-user 运行时**：设置 `QEMU_LD_PREFIX=$MEUOS_SYSROOT` 避免动态库找不到
+- **strace**：`strace -o /tmp/trace.log ./a.out` 定位系统调用级问题
+- **回归比对**：用 gcc 编译相同源码，比对行为确认是 Kit 问题还是测试用例问题
+
+**测试框架问题：**
+- **跳过已知阻塞项**：某些测试依赖未实现特性（如 mcc i386 后端缺口会阻塞 libc i386 TLS 测试），检查 TODO 确认是否为已知阻塞
+- **golden bytes 不匹配**：汇编测试（check-as-sse-x86_64 等）的 .expect 文件需要对应架构编码规则更新
+
+---
+
+## 9. 知识库管理（IMA 集成）
+
+> 本项目集成了 IMA OpenAPI 技能（`ima-skill`），作为 MeuOS Kit 文档的统一外部知识库。
+> 知识库中存储设计文档、会议记录、架构决策、移植笔记等不适合纳入代码仓库的内容。
+
+### 9.1 分工边界
+
+| 内容类型                              | 存放位置                 | 说明                                                                 |
+| ------------------------------------- | ------------------------ | -------------------------------------------------------------------- |
+| 功能需求、功能规格说明                 | IMA 知识库                | 功能需求的完整描述，包括使用场景、行为约束、验收条件                   |
+| 设计方案、架构决策、技术选型           | IMA 知识库                | 设计讨论记录、备选方案对比、最终决策及其理由                           |
+| 项目规划、路线图、阶段计划             | IMA 知识库                | Phase 级/里程碑级的规划文档，进度追踪和调整记录                        |
+| 任务计划、实施步骤、分工安排           | IMA 知识库                | 具体功能的实现计划，包括任务拆解、依赖关系、验收标准                   |
+| 会议记录、讨论结论                     | IMA 知识库                | 同步/异步讨论的完整记录和结论                                          |
+| 组件规格、API 接口定义                 | 代码仓库 `ARCHITECTURE.md` | 随代码版本控制，代码变更时同步更新；IMA 中的设计决策落地后应更新此处    |
+| 项目规约、任务编排策略、禁止事项       | `AGENTS.md`（本文件）     | Agent 初始化的核心参考                                                |
+| 移植笔记、架构差异对照表               | IMA 知识库                | 多架构移植的实测经验记录                                               |
+| 社区参考资源笔记                       | IMA 知识库                | 对 `reference/` 目录中社区源码的阅读笔记和分析                         |
+| 构建/调试踩坑记录                      | IMA 知识库                | 现场调试的完整过程和解决方案                                           |
+| 工具链就绪情况、编译器缺口的追踪       | IMA 知识库                | 跨架构测试的现场状态记录                                               |
+
+**核心判据**：凡是**未来才实现**的需求/设计/规划 → IMA 知识库；凡是**已经实现**的规格和约束 → 代码仓库。IMA 中的设计决策落地后，应将最终确定的规格同步到 `ARCHITECTURE.md` 并标记知识库对应文档为「已实现」。
+
+### 9.2 在 MeuOS Kit 中使用 ima-skill
+
+`ima-skill` 提供两类操作：**笔记管理（notes）** 和 **知识库操作（knowledge-base）**。
+
+**常用场景与对应操作：**
+
+| 场景                               | skill 模块         | 关键步骤                                                                 |
+| ---------------------------------- | ------------------ | ------------------------------------------------------------------------ |
+| 搜索知识库中 MeuOS 相关文档           | knowledge-base     | `search_knowledge` → 指定 `query` 关键词                                 |
+| 查看某篇知识的原始内容               | knowledge-base     | `get_media_info` → 获取 `media_id` → 下载原文                             |
+| 浏览知识库内容列表                   | knowledge-base     | 先 `search_knowledge_base` 获取知识库 ID → 再 `get_knowledge_list`       |
+| 新建一篇设计笔记                     | notes              | `import_doc` → 指定 `content`（Markdown 格式）和 `title`                  |
+| 追加调试记录到已有笔记               | notes              | `search_note` 找到笔记 → `append_doc`                                     |
+| 上传架构差异对照表文件到知识库       | knowledge-base     | `preflight-check` → `create_media` → COS Upload → `add_knowledge`        |
+
+**新 agent 会话启动时的知识库查询：**
+
+```sh
+# 在会话恢复流程（§0）中执行以下查询获取最新文档：
+# 使用 ima-skill 的 knowledge-base 模块：
+# 1. search_knowledge_base(query: "MeuOS") 找到对应的知识库
+# 2. get_knowledge_list(knowledge_base_id) 浏览知识库内容
+# 3. 根据标题判断需要阅读哪些文档
+```
+
+### 9.3 配置要求
+
+使用 `ima-skill` 需要配置 IMA OpenAPI 凭证：
+
+```bash
+# 方式 A：配置文件（推荐）
+mkdir -p ~/.config/ima
+echo "your_client_id" > ~/.config/ima/client_id
+echo "your_api_key" > ~/.config/ima/api_key
+
+# 方式 B：环境变量
+export IMA_OPENAPI_CLIENTID="your_client_id"
+export IMA_OPENAPI_APIKEY="your_api_key"
+```
+
+凭证优先级：环境变量 → 配置文件。缺少凭证时 API 调用以 code `-100` 退出。
+
+### 9.4 文档贡献指南
+
+向知识库贡献 MeuOS 文档时遵循以下原则：
+
+1. **标题格式**：`MeuOS/<主题>` — 例如 `MeuOS/mcc-i386-缺口分析`
+2. **内容格式**：Markdown，保持简洁的技术笔记风格
+3. **分类**：按阶段/组件组织，便于搜索
+4. **关联代码**：提及代码文件时注明相对路径（如 `projects/mcc/src/driver/main.c`）
+5. **定期清理**：过时文档标记为「已归档」或在笔记标题中添加 `[存档]` 前缀
+6. **与仓库同步**：当某个设计决策最终被编码实现后，在知识库中标记对应记录为「已实现」
+
+---
+
+## 10. 项目状态速查
+
+### 10.1 已完成里程碑
+
+- **mcc C11 完整实现** — `_Atomic`/`_Generic`/`_Thread_local`/`_Alignas`/`_Alignof`/`_Noreturn`/`_Static_assert`/匿名结构体/复合字面量/变长数组
+- **mcc C23 特性** — `constexpr`/`typeof`/`typeof_unqual`/`nullptr_t`/`#embed`/`__has_include`/`[[]]` 属性/`#elifdef`/`#elifndef`/`#warning`/二进制字面量/数字分隔符/空初始化器/`auto` 类型推导/Labeled break/continue/`bool`/`true`/`false`/`_BitInt(N)`/`_Decimal32`/`64`/`128`/`static_assert` 无消息
+- **5 个后端全部内置** — x86_64 / aarch64 / riscv64 / i386 / loongarch64
+- **meuos-libc x86_64 完整运行验证** — stdio/stdlib/string/thread/signal/syscall/compat 全覆盖
+- **meuos-libc aarch64 qemu 端到端验证通过**
+- **meow 构建系统** — YAML 配方 / Makefile 兼容 / 并行构建（`-jN`）/ DAG 增量构建
+- **meuos-toolchain 9 工具** — as/ld/ar/ranlib/nm/readelf/strip/objcopy/objdump
+- **Phase 4 自举验证通过** — sysroot 内 mcc + meow 自重建全套工具
+- **Phase 5 零宿主依赖验证通过** — mcc driver 集成 `MT_AS`/`MT_LD`，`check-mt-integration` 通过
+- **.msys 单文件 sysroot** — libmsys + mkmsys + mcc/ld 集成
+
+### 10.2 待启动/进行中工作
+
+| 工作项                                 | 状态     | 备注                                                             |
+| -------------------------------------- | -------- | ---------------------------------------------------------------- |
+| m++ C++ 前端（阶段 B/C/D）              | ⏳ 待启动 | 阶段 A（libmcc 分离）已完成；子阶段待 m++ 启动时实施               |
+| meuos-buildtools（m4/bison/flex/gperf） | ⏳ 待启动 | Phase 6；替换 GNU 构建工具依赖                                    |
+| meuos-utils（coreutils 等）             | ⏳ 待启动 | Phase 7；coreutils/diffutils/findutils 替代                       |
+| meuos-shell (msh)                       | ⏳ 待启动 | Phase 7；POSIX sh + 可选 bash/zsh 兼容                            |
+| mt 动态链接（P6）                       | ⏳ 待启动 | 共享库 / PIE / ld.so / dlopen                                     |
+| mt TLS 动态模型（P7）                   | ⏳ 待启动 | GD / LD 模型实现                                                   |
+| mt DWARF 调试信息（P8）                 | ⏳ 待启动 | 调试信息生成                                                      |
+| mt aarch64 后端（P10）                  | ⏳ 待启动 | 汇编器 aarch64 支持                                                |
+| mt riscv64 后端（P11）                  | ⏳ 待启动 | 汇编器 riscv64 支持                                                |
+| meow DAG 去重                          | 🔄 进行中 | 解决 -jN 并行构建的间接依赖重复执行问题                             |
+| meow 原生 shell 替代                   | 🔄 进行中 | 用 msh 替代 /bin/sh                                                |
+| .msys 构建流水线（Phase 4）             | ⏳ 待启动 | mkmsys 集成到 meow 构建流程                                        |
+| i386 TLS 端到端验证                     | ⏳ 阻塞中 | 被 mcc i386 后端缺口阻塞                                           |
+
+### 10.3 各架构支持矩阵
+
+| 架构         | mcc 后端 | libc 核心 | mt/as     | mt/ld     | qemu 运行时验证       | 系统依赖                   |
+| ------------- | -------- | --------- | --------- | --------- | --------------------- | -------------------------- |
+| x86_64        | ✅       | ✅        | ✅ P0-P9  | ✅ P0-P9  | ✅ 完整验证           | 无                         |
+| aarch64       | ✅       | ✅        | ⏳ P10     | ⏳ P10     | ✅ qemu 端到端        | `aarch64-linux-gnu-gcc`    |
+| riscv64       | ✅       | ✅        | ⏳ P11     | ⏳ P11     | ⚪ 代码落地待验证       | `riscv64-linux-gnu-gcc`    |
+| i386          | ✅       | ✅        | ✅ P9     | ⏳ P9     | ⚪ 被 mcc 缺口阻塞     | `gcc -m32` + 32-bit libc   |
+| loongarch64   | ✅       | ✅        | ✅        | ⏳         | ⚪ 代码落地待验证       | `loongarch64-linux-gnu-gcc` |
+
+### 10.4 相关文档索引
+
+| 文档路径                                           | 内容                                    |
+| -------------------------------------------------- | --------------------------------------- |
+| `AGENTS.md`（本文件）                                | 项目规约、命令参考、知识库管理           |
+| `README.md`                                        | 快速开始与项目简介                      |
+| `projects/mcc/ARCHITECTURE.md`                     | 编译器架构、模块职责、阶段状态           |
+| `projects/meuos-libc/ARCHITECTURE.md`              | C 库目录结构与模块职责                  |
+| `projects/meuos-libc/PORTING.md`                   | 多架构移植说明、ABI 契约、time64 策略   |
+| `projects/meow/ARCHITECTURE.md`                    | 构建系统模块职责与数据流                |
+| `projects/meuos-toolchain/ARCHITECTURE.md`         | 工具链架构、P0-P11 分阶段任务           |
+| `projects/meuos-sysroot/ARCHITECTURE.md`           | .msys 格式设计与依赖关系               |
+| `env/README.md`                                    | QEMU 测试环境使用说明                  |
+| `.todo`（根目录）                                    | 全局待办清单                           |
+| `projects/mcc/.todo/cpp-shared-backend.md`         | mcc/m++ 共享后端架构计划               |
+| `projects/meow/.todo/dag-dedup.md`                 | DAG 去重待实现项                       |
+| `projects/meow/.todo/native-shell.md`              | 原生 shell 替代待实现                  |
+| `projects/meuos-sysroot/.todo/msys.md`             | .msys 实现任务清单                     |
+| IMA 知识库（通过 `ima-skill` 访问）                 | 设计笔记、移植记录、调试踩坑           |

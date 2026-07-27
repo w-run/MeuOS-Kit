@@ -1,5 +1,5 @@
-# MeuOS Kit 五架构完善 — 待办清单
-# 架构：x86_64 i386 aarch64 riscv64 loongarch64
+# MeuOS Kit 六架构完善 — 待办清单
+# 架构：x86_64 i386 aarch64 riscv64 loongarch64 arm
 # QEMU: 10.1.0（自编译，env/qemu/qemu-{arch}）
 
 ## P0 — 测试基础设施（阻塞回归）
@@ -80,7 +80,19 @@
        mcc 编译 + ar 归档，压缩/解压验证通过
     -> dash/binutils: 当前仍用 ./configure/make，需要预生成 config.h 后迁移
 
-## P4 — 长期
+## P4 — ARM 完善 + 长期
+
+[x] ARM (armv7→arm) 完整移植
+    -> mcc 后端 4 文件（~18KB）：targ/abi/isel/emit + 子架构配置
+    -> meuos-libc 运行时 9 文件（含 AEABI 兼容层）
+    -> mt as+ld 工具链（encode.c 10.5KB + ELF32 + 18+ 重定位类型）
+    -> 命名标准化：armv7 → arm，v7 为子架构配置
+    -> qemu-arm 运行时验证通过（hello/atomic/setjmp/exit=42）
+    -> i386 编码器增强 + 9 个缺失原子操作补齐
+    -> riscv64 TLS LE 重定位 + e2e 测试 + 跳转融合
+    -> loongarch64 e2e 测试 + 跳转融合
+    -> mt/ld .msys 集成（Phase 3）
+    -> 清理 1462 行旧版代码（stdio.c.legacy + threads.c.legacy）
 
 [ ] m++ C++ 前端启动
     -> 参考 reference/cxx-frontend/ 和 reference/aburi/

@@ -1,6 +1,6 @@
 # meuos-libc 多架构移植说明
 
-> 更新：2026-07-25
+> 更新：2026-07-27
 >
 > 本文记录 `meuos-libc` 的架构取舍、移植边界与验收顺序。它是移植路线的
 > 动态说明；代码当前是否已经落地，以仓库中的源码、`.todo/` 和 `STATE.md`
@@ -19,7 +19,7 @@ mcc 已有代码生成基线、libc 运行时仍待移植；x86_64 和 aarch64 �
 | **loongarch64** | **已落地代码**   | mcc 后端有 ABI/汇编回归基线；libc runtime 已实现（crt1/syscall/atomic/setjmp/sigreturn/thread_clone/tls.c，移植自 riscv64）；`make ARCH=loongarch64` 与 `test/loongarch64-bootstrap.sh` 已注册 | 龙芯新生态；syscall 编号、ABI、TLS 和内核接口按最新 Linux UAPI 校准；移植自 riscv64 模板，随带补全了 riscv64 遗漏的 wrapper 条件分支 |
 | **i386**        | **运行验证**     | x87 浮点完整（运算/比较/signed·unsigned 转换/ABI）、FPR 收口（nfpr=0）、跨函数 `va_list` 已修复；`make check-i386` + `make check-i386-qemu` 双门禁全绿 | 32 位兼容基石；`time_t`=int64_t、statx(383)、mmap2(192)、socketcall(102) 均就位；Kl 软算术库已完成（soft_arith.c）、TLS/信号端到端（bare_tls 被 mcc i386 TLS 模型缺口阻塞，见 `mcc/.todo/gd-tls.md`） |
 | **riscv64**     | **已落地代码**   | libc runtime 已实现（crt1/syscall/atomic/setjmp/sigreturn/thread_clone/tls.c）；`make ARCH=riscv64` 与 `test/riscv64-bootstrap.sh` 已注册 | 无历史包袱的 64 位架构，用于检验 syscall/TLS/原子等抽象是否干净；代码经静态核对，真机门禁待交叉工具链/qemu 就绪 |
-| **armv7**       | **强烈建议新增** | 当前只有占位 TODO，没有 libc runtime 或构建目标                                   | ARMv7 hard-float EABI；同时验证 32 位指针、VFP/硬浮点 ABI、原子、TLS 与 64 位 `time_t` |
+| **arm**         | **运行验证**     | libc runtime 完整（crt1/syscall/atomic/setjmp/sigreturn/thread_clone/set_tls/tls.c 含 AEABI 兼容层）；`make ARCH=arm` 已注册；qemu-arm 运行时验证通过（hello/atomic/setjmp/exit=42） | ARMv7 hard-float EABI；同时验证 32 位指针、VFP/硬浮点 ABI、原子、TLS 与 64 位 `time_t` |
 | **ppc64le**     | **按需可选**     | 当前未实现、未纳入默认构建                                                        | POWER 服务器目标；在基础多架构 runtime 稳定后再投入，重点验证多寄存器调用约定          |
 | **s390x**       | **按需可选**     | 当前未实现、未纳入默认构建                                                        | IBM 大型机目标；重点验证独特 syscall 机制、寄存器约定和信号上下文                      |
 | **armel**       | **明确跳过**     | 不创建实现目标                                                                    | 极老软浮点 ARM；armv7 已覆盖仍有价值的 32 位 ARM 场景                                  |
@@ -85,7 +85,7 @@ libc 类型定义“碰巧工作”。至少要为每个目标明确记录：
 
 ### 3.2 32 位目标统一采用 time64
 
-i386 和新增的 armv7 不沿用 32 位 `long time_t`。公共头和实现应统一采用 64 位
+i386 和 arm 不沿用 32 位 `long time_t`。公共头和实现应统一采用 64 位
 有符号 `time_t`，并使用 Linux 的 time64 syscall（或等价的内核接口）实现
 `clock_gettime`、`nanosleep`、`futex` 等涉及时间的调用。旧 syscall 只可作为
 明确兼容旧内核的适配路径，不能让公共 API 退回 32 位秒数。
@@ -139,8 +139,7 @@ syscall 编号：LoongArch64 采用 asm-generic 编号（与 aarch64/riscv64 完
 相同），因此 syscall.h 的翻译表通过 `|| defined(__loongarch64)` 合流到
 asm-generic 分支（零重复）。运行时移植自 riscv64 模板（适配寄存器名/指令）。
 
-当前环境无 loongarch64-linux-gnu-gcc 与 qemu-loongarch64，真机门禁待工具链就绪后
-运行 `make check-loongarch64-bootstrap`。
+当前 loongarch64 e2e 测试已完成（exit=42 / printf / phase2 counter / bare_tls）
 - mcc loongarch64 后端 emit 语法不兼容问题：commit 4e99492 已修复（指令格式、寄存器命名、内存语法）
 - 浮点有序/无序比较崩溃：commit 8063fbf 已修复
 - riscv64/loongarch64 SExtThr (Initial-Exec TLS): 已实现
@@ -171,14 +170,32 @@ asm-generic 分支（零重复）。运行时移植自 riscv64 模板（适配�
 TLS 用 variant I 且 `GAP_ABOVE_TP = 0`（musl riscv64 ABI）：tp 直接指向 TLS
 镜像起点，`.tdata` 复制到 mmap 基址 +0。它是验证“架构差异只存在于边界层”的
 优先新目标，runtime 代码已落地，移植自 aarch64 模板。syscall 编号复用
-asm-generic 表（`__aarch64__ || __riscv` 合流）。
+asm-generic 表（`__aarch64__ || __riscv` 合流）。TLS LE 重定位已实现
+（TPREL_LO12_I/S/HI20），`test/riscv64_e2e.sh` exit=42 验证通过。
 
-### armv7
+### arm
 
-使用 ARMv7 hard-float EABI，明确区分整数寄存器参数与 VFP 参数，处理 8 字节参数
-对齐和结构体返回规则；线程指针、`clone`、原子和信号上下文均不能照搬 i386。
-公共类型坚持 64 位 `time_t`，并增加整数-only libc 代码与 VFP/硬浮点调用约定的
-编译和运行测试，避免把 `armv7` 错误降级成 armel。
+**已实现**（2026-07-27 完成，ar mv7 → arm 标准化命名）。
+
+使用 ARMv7 hard-float EABI（AAPCS），子架构配置支持 `-march`/`-mcpu`/`-mfpu`/`-mfloat-abi`。
+明确区分整数寄存器参数（R0-R3）与 VFP 参数。8 字节参数按 AAPCS 对齐和结构体返回规则处理。
+线程指针使用 `__kuser_set_tls` 内核辅助（0xffff0fe0），无需特权指令。
+
+**运行时文件清单**：
+| 文件 | 职责 |
+|------|------|
+| `crt1.S` | _start 入口：设置 tp、传 argc/argv/envp、调用 main、exit |
+| `src/arch/arm/syscall.S` | EABI syscall gate（R7 放编号，参数 R0-R5） |
+| `src/arch/arm/atomic.S` | C11 原子：1/2/4/8 字节（LDREX/STREX + DMB） |
+| `src/arch/arm/setjmp.S` | setjmp/longjmp：保存 s0-s11/sp/ra + fs0-fs7 |
+| `src/arch/arm/sigreturn.S` | rt_sigreturn restorer |
+| `src/arch/arm/thread_clone.S` | clone 入口：子线程栈切换 + 调用 entry |
+| `src/arch/arm/set_tls.S` | __kuser_set_tls 封装 |
+| `src/arch/arm/tls.c` | TLS 初始化 variant I（GAP=0） |
+| `src/arch/arm/aeabi.c` | AEABI 运行时辅助函数 |
+| `src/arch/arm/aeabi_wrap.S` | AEABI 除法/移位 wrapper |
+
+**验证**：`test/arm-bootstrap.sh` 6 测试全过（cross-gcc 编译链接）；qemu-arm 运行时 hello/atomic/setjmp/exit=42 验证通过。
 
 ## 5. 推荐移植顺序与验收
 
@@ -204,8 +221,7 @@ asm-generic 表（`__aarch64__ || __riscv` 合流）。
    运行时门禁。代码经静态核对，真机门禁待交叉工具链/qemu 就绪。作为第三条
    64 位完整链，反向校验了公共层架构抽象（syscall.h 合流 asm-generic、setjmp.h
    增量分支）。
-6. **armv7**：在 64 位目标稳定后加入，重点验证 32/64 位变体和 hard-float；先以
-   QEMU + 交叉汇编器为门禁，不影响默认 x86_64 构建。
+6. ✅ **arm**：libc runtime 完整（含 AEABI 兼容层），`make ARCH=arm` + qemu-arm 运行时验证通过（hello/atomic/setjmp/exit=42）。作为第一条 32 位 ARM 完整链，验证了 `__kuser_set_tls` 内核辅助路径、AEABI 兼容层和硬浮点 ABI。
 7. **ppc64le/s390x**：仅在明确用户空间需求或有可用 QEMU/硬件门禁时排期。
 8. **armel/mips\***：保持排除清单，不创建默认 target、不在核心库引入兼容性分支。
 

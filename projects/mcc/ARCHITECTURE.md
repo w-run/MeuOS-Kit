@@ -44,7 +44,8 @@ mcc/
 │   ├── aarch64.h            #   AArch64 backend interface
 │   ├── riscv64.h            #   RISC-V 64 backend interface
 │   ├── i386.h               #   i386 backend interface
-│   └── loongarch64.h        #   LoongArch64 backend interface
+│   ├── loongarch64.h        #   LoongArch64 backend interface
+│   └── arm.h                #   ARM 32-bit backend interface
 ├── src/                     # unified source tree (no frontend/backend split)
 │   ├── driver/
 │   │   ├── main.c            #   entry point: argv parse -> pp -> decl() loop -> emit
@@ -103,7 +104,8 @@ mcc/
 │       ├── aarch64/          #     same four files for AArch64 (AAPCS64 ABI)
 │       ├── riscv64/          #     same four files for RISC-V 64 (lp64d ABI)
 │       ├── i386/             #     i386 System V ABI backend
-│       └── loongarch64/      #     LoongArch64 LP64D ABI backend
+│       ├── loongarch64/      #     LoongArch64 LP64D ABI backend
+│       └── arm/              #     ARM 32-bit (v7+ with VFP) AAPCS ABI backend
 └── build/                   # object files + dep files (gitignored, auto-discovered)
 ```
 
@@ -178,8 +180,8 @@ autotools/cmake/meson). Key Makefile mechanics:
 - `SRC_DIRS := src` - single root; `find` recursively auto-discovers
   all `.c` files. **Adding/removing a `.c` file requires no Makefile
   edit.**
-- All five target backends (`x86_64`, `aarch64`, `riscv64`, `i386`,
-  `loongarch64`) are always linked into a single `mcc` binary; runtime target selection is via
+- All six target backends (`x86_64`, `aarch64`, `riscv64`, `i386`,
+  `loongarch64`, `arm`) are always linked into a single `mcc` binary; runtime target selection is via
   `pick_target()` in `src/driver/target_select.c` (consults `-target`/`-t` flag
   or host `uname -m`).
 - Build artifacts go to `build/` (mirrors source layout), which is
@@ -204,7 +206,7 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
 | 1c - compound types | PASS | strlen + struct pass/return (small/large/nested) + union + global init, 9/9 exit 0 |
 | 1d - C11 features | PASS (mcc host gate) | `make check-c11`: 13 runtime tests |
 | 1e - C23 features | PASS (mcc host gate) | `make check-c23`: 14 runtime tests |
-| 2 - meuos-libc | PASS (5 arch runtime) | `make -C projects/meuos-libc check` (x86_64 full; aarch64/riscv64/loongarch64/i386 bootstrap) |
+| 2 - meuos-libc | PASS (6 arch runtime) | `make -C projects/meuos-libc check` (x86_64 full; aarch64/arm qemu; riscv64/loongarch64/i386 bootstrap) |
 | 3 - meow | PASS | `meow build bzip2` (pure YAML); `make -C projects/meow check` |
 | 4 - bootstrap | PASS | `check-sysroot-static`: sysroot 内自重建 82 .c + libmcc.a + mcc 链接 |
 | 5 - toolchain | PASS | `check-mt-integration`: MT_AS/MT_LD 集成，零宿主 cc 依赖 |
@@ -303,7 +305,7 @@ artifacts and structural integration of the two source trees. Status:
   descent). Public API: `ppdefine()`/`ppundef()`/`ppincludepath()`/
   `ppdumpdeps()`.
 - **`-target` triplet mapping**: public target identifiers are
-  `x86_64`, `aarch64`, `riscv64`, `i386`, and `loongarch64`.
+  `x86_64`, `aarch64`, `riscv64`, `i386`, `loongarch64`, and `arm`.
   Historical aliases (`amd64`, `arm64`, `rv64`, `la64`) remain accepted.
   `targ_name()` in `src/driver/target_select.c` maps
   full triplets (e.g. `x86_64-unknown-linux`) to frontend's expected

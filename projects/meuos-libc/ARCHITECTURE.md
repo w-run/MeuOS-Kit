@@ -7,10 +7,11 @@
 ## 1. 概述
 
 `meuos-libc` 是直接面向 Linux 内核 ABI 的 MeuOS C 库：系统调用封装不经过
-宿主 libc，直接 `syscall()` 或内联汇编。当前以 x86_64 为完整运行验证目标，i386 有最小 bootstrap；
+宿主 libc，直接 `syscall()` 或内联汇编。当前以 x86_64 为完整运行验证基线，i386 有最小 bootstrap；
 **aarch64** 已完成 libc runtime（crt1 + syscall gate + atomic + setjmp + sigreturn +
 thread_clone + set_tls + tls.c），`test/aarch64-bootstrap.sh` 提供跨编译自检 +
 qemu-aarch64-static 运行时 gate（hello/atomic/phase2_counter=2000/bare_tls 端到端通过）。
+**arm** 已完成 libc runtime（含 AEABI 兼容层），qemu-arm 运行时验证通过（hello/atomic/setjmp/exit=42）。
 **riscv64、loongarch64** 的 libc runtime 已落地代码（crt1/syscall/atomic/setjmp/sigreturn/
 thread_clone/tls.c 全部就绪），`make ARCH=riscv64`/`make ARCH=loongarch64` 已注册，
 qemu 运行时门禁待交叉工具链就绪。目标是支撑 mcc 与 meow 的最小自举。
@@ -32,14 +33,16 @@ meuos-libc/
 ├── crt/                      # 启动入口（每 arch 一个 crt1.S）
 │   ├── x86_64/crt1.S
 │   ├── i386/crt1.S
-│   ├── aarch64/  (✅ 已完成：crt1.S / atomic.S / setjmp.S / sigreturn.S / thread_clone.S / set_tls.S / tls.c)
+│   ├── aarch64/  (✅ ���完成：crt1.S / atomic.S / setjmp.S / sigreturn.S / thread_clone.S / set_tls.S / tls.c)
 │   ├── riscv64/  (✅ 已完成：crt1.S / atomic.S / setjmp.S / sigreturn.S / thread_clone.S / tls.c)
-│   └── loongarch64/ (✅ 已完成：crt1.S / atomic.S / setjmp.S / sigreturn.S / thread_clone.S / tls.c)
+│   ├── loongarch64/ (✅ 已完成：crt1.S / atomic.S / setjmp.S / sigreturn.S / thread_clone.S / tls.c)
+│   └── arm/      (✅ 已完成：crt1.S / atomic.S / setjmp.S / set_tls.S / sigreturn.S / thread_clone.S / tls.c / aeabi.c / aeabi_wrap.S)
 ├── src/
 │   ├── arch/<arch>/          # arch 专属运行时（atomic / setjmp / sigreturn / thread_clone / tls）
 │   │   ├── x86_64/            #   完整实现
 │   │   ├── i386/              #   最小 bootstrap（含 load_gs / soft_arith）
 │   │   ├── aarch64/ (✅ 已完成)  riscv64/ loongarch64/  (✅ 已完成：runtime 全部就绪，见 .todo 验证项)
+│   │   └── arm/     (✅ 已完成：含 AEABI 兼容层 + __kuser_set_tls，qemu 验证通过)
 │   ├── internal/              # 内部头 + syscall gate
 │   │   ├── syscall.h          #   syscall 编号翻译 + __syscall6 声明
 │   │   └── arch/<arch>/syscall.S  # 每 arch 的 syscall 入口
@@ -91,10 +94,8 @@ meuos-libc/
 - `x86_64`（默认）：宿主 `cc` 编译 C，宿主汇编器处理 `.S`；当前完整运行验证基线。
 - `i386`：`$(MCC) --target=i386` 编译 C，宿主 `cc -m32` 汇编；当前只承诺整数 bootstrap。
 - `aarch64`：libc runtime + qemu gate 端到端通过（**第一条 64 位跨 ISA 完整链**）；
-  `loongarch64`：已确认基石，runtime 尚待实现；`riscv64` 是强烈建议新增目标（见
-  `PORTING.md` 与各 `src/arch/<arch>/.todo`）。
-- `armv7`/`ppc64le`/`s390x`：尚未纳入构建矩阵，先按 `PORTING.md` 的路线建立 TODO 和
-  交叉测试门禁；`armel` 与 `mips*` 明确不支持。
+- `arm`：libc runtime + qemu 运行时验证通过（hello/atomic/setjmp/exit=42）；`make ARCH=arm` 已注册。
+- `loongarch64`/`riscv64`：runtime 代码已落地，待交叉工具链就绪验证。
 
 `src/internal/syscall.h` 的 `__syscall_number()` 把 x86_64 syscall 号翻译为目标
 arch 的原生编号；ABU 形状不同的 syscall（如 i386 的 mmap2/socketcall）用
