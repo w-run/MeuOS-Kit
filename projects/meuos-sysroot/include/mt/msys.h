@@ -41,12 +41,18 @@ _Static_assert(sizeof(struct msys_header) == 32, "msys_header must be 32 bytes")
 _Static_assert(sizeof(struct msys_index_entry) == 16, "msys_index_entry must be 16 bytes");
 
 /* In-memory handle for an open .msys file */
+struct msys_chunk {
+	void *ptr;
+	struct msys_chunk *next;
+};
+
 struct msys {
 	void   *base;            /* mmap base address */
 	size_t  size;            /* file size */
 	struct msys_header *hdr; /* pointer to header within mmap */
 	struct msys_index_entry *index; /* pointer to first index entry */
 	unsigned char **entries; /* private: per-entry pointers (variable len) */
+	struct msys_chunk *chunks; /* private: allocated buffers (freed on close) */
 };
 
 /* Open a .msys file for reading.

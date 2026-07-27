@@ -150,6 +150,14 @@ struct msys *msys_open(const char *path)
 void msys_close(struct msys *m)
 {
 	if (!m) return;
+	/* Free decompression buffers */
+	struct msys_chunk *c = m->chunks;
+	while (c) {
+		struct msys_chunk *next = c->next;
+		free(c->ptr);
+		free(c);
+		c = next;
+	}
 	free(m->entries);
 	munmap(m->base, m->size);
 	free(m);
@@ -323,13 +331,13 @@ FILE *msys_fopen(struct msys *m, const char *path, const char *mode)
 		size_t usize;
 		void *decomp = decompress(m, data, dsize, &usize);
 		if (!decomp) return NULL;
-		/* fmemopen does NOT adopt the buffer; we'd leak.
-		 * Use tmpfile + write instead, or use funopen.
-		 * Simplest: msys_fopen on compressed data is not supported yet.
-		 * Return NULL; callers should use msys_load for compressed archives. */
-		free(decomp);
-		errno = ENOTSUP;
-		return NULL;
+		/* Register in chunks list so it's freed on msys_close */
+		struct msys_chunk *c = malloc(sizeof(*c));
+		if (!c) { free(decomp); return NULL; }
+		c->ptr = decomp;
+		c->next = m->chunks;
+		m->chunks = c;
+		return fmemopen(decomp, usize, mode);
 	}
 
 	/* fmemopen needs a non-const buffer; msys_search returns const from mmap.
