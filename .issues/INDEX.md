@@ -93,11 +93,11 @@ src/compat/
 | ID | 组件 | 项目 | 描述 | 状态 |
 |----|------|------|------|------|
 | meow-dag-dedup | meow | DAG 去重 | `-jN` 并行构建时间接依赖重复执行（`.todo/dag-dedup.md`） | ⏳ |
-| mcc-atomic-voidptr | mcc sema | `_Atomic int*` → `void*` | C 6.3.2.3p1 限定对象指针应可转 `void*`（chibicc 测试报） | ⏳ |
+| mcc-atomic-voidptr | mcc sema | `_Atomic int*` → `void*` | C 6.3.2.3p1 限定对象指针应可转 `void*`（chibicc 测试报） | 🟢 |
 | mcc-riscv64-qemu | mcc | riscv64 qemu 门禁 | 完整 qemu 运行时门禁（当前仅 exit=42） | ⏳ |
 | mcc-loong64-qemu | mcc+libc | loongarch64 qemu 门禁 | 完整 qemu 运行时门禁（当前仅 exit=42） | ⏳ |
 | mcc-i386-tls-e2e | mcc+libc | i386 TLS e2e | bug-i386-tls 修复后的 TLS 端到端验证 | ⏳ |
-| mcc-i386-tls-doc | mcc(i386) | `gd-tls.md` 文档 | 被 3 个文件引用但文件不存在 | 🟡 |
+| mcc-i386-tls-doc | mcc(i386) | `gd-tls.md` 文档 | 被 3 个文件引用但文件不存在 | 🟢 |
 | ld-shared | mt/ld | `-shared` 输出 `ET_DYN` | 生成 `.dynsym`/`.dynstr`/`.dynamic`/`.hash`/`.plt`/`.got.plt`/`.interp` 节区 + 动态程序头 | ⏳ |
 | ld-pie | mt/ld | `--pie`/`--no-pie` 支持 | PIE 二进制输出（`ET_DYN` + `PT_INTERP` + 相对重定位） | ⏳ |
 | mcc-pic-verify | mcc | PIC 代码生成加固 | 全架构验证 `-fPIC` 输出（GOT/PLT/TLS GD 路径） | ⏳ |
