@@ -214,6 +214,10 @@ QEMU_LOONGARCH64 ?= ../../env/qemu/qemu-loongarch64
 check-loongarch64-e2e: $(AS_BIN) $(LD_BIN)
 	sh test/loongarch64_e2e.sh "$(abspath $(AS_BIN))" "$(abspath $(LD_BIN))" "$(abspath $(QEMU_LOONGARCH64))"
 
+# i386 e2e: as 汇编验证（ld 待 ELF32 输入支持 P0-1a）
+check-i386-e2e: $(AS_BIN) $(LD_BIN)
+	sh test/i386_e2e.sh "$(abspath $(AS_BIN))" "$(abspath $(LD_BIN))"
+
 check-as-sse-x86_64: $(AS_BIN)
 	sh test/as_sse_x86_64.sh "$(abspath $(AS_BIN))"
 
