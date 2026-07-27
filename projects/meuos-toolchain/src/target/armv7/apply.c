@@ -18,7 +18,7 @@ static inline void write32(unsigned char *p, uint32_t v) {
 /* Apply a single ARM relocation.
  * Returns 0 on success, -1 on unsupported. */
 int
-armv7_apply_reloc(unsigned type, unsigned char *loc,
+mt_apply_arm_reloc(unsigned type, unsigned char *loc,
                   uint64_t S, int64_t A, uint64_t P)
 {
 	uint32_t insn, imm16;
