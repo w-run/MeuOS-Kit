@@ -206,31 +206,79 @@ int arm_encode_insn(const struct mt_target *target,
 		}
 	}
 
-	/* ---- movw r0, #imm ---- */
+	/* ---- movw r0, #imm (or #:lower16:sym) ---- */
 	if (strcmp(mnemonic, "movw") == 0 && nops >= 2) {
 		int rd; if (reg_num(ops[0], &rd) < 0) return -1;
-		int imm = 0;
-		if (ops[1][0] == '#') sscanf(ops[1]+1, "%i", &imm);
-		else return -1;
-		uint32_t imm16 = (uint32_t)imm & 0xFFFF;
-		emit32(out->bytes, 0xE3000000 | (rd<<12) | ((imm16>>12)&0xF)<<16 | (imm16 & 0xFFF));
-		return 0;
+		const char *op = ops[1];
+		if (op[0] == '#' && op[1] == ':') {
+			/* Symbol modifier: #:lower16:sym → R_ARM_MOVW_ABS_NC */
+			const char *sym = op + 2;
+			while (*sym == ':' || *sym == 'l' || *sym == 'o' || *sym == 'w'
+			       || *sym == 'e' || *sym == 'r' || *sym == '1' || *sym == '6')
+				sym++;
+			if (*sym == ':') sym++;
+			out->fixed = 0;
+			out->reloc_type = 43; /* R_ARM_MOVW_ABS_NC */
+			set_fixup(out, 0, 4, 43, sym, 0);
+			emit32(out->bytes, 0xE3000000 | (rd<<12));
+			return 0;
+		}
+		if (op[0] == '#') {
+			int imm = 0; sscanf(op+1, "%i", &imm);
+			uint32_t imm16 = (uint32_t)imm & 0xFFFF;
+			emit32(out->bytes, 0xE3000000 | (rd<<12) | ((imm16>>12)&0xF)<<16 | (imm16 & 0xFFF));
+			return 0;
+		}
+		return -1;
 	}
 
-	/* ---- movt r0, #imm ---- */
+	/* ---- movt r0, #imm (or #:upper16:sym) ---- */
 	if (strcmp(mnemonic, "movt") == 0 && nops >= 2) {
 		int rd; if (reg_num(ops[0], &rd) < 0) return -1;
-		int imm = 0;
-		if (ops[1][0] == '#') sscanf(ops[1]+1, "%i", &imm);
-		else return -1;
-		uint32_t imm16 = ((uint32_t)imm >> 16) & 0xFFFF;
-		emit32(out->bytes, 0xE3400000 | (rd<<12) | ((imm16>>12)&0xF)<<16 | (imm16 & 0xFFF));
-		return 0;
+		const char *op = ops[1];
+		if (op[0] == '#' && op[1] == ':') {
+			/* Symbol modifier: #:upper16:sym → R_ARM_MOVT_ABS */
+			const char *sym = op + 2;
+			while (*sym == ':' || *sym == 'u' || *sym == 'p' || *sym == 'e'
+			       || *sym == 'r' || *sym == '1' || *sym == '6')
+				sym++;
+			if (*sym == ':') sym++;
+			out->fixed = 0;
+			out->reloc_type = 44; /* R_ARM_MOVT_ABS */
+			set_fixup(out, 0, 4, 44, sym, 0);
+			emit32(out->bytes, 0xE3400000 | (rd<<12));
+			return 0;
+		}
+		if (op[0] == '#') {
+			int imm = 0; sscanf(op+1, "%i", &imm);
+			uint32_t imm16 = ((uint32_t)imm >> 16) & 0xFFFF;
+			emit32(out->bytes, 0xE3400000 | (rd<<12) | ((imm16>>12)&0xF)<<16 | (imm16 & 0xFFF));
+			return 0;
+		}
+		return -1;
 	}
 
+	/* ---- ldr rd, =sym (load address of global symbol) ---- */
+	if (strcmp(mnemonic, "ldr") == 0 && nops >= 2) {
+		int rd; if (reg_num(ops[0], &rd) < 0) goto ldr_mem;
+		const char *mem = ops[1];
+		if (mem[0] == '=') {
+			/* =sym → R_ARM_ABS32 fixup on a PC-relative load */
+			const char *sym = mem + 1;
+			out->fixed = 0;
+			out->reloc_type = 2; /* R_ARM_ABS32 */
+			set_fixup(out, 0, 4, 2, sym, 0);
+			/* Encode as literal-pool load: ldr rd, [pc, #0] */
+			emit32(out->bytes, 0xE51F0000 | (rd<<12));
+			return 0;
+		}
+	}
+	/* fall through to ldr/str memory handling */
+
 	/* ---- Simple memory: ldr r0, [r1] or str r0, [r1] ---- */
+ldr_mem:
 	if ((strcmp(mnemonic, "ldr") == 0 || strcmp(mnemonic, "str") == 0) && nops >= 2) {
-		int rd, rn;
+		int rd = 0, rn;
 		if (reg_num(ops[0], &rd) < 0) return -1;
 		int store = mnemonic[0] == 's';
 		const char *mem = ops[1];
