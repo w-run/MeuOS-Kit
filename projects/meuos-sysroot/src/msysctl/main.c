@@ -549,6 +549,78 @@ int main(int argc, char *argv[]) {
 			if (count == 0) { ret = -1; errno = ENOENT; }
 		}
 	}
+	/* ── diff: compare archive file with local file ── */
+	else if (strcmp(cmd, "diff") == 0) {
+		if (path_idx >= argc) { usage(); ret = 1; }
+		else {
+			const char *apath = argv[path_idx]; /* path within archive */
+			const char *lfile = path_idx + 1 < argc ? argv[path_idx + 1] : NULL;
+			/* Extract to temp file */
+			void *data; size_t dsize;
+			if (arch_load(a, apath, &data, &dsize) < 0) { ret = -1; }
+			char tmpfile[64]; snprintf(tmpfile, sizeof(tmpfile), "/tmp/msys-diff-XXXXXX");
+			int fd = mkstemp(tmpfile);
+			if (fd < 0) { free(data); ret = -1; }
+			write(fd, data, dsize); close(fd);
+			if (lfile) {
+				char cmdline[8192];
+				snprintf(cmdline, sizeof(cmdline), "diff -u %s %s 2>/dev/null || true", lfile, tmpfile);
+				ret = system(cmdline);
+			} else {
+				printf("Archive: %s (%zu bytes)\n", apath, dsize);
+			}
+			unlink(tmpfile);
+			free(data);
+		}
+	}
+	/* ── cmp: binary comparison with local file ── */
+	else if (strcmp(cmd, "cmp") == 0) {
+		if (path_idx + 1 >= argc) { usage(); ret = 1; }
+		else {
+			const char *apath = argv[path_idx];
+			const char *lfile = argv[path_idx + 1];
+			void *adata; size_t asize;
+			if (arch_load(a, apath, &adata, &asize) < 0) { ret = -1; }
+			FILE *lf = fopen(lfile, "rb");
+			if (!lf) { perror(lfile); free(adata); ret = -1;  }
+			fseek(lf, 0, SEEK_END); long lsize = ftell(lf); fseek(lf, 0, SEEK_SET);
+			if ((size_t)lsize != asize) {
+				printf("differ: size %ld != %zu\n", lsize, asize);
+			} else {
+				void *lbuf = malloc((size_t)lsize);
+				fread(lbuf, 1, (size_t)lsize, lf);
+				int diff_off = memcmp(adata, lbuf, asize);
+				if (diff_off == 0) printf("identical\n");
+				else {
+					for (size_t i = 0; i < asize; i++)
+						if (((unsigned char*)adata)[i] != ((unsigned char*)lbuf)[i])
+							{ printf("differ at offset %zu\n", i); break; }
+				}
+				free(lbuf);
+			}
+			fclose(lf);
+			free(adata);
+		}
+	}
+	/* ── du: directory usage ── */
+	else if (strcmp(cmd, "du") == 0) {
+		const char *dir = path_idx < argc ? argv[path_idx] : "";
+		struct msys *m = a->is_overlay ? msys_overlay_get(a->overlay, 0) : a->single;
+		uint32_t cnt = msys_count(m);
+		uint64_t total = 0; int nfiles = 0; size_t dlen = strlen(dir);
+		for (uint32_t i = 0; i < cnt; i++) {
+			const char *name; size_t nlen, dsize;
+			if (msys_enumerate(m, i, &name, &nlen, &dsize) < 0) continue;
+			if (nlen > 0 && name[0] == '@') continue;
+			/* Check prefix */
+			if (dlen > 0) {
+				if (nlen <= dlen || memcmp(name, dir, dlen) != 0) continue;
+				if (name[dlen] != '/' && name[dlen] != '\0') continue;
+			}
+			total += dsize; nfiles++;
+		}
+		printf("%s\t%lu bytes, %d files\n", dir[0] ? dir : "/", (unsigned long)total, nfiles);
+	}
 	else { fprintf(stderr, "Unknown: %s\n", cmd); usage(); }
 
 	if (ret < 0) perror(cmd);
