@@ -399,7 +399,7 @@ check-armv7-bootstrap:
 	@if [ ! -f build/armv7/libc-meuos.a ] || [ ! -f build/armv7/libatomic-meuos.a ] || [ ! -f build/armv7/crt1.o ]; then \
 		$(MAKE) ARCH=armv7; \
 	fi
-	ASCC="arm-linux-gnu-gcc -march=armv7-a -mfloat-abi=hard -mfpu=vfpv3-d16" sh test/armv7-bootstrap.sh
+	ASCC=arm-linux-gnu-gcc ARCH="-march=armv7-a -mfloat-abi=hard -mfpu=vfpv3-d16" sh test/armv7-bootstrap.sh
 
 # 一步式：build + install + 全套检查（包括 atomic/tls/threads/stdio/process）
 # 默认 host 是 x86_64，跨架构检查通过 check-aarch64-bootstrap / check-i386-bootstrap。

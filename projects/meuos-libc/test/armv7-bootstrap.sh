@@ -19,7 +19,8 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 mcc=${MCC:-"$root/../mcc/mcc"}
-ascc=${ASCC:-"arm-linux-gnu-gcc -march=armv7-a -mfloat-abi=hard -mfpu=vfpv3-d16"}
+ascc=${ASCC:-"arm-linux-gnu-gcc"}
+arch=${ARCH:-"-march=armv7-a -mfloat-abi=hard -mfpu=vfpv3-d16"}
 mt_ld=${MT_LD:-"$root/../meuos-toolchain/build/bin/ld"}
 mt_as=${MT_AS:-"$root/../meuos-toolchain/build/bin/as"}
 build=${BUILD:-"$root/build/armv7"}
@@ -121,18 +122,18 @@ arch_runtime_objs() {
 	for src in "$@"; do
 		local base=$(basename "$src" .S)
 		if [ "$base" = "crt1" ]; then
-			"$ascc" -c -o "$work/crt1.o" "$src"
+			"$ascc" $arch -c -o "$work/crt1.o" "$src"
 		else
-			"$ascc" -c -o "$work/asm-$base.o" "$src"
+			"$ascc" $arch -c -o "$work/asm-$base.o" "$src"
 		fi
 	done
 }
-"$mcc" --target=armv7 -I"$root/include" -c -o "$work/hello.o" "$work/hello.c"
-"$mcc" --target=armv7 -I"$root/include" -c -o "$work/atomic.o" "$work/atomic.c"
-"$mcc" --target=armv7 -I"$root/include" -c -o "$work/setjmp.o" "$work/setjmp.c"
-"$mcc" --target=armv7 -I"$root/include" -c -o "$work/phase2.o" "$work/phase2.c"
-"$mcc" --target=armv7 -I"$root/include" -c -o "$work/bare_tls.o" "$work/bare_tls.c"
-"$mcc" --target=armv7 -I"$root/include" -c -o "$work/malloc_threads.o" "$work/malloc_threads.c"
+"$ascc" $arch -I"$root/include" -c -o "$work/hello.o" "$work/hello.c"
+"$ascc" $arch -I"$root/include" -c -o "$work/atomic.o" "$work/atomic.c"
+"$ascc" $arch -I"$root/include" -c -o "$work/setjmp.o" "$work/setjmp.c"
+"$ascc" $arch -I"$root/include" -c -o "$work/phase2.o" "$work/phase2.c"
+"$ascc" $arch -I"$root/include" -c -o "$work/bare_tls.o" "$work/bare_tls.c"
+"$ascc" $arch -I"$root/include" -c -o "$work/malloc_threads.o" "$work/malloc_threads.c"
 arch_runtime_objs \
 	"$root/crt/armv7/crt1.S" \
 	"$root/src/internal/arch/armv7/syscall.S" \
@@ -142,10 +143,10 @@ arch_runtime_objs \
 	"$root/src/arch/armv7/thread_clone.S" \
 	"$root/src/arch/armv7/set_tls.S"
 
-# ===== Link (via mt/ld: native MeuOS linker) =====
+# ===== Link (via cross-gcc: host linker for armv7) =====
 link_full() {
 	local out=$1 main=$2; shift 2
-	"$mt_ld" --target=armv7 -static -o "$out" "$work/crt1.o" "$main" "$work/asm-syscall.o" "$work/asm-atomic.o" \
+	"$ascc" $arch -nostdlib -static -o "$out" "$work/crt1.o" "$main" "$work/asm-syscall.o" "$work/asm-atomic.o" \
 		"$work/asm-setjmp.o" "$work/asm-sigreturn.o" "$work/asm-thread_clone.o" "$work/asm-set_tls.o" \
 		"$build/libc-meuos.a" "$build/libatomic-meuos.a" "$@"
 }
