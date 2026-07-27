@@ -38,6 +38,14 @@ typedef unsigned long jmp_buf[23];
 #ifndef __STRICT_ANSI__
 typedef unsigned long sigjmp_buf[25];
 #endif
+#elif defined(__arm__)
+/* armv7 EABI 硬浮点 ABI：setjmp.S 保存 r4-r11、lr 共 9 字，sp 1 字，
+ * d8-d15 共 16 字（每个 double 占 2 个 unsigned long 字），合计 26 字；
+ * sigjmp_buf 追加 mask 标志位与 sigset_t（各 1 字），共 28 字。 */
+typedef unsigned long jmp_buf[26];
+#ifndef __STRICT_ANSI__
+typedef unsigned long sigjmp_buf[28];
+#endif
 #else
 /* x86_64: setjmp.S saves rbx/rbp/r12/r13/r14/r15/rip/rsp = 8 words */
 typedef unsigned long jmp_buf[8];

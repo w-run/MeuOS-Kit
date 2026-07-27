@@ -62,6 +62,92 @@ __syscall_number(long number)
 	case 234: return 270; /* tgkill */
 	default: return number;
 	}
+#elif defined(__arm__)
+	/* ARM EABI (armv7) syscall 号。内部号是 x86_64 稳定号，这里翻译成
+	 * ARM 原生号（来自 Linux arch/arm/tools/syscall.tbl / gdb arm-linux.xml）。
+	 * 低段 (0-131) 与 i386 大多数相同，差异项：getdents64(220→217)、
+	 * clock_gettime(265→263)、exit_group(252→248)、mmap 用 mmap2(192)。
+	 * 注意：ARM 的 rt_sig* 段是 174-179（与 i386 相同），不要误写成 mprotect(125) 等。 */
+	switch (number) {
+	case 0:   return 3;    /* read */
+	case 1:   return 4;    /* write */
+	case 2:   return 5;    /* open */
+	case 3:   return 6;    /* close */
+	case 4:   return 106;  /* stat (old) */
+	case 5:   return 108;  /* fstat (old) */
+	case 6:   return 107;  /* lstat (old) */
+	case 8:   return 19;   /* lseek */
+	case 9:   return 192;  /* mmap2 (page-offset, not byte) */
+	case 10:  return 125;  /* mprotect */
+	case 11:  return 91;   /* munmap */
+	case 12:  return 45;   /* brk */
+	case 13:  return 174;  /* rt_sigaction */
+	case 14:  return 175;  /* rt_sigprocmask */
+	case 16:  return 54;   /* ioctl */
+	case 21:  return 33;   /* access */
+	case 22:  return 42;   /* pipe */
+	case 24:  return 158;  /* sched_yield */
+	case 28:  return 220;  /* madvise */
+	case 32:  return 41;   /* dup */
+	case 33:  return 63;   /* dup2 */
+	case 35:  return 162;  /* nanosleep */
+	case 39:  return 20;   /* getpid */
+	case 56:  return 120;  /* clone */
+	case 57:  return 2;    /* fork */
+	case 59:  return 11;   /* execve */
+	case 60:  return 1;    /* exit */
+	case 61:  return 114;  /* wait4 */
+	case 62:  return 37;   /* kill */
+	case 63:  return 122;  /* uname */
+	case 72:  return 55;   /* fcntl */
+	case 79:  return 183;  /* getcwd */
+	case 80:  return 12;   /* chdir */
+	case 81:  return 13;   /* fchdir */
+	case 82:  return 38;   /* rename */
+	case 83:  return 39;   /* mkdir */
+	case 84:  return 40;   /* rmdir */
+	case 86:  return 9;    /* link */
+	case 87:  return 10;   /* unlink */
+	case 88:  return 83;   /* symlink */
+	case 89:  return 85;   /* readlink */
+	case 90:  return 15;   /* chmod */
+	case 91:  return 94;   /* fchmod */
+	case 93:  return 95;   /* fchown */
+	case 95:  return 60;   /* umask */
+	case 96:  return 169;  /* gettimeofday */
+	case 100: return 153;  /* times */
+	case 102: return 24;   /* getuid */
+	case 104: return 47;   /* getgid */
+	case 107: return 49;   /* geteuid */
+	case 108: return 50;   /* getegid */
+	case 127: return 176;  /* rt_sigpending */
+	case 130: return 179;  /* rt_sigsuspend */
+	case 131: return 186;  /* sigaltstack */
+	case 186: return 224;  /* gettid */
+	case 202: return 240;  /* futex */
+	case 217: return 217;  /* getdents64 */
+	case 228: return 263;  /* clock_gettime */
+	case 231: return 248;  /* exit_group */
+	case 234: return 268;  /* tgkill */
+	case 257: return 322;  /* openat */
+	case 258: return 323;  /* mkdirat */
+	case 259: return 324;  /* mknodat */
+	case 260: return 325;  /* fchownat */
+	case 262: return 327;  /* newfstatat / fstatat64 */
+	case 263: return 328;  /* unlinkat */
+	case 264: return 329;  /* renameat */
+	case 265: return 330;  /* linkat */
+	case 266: return 331;  /* symlinkat */
+	case 267: return 332;  /* readlinkat */
+	case 268: return 333;  /* fchmodat */
+	case 269: return 334;  /* faccessat */
+	case 292: return 358;  /* dup3 */
+	case 293: return 359;  /* pipe2 */
+	case 302: return 369;  /* prlimit64 */
+	case 332: return 383;  /* statx */
+	case 412: return 348;  /* utimensat */
+	default: return number;
+	}
 #elif defined(__aarch64__) || defined(__riscv) || defined(__loongarch64)
 	/* aarch64 使用 asm-generic syscall 号表，与 x86_64 完全不同。这里把
 	 * 包装器使用的 x86_64 内部号翻译成 aarch64 原生号。aarch64 不存在

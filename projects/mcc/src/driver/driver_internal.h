@@ -25,6 +25,7 @@ extern Target T_arm64;
 extern Target T_rv64;
 extern Target T_la64;
 extern Target T_i386_sysv;
+extern Target T_arm32;
 
 /* target_select.c */
 Target *pick_target(const char *triplet);

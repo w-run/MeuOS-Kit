@@ -992,7 +992,7 @@ patch_le(struct as_file *as, struct as_section *section, size_t offset,
 static int
 build_output_sections(struct as_file *as, struct out_section **out_sections,
                       size_t *out_count, int **section_map,
-                      struct reloc_group *groups)
+                      struct reloc_group *groups, int elf_class)
 {
 	struct out_section *out;
 	int *map;
@@ -1031,7 +1031,7 @@ build_output_sections(struct as_file *as, struct out_section **out_sections,
 		out[include].type = MT_SHT_RELA;
 		out[include].flags = 0;
 		out[include].align = 8;
-		out[include].entry_size = 24;
+		out[include].entry_size = (elf_class == 1) ? 12 : 24;
 		out[include].info = (uint32_t)map[i];
 		++include;
 	}
@@ -1271,15 +1271,30 @@ write_elf_header(FILE *file, const struct mt_target *target,
 
 static int
 write_section_header(FILE *file, const struct out_section *section,
-                     uint32_t name_offset)
+                     uint32_t name_offset, int elf_class)
 {
-	if (write_u32(file, name_offset) != 0 || write_u32(file, section->type) != 0 ||
-	    write_u64(file, section->flags) != 0 || write_u64(file, 0) != 0 ||
-	    write_u64(file, section->file_offset) != 0 || write_u64(file, section->size) != 0 ||
-	    write_u32(file, section->link) != 0 || write_u32(file, section->info) != 0 ||
-	    write_u64(file, section->align ? section->align : 1) != 0 ||
-	    write_u64(file, section->entry_size) != 0)
+	if (write_u32(file, name_offset) != 0 || write_u32(file, section->type) != 0)
 		return -1;
+	if (elf_class == 1) {
+		/* ELF32: 40-byte section header */
+		if (write_u32(file, (uint32_t)section->flags) != 0 ||
+		    write_u32(file, 0) != 0 ||  /* addr */
+		    write_u32(file, (uint32_t)section->file_offset) != 0 ||
+		    write_u32(file, (uint32_t)section->size) != 0 ||
+		    write_u32(file, section->link) != 0 ||
+		    write_u32(file, section->info) != 0 ||
+		    write_u32(file, section->align ? (uint32_t)section->align : 1) != 0 ||
+		    write_u32(file, (uint32_t)section->entry_size) != 0)
+			return -1;
+	} else {
+		/* ELF64: 64-byte section header */
+		if (write_u64(file, section->flags) != 0 || write_u64(file, 0) != 0 ||
+		    write_u64(file, section->file_offset) != 0 || write_u64(file, section->size) != 0 ||
+		    write_u32(file, section->link) != 0 || write_u32(file, section->info) != 0 ||
+		    write_u64(file, section->align ? section->align : 1) != 0 ||
+		    write_u64(file, section->entry_size) != 0)
+			return -1;
+	}
 	return 0;
 }
 
@@ -1304,7 +1319,7 @@ mem_u64(unsigned char **cursor, uint64_t value)
 
 static void
 build_symbol_data(unsigned char *data, const struct elf_sym_out *symbols,
-                  size_t count)
+                  size_t count, int elf_class)
 {
 	unsigned char *cursor = data;
 	size_t i;
@@ -1314,8 +1329,15 @@ build_symbol_data(unsigned char *data, const struct elf_sym_out *symbols,
 		*cursor++ = symbols[i].other;
 		*cursor++ = (unsigned char)symbols[i].section;
 		*cursor++ = (unsigned char)(symbols[i].section >> 8);
-		mem_u64(&cursor, symbols[i].value);
-		mem_u64(&cursor, symbols[i].size);
+		if (elf_class == 1) {
+			/* ELF32 symbol: 16 bytes */
+			mem_u32(&cursor, (uint32_t)symbols[i].value);
+			mem_u32(&cursor, (uint32_t)symbols[i].size);
+		} else {
+			/* ELF64 symbol: 24 bytes */
+			mem_u64(&cursor, symbols[i].value);
+			mem_u64(&cursor, symbols[i].size);
+		}
 	}
 }
 
@@ -1390,7 +1412,8 @@ write_object(struct as_file *as, const struct mt_target *target,
 	}
 	if (resolve_fixups(as, section_map, groups) != 0)
 		goto out;
-	if (build_output_sections(as, &out, &out_count, &section_map, groups) != 0) {
+	if (build_output_sections(as, &out, &out_count, &section_map, groups,
+	                          target->elf_class) != 0) {
 		as_error(as, "unable to build ELF section table");
 		goto out;
 	}
@@ -1428,7 +1451,7 @@ write_object(struct as_file *as, const struct mt_target *target,
 	out[symtab_index].type = MT_SHT_SYMTAB;
 	out[symtab_index].flags = 0;
 	out[symtab_index].align = 8;
-	out[symtab_index].entry_size = 24;
+	out[symtab_index].entry_size = (target->elf_class == 1) ? 16 : 24;
 	out[symtab_index].link = (uint32_t)strtab_index;
 	out[symtab_index].info = (uint32_t)local_count;
 	out[strtab_index].name = ".strtab";
@@ -1454,12 +1477,12 @@ write_object(struct as_file *as, const struct mt_target *target,
 	if (string_add(&shstrtab, ".shstrtab", &shstr_string_index) != 0)
 		goto out;
 	(void)shstr_string_index;
-	out[symtab_index].size = symbol_count * 24;
+	out[symtab_index].size = symbol_count * ((target->elf_class == 1) ? 16 : 24);
 	out[symtab_index].data = (unsigned char *)mt_malloc(out[symtab_index].size);
 	if (!out[symtab_index].data)
 		goto out;
 	symtab_data = out[symtab_index].data;
-	build_symbol_data(symtab_data, symbols, symbol_count);
+	build_symbol_data(symtab_data, symbols, symbol_count, target->elf_class);
 	out[strtab_index].data = strtab.data;
 	out[strtab_index].size = strtab.size;
 	strtab.data = NULL;
@@ -1509,7 +1532,7 @@ write_object(struct as_file *as, const struct mt_target *target,
 	    write_zeros(file, target->shdr_size) != 0)
 		goto out;
 	for (i = 1; i < out_count; ++i)
-		if (write_section_header(file, &out[i], section_name_offsets[i]) != 0)
+		if (write_section_header(file, &out[i], section_name_offsets[i], target->elf_class) != 0)
 			goto out;
 	if (fclose(file) != 0) {
 		file = NULL;

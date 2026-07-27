@@ -40,6 +40,46 @@ int opt_level = 2;    /* -O2 default */
 /* warn_level and warn_as_error are defined in src/lex/token.c */
 enum tls_model tls_model = TLSM_DEFAULT;
 
+/* ARM sub-architecture flags (set via -march/-mcpu/-mfpu/-mfloat-abi) */
+static const char *arm_march  = "armv7-a";
+static const char *arm_mcpu   = NULL;
+static const char *arm_mfpu   = "vfpv3-d16";
+static const char *arm_mfloat_abi = "hard";
+
+/* Parse ARM architecture version from -march string (e.g., "armv7-a" -> 7) */
+static int arm_arch_from_march(const char *m) {
+	if (!m) return 7;
+	if (strncmp(m, "armv", 4) == 0) return atoi(m + 4);
+	if (strncmp(m, "v", 1) == 0) return atoi(m + 1);
+	return 7;
+}
+/* Set ARM-specific predefines based on -march/-mcpu/-mfpu/-mfloat-abi flags */
+static void arm_set_target_defines(void) {
+	int arch_ver = arm_arch_from_march(arm_march ? arm_march : arm_mcpu);
+	ppdefine("__arm__", "1");
+	ppdefine("__ARM_ARCH", "");
+	char *arch_num = malloc(16);
+	snprintf(arch_num, 16, "%d", arch_ver);
+	ppdefine("__ARM_ARCH_7__", "1");
+	if (arch_ver >= 7) {
+		ppdefine("__ARM_ARCH_7__", "1");
+		ppdefine("__ARM_ARCH_7A__", "1");
+	}
+	ppdefine("__ARMEL__", "1");
+	ppdefine("__ARM_EABI__", "1");
+	if (arm_mfloat_abi && strcmp(arm_mfloat_abi, "hard") == 0)
+		ppdefine("__ARM_PCS_VFP", "1");
+	if (arm_mfpu) {
+		ppdefine("__VFP_FP__", "1");
+		if (strstr(arm_mfpu, "vfpv3") || strstr(arm_mfpu, "vfpv4")
+		 || strstr(arm_mfpu, "neon"))
+			ppdefine("__ARM_VFPV3__", "1");
+	}
+	ppdefine("__ILP32__", "1");
+	ppdefine("_ILP32", "1");
+	free(arch_num);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -130,7 +170,13 @@ main(int argc, char *argv[])
 		continue;
 	}
 	if (a[1] == 'f') continue;   /* -fxxx feature flags */
-	if (a[1] == 'm') {           /* -march= etc. */
+	if (a[1] == 'm') {           /* -march=, -mcpu=, -mfpu=, -mfloat-abi= */
+		if (strncmp(a, "-march=", 7) == 0) arm_march = a + 7;
+		else if (strncmp(a, "-mcpu=", 6) == 0) arm_mcpu = a + 6;
+		else if (strncmp(a, "-mfpu=", 6) == 0) arm_mfpu = a + 6;
+		else if (strcmp(a, "-mfloat-abi=soft") == 0) arm_mfloat_abi = "soft";
+		else if (strcmp(a, "-mfloat-abi=softfp") == 0) arm_mfloat_abi = "softfp";
+		else if (strcmp(a, "-mfloat-abi=hard") == 0) arm_mfloat_abi = "hard";
 		continue;
 	}
 	if (a[1] == 'M') {
@@ -305,6 +351,8 @@ main(int argc, char *argv[])
 			ppdefine("__loongarch_lp64", "1");
 			ppdefine("__LP64__", "1");
 			ppdefine("_LP64", "1");
+		} else if (strncmp(name, "arm", 3) == 0) {
+			arm_set_target_defines();
 		}
 	}
 

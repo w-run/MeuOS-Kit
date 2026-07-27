@@ -90,9 +90,12 @@ static void
 radd(RMap *m, int t, int r)
 {
 	assert((t >= Tmp0 || t == r) && "invalid temporary");
-	assert(((T.gpr0 <= r && r < T.gpr0 + T.ngpr)
-		|| (T.fpr0 <= r && r < T.fpr0 + T.nfpr))
-		&& "invalid register");
+	if (!((T.gpr0 <= r && r < T.gpr0 + T.ngpr)
+		|| (T.fpr0 <= r && r < T.fpr0 + T.nfpr))) {
+		fprintf(stderr, "radd fail: t=%d r=%d gpr0=%d ngpr=%d fpr0=%d nfpr=%d\n",
+			t, r, T.gpr0, T.ngpr, T.fpr0, T.nfpr);
+		abort();
+	}
 	assert(!bshas(m->b, t) && "temporary has mapping");
 	assert(!bshas(m->b, r) && "register already allocated");
 	assert(m->n <= T.ngpr+T.nfpr && "too many mappings");

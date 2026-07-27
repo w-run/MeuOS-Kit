@@ -50,6 +50,17 @@ else ifeq ($(ARCH),loongarch64)
 # loongarch64 的 .S 须经交叉 gcc 汇编（syscall 0/ll.sc/dbar 等指令 mcc 不内联）。
 CC := $(MCC) --target=loongarch64
 AS := loongarch64-linux-gnu-gcc
+else ifeq ($(ARCH),arm)
+# ARM 32-bit 通用目标。子架构通过以下变量配置（默认 v7-a + hard-float + vfpv3-d16）：
+#   ARM_ARCH      架构版本（armv7-a, armv8-a 等）
+#   ARM_FLOAT_ABI 浮点 ABI（hard, softfp, soft）
+#   ARM_FPU       FPU 类型（vfpv3-d16, neon, vfpv4 等）
+ARM_ARCH      ?= armv7-a
+ARM_FLOAT_ABI ?= hard
+ARM_FPU       ?= vfpv3-d16
+ARM_FLAGS     := -march=$(ARM_ARCH) -mfloat-abi=$(ARM_FLOAT_ABI) -mfpu=$(ARM_FPU)
+CC := arm-linux-gnu-gcc $(ARM_FLAGS)
+AS := arm-linux-gnu-gcc $(ARM_FLAGS)
 else
 CC := $(HOST_CC)
 AS := $(HOST_CC)
@@ -67,8 +78,8 @@ ATOMIC_OBJ := $(BUILD)/arch/$(ARCH)/atomic.o
 ATOMIC_LIB := $(BUILD)/libatomic-meuos.a
 
 # Per-arch runtime helpers (TLS, setjmp, sigreturn, thread clone).
-# load_gs.S and soft_arith.c are i386-only; set_tls.S is aarch64-only
-# (variant I TLS 用 msr tpidr_el0 直接设置线程指针，没有 arch_prctl 等价 syscall)。
+# load_gs.S and soft_arith.c are i386-only; set_tls.S is aarch64/armv7-only
+# (variant I TLS 用 msr tpidr_el0 / mcr p15 直接设置线程指针)。
 ifeq ($(ARCH),x86_64)
 ARCH_RT_OBJS := $(BUILD)/arch/$(ARCH)/tls.o \
                 $(BUILD)/arch/$(ARCH)/setjmp.o \
@@ -99,6 +110,17 @@ ARCH_RT_OBJS := $(BUILD)/arch/$(ARCH)/tls.o \
                 $(BUILD)/arch/$(ARCH)/setjmp.o \
                 $(BUILD)/arch/$(ARCH)/sigreturn.o \
                 $(BUILD)/arch/$(ARCH)/thread_clone.o
+else ifeq ($(ARCH),arm)
+# armv7 使用协处理器 c13 设置线程指针（mcr p15,0,rd,c13,c0,3）。
+# 含 set_tls.S 用于主线程 TP 设置；aeabi.c 提供 __aeabi_* EABI 运行时
+# helper（64/32 位除法、memcpy 等）。
+ARCH_RT_OBJS := $(BUILD)/arch/$(ARCH)/tls.o \
+                $(BUILD)/arch/$(ARCH)/setjmp.o \
+                $(BUILD)/arch/$(ARCH)/sigreturn.o \
+                $(BUILD)/arch/$(ARCH)/thread_clone.o \
+                $(BUILD)/arch/$(ARCH)/set_tls.o \
+                $(BUILD)/arch/$(ARCH)/aeabi.o \
+                $(BUILD)/arch/$(ARCH)/aeabi_wrap.o
 else
 # i386 and other archs: __tls_get_addr is assembly (no inline asm in mcc)
 ARCH_RT_OBJS := $(BUILD)/arch/$(ARCH)/tls.o \
@@ -378,13 +400,22 @@ check-loongarch64-bootstrap:
 	fi
 	ASCC=loongarch64-linux-gnu-gcc sh test/loongarch64-bootstrap.sh
 
+# arm-bootstrap.sh 跨编译自检 ELF32/ARM 头；MEUOS_ARM_RUN=1 且
+# MEUOS_ARM_QEMU=<path> 时附加 qemu-user 运行时 gate。
+check-arm-bootstrap:
+	@if [ ! -f build/arm/libc-meuos.a ] || [ ! -f build/arm/libatomic-meuos.a ] || [ ! -f build/arm/crt1.o ]; then \
+		$(MAKE) ARCH=arm; \
+	fi
+	ARM_ARCH=$(ARM_ARCH) ARM_FLOAT_ABI=$(ARM_FLOAT_ABI) ARM_FPU=$(ARM_FPU) \
+		ASCC=arm-linux-gnu-gcc sh test/arm-bootstrap.sh
+
 # 一步式：build + install + 全套检查（包括 atomic/tls/threads/stdio/process）
 # 默认 host 是 x86_64，跨架构检查通过 check-aarch64-bootstrap / check-i386-bootstrap。
-check-all: check check-aarch64-bootstrap check-i386-bootstrap check-riscv64-bootstrap check-loongarch64-bootstrap
+check-all: check check-aarch64-bootstrap check-i386-bootstrap check-riscv64-bootstrap check-loongarch64-bootstrap check-arm-bootstrap
 
 clean:
 	rm -rf build
 	@$(MAKE) -C src/compat clean 2>/dev/null || true
 
 .PHONY: all compat install check check-native-linker check-mcc check-i386-bootstrap \
-        check-aarch64-bootstrap check-riscv64-bootstrap check-loongarch64-bootstrap check-all clean
+        check-aarch64-bootstrap check-riscv64-bootstrap check-loongarch64-bootstrap check-arm-bootstrap check-all clean
