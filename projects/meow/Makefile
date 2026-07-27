@@ -23,16 +23,23 @@ SRCS := $(sort $(wildcard src/*.c))
 OBJS := $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS))
 
 ifeq ($(CC),../mcc/mcc)
-  MEOW_CFLAGS := --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib
-  MEOW_LDLIBS := -l:libc-meuos.a
+  MEOW_CFLAGS := --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib -I../meuos-sysroot/include
+  MEOW_LDLIBS := -l:libc-meuos.a -L$(abspath ../meuos-sysroot/build) -lmsys
 else
-  MEOW_CFLAGS := -D_GNU_SOURCE
-  MEOW_LDLIBS :=
+  MEOW_CFLAGS := -D_GNU_SOURCE -I../meuos-sysroot/include
+  MEOW_LDLIBS := -L$(abspath ../meuos-sysroot/build) -lmsys
 endif
+
+# libmsys.a — .msys single-file sysroot reader (dependency for msys/check-msys)
+MSYS_LIB := $(abspath ../meuos-sysroot/build/libmsys.a)
+MSYS_DIR := $(abspath ../meuos-sysroot)
+
+$(MSYS_LIB):
+	$(MAKE) -C $(MSYS_DIR)
 
 all: $(BUILD)/meow
 
-$(BUILD)/meow: $(OBJS)
+$(BUILD)/meow: $(OBJS) $(MSYS_LIB)
 	@mkdir -p $(BUILD)
 	$(CC) $(MEOW_CFLAGS) -o $@ $^ $(MEOW_LDLIBS)
 
@@ -110,14 +117,49 @@ check-meow-multiarch: $(BUILD)/meow
 # /bin/sh until the MeuOS userspace supplies its own shell.
 check-sysroot-static:
 	@$(MAKE) -C ../meuos-libc install DESTDIR=$(abspath ../sysroot) PREFIX=/usr
+	@$(MAKE) -C ../meuos-sysroot
 	@work=$$(mktemp -d /tmp/meow-sysroot-static.XXXXXX); trap 'rm -rf "$$work"' EXIT HUP INT TERM; \
 	../mcc/mcc --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib --static \
-		-o "$$work/meow" $(SRCS) -l:libc-meuos.a; \
+		-o "$$work/meow" $(SRCS) -l:libc-meuos.a -L$(abspath ../meuos-sysroot/build) -lmsys; \
 	cd .. && { \
 		"$$work/meow" build meow-smoke && "$$work/meow" clean meow-smoke && \
 		"$$work/meow" build meow-env && "$$work/meow" clean meow-env && \
 		"$$work/meow" list | grep -qx meow-smoke; \
 	}
+
+# msys — Build .msys from MEUOS_SYSROOT using mkmsys
+MSYS_SYSROOT ?= $(MEUOS_SYSROOT)
+MSYS_OUTPUT  ?= $(MSYS_SYSROOT).msys
+MKMSYS       := $(abspath ../meuos-sysroot/build/mkmsys)
+
+msys: $(MKMSYS)
+	@if [ -z "$(MSYS_SYSROOT)" ]; then \
+		echo "MEUOS_SYSROOT not set — use MSYS_SYSROOT=<dir>"; exit 1; fi
+	@echo "Packing $(MSYS_SYSROOT) -> $(MSYS_OUTPUT)"
+	"$(MKMSYS)" --format v2 --dedup --arch=$$(basename "$$MSYS_SYSROOT" | sed 's/sysroot-//; s/\.msys//') \
+	  -o "$(MSYS_OUTPUT)" "$(MSYS_SYSROOT)"
+
+$(MKMSYS):
+	$(MAKE) -C $(MSYS_DIR)
+
+# check-msys — Validate .msys is readable
+check-msys: $(MSYS_LIB)
+	@ok=0; \
+	for f in /tmp/*.msys; do \
+		if [ -f "$$f" ]; then \
+			echo "Checking $$f ..."; \
+			$(MKMSYS) --list "$$f" > /dev/null 2>&1; \
+			if [ $$? -eq 0 ]; then \
+				echo "  OK: $$(wc -c < "$$f") bytes"; \
+				ok=1; \
+			else \
+				echo "  FAIL: $$f"; exit 1; \
+			fi; \
+		fi; \
+	done; \
+	if [ "$$ok" -eq 0 ]; then \
+		echo "check-msys: no .msys files found — build one first with 'make msys'"; \
+	fi
 
 install: $(BUILD)/meow
 	@mkdir -p $(DESTDIR)/usr/bin
@@ -126,4 +168,4 @@ install: $(BUILD)/meow
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all check check-sysroot-static check-meow-multiarch install clean
+.PHONY: all check check-sysroot-static check-meow-multiarch msys check-msys install clean

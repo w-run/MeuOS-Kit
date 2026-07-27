@@ -17,6 +17,12 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROGRESS_FILE="${REPO_ROOT}/bootstrap-report.md"
 
+# Paths (all components live under projects/ since the multi-component split)
+MCC_DIR="${REPO_ROOT}/projects/mcc"
+LIBC_DIR="${REPO_ROOT}/projects/meuos-libc"
+MEOW_DIR="${REPO_ROOT}/projects/meow"
+MSYS_DIR="${REPO_ROOT}/projects/meuos-sysroot"
+
 # Environment with sensible defaults (idempotent re-runs)
 : "${HOST_CC:=}"
 : "${MEUOS_SYSROOT:=${REPO_ROOT}/sysroot}"
@@ -103,22 +109,22 @@ phase0_prepare() {
 
 phase1_build_mcc() {
     phase "Phase 1 — Birth of mcc"
-    if [[ ! -d "${REPO_ROOT}/mcc" ]] || [[ ! -f "${REPO_ROOT}/mcc/Makefile" ]]; then
+    if [[ ! -d "${MCC_DIR}" ]] || [[ ! -f "${MCC_DIR}/Makefile" ]]; then
         die "mcc/ source tree (with Makefile) not yet created. Implement mcc first (AGENTS.md §6 Task 1)."
     fi
 
     # Keep the source tree reusable: build incrementally and leave cleaning
     # to an explicit `make clean`, rather than deleting a user's artifacts.
-    make -C "${REPO_ROOT}/mcc"
-    make -C "${REPO_ROOT}/mcc" check
-    make -C "${REPO_ROOT}/mcc" check-c11
-    make -C "${REPO_ROOT}/mcc" check-driver
-    make -C "${REPO_ROOT}/mcc" check-i386
-    make -C "${REPO_ROOT}/mcc" check-targets
-    make -C "${REPO_ROOT}/mcc" check-loongarch64
+    make -C "${MCC_DIR}"
+    make -C "${MCC_DIR}" check
+    make -C "${MCC_DIR}" check-c11
+    make -C "${MCC_DIR}" check-driver
+    make -C "${MCC_DIR}" check-i386
+    make -C "${MCC_DIR}" check-targets
+    make -C "${MCC_DIR}" check-loongarch64
 
     mkdir -p "${MEUOS_SYSROOT}/usr/bin"
-    cp "${REPO_ROOT}/mcc/mcc" "${MEUOS_SYSROOT}/usr/bin/mcc"
+    cp "${MCC_DIR}/mcc" "${MEUOS_SYSROOT}/usr/bin/mcc"
     chmod 755 "${MEUOS_SYSROOT}/usr/bin/mcc"
 
     local hello_c hello_bin atomic_bin
@@ -128,8 +134,8 @@ phase1_build_mcc() {
     "${MEUOS_SYSROOT}/usr/bin/mcc" -o "${hello_bin}" "${hello_c}"
     "${hello_bin}"
     atomic_bin="/tmp/meuos-mcc-phase1-atomic"
-    "${MEUOS_SYSROOT}/usr/bin/mcc" -I"${REPO_ROOT}/mcc/test/c11" \
-        -o "${atomic_bin}" "${REPO_ROOT}/mcc/test/c11/atomic_concurrent.c" -lpthread
+    "${MEUOS_SYSROOT}/usr/bin/mcc" -I"${MCC_DIR}/test/c11" \
+        -o "${atomic_bin}" "${MCC_DIR}/test/c11/atomic_concurrent.c" -lpthread
     "${atomic_bin}" | grep -qx 'PASS'
     log "Phase 1 PASS: mcc installed to ${MEUOS_SYSROOT}/usr/bin/mcc"
 }
@@ -142,15 +148,13 @@ phase2_build_libc() {
     phase "Phase 2 - Birth of meuos-libc"
     # mcc rebuilds the libc C sources and runs the full regression
     # (atomic, threads, TLS, stdio, signal, setjmp, pthread, process).
-    make -C "${REPO_ROOT}/meuos-libc" check-mcc
+    make -C "${LIBC_DIR}" check-mcc
     # mcc itself is then rebuilt with only libc-meuos (--nostdlib --static)
     # and runs a hello-world, proving the standalone sysroot closed loop.
-    make -C "${REPO_ROOT}/mcc" check-sysroot-static
-    # GNU-extension compatibility layer (error, argp, obstack, funopen,
-    # getline, asprintf, malloc hooks, strdupa) per AGENTS.md §2.2.
-    make -C "${REPO_ROOT}/meuos-libc-compat" check
-    make -C "${REPO_ROOT}/meuos-libc-compat" install DESTDIR="${MEUOS_SYSROOT}" PREFIX=/usr
-    log "Phase 2 PASS: libc-meuos + libc-meuos-compat verified"
+    make -C "${MCC_DIR}" check-sysroot-static
+    # libc install includes both core libc-meuos.a and compat (embedded within)
+    make -C "${LIBC_DIR}" install DESTDIR="${MEUOS_SYSROOT}" PREFIX=/usr
+    log "Phase 2 PASS: libc-meuos + compat verified"
 }
 
 # ============================================================
@@ -161,9 +165,9 @@ phase3_build_meow() {
     phase "Phase 3 — Birth of meow"
     # meow is built with mcc + libc-meuos (--nostdlib --static) and runs
     # the native YAML target-graph regression.
-    make -C "${REPO_ROOT}/meow" SYSROOT="${MEUOS_SYSROOT}" check-sysroot-static
-    make -C "${REPO_ROOT}/meow" SYSROOT="${MEUOS_SYSROOT}" check
-    make -C "${REPO_ROOT}/meow" SYSROOT="${MEUOS_SYSROOT}" \
+    make -C "${MEOW_DIR}" SYSROOT="${MEUOS_SYSROOT}" check-sysroot-static
+    make -C "${MEOW_DIR}" SYSROOT="${MEUOS_SYSROOT}" check CC=gcc
+    make -C "${MEOW_DIR}" SYSROOT="${MEUOS_SYSROOT}" \
         DESTDIR="${MEUOS_SYSROOT}" install
     (cd "${REPO_ROOT}" && "${MEUOS_SYSROOT}/usr/bin/meow" list >/dev/null)
     log "Phase 3 PASS: meow builds with mcc+libc-meuos and runs native YAML targets"
@@ -190,7 +194,7 @@ phase4_verify() {
 		if [ -d "${MEUOS_SYSROOT}/usr/lib" ]; then
 			make -C "${REPO_ROOT}/projects/meuos-sysroot" MSYS_SYSROOT="${MEUOS_SYSROOT}" msys \
 			  >/dev/null 2>&1 && \
-			log "  .msys: ${MEUOS_SYSROOT}.msys generated"
+			log "  .msys: ${MEUOS_SYSROOT}.msys generated (v2+dedup+arch)"
 		fi
 	else
         log "Phase 4 FAIL: check-sysroot-static failed"
@@ -309,8 +313,8 @@ phase5_lfs() {
         log "Phase 5 SKIP (MEUOS_SKIP_PHASE5=1)"
         return 0
     fi
-    cp "${REPO_ROOT}/mcc/mcc" "${MEUOS_SYSROOT}/usr/bin/mcc"
-    cp "${REPO_ROOT}/meow/build/meow" "${MEUOS_SYSROOT}/usr/bin/meow"
+    cp "${MCC_DIR}/mcc" "${MEUOS_SYSROOT}/usr/bin/mcc"
+    cp "${MEOW_DIR}/build/meow" "${MEUOS_SYSROOT}/usr/bin/meow"
 
     # bzip2 1.0.8
     (cd "${REPO_ROOT}" && MEUOS_SYSROOT="${MEUOS_SYSROOT}" \

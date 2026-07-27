@@ -2,11 +2,11 @@
 priority: P2
 status: in_progress
 kind: plan
-progress_note: Phase A 已验证 (libmcc.a build OK, make check 全绿); Phase B/C/D 待 m++ 启动时实施
-note: mcc/m++ 共享后端架构(libmcc 化)的分阶段计划;阶段 A 已落地,阶段 B/C/D 待 m++ 启动时实施。本 todo 属规划类(kind: plan),验收命令只验证 Phase A 既有产物,driver 不应据此标 done。
+progress_note: libmcc-phase-a 已验证 (libmcc.a build OK, make check 全绿); libmcc-phases 待 m++ 启动时实施
+note: mcc/m++ 共享后端架构(libmcc 化)的分阶段计划;libmcc-stage-a 已落地,阶段 B/C/D 待 m++ 启动时实施。本 todo 属规划类(kind: plan),验收命令只验证 libmcc-phase-a 既有产物,driver 不应据此标 done。
 start_ts: 2026-07-24
 rollback_ts: 2026-07-24
-rollback_reason: driver 误标 done (验收命令只验 Phase A 既有产物, 无本轮代码改动); 改为 kind: plan, 不进 driver actionable 队列
+rollback_reason: driver 误标 done (验收命令只验 libmcc-phase-a 既有产物, 无本轮代码改动); 改为 kind: plan, 不进 driver actionable 队列
 -->
 
 # 待规划：mcc/m++ 共享后端架构调整（libmcc 化）
@@ -119,7 +119,7 @@ projects/
 
 ## 实施阶段（渐进、可回滚）
 
-### 阶段 A（最小破坏性改动，验证可行性）✅ 已完成（2026-07-22）
+### libmcc-stage-a（最小破坏性改动，验证可行性）✅ 已完成（2026-07-22）
 
 - **不改目录结构**，只在 `projects/mcc/Makefile` 把后端 .o 打成
   `libmcc.a`（包含 `ir/opt/abi/emit/target/util` 的所有 .o，共 41 个）
@@ -159,8 +159,8 @@ projects/
 
 ## 优先级评估
 
-- **不阻塞当前 aarch64 移植**：可先完成 P2 aarch64，再做架构调整
-- **建议时机**：在 m++ 真正开始之前完成阶段 A+B（不破坏现有功能，
+- **不阻塞当前 aarch64 移植**：可先完成 target-aarch64，再做架构调整
+- **建议时机**：在 m++ 真正开始之前完成libmcc-stage-a+B（不破坏现有功能，
   为 m++ 铺路）
 - **风险**：阶段 C 涉及大范围文件移动，需严格回归测试
 
@@ -175,12 +175,12 @@ projects/
 
 ## 前置依赖
 
-- aarch64 移植完成（P2），避免重构期叠加架构移植风险
+- aarch64 移植完成（target-aarch64），避免重构期叠加架构移植风险
 - 完整的 `make check` 回归基线（已有）
 
 ## 验收
 
-- 阶段 A 完成：`libmcc.a` 产出，mcc 行为零变化（全绿 check）
+- libmcc-stage-a 完成：`libmcc.a` 产出，mcc 行为零变化（全绿 check）
 - 阶段 B 完成：`projects/libmcc/include/` 就绪，可被外部链接
 - 阶段 C 完成：mcc = 前端 + libmcc.a，二进制大小相近（<5% 增长）
 - 阶段 D 完成（未来）：m++ 能编译并运行最简 C++ 程序
@@ -200,10 +200,10 @@ projects/
 ## 验收标准
 
 ```bash
-# Phase A: verify libmcc.a exists (full path from project root)
+# libmcc-phase-a: verify libmcc.a exists (full path from project root)
 test -f projects/mcc/build/libmcc.a
-# Phase A: verify existing tests still pass
+# libmcc-phase-a: verify existing tests still pass
 cd projects/mcc && make check
-# Phase A: verify libmcc.a contains backend symbols (full path from project root)
+# libmcc-phase-a: verify libmcc.a contains backend symbols (full path from project root)
 nm projects/mcc/build/libmcc.a | grep -q 'T.*isel' && echo "backend symbols in libmcc: PASS"
 ```

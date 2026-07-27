@@ -482,32 +482,59 @@ MeuOS-Kit/
 反例（禁止）："实现 riscv64 的 7 个运行时文件"
 正例："创建 `src/arch/riscv64/atomic.S`（380 行，25 个原子函数）"
 
-### 7.2 任务卡片四要素
+### 7.2 任务卡片五要素
 
-每个任务必须包含以下四项，缺一不可：
+每个任务必须包含以下五项，缺一不可：
 
 | 要素                  | 说明                                                | 示例                                                                                         |
 | --------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| **1. 任务范围** | 精确的文件路径和修改内容                            | 创建`src/arch/riscv64/atomic.S`，实现 `__atomic_*` 系列                                  |
-| **2. 参考来源** | 本仓库已验证实现（最优先）+ 社区标准实现 + 规范文档 | `src/arch/aarch64/atomic.S`（本仓库模板）+ `musl arch/riscv64/atomic_arch.h`（社区参考） |
-| **3. 验收标准** | 可写成 shell 单行断言的检查项                       | `riscv64-linux-gnu-gcc -c atomic.S` 通过 && `nm atomic.o                                   |
-| **4. 依赖关系** | 仅依赖已完成的**前置**任务，线性单向无回溯    | 依赖 task-01（syscall.S）已完成                                                              |
+| **1. 任务 ID** | 单词-短横线-代号。机器可读、语义自明；不用纯数字或字母数字编号 | `bug-riscv64-emit`、`ld-shared`、`meow-template-subst` |
+| **2. 任务范围** | 精确的文件路径和修改内容                            | 创建`src/arch/riscv64/atomic.S`，实现 `__atomic_*` 系列                                  |
+| **3. 参考来源** | 本仓库已验证实现（最优先）+ 社区标准实现 + 规范文档 | `src/arch/aarch64/atomic.S`（本仓库模板）+ `musl arch/riscv64/atomic_arch.h`（社区参考） |
+| **4. 验收标准** | 可写成 shell 单行断言的检查项                       | `riscv64-linux-gnu-gcc -c atomic.S` 通过 && `nm atomic.o                                   |
+| **5. 依赖关系** | 仅依赖已完成的**前置**任务，线性单向无回溯    | 依赖 `riscv64-syscall` 已完成                                                              |
+
+#### 任务 ID 命名规则
+
+```
+<组件>-<功能>-<修饰>     # 全部小写，短横线分隔
+```
+
+**组件前缀**（来源自明）：
+- `bug-*`        — 阻塞性 bug（如 `bug-riscv64-emit`、`bug-i386-tls`）
+- `mcc-*`        — 编译器相关
+- `libc-*`       — C 库相关
+- `ld-*`         — 链接器相关（mt/ld）
+- `as-*`         — 汇编器相关（mt/as）
+- `meow-*`       — 构建系统相关
+- `arch-*`       — 跨架构适配
+- `c23-*`        — C23 标准特性
+- `target-*`     — 架构 Target/子架构
+- `specs-*`      — 编译参数/配置
+- `triple-*`     — 三元组/ABI 相关
+- `ci-*`         — CI/CD/测试基础设施
+
+**命名原则**：
+- 一眼能看出是哪个组件 + 做什么
+- 避免纯数字（agent 记不住 `task-42` 是什么意思）
+- 有层次：`mcc-pic-verify`（mcc 的 PIC 验证）好于 `verify-pic`
+- 文件名/函数名风格：`ld-shared`、`meow-wildcard`、`libc-math`
 
 ### 7.3 线性单向任务流
 
 - 将任务 DAG **拉平成线性阶段**，每个阶段内无交叉依赖
 - 阶段内互不依赖的独立任务可**并行分派**给 hy3 无头 agent（使用 Agent 工具 `run_in_background: true` + `model: "hy3"`）
 - 每个阶段完成后**立即验证**，失败不回退、不被后续任务污染
-- **禁止回溯**：不允许 task-N 完成后发现 task-M（M < N）有问题再回去改
+- **禁止回溯**：不允许 `ld-so` 完成后发现 `ld-shared` 有问题再回去改
 
 ### 7.4 hy3 无头 agent 并行开发
 
 识别同一阶段内互不依赖的并行任务窗口：
 
 ```
-Phase A: task-01（基础，必须串行先做）
-  → task-02, task-03, task-04（互不依赖，可 3 个 hy3 无头 agent 并行）
-  → task-05（依赖 02-04 全部完成，串行收尾）
+Phase A: riscv64-syscall（基础，必须串行先做）
+  → riscv64-atomic, riscv64-setjmp, riscv64-sigreturn（互不依赖，可 3 个 hy3 无头 agent 并行）
+  → riscv64-thread-clone（依赖前 3 个全部完成，串行收尾）
 ```
 
 并行分派要点：

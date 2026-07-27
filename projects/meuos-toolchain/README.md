@@ -13,19 +13,19 @@
     - `ld` - 链接器
     - `ar` - 归档器
     - `ranlib` - 归档索引生成器
-    - `nm` / `objdump` / `readelf` / `strip` / `objcopy` - 二进制工具（P4）
+    - `nm` / `objdump` / `readelf` / `strip` / `objcopy` - 二进制工具（binutils）
 - **内部共享**：`src/libelf/`（ELF 解析库，编译为 `build/lib/libelf.a`）
 - **代码不包含宿主 `<elf.h>`**：所有 ELF 常量和结构体自带，避免 GNU 依赖
 
-## 当前状态（P0-P2 已完成）
+## 当前状态（base-layer...ld-x86_64 已完成）
 
 | 阶段 | 状态 | 内容 |
 |------|------|------|
 | P0a | ✅ | libelf + ar 基础框架 |
 | P0b | ✅ | ar 完整化：GNU // long-name、/ symbol index、r/q 语义、ranlib、BSD #1/ |
-| P1 | ✅ | x86_64 汇编器：整数/SSE/SSE2 标量编码、ET_REL 生成、golden bytes 对比 |
-| P2 | ✅ | x86_64 静态链接器：PT_TLS + TPOFF32、-L/-l/-l:/--sysroot、counter=2000 QEMU 端到端 |
-| P3-P11 | 规划中 | 见 [ARCHITECTURE.md](ARCHITECTURE.md) |
+| as-x86_64 | ✅ | x86_64 汇编器：整数/SSE/SSE2 标量编码、ET_REL 生成、golden bytes 对比 |
+| ld-x86_64 | ✅ | x86_64 静态链接器：PT_TLS + TPOFF32、-L/-l/-l:/--sysroot、counter=2000 QEMU 端到端 |
+| mcc-mt-integrate...target-riscv64 | 规划中 | 见 [ARCHITECTURE.md](ARCHITECTURE.md) |
 
 ## 目录结构
 
@@ -44,7 +44,7 @@ projects/meuos-toolchain/
 │   ├── as/{assemble.c,main.c}  # x86_64 汇编器
 │   ├── ld/{link.c,main.c}      # x86_64 静态链接器
 │   ├── ranlib/main.c           # 归档索引生成器
-│   └── target/<arch>/README.md # 架构占位（P9-P11 实现）
+│   └── target/<arch>/README.md # 架构占位（target-i386...target-riscv64 实现）
 ├── test/                       # 测试脚本
 │   ├── as_sse_x86_64.sh        # SSE golden bytes 对比
 │   ├── as_libc_x86_64.sh       # libc 运行时汇编 fixture
@@ -104,19 +104,19 @@ mt check (ar 完整功能): PASS
 
 ## 后续路线图
 
-P3-P11 详见 [ARCHITECTURE.md](ARCHITECTURE.md)：
+mcc-mt-integrate...target-riscv64 详见 [ARCHITECTURE.md](ARCHITECTURE.md)：
 
 | 阶段 | 内容 | 规模 |
 |------|------|------|
-| P3 | mcc driver 集成（消除宿主 cc 依赖） | S |
-| P4 | nm/readelf/objdump/strip/objcopy | M |
-| P5 | 自举验证（QEMU sysroot 自重建） | M |
-| P6 | 动态链接（.so + ld.so + dlopen） | L |
-| P7 | TLS 动态模型（GD/LD） | M |
-| P8 | DWARF 调试信息（-g） | M |
-| P9 | i386 架构 | M |
-| P10 | aarch64 架构 | L |
-| P11 | riscv64 架构 | L |
+| mcc-mt-integrate | mcc driver 集成（消除宿主 cc 依赖） | S |
+| binutils | nm/readelf/objdump/strip/objcopy | M |
+| bootstrap-verify | 自举验证（QEMU sysroot 自重建） | M |
+| ld-shared | 动态链接（.so + ld.so + dlopen） | L |
+| ld-tls-dynamic | TLS 动态模型（GD/LD） | M |
+| ld-dwarf | DWARF 调试信息（-g） | M |
+| target-i386 | i386 架构 | M |
+| target-aarch64 | aarch64 架构 | L |
+| target-riscv64 | riscv64 架构 | L |
 
 ## 参考实现（许可证友好）
 

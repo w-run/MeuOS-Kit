@@ -2,7 +2,7 @@
 # 架构：x86_64 i386 aarch64 riscv64 loongarch64 arm
 # QEMU: 10.1.0（自编译，env/qemu/qemu-{arch}）
 
-## P0 — 测试基础设施（阻塞回归）
+## base-layer — 测试基础设施（阻塞回归）
 
 [x] 修复 check-ld-x86_64 / check-ld-sysroot：因 sysroot 未安装 libc 头文件而跳过
     -> make -C projects/meuos-libc install DESTDIR=/workspace/MeuOS-Kit/sysroot PREFIX=/usr
@@ -17,7 +17,7 @@
     -> 新增 i386/aarch64/riscv64/loongarch64 syscall 号翻译
     -> make -C projects/meow check 全面通过
 
-## P1 — loongarch64 核心补齐
+## as-x86_64 — loongarch64 核心补齐
 
 [x] mt/as loongarch64 编码器扩增 + bug 修复
     -> 新增 jirl/syscall/move/nop/ret/jr/conditional branch 等编码
@@ -38,10 +38,10 @@
     -> mt/ld 修复：R_LARCH_B16 (64) 应用支持
     -> 全部 6 个测试 ELF 编译检查通过（mt/as + mt/ld 全链路）
     -> hello (getpid+write) qemu-user 运行时验证：exit=0 正确输出
-    -> 原子测试 qemu-user 失败（exit=5），疑似 QEMU LL/SC 问题，P2 中跟进
+    -> 原子测试 qemu-user 失败（exit=5），疑似 QEMU LL/SC 问题，ld-x86_64 中跟进
     -> 安装 libc-meuos.a/libatomic-meuos.a/crt1.o 到 sysroot-loongarch64
 
-## P2 — 跨架构完善
+## ld-x86_64 — 跨架构完善
 
 [x] mt/as riscv64 编码器扩展 + 链接器分发
     -> 新增 beqz/bnez/blez/bgez/bltz/bgtz 分支伪指令 + tail 远跳转伪指令
@@ -64,7 +64,7 @@
     -> check-c23 全 20 测试 PASS（embed 参数/BitInt/属性全部通过并验证）
     -> .todo 已过时：所有 AGENTS.md §2.2 列出的 C23 特性均已完整实现
 
-## P3 — 自举验证
+## mcc-mt-integrate — 自举验证
 
 [x] Phase 4: 用 sysroot 内的 mcc + meow 重新编译全套工具
     -> check-sysroot-static 全部通过：82 个 .c 编译 + libmcc.a + mcc 链接
@@ -80,7 +80,7 @@
        mcc 编译 + ar 归档，压缩/解压验证通过
     -> dash/binutils: 当前仍用 ./configure/make，需要预生成 config.h 后迁移
 
-## P4 — ARM 完善 + 长期
+## binutils — ARM 完善 + 长期
 
 [x] ARM (armv7→arm) 完整移植
     -> mcc 后端 4 文件（~18KB）：targ/abi/isel/emit + 子架构配置
@@ -103,7 +103,7 @@
     -> meow 源码：${VAR} 展开、增量路径检测已实现
     -> 遗留：Makefile 暂保留作为 bootstrap 过渡路径
 
-## P5 — .msys v2 格式完善（已完成）
+## bootstrap-verify — .msys v2 格式完善（已完成）
 
 [x] v2 格式设计（Phase 2A-2C）：64B header + 32B index + dir block
 [x] SHA-256 内容去重（5.4）：--dedup 打包 + msys_verify/verify_all

@@ -22,7 +22,7 @@ objcopy  节区和格式复制
 ```
 
 当前已实现 `ar`、`ranlib`、`as`、`ld`、`nm`、`readelf`、`objdump`、`strip`、`objcopy`
-和内部 `libelf`、`libdisasm`。P3（mcc driver 集成 MT_AS/MT_LD）与 P4（二进制
+和内部 `libelf`、`libdisasm`。mcc-mt-integrate（mcc driver 集成 MT_AS/MT_LD）与 binutils（二进制
 辅助工具：readelf/nm/objdump/strip/objcopy）已完成。
 
 ### 1.2 内部共享层
@@ -39,7 +39,7 @@ src/target/       架构相关编码、重定位和反汇编
 
 ### 1.3 x86_64 首期边界
 
-P0-P2 已实现：
+base-layer...ld-x86_64 已实现：
 
 - ELF64 little-endian；`ET_REL`、`ET_EXEC`、`ET_DYN` 头部读取；
 - `EM_X86_64`；
@@ -49,10 +49,10 @@ P0-P2 已实现：
 - 静态链接 MeuOS libc 和 `crt1.o`；
 - 宿主 Linux 上的 `make check`，以及 QEMU x86_64 上的端到端运行。
 
-P0-P2 范围（已全部完成）：GNU // long-name table、archive symbol index、
+base-layer...ld-x86_64 范围（已全部完成）：GNU // long-name table、archive symbol index、
 SSE/SSE2 标量编码、TLS 静态模型（IE/LE + PT_TLS + TPOFF32）、BSD #1/ 格式读取、
 ranlib、-L/-l/--sysroot 库搜索。
-P3-P11 覆盖后续全部能力（详见 §2），不预设优先级。
+mcc-mt-integrate...target-riscv64 覆盖后续全部能力（详见 §2），不预设优先级。
 
 ## 2. 分阶段开发任务
 
@@ -103,7 +103,7 @@ make -C projects/meuos-toolchain check
 - `ar t`/`nm` 可看到稳定的成员和符号；
 - `make -C projects/mcc check` 可在 `MT_AR` 下通过。
 
-### P1：x86_64 汇编器（核心完成，含 SSE/SSE2 标量指令）
+### as-x86_64：x86_64 汇编器（核心完成，含 SSE/SSE2 标量指令）
 
 任务：
 
@@ -127,7 +127,7 @@ make -C projects/meuos-toolchain check-as-x86_64 check-as-libc-x86_64
 - mcc 产出的 x86_64 `.s` 和 MeuOS libc 的 crt/atomic/setjmp/sigreturn/thread/syscall 汇编可汇编；
 - 错误输入必须报告行号和列号，不得崩溃。
 
-### P2：x86_64 静态链接器（完成，含 TLS + counter=2000 + -L/-l/--sysroot）
+### ld-x86_64：x86_64 静态链接器（完成，含 TLS + counter=2000 + -L/-l/--sysroot）
 
 已完成的任务：
 
@@ -151,13 +151,13 @@ make -C projects/meuos-toolchain check-ld-x86_64
 - SSE/SSE2 标量指令编码与 host as 字节级一致；
 - 未定义符号有明确诊断；
 - `-L`/`-l`/`-l:`/`--sysroot` 库搜索路径已支持；
-- 后续：P3-P11（见下文）。
+- 后续：mcc-mt-integrate...target-riscv64（见下文）。
 
-### P3：mcc driver 集成（已完成）
+### mcc-mt-integrate：mcc driver 集成（已完成）
 
 > 消除 Kit 自举链的最后一个外部依赖（宿主 `cc` 做汇编/链接）。
 
-**依赖**：P0-P2　**规模**：S
+**依赖**：base-layer...ld-x86_64　**规模**：S
 
 产物：mcc 通过 `MT_AS`/`MT_LD` 调用 mt 工具，不再经宿主 `cc`。
 
@@ -175,11 +175,11 @@ strace -f mcc --specs=meuos test.c -o test 2>&1 \
 
 ---
 
-### P4：二进制辅助工具（已完成）
+### binutils：二进制辅助工具（已完成）
 
 > 构建真实软件包时 configure/make 会调用 nm/readelf/objdump/strip/objcopy。
 
-**依赖**：P0（libelf）　**规模**：M
+**依赖**：base-layer（libelf）　**规模**：M
 
 **状态**：已完成。9 个工具（as/ld/ar/ranlib/nm/readelf/objdump/strip/objcopy）全部实现，
 `make check` 全量通过。
@@ -205,12 +205,12 @@ objdump -d build/bin/ar | grep -q 'endbr64'
 
 ---
 
-### P5：自举验证 ✅ 已完成
+### bootstrap-verify：自举验证 ✅ 已完成
 
 > AGENTS.md Phase 4 核���要求已满足：`check-sysroot-static` 验证通过，
 > `check-mt-integration` 验证零宿主 cc 依赖。
 
-**依赖**：P3 + P4　**规模**：M
+**依赖**：mcc-mt-integrate + binutils　**规模**：M
 
 验证：
 - `make -C projects/mcc check-sysroot-static` — sysroot 内自重建通过
@@ -219,11 +219,11 @@ objdump -d build/bin/ar | grep -q 'endbr64'
 
 ---
 
-### P6：动态链接
+### ld-shared：动态链接
 
 > 真实软件几乎都依赖共享库。没有动态链接，meow 只能构建纯静态二进制。
 
-**依赖**：P3 + P5　**规模**：L
+**依赖**：mcc-mt-integrate + bootstrap-verify　**规模**：L
 
 产物：mt/ld `-shared`（`ET_DYN`）、`-pie`/`-no-pie`、动态链接器 `ld.so`、
 libc `dlopen`/`dlsym`/`dlclose`。
@@ -246,12 +246,12 @@ meow build busybox    # 动态链接版本
 
 ---
 
-### P7：TLS 动态模型
+### ld-tls-dynamic：TLS 动态模型
 
 > 共享库中的 `_Thread_local` 需要 GD/LD 模型。glibc 的 `errno` 就是
 > `_Thread_local`，任何使用 errno 的共享库都会触发。
 
-**依赖**：P6　**规模**：M
+**依赖**：ld-shared　**规模**：M
 
 产物：TLS general-dynamic 和 local-dynamic 代码序列、重定位、运行时支持。
 
@@ -274,12 +274,12 @@ LD_LIBRARY_PATH=. ./tls_test     # 输出 42
 
 ---
 
-### P8：DWARF 调试信息
+### ld-dwarf：DWARF 调试信息
 
 > 构建带 `-g` 的软件包、调试崩溃、stack trace 都需要 DWARF。部分 configure
 > 脚本会检测调试信息支持。
 
-**依赖**：P3 + P4（objdump 反汇编）　**规模**：M
+**依赖**：mcc-mt-integrate + binutils（objdump 反汇编）　**规模**：M
 
 产物：mcc `-g` 生成 DWARF v5（`.debug_info`/`.debug_line`/`.debug_abbrev`），
 mt/ld 合并重定位 `.debug_*` 节，strip 支持 `--strip-debug`。
@@ -300,13 +300,13 @@ strip --strip-debug test && readelf -S test | grep -v '\.debug'
 
 ---
 
-### P9：i386 架构 ✅ 已完成
+### target-i386：i386 架构 ✅ 已完成
 
 > i386 mt/as + mt/ld 支持已实现。编码器支持 ModRM/SIB 寻址、条件跳转、
 > 移位/旋转、and/or/div 等通用指令。链接器支持 ELF32 输入和 i386 重定位。
 > 端到端 as+ld i386 ELF 验证通过。
 
-**依赖**：P0-1a + P0-2　**规模**：M
+**依赖**：base-libelf + base-ar　**规模**：M
 
 实现：
 1. mt/as: i386 指令编码（1118 行，ModRM/SIB/条件跳转/移位/四则运算）；
@@ -322,13 +322,13 @@ qvm run i386 '/mnt/host/i386_counter_test'
 
 ---
 
-### P10：aarch64 架构 ✅ 已完成
+### target-aarch64：aarch64 架构 ✅ 已完成
 
-> mt/as + mt/ld aarch64 支持已实现（超原计划 P10 进度）。编码器 1248 行，
+> mt/as + mt/ld aarch64 支持已实现（超原计划 target-aarch64 进度）。编码器 1248 行，
 > 支持 50+ 指令族（含原子和浮点）。链接器支持 13 种重定位类型。
 > 端到端 as+ld+qemu-aarch64 验证通过。
 
-**依赖**：P3　**规模**：L
+**依赖**：mcc-mt-integrate　**规模**：L
 
 实现：
 1. mt/as: aarch64 指令编码（ADRP/LDR/STR/B/BL/原子/浮点等 50+ 族）；
@@ -342,12 +342,12 @@ make -C projects/meuos-toolchain check-aarch64-e2e  # as+ld+qemu aarch64
 
 ---
 
-### P11：riscv64 架构 ✅ 已完成
+### target-riscv64：riscv64 架构 ✅ 已完成
 
-> mt/as + mt/ld riscv64 支持已实现（超原计划 P11 进度）。编码器 939 行，
+> mt/as + mt/ld riscv64 支持已实现（超原计划 target-riscv64 进度）。编码器 939 行，
 > 支持 RV64I + M + A + F/D。链接器支持 13 种重定位类型（含 TLS LE）。
 
-**依赖**：P3　**规模**：L
+**依赖**：mcc-mt-integrate　**规模**：L
 
 实现：
 1. mt/as: riscv64 指令编码（LUI/AUIPC/JAL/JALR/RV64I+M+A+F/D）；
@@ -370,7 +370,7 @@ make -C projects/meuos-toolchain check-riscv64-e2e  # as+ld+qemu riscv64
 
 ## 3. 架构策略
 
-mt 的多架构支持在各架构阶段（P9-P11）中实现。每个架构的 mt/as 编码和 mt/ld
+mt 的多架构支持在各架构阶段（target-i386...target-riscv64）中实现。每个架构的 mt/as 编码和 mt/ld
 重定位独立于 mcc 的后端：mcc 生成 AT&T 汇编文本，mt/as 负责编码为机器码。
 
 每个架构必须同时提供：指令编码、重定位类型、golden bytes 对比、QEMU 运行

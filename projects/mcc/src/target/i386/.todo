@@ -1,6 +1,6 @@
 # i386 target 状态记录
 
-> Update 2026-07-23：i386 已是**完整代码生成 target**，所有 P1-P5 任务
+> Update 2026-07-23：i386 已是**完整代码生成 target**，所有 as-x86_64...binutils 任务
 > 关闭。本文件转为状态参考，记录架构决策与已完成项，供未来维护查阅。
 
 ## 架构决策（永久参考）
@@ -30,10 +30,10 @@
 | float_binary float_ref 修复 | 第二个操作数转内存引用，消除 isreg 断言 |
 | Ostosi/Odtosi Kl 目标 float_ref | fisttpq 目标转内存引用 |
 | mem-to-mem mov 修复 | Ostoui/Odtoui 结果回写经寄存器中转 |
-| P1 跨函数 va_list | typevalist 改 TYPESTRUCT，根因修复 |
-| P3 FPR 收口 | fpr0=0, nfpr=0，设计决策固化 |
-| P4 socketcall 多路复用 | libc 侧 socketcall.c，i386 走 socketcall(102) |
-| P5 端到端验证 | runtime.sh（宿主 ia32）+ qemu-runtime.sh（真 32 位内核），全绿 |
+| as-x86_64 跨函数 va_list | typevalist 改 TYPESTRUCT，根因修复 |
+| mcc-mt-integrate FPR 收口 | fpr0=0, nfpr=0，设计决策固化 |
+| binutils socketcall 多路复用 | libc 侧 socketcall.c，i386 走 socketcall(102) |
+| bootstrap-verify 端到端验证 | runtime.sh（宿主 ia32）+ qemu-runtime.sh（真 32 位内核），全绿 |
 
 ## 仍 OPEN / 已关闭
 
@@ -41,7 +41,7 @@
 
 - TLS/信号端到端验证：hello/atomic/setjmp/phase2("counter=2000") 在 IA32 仿真宿主
   通过。注：bare_tls 因 mcc i386 后端 TLS 模型选择缺口（发出 IE 而非 LE reloc）
-  被排除 — 见 `../../.todo/gd-tls.md` Phase A TLS 模型选择。
+  被排除 — 见 `../../.todo/gd-tls.md` tls-model-choice TLS 模型选择。
 
 ### ⬜ 仍 OPEN
 

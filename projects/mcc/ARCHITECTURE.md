@@ -147,7 +147,7 @@ data-structure definitions, value/block construction, instruction
 building, type conversions, memory ops, function control-flow,
 branches, expression lowering, switch lowering, and IR emission.
 
-After the Phase B refactor it is split into 10 files averaging ~150
+After the irgen-refactor refactor it is split into 10 files averaging ~150
 lines each, plus an internal shared header `irgen.h`. The split
 criteria was **functional cohesion** - each file owns one phase of
 the AST -> IR translation:
@@ -218,7 +218,7 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
 The user has asked for **progressive** removal of `cproc`/`qbe` naming
 artifacts and structural integration of the two source trees. Status:
 
-**Done in Phase B (irgen/ split round)**:
+**Done in irgen-refactor (irgen/ split round)**:
 - `cproc_op_to_qbe()` -> `fe_to_ir_op()` (in `src/irgen/emit.c`)
 - Comment cleanup: most "cproc does X" -> "the frontend does X"
 - File split removed monolithic `irgen.c` (no cproc/qbe filename in `src/irgen/`)
@@ -227,7 +227,7 @@ artifacts and structural integration of the two source trees. Status:
 - Pass 2 emit pattern switched from BACKWARD `emit()` to FORWARD
   `*curi++` writes - eliminates instruction-order inversion bug.
 - `err()` redefined in `src/ir/ir_util.c` - was originally in
-  `parse.c` (deleted in Phase B). Without the definition the linker
+  `parse.c` (deleted in irgen-refactor). Without the definition the linker
   resolved it to libc's `err(int eval, ...)` with a different signature.
 - `Opar` emission added to start of entry block.
 - Phi node construction (`b->phi` -> IR `Phi`) for if-else result merging.

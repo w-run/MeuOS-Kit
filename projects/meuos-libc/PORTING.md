@@ -156,7 +156,7 @@ asm-generic 分支（零重复）。运行时移植自 riscv64 模板（适配�
   全套 runtime_kl/runtime_fp/runtime_time64/runtime_va/fp_unsigned/fp_arith 全绿
 （Kl mul/div/rem 已通过 sysv 预扫描+软算术库实现；`src/arch/i386/soft_arith.c` 提供 8 个完整函数）
 
-剩余：TLS/信号上下文端到端验证（bare_tls 被 mcc i386 后端 TLS 模型选择缺口阻塞，见 `projects/mcc/.todo/gd-tls.md` Phase A）。
+剩余：TLS/信号上下文端到端验证（bare_tls 被 mcc i386 后端 TLS 模型选择缺口阻塞，见 `projects/mcc/.todo/gd-tls.md` tls-model-choice）。
 
 强制 64 位 `time_t` 是公共 ABI 政策，不得用 `-D_TIME_BITS=64` 这种仅对某个构建命令生效的旁路替代。
 

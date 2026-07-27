@@ -73,7 +73,15 @@ BIN := mcc
 LIB := build/libmcc.a
 
 # ---- Rules ----
-all: $(BIN)
+all: $(BIN) $(MSYS_LIB)
+
+# libmsys.a — .msys single-file sysroot reader (shared dependency)
+MSYS_LIB := $(abspath ../meuos-sysroot/build/libmsys.a)
+MSYS_DIR  := $(abspath ../meuos-sysroot)
+
+# Build libmsys if not already present (used by mcc at link time)
+$(MSYS_LIB):
+	$(MAKE) -C $(MSYS_DIR)
 
 # mcc = C frontend objects + libmcc.a (shared backend archive)
 $(BIN): $(FE_OBJS) $(LIB)
@@ -176,7 +184,7 @@ check-driver: $(BIN)
 	sh test/driver/sysroot.sh ./$(BIN)
 	sh test/driver/feature-regress.sh ./$(BIN)
 
-# P3: verify MT_AS/MT_LD/MT_AR redirect mcc to the MeuOS toolchain
+# mcc-mt-integrate: verify MT_AS/MT_LD/MT_AR redirect mcc to the MeuOS toolchain
 # (mt/as, mt/ld) instead of the host cc.  SKIPs gracefully when
 # meuos-toolchain has not been built.
 check-mt-integration: $(BIN)

@@ -593,24 +593,41 @@ openinclude(const char *name, bool angled, char **path_out)
 	for (i = 0; i < n; ++i) {
 		const char *dir = ((char **)inclpaths.val)[i];
 		size_t dlen = strlen(dir);
+
+		/* When sysroot is a .msys file, try VFS first to avoid a
+		 * guaranteed fopen failure on the fake filesystem path. */
+		if (msys_sysroot_handle && msys_sysroot_path) {
+			size_t slen = strlen(msys_sysroot_path);
+			if (strncmp(dir, msys_sysroot_path, slen) == 0 && dir[slen] == '/') {
+				const char *rel = dir + slen + 1;  /* archive-relative prefix */
+				size_t rlen = strlen(rel);
+				path = xmalloc(rlen + 1 + strlen(name) + 1);
+				memcpy(path, rel, rlen);
+				path[rlen] = '/';
+				strcpy(path + rlen + 1, name);
+				f = msys_fopen(msys_sysroot_handle, path, "r");
+				if (f) {
+					/* Reconstruct the full filesystem-looking path for
+					 * *path_out (caller uses it for #line directives). */
+					free(path);
+					path = xmalloc(dlen + 1 + strlen(name) + 1);
+					memcpy(path, dir, dlen);
+					path[dlen] = '/';
+					strcpy(path + dlen + 1, name);
+					*path_out = path;
+					return f;
+				}
+				free(path);
+				continue;  /* skip the fopen+fallback for this .msys prefix */
+			}
+		}
+
 		path = xmalloc(dlen + 1 + strlen(name) + 1);
 		memcpy(path, dir, dlen);
 		path[dlen] = '/';
 		strcpy(path + dlen + 1, name);
 		f = fopen(path, "r");
 		if (f) { *path_out = path; return f; }
-
-		/* If the path is within a .msys sysroot, fall back to VFS
-		 * (msys_fopen reads from the mmap'd archive).  Strip the
-		 * sysroot path prefix to get the archive-relative path. */
-		if (!f && msys_sysroot_handle && msys_sysroot_path) {
-			size_t slen = strlen(msys_sysroot_path);
-			if (strncmp(path, msys_sysroot_path, slen) == 0 && path[slen] == '/') {
-				const char *rel = path + slen + 1;  /* skip "/" */
-				f = msys_fopen(msys_sysroot_handle, rel, "r");
-				if (f) { *path_out = path; return f; }
-			}
-		}
 
 		free(path);
 	}

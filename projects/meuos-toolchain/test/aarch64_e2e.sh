@@ -5,7 +5,7 @@
 #   编写 .S → mt/as 汇编 → mt/ld 链接 → qemu-aarch64 运行
 #
 # 注意：完整的 C 程序链路 (crt1 + libc) 仍受 TLS 重定位影响，
-# 参见 P1.3（loongarch64 TLS）和 mt/ld TLS 支持计划。
+# 参见 bug-loong64-tls-reloc（loongarch64 TLS）和 ld-tls-dynamic 支持计划。
 # 本测试只验证 as+ld 本身对 aarch64 的正确性。
 
 AS=${1:-build/bin/as}

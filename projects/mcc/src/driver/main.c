@@ -28,10 +28,6 @@
 #include "mcc.h"
 #include "driver_internal.h"
 
-/* .msys single-file sysroot support */
-#include "mt/msys.h"
-int msys_is_sysroot(const char *path);
-struct msys *msys_sysroot_open(const char *sysroot_path);
 /* Global msys handle and path exposed to the preprocessor (pp.c) for
  * VFS-based include file reading (msys_fopen fallback). */
 struct msys *msys_sysroot_handle;
@@ -282,8 +278,22 @@ main(int argc, char *argv[])
 		/* If sysroot is a .msys file, open via VFS instead of extracting */
 		if (msys_is_sysroot(sysroot)) {
 			msys_handle = msys_sysroot_open(sysroot);
-			if (msys_handle)
+			if (msys_handle) {
 				msys_sysroot_path = sysroot;
+				/* Auto-detect target architecture from @meuos_arch metadata
+				 * when --target is not explicitly set. */
+				if (!target) {
+					char *arch = msys_sysroot_get_arch(msys_handle);
+					if (arch) {
+						/* Normalize: strip trailing newline if present */
+						size_t alen = strlen(arch);
+						while (alen > 0 && (arch[alen-1] == '\n' || arch[alen-1] == '\r'))
+							arch[--alen] = '\0';
+						if (alen > 0)
+							target = arch;  /* arch is malloc'd; leaks intentionally */
+					}
+				}
+			}
 		}
 		/* For .msys sysroots, skip libdirs (lib/ and usr/lib/ do not exist
 		 * as real directories — library files are accessed via VFS). */
@@ -383,8 +393,21 @@ main(int argc, char *argv[])
 	for (i = 0; i < (int)(incdirs.len / sizeof(char *)); ++i)
 		ppincludepath(((char **)incdirs.val)[i]);
 	if (sysroot && !nostdinc) {
-		ppincludepath(sysrootpath(sysroot, "include"));
-		ppincludepath(sysrootpath(sysroot, "usr/include"));
+		if (msys_sysroot_handle) {
+			/* For .msys sysroots, register VFS include prefixes.
+			 * pp.c's openinclude() handles these via msys_fopen
+			 * directly, avoiding filesystem probe failure. */
+			const char *pfx[8];
+			int npfx = msys_sysroot_incprefixes(pfx, 8);
+			for (int i = 0; i < npfx; i++) {
+				char *vpath = xmalloc(strlen(msys_sysroot_path) + 1 + strlen(pfx[i]) + 1);
+				sprintf(vpath, "%s/%s", msys_sysroot_path, pfx[i]);
+				ppincludepath(vpath);
+			}
+		} else {
+			ppincludepath(sysrootpath(sysroot, "include"));
+			ppincludepath(sysrootpath(sysroot, "usr/include"));
+		}
 	}
 	/* ----- input setup ----- */
 	if (inputs.len) {

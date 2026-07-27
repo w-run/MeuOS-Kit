@@ -1,0 +1,676 @@
+# worktree-stable-enhance — C 工具链完善追踪
+
+> 目标：C 功能彻底完善（6 架构：x86_64/aarch64/riscv64/i386/loongarch64/arm），
+> 包含动态链接(ld-shared)持续集成到项目中。
+>
+> 排除架构：s390x、powerpc64le（可选，不在当前 scope）。
+>
+> **env/**: 已软链接到 main 分支的 env/（含 qemu 10.1.0 全架构静态二进制），
+> 见 `.issues/env-symlink.md`。
+
+---
+
+## 关键路径（p0-blockers）
+
+| ID | 组件 | 架构 | 描述 | 状态 |
+|----|------|------|------|------|
+| bug-riscv64-emit | mcc backend | riscv64 | `riscv64_emit.c:664 assert(isreg(rb))` — emit 条件分支 slot/const 未 reg 降级 | 🔴 |
+| bug-loong64-emit | mcc backend | loongarch64 | `loongarch64_emit.c:514 assert(isreg(rb))` — 同上模式 | 🔴 |
+| bug-arm-isel | mcc backend | arm | `arm_isel.c: slot %(null) is read but never stored to` — IR 诊断阻塞 self-rebuild | 🔴 |
+| bug-i386-tls | mcc isel/sema | i386 | TLS 模型选择：非静态 `_Thread_local` 发出 IE(`@gotntpoff`) 而非 LE(`@ntpoff`) | 🔴 |
+| bug-loong64-tls-reloc | mt/ld | loongarch64 | TLS LE 重定位 `.tdata` 初始值损坏（`2a000000` → `20c30000`） | 🔴 |
+| bug-loong64-tls-errno | meuos-libc | loongarch64 | TLS errno 回退到 `static int`（非线程安全 fallback） | 🔴 |
+
+## 优先级 1（P1-core — 功能完善，需要实现）
+
+| ID | 组件 | 项目 | 描述 | 状态 |
+|----|------|------|------|------|
+| meow-dag-dedup | meow | DAG 去重 | `-jN` 并行构建时间接依赖重复执行（`.todo/dag-dedup.md`） | ⏳ |
+| mcc-atomic-voidptr | mcc sema | `_Atomic int*` → `void*` | C 6.3.2.3p1 限定对象指针应可转 `void*`（chibicc 测试报） | ⏳ |
+| mcc-riscv64-qemu | mcc | riscv64 qemu 门禁 | 完整 qemu 运行时门禁（当前仅 exit=42） | ⏳ |
+| mcc-loong64-qemu | mcc+libc | loongarch64 qemu 门禁 | 完整 qemu 运行时门禁（当前仅 exit=42） | ⏳ |
+| mcc-i386-tls-e2e | mcc+libc | i386 TLS e2e | bug-i386-tls 修复后的 TLS 端到端验证 | ⏳ |
+| mcc-i386-tls-doc | mcc(i386) | `gd-tls.md` 文档 | 被 3 个文件引用但文件不存在 | 🟡 |
+| ld-shared | mt/ld | `-shared` 输出 `ET_DYN` | 生成 `.dynsym`/`.dynstr`/`.dynamic`/`.hash`/`.plt`/`.got.plt`/`.interp` 节区 + 动态程序头 | ⏳ |
+| ld-pie | mt/ld | `--pie`/`--no-pie` 支持 | PIE 二进制输出（`ET_DYN` + `PT_INTERP` + 相对重定位） | ⏳ |
+| mcc-pic-verify | mcc | PIC 代码生成加固 | 全架构验证 `-fPIC` 输出（GOT/PLT/TLS GD 路径） | ⏳ |
+| mcc-shared-mt | mcc driver | `-shared` mt/ld 集成 | 去掉 `-shared` 回退到 host cc 的限制 | ⏳ |
+| ld-so | 新建 | ld.so 动态链接器 | ELF 加载、DT_NEEDED 图遍历、符号解析、重定位应用、延迟绑定、TLS init | ⏳ |
+| libc-dl | meuos-libc | `dlfcn.h` + `dl*` 实现 | `dlopen`/`dlsym`/`dlclose`/`dlerror` | ⏳ |
+| mcc-dwarf | mcc | DWARF 调试信息 | `-g` 生成 DWARF v5（`.debug_info`/`.abbrev`/`.line`/`.str`/`.loc`/`.ranges`），包含行号、变量、类型信息 | ⏳ |
+| ld-dwarf-merge | mt/ld | DWARF 节区合并 | 链接时合并 `.debug_*` 节区，生成 `.debug_line`/`.debug_info` 跨目标文件 | ⏳ |
+
+## 优先级 2（P2-toolchain — 生态集成）
+
+| ID | 组件 | 项目 | 描述 | 状态 |
+|----|------|------|------|------|
+| meow-native-shell | meow | 原生 shell 替代 | 从 `/bin/sh` 切到 `$SYSROOT/bin/sh`（阻塞于 msh） | ⏳ |
+| mcc-msys-link | mcc driver | `.msys` + host linker | host cc 链接时自动提取 `.a` 到 temp | 🟡 |
+| ld-tls-dynamic | mt/ld | TLS 动态模型 | GD/LD 模型、`__tls_get_addr`（依赖 ld-shared） | ⏳ |
+| ld-gc-sections | mt/ld | `--gc-sections` | 未引用节区的死代码消除 | ⏳ |
+| ld-linker-script | mt/ld | 链接脚本支持 | `.ld` 脚本解析与布局控制（替代 `-T` 占位） | ⏳ |
+| ld-print-map | mt/ld | `--print-map` | 链接映射输出 | ⏳ |
+| as-macro | mt/as | 宏/重复伪指令 | `.macro`/`.endm`/`.rept`/`.irp` 支持 | ⏳ |
+| as-full-isa | mt/as | 全架构指令完整覆盖 | 各架构缺的少用指令补全 | ⏳ |
+| meow-multi-dir | meow | 多目录构建 | 跨目录包依赖的 YAML 配方 | ⏳ |
+
+## 优先级 3（P3-libc — libc 标准接口完备）
+
+> C 库标准接口（ISO C11 + POSIX）的完整实现。当前核心 libc 已有基础框架，
+> 以下为尚未实现的或仅 stub 的接口族。
+
+| ID | 模块 | 描述 | 优先 |
+|----|------|------|------|
+| libc-math | `<math.h>` | 数学库：`sin`/`cos`/`sqrt`/`log`/`exp`/`pow` 等 IEEE 754 浮点函数 | 🔴 高 |
+| libc-printf | `<stdio.h>` | 完整 `printf`/`scanf` 格式覆盖（浮点、`%n`、宽字符、长 double） | 🔴 高 |
+| libc-time | `<time.h>` | 完整 `strftime`、时区处理、`clock_gettime` POSIX 扩展 | 🟡 中 |
+| libc-pthread | `<pthread.h>` | rwlock/barrier/spinlock/cleanup handler 完整覆盖 | 🟡 中 |
+| libc-str | `<string.h>` | `strerror_r` 线程安全变体、`strcoll`/`strxfrm` locale 感知 | 🟢 低 |
+| libc-wchar | `<wchar.h>` | 宽字符 I/O、宽字符 `printf`/`scanf`、wcsftime | 🟢 低 |
+| libc-locale | `<locale.h>` | locale 感知函数（`setlocale` 当前 stub） | 🟢 低 |
+| libc-complex | `<complex.h>` | 复数算术和数学函数 | 🟢 低 |
+| libc-socket | POSIX 网络 | `<sys/socket.h>`、`<netdb.h>`、`<netinet/in.h>`、`<arpa/inet.h>` | 🟡 中 |
+| libc-regex | POSIX 正则 | `<regex.h>` — `regcomp`/`regexec`/`regerror`/`regfree` | 🟡 中 |
+| libc-termios | POSIX 终端 | `<termios.h>`、`<sys/ioctl.h>` | 🟢 低 |
+| libc-glob | POSIX glob | `<glob.h>`、`<fnmatch.h>` 模式匹配 | 🟡 中 |
+| libc-syslog | POSIX 环境 | `<syslog.h>`、`<utmpx.h>` | 🟢 低 |
+| libc-atomic | `<stdatomic.h>` | C11 atomic 的完整操作集（`atomic_compare_exchange_*` 变体等） | 🟡 中 |
+| libc-threads | `<threads.h>` | C11 thread 完整接口（`tss_*`、`call_once` 等） | 🟡 中 |
+
+## 优先级 4（P4-devexp — 开发者体验）
+
+> 编译器质量和开发者体验优化。这些项不影响功能正确性，但影响日常使用体验。
+
+| ID | 组件 | 描述 | 优先 |
+|----|------|------|------|
+| mcc-diagnostics | mcc | 诊断质量：带源位置和 caret（`^`）的错误消息 | 🟡 中 |
+| mcc-warnings | mcc | `-Wall`/`-Wextra`/`-Wpedantic` 警告覆盖完善 | 🟡 中 |
+| mcc-attributes | mcc | `__attribute__((...))` GCC 兼容属性（`packed`/`aligned`/`section`/`weak`/`noreturn`） | 🟡 中 |
+| mcc-pragma | mcc | `#pragma` 指令支持（`once`/`pack`/`GCC poison`） | 🟡 中 |
+| mcc-builtins | mcc | `__builtin_*` 内建函数覆盖（`__builtin_expect`/`__builtin_unreachable`/`__builtin_offsetof` 等） | 🟢 低 |
+| mcc-generic | mcc | `_Generic` 完整 C11 匹配规则（含 qualified type 分派） | 🟡 中 |
+| as-errors | mt/as | 错误消息行号/列号 | 🟢 低 |
+| ld-errors | mt/ld | 未定义符号的友好诊断（列出候选目标文件） | 🟢 低 |
+| community-tests | 全项目 | 社区测试套件覆盖率（chibicc → C99/C11/C23 全量通过） | 🟡 中 |
+| meow-lint | meow | 配方语法检查器（`meow lint`） | 🟢 低 |
+| ci-pipeline | 全项目 | CI/CD 流水线（GitHub Actions + qemu-user 跨架构回归） | 🟡 中 |
+
+## 优先级 5（P5-meow — meow 构建系统完备）
+
+> meow 目标是替代 make + autoconf + libtool + pkg-config。当前约 40% Make、
+> 20% autoconf、0% pkg-config/libtool。以下按影响排序。
+
+| ID | 类别 | 描述 | 优先 |
+|----|------|------|------|
+| meow-template-subst | autoconf | **`@VAR@` 模板替换** — `config.h.in`/`Makefile.in` 处理，`AC_CONFIG_FILES` 等价物 | 🔴 高 |
+| meow-wildcard | make | **`$(wildcard)` / `$(patsubst)`** — 文件列表通配与变换。当前 recipes 需手动枚举（mcc recipe 60+ 行） | 🔴 高 |
+| meow-check-library | autoconf | **`check_library` / `check_link`** — 链接测试检测 `-lz`、`-lpthread`。当前只有编译测试 | 🔴 高 |
+| meow-conditional | make | **条件语句** — `ifeq`/`ifdef`/`ifarch`。无法根据 ARCH 切换目标或变量 | 🔴 高 |
+| meow-type-size | autoconf | **`check_type_size`** — 检测 `sizeof(time_t)`、`sizeof(off_t)`。对 time64/32-bit 关键 | 🟡 中 |
+| meow-probe-cache | autoconf | **Probe 缓存** — `config.cache` 等价物。当前每次从头跑所有 probe | 🟡 中 |
+| meow-vpath | make | **VPATH / srcdir ≠ builddir** — `$(srcdir)` 抽象 | 🟡 中 |
+| meow-subdirs | make | **`-C` 多目录构建** — `AC_CONFIG_SUBDIRS` 等价物 | 🟡 中 |
+| meow-pkg-config | pkg-config | **`.pc` 文件解析/查询** — `--cflags`/`--libs` 输出 | 🟡 中 |
+| meow-libtool | libtool | **共享/静态库管理** — PIC、`.la`、库版本。依赖 ld-shared 动态链接 | 🟢 低 |
+| meow-dag | meow | **DAG 去重**（`.todo/dag-dedup.md`）— `-jN` 间接依赖重复执行 | 🟡 中 |
+| meowctl | meow | **`meowctl`** — `configure` 风格交互式配置界面 | 🟢 低 |
+
+## 优先级 7（P7-subarch — 子架构与 CPU 特性支持）
+
+> 当前所有 6 架构都是"每个架构一个基准 ISA"模型，无子架构区分、无特性标志系统、
+> 无 `-march=native`。对于真实世界软件，子架构感知必不可少。
+
+### 现状
+
+| 特性 | 状态 | 说明 |
+|------|------|------|
+| `Target.features` / 特性标志位 | ❌ 不存在 | Target 结构体无 capability 字段，无 ISA 级别概念 |
+| `-march`/`-mcpu`/`-mfpu` | ⚠️ 仅 ARM | 仅影响预处理器宏，**不影响代码生成** |
+| `-mfloat-abi` | ⚠️ 仅 ARM | hard 还是 soft 影响 ABI |
+| `-mtune` | ❌ 不存在 | |
+| `-march=native` | ❌ 不存在 | 无 CPUID、无 `/proc/cpuinfo` 检测 |
+| **mt/as 指令门控** | ❌ 不存在 | 编码器解码即支持，无特性假设检查 |
+
+### 各架构的缺口
+
+| 架构 | 子架构/特性 | 现状 | 影响 |
+|------|------------|------|------|
+| **x86_64** | ISA 级别 v1/v2/v3/v4 | ❌ 只发标量 SSE、无 AVX/AVX2/AVX-512 | 无法利用现代 CPU 特性；某些需要 SSE4.2/AVX 的软件无法编译 |
+| **x86_64** | `-mno-sse` / `-mno-mmx` | ❌ 不存在 | 某些嵌入式/内核编译需要关 SSE |
+| **aarch64** | SVE/SVE2/RME/FP16 | ❌ 只发基础 AArch64 指令 | 无法优化向量化代码 |
+| **riscv64** | 扩展选择（F/D/C/V/Zb*/Zk*） | ❌ 隐含 F/D/A，无选择机制 | 无法构建无浮点或压缩指令的目标 |
+| **riscv64** | `-mabi=lp64` vs `lp64d` vs `ilp32` | ❌ 只有 LP64D | 无法构建无浮点 binary |
+| **i386** | 486/586/686/Pentium 变体 | ❌ 全部映射到同一 Target | 387 vs SSE2 差异未利用 |
+| **loongarch64** | LSX/LASX/LVZ | ❌ 只发基础 LA64 | 无法利用 SIMD |
+| **arm** | ARMv6/v7/v8 实际代码差异 | ❌ 单一 `armv7` 后端 | `-march=armv8-a` 仍发 ARMv7 指令 |
+
+### 子任务
+
+| ID | 描述 | 优先 |
+|----|------|------|
+| target-features | **`Target.features` 设计**：在 Target 中添加 `uint64_t features` 位图 + `const char *features_desc[]`。定义架构无关的公共特性位和架构特有的特性位 | 🔴 高 |
+| march-generic | **`-march=` 解析通用化**：从仅 ARM 推广到全架构。x86_64 解析 `native`/`x86-64`/`x86-64-v2`/`v3`/`v4`；riscv64 解析 `rv64gc`/`rv64imafdc`；aarch64 解析 `armv8-a`/`armv8.2-a` 等 | 🔴 高 |
+| x86-isa-levels | **x86_64 ISA 级别门控**：实现 `-march=x86-64-v2`/`v3`/`v4` 代码生成差异。至少：v2 启用 SSE4.2+POPCNT，v3 启用 AVX2+BMI2，v4 启用 AVX-512 | 🔴 高 |
+| riscv-extensions | **riscv64 扩展选择**：实现 `-march=rv64imafdc` 解析，根据扩展集发射指令。`-mabi=lp64d`/`lp64`/`ilp32d`/`ilp32` | 🟡 中 |
+| arm-multiver | **arm 多版本后端**：根据 `-march` 切换 ARMv6/v7/v8 指令选择器和发射器差异（Thumb/ARM 模式、DMB 变体等） | 🟡 中 |
+| aarch64-ext | **aarch64 架构扩展**：FEAT_FP16/FEAT_RDM/FEAT_JSCVT 等特性位与代码生成 | 🟢 低 |
+| march-native | **`-march=native`**：通过 CPUID（x86）或 `/proc/cpuinfo` 查询宿主机特性并设置 Target.features | 🟡 中 |
+| as-isa-gating | **mt/as 指令门控**：编码器根据 insn 要求的特性位进行验证，不支持的指令报错而非默默生成 | 🟡 中 |
+| i386-variants | **i386 变体区分**：486/586/686 在 cmpxchg/CMPXCHG8B/FPU 存在性上的差异映射到特性位 | 🟢 低 |
+
+### 设计提案
+
+```
+// Target 特性位设计（草案）
+enum target_feature {
+    TF_FPU       = 1ULL << 0,   // 硬浮点（架构特定的 FPR）
+    TF_SOFT_FLOAT = 1ULL << 1,  // 软浮点（无 FPR，用 GPR 模拟）
+    TF_ATOMICS    = 1ULL << 2,  // 硬件原子操作（lock/lr/sc）
+    TF_SSE        = 1ULL << 3,  // x86 SSE
+    TF_SSE2       = 1ULL << 4,  // x86 SSE2
+    TF_AVX        = 1ULL << 5,  // x86 AVX
+    TF_AVX2       = 1ULL << 6,  // x86 AVX2
+    TF_AVX512F    = 1ULL << 7,  // x86 AVX-512 Foundation
+    TF_POPCNT     = 1ULL << 8,
+    TF_BMI        = 1ULL << 9,  // x86 BMI1/BMI2
+    TF_AARCH64_FP16 = 1ULL << 10, // aarch64 FEAT_FP16
+    TF_AARCH64_SVE  = 1ULL << 11, // aarch64 SVE
+    TF_RV_F       = 1ULL << 12, // riscv F 扩展
+    TF_RV_D       = 1ULL << 13, // riscv D 扩展
+    TF_RV_C       = 1ULL << 14, // riscv C 压缩指令
+    TF_RV_V       = 1ULL << 15, // riscv V 向量
+    TF_ARM_THUMB  = 1ULL << 16, // arm Thumb 模式
+    TF_ARM_VFP    = 1ULL << 17, // arm VFP
+    TF_ARM_NEON   = 1ULL << 18, // arm NEON
+};
+```
+
+## 优先级 6（P6-c23 — C23 标准边缘情况）
+
+> mcc 已实现 AGENTS.md §2.2 所列 C23 主要特性。以下为剩余边缘情况。
+
+| ID | 描述 | 状态 |
+|----|------|------|
+| c23-constexpr | `constexpr` 初始化规则（运行时 vs 编译期求值边界） | ⏳ |
+| c23-attributes | `[[]]` 属性语法全位置覆盖（声明/类型/语句/标签） | ⏳ |
+| c23-bool | `bool`/`true`/`false` 关键字 vs `<stdbool.h>` 宏兼容 | ⏳ |
+| c23-embed | `#embed` 边界情况（大文件/`limit(N)`/`prefix`/`suffix`/`if_empty`） | ⏳ |
+| c23-typeof | `typeof`/`typeof_unqual` 在复杂声明中的应用 | ⏳ |
+
+## 优先级 3（P3-libc — 社区测试兼容性，低优先级）
+
+| ID | 组件 | 描述 | 状态 |
+|----|------|------|------|
+| mcc-float-suffix | mcc lexer | C23 `100f` float 后缀支持 | ⏳ |
+| mcc-uint64-max | mcc sema | UINT64_MAX 字面量类型回退到 `unsigned long long` | ⏳ |
+| mcc-macro-redef | mcc preproc | 宏定义相同 token 序列允许重定义（C 6.10.3p2） | ⏳ |
+| mcc-line-num | mcc preproc | `__LINE__` 偏移 1 | ⏳ |
+| mcc-common-sym | mcc sema | common/tentative-definition 合并行为 | ⏳ |
+| mcc-unicode | mcc lexer | Unicode/C11 标识符（$/UCN/UTF-8） | ⏳ |
+| mcc-va-end | mcc | `__builtin_va_end` 类型检查时机（宏定义处而非使用处） | ⏳ |
+
+---
+
+## 架构完备性矩阵
+
+| 准则 | x86_64 | aarch64 | riscv64 | i386 | loongarch64 | arm |
+|------|--------|---------|---------|------|-------------|-----|
+| mcc 后端 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| libc 运行时 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| mt/as | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| mt/ld | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| libc 全量构建 | ✅ | ✅ | ❌ bug-riscv64-emit | ✅ | ❌ bug-loong64-emit/bug-loong64-tls-reloc | ✅ |
+| qemu 运行时验证 | ✅ 完整 | ✅ 完整 | ⚠️ exit=42 | ⚠️ qemu system | ⚠️ exit=42 | ✅ 完整 |
+| TLS 端到端 | ✅ | ✅ | ❌ bug-riscv64-emit | ❌ bug-i386-tls | ❌ bug-loong64-tls-reloc/bug-loong64-tls-errno | ✅ |
+| self-rebuild | ✅ | ✅ | ❌ bug-riscv64-emit | ❌ bug-i386-tls | ❌ bug-loong64-emit | ❌ bug-arm-isel |
+| 动态链接 | 🔄 ld-shared...ld-so | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
+| DWARF 调试信息 | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
+| mcc 诊断/警告 | 🔄 mcc-diagnostics...mcc-generic | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
+| libc 完整 POSIX | 🔄 libc-math...libc-threads | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
+| mt/as 完整指令 | 🔄 as-macro+as-full-isa | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
+| mt/ld 链接器特性 | 🔄 ld-gc-sections+ld-linker-script+ld-print-map | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
+| C23 边缘情况 | 🔄 c23-xxxx | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
+| CI/CD 跨架构 | 🔄 ci-pipeline | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
+
+---
+
+## 总体范围层级
+
+```
+p0-blockers ── 6 个阻塞 bug（架构独有，必须修才能声称架构可用）
+  ├── bug-riscv64-emit-bug-arm-isel: emit/isel bug（riscv64/loongarch64/arm）
+  └── bug-i386-tls-bug-loong64-tls-errno: TLS 缺口（i386/loongarch64）
+
+p1-core ── 核心功能完善（编译器+工具链+运行时质量）
+  ├── meow-dag-dedup...mcc-i386-tls-doc:  现有组件完善（meow DAG/mcc/libc）
+  ├── ld-shared...ld-so:  p6-dynamic-link（mt/ld -shared → ld.so → dlopen）
+  └── mcc-dwarf+ld-dwarf-merge: p8-dwarf（行号表 → 类型 DIE → 合并）
+
+p2-toolchain ── 工具链生态完善（汇编/链接器特性）
+  ├── mt/ld: --gc-sections, 链接脚本, --print-map
+  ├── mt/as: 宏/重复, 全架构指令覆盖, ARM host_cc 检测
+  └── meow: 多目录构建, 原生 shell
+
+p3-libc ── libc 标准接口完备（ISO C11 + POSIX 全量）
+  ├── 高: math.h, 完整 printf/scanf
+  ├── 中: pthread, socket, regex, glob, atomic, thread, time
+  └── 低: wchar, locale, complex, termios, syslog
+
+p4-devexp ── 开发者体验（编译器质量、诊断、CI）
+  ├── mcc: 诊断 caret、-Wall、__attribute__、#pragma、__builtin_、_Generic
+  ├── mcc: 社区测试覆盖（chibicc 全过）
+  └── CI/CD: GitHub Actions + qemu-user 跨架构回归
+
+p6-c23 ── C23 标准边缘情况
+  └── constexpr, 属性语法, bool 关键字, #embed, typeof
+
+p7-subarch ── 子架构与 CPU 特性支持（当前最薄弱的环节）
+  ├── 高: Target.features 设计, -march 通用化, x86_64 ISA 级别门控
+  ├── 中: riscv64 扩展选择, arm 多版本, mt/as 指令门控
+  └── 低: aarch64 扩展, i386 变体
+
+p8-meow ── meow 构建系统完备（替代 make+autoconf+libtool+pkg-config）
+  └── ...（见 p5-meow 表）
+
+### 跨域设计项（影响多个组件）
+
+| ID | 主题 | 描述 | 涉及组件 | 优先 |
+|----|------|------|---------|------|
+| specs-default | **`--specs=meuos` 默认化** | `MEUOS_SYSROOT` 设置时自动隐含 `--specs=meuos`，不再需要显式传入。新增 `--specs=host` 切回宿主模式 | mcc driver | 🔴 高 |
+| meow-auto-config | **meow 自动决策编译参数** | `meow build <pkg> --target=<triplet>` 自动解析 triple → arch/abi/float/subarch, 自动设 CC/CFLAGS/LDFLAGS, 自动跑 probe 生成 config.h | meow + mcc | 🔴 高 |
+| triple-lib | **共享 triple 解析库** | meow 和 mcc 共享同一套 triple 解析逻辑，避免两处分叉。提取为 `libtriple` 或共用头文件 | meow + mcc | 🔴 高 |
+| triple-abi-map | **Triple → ABI 自动映射** | `--target=<triplet>` 精确提取 ABI/lp64/float 信息并选择对应 Target/ABI 降级 | mcc sema | 🟡 中 |
+| meow-zero-args | **meow 零参数构建** | `meow build` 无参数时自动嗅探当前架构/sysroot/源码，生成完整构建环境；只有需要定制时才传入参数 | meow | 🔴 高 |
+
+### meow 用户体验设计原则
+
+> meow = autoconf + make + libtool + pkg-config 集合体。
+> 参考 Go 的设计哲学：零配置、快、跨编译简单、输出干净，但不照搬命令——要符合 C 项目和 MeuOS 自己的习惯。
+
+#### 参考的设计哲学
+
+| Go 的设计思路 | 对我们意味着什么 |
+|--------------|---------------|
+| `go build` 零配置 | `meow build` 不传参数就能干活——自动检测一切 |
+| 交叉编译用环境变量/参数 | 延续已有的 `--target=triple`，不用另起炉灶 |
+| 编译缓存 | 增量构建 + `~/.cache/meow/` |
+| 默认只显示错误 | 编译器命令行默认隐藏，`--verbose` 展开 |
+| 不污染源码目录 | 产物一律进 `build/<pkg>/`，要做 `-C <dir>` 也支持 |
+| 快速增量 | DAG 去重 + mtime 追踪 |
+| 不自带语言特性检查（go vet 是工具） | `meow lint` 仅做配方检查，编译器诊断是 mcc 的事 |
+| `go generate` 代码生成 | `meow.yaml` 的 `generate:` 步骤 |
+| `go test` 测试 | `make check` 是已有的习惯，meow 也可以封装 |
+
+#### 命令风格原则
+
+```
+- 保持 C 项目的直觉（不像 Go 那样把语言和构建绑定）
+- 延续 meow 已有的习惯（--target= / --sysroot= / -jN）
+- 汉语友好的长选项名（--jobs 优于 -j 作唯一名）
+- 分层的 subcommand 体系
+```
+
+#### meow CLI 体系
+
+```sh
+meow build [pkg] [options]          # 构建（默认当前目录包）
+meow clean [pkg]                    # 清理
+meow list                           # 列出可用包
+meow install [pkg]                  # 安装到 sysroot
+meow test [pkg]                     # 跑测试（相当于 make check）
+meow lint                           # 配方语法检查
+meow env                            # 打印检测到的构建环境
+meow version                        # 打印版本
+```
+
+#### 默认行为（零参数）
+...
+
+```sh
+cd <project>       # 进入有 meow.yaml 的目录（或 meow.yaml 定义了根包）
+meow build          # ← 这就是全部
+
+# meow 自动做：
+#   1. 检测宿主编译器（mcc on MEUOS_SYSROOT / fallback host cc）
+#   2. 检测 MEUOS_SYSROOT（环境变量 / 默认路径 / sysroot(架构).msys）
+#   3. 检测宿主架构 → 设 ARCH
+#   4. 跑 probe（头文件检查/函数检查/类型大小）→ 生成 config.h
+#   5. 解析 meow.yaml → 构建依赖图 → 执行
+#   6. 安装到 $MEUOS_SYSROOT
+```
+
+这等价于 gcc 世界的 `./configure && make && make install`，一步到位。
+
+#### 覆写参数（仅需定制时传入）
+
+```sh
+# 交叉编译
+meow build --target=aarch64                    # 目标架构
+meow build bzip2 --target=riscv64              # 指定包+架构
+
+# 自定义 sysroot
+meow build --sysroot=/custom/sysroot
+meow build --sysroot=/tmp/sysroot-aarch64.msys  # .msys 文件也行
+
+# 构建目录（out-of-tree）
+meow build bzip2 -C build/bzip2                # srcdir != builddir
+meow build -C build/all                        # 全局 out-of-tree
+
+# 资源控制
+meow build --jobs=8                            # 并行（默认 NCPU）
+meow build --mem-limit=4G                      # 内存上限
+meow build --quiet                             # 静默模式
+
+# 诊断
+meow build --verbose                           # 详细日志
+meow build --dry-run                           # 只打印不执行
+meow lint                                      # 配方语法检查
+```
+
+#### 设计含义
+
+| 能力 | 当前状态 | 目标 |
+|------|---------|------|
+| `meow build` 无参数 | ❌ 必须指定包名 | ✅ 默认包（根 meow.yaml 定义） |
+| 架构自动检测 | ❌ 必须 `--arch=` | ✅ 自动检测宿主，`--target=` 覆盖 |
+| sysroot 自动检测 | ❌ 必须环境变量 | ✅ `$MEUOS_SYSROOT` / `./sysroot` / `./*.msys` |
+| probe 自动跑 | ❌ 必须 recipe 显式调用 | ✅ 构建前自动跑所有声明的 probe |
+| config.h 自动生成 | ❌ 不存在 | ✅ probe 结果写入 `build/config.h` |
+| out-of-tree (`-C`) | ❌ 不存在 | ✅ 支持 VPATH 风格 |
+| 资源控制 | ❌ 只有 `-jN` | ✅ `--jobs=` / `--mem-limit=` |
+| install 自动完成 | ❌ 需要显式 target | ✅ `meow build` 默认包含 install |
+
+## p6-dynamic-link — 子任务分解
+
+### 范围
+
+动态链接涉及 mt/ld、mcc、libc、ld.so 四个组件的联动改动。依赖关系线性：
+
+```
+mt/ld -shared → mcc -shared 集成 → ld.so → libc dlopen → 全架构适配
+```
+
+### 子任务详情
+
+#### ld-shared: mt/ld `-shared` 输出（ET_DYN）
+
+**文件**: `projects/meuos-toolchain/src/ld/`
+
+**改动**:
+- `main.c`: 添加 `--shared` CLI 解析
+- `ld.h`: `mt_ld_link()` 增加输出类型参数
+- `link.c`: 核心改动：
+  - 生成 `.dynsym`（`SHT_DYNSYM`，导出全局符号）
+  - 生成 `.dynstr`（符号名称字符串表）
+  - 生成 `.dynamic`（`DT_SYMTAB`/`DT_STRTAB`/`DT_STRSZ`/`DT_SYMENT`/`DT_SONAME`/`DT_INIT_ARRAY`/`DT_HASH`）
+  - 生成 `.hash`（SysV 风格）
+  - 生成 `.got`/`.got.plt`（`GLOB_DAT`/`JUMP_SLOT` 重定位条目）
+  - 生成 `.plt`（x86_64 标准 16 字节 PLT 存根）
+  - 生成 `.interp`（`/lib/ld-meuos.so.1`）
+  - 发出 `PT_DYNAMIC`/`PT_INTERP`/`PT_GNU_RELRO`/`PT_GNU_STACK` 程序头
+  - 实现 `R_X86_64_COPY`/`GLOB_DAT`/`JUMP_SLOT`/`RELATIVE` 重定位
+
+**验收**: `mcc -shared -fPIC -o libfoo.so foo.c`（经 mt/ld 链接）
+
+#### ld-pie: mt/ld `--pie`/`--no-pie` 支持
+
+**文件**: `projects/meuos-toolchain/src/ld/`
+
+**改动**: 与 `-shared` 共享 `ET_DYN` 输出路径，区别：
+- PIE 有 `PT_INTERP` 且入口点为 `_start`
+- `-no-pie` 为传统 `ET_EXEC`
+
+**验收**: `mcc -pie -o app main.c`
+
+#### mcc-pic-verify: mcc PIC 代码生成加固
+
+**文件**: `projects/mcc/src/target/*/` + `driver/`
+
+**现状**: x86_64 已通过 GOT/PLT 基本支持 PIC；其他架构未测试。
+
+**改动**:
+- x86_64: 验证 `-fPIC` 输出（数据→`@gotpcrel`，函数→`@plt`，TLS→`@gottpoff`/`@tlsgd`）
+- aarch64: 验证 ADRP+LDR GOT 路径 + `@plt` 调用
+- riscv64: 验证 `%got_pcrel_hi` + `%plt`
+- 创建 `check-pic` 回归测试
+
+**验收**: 全架构 `make check-pic` 通过
+
+#### mcc-shared-mt: mcc driver `-shared` mt/ld 集成
+
+**文件**: `projects/mcc/src/driver/host_toolchain.c`
+
+**改动**: 移除 `if (!shared)` 条件中绕过 mt/ld 的逻辑。当 `MT_AS`/`MT_LD` 环境变量设置且 mt_target_supported 时，`-shared` 走 mt/ld。
+
+**验收**: `MT_AS=... MT_LD=... mcc -shared -fPIC -o libfoo.so foo.c` 走 mt/ld 而非 host cc
+
+#### ld-so: ld.so 动态链接器
+
+**文件**: `projects/meuos-toolchain/src/rtld/`（新建）
+
+**规模**: ~2500+ 行 C + 各架构自举汇编
+
+**子任务**:
+1. 入口自举（架构特定 `_start`，无栈/GOT 环境自举）
+2. ELF 加载器（`mmap` PT_LOAD，页对齐）
+3. DT_NEEDED 图遍历（递归加载依赖，循环检测）
+4. 符号解析（`.dynsym`/`.hash` 搜索，加载顺序作用域）
+5. 重定位应用（RELATIVE/GLOB_DAT/JUMP_SLOT/COPY/DTPMOD/DTPOFF/TPOFF）
+6. 延迟绑定（PLT 初始存根 → `_dl_runtime_resolve` → GOT 填充）
+7. TLS 初始化（PT_TLS → `tls_index` → `__tls_get_addr`）
+8. RELRO 应用
+9. init/fini 执行（`DT_INIT`/`DT_INIT_ARRAY`）
+10. `LD_LIBRARY_PATH`/RPATH/RUNPATH 支持
+
+**验收**: `LD_LIBRARY_PATH=. ./app` 正常执行
+
+#### libc-dl: libc dlopen 接口
+
+**文件**: `projects/meuos-libc/include/dlfcn.h`（新建）+ `src/dlopen.c` 等
+
+**实现**:
+- `dlopen()` → 调用 ld.so 加载新库
+- `dlsym()` → 在已加载库或 `RTLD_DEFAULT`/`RTLD_NEXT` 中搜索
+- `dlclose()` → 引用计数卸载
+- `dlerror()` → 返回上次错误
+
+**验收**: 运行 `dlopen("libfoo.so") + dlsym(handle, "func") + dlclose`
+
+#### arch-p6-all: 全架构 p6-dynamic-link 适配
+
+各架构需要的独特工作：
+- mt/as: 添加 PLT/GOT/动态节区生成
+- mt/ld: 各架构动态重定位类型（`R_AARCH64_GLOB_DAT`、`R_RISCV_RELATIVE` 等）
+- ld.so: 各架构自举汇编、PLT 存根格式、函数调用约定
+- mcc: 各架构 `-fPIC` 代码生成测试
+
+---
+
+## p8-dwarf — 子任务分解
+
+### 现状
+
+mcc 已经接受 `-g` 选项（`driver/main.c` 中 `case 'g': break;` — 记录但不输出）。
+mt/ld 不处理 `.debug_*` 节区（静态链接直接透传）。
+readelf 已实现部分 DWARF 节区头解析。
+
+**核心设计**：DWARF 输出应在 mcc 的 **emit 阶段**（将 IR 指令转为汇编文本时）同时生成，而非在 IR 中建模 DWARF。emitfn 遍历 IR 时，按基本块和指令位置发出 `.loc` / `.cfi_*` 伪指令，由 mt/as 汇编成 DWARF 字节码，mt/ld 合并。
+
+这样 DWARF 生成与 IR 优化解耦：优化 pass 改变 IR 时不需感知 DWARF。
+
+### 14: mcc `-g` DWARF v5 生成
+
+**文件**: `projects/mcc/src/emit/` + `projects/mcc/src/target/*/`
+
+**子任务**:
+
+1. **`-g` 门控**：`main.c` 中 `case 'g':` 改为设置 `debug_info = true` 而非空 `break`
+2. **`.debug_line` 行号表**（最高优先级）：
+   - emit 时跟踪当前源位置（file/line/col）
+   - 发出 `.file N "name"` / `.loc F L C` 汇编伪指令
+   - mt/as 汇编为 DWARF v5 `.debug_line` 行号程序
+   - 验证：`readelf --debug-dump=line a.out` 显示正确的行号映射
+3. **`.debug_info` + `.debug_abbrev`**（类型/变量信息）：
+   - 遍历 AST 符号表，为每个函数/全局变量/类型生成 DIE（Debugging Information Entry）
+   - 编译单元 DIE → 子程序 DIE → 局部变量 DIE → 类型 DIE
+   - 发出 `.uleb128`/`.sleb128`/`.string` 汇编数据
+   - 初始阶段：只输出函数名和行号范围
+4. **`.debug_str`**（字符串表）：
+   - 收集所有 DWARF 字符串，去重后写入
+5. **`.debug_rnglists` / `.debug_loclists`**（地址范围）：
+   - 函数和变量的地址范围列表
+
+**实现策略**：
+- 第一阶段：行号表（`.debug_line`）— 覆盖 80% 调试需求
+- 第二阶段：函数签名和变量类型（`.debug_info` + `.abbrev`）
+- 第三阶段：局部变量位置表达式（`.debug_loc` / `.debug_loclists`）
+
+**参考**: cproc 的 DWARF 输出（`reference/cproc/`）、QBE 的 emit 框架
+
+**验收**: `mcc -g -o hello hello.c && gdb ./hello -ex 'break main' -ex run -ex quit` 正常工作
+
+### 15: mt/ld DWARF 节区合并
+
+**文件**: `projects/meuos-toolchain/src/ld/link.c`
+
+**改动**: 链接器需要：
+- 透传 `.debug_*` 节区（已隐式处理——所有输入节区默认复制到输出）
+- `.debug_line` 跨目标文件的 `.debug_str`/`.debug_abbrev` 去重
+- `.debug_info` 中跨编译单元的引用修正
+
+**验收**: `mcc -g -c -o a.o a.c && mcc -g -c -o b.o b.c && mcc -g -o ab a.o b.o && gdb ./ab` 正常工作
+
+---
+
+## 模板
+
+| 准则 | x86_64 | aarch64 | riscv64 | i386 | loongarch64 | arm |
+|------|--------|---------|---------|------|-------------|-----|
+| mcc 后端 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| libc 运行时 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| mt/as | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| mt/ld | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| libc 全量构建 | ✅ | ✅ | ❌ bug-riscv64-emit | ✅ | ❌ bug-loong64-emit/bug-loong64-tls-reloc | ✅ |
+| qemu 运行时验证 | ✅ 完整 | ✅ 完整 | ⚠️ exit=42 | ⚠️ qemu system | ⚠️ exit=42 | ✅ 完整 |
+| TLS 端到端 | ✅ | ✅ | ❌ bug-riscv64-emit | ❌ bug-i386-tls | ❌ bug-loong64-tls-reloc/bug-loong64-tls-errno | ✅ |
+| self-rebuild | ✅ | ✅ | ❌ bug-riscv64-emit | ❌ bug-i386-tls | ❌ bug-loong64-emit | ❌ bug-arm-isel |
+| 动态链接 | 🔄 ld-shared...ld-so | 🔄 ld-shared...ld-so | 🔄 ld-shared...ld-so | 🔄 ld-shared...ld-so | 🔄 ld-shared...ld-so | 🔄 ld-shared...ld-so |
+| DWARF 调试信息 | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge |
+
+---
+
+## 详细说明
+
+### bug-riscv64-emit — riscv64 emit assert(isreg(rb))
+
+**文件**: `projects/mcc/src/target/riscv64/riscv64_emit.c:664`
+
+**现象**: 编译 libc `string/error.o` 时断言失败：
+```
+mcc: src/target/riscv64/riscv64_emit.c:664: rv64_emitfn: Assertion `isreg(rb)' failed.
+```
+
+**原因**: emit 条件分支处理中 `rb` 可能是 slot 或 const。只有 `rtype(rb) == RSlot` 分支做了 `lw t6, %M0` 的 reg 降级，其他类型未处理。
+
+**参考**: `riscv64_emit.c:658-664` — 与 bug-loong64-emit 同源。
+
+**验收**: `make -C projects/meuos-libc ARCH=riscv64` 全量通过。
+
+---
+
+### bug-loong64-emit — loongarch64 emit assert(isreg(rb))
+
+**文件**: `projects/mcc/src/target/loongarch64/loongarch64_emit.c:514`
+
+**现象**: 编译 libc 时断言失败：
+```
+mcc: src/target/loongarch64/loongarch64_emit.c:514: la64_emitfn: Assertion `isreg(rb)' failed.
+```
+
+**原因**: 同 bug-riscv64-emit，条件分支 `rb` 未处理非 register 类型。
+
+**参考**: `loongarch64_emit.c:510-516`。
+
+**验收**: `make -C projects/meuos-libc ARCH=loongarch64` 全量通过。
+
+---
+
+### bug-arm-isel — arm isel slot %(null)
+
+**文件**: `projects/mcc/src/target/arm/arm_isel.c`
+
+**现象**: mcc 编译 arm backend 自身时 IR 警告：
+```
+mcc: slot %(null) is read but never stored to
+```
+
+**原因**: ARM isel 中某 IR slot 被引用但从未赋值。
+
+**影响**: 阻塞 `check-sysroot-static`。
+
+**验收**: `make -C projects/mcc check-sysroot-static` 全量通过。
+
+---
+
+### bug-i386-tls — i386 TLS 模型选择
+
+**文件**: `projects/mcc/src/target/i386/i386_emit.c`（已实现两种重定位）+ isel/sema 层未正确选择模型
+
+**现象**: 非静态 `_Thread_local` 在静态构建中链接失败，IE(`@gotntpoff`) 无法被静态链接器解析。
+
+**原因**: mcc 的 isel/sema 层对 `_Thread_local` 变量做符号解析时，未根据 `--static`/`-fPIC` 选择正确的 TLS 模型。静态构建应选择 LE(`@ntpoff`)。
+
+**关联**: AGENTS.md §10.2 列为「阻塞中」。见 `projects/mcc/src/target/i386/.todo`。
+
+**验收**: `make check-i386` + `make check-i386-qemu` 中 TLS 测试通过。
+
+---
+
+### bug-loong64-tls-reloc — loongarch64 TLS LE 重定位损坏
+
+**文件**: `projects/mt/ld` linker（loongarch64 支持模块）
+
+**现象**: `.tdata` 段的 TLS 初始值被链接器破坏（`42` → 垃圾值）。
+
+**原因**: mt/ld 的 loongarch64 TLS LE 重定位处理有 bug，`R_LARCH_TLS_LE_*` 类型应用不正确。
+
+**关联**: 记录在 `projects/meuos-libc/src/arch/loongarch64/.todo`。
+
+**验收**: 静态 TLS 变量的初始值正确保留。
+
+---
+
+### bug-loong64-tls-errno — loongarch64 TLS errno 回退
+
+**文件**: `projects/meuos-libc/src/errno/`（或 TLS 相关）
+
+**现象**: loongarch64 上 `errno` 使用 `static int` 而非 TLS 变量，多线程不安全。
+
+**原因**: bug-loong64-tls-reloc 导致 TLS LE 不可用，libc 被迫回退到非线程安全的备用方案。
+
+**验收**: loongarch64 qemu 下多线程 `errno` 隔离验证通过。
+
+---
+
+## 已解决的问题
+
+| 旧 ID
+|-------|------|------|
+| riscv64-qemu-thread | riscv64 QEMU thread_cpu 全局变量（env qemu 10.1.0 已修复） | 🟢 已解决 |
+| check-sysroot-static-path | check-sysroot-static temp 目录路径（已用 abspath 绕过） | 🟢 已绕过 |
+
+---
+
+## 模板
+
+```markdown
+### ID — 简短标题
+
+**文件**: `path/to/file`
+
+**现象**: 
+
+**原因**: 
+
+**验收**: 
+```

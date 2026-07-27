@@ -42,7 +42,17 @@ void run_host_link(struct array *objects, const char *output, bool verbose,
                    bool shared, bool nostdlib, bool nodefaultlibs,
                    bool meuos_specs, const char *target_triple);
 bool is_link_input(const char *path);
-char *default_out_name(const char *input, const char *ext);
+char *default_out_name(const char *input, const char *desc);
+
+/* msys.c — .msys single-file sysroot support */
+#include "mt/msys.h"
+int msys_is_sysroot(const char *path);
+struct msys *msys_sysroot_open(const char *sysroot_path);
+char *msys_sysroot_get_arch(struct msys *m);
+int  msys_sysroot_incprefixes(const char *prefixes[], int max_count);
+/* Global msys handle and path exposed to pp.c for VFS include fallback. */
+extern struct msys *msys_sysroot_handle;
+extern const char *msys_sysroot_path;
 
 /* usage.c */
 void print_version(void);

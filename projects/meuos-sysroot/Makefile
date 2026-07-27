@@ -88,22 +88,26 @@ check: $(MKMSYS_BIN) $(TEST_BIN)
 	$(TEST_BIN)
 	@echo "meuos-sysroot: check PASS"
 
-# msys — Build .msys from sysroot directory
+# msys — Build .msys from sysroot directory (v2 format with dedup)
 MSYS_SYSROOT ?= $(MEUOS_SYSROOT)
 MSYS_OUTPUT  ?= $(MSYS_SYSROOT).msys
 
 msys: $(MKMSYS_BIN)
 	@if [ -z "$(MSYS_SYSROOT)" ]; then \
 		echo "MEUOS_SYSROOT not set — use MSYS_SYSROOT=<dir>"; exit 1; fi
-	@echo "Packing $(MSYS_SYSROOT) -> $(MSYS_OUTPUT)"
-	$(MKMSYS_BIN) -o "$(MSYS_OUTPUT)" "$(MSYS_SYSROOT)"
+	@arch=$$(basename "$(MSYS_SYSROOT)" | sed 's/sysroot-//; s/\.msys//'); \
+	[ "$$arch" = "sysroot" ] && arch=x86_64; \
+	echo "Packing $(MSYS_SYSROOT) -> $(MSYS_OUTPUT) (v2, arch=$$arch)"; \
+	$(MKMSYS_BIN) --format v2 --dedup --arch "$$arch" -o "$(MSYS_OUTPUT)" "$(MSYS_SYSROOT)"
 
 # msys-compressed — Build compressed .msys from sysroot directory
 msys-compressed: $(MKMSYS_BIN)
 	@if [ -z "$(MSYS_SYSROOT)" ]; then \
 		echo "MEUOS_SYSROOT not set — use MSYS_SYSROOT=<dir>"; exit 1; fi
-	@echo "Packing $(MSYS_SYSROOT) -> $(MSYS_OUTPUT) (zlib)"
-	$(MKMSYS_BIN) --compress=zlib -o "$(MSYS_OUTPUT)" "$(MSYS_SYSROOT)"
+	@arch=$$(basename "$(MSYS_SYSROOT)" | sed 's/sysroot-//; s/\.msys//'); \
+	[ "$$arch" = "sysroot" ] && arch=x86_64; \
+	echo "Packing $(MSYS_SYSROOT) -> $(MSYS_OUTPUT) (v2, zlib, arch=$$arch)"; \
+	$(MKMSYS_BIN) --format v2 --dedup --compress=zlib --arch "$$arch" -o "$(MSYS_OUTPUT)" "$(MSYS_SYSROOT)"
 
 # check-msys — Validate .msys is readable (detect existing .msys files)
 check-msys: $(MKMSYS_BIN)
