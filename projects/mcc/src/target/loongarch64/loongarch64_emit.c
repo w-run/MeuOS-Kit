@@ -398,13 +398,48 @@ emitins(Ins *i, Fn *fn, FILE *f)
 	}
 }
 
+static char *la64_br[] = {
+	[Cieq]  = "beq",
+	[Cine]  = "bne",
+	[Cisge] = "bge",
+	[Cisgt] = "blt",
+	[Cisle] = "bge",
+	[Cislt] = "blt",
+	[Ciuge] = "bgeu",
+	[Ciugt] = "bltu",
+	[Ciule] = "bgeu",
+	[Ciult] = "bltu",
+};
+
+static int la64_swp[] = {
+	[Cieq]  = 0, [Cine]  = 0,
+	[Cisge] = 0, [Cisgt] = 1,
+	[Cisle] = 1, [Cislt] = 0,
+	[Ciuge] = 0, [Ciugt] = 1,
+	[Ciule] = 1, [Ciult] = 0,
+};
+
+static int la64_inv[] = {
+	[Cieq]  = Cine,
+	[Cine]  = Cieq,
+	[Cisge] = Cislt,
+	[Cisgt] = Cisle,
+	[Cisle] = Cisgt,
+	[Cislt] = Cisge,
+	[Ciuge] = Ciult,
+	[Ciugt] = Ciule,
+	[Ciule] = Ciugt,
+	[Ciult] = Ciuge,
+};
+
 void
 la64_emitfn(Fn *fn, FILE *f)
 {
 	static int id0;
-	int frame, off, lbl, neg, r, *pr;
+	int frame, off, lbl, neg, r, *pr, c;
 	Blk *b, *s;
 	Ins *i, ii;
+	Ref ra, rb, rt;
 	emitfnlnk(fn->name, &fn->lnk, f);
 	frame = (16 + 4 * fn->slot + 15) & -16;
 	for (pr = la64_rclob; *pr >= 0; pr++) if (fn->reg & BIT(*pr)) frame += 8;
@@ -449,6 +484,41 @@ la64_emitfn(Fn *fn, FILE *f)
 			if (b->link == b->s2) { s = b->s1; b->s1 = b->s2; b->s2 = s; neg = 1; }
 			if (rtype(b->jmp.arg) == RSlot) { ii.arg[0] = b->jmp.arg; emitf("ld.w $t8, %M0", &ii, fn, f); b->jmp.arg = TMP(T8); }
 			fprintf(f, "\tb%s %s, $zero, .L%d\n", neg ? "ne" : "eq", rname[b->jmp.arg.val], id0 + b->s2->id);
+			goto Jmp;
+		default:
+			if (!INRANGE(b->jmp.type, Jjf, Jjf1))
+				die("unhandled jump %d", b->jmp.type);
+			c = b->jmp.type - Jjf;
+			if (c < 0 || c >= NCmpI)
+				die("unhandled jump %d", b->jmp.type);
+			neg = 0;
+			if (b->link == b->s2) { s = b->s1; b->s1 = b->s2; b->s2 = s; neg = 1; }
+			if (!neg)
+				c = la64_inv[c];
+			ra = b->jmp.arg;
+			rb = b->jmp.arg1;
+			if (la64_swp[c]) {
+				rt = ra; ra = rb; rb = rt;
+			}
+			if (rtype(ra) == RSlot) {
+				ii.arg[0] = ra;
+				emitf("ld.w $t8, %M0", &ii, fn, f);
+				ra = TMP(T8);
+			}
+			if (rtype(rb) == RSlot) {
+				ii.arg[0] = rb;
+				emitf("ld.w $t8, %M0", &ii, fn, f);
+				rb = TMP(T8);
+			}
+			assert(isreg(ra));
+			assert(isreg(rb));
+			fprintf(f,
+				"\t%s %s, %s, .L%d\n",
+				la64_br[c],
+				rname[ra.val],
+				rname[rb.val],
+				id0 + b->s2->id
+			);
 			goto Jmp;
 		}
 	}

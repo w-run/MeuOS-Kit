@@ -262,6 +262,7 @@ struct Blk {
 	struct {
 		short type;
 		Ref arg;
+		Ref arg1;  /* second operand for fused conditional branches */
 	} jmp;
 	Blk *s1;
 	Blk *s2;

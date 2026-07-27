@@ -2,6 +2,7 @@
 #include "mt/ld.h"
 #include "mt/archive.h"
 #include "mt/elf.h"
+#include "mt/elf32.h"
 #include "mt/target.h"
 
 #include <errno.h>
@@ -18,6 +19,8 @@ extern int la64_apply_reloc(unsigned type, unsigned char *loc,
                             uint64_t S, int64_t A, uint64_t P);
 extern int riscv64_apply_reloc(unsigned reloc_type, unsigned char *place,
                                uint64_t S, int64_t A, uint64_t P);
+extern int i386_apply_reloc(unsigned reloc_type, unsigned char *place,
+                            uint64_t S, int64_t A, uint64_t P);
 
 #define LD_SHF_WRITE 0x1ULL
 #define LD_SHF_ALLOC 0x2ULL
@@ -63,12 +66,25 @@ struct ld_object {
 	char *name;
 	unsigned char *data;
 	size_t size;
-	struct mt_elf64_view view;
+	int elf_class;
+	union {
+		struct mt_elf64_view v64;
+		struct mt_elf32_view v32;
+	} view;
 	struct ld_section_map *maps;
 	uint16_t symtab_index;
-	struct mt_elf64_section symtab;
-	struct mt_elf64_section strtab;
-	struct mt_elf64_section section_names;
+	union {
+		struct mt_elf64_section v64;
+		struct mt_elf32_section v32;
+	} symtab;
+	union {
+		struct mt_elf64_section v64;
+		struct mt_elf32_section v32;
+	} strtab;
+	union {
+		struct mt_elf64_section v64;
+		struct mt_elf32_section v32;
+	} section_names;
 	int has_symtab;
 };
 
@@ -217,6 +233,237 @@ align_up(uint64_t value, uint64_t align)
 	return (value + mask) & ~mask;
 }
 
+/* ---- ELF32/64 dispatch helpers ---- */
+
+/* Forward declarations for functions used by helpers below. */
+static struct ld_global *find_global(struct ld_context *ctx, const char *name);
+static int ld_errorf(struct ld_context *ctx, const char *prefix, const char *name);
+static int ld_error(struct ld_context *ctx, const char *message);
+
+/* Parse an object file's ELF header.  Returns 0 on success, -1 on failure. */
+static int
+object_parse(struct ld_context *ctx, struct ld_object *object)
+{
+	enum mt_elf_status status;
+	if (ctx->target->elf_class == 1) {
+		status = mt_elf32_parse(object->data, object->size, &object->view.v32);
+		if (status != MT_ELF_OK || object->view.v32.type != MT_ET_REL ||
+		    object->view.v32.machine != ctx->target->emachine)
+			return -1;
+	} else {
+		status = mt_elf64_parse(object->data, object->size, &object->view.v64);
+		if (status != MT_ELF_OK || object->view.v64.type != MT_ET_REL ||
+		    object->view.v64.machine != ctx->target->emachine)
+			return -1;
+	}
+	object->elf_class = ctx->target->elf_class;
+	return 0;
+}
+
+/* Section count accessor — works for both 32 and 64 bit views. */
+static uint16_t
+object_section_count(const struct ld_object *object)
+{
+	return (object->elf_class == 1)
+		? object->view.v32.section_count
+		: object->view.v64.section_count;
+}
+
+/* Section name index accessor. */
+static uint16_t
+object_section_name_index(const struct ld_object *object)
+{
+	return (object->elf_class == 1)
+		? object->view.v32.section_name_index
+		: object->view.v64.section_name_index;
+}
+
+/* Read a section header and convert to 64-bit fields. */
+static int
+object_get_section(struct ld_object *object, uint16_t index,
+                   struct mt_elf64_section *out)
+{
+	if (object->elf_class == 1) {
+		struct mt_elf32_section s32;
+		if (mt_elf32_get_section(object->data, object->size,
+		                         &object->view.v32, index, &s32) != MT_ELF_OK)
+			return -1;
+		out->name = s32.name;
+		out->type = s32.type;
+		out->flags = s32.flags;
+		out->address = s32.address;
+		out->offset = s32.offset;
+		out->size = s32.size;
+		out->link = s32.link;
+		out->info = s32.info;
+		out->alignment = s32.alignment;
+		out->entry_size = s32.entry_size;
+	} else {
+		if (mt_elf64_get_section(object->data, object->size,
+		                         &object->view.v64, index, out) != MT_ELF_OK)
+			return -1;
+	}
+	return 0;
+}
+
+/* Read a symbol and convert to 64-bit fields. */
+static int
+object_get_symbol(struct ld_object *object, uint64_t index,
+                  struct mt_elf64_symbol *out)
+{
+	if (object->elf_class == 1) {
+		struct mt_elf32_symbol sym32;
+		if (mt_elf32_get_symbol(object->data, object->size,
+		                        &object->symtab.v32, index,
+		                        &sym32) != MT_ELF_OK)
+			return -1;
+		out->name = sym32.name;
+		out->info = sym32.info;
+		out->other = sym32.other;
+		out->section = sym32.section;
+		out->value = sym32.value;
+		out->size = sym32.size;
+	} else {
+		if (mt_elf64_get_symbol(object->data, object->size,
+		                        &object->symtab.v64, index, out) != MT_ELF_OK)
+			return -1;
+	}
+	return 0;
+}
+
+/* Read a string from the symbol string table (strtab). */
+static int
+object_get_strtab_string(struct ld_object *object, uint32_t offset,
+                         const char **value)
+{
+	if (object->elf_class == 1)
+		return mt_elf32_get_string(object->data, object->size,
+		                            &object->strtab.v32, offset, value);
+	return mt_elf64_get_string(object->data, object->size,
+	                            &object->strtab.v64, offset, value);
+}
+
+/* Read a string from the section-name string table (section_names). */
+static int
+object_get_secname_string(struct ld_object *object, uint32_t offset,
+                          const char **value)
+{
+	if (object->elf_class == 1)
+		return mt_elf32_get_string(object->data, object->size,
+		                            &object->section_names.v32, offset, value);
+	return mt_elf64_get_string(object->data, object->size,
+	                            &object->section_names.v64, offset, value);
+}
+
+/* Read a section name (calls object_get_section + gets name string). */
+static const char *
+object_section_name(struct ld_object *object, uint16_t index)
+{
+	struct mt_elf64_section section;
+	const char *name;
+	if (object_get_section(object, index, &section) != 0)
+		return NULL;
+	if (object_get_secname_string(object, section.name, &name) != 0)
+		return NULL;
+	return name;
+}
+
+/* Helper: check if an archive member ELF contains a needed undefined symbol.
+ * elf_class is ctx->target->elf_class (1 for ELF32, 2 for ELF64). */
+static int
+archive_member_needed_impl(struct ld_context *ctx, const unsigned char *data,
+                      size_t size, int elf_class)
+{
+	union {
+		struct mt_elf64_view v64;
+		struct mt_elf32_view v32;
+	} view;
+	union {
+		struct mt_elf64_section v64;
+		struct mt_elf32_section v32;
+	} symtab, strtab;
+	struct mt_elf64_symbol symbol;
+	const char *name;
+	uint16_t i;
+	uint64_t j;
+	uint16_t section_count;
+	unsigned binding;
+
+	/* Parse based on elf_class */
+	if (elf_class == 1) {
+		if (mt_elf32_parse(data, size, &view.v32) != MT_ELF_OK ||
+		    view.v32.type != MT_ET_REL ||
+		    view.v32.machine != ctx->target->emachine)
+			return 0;
+		section_count = view.v32.section_count;
+	} else {
+		if (mt_elf64_parse(data, size, &view.v64) != MT_ELF_OK ||
+		    view.v64.type != MT_ET_REL ||
+		    view.v64.machine != ctx->target->emachine)
+			return 0;
+		section_count = view.v64.section_count;
+	}
+
+	for (i = 0; i < section_count; ++i) {
+		if (elf_class == 1) {
+			struct mt_elf32_section s32;
+			if (mt_elf32_get_section(data, size, &view.v32, i, &s32) != MT_ELF_OK)
+				return -1;
+			if (s32.type != MT_SHT_SYMTAB)
+				continue;
+			symtab.v32 = s32;
+			if (s32.link >= section_count ||
+			    mt_elf32_get_section(data, size, &view.v32,
+			                         (uint16_t)s32.link, &strtab.v32) != MT_ELF_OK)
+				return -1;
+			for (j = 0; j < s32.size / s32.entry_size; ++j) {
+				struct mt_elf32_symbol sym32;
+				struct ld_global *global;
+				if (mt_elf32_get_symbol(data, size, &symtab.v32, j,
+				                        &sym32) != MT_ELF_OK)
+					return -1;
+				binding = sym32.info >> LD_STB_SHIFT;
+				if (binding == LD_STB_LOCAL || sym32.section == MT_SHN_UNDEF ||
+				    sym32.name == 0 ||
+				    mt_elf32_get_string(data, size, &strtab.v32, sym32.name,
+				                       &name) != MT_ELF_OK)
+					continue;
+				global = find_global(ctx, name);
+				if (global && !global->defined)
+					return 1;
+			}
+		} else {
+			struct mt_elf64_section s64;
+			if (mt_elf64_get_section(data, size, &view.v64, i, &s64) != MT_ELF_OK)
+				return -1;
+			if (s64.type != MT_SHT_SYMTAB)
+				continue;
+			symtab.v64 = s64;
+			if (s64.link >= section_count ||
+			    mt_elf64_get_section(data, size, &view.v64,
+			                         (uint16_t)s64.link, &strtab.v64) != MT_ELF_OK)
+				return -1;
+			for (j = 0; j < s64.size / s64.entry_size; ++j) {
+				struct ld_global *global;
+				if (mt_elf64_get_symbol(data, size, &symtab.v64, j,
+				                        &symbol) != MT_ELF_OK)
+					return -1;
+				binding = symbol.info >> LD_STB_SHIFT;
+				if (binding == LD_STB_LOCAL || symbol.section == MT_SHN_UNDEF ||
+				    symbol.name == 0 ||
+				    mt_elf64_get_string(data, size, &strtab.v64, symbol.name,
+				                       &name) != MT_ELF_OK)
+					continue;
+				global = find_global(ctx, name);
+				if (global && !global->defined)
+					return 1;
+			}
+		}
+		break;
+	}
+	return 0;
+}
+
 static void
 free_object(struct ld_object *object)
 {
@@ -256,7 +503,6 @@ append_object(struct ld_context *ctx, const char *name,
 {
 	struct ld_object *objects;
 	struct ld_object *object;
-	enum mt_elf_status status;
 	if (ctx->objects.count == ctx->objects.capacity) {
 		size_t capacity = ctx->objects.capacity ? ctx->objects.capacity * 2 : 16;
 		objects = (struct ld_object *)ld_realloc(
@@ -276,26 +522,42 @@ append_object(struct ld_context *ctx, const char *name,
 	}
 	memcpy(object->data, data, size);
 	object->size = size;
-	status = mt_elf64_parse(object->data, object->size, &object->view);
-	if (status != MT_ELF_OK || object->view.type != MT_ET_REL ||
-	    object->view.machine != ctx->target->emachine) {
+	if (object_parse(ctx, object) != 0) {
 		free_object(object);
 		return ld_errorf(ctx, "unsupported input object", name);
 	}
-	object->maps = (struct ld_section_map *)ld_malloc(
-	    object->view.section_count * sizeof(*object->maps));
-	if (!object->maps && object->view.section_count != 0) {
-		free_object(object);
-		return ld_error(ctx, "out of memory");
+	{
+		uint16_t sec_count = object_section_count(object);
+		object->maps = (struct ld_section_map *)ld_malloc(
+		    sec_count * sizeof(*object->maps));
+		if (!object->maps && sec_count != 0) {
+			free_object(object);
+			return ld_error(ctx, "out of memory");
+		}
+		for (uint16_t i = 0; i < sec_count; ++i)
+			object->maps[i].group = -1;
 	}
-	for (uint16_t i = 0; i < object->view.section_count; ++i)
-		object->maps[i].group = -1;
-	if (object->view.section_name_index < object->view.section_count &&
-	    mt_elf64_get_section(object->data, object->size, &object->view,
-	                         object->view.section_name_index,
-	                         &object->section_names) != MT_ELF_OK) {
-		free_object(object);
-		return ld_errorf(ctx, "invalid section-name table", name);
+	{
+		uint16_t sni = object_section_name_index(object);
+		if (object->elf_class == 1) {
+			struct mt_elf32_section s32;
+			if (sni >= object_section_count(object) ||
+			    mt_elf32_get_section(object->data, object->size,
+			                         &object->view.v32, sni,
+			                         &s32) != MT_ELF_OK) {
+				free_object(object);
+				return ld_errorf(ctx, "invalid section-name table", name);
+			}
+			object->section_names.v32 = s32;
+		} else {
+			if (sni >= object_section_count(object) ||
+			    mt_elf64_get_section(object->data, object->size,
+			                         &object->view.v64, sni,
+			                         &object->section_names.v64) != MT_ELF_OK) {
+				free_object(object);
+				return ld_errorf(ctx, "invalid section-name table", name);
+			}
+		}
 	}
 	++ctx->objects.count;
 	return 0;
@@ -471,19 +733,6 @@ append_group_data(struct ld_context *ctx, struct ld_group *group,
 	return 0;
 }
 
-static const char *
-object_section_name(const struct ld_object *object, uint16_t index)
-{
-	struct mt_elf64_section section;
-	const char *name;
-	if (mt_elf64_get_section(object->data, object->size, &object->view,
-	                         index, &section) != MT_ELF_OK ||
-	    mt_elf64_get_string(object->data, object->size, &object->section_names,
-	                        section.name, &name) != MT_ELF_OK)
-		return NULL;
-	return name;
-}
-
 static int
 collect_sections(struct ld_context *ctx)
 {
@@ -497,9 +746,8 @@ collect_sections(struct ld_context *ctx)
 
 	for (i = 0; i < ctx->objects.count; ++i) {
 		struct ld_object *object = &ctx->objects.items[i];
-		for (j = 0; j < object->view.section_count; ++j) {
-			if (mt_elf64_get_section(object->data, object->size,
-			                        &object->view, j, &section) != MT_ELF_OK)
+		for (j = 0; j < object_section_count(object); ++j) {
+			if (object_get_section(object, j, &section) != 0)
 				return ld_errorf(ctx, "invalid section in object", object->name);
 			if (section.type != MT_SHT_PROGBITS &&
 			    section.type != MT_SHT_NOBITS)
@@ -546,9 +794,8 @@ collect_one_object_sections(struct ld_context *ctx, size_t object_index)
 	uint16_t j;
 	int group;
 	uint64_t offset;
-	for (j = 0; j < object->view.section_count; ++j) {
-		if (mt_elf64_get_section(object->data, object->size,
-		                        &object->view, j, &section) != MT_ELF_OK)
+	for (j = 0; j < object_section_count(object); ++j) {
+		if (object_get_section(object, j, &section) != 0)
 			return ld_errorf(ctx, "invalid section in object", object->name);
 		if (section.type != MT_SHT_PROGBITS && section.type != MT_SHT_NOBITS)
 			continue;
@@ -620,23 +867,53 @@ prepare_object_symbol(struct ld_context *ctx, struct ld_object *object)
 {
 	struct mt_elf64_section section;
 	uint16_t i;
+	uint16_t sec_count = object_section_count(object);
 	object->has_symtab = 0;
-	for (i = 0; i < object->view.section_count; ++i) {
-		if (mt_elf64_get_section(object->data, object->size,
-		                        &object->view, i, &section) != MT_ELF_OK)
+	for (i = 0; i < sec_count; ++i) {
+		if (object_get_section(object, i, &section) != 0)
 			return ld_errorf(ctx, "invalid symbol section", object->name);
 		if (section.type != MT_SHT_SYMTAB)
 			continue;
-		if (section.link >= object->view.section_count ||
-		    mt_elf64_get_section(object->data, object->size,
-		                        &object->view, (uint16_t)section.link,
-		                        &object->strtab) != MT_ELF_OK ||
-		    object->strtab.type != MT_SHT_STRTAB ||
-		    section.entry_size < MT_ELF64_SYM_SIZE ||
-		    section.size % section.entry_size != 0)
+		if (section.link >= sec_count)
 			return ld_errorf(ctx, "invalid symbol table", object->name);
+		if (object->elf_class == 1) {
+			struct mt_elf32_section strtab32;
+			if (mt_elf32_get_section(object->data, object->size,
+			                         &object->view.v32,
+			                         (uint16_t)section.link,
+			                         &strtab32) != MT_ELF_OK ||
+			    strtab32.type != MT_SHT_STRTAB ||
+			    section.entry_size < MT_ELF32_SYM_SIZE ||
+			    section.size % section.entry_size != 0)
+				return ld_errorf(ctx, "invalid symbol table", object->name);
+			object->strtab.v32 = strtab32;
+			/* Convert the 64-bit section fields back to 32-bit for storage */
+			{
+				struct mt_elf32_section sym32;
+				sym32.name = section.name;
+				sym32.type = section.type;
+				sym32.flags = (uint32_t)section.flags;
+				sym32.address = (uint32_t)section.address;
+				sym32.offset = (uint32_t)section.offset;
+				sym32.size = (uint32_t)section.size;
+				sym32.link = section.link;
+				sym32.info = section.info;
+				sym32.alignment = (uint32_t)section.alignment;
+				sym32.entry_size = (uint32_t)section.entry_size;
+				object->symtab.v32 = sym32;
+			}
+		} else {
+			if (mt_elf64_get_section(object->data, object->size,
+			                         &object->view.v64,
+			                         (uint16_t)section.link,
+			                         &object->strtab.v64) != MT_ELF_OK ||
+			    object->strtab.v64.type != MT_SHT_STRTAB ||
+			    section.entry_size < MT_ELF64_SYM_SIZE ||
+			    section.size % section.entry_size != 0)
+				return ld_errorf(ctx, "invalid symbol table", object->name);
+			object->symtab.v64 = section;
+		}
 		object->symtab_index = i;
-		object->symtab = section;
 		object->has_symtab = 1;
 		break;
 	}
@@ -660,7 +937,7 @@ register_global_symbol(struct ld_context *ctx, struct ld_object *object,
 	if (!global)
 		return ld_error(ctx, "out of memory");
 	if (defined) {
-		if (symbol->section >= object->view.section_count ||
+		if (symbol->section >= object_section_count(object) ||
 		    object->maps[symbol->section].group < 0)
 			return ld_errorf(ctx, "symbol points to discarded section", name);
 		if (global->defined && !global->weak && binding != LD_STB_WEAK)
@@ -696,18 +973,24 @@ collect_one_object_symbols(struct ld_context *ctx, size_t object_index)
 	struct ld_object *object = &ctx->objects.items[object_index];
 	struct mt_elf64_symbol symbol;
 	const char *name;
-	uint64_t j;
+	uint64_t j, sym_count;
 	if (prepare_object_symbol(ctx, object) != 0)
 		return -1;
 	if (!object->has_symtab)
 		return 0;
-	for (j = 0; j < object->symtab.size / object->symtab.entry_size; ++j) {
-		if (mt_elf64_get_symbol(object->data, object->size,
-		                        &object->symtab, j, &symbol) != MT_ELF_OK)
+	/* Copy symtab/strtab to 64-bit local vars for iteration */
+	if (object->elf_class == 1) {
+		struct mt_elf32_section *s32 = &object->symtab.v32;
+		sym_count = s32->size / s32->entry_size;
+	} else {
+		struct mt_elf64_section *s64 = &object->symtab.v64;
+		sym_count = s64->size / s64->entry_size;
+	}
+	for (j = 0; j < sym_count; ++j) {
+		if (object_get_symbol(object, j, &symbol) != 0)
 			return ld_errorf(ctx, "invalid symbol", object->name);
 		if (symbol.name == 0 ||
-		    mt_elf64_get_string(object->data, object->size,
-		                       &object->strtab, symbol.name, &name) != MT_ELF_OK)
+		    object_get_strtab_string(object, symbol.name, &name) != 0)
 			continue;
 		if (register_global_symbol(ctx, object, j, &symbol, name) != 0)
 			return -1;
@@ -735,44 +1018,7 @@ static int
 archive_member_needed(struct ld_context *ctx, const unsigned char *data,
                       size_t size)
 {
-	struct mt_elf64_view view;
-	struct mt_elf64_section symtab;
-	struct mt_elf64_section strtab;
-	struct mt_elf64_symbol symbol;
-	const char *name;
-	uint16_t i;
-	uint64_t j;
-	unsigned binding;
-
-	if (mt_elf64_parse(data, size, &view) != MT_ELF_OK ||
-	    view.type != MT_ET_REL || view.machine != ctx->target->emachine)
-		return 0;
-	for (i = 0; i < view.section_count; ++i) {
-		if (mt_elf64_get_section(data, size, &view, i, &symtab) != MT_ELF_OK)
-			return -1;
-		if (symtab.type != MT_SHT_SYMTAB)
-			continue;
-		if (symtab.link >= view.section_count ||
-		    mt_elf64_get_section(data, size, &view, (uint16_t)symtab.link,
-		                         &strtab) != MT_ELF_OK)
-			return -1;
-		for (j = 0; j < symtab.size / symtab.entry_size; ++j) {
-			struct ld_global *global;
-			if (mt_elf64_get_symbol(data, size, &symtab, j, &symbol) != MT_ELF_OK)
-				return -1;
-			binding = symbol.info >> LD_STB_SHIFT;
-			if (binding == LD_STB_LOCAL || symbol.section == MT_SHN_UNDEF ||
-			    symbol.name == 0 ||
-			    mt_elf64_get_string(data, size, &strtab, symbol.name,
-			                       &name) != MT_ELF_OK)
-				continue;
-			global = find_global(ctx, name);
-			if (global && !global->defined)
-				return 1;
-		}
-		break;
-	}
-	return 0;
+	return archive_member_needed_impl(ctx, data, size, ctx->target->elf_class);
 }
 
 static int
@@ -854,15 +1100,13 @@ get_symbol_by_index(struct ld_context *ctx, struct ld_object *object,
                     const char **name)
 {
 	if (!object->has_symtab ||
-	    mt_elf64_get_symbol(object->data, object->size, &object->symtab,
-	                         index, symbol) != MT_ELF_OK)
+	    object_get_symbol(object, index, symbol) != 0)
 		return ld_errorf(ctx, "relocation symbol is invalid", object->name);
 	if (symbol->name == 0) {
 		*name = "";
 		return 0;
 	}
-	if (mt_elf64_get_string(object->data, object->size, &object->strtab,
-	                        symbol->name, name) != MT_ELF_OK)
+	if (object_get_strtab_string(object, symbol->name, name) != 0)
 		return ld_errorf(ctx, "relocation string is invalid", object->name);
 	return 0;
 }
@@ -894,7 +1138,7 @@ symbol_value(struct ld_context *ctx, struct ld_object *object,
 		*value = ctx->groups[global->group].address + global->offset;
 		return 0;
 	}
-	if (symbol.section >= object->view.section_count ||
+	if (symbol.section >= object_section_count(object) ||
 	    object->maps[symbol.section].group < 0)
 		return ld_errorf(ctx, "symbol section was discarded", name);
 	map = &object->maps[symbol.section];
@@ -953,31 +1197,51 @@ collect_got_relocations(struct ld_context *ctx)
 	struct mt_elf64_symbol symbol;
 	const char *name;
 	uint64_t n;
-	uint64_t info;
 	for (i = 0; i < ctx->objects.count; ++i) {
 		struct ld_object *object = &ctx->objects.items[i];
-		for (j = 0; j < object->view.section_count; ++j) {
-			if (mt_elf64_get_section(object->data, object->size,
-			                        &object->view, (uint16_t)j, &section) != MT_ELF_OK)
+		for (j = 0; j < object_section_count(object); ++j) {
+			if (object_get_section(object, (uint16_t)j, &section) != 0)
 				return -1;
-			if (section.type != MT_SHT_RELA || section.entry_size < 24 ||
-			    section.size % section.entry_size != 0)
+			if (section.type != MT_SHT_RELA)
 				continue;
-			for (n = 0; n < section.size / section.entry_size; ++n) {
-				const unsigned char *p = object->data + section.offset + n * section.entry_size;
-				info = read64(p + 8);
-		if ((unsigned)info != LD_R_X86_64_GOTPCREL) {
-				/* Also collect GOT-based relocations for other architectures */
-				unsigned rel_type = (unsigned)(info & 0xffffffff);
-				/* LoongArch64 GOT_PC_HI20 (75) and GOT_PC_LO12 (76) */
-				if (rel_type == 75 || rel_type == 76)
-					goto collect_got;
-				continue;
-			}
-			collect_got:;
-				if (get_symbol_by_index(ctx, object, info >> 32, &symbol,
-				                        &name) != 0 || add_got_entry(ctx, name) != 0)
-					return -1;
+			if (object->elf_class == 1) {
+				/* ELF32 RELA: 12 bytes per entry */
+				uint32_t info32;
+				if (section.entry_size < 12 ||
+				    section.size % section.entry_size != 0)
+					continue;
+				for (n = 0; n < section.size / section.entry_size; ++n) {
+					const unsigned char *p = object->data + section.offset + n * 12;
+					info32 = read32(p + 4);
+					if ((unsigned)info32 == LD_R_X86_64_GOTPCREL ||
+					    (info32 & 0xff) == 75 || (info32 & 0xff) == 76) {
+						uint32_t sym_idx = info32 >> 8;
+						if (get_symbol_by_index(ctx, object, sym_idx, &symbol,
+						                        &name) != 0 ||
+						    add_got_entry(ctx, name) != 0)
+							return -1;
+					}
+				}
+			} else {
+				uint64_t info64;
+				if (section.entry_size < 24 ||
+				    section.size % section.entry_size != 0)
+					continue;
+				for (n = 0; n < section.size / section.entry_size; ++n) {
+					const unsigned char *p = object->data + section.offset + n * section.entry_size;
+					info64 = read64(p + 8);
+					if ((unsigned)info64 != LD_R_X86_64_GOTPCREL) {
+						unsigned rel_type = (unsigned)(info64 & 0xffffffff);
+						if (rel_type == 75 || rel_type == 76)
+							goto collect_got64;
+						continue;
+					}
+					collect_got64:;
+					if (get_symbol_by_index(ctx, object, info64 >> 32, &symbol,
+					                        &name) != 0 ||
+					    add_got_entry(ctx, name) != 0)
+						return -1;
+				}
 			}
 		}
 	}
@@ -1111,7 +1375,7 @@ symbol_tls_offset(struct ld_context *ctx, struct ld_object *object,
 			return ld_errorf(ctx, "TPOFF32 relocation against non-TLS symbol", name);
 		return 0;
 	}
-	if (symbol.section >= object->view.section_count ||
+	if (symbol.section >= object_section_count(object) ||
 	    object->maps[symbol.section].group < 0)
 		return ld_errorf(ctx, "symbol section was discarded", name);
 	map = &object->maps[symbol.section];
@@ -1131,11 +1395,23 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 {
 	const unsigned char *p = object->data + reloc_section->offset +
 	                         reloc_index * reloc_section->entry_size;
-	uint64_t offset = read64(p + 0);
-	uint64_t info = read64(p + 8);
-	int type = (int)(info & 0xffffffffu);
-	uint64_t symbol_index = info >> 32;
-	int64_t addend = (int64_t)read64(p + 16);
+	uint64_t offset, info, symbol_index;
+	int64_t addend;
+	int type;
+	if (object->elf_class == 1) {
+		/* ELF32 RELA: 12-byte entry */
+		offset = read32(p + 0);
+		info = read32(p + 4);
+		type = (int)(info & 0xff);
+		symbol_index = info >> 8;
+		addend = (int32_t)read32(p + 8);
+	} else {
+		offset = read64(p + 0);
+		info = read64(p + 8);
+		type = (int)(info & 0xffffffffu);
+		symbol_index = info >> 32;
+		addend = (int64_t)read64(p + 16);
+	}
 	uint64_t resolved_value;
 	const char *name;
 	uint64_t place;
@@ -1205,6 +1481,12 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 			return 0;
 		return ld_errorf(ctx, "unsupported relocation type", name);
 	}
+	if (strcmp(ctx->target->name, "i386") == 0) {
+		if (i386_apply_reloc(type, target->data + target_offset,
+		                     resolved_value, addend, place) == 0)
+			return 0;
+		return ld_errorf(ctx, "unsupported relocation type", name);
+	}
 
 	/* x86_64-specific type dispatch.  These type numbers are ONLY valid
 	 * for x86_64 — arch-specific dispatch above handles all others. */
@@ -1256,13 +1538,12 @@ apply_relocations(struct ld_context *ctx)
 	int group;
 	for (i = 0; i < ctx->objects.count; ++i) {
 		struct ld_object *object = &ctx->objects.items[i];
-		for (j = 0; j < object->view.section_count; ++j) {
-			if (mt_elf64_get_section(object->data, object->size,
-			                        &object->view, j, &section) != MT_ELF_OK)
+		for (j = 0; j < object_section_count(object); ++j) {
+			if (object_get_section(object, j, &section) != 0)
 				return ld_errorf(ctx, "invalid relocation section", object->name);
 			if (section.type != MT_SHT_RELA)
 				continue;
-			if (section.info >= object->view.section_count ||
+			if (section.info >= object_section_count(object) ||
 			    object->maps[section.info].group < 0)
 				return ld_error(ctx, "relocation target was discarded");
 			group = object->maps[section.info].group;

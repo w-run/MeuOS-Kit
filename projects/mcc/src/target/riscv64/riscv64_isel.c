@@ -1,6 +1,26 @@
 #include "riscv64.h"
 
 static int
+is32arith(int op)
+{
+	switch (op) {
+	case Oadd:
+	case Osub:
+	case Omul:
+	case Odiv:
+	case Orem:
+	case Oudiv:
+	case Ourem:
+	case Oshl:
+	case Oshr:
+	case Osar:
+		return 1;
+	default:
+		return 0;
+	}
+}
+
+static int
 memarg(Ref *r, int op, Ins *i)
 {
 	if (isload(op) || op == Ocall)
@@ -90,11 +110,16 @@ fixarg(Ref *r, int k, Ins *i, Fn *fn)
 		if (memarg(r, op, i) && fn->tmp[r0.val].cls == Kl)
 			break;
 		if (k == Kw && fn->tmp[r0.val].cls == Kl) {
-			/* TODO: this sign extension isn't needed
-			 * for 32-bit arithmetic instructions
-			 */
-			r1 = newtmp("isel", k, fn);
-			emit(Oextsw, Kl, r1, r0, R);
+			if (is32arith(op)) {
+				/* RISC-V 32-bit arithmetic instructions
+				 * (.w variants) only use the lower 32 bits
+				 * of their inputs, so sign extension is
+				 * unnecessary */
+				r1 = r0;
+			} else {
+				r1 = newtmp("isel", k, fn);
+				emit(Oextsw, Kl, r1, r0, R);
+			}
 		} else {
 			assert(k == fn->tmp[r0.val].cls);
 		}
@@ -224,9 +249,41 @@ sel(Ins i, Fn *fn)
 static void
 seljmp(Blk *b, Fn *fn)
 {
-	/* TODO: replace cmp+jnz with beq/bne/blt[u]/bge[u] */
-	if (b->jmp.type == Jjnz)
-		fixarg(&b->jmp.arg, Kw, 0, fn);
+	Ref r;
+	Ins *i, *ir;
+	int ck, cc, use;
+
+	if (b->jmp.type == Jret0
+	|| b->jmp.type == Jjmp
+	|| b->jmp.type == Jhlt)
+		return;
+	assert(b->jmp.type == Jjnz);
+	r = b->jmp.arg;
+	use = -1;
+	b->jmp.arg = R;
+	b->jmp.arg1 = R;
+	ir = 0;
+	i = &b->ins[b->nins];
+	while (i > b->ins)
+		if (req((--i)->to, r)) {
+			use = fn->tmp[r.val].nuse;
+			ir = i;
+			break;
+		}
+	if (ir && use == 1
+	&& iscmp(ir->op, &ck, &cc)
+	&& cc < NCmpI) {
+		/* fuse: replace cmp+jnz with beq/bne/blt[u]/bge[u] */
+		fixarg(&ir->arg[0], ck, ir, fn);
+		fixarg(&ir->arg[1], ck, ir, fn);
+		b->jmp.arg = ir->arg[0];
+		b->jmp.arg1 = ir->arg[1];
+		b->jmp.type = Jjf + cc;
+		*ir = (Ins){.op = Onop};
+	} else {
+		fixarg(&r, Kw, 0, fn);
+		b->jmp.arg = r;
+	}
 }
 
 void

@@ -438,12 +438,9 @@ selcall(Fn *fn, Ins *i0, Ins *i1, Insl **ilp)
 		if (i->op == Oarg) {
 			r1 = newtmp("abi", Kl, fn);
 			emit(Ostorew+i->cls, Kw, R, i->arg[0], r1);
-			if (i->cls == Kw) {
-				/* TODO: we only need this sign
-				 * extension for l temps passed
-				 * as w arguments
-				 * (see la64/isel.c:fixarg)
-				 */
+			if (i->cls == Kw
+			&& rtype(i->arg[0]) == RTmp
+			&& fn->tmp[i->arg[0].val].cls == Kl) {
 				curi->op = Ostorel;
 				curi->arg[0] = newtmp("abi", Kl, fn);
 				emit(Oextsw, Kl, curi->arg[0], i->arg[0], R);

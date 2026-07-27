@@ -335,7 +335,7 @@ disasm_section(const unsigned char *bytes, size_t size,
 		if (sym) {
 			printf("\n%016" PRIx64 " <%s>:\n", addr, sym);
 		}
-		rc = mt_disasm_x86_64_one(data, sec->size, off, addr, &insn);
+		rc = mt_disasm_one("x86_64", data, sec->size, off, addr, &insn);
 		if (rc != 0 && insn.length == 0)
 			insn.length = 1;
 		/* GNU objdump 格式: "  addr:  bytes  mnemonic  operands" */

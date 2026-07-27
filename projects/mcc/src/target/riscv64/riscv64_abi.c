@@ -438,12 +438,9 @@ selcall(Fn *fn, Ins *i0, Ins *i1, Insl **ilp)
 		if (i->op == Oarg) {
 			r1 = newtmp("abi", Kl, fn);
 			emit(Ostorew+i->cls, Kw, R, i->arg[0], r1);
-			if (i->cls == Kw) {
-				/* TODO: we only need this sign
-				 * extension for l temps passed
-				 * as w arguments
-				 * (see rv64/isel.c:fixarg)
-				 */
+			if (i->cls == Kw
+			&& rtype(i->arg[0]) == RTmp
+			&& fn->tmp[i->arg[0].val].cls == Kl) {
 				curi->op = Ostorel;
 				curi->arg[0] = newtmp("abi", Kl, fn);
 				emit(Oextsw, Kl, curi->arg[0], i->arg[0], R);
@@ -498,6 +495,7 @@ selpar(Fn *fn, Ins *i0, Ins *i1)
 
 	cty = argsclass(i0, i1, ca, cr.class & Cptr);
 	fn->reg = rv64_argregs(CALL(cty), 0);
+	fn->va_gpregs = (cty >> 4) & 15;
 
 	il = 0;
 	t = tmp;
@@ -579,7 +577,7 @@ selvastart(Fn *fn, Params p, Ref ap)
 
 	rsave = newtmp("abi", Kl, fn);
 	emit(Ostorel, Kw, R, rsave, ap);
-	s = p.stk > 2 + 8 * fn->vararg ? p.stk : 2 + p.ngp;
+	s = fn->va_gpregs < 8 ? 2 + fn->va_gpregs : p.stk;
 	emit(Oaddr, Kl, rsave, SLOT(-s), R);
 }
 

@@ -83,6 +83,8 @@ fillcost(Fn *fn)
 			tmpuse(i->arg[1], 1, n, fn);
 		}
 		tmpuse(b->jmp.arg, 1, n, fn);
+		if (rtype(b->jmp.arg1) == RTmp)
+			tmpuse(b->jmp.arg1, 1, n, fn);
 	}
 	if (debug['S']) {
 		fprintf(stderr, "\n> Spill costs:\n");
@@ -486,6 +488,14 @@ spill(Fn *fn)
 			limit2(v, 0, 0, NULL);
 			if (!bshas(v, t))
 				b->jmp.arg = slot(t);
+		}
+		if (rtype(b->jmp.arg1) == RTmp) {
+			t = b->jmp.arg1.val;
+			assert(KBASE(tmp[t].cls) == 0);
+			bsset(v, t);
+			limit2(v, 0, 0, NULL);
+			if (!bshas(v, t))
+				b->jmp.arg1 = slot(t);
 		}
 		for (t=Tmp0; bsiter(b->out, &t); t++)
 			if (!bshas(v, t))

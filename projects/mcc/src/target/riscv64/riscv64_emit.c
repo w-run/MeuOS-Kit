@@ -471,22 +471,55 @@ emitins(Ins *i, Fn *fn, FILE *f)
 
 */
 
+static char *rv64_br[] = {
+	[Cieq]  = "beq",
+	[Cine]  = "bne",
+	[Cisge] = "bge",
+	[Cisgt] = "blt",
+	[Cisle] = "bge",
+	[Cislt] = "blt",
+	[Ciuge] = "bgeu",
+	[Ciugt] = "bltu",
+	[Ciule] = "bgeu",
+	[Ciult] = "bltu",
+};
+
+static int rv64_swp[] = {
+	[Cieq]  = 0, [Cine]  = 0,
+	[Cisge] = 0, [Cisgt] = 1,
+	[Cisle] = 1, [Cislt] = 0,
+	[Ciuge] = 0, [Ciugt] = 1,
+	[Ciule] = 1, [Ciult] = 0,
+};
+
+static int rv64_inv[] = {
+	[Cieq]  = Cine,
+	[Cine]  = Cieq,
+	[Cisge] = Cislt,
+	[Cisgt] = Cisle,
+	[Cisle] = Cisgt,
+	[Cislt] = Cisge,
+	[Ciuge] = Ciult,
+	[Ciugt] = Ciule,
+	[Ciule] = Ciugt,
+	[Ciult] = Ciuge,
+};
+
 void
 rv64_emitfn(Fn *fn, FILE *f)
 {
 	static int id0;
-	int lbl, neg, off, frame, *pr, r;
+	int lbl, neg, off, frame, *pr, r, c;
 	Blk *b, *s;
 	Ins *i, ii;
+	Ref ra, rb, rt;
 
 	emitfnlnk(fn->name, &fn->lnk, f);
 
 	if (fn->vararg) {
-		/* TODO: only need space for registers
-		 * unused by named arguments
-		 */
+		/* only save GP registers not consumed by named arguments */
 		fprintf(f, "\tadd sp, sp, -64\n");
-		for (r=A0; r<=A7; r++)
+		for (r=A0+fn->va_gpregs; r<=A7; r++)
 			fprintf(f,
 				"\tsd %s, %d(sp)\n",
 				rname[r], 8 * (r - A0)
@@ -592,6 +625,48 @@ rv64_emitfn(Fn *fn, FILE *f)
 				"\tb%sz %s, .L%d\n",
 				neg ? "ne" : "eq",
 				rname[b->jmp.arg.val],
+				id0+b->s2->id
+			);
+			goto Jmp;
+		default:
+			if (!INRANGE(b->jmp.type, Jjf, Jjf1))
+				die("unhandled jump %d", b->jmp.type);
+			c = b->jmp.type - Jjf;
+			if (c < 0 || c >= NCmpI)
+				die("unhandled jump %d", b->jmp.type);
+			neg = 0;
+			if (b->link == b->s2) {
+				s = b->s1;
+				b->s1 = b->s2;
+				b->s2 = s;
+				neg = 1;
+			}
+			if (!neg)
+				c = rv64_inv[c];
+			ra = b->jmp.arg;
+			rb = b->jmp.arg1;
+			if (rv64_swp[c]) {
+				rt = ra;
+				ra = rb;
+				rb = rt;
+			}
+			if (rtype(ra) == RSlot) {
+				ii.arg[0] = ra;
+				emitf("lw t6, %M0", &ii, fn, f);
+				ra = TMP(T6);
+			}
+			if (rtype(rb) == RSlot) {
+				ii.arg[0] = rb;
+				emitf("lw t6, %M0", &ii, fn, f);
+				rb = TMP(T6);
+			}
+			assert(isreg(ra));
+			assert(isreg(rb));
+			fprintf(f,
+				"\t%s %s, %s, .L%d\n",
+				rv64_br[c],
+				rname[ra.val],
+				rname[rb.val],
 				id0+b->s2->id
 			);
 			goto Jmp;

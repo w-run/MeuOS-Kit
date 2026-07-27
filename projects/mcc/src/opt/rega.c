@@ -405,6 +405,8 @@ doblk(Blk *b, RMap *cur)
 
 	if (rtype(b->jmp.arg) == RTmp)
 		b->jmp.arg = ralloc(cur, b->jmp.arg.val);
+	if (rtype(b->jmp.arg1) == RTmp)
+		b->jmp.arg1 = ralloc(cur, b->jmp.arg1.val);
 	curi = &insb[NIns];
 	for (i1=&b->ins[b->nins]; i1!=b->ins;) {
 		emiti(*--i1);
