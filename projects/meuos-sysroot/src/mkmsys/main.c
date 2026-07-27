@@ -879,17 +879,23 @@ static void write_msys_v2(const char *output, struct collector *c, uint32_t flag
 		}
 	}
 
+	int streaming = (flags & MSYS_F_STREAMING);
+
 	for (size_t i = 0; i < c->count; i++) {
 		cur = align4(cur);
+		struct entry *e = &c->entries[i];
+		/* Streaming inline header: [nlen:2][dsize:4][name:nlen] before data */
+		size_t stream_oh = 0;
+		if (streaming && !(dedup && dedup_map[i] >= 0))
+			stream_oh = 6 + e->name_len;
 		/* If this entry is a dedup of an earlier one, use that offset */
 		if (dedup && dedup_map[i] >= 0) {
 			data_offsets[i] = data_offsets[(size_t)dedup_map[i]];
 		} else {
-			data_offsets[i] = cur;
+			data_offsets[i] = cur + stream_oh;
 		}
-		struct entry *e = &c->entries[i];
-		cur += ((is_zlib || is_zstd) && compressed[i])
-			? comp_sizes[i] : e->data_size;
+		cur += stream_oh + ((is_zlib || is_zstd) && compressed[i]
+			? comp_sizes[i] : e->data_size);
 	}
 	uint64_t dir_offset_ftell; /* computed after writing data, from actual file pos */
 	uint64_t index_offset;     /* computed after writing data, from actual file pos */
@@ -917,6 +923,18 @@ static void write_msys_v2(const char *output, struct collector *c, uint32_t flag
 		long pos = ftell(fp);
 		while ((size_t)pos < align4((size_t)pos)) { fputc(0, fp); pos++; }
 		if (e->data_size == 0) continue;
+		/* Streaming: write inline header [nlen:2][name:nlen][dsize:4] before data */
+		if (streaming) {
+			uint8_t ih[4];
+			uint16_t nlen16 = (uint16_t)e->name_len;
+			uint32_t dsize32 = (uint32_t)(((is_zlib || is_zstd) && compressed[i])
+				? comp_sizes[i] : e->data_size);
+			wr16(ih, nlen16);
+			fwrite(ih, 1, 2, fp);
+			fwrite(e->name, 1, nlen16, fp);
+			wr32(ih, dsize32);
+			fwrite(ih, 1, 4, fp);
+		}
 		if ((is_zlib || is_zstd) && compressed[i])
 			fwrite(compressed[i], 1, comp_sizes[i], fp);
 		else
@@ -1076,6 +1094,7 @@ int main(int argc, char *argv[])
 	const char *input = NULL;
 	int incremental = 0;
 	int dedup_mode = 0;
+	int streaming_mode = 0;
 	const char *sign_keyfile = NULL;
 	int format_v2 = 0;
 	const char *compress = NULL;
@@ -1128,6 +1147,8 @@ int main(int argc, char *argv[])
 			incremental = 1; i++;
 		} else if (strcmp(argv[i], "--dedup") == 0) {
 			dedup_mode = 1; i++;
+		} else if (strcmp(argv[i], "--streaming") == 0) {
+			format_v2 = 1; streaming_mode = 1; i++;
 		} else if (strncmp(argv[i], "--sign=", 7) == 0) {
 			sign_keyfile = argv[i] + 7; i++;
 		} else if (strcmp(argv[i], "--format") == 0 && i + 1 < argc) {
@@ -1189,6 +1210,10 @@ int main(int argc, char *argv[])
 
 	if (dedup_mode) {
 		flags |= MSYS_F_DEDUP;
+	}
+
+	if (streaming_mode) {
+		flags |= MSYS_F_STREAMING;
 	}
 
 	struct collector c;

@@ -26,6 +26,7 @@ extern "C" {
 #define MSYS_F_DEDUP     0x0100  /* v2: content dedup */
 #define MSYS_F_SIGNED    0x0200  /* v2: has signature extension */
 #define MSYS_F_DIR_BLOCK 0x1000  /* v2: has directory block */
+#define MSYS_F_STREAMING 0x2000  /* v2: sequential streaming layout */
 
 /* File types for v2 index entries */
 #define MSYS_FILE_REG    0
@@ -329,6 +330,31 @@ int msys_overlay_verify(struct msys_overlay *ol, const char *name);
 /* Close all layers and free the overlay handle.
  *   ol: handle to close (NULL is safe). */
 void msys_overlay_close(struct msys_overlay *ol);
+
+/* ---- Streaming API ---- */
+
+/* Streaming reader for .msys archives with MSYS_F_STREAMING layout.
+ * Allows sequential read of all (name, data) pairs without seeking. */
+struct msys_stream;
+
+/* Open a .msys file in streaming mode.
+ *   path:  path to .msys file
+ *   Returns a stream handle, or NULL on error (errno set). */
+struct msys_stream *msys_stream_open(const char *path);
+
+/* Read the next entry from the stream.
+ *   s:     stream handle from msys_stream_open
+ *   name:  out parameter, receives pointer to entry name (NOT NUL-terminated)
+ *   nlen:  out parameter, receives name length
+ *   data:  out parameter, receives pointer to entry data
+ *   dsize: out parameter, receives data size in bytes
+ *   Returns 1 on success, 0 at end of stream, -1 on error (errno set). */
+int msys_stream_next(struct msys_stream *s,
+                     const char **name, size_t *nlen,
+                     const void **data, size_t *dsize);
+
+/* Close a streaming reader. */
+void msys_stream_close(struct msys_stream *s);
 
 #ifdef __cplusplus
 }

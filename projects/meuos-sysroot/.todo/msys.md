@@ -113,10 +113,10 @@ Data blocks: 按 data_offset 排列，4 字节对齐
 - [x] `msys_verify_signature(pk)` API（验证索引块 SHA-256 + ed25519 签名）
 - [x] `mkmsys --sign=<keyfile>`（32B seed 或 64B 完整密钥）
 
-#### 5.8 流式消费（待实现）
+#### 5.8 流式消费 ✅
 
-- [ ] 支持按顺序流式读取出所有文件的（name, data）对
-- [ ] `MSYS_F_STREAMING` 顺序布局
+- [x] 支持按顺序流式读取出所有文件的（name, data）对（`msys_stream_*` API）
+- [x] `MSYS_F_STREAMING` 顺序布局（`--streaming` 标志）
 
 #### 5.9 扩展块机制 ✅
 
