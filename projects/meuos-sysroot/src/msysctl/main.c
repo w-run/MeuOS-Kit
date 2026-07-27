@@ -10,7 +10,7 @@
  *   msysctl hist diff <archive> <path> <rev1> <rev2>         — diff versions
  *
  * Commands: cat <path>, ls [dir], find [dir], tree, extract [dir],
- *           verify, stat <path>
+ *           info, verify, stat <path>
  */
 
 #include "mt/msys.h"
@@ -23,13 +23,16 @@
 #include <unistd.h>
 #include <dirent.h>
 
+/* Forward declaration for overlay wrapper functions */
+struct archive;
+
 static void die(const char *msg) { perror(msg); exit(1); }
 static void usage(void) {
 	fprintf(stderr, "Usage:\n"
 		"  msysctl [--overlay a.msys,b.msys] <cmd> <archive> [args...]\n"
 		"  msysctl hist <add|list|cat|diff> <archive> [args...]\n"
 		"Commands: cat <path> | ls [dir] | find [dir] | tree |\n"
-		"          extract [dir] | verify | stat <path>\n");
+		"          extract [dir] | info | verify | stat <path>\n");
 	exit(1);
 }
 
@@ -166,6 +169,8 @@ static int cmd_extract(struct msys *m, const char *outdir) {
 	printf("Extracted %zu entries to %s\n", extracted, outdir);
 	return 0;
 }
+
+/* ── info (archive statistics) ── */
 
 /* ── history ── */
 
@@ -417,6 +422,7 @@ static int arch_extract(struct archive *a, const char *dir) {
 }
 
 /* ── main ── */
+static int cmd_info(struct archive *a);
 int main(int argc, char *argv[]) {
 	if (argc < 2) usage();
 
@@ -477,6 +483,7 @@ int main(int argc, char *argv[]) {
 		path_idx < argc ? argv[path_idx] : "");
 	else if (strcmp(cmd, "tree") == 0) arch_tree(a);
 	else if (strcmp(cmd, "extract") == 0) ret = arch_extract(a, path_idx < argc ? argv[path_idx] : ".");
+	else if (strcmp(cmd, "info") == 0) ret = cmd_info(a);
 	else if (strcmp(cmd, "verify") == 0) ret = arch_verify_all(a);
 	else if (strcmp(cmd, "stat") == 0) ret = path_idx >= argc ? (usage(), 1) : arch_stat(a, argv[path_idx]);
 	else { fprintf(stderr, "Unknown: %s\n", cmd); usage(); }
@@ -485,3 +492,153 @@ int main(int argc, char *argv[]) {
 	close_archive(a);
 	return ret < 0 ? 1 : 0;
 }
+static int cmd_info(struct archive *a) {
+	/* Determine which layers to analyze */
+	int nlayers = 1;
+	struct msys *layers[16];
+	if (a->is_overlay) {
+		nlayers = msys_overlay_count(a->overlay);
+		for (int i = 0; i < nlayers && i < 16; i++)
+			layers[i] = msys_overlay_get(a->overlay, i);
+	} else {
+		layers[0] = a->single;
+	}
+
+	for (int li = 0; li < nlayers; li++) {
+		struct msys *m = layers[li];
+		uint32_t cnt = msys_count(m);
+		int v2 = (msys_format_version(m) == MSYS_FORMAT_V2);
+		uint32_t flags = m->hdr->flags;
+
+		if (nlayers > 1) printf("\nLayer %d:\n", li);
+
+		/* Header info */
+		printf("  Format:      v%d\n", msys_format_version(m));
+		printf("  Entries:     %u\n", cnt);
+		printf("  Flags:       0x%04x", flags);
+		if (flags & MSYS_F_ZLIB) printf(" zlib");
+		if (flags & MSYS_F_ZSTD) printf(" zstd");
+		if (flags & MSYS_F_DEDUP) printf(" dedup");
+		if (flags & MSYS_F_DIR_BLOCK) printf(" dir-block");
+		if (flags & MSYS_F_STREAMING) printf(" streaming");
+		if (flags & MSYS_F_SIGNED) printf(" signed");
+		printf("\n");
+
+		/* Count file types */
+		int nreg = 0, ndir = 0, nsym = 0, nmeta = 0;
+		uint64_t total_data = 0, total_stored = 0;
+		uint64_t dedup_saved = 0, dedup_files = 0;
+		uint64_t largest_size = 0;
+		char largest_name[256] = "";
+		/* Track unique data offsets for dedup calculation */
+		uint64_t *unique_offs = NULL;
+		size_t unique_cnt = 0, unique_cap = 0;
+
+		for (uint32_t i = 0; i < cnt; i++) {
+			const char *name; size_t nlen, dsize;
+			if (msys_enumerate(m, i, &name, &nlen, &dsize) < 0) continue;
+			char nb[4096];
+			if (nlen >= sizeof(nb)) continue;
+			memcpy(nb, name, nlen); nb[nlen] = '\0';
+
+			if (nb[0] == '@') { nmeta++; continue; }
+			if (v2) {
+				struct msys_stat st;
+				if (msys_stat(m, nb, &st) == 0) {
+					if (st.file_type == MSYS_FILE_DIR) ndir++;
+					else if (st.file_type == MSYS_FILE_SYMLINK) nsym++;
+					else nreg++;
+				} else nreg++;
+			} else nreg++;
+
+			total_data += dsize;
+
+			/* Track stored size from index entry */
+			int entry_v2 = v2;
+			unsigned char *ep = m->entries[i];
+			uint32_t stored_dsize = entry_v2 ? 
+				(uint32_t)ep[10] | ((uint32_t)ep[11]<<8) | ((uint32_t)ep[12]<<16) | ((uint32_t)ep[13]<<24) :
+				(uint32_t)ep[10] | ((uint32_t)ep[11]<<8) | ((uint32_t)ep[12]<<16) | ((uint32_t)ep[13]<<24);
+			total_stored += stored_dsize;
+
+			/* Track largest */
+			if (dsize > largest_size) {
+				largest_size = dsize;
+				snprintf(largest_name, sizeof(largest_name), "%.*s", (int)nlen, name);
+			}
+
+			/* Dedup tracking: check if this data offset is unique */
+			uint64_t data_off = entry_v2 ?
+				(uint64_t)ep[4] | ((uint64_t)ep[5]<<8) | ((uint64_t)ep[6]<<16) | ((uint64_t)ep[7]<<24) | ((uint64_t)ep[8]<<32) | ((uint64_t)ep[9]<<40) :
+				(uint64_t)ep[4] | ((uint64_t)ep[5]<<8) | ((uint64_t)ep[6]<<16) | ((uint64_t)ep[7]<<24) | ((uint64_t)ep[8]<<32) | ((uint64_t)ep[9]<<40);
+			int found = 0;
+			for (size_t j = 0; j < unique_cnt; j++) {
+				if (unique_offs[j] == data_off) { found = 1; break; }
+			}
+			if (!found) {
+				if (unique_cnt >= unique_cap) {
+					unique_cap = unique_cap ? unique_cap * 2 : 64;
+					uint64_t *nu = realloc(unique_offs, unique_cap * sizeof(uint64_t));
+					if (!nu) { free(unique_offs); return -1; }
+					unique_offs = nu;
+				}
+				unique_offs[unique_cnt++] = data_off;
+			} else {
+				dedup_files++;
+				dedup_saved += dsize;
+			}
+		}
+		free(unique_offs);
+
+		/* File type summary */
+		printf("  Files:       %d regular, %d dir, %d symlink, %d meta\n",
+		       nreg, ndir, nsym, nmeta);
+		printf("  Data:        %lu bytes stored", (unsigned long)total_stored);
+		if (flags & (MSYS_F_ZLIB | MSYS_F_ZSTD))
+			printf(" (%lu uncompressed, %.1f%% ratio)",
+			       (unsigned long)total_data,
+			       total_data > 0 ? 100.0 * total_stored / total_data : 0);
+		printf("\n");
+
+		/* Dedup info */
+		if (dedup_files > 0)
+			printf("  Dedup:       %lu files shared, %lu bytes saved\n",
+			       (unsigned long)dedup_files, (unsigned long)dedup_saved);
+
+		/* Extension blocks */
+		if (v2) {
+			uint32_t ext_off = m->hdr_v2->extension_offset;
+			if (ext_off > 0) {
+				const unsigned char *p = (const unsigned char *)m->base + ext_off;
+				uint64_t avail = m->size - ext_off;
+				int n_ext = 0;
+				while (avail >= 8) {
+					uint32_t bt = (uint32_t)p[0] | ((uint32_t)p[1]<<8) | ((uint32_t)p[2]<<16) | ((uint32_t)p[3]<<24);
+					uint32_t bl = (uint32_t)p[4] | ((uint32_t)p[5]<<8) | ((uint32_t)p[6]<<16) | ((uint32_t)p[7]<<24);
+					char fourcc[5] = {(char)(bt&0xff),(char)((bt>>8)&0xff),(char)((bt>>16)&0xff),(char)((bt>>24)&0xff),0};
+					printf("  Extension:   0x%08x (\"%s\") %u bytes\n", bt, fourcc, bl);
+					p += 8 + bl; avail -= 8 + bl;
+					n_ext++;
+				}
+				if (n_ext == 0) printf("  Extension:   0 bytes\n");
+			}
+		}
+
+		/* Largest file */
+		if (largest_size > 0)
+			printf("  Largest:     %s (%lu bytes)\n", largest_name, (unsigned long)largest_size);
+
+		/* Dir block */
+		if (v2 && m->hdr_v2->dir_count > 0)
+			printf("  Dir block:   %u entries\n", m->hdr_v2->dir_count);
+
+		/* Signature */
+		{
+			const void *sig_data; uint32_t sig_len;
+			if (v2 && msys_get_extension(m, 0x6e676973, &sig_data, &sig_len) == 0)
+				printf("  Signature:   present (%u bytes)\n", sig_len);
+		}
+	}
+	return 0;
+}
+
