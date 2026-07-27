@@ -222,6 +222,18 @@ int msys_stat(struct msys *m, const char *name, struct msys_stat *st);
  *   (errno = EINVAL if not a symlink, ENOENT if not found). */
 int msys_readlink(struct msys *m, const char *name, char *buf, size_t bufsize);
 
+/* Verify content integrity of a single file by recomputing SHA-256.
+ *   m:    handle from msys_open
+ *   name: NUL-terminated path
+ *   Returns 0 on success (hash matches), -1 on error or mismatch (errno set).
+ *   For v1 files or entries without SHA-256, returns 0 (cannot verify). */
+int msys_verify(struct msys *m, const char *name);
+
+/* Verify all files in the archive.
+ *   m: handle from msys_open
+ *   Returns 0 if all verifiable entries match, -1 on first mismatch. */
+int msys_verify_all(struct msys *m);
+
 /* FNV-1a 32-bit hash helper.
  *   name: pointer to data to hash
  *   len:  number of bytes

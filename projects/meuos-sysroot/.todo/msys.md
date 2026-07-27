@@ -93,11 +93,11 @@ Data blocks: 按 data_offset 排列，4 字节对齐
 - [x] `msys_readlink()` API 返回链接目标
 - [ ] 读取时自动解析（待后续版本）
 
-#### 5.4 SHA-256 + 去重（待实现）
+#### 5.4 SHA-256 + 去重 ✅
 
-- [ ] 内容哈希（SHA-256）索引，相同内容只存一份（需要 sha256.c）
-- [ ] 打包时去重检查，相同文件在不同路径下共用数据
-- [ ] `msys_verify()` / `msys_verify_all()` API
+- [x] 内容哈希（SHA-256）索引，相同内容只存一份（sha256.c 独立实现）
+- [x] 打包时去重检查，相同文件在不同路径下共用数据（`--dedup` 标志）
+- [x] `msys_verify()` / `msys_verify_all()` API（libmsys 端已实现）
 
 #### 5.5 文件级校验（与 5.4 合并）
 

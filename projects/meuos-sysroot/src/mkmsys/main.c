@@ -29,6 +29,7 @@
  */
 
 #include "mt/msys.h"
+#include "sha256.h"
 
 #include <dirent.h>
 #include <dlfcn.h>
@@ -80,6 +81,7 @@ struct entry {
 	uint16_t mode;       /* file permissions */
 	uint32_t uid;
 	uint32_t gid;
+	uint8_t  content_hash[32]; /* SHA-256 of data (for dedup/verify) */
 };
 
 struct collector {
@@ -108,6 +110,10 @@ static void collector_add(struct collector *c, const char *relpath,
 	e->data      = malloc(data_size ? data_size : 1);
 	if (!e->data) die("malloc");
 	if (data_size > 0) memcpy(e->data, data, data_size);
+	if (data_size > 0)
+		sha256(data, data_size, e->content_hash);
+	else
+		memset(e->content_hash, 0, 32);
 	e->mtime     = mtime;
 	e->file_type = file_type;
 	e->mode      = mode;
@@ -847,33 +853,63 @@ static void write_msys_v2(const char *output, struct collector *c, uint32_t flag
 	size_t *data_offsets = malloc(c->count * sizeof(size_t));
 	if (!data_offsets) die("malloc");
 
+	/* Dedup: map SHA-256 hash -> first entry index that stored this content */
+	int dedup = (flags & MSYS_F_DEDUP);
+	int *dedup_map = NULL;
+	if (dedup) {
+		dedup_map = calloc(c->count, sizeof(int));
+		if (!dedup_map) die("malloc");
+		for (size_t i = 0; i < c->count; i++)
+			dedup_map[i] = -1;
+		/* First pass: find duplicates by SHA-256 */
+		for (size_t i = 0; i < c->count; i++) {
+			if (c->entries[i].data_size == 0) continue;
+			if (c->entries[i].name[0] == '@') continue;
+			for (size_t j = 0; j < i; j++) {
+				if (c->entries[j].data_size == c->entries[i].data_size &&
+				    memcmp(c->entries[j].content_hash, c->entries[i].content_hash, 32) == 0) {
+					dedup_map[i] = (int)j;
+					break;
+				}
+			}
+		}
+	}
+
 	for (size_t i = 0; i < c->count; i++) {
 		cur = align4(cur);
-		data_offsets[i] = cur;
+		/* If this entry is a dedup of an earlier one, use that offset */
+		if (dedup && dedup_map[i] >= 0) {
+			data_offsets[i] = data_offsets[(size_t)dedup_map[i]];
+		} else {
+			data_offsets[i] = cur;
+		}
 		struct entry *e = &c->entries[i];
 		cur += ((is_zlib || is_zstd) && compressed[i])
 			? comp_sizes[i] : e->data_size;
 	}
-	uint64_t dir_offset = align4(cur);   /* directory block after data */
-	uint64_t index_offset = align4(cur + dir_block_size);
+	uint64_t dir_offset_ftell; /* computed after writing data, from actual file pos */
+	uint64_t index_offset;     /* computed after writing data, from actual file pos */
 
-	/* Phase 3: write v2 header */
+	/* ---- write v2 header placeholder ---- */
 	struct msys_header_v2 hdr;
 	memset(&hdr, 0, sizeof(hdr));
 	memcpy(hdr.magic, MSYS_MAGIC_V2, 8);
-	hdr.index_offset = index_offset;
-	hdr.index_count  = (uint32_t)c->count;
-	hdr.flags        = flags | MSYS_F_DIR_BLOCK;
-	hdr.dir_offset   = dir_offset;
-	hdr.dir_count    = dir_count;
+	hdr.index_offset = 0; /* placeholder */
+	hdr.index_count  = 0; /* placeholder */
+	hdr.flags        = 0; /* placeholder */
+	hdr.dir_offset   = 0; /* placeholder */
+	hdr.dir_count    = 0; /* placeholder */
 	hdr.extension_offset = 0;
 	hdr.data_size_total  = 0;
 	hdr.content_hash     = 0;
+	/* Write temporary header — we'll seek back and rewrite after computing real offsets */
 	fwrite(&hdr, sizeof(hdr), 1, fp);
 
-	/* Phase 4: write data blocks */
+	/* Phase 4: write data blocks (skip dedup duplicates) */
 	for (size_t i = 0; i < c->count; i++) {
 		struct entry *e = &c->entries[i];
+		/* Skip if this is a dedup of an earlier entry */
+		if (dedup && dedup_map[i] >= 0) continue;
 		long pos = ftell(fp);
 		while ((size_t)pos < align4((size_t)pos)) { fputc(0, fp); pos++; }
 		if (e->data_size == 0) continue;
@@ -883,18 +919,40 @@ static void write_msys_v2(const char *output, struct collector *c, uint32_t flag
 			fwrite(e->data, 1, e->data_size, fp);
 	}
 
-	/* Phase 4.5: write directory block */
+	/* Phase 4.5: write directory block (if any), compute real offsets from ftell */
 	if (dir_block) {
-		long pos = ftell(fp);
-		while ((size_t)pos < align4((size_t)pos)) { fputc(0, fp); pos++; }
+		dir_offset_ftell = (uint64_t)ftell(fp);
+		while (dir_offset_ftell < align4((size_t)dir_offset_ftell)) {
+			fputc(0, fp); dir_offset_ftell++;
+		}
 		fwrite(dir_block, 1, dir_block_size, fp);
 		free(dir_block);
+	} else {
+		dir_offset_ftell = 0;
 	}
 
-	/* Phase 5: write v2 index entries */
+	/* Index offset: compute from actual file position */
+	index_offset = (uint64_t)ftell(fp);
+	while (index_offset < align4((size_t)index_offset)) {
+		fputc(0, fp); index_offset++;
+	}
+
+	/* Seek back and rewrite header with real offsets */
 	{
-		long pos = ftell(fp);
-		while ((size_t)pos < align4((size_t)pos)) { fputc(0, fp); pos++; }
+		struct msys_header_v2 hdr2;
+		memset(&hdr2, 0, sizeof(hdr2));
+		memcpy(hdr2.magic, MSYS_MAGIC_V2, 8);
+		hdr2.index_offset = index_offset;
+		hdr2.index_count  = (uint32_t)c->count;
+		hdr2.flags        = flags | MSYS_F_DIR_BLOCK;
+		hdr2.dir_offset   = dir_offset_ftell;
+		hdr2.dir_count    = dir_count;
+		hdr2.extension_offset = 0;
+		hdr2.data_size_total  = 0;
+		hdr2.content_hash     = 0;
+		fseek(fp, 0, SEEK_SET);
+		fwrite(&hdr2, sizeof(hdr2), 1, fp);
+		fseek(fp, 0, SEEK_END); /* seek back to end for index write */
 	}
 	for (size_t i = 0; i < c->count; i++) {
 		struct entry *e = &c->entries[i];
@@ -921,13 +979,17 @@ static void write_msys_v2(const char *output, struct collector *c, uint32_t flag
 		wr32(buf + 26, e->gid);
 		/* name_len */
 		buf[30] = (uint8_t)e->name_len;
-		/* content_hash_present */
-		buf[31] = 0;
+		/* content_hash_present: 1 if dedup flag set or entry has data */
+		buf[31] = (dedup || e->data_size > 0) ? 1 : 0;
 		fwrite(buf, 32, 1, fp);
 		fwrite(e->name, 1, e->name_len, fp);
+		/* Write SHA-256 hash if content_hash_present */
+		if (buf[31])
+			fwrite(e->content_hash, 1, 32, fp);
 	}
 
 	free(data_offsets);
+	free(dedup_map);
 	if (compressed) {
 		for (size_t i = 0; i < c->count; i++) free(compressed[i]);
 		free(compressed);
@@ -958,6 +1020,7 @@ int main(int argc, char *argv[])
 	int extract_mode = 0;
 	const char *input = NULL;
 	int incremental = 0;
+	int dedup_mode = 0;
 	int format_v2 = 0;
 	const char *compress = NULL;
 
@@ -981,6 +1044,7 @@ int main(int argc, char *argv[])
 	  "  --arch <name>      Write @meuos_arch metadata entry\n"
 	  "  --compress=<type>  Compress data blocks: zlib, zstd\n"
 	  "  --incremental      Incremental mode: only repack changed files\n"
+	  "  --dedup            Content dedup (v2 only): SHA-256 identical data stored once\n"
 	  "  --format <v1|v2>   Output format version (default: v1)\n"
 	  "  --help             Show this help message\n"
 	  "\n"
@@ -1005,6 +1069,8 @@ int main(int argc, char *argv[])
 			arch = argv[i + 1]; i += 2;
 		} else if (strcmp(argv[i], "--incremental") == 0) {
 			incremental = 1; i++;
+		} else if (strcmp(argv[i], "--dedup") == 0) {
+			dedup_mode = 1; i++;
 		} else if (strcmp(argv[i], "--format") == 0 && i + 1 < argc) {
 			format_v2 = (strcmp(argv[i + 1], "v2") == 0); i += 2;
 		} else if (strcmp(argv[i], "--help") == 0) {
@@ -1060,6 +1126,10 @@ int main(int argc, char *argv[])
 
 	if (incremental) {
 		flags |= MSYS_F_INCREMENTAL;
+	}
+
+	if (dedup_mode) {
+		flags |= MSYS_F_DEDUP;
 	}
 
 	struct collector c;

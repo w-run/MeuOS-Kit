@@ -12,7 +12,7 @@ CFLAGS  ?= -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -D_POSIX_C_SOURCE=20080
 BUILD   ?= build
 OBJDIR  ?= $(BUILD)/obj
 
-MSYS_SRCS := src/libmsys/msys.c
+MSYS_SRCS := src/libmsys/msys.c src/libmsys/sha256.c
 MSYS_OBJS := $(patsubst src/%.c,$(OBJDIR)/%.o,$(MSYS_SRCS))
 MSYS_LIB  := $(BUILD)/libmsys.a
 
@@ -43,7 +43,7 @@ $(MKMSYS_BIN): $(MKMSYS_OBJS) $(MSYS_LIB)
 
 $(OBJDIR)/mkmsys/main.o: src/mkmsys/main.c include/mt/msys.h
 	@mkdir -p $(dir $@)
-	$(HOST_CC) $(CFLAGS) -Iinclude -c -o $@ $<
+	$(HOST_CC) $(CFLAGS) -Iinclude -Isrc/libmsys -c -o $@ $<
 
 # test
 $(TEST_BIN): $(TEST_SRCS) $(MSYS_LIB)

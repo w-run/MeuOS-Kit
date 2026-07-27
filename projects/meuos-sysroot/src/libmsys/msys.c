@@ -1,4 +1,5 @@
 #include "mt/msys.h"
+#include "sha256.h"
 
 #include <dlfcn.h>
 #include <errno.h>
@@ -477,6 +478,81 @@ int msys_readlink(struct msys *m, const char *name, char *buf, size_t bufsize)
 	}
 	errno = EINVAL;
 	return -1;
+}
+
+/* ---- verify (SHA-256 content integrity) ---- */
+
+int msys_verify(struct msys *m, const char *name)
+{
+	size_t dsize;
+	const void *data = msys_search(m, name, &dsize);
+	if (!data) return -1;
+
+	/* For v2 entries with content_hash_present, verify SHA-256 */
+	if (m->format_version == MSYS_FORMAT_V2) {
+		uint32_t target = msys_fnv1a((const unsigned char *)name, strlen(name));
+		uint32_t lo = 0, hi = m->hdr->index_count;
+		while (lo < hi) {
+			uint32_t mid = lo + (hi - lo) / 2;
+			unsigned char *e = m->entries[mid];
+			uint32_t eh = read32(e);
+			if (eh < target) { lo = mid + 1; continue; }
+			if (eh > target) { hi = mid; continue; }
+			uint32_t scan = mid;
+			while (scan > lo) {
+				if (read32(m->entries[scan - 1]) != target) break;
+				scan--;
+			}
+			while (scan < m->hdr->index_count) {
+				unsigned char *p = m->entries[scan];
+				if (read32(p) != target) break;
+				uint8_t nlen = p[30];
+				if ((size_t)nlen == strlen(name) &&
+				    memcmp(p + 32, name, nlen) == 0) {
+					if (p[31] == 0) return 0; /* no hash stored */
+					/* Hash is at p + 32 + nlen */
+					uint8_t stored[32];
+					memcpy(stored, p + 32 + nlen, 32);
+					uint8_t computed[32];
+					sha256(data, dsize, computed);
+					return memcmp(stored, computed, 32) == 0 ? 0 : -1;
+				}
+				scan++;
+			}
+			break;
+		}
+	}
+	return 0; /* No hash stored — cannot verify */
+}
+
+int msys_verify_all(struct msys *m)
+{
+	if (!m) { errno = EINVAL; return -1; }
+	uint32_t cnt = m->hdr->index_count;
+	int v2 = (m->format_version == MSYS_FORMAT_V2);
+	for (uint32_t i = 0; i < cnt; i++) {
+		unsigned char *p = m->entries[i];
+		uint8_t nlen = v2 ? p[30] : (uint8_t)(read16(p + 14));
+		const char *name = v2 ? (const char *)(p + 32) : (const char *)(p + 16);
+
+		/* Skip metadata entries */
+		if (nlen > 0 && name[0] == '@') continue;
+
+		if (v2 && p[31]) {
+			size_t sz;
+			const void *data = msys_search(m, name, &sz);
+			if (!data) continue;
+			uint8_t stored[32];
+			memcpy(stored, p + 32 + nlen, 32);
+			uint8_t computed[32];
+			sha256(data, sz, computed);
+			if (memcmp(stored, computed, 32) != 0) {
+				errno = EIO;
+				return -1;
+			}
+		}
+	}
+	return 0;
 }
 
 /* ---- search (binary search by name_hash, verify name string) ---- */
