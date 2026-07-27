@@ -274,6 +274,12 @@ main(int argc, char *argv[])
 		if (!shared)
 			static_link = true;
 	}
+	/* For fully static non-PIC builds, all TLS is necessarily local —
+	 * extern _Thread_local symbols must use LE (@ntpoff) instead of IE
+	 * (@gotntpoff), because the static linker cannot resolve IE relocs
+	 * without a GOT.  This overrides the TLSM_DEFAULT logic in valref(). */
+	if (static_link && !pic && tls_model == TLSM_DEFAULT)
+		tls_model = TLSM_LOCAL_EXEC;
 	if (sysroot) {
 		/* If sysroot is a .msys file, open via VFS instead of extracting */
 		if (msys_is_sysroot(sysroot)) {

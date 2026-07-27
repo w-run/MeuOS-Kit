@@ -84,7 +84,7 @@ src/compat/
 | bug-riscv64-emit | mcc backend | riscv64 | `riscv64_emit.c:664 assert(isreg(rb))` — emit 条件分支 slot/const 未 reg 降级 | 🟢 |
 | bug-loong64-emit | mcc backend | loongarch64 | `loongarch64_emit.c:514 assert(isreg(rb))` — 同上模式 | 🟢 |
 | bug-arm-isel | mcc backend | arm | `arm_isel.c: slot %(null) is read but never stored to` — IR 诊断阻塞 self-rebuild | 🟢 |
-| bug-i386-tls | mcc isel/sema | i386 | TLS 模型选择：非静态 `_Thread_local` 发出 IE(`@gotntpoff`) 而非 LE(`@ntpoff`) | 🔴 |
+| bug-i386-tls | mcc isel/sema | i386 | TLS 模型选择：非静态 `_Thread_local` 发出 IE(`@gotntpoff`) 而非 LE(`@ntpoff`) | 🟢 |
 | bug-loong64-tls-reloc | mt/ld | loongarch64 | TLS LE 重定位 `.tdata` 初始值损坏（`2a000000` → `20c30000`） | 🔴 |
 | bug-loong64-tls-errno | meuos-libc | loongarch64 | TLS errno 回退到 `static int`（非线程安全 fallback） | 🔴 |
 
