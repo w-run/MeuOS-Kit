@@ -18,7 +18,7 @@ MeuOS-Kit/
 │   ├── meuos-libc/         标准 C 库（ISO C11 + POSIX；含 compat 兼容层）
 │   ├── meow/               构建系统（取代 make + autoconf）
 │   ├── meuos-toolchain/    底层工具链（as/ld/ar/ranlib，取缔 binutils）
-│   ├── meuos-sysroot/      单文件 sysroot 系统（.msys，mcc 原生读取）
+│   ├── meuos-sysroot/      单文件 sysroot 系统（.msys v2，libmsys + mkmsys + msysctl CLI + Python 绑定）
 │   ├── meuos-utils/        核心工具集（coreutils/diffutils/findutils 替代）
 │   └── meuos-shell/        Shell 终端（msh，POSIX sh + 可选 bash/zsh 兼容）
 ├── env/                    QEMU 多架构测试环境（6.6.142 内核 + 9p）
@@ -37,7 +37,7 @@ MeuOS-Kit/
 | `mcc` / `m++` | C99+C11 完整，C23 稳定；后续 C++ 共享后端 | C11 核心 + 6 架构后端（x86_64/aarch64/riscv64/i386/loongarch64/arm） |
 | `meow` | 取代 make + autoconf | 原生 YAML + Makefile 兼容 |
 | `meuos-toolchain` | 取缔 binutils（as/ld/ar/ranlib/nm/objdump/readelf/strip/objcopy） | P0-P4+P9-P11 完成（6 架构 as+ld + .msys Phase 3）；P6-P8 规划中 |
-| `meuos-sysroot` | 单文件 sysroot 系统（.msys 格式，mcc/mt/meow 原生读取） | libmsys + mkmsys 完成，已集成到 mcc/mt/ld |
+| `meuos-sysroot` | 单文件 sysroot 系统（.msys 格式，mcc/mt/meow 原生读取） | v2 格式完整：SHA-256 去重/校验、ed25519 签名、Overlay 分层、流式消费、xattr、msysctl CLI（22+ 命令）、Python 绑定；已集成到 mcc/mt/ld |
 | `meuos-utils` | coreutils/diffutils/findutils 完整替代 | 待启动 |
 | `meuos-shell` (msh) | POSIX sh + 可选 bash 兼容 + zsh 插件/主题 | 待启动 |
 | `meuos-buildtools` | m4/bison/flex/gperf（取代 GNU 构建工具） | 待启动 |

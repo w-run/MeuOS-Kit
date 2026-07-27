@@ -67,10 +67,10 @@ Data blocks: 按 data_offset 排列，4 字节对齐
 - [x] `mkmsys --compress=zstd` 实际压缩逻辑（dlopen libzstd.so, ZSTD_compress）
 - [x] `bootstrap.sh` 阶段产出 .msys（Phase 4 验证通过后自动生成）
 
-### Phase 5 — v2 格式设计（实现中）
+### Phase 5 — v2 格式设计 ✅ 已完成
 
 > v2 格式已在 Phase 2A-2C 中实现：向后兼容阅读器、v2 写入器、目录块。
-> 以下为子阶段进展。
+> Phase 5.1-5.9 全部完成。
 
 #### 5.1 目录层次结构 ✅
 
@@ -125,6 +125,29 @@ Data blocks: 按 data_offset 排列，4 字节对齐
 - [x] 索引块后跟 optional extension blocks（`type(4)+length(4)+data(length)`）
 - [x] `msys_get_extension()` API（线性扫描，按 type 查找）
 - [x] mkmsys 写入端支持扩展块（`ext_data`/`ext_len` 参数）
+
+### Phase 6 — msysctl 统一 CLI ✅ 已完成
+
+> msysctl 实现为统一的 .msys 命令行工具，支持 22+ 个命令。
+
+- [x] msysctl main.c (1031 行)：cat/ls/find/tree/extract/info/verify/stat/grep/diff/cmp/du/head/tail/cp/wc/sort/export/import/init/env/hist
+- [x] --overlay 层叠模式
+- [x] fzf 交互式浏览器（msys-browse.sh）
+- [x] bash 自动补全（msysctl-completion.bash）
+
+### Phase 7 — Python 绑定 ✅ 已完成
+
+- [x] ctypes 封装 libmsys.so（src/msys/__init__.py，351 行）
+- [x] 支持 open/read/listdir/stat/close/overlay_open
+- [x] `make so` 构建共享库
+
+## 后续方向
+
+| 特性 | 说明 |
+|------|------|
+| 写入/修改支持 | 当前 .msys 是只读格式，写入需重新打包 |
+| 增量更新（文件级追加） | 当前 --incremental 是全量重打包，可优化为追加式 |
+| 压缩包随机读取 | 未压缩时零拷贝；压缩时需全部解压，可改为逐块解压 |
 
 ## 验收
 

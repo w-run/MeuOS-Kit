@@ -363,7 +363,7 @@ MeuOS-Kit/
 │   ├── meuos-libc/         标准 C 库（ISO C11 + POSIX；含 compat 兼容层）
 │   ├── meow/               构建系统（取代 make + autoconf）
 │   ├── meuos-toolchain/    底层工具链（as/ld/ar/ranlib/nm/readelf/strip/objcopy/objdump）
-│   ├── meuos-sysroot/      .msys 单文件 sysroot 系统（libmsys + mkmsys，已集成到 mcc）
+│   ├── meuos-sysroot/      .msys 单文件 sysroot 系统（libmsys + mkmsys + msysctl CLI + Python 绑定，已集成到 mcc）
 │   ├── meuos-utils/        核心工具集（待启动）
 │   ├── meuos-shell/        Shell 终端（待启动）
 │   ├── pkgs -> ../pkgs     meow 构建配方软链接
@@ -613,6 +613,10 @@ make -C projects/meow CC=cc                   # 使用宿主 cc（编译环境�
 
 # meuos-toolchain（一次性构建全部 9 个工具）
 make -C projects/meuos-toolchain              # 构建 as/ld/ar/ranlib/nm/readelf/strip/objcopy/objdump
+
+# meuos-sysroot（libmsys + mkmsys + msysctl）
+make -C projects/meuos-sysroot                # 构建 libmsys.a + mkmsys + msysctl
+make -C projects/meuos-sysroot so             # 构建 libmsys.so（Python 绑定用）
 ```
 
 ### 8.3 测试
@@ -700,6 +704,14 @@ make -C projects/meuos-toolchain check-ar-bsd          # BSD 归档格式
 make -C projects/meuos-toolchain check-libelf          # ELF 解析轮转
 ```
 
+#### meuos-sysroot 测试
+
+```sh
+make -C projects/meuos-sysroot check         # 打包+校验+单元测试
+make -C projects/meuos-sysroot msys          # 从 MEUOS_SYSROOT 生成 .msys
+make -C projects/meuos-sysroot check-msys    # 检查已有 .msys 可读性
+```
+
 ### 8.4 自举
 
 ```sh
@@ -730,6 +742,7 @@ make -C projects/mcc clean
 make -C projects/meuos-libc clean
 make -C projects/meow clean
 make -C projects/meuos-toolchain clean
+make -C projects/meuos-sysroot clean
 ```
 
 ### 8.7 测试调试指引
@@ -912,7 +925,7 @@ for item in data:
 - **meuos-toolchain 9 工具** — as/ld/ar/ranlib/nm/readelf/strip/objcopy/objdump
 - **Phase 4 自举验证通过** — sysroot 内 mcc + meow 自重建全套工具
 - **Phase 5 零宿主依赖验证通过** — mcc driver 集成 `MT_AS`/`MT_LD`，`check-mt-integration` 通过
-- **.msys 单文件 sysroot** — libmsys + mkmsys + mcc/ld 集成，zlib/zstd 压缩，--incremental 增量打包，bootstrap 自动生成
+- **.msys v2 完整实现** — v2 格式（64B header + 32B index + dir block）、SHA-256 去重/校验、ed25519 签名、Overlay 分层、流式消费、扩展块机制、xattr 扩展属性、msysctl 统一 CLI（22+ 命令）、Python ctypes 绑定。`msysctl fzf` 交互式浏览器支持。
 
 ### 10.2 待启动/进行中工作
 

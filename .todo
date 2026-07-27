@@ -102,3 +102,16 @@
     -> 三组件 meow.yaml 已完成（mcc/meow/meuos-libc）
     -> meow 源码：${VAR} 展开、增量路径检测已实现
     -> 遗留：Makefile 暂保留作为 bootstrap 过渡路径
+
+## P5 — .msys v2 格式完善（已完成）
+
+[x] v2 格式设计（Phase 2A-2C）：64B header + 32B index + dir block
+[x] SHA-256 内容去重（5.4）：--dedup 打包 + msys_verify/verify_all
+[x] 分层/Overlay（5.6）：msys_overlay_open/add/search/readdir 全 API
+[x] ed25519 签名/认证（5.7）：扩展块存储 + msys_verify_signature
+[x] 流式消费（5.8）：msys_stream_open/next/close 顺序读取
+[x] 扩展块机制（5.9）：type(4)+length(4)+data() 链
+[x] xattr 扩展属性：@xattr/<name> + msys_getxattr
+[x] msysctl 统一 CLI：22+ 命令（cat/ls/find/tree/extract/verify/stat/grep/diff/cmp/du/head/tail/cp/wc/sort/export/import/init/env/hist）
+[x] Python 绑定：ctypes 封装 libmsys.so（msys.open/read/listdir/stat/overlay）
+[x] bash 自动补全 + fzf 交互式浏览器

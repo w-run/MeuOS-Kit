@@ -53,17 +53,27 @@
 
 ```
 meuos-sysroot/
-├── Makefile               # 构建 libmsys.a + mkmsys
+├── Makefile               # 构建 libmsys.a + mkmsys + msysctl + libmsys.so
 ├── ARCHITECTURE.md        # 本文件
 ├── .todo/
 │   └── msys.md            # 实现任务清单
 ├── include/mt/
 │   └── msys.h             # libmsys 公共接口（mcc、mt 共享）
 ├── src/
-│   ├── libmsys/
-│   │   └── msys.c         # .msys 读取核心（mmap + 索引二分查找）
-│   └── mkmsys/
-│       └── main.c         # 从 sysroot 目录生成 .msys 的打包工具
+│   ├── libmsys/           # libmsys.a 核心库
+│   │   ├── msys.c         # .msys 读取核心（mmap + 索引二分查找）
+│   │   ├── sha256.c/h     # SHA-256 内容哈希（去重/校验用）
+│   │   ├── ed25519.c/h    # ed25519 签名/验证（扩展块存储）
+│   │   ├── overlay.c      # 分层/Overlay 支持
+│   │   └── stream.c       # 流式顺序消费支持
+│   ├── mkmsys/
+│   │   └── main.c         # 从 sysroot 目录生成 .msys 的打包工具
+│   ├── msysctl/
+│   │   ├── main.c         # msysctl 统一 CLI 工具（1031 行）
+│   │   ├── msysctl-completion.bash  # bash 自动补全
+│   │   └── msys-browse.sh # fzf 交互式浏览器
+│   └── msys/
+│       └── __init__.py    # Python 绑定（ctypes 封装 libmsys.so，351 行）
 └── test/
     └── msys_test.c        # 读写验收测试
 ```
@@ -157,6 +167,89 @@ msys_fopen()      | fmemopen 零拷贝  | 解压 → chunks 注册 → fmemopen
 msys_load()       | malloc + memcpy  | 解压 → 直接返回分配的内存
 ```
 
+## msysctl 统一 CLI
+
+`msysctl` 是 .msys 档案的统一 CLI 工具，提供类 coreutils 的命令行接口。
+支持 v1/v2 格式，内置 --overlay 层叠模式。
+
+### 命令一览
+
+| 命令 | 功能 | 示例 |
+|------|------|------|
+| `cat` | 输出文件内容 | `msysctl cat a.msys /path/to/file` |
+| `ls` | 列出目录内容 | `msysctl ls a.msys /usr/lib` |
+| `find` | 递归查找文件（支持 glob 通配符） | `msysctl find a.msys '*.h'` |
+| `tree` | 树形结构查看 | `msysctl tree a.msys` |
+| `extract` | 解包到目录 | `msysctl extract a.msys /tmp/out` |
+| `info` | 档案统计信息 | `msysctl info a.msys` |
+| `verify` | 全量 SHA-256 校验 | `msysctl verify a.msys` |
+| `stat` | 单文件元数据 | `msysctl stat a.msys /usr/lib/crt1.o` |
+| `grep` | 内容搜索（regex） | `msysctl grep a.msys 'pattern'` |
+| `diff` | 跨档案 diff | `msysctl diff a.msys b.msys` |
+| `cmp` | 文件级二进制比较 | `msysctl cmp a.msys file1 file2` |
+| `du` | 档案磁盘使用统计 | `msysctl du a.msys` |
+| `head` | 文件前 N 行 | `msysctl head a.msys file -n 5` |
+| `tail` | 文件后 N 行 | `msysctl tail a.msys file -n 5` |
+| `cp` | 档案内复制 | `msysctl cp a.msys src dst` |
+| `wc` | 文件行/词/字符统计 | `msysctl wc a.msys file` |
+| `sort` | 文件内容排序 | `msysctl sort a.msys file` |
+| `export` | 导出为 tar 格式 | `msysctl export a.msys out.tar` |
+| `import` | 从 tar 导入创建 .msys | `msysctl import in.tar out.msys` |
+| `init` | 创建空 .msys 档案 | `msysctl init new.msys` |
+| `env` | 输出 sh 兼容的变量导出 | `eval $(msysctl env a.msys)` |
+| `hist` | 文件版本历史管理 | `msysctl hist add/list/cat/diff` |
+
+### --overlay 层叠模式
+
+```sh
+# 基础层 + 覆盖层叠加
+msysctl --overlay base.msys,override.msys ls /
+msysctl --overlay base.msys,override.msys cat /etc/config
+```
+
+### fzf 交互式浏览器
+
+`msys-browse.sh` 提供基于 fzf 的交互式文件浏览，支持键鼠操作：
+
+```sh
+bash src/msysctl/msys-browse.sh a.msys
+```
+
+## Python 绑定（msys 模块）
+
+`src/msys/__init__.py` 提供基于 ctypes 的 Python 绑定，封装 libmsys.so。
+
+### 构建
+
+```sh
+make -C projects/meuos-sysroot so          # 构建 libmsys.so
+```
+
+### 使用
+
+```python
+import msys
+
+m = msys.open("archive.msys")
+print(f"version: {m.version}, entries: {m.count}")
+
+# 文件读取
+data = m.read("/usr/lib/crt1.o")
+
+# 目录枚举
+for name in m.listdir("/usr/include"):
+    print(name)
+
+# 元数据
+st = m.stat("/usr/bin/mcc")
+print(f"type={st.file_type}, mode={oct(st.mode)}, size={st.size}")
+
+# Overlay
+m2 = msys.overlay_open(["base.msys", "override.msys"])
+
+m.close()
+```
+
 ## 依赖关系
 
 ```
@@ -164,7 +257,8 @@ meuos-sysroot（本组件）
     ↑ 链接 libmsys.a
     ├── mcc           — preprocessor include 搜索（msys_fopen）
     ├── mt/ld         — -L 参数识别 .msys，读取 .a/.o（msys_load）
-    └── meow          — make msys 调用 mkmsys 打包
+    ├── meow          — make msys 调用 mkmsys 打包
+    └── msysctl       — 统一 CLI（链接 libmsys.a）
 ```
 
 ## 使用方式
@@ -189,17 +283,21 @@ mcc --target=aarch64 --sysroot=meuos-aarch64.msys -o test test.c
 
 ## 局限性（与未来方向对比）
 
-当前 .msys 设计定位于**开发工具链 sysroot**，不是通用系统镜像格式。主要局限：
+当前 .msys 设计定位于**开发工具链 sysroot**，不是通用系统镜像格式。
+v2 格式已解决大多数早期局限，以下是已实现的 vs 仍待补充的特性：
 
-| 缺失特性 | 障碍 | 未来方向 |
-|----------|------|---------|
-| 目录层次结构 | 只能精确按名查找 | 添加 `msys_readdir()` |
-| 文件元数据（类型/权限/uid/mtime） | 只存了文件名和数据 | 扩展索引条目 |
-| 符号链接 | 没有 symlink 语义 | 添加文件类型字段 |
-| 内容寻址/去重 | 相同内容重复存储 | 添加内容哈希索引 |
-| 文件级校验 | 无完整性保护 | 索引中加 CRC32/SHA-256 |
-| 分层/Overlay | 一次只能打开一个 | 支持多个 .msys 叠加 |
-| 签名/认证 | 完全不验证发布者 | 尾部附加签名块 |
-| 流式消费 | 必须 mmap 全文件 | 支持顺序流式读取 |
-
-详见 `.todo/msys.md` Phase 5。
+| 特性 | 状态 | 说明 |
+|------|------|------|
+| 目录层次结构（O(1) readdir） | ✅ | v2 目录块，msys_readdir() API |
+| 文件元数据（类型/权限/uid/gid） | ✅ | v2 索引扩展 32B/entry |
+| 符号链接 | ✅ | SYMLINK 类型 + msys_readlink/自动解析 |
+| 内容去重（--dedup） | ✅ | SHA-256 索引，相同内容共享 data_offset |
+| 文件级校验（SHA-256） | ✅ | msys_verify / msys_verify_all API |
+| 分层 / Overlay | ✅ | msys_overlay_open/add/search/readdir |
+| 签名 / 认证（ed25519） | ✅ | 扩展块存储 + msys_verify_signature |
+| 流式消费 | ✅ | msys_stream_open/next/close |
+| 扩展块机制 | ✅ | type(4)+length(4)+data() 链 |
+| xattr 扩展属性 | ✅ | @xattr/<name> 条目 + msys_getxattr |
+| 写入/修改支持 | ❌ 未来 | 只读格式，写入需重新打包 |
+| 增量更新（文件级追加） | ❌ 未来 | 当前 --incremental 是全量重打包 |
+| 压缩包随机读取 | ⚠️ 有限 | 未压缩时零拷贝；压缩时需全部解压 |
