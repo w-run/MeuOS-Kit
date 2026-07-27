@@ -12,7 +12,7 @@ CFLAGS  ?= -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -D_POSIX_C_SOURCE=20080
 BUILD   ?= build
 OBJDIR  ?= $(BUILD)/obj
 
-MSYS_SRCS := src/libmsys/msys.c src/libmsys/sha256.c
+MSYS_SRCS := src/libmsys/msys.c src/libmsys/sha256.c src/libmsys/overlay.c
 MSYS_OBJS := $(patsubst src/%.c,$(OBJDIR)/%.o,$(MSYS_SRCS))
 MSYS_LIB  := $(BUILD)/libmsys.a
 

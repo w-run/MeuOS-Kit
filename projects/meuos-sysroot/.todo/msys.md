@@ -101,11 +101,11 @@ Data blocks: 按 data_offset 排列，4 字节对齐
 
 #### 5.5 文件级校验（与 5.4 合并）
 
-#### 5.6 分层 / Overlay（待实现）
+#### 5.6 分层 / Overlay ✅
 
-- [ ] 支持堆叠多个 .msys：基础层 + 用户层
-- [ ] 同名文件覆盖语义
-- [ ] `msys_open_layer()` / `msys_overlay_add()` API
+- [x] 支持堆叠多个 .msys：基础层 + 用户层（`msys_overlay_open/add`）
+- [x] 同名文件覆盖语义（搜索从高层到底层，首次匹配返回）
+- [x] `msys_overlay_search/read/stat/readlink/load/fopen/readdir/verify/close` API
 
 #### 5.7 签名 / 认证（待实现）
 

@@ -240,6 +240,75 @@ int msys_verify_all(struct msys *m);
  *   Returns 32-bit FNV-1a hash. */
 uint32_t msys_fnv1a(const unsigned char *name, size_t len);
 
+/* ---- Overlay / layering API ---- */
+
+/* Overlay handle: stack of .msys files.
+ * Layer 0 = base (lowest priority), last layer added = top (highest priority).
+ * Search checks from top to bottom; first match wins. */
+struct msys_overlay {
+	struct msys **layers;
+	int           count;
+	int           cap;
+};
+
+/* Open multiple .msys files as layers.
+ *   paths: array of paths, paths[0] = base, paths[count-1] = top.
+ *   count: number of paths.
+ *   Returns handle, or NULL on error (all opened handles closed on failure). */
+struct msys_overlay *msys_overlay_open(const char **paths, int count);
+
+/* Add a layer on top (highest priority).
+ *   ol:   overlay handle.
+ *   path: path to .msys file to add.
+ *   Returns 0 on success, -1 on error. */
+int msys_overlay_add(struct msys_overlay *ol, const char *path);
+
+/* Number of layers. */
+int msys_overlay_count(struct msys_overlay *ol);
+
+/* Get layer handle by index (0 = base). */
+struct msys *msys_overlay_get(struct msys_overlay *ol, int idx);
+
+/* Search across layers, top (highest priority) first.
+ *   Returns data pointer from the first layer containing name.
+ *   *layer receives the layer index that matched (may be NULL). */
+const void *msys_overlay_search(struct msys_overlay *ol, const char *name,
+                                size_t *size, int *layer);
+
+/* Read a file from the first layer that has it. */
+int msys_overlay_read(struct msys_overlay *ol, const char *name,
+                      void *buf, size_t buflen);
+
+/* VFS: fopen from first layer that has the path. */
+FILE *msys_overlay_fopen(struct msys_overlay *ol, const char *path,
+                         const char *mode);
+
+/* Load file content from first layer that has it. */
+int msys_overlay_load(struct msys_overlay *ol, const char *path,
+                      void **buf, size_t *size);
+
+/* Stat a file across layers (first match wins). */
+int msys_overlay_stat(struct msys_overlay *ol, const char *name,
+                      struct msys_stat *st);
+
+/* Readlink from first layer that has the path. */
+int msys_overlay_readlink(struct msys_overlay *ol, const char *name,
+                          char *buf, size_t bufsize);
+
+/* Read directory listing merged from all layers (dedup by child name).
+ *   For each immediate child of dir, cb is called at most once.
+ *   A file in a higher layer shadows (replaces) the same file in a lower
+ *   layer in the listing — only the topmost occurrence is reported. */
+int msys_overlay_readdir(struct msys_overlay *ol, const char *dir,
+                         msys_dir_cb cb, void *arg);
+
+/* Verify a file's SHA-256 in the first layer that has it. */
+int msys_overlay_verify(struct msys_overlay *ol, const char *name);
+
+/* Close all layers and free the overlay handle.
+ *   ol: handle to close (NULL is safe). */
+void msys_overlay_close(struct msys_overlay *ol);
+
 #ifdef __cplusplus
 }
 #endif
