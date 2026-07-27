@@ -183,10 +183,16 @@ phase4_verify() {
         log "Phase 4 SKIP (MEUOS_SKIP_PHASE4=1)"
         return 0
     fi
-    if make -C "${REPO_ROOT}/projects/mcc" check-sysroot-static >/dev/null 2>&1; then
-        log "Phase 4 PASS: mcc self-rebuilds with libc-meuos (check-sysroot-static)"
-        log "  cross-arch runtime: env/bin/qvm (see env/README.md)"
-    else
+	if make -C "${REPO_ROOT}/projects/mcc" check-sysroot-static >/dev/null 2>&1; then
+		log "Phase 4 PASS: mcc self-rebuilds with libc-meuos (check-sysroot-static)"
+		log "  cross-arch runtime: env/bin/qvm (see env/README.md)"
+		# Generate .msys from the sysroot for downstream tooling
+		if [ -d "${MEUOS_SYSROOT}/usr/lib" ]; then
+			make -C "${REPO_ROOT}/projects/meuos-sysroot" MSYS_SYSROOT="${MEUOS_SYSROOT}" msys \
+			  >/dev/null 2>&1 && \
+			log "  .msys: ${MEUOS_SYSROOT}.msys generated"
+		fi
+	else
         log "Phase 4 FAIL: check-sysroot-static failed"
         return 1
     fi
