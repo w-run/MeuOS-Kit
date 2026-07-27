@@ -22,6 +22,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <fnmatch.h>
 
 /* Forward declaration for overlay wrapper functions */
 struct archive;
@@ -50,7 +51,7 @@ static int ls_cb(const char *name, size_t nlen, size_t size, int is_dir, void *a
 }
 
 /* ── find (recursive) ── */
-static void find_dir(struct msys *m, const char *dir) {
+static void find_dir(struct msys *m, const char *dir, const char *pattern) {
 	char **names = NULL; size_t cnt = 0, cap = 0;
 	uint32_t total = msys_count(m); size_t dlen = strlen(dir);
 	for (uint32_t i = 0; i < total; i++) {
@@ -85,12 +86,14 @@ static void find_dir(struct msys *m, const char *dir) {
 			    ename[dlen + 1 + strlen(names[i])] == '/') { is_dir = 1; break; }
 		}
 		char full[4096]; snprintf(full, sizeof(full), "%s%s%s", dir, dlen > 0 ? "/" : "", names[i]);
-		printf("%s\n", full);
-		if (is_dir) find_dir(m, full);
+		if (!pattern || fnmatch(pattern, full, 0) == 0 ||
+		    (is_dir && fnmatch(pattern, names[i], 0) == 0))
+			printf("%s\n", full);
+		if (is_dir) find_dir(m, full, pattern);
 	}
 cleanup: for (size_t i = 0; i < cnt; i++) free(names[i]); free(names);
 }
-static int cmd_find(struct msys *m, const char *dir) { find_dir(m, dir ? dir : ""); return 0; }
+static int cmd_find(struct msys *m, const char *dir, const char *pattern) { find_dir(m, dir ? dir : "", pattern); return 0; }
 
 /* ── tree ── */
 static void tree_dir(struct msys *m, const char *dir, int depth) {
@@ -499,9 +502,17 @@ int main(int argc, char *argv[]) {
 			ret = arch_load(a, argv[path_idx], &b, &s);
 			if (ret >= 0) { fwrite(b, 1, s, stdout); free(b); } }
 	} else if (strcmp(cmd, "ls") == 0) ret = arch_ls(a, path_idx < argc ? argv[path_idx] : "");
-	else if (strcmp(cmd, "find") == 0) ret = cmd_find(
-		a->is_overlay ? msys_overlay_get(a->overlay, 0) : a->single,
-		path_idx < argc ? argv[path_idx] : "");
+	else if (strcmp(cmd, "find") == 0) {
+		const char *fdir = path_idx < argc ? argv[path_idx] : "";
+		const char *fpat = NULL;
+		if (path_idx + 2 < argc && strcmp(argv[path_idx + 1], "-name") == 0)
+			fpat = argv[path_idx + 2];
+		else if (path_idx < argc && strncmp(argv[path_idx], "-name", 5) == 0 && path_idx + 1 < argc)
+			{ fpat = argv[path_idx + 1]; fdir = ""; }
+		ret = cmd_find(
+			a->is_overlay ? msys_overlay_get(a->overlay, 0) : a->single,
+			fdir, fpat);
+	}
 	else if (strcmp(cmd, "tree") == 0) arch_tree(a);
 	else if (strcmp(cmd, "extract") == 0) ret = arch_extract(a, path_idx < argc ? argv[path_idx] : ".");
 	else if (strcmp(cmd, "info") == 0) ret = cmd_info(a);
