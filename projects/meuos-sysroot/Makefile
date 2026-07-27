@@ -23,9 +23,13 @@ MKMSYS_BIN  := $(BUILD)/mkmsys
 TEST_SRCS := test/msys_test.c
 TEST_BIN  := $(BUILD)/test-msys
 
+MSYSCTL_SRCS := src/msysctl/main.c
+MSYSCTL_OBJS := $(patsubst src/%.c,$(OBJDIR)/%.o,$(MSYSCTL_SRCS))
+MSYSCTL_BIN  := $(BUILD)/msysctl
+
 .PHONY: all check clean msys msys-compressed check-msys
 
-all: $(MSYS_LIB) $(MKMSYS_BIN)
+all: $(MSYS_LIB) $(MKMSYS_BIN) $(MSYSCTL_BIN)
 
 # libmsys.a — shared .msys reader (consumed by mcc, mt/ld)
 $(MSYS_LIB): $(MSYS_OBJS)
@@ -44,6 +48,15 @@ $(MKMSYS_BIN): $(MKMSYS_OBJS) $(MSYS_LIB)
 $(OBJDIR)/mkmsys/main.o: src/mkmsys/main.c include/mt/msys.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(CFLAGS) -Iinclude -Isrc/libmsys -c -o $@ $<
+
+# msysctl — unified CLI for .msys archives
+$(MSYSCTL_BIN): $(MSYSCTL_OBJS) $(MSYS_LIB)
+	@mkdir -p $(dir $@)
+	$(HOST_CC) $(CFLAGS) -o $@ $(MSYSCTL_OBJS) $(MSYS_LIB)
+
+$(OBJDIR)/msysctl/main.o: src/msysctl/main.c include/mt/msys.h
+	@mkdir -p $(dir $@)
+	$(HOST_CC) $(CFLAGS) -Iinclude -c -o $@ $<
 
 # test
 $(TEST_BIN): $(TEST_SRCS) $(MSYS_LIB)

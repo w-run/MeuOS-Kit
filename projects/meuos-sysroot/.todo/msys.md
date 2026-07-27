@@ -76,7 +76,8 @@ Data blocks: 按 data_offset 排列，4 字节对齐
 
 - [x] `msys_readdir(m, "/usr/lib")` 返回目录下文件和子目录列表
 - [x] 实现方式：v2=目录块 O(1) 哈希查找 / v1=前缀扫描 O(N)
-- [ ] 消费方：Shell `ls`、`find`、包管理器、根文件系统挂载（未集成）
+- [x] 消费方：msysctl 统一 CLI（cat/ls/find/tree/extract/verify/stat）
+- [x] libmsys 直接读取，无需解压到临时目录
 
 #### 5.2 完整文件元数据 ✅
 
