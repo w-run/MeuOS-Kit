@@ -562,20 +562,15 @@ int main(int argc, char *argv[])
 					uint64_t old_mt_val = 0;
 					for (int j = 0; j < 8; j++)
 						old_mt_val |= ((uint64_t)((const uint8_t*)old_mt)[j]) << (8*j);
-					fprintf(stderr, "DBG: %s stored=%lu cur=%ld\n",
-					        e->name, (unsigned long)old_mt_val, (long)e->mtime);
 					if (old_mt_val == (uint64_t)e->mtime) {
 						/* Unchanged — read data from old archive */
 						void *old_data = NULL;
 						size_t old_size;
-						int r = msys_load(old, e->name, &old_data, &old_size);
-						if (r >= 0) {
+						if (msys_load(old, e->name, &old_data, &old_size) >= 0) {
 							free(e->data);
 							e->data = old_data; /* msys_load returns allocated buffer */
 							e->data_size = old_size;
 							reused++;
-						} else {
-							fprintf(stderr, "DBG: msys_load(%s) failed errno=%d\n", e->name, errno);
 						}
 					}
 				}
