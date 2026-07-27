@@ -791,6 +791,17 @@ mcc: slot %(null) is read but never stored to
 
 **原因**: mt/ld 的 loongarch64 TLS LE 重定位处理有 bug，`R_LARCH_TLS_LE_*` 类型应用不正确。
 
+**已尝试修复**: 在 `apply.c` 中给 `R_LARCH_TLS_LE_HI20` 添加了 `+0x800` 舍入补偿，兼容交叉编译器可能使用 `addi.d` 而非 `ori` 的情况。
+
+**仍有疑问**: `.tdata` 数据本身（初始值 42→49952）被破坏，而非仅是指令中的重定位值错误。
+可能原因包括：
+1. `.rela.tdata` 中存在错误的 `R_LARCH_64` 重定位覆盖了数据
+2. QEMU loongarch64 的 TLS 模拟 bug
+3. 静态 TLS 块布局计算错误（对齐填充导致偏移错误）
+
+**需真机验证**：需要 loongarch64 交叉 GCC + qemu-loongarch64 环境做二进制级别的调试。
+检查链接后的 ELF 中 `.tdata` 是否正确、`lu12i.w` 指令的立即数是否正确。
+
 **关联**: 记录在 `projects/meuos-libc/src/arch/loongarch64/.todo`。
 
 **验收**: 静态 TLS 变量的初始值正确保留。

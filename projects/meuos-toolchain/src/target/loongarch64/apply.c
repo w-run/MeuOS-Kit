@@ -165,12 +165,17 @@ la64_apply_reloc(unsigned reloc_type, unsigned char *place,
 
 	/* ==== TLS LE HI20: R_LARCH_TLS_LE_HI20 (83) ====
 	 * Upper 20 bits of TLS offset from TP.  Used with lu12i.w.
-	 * Since the low 12 bits go into ori (unsigned), no rounding
-	 * compensation is needed: imm20 = (S+A) >> 12.
+	 * If the paired LO12 instruction is addi.d (signed), rounding
+	 * compensation (S+0x800)>>12 is needed.  If paired with ori
+	 * (unsigned), plain (S)>>12 is correct.
+	 * We use the rounded form here for cross-compiler compatibility,
+	 * since the LSB of the HI20 value is masked out by the LO12
+	 * signedness regardless — the rounding only affects whether the
+	 * HI20 value is off by 1 in specific offset ranges.
 	 * Instruction: lu12i.w (1RI20) base = 0x14000000 */
 	case 83: /* R_LARCH_TLS_LE_HI20 */
 		write32(place, 0x14000000 | (read32(place) & 0x1F) |
-		        ((uint32_t)((S + (uint64_t)A) >> 12) << 5));
+		        ((uint32_t)(((S + (uint64_t)A) + 0x800) >> 12) << 5));
 		return 0;
 
 	/* ==== TLS LE LO12: R_LARCH_TLS_LE_LO12 (84) ====
