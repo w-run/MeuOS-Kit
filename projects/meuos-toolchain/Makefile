@@ -204,6 +204,11 @@ QEMU_AARCH64 ?= ../../env/qemu/qemu-aarch64
 check-aarch64-e2e: $(AS_BIN) $(LD_BIN)
 	sh test/aarch64_e2e.sh "$(abspath $(AS_BIN))" "$(abspath $(LD_BIN))" "$(abspath $(QEMU_AARCH64))"
 
+# riscv64 e2e: 最小汇编端到端
+QEMU_RISCV64 ?= ../../env/qemu/qemu-riscv64
+check-riscv64-e2e: $(AS_BIN) $(LD_BIN)
+	sh test/riscv64_e2e.sh "$(abspath $(AS_BIN))" "$(abspath $(LD_BIN))" "$(abspath $(QEMU_RISCV64))"
+
 check-as-sse-x86_64: $(AS_BIN)
 	sh test/as_sse_x86_64.sh "$(abspath $(AS_BIN))"
 
