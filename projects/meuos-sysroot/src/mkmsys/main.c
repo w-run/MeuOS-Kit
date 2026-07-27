@@ -433,6 +433,103 @@ static int list_msys(const char *path)
 	return 0;
 }
 
+/* ---- list-tree ---- */
+
+/* Directory entry collected for tree display */
+struct tree_node {
+	char  *name;    /* immediate child name (not full path) */
+	size_t nlen;
+	size_t size;
+	int    is_dir;
+};
+
+/* Callback: collect one tree_node into a realloc'd array.
+ * arg points to { struct tree_node **array, size_t *count, size_t *cap }. */
+struct collect_arg {
+	struct tree_node **array;
+	size_t *count, *cap;
+};
+
+static int collect_cb(const char *name, size_t nlen, size_t size, int is_dir, void *arg)
+{
+	struct collect_arg *ca = (struct collect_arg *)arg;
+	if (*ca->count >= *ca->cap) {
+		*ca->cap = *ca->cap ? *ca->cap * 2 : 64;
+		struct tree_node *p = realloc(*ca->array, *ca->cap * sizeof(struct tree_node));
+		if (!p) return 1;
+		*ca->array = p;
+	}
+	struct tree_node *n = &(*ca->array)[(*ca->count)++];
+	n->name = malloc(nlen);
+	memcpy(n->name, name, nlen);
+	n->nlen  = nlen;
+	n->size  = size;
+	n->is_dir = is_dir;
+	return 0;
+}
+
+static void
+print_tree(struct msys *m, const char *dir, int depth)
+{
+	struct tree_node *nodes = NULL;
+	size_t count = 0, cap = 0;
+	struct collect_arg ca = { &nodes, &count, &cap };
+
+	if (msys_readdir(m, dir, collect_cb, &ca) < 0) {
+		if (depth == 0) /* root always exists */
+			fprintf(stderr, "(empty)\n");
+		return;
+	}
+
+	for (size_t i = 0; i < count; i++) {
+		struct tree_node *n = &nodes[i];
+		/* Skip @mt/ metadata entries */
+		if (n->nlen >= 4 && memcmp(n->name, "@mt/", 4) == 0) continue;
+		if (n->nlen == 3 && memcmp(n->name, "@mt", 3) == 0) continue;
+		printf("%*s", depth * 2, "");
+		if (n->is_dir)
+			printf("%.*s/\n", (int)n->nlen, n->name);
+		else
+			printf("%.*s  (%zu bytes)\n", (int)n->nlen, n->name, n->size);
+
+		if (n->is_dir) {
+			/* Recurse into subdirectory */
+			size_t dlen = strlen(dir);
+			size_t sublen = dlen + 1 + n->nlen;
+			char *sub = malloc(sublen + 1);
+			if (dlen > 0) {
+				memcpy(sub, dir, dlen);
+				sub[dlen] = '/';
+				memcpy(sub + dlen + 1, n->name, n->nlen);
+			} else {
+				memcpy(sub, n->name, n->nlen);
+			}
+			sub[sublen] = '\0';
+			print_tree(m, sub, depth + 1);
+			free(sub);
+		}
+	}
+
+	for (size_t i = 0; i < count; i++) free(nodes[i].name);
+	free(nodes);
+}
+
+static int
+list_tree_msys(const char *path)
+{
+	struct msys *m = msys_open(path);
+	if (!m) die(path);
+
+	printf(".msys file: %s\n", path);
+	printf("Entries:    %u\n", msys_count(m));
+	printf("Flags:      0x%08x\n", m->hdr->flags);
+	printf("\n");
+
+	print_tree(m, "", 0);
+	msys_close(m);
+	return 0;
+}
+
 /* ---- extract ---- */
 
 static void ensure_parent(const char *path)
@@ -518,6 +615,7 @@ int main(int argc, char *argv[])
 	const char *output = NULL;
 	const char *arch = NULL;
 	int list_mode = 0;
+	int tree_mode = 0;
 	int extract_mode = 0;
 	const char *input = NULL;
 	int incremental = 0;
@@ -526,16 +624,19 @@ int main(int argc, char *argv[])
 	static const char *usage_short =
 	  "Usage: mkmsys -o <output> [options] <root-dir>\n"
 	  "       mkmsys --list <input.msys>\n"
+	  "       mkmsys --list-tree <input.msys>\n"
 	  "       mkmsys --extract <input.msys> -o <dir>\n"
 	  "Try `mkmsys --help` for more information.\n";
 	static const char *usage_full =
 	  "Usage: mkmsys -o <output> [options] <root-dir>\n"
 	  "       mkmsys --list <input.msys>\n"
+	  "       mkmsys --list-tree <input.msys>\n"
 	  "       mkmsys --extract <input.msys> -o <dir>\n"
 	  "\n"
 	  "Options:\n"
 	  "  -o <file>          Output .msys file path (or output dir with --extract)\n"
-	  "  --list             List contents of an existing .msys file\n"
+	  "  --list             List contents of an existing .msys file (flat index)\n"
+	  "  --list-tree        List contents with directory tree structure\n"
 	  "  --extract          Extract contents of .msys to directory\n"
 	  "  --arch <name>      Write @meuos_arch metadata entry\n"
 	  "  --compress=<type>  Compress data blocks: zlib, zstd (experimental)\n"
@@ -555,6 +656,8 @@ int main(int argc, char *argv[])
 			output = argv[i + 1]; i += 2;
 		} else if (strcmp(argv[i], "--list") == 0) {
 			list_mode = 1; i++;
+		} else if (strcmp(argv[i], "--list-tree") == 0) {
+			tree_mode = 1; i++;
 		} else if (strcmp(argv[i], "--extract") == 0) {
 			extract_mode = 1; i++;
 		} else if (strcmp(argv[i], "--arch") == 0 && i + 1 < argc) {
@@ -578,6 +681,12 @@ int main(int argc, char *argv[])
 		if (!input) input = output;
 		if (!input) { fprintf(stderr, "Usage: mkmsys --list <input.msys>\n"); return 1; }
 		return list_msys(input);
+	}
+
+	if (tree_mode) {
+		if (!input) input = output;
+		if (!input) { fprintf(stderr, "Usage: mkmsys --list-tree <input.msys>\n"); return 1; }
+		return list_tree_msys(input);
 	}
 
 	if (extract_mode) {
