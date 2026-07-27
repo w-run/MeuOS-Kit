@@ -51,9 +51,16 @@ else ifeq ($(ARCH),loongarch64)
 CC := $(MCC) --target=loongarch64
 AS := loongarch64-linux-gnu-gcc
 else ifeq ($(ARCH),arm)
-# armv7 暂时使用交叉 gcc 编译，等 mcc armv7 后端完成后切回 mcc。
-CC := arm-linux-gnu-gcc -march=armv7-a -mfloat-abi=hard -mfpu=vfpv3-d16
-AS := arm-linux-gnu-gcc -march=armv7-a -mfloat-abi=hard -mfpu=vfpv3-d16
+# ARM 32-bit 通用目标。子架构通过以下变量配置（默认 v7-a + hard-float + vfpv3-d16）：
+#   ARM_ARCH      架构版本（armv7-a, armv8-a 等）
+#   ARM_FLOAT_ABI 浮点 ABI（hard, softfp, soft）
+#   ARM_FPU       FPU 类型（vfpv3-d16, neon, vfpv4 等）
+ARM_ARCH      ?= armv7-a
+ARM_FLOAT_ABI ?= hard
+ARM_FPU       ?= vfpv3-d16
+ARM_FLAGS     := -march=$(ARM_ARCH) -mfloat-abi=$(ARM_FLOAT_ABI) -mfpu=$(ARM_FPU)
+CC := arm-linux-gnu-gcc $(ARM_FLAGS)
+AS := arm-linux-gnu-gcc $(ARM_FLAGS)
 else
 CC := $(HOST_CC)
 AS := $(HOST_CC)
@@ -396,10 +403,11 @@ check-loongarch64-bootstrap:
 # arm-bootstrap.sh 跨编译自检 ELF32/ARM 头；MEUOS_ARM_RUN=1 且
 # MEUOS_ARM_QEMU=<path> 时附加 qemu-user 运行时 gate。
 check-arm-bootstrap:
-	@if [ ! -f build/armv7/libc-meuos.a ] || [ ! -f build/armv7/libatomic-meuos.a ] || [ ! -f build/armv7/crt1.o ]; then \
+	@if [ ! -f build/arm/libc-meuos.a ] || [ ! -f build/arm/libatomic-meuos.a ] || [ ! -f build/arm/crt1.o ]; then \
 		$(MAKE) ARCH=arm; \
 	fi
-	ASCC=arm-linux-gnu-gcc ARCH="-march=armv7-a -mfloat-abi=hard -mfpu=vfpv3-d16" sh test/arm-bootstrap.sh
+	ARM_ARCH=$(ARM_ARCH) ARM_FLOAT_ABI=$(ARM_FLOAT_ABI) ARM_FPU=$(ARM_FPU) \
+		ASCC=arm-linux-gnu-gcc sh test/arm-bootstrap.sh
 
 # 一步式：build + install + 全套检查（包括 atomic/tls/threads/stdio/process）
 # 默认 host 是 x86_64，跨架构检查通过 check-aarch64-bootstrap / check-i386-bootstrap。

@@ -20,7 +20,10 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 mcc=${MCC:-"$root/../mcc/mcc"}
 ascc=${ASCC:-"arm-linux-gnu-gcc"}
-arch=${ARCH:-"-march=arm-a -mfloat-abi=hard -mfpu=vfpv3-d16"}
+ARM_ARCH=${ARM_ARCH:-armv7-a}
+ARM_FLOAT_ABI=${ARM_FLOAT_ABI:-hard}
+ARM_FPU=${ARM_FPU:-vfpv3-d16}
+arch=${ARCH:-"-march=$ARM_ARCH -mfloat-abi=$ARM_FLOAT_ABI -mfpu=$ARM_FPU"}
 mt_ld=${MT_LD:-"$root/../meuos-toolchain/build/bin/ld"}
 mt_as=${MT_AS:-"$root/../meuos-toolchain/build/bin/as"}
 build=${BUILD:-"$root/build/arm"}
