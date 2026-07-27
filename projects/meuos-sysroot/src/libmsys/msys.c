@@ -86,7 +86,8 @@ struct msys *msys_open(const char *path)
 	if (base == MAP_FAILED) return NULL;
 
 	/* Validate magic */
-	if (memcmp(base, MSYS_MAGIC, MSYS_MAGIC_LEN) != 0) {
+	if (memcmp(base, MSYS_MAGIC, MSYS_MAGIC_LEN) != 0 &&
+	    memcmp(base, MSYS_MAGIC_V2, MSYS_MAGIC_LEN) != 0) {
 		munmap(base, (size_t)st.st_size);
 		errno = EINVAL;
 		return NULL;

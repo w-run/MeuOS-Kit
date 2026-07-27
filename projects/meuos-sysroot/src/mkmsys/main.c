@@ -58,14 +58,6 @@ typedef struct {
 
 /* ---- LE read/write helpers ---- */
 
-static uint64_t rd48(const uint8_t *buf)
-{
-	return (uint64_t)buf[0] | ((uint64_t)buf[1] << 8)
-	     | ((uint64_t)buf[2] << 16) | ((uint64_t)buf[3] << 24)
-	     | ((uint64_t)buf[4] << 32) | ((uint64_t)buf[5] << 40);
-}
-static uint32_t rd32(const uint8_t *buf) { return (uint32_t)buf[0] | ((uint32_t)buf[1] << 8) | ((uint32_t)buf[2] << 16) | ((uint32_t)buf[3] << 24); }
-static uint16_t rd16(const uint8_t *buf) { return (uint16_t)buf[0] | ((uint16_t)buf[1] << 8); }
 static void wr48(uint8_t *b, uint64_t v) { b[0]=v; b[1]=v>>8; b[2]=v>>16; b[3]=v>>24; b[4]=v>>32; b[5]=v>>40; }
 static void wr32(uint8_t *b, uint32_t v) { b[0]=v; b[1]=v>>8; b[2]=v>>16; b[3]=v>>24; }
 static void wr16(uint8_t *b, uint16_t v) { b[0]=v; b[1]=v>>8; }
@@ -84,6 +76,10 @@ struct entry {
 	void    *data;
 	size_t   data_size;
 	time_t  mtime;
+	uint16_t file_type;  /* MSYS_FILE_* */
+	uint16_t mode;       /* file permissions */
+	uint32_t uid;
+	uint32_t gid;
 };
 
 struct collector {
@@ -93,7 +89,8 @@ struct collector {
 };
 
 static void collector_add(struct collector *c, const char *relpath,
-                          const void *data, size_t data_size, time_t mtime)
+                          const void *data, size_t data_size, time_t mtime,
+                          uint16_t file_type, uint16_t mode, uint32_t uid, uint32_t gid)
 {
 	if (c->count >= c->cap) {
 		size_t newcap = c->cap ? c->cap * 2 : 4096;
@@ -112,6 +109,10 @@ static void collector_add(struct collector *c, const char *relpath,
 	if (!e->data) die("malloc");
 	if (data_size > 0) memcpy(e->data, data, data_size);
 	e->mtime     = mtime;
+	e->file_type = file_type;
+	e->mode      = mode;
+	e->uid       = uid;
+	e->gid       = gid;
 	c->count++;
 }
 
@@ -145,9 +146,17 @@ static void collector_walk(struct collector *c, const char *dir,
 		}
 
 		struct stat st;
-		if (stat(abspath, &st) < 0) { free(abspath); free(relpath); continue; }
+		if (lstat(abspath, &st) < 0) { free(abspath); free(relpath); continue; }
+
+		uint16_t file_type = MSYS_FILE_REG;
+		uint16_t mode_bits = 0;
+		uint32_t uid = 0, gid = 0;
 
 		if (S_ISREG(st.st_mode)) {
+			file_type = MSYS_FILE_REG;
+			mode_bits = (uint16_t)(st.st_mode & 07777);
+			uid = (uint32_t)st.st_uid;
+			gid = (uint32_t)st.st_gid;
 			FILE *fp = fopen(abspath, "rb");
 			if (!fp) { free(abspath); free(relpath); continue; }
 			void *buf = malloc(st.st_size ? (size_t)st.st_size : 1);
@@ -155,10 +164,40 @@ static void collector_walk(struct collector *c, const char *dir,
 			if (st.st_size > 0)
 				nread = fread(buf, 1, (size_t)st.st_size, fp);
 			fclose(fp);
-			collector_add(c, relpath, buf, nread, st.st_mtime);
+			collector_add(c, relpath, buf, nread, st.st_mtime,
+			              file_type, mode_bits, uid, gid);
 			free(buf);
 		} else if (S_ISDIR(st.st_mode)) {
+			file_type = MSYS_FILE_DIR;
+			mode_bits = (uint16_t)(st.st_mode & 07777);
+			uid = (uint32_t)st.st_uid;
+			gid = (uint32_t)st.st_gid;
+			/* Directories are not stored as data entries */
 			collector_walk(c, abspath, relpath);
+		} else if (S_ISLNK(st.st_mode)) {
+			file_type = MSYS_FILE_SYMLINK;
+			mode_bits = (uint16_t)0777;
+			uid = (uint32_t)st.st_uid;
+			gid = (uint32_t)st.st_gid;
+			/* Read symlink target and store as data */
+			char linkbuf[4096];
+			ssize_t llen = readlink(abspath, linkbuf, sizeof(linkbuf));
+			if (llen > 0) {
+				collector_add(c, relpath, linkbuf, (size_t)llen,
+				              st.st_mtime, file_type, mode_bits, uid, gid);
+			}
+		} else if (S_ISCHR(st.st_mode)) {
+			file_type = MSYS_FILE_CHR;
+			collector_add(c, relpath, NULL, 0, st.st_mtime,
+			              file_type, 0, 0, 0);
+		} else if (S_ISBLK(st.st_mode)) {
+			file_type = MSYS_FILE_BLK;
+			collector_add(c, relpath, NULL, 0, st.st_mtime,
+			              file_type, 0, 0, 0);
+		} else if (S_ISFIFO(st.st_mode)) {
+			file_type = MSYS_FILE_FIFO;
+			collector_add(c, relpath, NULL, 0, st.st_mtime,
+			              file_type, 0, 0, 0);
 		}
 
 		free(abspath);
@@ -281,7 +320,8 @@ static void write_msys(const char *output, struct collector *c, uint32_t flags)
 			(uint8_t)(e->mtime >> 32), (uint8_t)(e->mtime >> 40),
 			(uint8_t)(e->mtime >> 48), (uint8_t)(e->mtime >> 56)
 		};
-		collector_add(c, mtname, mtbuf, 8, 0);
+		collector_add(c, mtname, mtbuf, 8, 0,
+		              MSYS_FILE_REG, 0, 0, 0);
 		free(mtname);
 	}
 
@@ -412,21 +452,22 @@ static int list_msys(const char *path)
 	if (!m) die(path);
 
 	printf(".msys file: %s\n", path);
-	printf("Entries:    %u\n", m->hdr->index_count);
-	printf("Index off:  %lu\n", (unsigned long)m->hdr->index_offset);
+	printf("Entries:    %u\n", msys_count(m));
+	printf("Index off:  %lu\n",
+	       (unsigned long)(m->format_version == MSYS_FORMAT_V2
+	           ? m->hdr_v2->index_offset : m->hdr->index_offset));
+	printf("Format:     v%d\n", msys_format_version(m));
 	printf("Flags:      0x%08x\n", m->hdr->flags);
 	printf("---\n");
 
-	uint32_t count = m->hdr->index_count;
+	uint32_t count = msys_count(m);
 	for (uint32_t i = 0; i < count; i++) {
-		unsigned char *p = m->entries[i];
-		uint32_t hash  = rd32(p);
-		uint64_t off   = rd48(p + 4);
-		uint32_t sz    = rd32(p + 10);
-		uint16_t nlen  = rd16(p + 14);
-		const char *name = (const char *)(p + 16);
-		printf("  %08x  %8lu  %8u  %.*s\n",
-		       hash, (unsigned long)off, sz, (int)nlen, name);
+		const char *name; size_t nlen, dsize;
+		if (msys_enumerate(m, i, &name, &nlen, &dsize) < 0)
+			continue;
+		printf("  %s%.*s  (%zu bytes)\n",
+		       nlen > 0 && name[nlen-1] == '/' ? "" : "",
+		       (int)nlen, name, dsize);
 	}
 
 	msys_close(m);
@@ -600,12 +641,232 @@ static int extract_msys(const char *msys_path, const char *outdir)
 	return 0;
 }
 
+/* ---- write v2 .msys ---- */
+
+static void write_msys_v2(const char *output, struct collector *c, uint32_t flags)
+{
+	FILE *fp = fopen(output, "wb");
+	if (!fp) die(output);
+
+	/* Layout:
+	 *   [Header (64 bytes)]
+	 *   [Data block 1..N]
+	 *   [@mt/ metadata entries appended to collector]
+	 *   [Index block (v2 entries, 32+name+opt bytes)]
+	 */
+
+	/* Compression (same as v1) */
+	void *zlib_handle = NULL;
+	void *zstd_handle = NULL;
+	int (*zlib_deflateInit)(void *, int, const char *, int) = NULL;
+	int (*zlib_deflate)(void *, int) = NULL;
+	int (*zlib_deflateEnd)(void *) = NULL;
+	unsigned long (*zlib_compressBound)(unsigned long) = NULL;
+	size_t (*zstd_compress)(void *, size_t, const void *, size_t, int) = NULL;
+	size_t (*zstd_compressBound)(size_t) = NULL;
+
+	if (flags & MSYS_F_ZLIB) {
+		zlib_handle = dlopen("libz.so.1", RTLD_LAZY | RTLD_LOCAL);
+		if (!zlib_handle) zlib_handle = dlopen("libz.so", RTLD_LAZY | RTLD_LOCAL);
+		if (!zlib_handle) {
+			fprintf(stderr, "mkmsys: --compress=zlib but libz.so not found\n");
+			exit(1);
+		}
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
+		zlib_deflateInit = (int (*)(void *, int, const char *, int))dlsym(zlib_handle, "deflateInit_");
+		zlib_deflate     = (int (*)(void *, int))dlsym(zlib_handle, "deflate");
+		zlib_deflateEnd  = (int (*)(void *))dlsym(zlib_handle, "deflateEnd");
+		zlib_compressBound = (unsigned long (*)(unsigned long))dlsym(zlib_handle, "compressBound");
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+		if (!zlib_deflateInit || !zlib_deflate || !zlib_deflateEnd || !zlib_compressBound)
+			die("missing zlib symbols");
+	}
+	if (flags & MSYS_F_ZSTD) {
+		zstd_handle = dlopen("libzstd.so.1", RTLD_LAZY | RTLD_LOCAL);
+		if (!zstd_handle) zstd_handle = dlopen("libzstd.so", RTLD_LAZY | RTLD_LOCAL);
+		if (!zstd_handle) {
+			fprintf(stderr, "mkmsys: --compress=zstd but libzstd.so not found\n");
+			exit(1);
+		}
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
+		zstd_compress = (size_t (*)(void *, size_t, const void *, size_t, int))dlsym(zstd_handle, "ZSTD_compress");
+		zstd_compressBound = (size_t (*)(size_t))dlsym(zstd_handle, "ZSTD_compressBound");
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+		if (!zstd_compress || !zstd_compressBound)
+			die("missing zstd symbols");
+	}
+
+	/* Add @mt/<name> metadata entries for incremental support */
+	size_t meta_start = c->count;
+	for (size_t i = 0; i < meta_start; i++) {
+		struct entry *e = &c->entries[i];
+		if (strncmp(e->name, "@", 1) == 0) continue;
+		size_t mtname_len = e->name_len + 4;
+		char *mtname = malloc(mtname_len + 1);
+		if (!mtname) die("malloc");
+		memcpy(mtname, "@mt/", 4);
+		memcpy(mtname + 4, e->name, e->name_len);
+		mtname[mtname_len] = '\0';
+		uint8_t mtbuf[8];
+		uint64_t mt = (uint64_t)e->mtime;
+		for (int j = 0; j < 8; j++) { mtbuf[j] = mt & 0xff; mt >>= 8; }
+		collector_add(c, mtname, mtbuf, 8, 0, MSYS_FILE_REG, 0, 0, 0);
+		free(mtname);
+	}
+	qsort(c->entries, c->count, sizeof(struct entry), entry_cmp);
+
+	/* Phase 1: compute data sizes (compress each block if needed) */
+	int is_zlib = (flags & MSYS_F_ZLIB);
+	int is_zstd = (flags & MSYS_F_ZSTD);
+	unsigned char **compressed = NULL;
+	size_t *comp_sizes = NULL;
+	if (is_zlib || is_zstd) {
+		compressed = calloc(c->count, sizeof(*compressed));
+		comp_sizes = calloc(c->count, sizeof(*comp_sizes));
+		if (!compressed || !comp_sizes) die("malloc");
+		for (size_t i = 0; i < c->count; i++) {
+			struct entry *e = &c->entries[i];
+			if (e->data_size == 0) { comp_sizes[i] = 0; continue; }
+			if (is_zlib) {
+				unsigned long bound = (*zlib_compressBound)((unsigned long)e->data_size);
+				compressed[i] = malloc(bound + 8);
+				if (!compressed[i]) die("malloc");
+				z_stream_min strm;
+				memset(&strm, 0, sizeof(strm));
+				strm.next_in = e->data;
+				strm.avail_in = (unsigned int)e->data_size;
+				strm.next_out = compressed[i];
+				strm.avail_out = (unsigned int)(bound + 8);
+				if ((*zlib_deflateInit)(&strm, Z_DEFAULT_COMPRESSION, "1.2.3", (int)sizeof(z_stream_min)) != Z_OK)
+					die("deflateInit");
+				if ((*zlib_deflate)(&strm, Z_FINISH) != Z_STREAM_END) die("deflate");
+				(*zlib_deflateEnd)(&strm);
+				comp_sizes[i] = strm.total_out;
+				if (comp_sizes[i] >= e->data_size) {
+					free(compressed[i]); compressed[i] = NULL;
+					comp_sizes[i] = e->data_size;
+				}
+			} else {
+				size_t bound = (*zstd_compressBound)(e->data_size);
+				compressed[i] = malloc(bound + 8);
+				if (!compressed[i]) die("malloc");
+				size_t out = (*zstd_compress)(compressed[i], bound, e->data, e->data_size, 3);
+				if (out >= e->data_size) {
+					free(compressed[i]); compressed[i] = NULL;
+					comp_sizes[i] = e->data_size;
+				} else {
+					comp_sizes[i] = out;
+				}
+			}
+		}
+	}
+
+	/* Phase 2: compute offsets */
+	size_t hdr_size = sizeof(struct msys_header_v2); /* 64 bytes */
+	size_t cur = hdr_size;
+	size_t *data_offsets = malloc(c->count * sizeof(size_t));
+	if (!data_offsets) die("malloc");
+
+	for (size_t i = 0; i < c->count; i++) {
+		cur = align4(cur);
+		data_offsets[i] = cur;
+		struct entry *e = &c->entries[i];
+		cur += ((is_zlib || is_zstd) && compressed[i])
+			? comp_sizes[i] : e->data_size;
+	}
+	uint64_t index_offset = align4(cur);
+
+	/* Phase 3: write v2 header */
+	struct msys_header_v2 hdr;
+	memset(&hdr, 0, sizeof(hdr));
+	memcpy(hdr.magic, MSYS_MAGIC_V2, 8);
+	hdr.index_offset = index_offset;
+	hdr.index_count  = (uint32_t)c->count;
+	hdr.flags        = flags | MSYS_F_DIR_BLOCK;
+	hdr.dir_offset   = 0;   /* directory block not implemented yet */
+	hdr.dir_count    = 0;
+	hdr.extension_offset = 0;
+	hdr.data_size_total  = 0;
+	hdr.content_hash     = 0;
+	fwrite(&hdr, sizeof(hdr), 1, fp);
+
+	/* Phase 4: write data blocks */
+	for (size_t i = 0; i < c->count; i++) {
+		struct entry *e = &c->entries[i];
+		/* Align to 4 bytes */
+		long pos = ftell(fp);
+		while ((size_t)pos < align4((size_t)pos)) { fputc(0, fp); pos++; }
+		if (e->data_size == 0) continue;
+		if ((is_zlib || is_zstd) && compressed[i])
+			fwrite(compressed[i], 1, comp_sizes[i], fp);
+		else
+			fwrite(e->data, 1, e->data_size, fp);
+	}
+
+	/* Phase 5: write v2 index entries */
+	{
+		long pos = ftell(fp);
+		while ((size_t)pos < align4((size_t)pos)) { fputc(0, fp); pos++; }
+	}
+	for (size_t i = 0; i < c->count; i++) {
+		struct entry *e = &c->entries[i];
+		uint64_t dsize = ((is_zlib || is_zstd) && compressed[i])
+			? comp_sizes[i] : e->data_size;
+		uint8_t buf[32];
+		memset(buf, 0, 32);
+		/* name_hash[4] */
+		buf[0] = e->hash; buf[1] = e->hash >> 8;
+		buf[2] = e->hash >> 16; buf[3] = e->hash >> 24;
+		/* data_offset[6] */
+		wr48(buf + 4, data_offsets[i]);
+		/* data_size[4] */
+		wr32(buf + 10, (uint32_t)dsize);
+		/* uncompressed_size[4] */
+		wr32(buf + 14, (uint32_t)e->data_size);
+		/* file_type[2] */
+		buf[18] = e->file_type; buf[19] = e->file_type >> 8;
+		/* mode[2] */
+		buf[20] = e->mode; buf[21] = e->mode >> 8;
+		/* uid[4] */
+		wr32(buf + 22, e->uid);
+		/* gid[4] */
+		wr32(buf + 26, e->gid);
+		/* name_len */
+		buf[30] = (uint8_t)e->name_len;
+		/* content_hash_present */
+		buf[31] = 0;
+		fwrite(buf, 32, 1, fp);
+		fwrite(e->name, 1, e->name_len, fp);
+	}
+
+	free(data_offsets);
+	if (compressed) {
+		for (size_t i = 0; i < c->count; i++) free(compressed[i]);
+		free(compressed);
+	}
+	free(comp_sizes);
+	if (zlib_handle) dlclose(zlib_handle);
+	if (zstd_handle) dlclose(zstd_handle);
+	fclose(fp);
+}
+
 /* ---- add metadata entry ---- */
 
 static void add_metadata_entry(struct collector *c, const char *key,
                                const char *value)
 {
-	collector_add(c, key, value, strlen(value), 0);
+	collector_add(c, key, value, strlen(value), 0,
+	              MSYS_FILE_REG, 0, 0, 0);
 }
 
 /* ---- main ---- */
@@ -619,6 +880,7 @@ int main(int argc, char *argv[])
 	int extract_mode = 0;
 	const char *input = NULL;
 	int incremental = 0;
+	int format_v2 = 0;
 	const char *compress = NULL;
 
 	static const char *usage_short =
@@ -639,8 +901,9 @@ int main(int argc, char *argv[])
 	  "  --list-tree        List contents with directory tree structure\n"
 	  "  --extract          Extract contents of .msys to directory\n"
 	  "  --arch <name>      Write @meuos_arch metadata entry\n"
-	  "  --compress=<type>  Compress data blocks: zlib, zstd (experimental)\n"
+	  "  --compress=<type>  Compress data blocks: zlib, zstd\n"
 	  "  --incremental      Incremental mode: only repack changed files\n"
+	  "  --format <v1|v2>   Output format version (default: v1)\n"
 	  "  --help             Show this help message\n"
 	  "\n"
 	  "Compression types:\n"
@@ -664,6 +927,8 @@ int main(int argc, char *argv[])
 			arch = argv[i + 1]; i += 2;
 		} else if (strcmp(argv[i], "--incremental") == 0) {
 			incremental = 1; i++;
+		} else if (strcmp(argv[i], "--format") == 0 && i + 1 < argc) {
+			format_v2 = (strcmp(argv[i + 1], "v2") == 0); i += 2;
 		} else if (strcmp(argv[i], "--help") == 0) {
 			printf("%s", usage_full);
 			return 0;
@@ -776,7 +1041,10 @@ int main(int argc, char *argv[])
 	}
 
 	qsort(c.entries, c.count, sizeof(struct entry), entry_cmp);
-	write_msys(output, &c, flags);
+	if (format_v2)
+		write_msys_v2(output, &c, flags);
+	else
+		write_msys(output, &c, flags);
 
 	printf("Wrote %zu entries to %s\n", c.count, output);
 	collector_free(&c);
