@@ -248,13 +248,13 @@ int msys_read(struct msys *m, const char *name, void *buf, size_t buflen)
 
 /* ---- VFS: fopen a file within the archive ---- */
 
-/* Decompress data if the archive has MSYS_F_ZLIB flag set.
+/* Decompress zlib data (dlopen libz.so.1).
  * Returns allocated buffer (caller must free) on success, NULL on error.
  * On success, *out_size receives decompressed size. */
 static void *
-decompress(struct msys *m, const void *compressed, size_t csize, size_t *out_size)
+decompress_zlib(struct msys *m, const void *compressed, size_t csize, size_t *out_size)
 {
-	(void)m; /* unused - flag is checked by callers */
+	(void)m;
 	static void *zlib_handle;
 	static int (*zlib_inflateInit)(void *, const char *, int);
 	static int (*zlib_inflate)(void *, int);
@@ -299,11 +299,9 @@ decompress(struct msys *m, const void *compressed, size_t csize, size_t *out_siz
 		ret = (*zlib_inflate)(&strm, Z_FINISH);
 		if (ret == Z_STREAM_END) break;
 		if (ret != Z_OK && strm.avail_out != 0) {
-			/* Error, not just need more space */
 			(*zlib_inflateEnd)(&strm);
 			free(decomp); return NULL;
 		}
-		/* Need more space - double the buffer */
 		size_t consumed = (size_t)(strm.next_out - (unsigned char *)decomp);
 		guess *= 2;
 		void *newbuf = realloc(decomp, guess);
@@ -318,6 +316,77 @@ decompress(struct msys *m, const void *compressed, size_t csize, size_t *out_siz
 	return decomp;
 }
 
+/* Decompress zstd data (dlopen libzstd.so.1). */
+static void *
+decompress_zstd(struct msys *m, const void *compressed, size_t csize, size_t *out_size)
+{
+	(void)m;
+	typedef size_t (*zstd_decompress_fn)(void *, size_t, const void *, size_t);
+	typedef unsigned long long (*zstd_get_size_fn)(const void *, size_t);
+	typedef unsigned (*zstd_is_error_fn)(size_t);
+
+	static void *zstd_handle;
+	static zstd_decompress_fn  zstd_decompress;
+	static zstd_get_size_fn    zstd_getFrameContentSize;
+	static zstd_is_error_fn    zstd_isError;
+	static int zstd_loaded;
+
+	if (!zstd_loaded) {
+		zstd_loaded = 1;
+		zstd_handle = dlopen("libzstd.so.1", RTLD_LAZY | RTLD_LOCAL);
+		if (!zstd_handle) zstd_handle = dlopen("libzstd.so", RTLD_LAZY | RTLD_LOCAL);
+		if (zstd_handle) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+			zstd_decompress        = (zstd_decompress_fn)dlsym(zstd_handle, "ZSTD_decompress");
+			zstd_getFrameContentSize = (zstd_get_size_fn)dlsym(zstd_handle, "ZSTD_getFrameContentSize");
+			zstd_isError           = (zstd_is_error_fn)dlsym(zstd_handle, "ZSTD_isError");
+#pragma GCC diagnostic pop
+		}
+	}
+
+	if (!zstd_handle || !zstd_decompress || !zstd_getFrameContentSize || !zstd_isError)
+		return NULL;
+
+	unsigned long long usize = (*zstd_getFrameContentSize)(compressed, csize);
+	if ((*zstd_isError)(usize))
+		return NULL;
+
+	void *decomp = malloc((size_t)usize);
+	if (!decomp) return NULL;
+
+	size_t ret = (*zstd_decompress)(decomp, (size_t)usize, compressed, csize);
+	if ((*zstd_isError)(ret)) {
+		free(decomp);
+		return NULL;
+	}
+
+	*out_size = (size_t)usize;
+	return decomp;
+}
+
+/* Dispatch to the appropriate decompressor based on flags. */
+static void *
+decompress(struct msys *m, const void *data, size_t dsize, size_t *out_size)
+{
+	if (m->hdr->flags & MSYS_F_ZLIB)
+		return decompress_zlib(m, data, dsize, out_size);
+	if (m->hdr->flags & MSYS_F_ZSTD)
+		return decompress_zstd(m, data, dsize, out_size);
+	return NULL;
+}
+
+static int
+register_chunk(struct msys *m, void *decomp)
+{
+	struct msys_chunk *c = malloc(sizeof(*c));
+	if (!c) return -1;
+	c->ptr = decomp;
+	c->next = m->chunks;
+	m->chunks = c;
+	return 0;
+}
+
 FILE *msys_fopen(struct msys *m, const char *path, const char *mode)
 {
 	size_t dsize;
@@ -327,16 +396,11 @@ FILE *msys_fopen(struct msys *m, const char *path, const char *mode)
 	data = msys_search(m, path, &dsize);
 	if (!data) return NULL;
 
-	if (m->hdr->flags & MSYS_F_ZLIB) {
+	if (m->hdr->flags & (MSYS_F_ZLIB | MSYS_F_ZSTD)) {
 		size_t usize;
 		void *decomp = decompress(m, data, dsize, &usize);
 		if (!decomp) return NULL;
-		/* Register in chunks list so it's freed on msys_close */
-		struct msys_chunk *c = malloc(sizeof(*c));
-		if (!c) { free(decomp); return NULL; }
-		c->ptr = decomp;
-		c->next = m->chunks;
-		m->chunks = c;
+		if (register_chunk(m, decomp) < 0) { free(decomp); return NULL; }
 		return fmemopen(decomp, usize, mode);
 	}
 
@@ -356,7 +420,7 @@ int msys_load(struct msys *m, const char *path, void **buf, size_t *size)
 	data = msys_search(m, path, &dsize);
 	if (!data) return -1;
 
-	if (m->hdr->flags & MSYS_F_ZLIB) {
+	if (m->hdr->flags & (MSYS_F_ZLIB | MSYS_F_ZSTD)) {
 		void *decomp = decompress(m, data, dsize, &dsize);
 		if (!decomp) return -1;
 		*buf = decomp;
