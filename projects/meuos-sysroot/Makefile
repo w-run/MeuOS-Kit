@@ -23,7 +23,7 @@ MKMSYS_BIN  := $(BUILD)/mkmsys
 TEST_SRCS := test/msys_test.c
 TEST_BIN  := $(BUILD)/test-msys
 
-.PHONY: all check clean msys check-msys
+.PHONY: all check clean msys msys-compressed check-msys
 
 all: $(MSYS_LIB) $(MKMSYS_BIN)
 
@@ -76,6 +76,13 @@ msys: $(MKMSYS_BIN)
 		echo "MEUOS_SYSROOT not set — use MSYS_SYSROOT=<dir>"; exit 1; fi
 	@echo "Packing $(MSYS_SYSROOT) -> $(MSYS_OUTPUT)"
 	$(MKMSYS_BIN) -o "$(MSYS_OUTPUT)" "$(MSYS_SYSROOT)"
+
+# msys-compressed — Build compressed .msys from sysroot directory
+msys-compressed: $(MKMSYS_BIN)
+	@if [ -z "$(MSYS_SYSROOT)" ]; then \
+		echo "MEUOS_SYSROOT not set — use MSYS_SYSROOT=<dir>"; exit 1; fi
+	@echo "Packing $(MSYS_SYSROOT) -> $(MSYS_OUTPUT) (zlib)"
+	$(MKMSYS_BIN) --compress=zlib -o "$(MSYS_OUTPUT)" "$(MSYS_SYSROOT)"
 
 # check-msys — Validate .msys is readable (detect existing .msys files)
 check-msys: $(MKMSYS_BIN)

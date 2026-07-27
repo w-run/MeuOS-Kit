@@ -21,6 +21,9 @@ Index entry (16 + name_len bytes, sorted by name_hash):
   [...]   name (name_len bytes, no NUL terminator)
 
 Data blocks: 按 data_offset 排列，4 字节对齐
+
+元数据条目: 以 '@' 前缀命名的条目
+  @meuos_arch      目标架构名称（如 aarch64, x86_64）
 ```
 
 ## 任务清单
@@ -35,13 +38,13 @@ Data blocks: 按 data_offset 排列，4 字节对齐
 
 - [x] `src/mkmsys/main.c`：遍历目录 → FNV-1a 哈希 → 排序 → 写入 .msys
 - [x] 支持 `-o <output>`、`--list` 列出内容
-- [x] 支持 `--arch <name>` 写入元数据键 `meuos_arch`
+- [x] 支持 `--arch <name>` 写入元数据键 `@meuos_arch`
 
 ### Phase 2 — mcc 集成 ✅
 
 - [x] `mcc/src/driver/msys.c`：sysroot 抽象层，检测 `.msys` 后缀走 libmsys 读取
 - [x] preprocessor include 搜索支持 .msys
-- [x] 未显式传 `--target` 时，从 .msys 提取 `meuos_arch`
+- [x] 未显式传 `--target` 时，从 .msys 提取 `@meuos_arch`
 
 ### Phase 3 — mt/ld 集成 ✅ 已完成
 
@@ -49,32 +52,107 @@ Data blocks: 按 data_offset 排列，4 字节对齐
 - [x] mt/ld 链接 libmsys.a
 - [x] 端到端验证通过（`make check` + `check-i386-e2e`）
 
-### Phase 4 — 构建流水线 + mkmsys 改进 ✅
+### Phase 4 — 压缩 + VFS 改进 ✅
 
 - [x] `msys.h`：添加 `MSYS_F_ZLIB`、`MSYS_F_ZSTD`、`MSYS_F_INCREMENTAL` 压缩标志
-- [x] `mkmsys`：添加 `--incremental`/`--compress` CLI 选项（桩实现）
-- [x] `mkmsys`：添加 `--help` 详细帮助输出
+- [x] `mkmsys`：添加 `--compress=zlib` 实际压缩（dlopen 动态加载 libz，逐块 deflate）
+- [x] `mkmsys`：压缩不会膨胀——压缩后比原件大则存原件
+- [x] `msys_fopen` 支持压缩：解压后注册到 chunks 链表，fclose 时释放
+- [x] `msys_load` 支持压缩：解压后直接返回分配内存
+- [x] `msys_close`：遍历 chunks 链表释放所有解压缓冲
+- [x] `msys.h`：`struct msys` 添加 `struct msys_chunk *chunks` 链表
 - [x] `make msys`：自动从 sysroot 目录生成 .msys
 - [x] `make check-msys`：验证生成的 .msys 可被正确读取
 - [ ] `mkmsys --incremental` 实际增量逻辑（计划后续实现）
-- [ ] `mkmsys --compress=zlib` 实际压缩逻辑（计划后续实现，dlopen 动态加载 libz）
+- [ ] `mkmsys --compress=zstd` 实际压缩逻辑（zstd 支持，flags 已定义）
 - [ ] `bootstrap.sh` 阶段产出 .msys
+
+### Phase 5 — v2 格式设计（规划中）
+
+> 当前 .msys 定位于开发工具链 sysroot。以下为 MeuOS 系统级镜像/包分发格式的
+> 需求分析，非当前版本承诺。
+
+#### 5.1 目录层次结构
+
+- [ ] `msys_readdir(m, "/usr/lib")` 返回目录下文件和子目录列表
+- [ ] 实现方式：隐式路径前缀匹配，或独立的 directory block
+- [ ] 消费方：Shell `ls`、`find`、包管理器、根文件系统挂载
+
+#### 5.2 完整文件元数据
+
+- [ ] 扩展索引条目，添加字段：
+  - 文件类型：普通文件/目录/符号链接/设备节点/管道
+  - 权限位（`0775` 等 Unix 权限）
+  - uid/gid（数字）
+  - mtime（增量打包、缓存失效的基础）
+  - 可选 xattr
+
+#### 5.3 符号链接
+
+- [ ] `type=SYMLINK` 字段，数据块存储目标路径
+- [ ] 读取时自动解析或暴露目标给调用方
+
+#### 5.4 内容寻址 / 去重
+
+- [ ] 内容哈希（SHA-256）索引，相同内容只存一份
+- [ ] 打包时去重检查，相同文件在不同路径下共用数据
+
+#### 5.5 文件级校验
+
+- [ ] 索引条目携带内容哈希（CRC32 + SHA-256）
+- [ ] 读取时可选验证完整性
+
+#### 5.6 分层 / Overlay
+
+- [ ] 支持堆叠多个 .msys：基础层 + 用户层
+- [ ] 同名文件覆盖语义
+- [ ] 场景：原子系统更新（只替换上层）、容器镜像
+
+#### 5.7 签名 / 认证
+
+- [ ] 文件尾附加签名块（如 ed25519）
+- [ ] 验证索引块完整性
+- [ ] 场景：安全的包分发、系统更新
+
+#### 5.8 流式消费
+
+- [ ] 支持按顺序流式读取出所有文件的（name, data）对
+- [ ] 不依赖 mmap/malloc 全部数据
+- [ ] 场景：通过网络推送包、从管道安装
+
+#### 5.9 扩展块机制
+
+- [ ] 索引块后跟 optional extension blocks
+- [ ] 格式：`type(4) | length(4) | data(length)`
+- [ ] 用于签名、注释、附加元数据
 
 ## 验收
 
 ```sh
-# 打包
+# 打包（未压缩）
 mkmsys -o /tmp/aarch64.msys /path/to/sysroot-aarch64
-mkmsys --list /tmp/aarch64.msys  # 列出所有路径
+
+# 打包（压缩）
+mkmsys --compress=zlib -o /tmp/aarch64-compressed.msys /path/to/sysroot-aarch64
+
+# 查看内容（压缩/未压缩）
+mkmsys --list /tmp/aarch64.msys
+mkmsys --list /tmp/aarch64-compressed.msys
 
 # mcc 读头文件
 mcc --target=aarch64 --sysroot=/tmp/aarch64.msys -c -o test.o test.c
+mcc --target=aarch64 --sysroot=/tmp/aarch64-compressed.msys -c -o test.o test.c
 
 # 全链路
 mcc --sysroot=/tmp/aarch64.msys -o test test.c
+
+# 压缩比验证
+ls -lh /tmp/aarch64.msys /tmp/aarch64-compressed.msys
 ```
 
 ## 参考
 
 - FNV-1a 哈希算法：https://en.wikipedia.org/wiki/Fowler–Noll–Vo_hash_function
 - 现有工具链中的 libelf 共享库模式：`meuos-toolchain/src/libelf/`
+- SquashFS 格式设计（只读文件系统参考）
+- OCI 镜像分层规范（分层/overlay 参考）
