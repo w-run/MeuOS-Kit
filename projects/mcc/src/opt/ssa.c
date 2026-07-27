@@ -390,6 +390,8 @@ ssacheck(Fn *fn)
 	Ref r;
 
 	for (t=&fn->tmp[Tmp0]; t-fn->tmp < fn->ntmp; t++) {
+		if (!t->name)
+			continue;
 		if (t->ndef > 1)
 			err("ssa temporary %%%s defined more than once",
 				t->name);
@@ -402,6 +404,8 @@ ssacheck(Fn *fn)
 		for (p=b->phi; p; p=p->link) {
 			r = p->to;
 			t = &fn->tmp[r.val];
+			if (!t->name)
+				continue;
 			for (u=t->use; u<&t->use[t->nuse]; u++) {
 				bu = fn->rpo[u->bid];
 				if (u->type == UPhi) {
@@ -417,6 +421,8 @@ ssacheck(Fn *fn)
 				continue;
 			r = i->to;
 			t = &fn->tmp[r.val];
+			if (!t->name)
+				continue;
 			for (u=t->use; u<&t->use[t->nuse]; u++) {
 				bu = fn->rpo[u->bid];
 				if (u->type == UPhi) {
@@ -440,5 +446,6 @@ Err:
 		die("%%%s violates ssa invariant", t->name);
 	else
 		err("ssa temporary %%%s is used undefined in @%s",
-			t->name, bu->name);
+			t->name ? t->name : "(null)",
+			bu->name);
 }

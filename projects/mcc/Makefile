@@ -212,12 +212,13 @@ check-abi: $(BIN)
 # exercised by check-mt-integration.
 check-sysroot-static: $(BIN)
 	@$(MAKE) -C ../meuos-libc install DESTDIR=$(abspath ../sysroot) PREFIX=/usr
+	@$(MAKE) -C $(MSYS_DIR)
 	@work=$$(mktemp -d /tmp/mcc-sysroot-static.XXXXXX); trap 'rm -rf "$$work"' EXIT HUP INT TERM; \
 	cp -a . "$$work/mcc"; \
 	$(MAKE) -C "$$work/mcc" clean; \
 	env -u MT_AS -u MT_LD -u MT_AR MCC_HOST_CC=cc $(MAKE) -C "$$work/mcc" HOST_CC="$(abspath $(BIN))" \
 		CFLAGS="-O2 -g -std=gnu11 -Iinclude -I$(abspath ../meuos-libc/include) -I$(abspath ../meuos-sysroot/include) -Wno-all --specs=meuos --sysroot=$(abspath ../sysroot) --nostdlib --static" \
-		LDLIBS="-L$(abspath ../meuos-sysroot/build) -lmsys"; \
+		LDLIBS="-L$(abspath ../meuos-sysroot/build) -lmsys -ldl"; \
 	"$$work/mcc/mcc" --version; \
 	printf '%s\n' 'int main(void) { return 0; }' > "$$work/hello.c"; \
 	"$$work/mcc/mcc" -o "$$work/hello" "$$work/hello.c"; \
