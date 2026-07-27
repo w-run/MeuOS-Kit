@@ -57,10 +57,31 @@ void
 arm32_abi(Fn *fn)
 {
 	Blk *b;
+	Ins *i;
 
 	for (b = fn->start; b; b = b->link) {
 		curi = &insb[NIns];
 		selret(b, fn);
+		for (i = &b->ins[b->nins]; i != b->ins;) {
+			switch ((--i)->op) {
+			case Ocall:
+				/* For now, calls pass through unchanged */
+				emiti(*i);
+				break;
+			case Oarg:
+			case Oargv:
+			case Oargc:
+			case Oarge:
+			case Opar:
+			case Oparc:
+			case Opare:
+				emiti(*i);
+				break;
+			default:
+				emiti(*i);
+				break;
+			}
+		}
 		idup(b, curi, &insb[NIns] - curi);
 	}
 }
