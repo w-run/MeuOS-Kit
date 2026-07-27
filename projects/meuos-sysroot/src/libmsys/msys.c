@@ -97,50 +97,90 @@ struct msys *msys_open(const char *path)
 
 	m->base  = base;
 	m->size  = (size_t)st.st_size;
-	m->hdr   = (struct msys_header *)base;
+	m->format_version = MSYS_FORMAT_V1;
 
-	uint64_t index_off = m->hdr->index_offset;
+	/* Detect format by magic */
+	if (memcmp(base, MSYS_MAGIC, MSYS_MAGIC_LEN) == 0) {
+		m->hdr = (struct msys_header *)base;
+	} else if (memcmp(base, MSYS_MAGIC_V2, MSYS_MAGIC_LEN) == 0) {
+		m->format_version = MSYS_FORMAT_V2;
+		m->hdr_v2 = (struct msys_header_v2 *)base;
+		/* v2 code path — handled below */
+	} else {
+		munmap(base, (size_t)st.st_size);
+		free(m);
+		errno = EINVAL;
+		return NULL;
+	}
 
-	/* Validate index offset fits within the mapped region.
-	 * We don't know the exact index size yet (variable-length names),
-	 * but we validate at search time. At minimum ensure the header
-	 * doesn't claim a nonsense offset. */
-	if (index_off < sizeof(struct msys_header) ||
+	uint64_t index_off;
+	uint32_t count;
+
+	if (m->format_version == MSYS_FORMAT_V1) {
+		index_off = m->hdr->index_offset;
+		count = m->hdr->index_count;
+	} else {
+		index_off = m->hdr_v2->index_offset;
+		count = m->hdr_v2->index_count;
+	}
+
+	/* Validate index offset fits within the mapped region. */
+	if ((m->format_version == MSYS_FORMAT_V1 && index_off < sizeof(struct msys_header)) ||
+	    (m->format_version == MSYS_FORMAT_V2 && index_off < sizeof(struct msys_header_v2)) ||
 	    index_off >= m->size) {
 		munmap(base, m->size); free(m);
 		errno = EINVAL;
 		return NULL;
 	}
 
-	m->index = (struct msys_index_entry *)((unsigned char *)base + index_off);
+	if (m->format_version == MSYS_FORMAT_V1)
+		m->index = (struct msys_index_entry *)((unsigned char *)base + index_off);
+	else
+		m->index_v2 = (struct msys_index_entry_v2 *)((unsigned char *)base + index_off);
 
 	/* Build per-entry pointer array (entries are variable-length) */
-	uint32_t count = m->hdr->index_count;
 	if (count > 0) {
 		m->entries = calloc(count, sizeof(unsigned char *));
 		if (!m->entries) {
 			munmap(base, m->size); free(m);
 			return NULL;
 		}
-		unsigned char *p = (unsigned char *)m->index;
+		unsigned char *p = (m->format_version == MSYS_FORMAT_V1)
+			? (unsigned char *)m->index
+			: (unsigned char *)m->index_v2;
 		uint64_t avail = m->size - index_off;
 		for (uint32_t i = 0; i < count; i++) {
 			m->entries[i] = p;
-			/* entry is 16 + name_len bytes; validate bounds */
-			if (avail < 16) {
-				munmap(base, m->size); free(m->entries); free(m);
-				errno = EINVAL;
-				return NULL;
+			if (m->format_version == MSYS_FORMAT_V1) {
+				/* v1: 16 + name_len (uint16 at offset 14) */
+				if (avail < 16) {
+					munmap(base, m->size); free(m->entries); free(m);
+					errno = EINVAL; return NULL;
+				}
+				uint16_t nlen = (uint16_t)p[14] | ((uint16_t)p[15] << 8);
+				uint64_t ent = 16 + (uint64_t)nlen;
+				if (avail < ent) {
+					munmap(base, m->size); free(m->entries); free(m);
+					errno = EINVAL; return NULL;
+				}
+				p += ent;
+				avail -= ent;
+			} else {
+				/* v2: 32 + name_len (uint8 at offset 30) + optional 32 SHA-256 */
+				if (avail < 32) {
+					munmap(base, m->size); free(m->entries); free(m);
+					errno = EINVAL; return NULL;
+				}
+				uint8_t nlen = p[30]; /* uint8 name_len */
+				uint8_t chp  = p[31]; /* content_hash_present */
+				uint64_t ent = 32 + (uint64_t)nlen + (chp ? 32ULL : 0);
+				if (avail < ent) {
+					munmap(base, m->size); free(m->entries); free(m);
+					errno = EINVAL; return NULL;
+				}
+				p += ent;
+				avail -= ent;
 			}
-			uint16_t nlen = (uint16_t)p[14] | ((uint16_t)p[15] << 8);
-			uint64_t ent = 16 + (uint64_t)nlen;
-			if (avail < ent) {
-				munmap(base, m->size); free(m->entries); free(m);
-				errno = EINVAL;
-				return NULL;
-			}
-			p += ent;
-			avail -= ent;
 		}
 	}
 
@@ -163,6 +203,30 @@ void msys_close(struct msys *m)
 	free(m);
 }
 
+/* ---- helpers for format-agnostic entry access ---- */
+/* v1 entry: name_len=read16(off14), name=off16
+ * v2 entry: name_len=uint8(off30),  name=off32
+ * data_size at off10 is same for both. */
+
+static inline uint16_t entry_nlen(const unsigned char *e, int v2)
+{
+	return v2 ? (uint16_t)e[30] : read16(e + 14);
+}
+static inline const char *entry_name(const unsigned char *e, int v2)
+{
+	return (const char *)(e + (v2 ? 32 : 16));
+}
+static inline uint32_t entry_dsize(const unsigned char *e, int v2)
+{
+	(void)v2;
+	return read32(e + 10);
+}
+static inline uint64_t entry_doff(const unsigned char *e, int v2)
+{
+	(void)v2;
+	return read48(e + 4);
+}
+
 /* ---- enumerate / count ---- */
 
 uint32_t msys_count(struct msys *m)
@@ -176,17 +240,15 @@ int msys_enumerate(struct msys *m, uint32_t idx,
 	if (!m || !name || !nlen || !size) { errno = EINVAL; return -1; }
 	if (idx >= m->hdr->index_count) { errno = ERANGE; return -1; }
 
+	int v2 = (m->format_version == MSYS_FORMAT_V2);
 	unsigned char *entry = m->entries[idx];
-	uint64_t off   = read48(entry + 4);
-	uint32_t dsize = read32(entry + 10);
-	uint16_t nl    = read16(entry + 14);
 
-	*name  = (const char *)(entry + 16);
-	*nlen  = nl;
-	*size  = dsize;
+	*name  = entry_name(entry, v2);
+	*nlen  = entry_nlen(entry, v2);
+	*size  = entry_dsize(entry, v2);
 
-	/* Validate data offset is within file */
-	if (off + dsize > m->size) { errno = EIO; return -1; }
+	uint64_t off = entry_doff(entry, v2);
+	if (off + *size > m->size) { errno = EIO; return -1; }
 	return 0;
 }
 
@@ -197,6 +259,7 @@ int msys_readdir(struct msys *m, const char *dir, msys_dir_cb cb, void *arg)
 	if (!m || !dir || !cb) { errno = EINVAL; return -1; }
 
 	size_t dlen = strlen(dir);
+	int v2 = (m->format_version == MSYS_FORMAT_V2);
 	uint32_t cnt = m->hdr->index_count;
 
 	/* Simple linear dedup: track unique children seen so far.
@@ -206,9 +269,9 @@ int msys_readdir(struct msys *m, const char *dir, msys_dir_cb cb, void *arg)
 
 	for (uint32_t i = 0; i < cnt; i++) {
 		unsigned char *entry = m->entries[i];
-		uint16_t nl = read16(entry + 14);
-		const char *ename = (const char *)(entry + 16);
-		uint32_t dsize = read32(entry + 10);
+		uint16_t nl   = entry_nlen(entry, v2);
+		const char *ename = entry_name(entry, v2);
+		uint32_t dsize = entry_dsize(entry, v2);
 
 		const char *child = ename;
 		size_t child_len = nl;
@@ -281,6 +344,113 @@ int msys_fstat(struct msys *m, const char *name, size_t *size)
 	return 0;
 }
 
+/* ---- v2 API: format version, stat, readlink ---- */
+
+int msys_format_version(struct msys *m)
+{
+	return m ? m->format_version : 0;
+}
+
+int msys_stat(struct msys *m, const char *name, struct msys_stat *st)
+{
+	size_t dsize;
+	const void *data = msys_search(m, name, &dsize);
+	if (!data) return -1;
+	if (!st) return 0;
+
+	memset(st, 0, sizeof(*st));
+	st->size = dsize;
+	st->name_hash = msys_fnv1a((const unsigned char *)name, strlen(name));
+
+	if (m->format_version == MSYS_FORMAT_V2) {
+		/* Search again to find the index entry for metadata */
+		uint32_t target = st->name_hash;
+		uint32_t lo = 0, hi = m->hdr->index_count;
+		while (lo < hi) {
+			uint32_t mid = lo + (hi - lo) / 2;
+			unsigned char *e = m->entries[mid];
+			uint32_t eh = read32(e);
+			if (eh < target) { lo = mid + 1; continue; }
+			if (eh > target) { hi = mid; continue; }
+			/* Hash match — check name */
+			uint32_t scan = mid;
+			while (scan > lo) {
+				if (read32(m->entries[scan - 1]) != target) break;
+				scan--;
+			}
+			while (scan < m->hdr->index_count) {
+				unsigned char *p = m->entries[scan];
+				if (read32(p) != target) break;
+				size_t nl = entry_nlen(p, 1);
+				if (nl == strlen(name) &&
+				    memcmp(entry_name(p, 1), name, nl) == 0) {
+					st->file_type = (uint16_t)p[18] | ((uint16_t)p[19] << 8);
+					st->mode      = (uint16_t)p[20] | ((uint16_t)p[21] << 8);
+					st->uid       = read32(p + 22);
+					st->gid       = read32(p + 26);
+					st->mtime     = 0; /* stored in @mt entry */
+					return 0;
+				}
+				scan++;
+			}
+			break;
+		}
+	}
+	/* For v1 (or v2 entry not found via index), return size only */
+	return 0;
+}
+
+int msys_readlink(struct msys *m, const char *name, char *buf, size_t bufsize)
+{
+	(void)buf; (void)bufsize;
+	if (!m || !name || !buf) { errno = EINVAL; return -1; }
+
+	if (m->format_version == MSYS_FORMAT_V2) {
+		/* Check file_type in index entry */
+		uint32_t target = msys_fnv1a((const unsigned char *)name, strlen(name));
+		uint32_t lo = 0, hi = m->hdr->index_count;
+		while (lo < hi) {
+			uint32_t mid = lo + (hi - lo) / 2;
+			unsigned char *e = m->entries[mid];
+			uint32_t eh = read32(e);
+			if (eh < target) { lo = mid + 1; continue; }
+			if (eh > target) { hi = mid; continue; }
+			uint32_t scan = mid;
+			while (scan > lo) {
+				if (read32(m->entries[scan - 1]) != target) break;
+				scan--;
+			}
+			while (scan < m->hdr->index_count) {
+				unsigned char *p = m->entries[scan];
+				if (read32(p) != target) break;
+				size_t nl = entry_nlen(p, 1);
+				if (nl == strlen(name) &&
+				    memcmp(entry_name(p, 1), name, nl) == 0) {
+					uint16_t ft = (uint16_t)p[18] | ((uint16_t)p[19] << 8);
+					if (ft != MSYS_FILE_SYMLINK) {
+						errno = EINVAL;
+						return -1;
+					}
+					/* Read symlink target from data */
+					void *data = NULL;
+					size_t sz;
+					int r = msys_load(m, name, &data, &sz);
+					if (r < 0) return -1;
+					size_t tocpy = sz < bufsize ? sz : bufsize - 1;
+					memcpy(buf, data, tocpy);
+					buf[tocpy] = '\0';
+					free(data);
+					return (int)tocpy;
+				}
+				scan++;
+			}
+			break;
+		}
+	}
+	errno = EINVAL;
+	return -1;
+}
+
 /* ---- search (binary search by name_hash, verify name string) ---- */
 
 const void *msys_search(struct msys *m, const char *name, size_t *size)
@@ -291,6 +461,7 @@ const void *msys_search(struct msys *m, const char *name, size_t *size)
 
 	if (!m || !name) { errno = EINVAL; return NULL; }
 
+	int v2 = (m->format_version == MSYS_FORMAT_V2);
 	name_len = strlen(name);
 	target_hash = msys_fnv1a((const unsigned char *)name, name_len);
 
@@ -320,8 +491,8 @@ const void *msys_search(struct msys *m, const char *name, size_t *size)
 				unsigned char *p = m->entries[scan];
 				if (read32(p) != target_hash) break;
 
-				uint16_t ename_len = read16(p + 14);
-				const char *ename = (const char *)(p + 16);
+				uint16_t ename_len = entry_nlen(p, v2);
+				const char *ename   = entry_name(p, v2);
 				if (ename_len == name_len &&
 				    memcmp(ename, name, name_len) == 0) {
 					/* Found! */
@@ -329,7 +500,6 @@ const void *msys_search(struct msys *m, const char *name, size_t *size)
 					uint32_t dsize = read32(p + 10);
 					if (size) *size = dsize;
 					if (off + dsize > m->size) {
-						/* Corrupt: data extends past file */
 						errno = EIO;
 						return NULL;
 					}

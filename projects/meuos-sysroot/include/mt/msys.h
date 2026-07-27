@@ -10,14 +10,31 @@ extern "C" {
 #endif
 
 /* Magic for .msys file header */
-#define MSYS_MAGIC "Msys1\0\0\0"
+#define MSYS_MAGIC    "Msys1\0\0\0"
+#define MSYS_MAGIC_V2 "Msys2\0\0\0"
 #define MSYS_MAGIC_LEN 8
 
+/* Format versions */
+#define MSYS_FORMAT_V1 1
+#define MSYS_FORMAT_V2 2
+
 /* Flags for msys_header.flags */
-#define MSYS_F_NONE      0x00  /* no compression */
-#define MSYS_F_ZLIB      0x01  /* zlib deflate (data blocks) */
-#define MSYS_F_ZSTD      0x02  /* zstd compression (future) */
-#define MSYS_F_INCREMENTAL 0x04  /* incremental mode (future) */
+#define MSYS_F_NONE      0x00    /* no compression */
+#define MSYS_F_ZLIB      0x01    /* zlib deflate (data blocks) */
+#define MSYS_F_ZSTD      0x02    /* zstd compression */
+#define MSYS_F_INCREMENTAL 0x04  /* incremental mode */
+#define MSYS_F_DEDUP     0x0100  /* v2: content dedup */
+#define MSYS_F_SIGNED    0x0200  /* v2: has signature extension */
+#define MSYS_F_DIR_BLOCK 0x1000  /* v2: has directory block */
+
+/* File types for v2 index entries */
+#define MSYS_FILE_REG    0
+#define MSYS_FILE_DIR    1
+#define MSYS_FILE_SYMLINK 2
+#define MSYS_FILE_CHR    3
+#define MSYS_FILE_BLK    4
+#define MSYS_FILE_FIFO   5
+#define MSYS_FILE_SOCK   6
 
 /* .msys file header (32 bytes on disk) */
 struct msys_header {
@@ -28,6 +45,20 @@ struct msys_header {
 	uint8_t  reserved[8];    /* reserved, must be zero */
 };
 
+/* v2 file header (64 bytes on disk) */
+struct msys_header_v2 {
+	char     magic[8];       /* "Msys2\0\0\0" */
+	uint64_t index_offset;   /* offset to index block */
+	uint32_t index_count;    /* number of entries */
+	uint32_t flags;          /* flags */
+	uint64_t dir_offset;     /* offset to directory block, 0 if none */
+	uint32_t dir_count;      /* number of directory entries, 0 if none */
+	uint32_t extension_offset; /* offset to first extension block, 0 if none */
+	uint64_t data_size_total;  /* sum of all uncompressed data sizes */
+	uint64_t content_hash;     /* first 8 bytes of SHA-256 of index block */
+	uint8_t  reserved[16];     /* reserved, must be zero */
+};
+
 /* Index entry (16 + name_len bytes on disk, variable-length name tail) */
 struct msys_index_entry {
 	uint8_t name_hash[4];    /* FNV-1a 32-bit, little-endian */
@@ -35,6 +66,33 @@ struct msys_index_entry {
 	uint8_t data_size[4];    /* uint32 little-endian */
 	uint8_t name_len[2];     /* uint16 little-endian */
 	/* name follows (name_len bytes, no NUL terminator) */
+};
+
+/* v2 index entry (32 + name_len + optional 32 bytes SHA-256 on disk) */
+struct msys_index_entry_v2 {
+	uint8_t name_hash[4];       /* FNV-1a 32-bit, LE */
+	uint8_t data_offset[6];     /* uint48 LE */
+	uint8_t data_size[4];       /* uint32 LE: stored (possibly compressed) size */
+	uint8_t uncompressed_size[4]; /* uint32 LE: original size, 0 if uncompressed */
+	uint8_t file_type[2];       /* uint16 LE: MSYS_FILE_* */
+	uint8_t mode[2];            /* uint16 LE: file permissions */
+	uint8_t uid[4];             /* uint32 LE */
+	uint8_t gid[4];             /* uint32 LE */
+	uint8_t name_len;           /* uint8: name length (max 255) */
+	uint8_t content_hash_present; /* 0 or 1 */
+	/* name follows (name_len bytes, NUL NOT included) */
+	/* content_hash follows name if content_hash_present==1 (32 bytes) */
+};
+
+/* Stat structure returned by msys_stat */
+struct msys_stat {
+	uint16_t  file_type;   /* MSYS_FILE_* */
+	uint16_t  mode;        /* file permissions */
+	uint32_t  uid;         /* owner uid */
+	uint32_t  gid;         /* owner gid */
+	uint64_t  size;        /* uncompressed data size */
+	uint64_t  mtime;       /* modification time */
+	uint32_t  name_hash;   /* FNV-1a hash of name */
 };
 
 _Static_assert(sizeof(struct msys_header) == 32, "msys_header must be 32 bytes");
@@ -49,8 +107,13 @@ struct msys_chunk {
 struct msys {
 	void   *base;            /* mmap base address */
 	size_t  size;            /* file size */
-	struct msys_header *hdr; /* pointer to header within mmap */
-	struct msys_index_entry *index; /* pointer to first index entry */
+	int     format_version;  /* MSYS_FORMAT_V1 or MSYS_FORMAT_V2 */
+	union {
+		struct msys_header   *hdr;   /* v1 header pointer */
+		struct msys_header_v2 *hdr_v2; /* v2 header pointer */
+	};
+	struct msys_index_entry    *index;   /* v1 index (NULL for v2) */
+	struct msys_index_entry_v2 *index_v2; /* v2 index (NULL for v1) */
 	unsigned char **entries; /* private: per-entry pointers (variable len) */
 	struct msys_chunk *chunks; /* private: allocated buffers (freed on close) */
 };
@@ -136,6 +199,28 @@ int msys_readdir(struct msys *m, const char *dir, msys_dir_cb cb, void *arg);
  *   size: out parameter, receives data size (may be NULL)
  *   Returns 0 on success, -1 on error (errno set: ENOENT, ENOMSG). */
 int msys_fstat(struct msys *m, const char *name, size_t *size);
+
+/* Get format version of opened .msys.
+ *   Returns MSYS_FORMAT_V1 or MSYS_FORMAT_V2 (0 if m is NULL). */
+int msys_format_version(struct msys *m);
+
+/* Get metadata for a path within the archive.
+ *   m:    handle from msys_open
+ *   name: NUL-terminated path
+ *   st:   out parameter, receives metadata (may be NULL for existence check)
+ *   Returns 0 on success, -1 on error (errno set).
+ *   For v1 archives, file_type = MSYS_FILE_REG, other fields are zeroed.
+ *   For v2 archives, returns the stored metadata. */
+int msys_stat(struct msys *m, const char *name, struct msys_stat *st);
+
+/* Read symlink target from the archive.
+ *   m:       handle from msys_open
+ *   name:    NUL-terminated path
+ *   buf:     destination buffer
+ *   bufsize: buffer size
+ *   Returns number of bytes written (not including NUL) on success, -1 on error
+ *   (errno = EINVAL if not a symlink, ENOENT if not found). */
+int msys_readlink(struct msys *m, const char *name, char *buf, size_t bufsize);
 
 /* FNV-1a 32-bit hash helper.
  *   name: pointer to data to hash
