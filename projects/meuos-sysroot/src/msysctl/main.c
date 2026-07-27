@@ -1,8 +1,13 @@
 /* msysctl — Unified CLI for .msys archives.
  *
+#pragma GCC diagnostic ignored "-Wformat-truncation"
  * Usage:
- *   msysctl <cmd> <archive> [args...]            — single archive
- *   msysctl --overlay a.msys,b.msys <cmd> [args] — overlay (comma-sep)
+ *   msysctl <cmd> <archive> [args...]                        — single archive
+ *   msysctl --overlay a.msys,b.msys <cmd> [args]             — overlay
+ *   msysctl hist add <archive> <path> [msg]                  — save version
+ *   msysctl hist list <archive> [path]                       — list versions
+ *   msysctl hist cat <archive> <path> <rev>                  — show version
+ *   msysctl hist diff <archive> <path> <rev1> <rev2>         — diff versions
  *
  * Commands: cat <path>, ls [dir], find [dir], tree, extract [dir],
  *           verify, stat <path>
@@ -14,23 +19,34 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
+#include <dirent.h>
 
 static void die(const char *msg) { perror(msg); exit(1); }
 static void usage(void) {
-	fprintf(stderr, "Usage: msysctl [--overlay a.msys,b.msys] <cmd> <archive> [args...]\n"
-		"Commands: cat <path> | ls [dir] | find [dir] | tree | extract [dir] | verify | stat <path>\n");
+	fprintf(stderr, "Usage:\n"
+		"  msysctl [--overlay a.msys,b.msys] <cmd> <archive> [args...]\n"
+		"  msysctl hist <add|list|cat|diff> <archive> [args...]\n"
+		"Commands: cat <path> | ls [dir] | find [dir] | tree |\n"
+		"          extract [dir] | verify | stat <path>\n");
 	exit(1);
 }
 
-/* ---- ls callback ---- */
+/* ── helpers ── */
+static const char *basename_of(const char *path) {
+	const char *s = strrchr(path, '/');
+	return s ? s + 1 : path;
+}
+
+/* ── ls callback ── */
 static int ls_cb(const char *name, size_t nlen, size_t size, int is_dir, void *arg) {
 	(void)size; (void)arg;
 	printf("%s%.*s\n", is_dir ? "d " : "  ", (int)nlen, name);
 	return 0;
 }
 
-/* ---- find (recursive) ---- */
+/* ── find (recursive) ── */
 static void find_dir(struct msys *m, const char *dir) {
 	char **names = NULL; size_t cnt = 0, cap = 0;
 	uint32_t total = msys_count(m); size_t dlen = strlen(dir);
@@ -73,7 +89,7 @@ cleanup: for (size_t i = 0; i < cnt; i++) free(names[i]); free(names);
 }
 static int cmd_find(struct msys *m, const char *dir) { find_dir(m, dir ? dir : ""); return 0; }
 
-/* ---- tree ---- */
+/* ── tree ── */
 static void tree_dir(struct msys *m, const char *dir, int depth) {
 	char **names = NULL; size_t cnt = 0, cap = 0;
 	uint32_t total = msys_count(m); size_t dlen = strlen(dir);
@@ -115,7 +131,7 @@ static void tree_dir(struct msys *m, const char *dir, int depth) {
 cleanup_tree: for (size_t i = 0; i < cnt; i++) free(names[i]); free(names);
 }
 
-/* ---- stat ---- */
+/* ── stat ── */
 static int cmd_stat(struct msys *m, const char *path) {
 	struct msys_stat st;
 	if (msys_stat(m, path, &st) < 0) { perror("stat"); return -1; }
@@ -128,7 +144,7 @@ static int cmd_stat(struct msys *m, const char *path) {
 	return 0;
 }
 
-/* ---- extract (single archive) ---- */
+/* ── extract (single archive) ── */
 static int cmd_extract(struct msys *m, const char *outdir) {
 	uint32_t cnt = msys_count(m); size_t extracted = 0;
 	for (uint32_t i = 0; i < cnt; i++) {
@@ -137,7 +153,7 @@ static int cmd_extract(struct msys *m, const char *outdir) {
 		if (nlen > 0 && name[0] == '@') continue;
 		char namebuf[4096]; if (nlen >= sizeof(namebuf)) continue;
 		memcpy(namebuf, name, nlen); namebuf[nlen] = '\0';
-		char path[8192]; int n = snprintf(path, sizeof(path), "%s/%s", outdir, namebuf);
+		char path[16384]; int n = snprintf(path, sizeof(path), "%s/%s", outdir, namebuf);
 		if (n < 0 || (size_t)n >= sizeof(path)) continue;
 		char *slash = strrchr(path, '/');
 		if (slash && slash != path) { *slash = '\0'; mkdir(path, 0755); *slash = '/'; }
@@ -151,7 +167,146 @@ static int cmd_extract(struct msys *m, const char *outdir) {
 	return 0;
 }
 
-/* ---- overlay wrappers ---- */
+/* ── history ── */
+
+/* History is stored on disk in .msys.hist/<basename>/ */
+
+static const char *hist_dir(const char *archive) {
+	static char buf[4096];
+	const char *bn = basename_of(archive);
+	snprintf(buf, sizeof(buf), ".msys.hist/%s", bn);
+	return buf;
+}
+
+static int cmd_hist_add(const char *archive, const char *path, const char *msg) {
+	struct msys *m = msys_open(archive);
+	if (!m) die(archive);
+
+	void *data; size_t dsize;
+	if (msys_load(m, path, &data, &dsize) < 0) { perror("load"); msys_close(m); return -1; }
+
+	/* Create history dir: .msys.hist/<basename>/<path>/ */
+	char dir[16384];
+	snprintf(dir, sizeof(dir), "%s/%s", hist_dir(archive), path);
+	/* mkdir -p */
+	char *p = dir;
+	while ((p = strchr(p + 1, '/'))) { *p = '\0'; mkdir(dir, 0755); *p = '/'; }
+	mkdir(dir, 0755);
+
+	/* Save as <timestamp> */
+	char file[16384];
+	snprintf(file, sizeof(file), "%s/%lu", dir, (unsigned long)time(NULL));
+	FILE *fp = fopen(file, "wb");
+	if (!fp) { perror("fopen"); free(data); msys_close(m); return -1; }
+	fwrite(data, 1, dsize, fp);
+	fclose(fp);
+
+	/* Save message if provided */
+	if (msg && *msg) {
+		char msgfile[16384];
+		snprintf(msgfile, sizeof(msgfile), "%s/%lu.msg", dir, (unsigned long)time(NULL));
+		fp = fopen(msgfile, "wb");
+		if (fp) { fwrite(msg, 1, strlen(msg), fp); fclose(fp); }
+	}
+
+	printf("saved %s v%lu (%zu bytes)%s%s\n", path, (unsigned long)time(NULL), dsize,
+	       msg ? " — " : "", msg ? msg : "");
+	free(data);
+	msys_close(m);
+	return 0;
+}
+
+static int cmd_hist_list(const char *archive, const char *filter_path) {
+	const char *hd = hist_dir(archive);
+
+	if (filter_path) {
+		/* List versions for specific file */
+		char dir[16384];
+		snprintf(dir, sizeof(dir), "%s/%s", hd, filter_path);
+		DIR *d = opendir(dir);
+		if (!d) { fprintf(stderr, "no history for %s\n", filter_path); return -1; }
+
+		struct dirent *de;
+		while ((de = readdir(d))) {
+			if (de->d_name[0] == '.') continue;
+			size_t nl = strlen(de->d_name);
+			if (nl > 4 && strcmp(de->d_name + nl - 4, ".msg") == 0) continue;
+
+			char path[16384];
+			snprintf(path, sizeof(path), "%s/%s", dir, de->d_name);
+			struct stat st;
+			if (stat(path, &st) < 0) continue;
+
+			/* Try to read message */
+			char msgfile[16384];
+			snprintf(msgfile, sizeof(msgfile), "%s/%s.msg", dir, de->d_name);
+			char msg[256] = "";
+			FILE *mf = fopen(msgfile, "rb");
+			if (mf) {
+				size_t r = fread(msg, 1, sizeof(msg) - 1, mf);
+				msg[r] = '\0';
+				fclose(mf);
+			}
+
+			printf("  %s  %zu bytes  %s%s\n", de->d_name, (size_t)st.st_size,
+			       msg, msg[0] ? "" : "");
+		}
+		closedir(d);
+		return 0;
+	}
+
+	/* List all tracked files */
+	DIR *d = opendir(hd);
+	if (!d) { fprintf(stderr, "no history for %s\n", basename_of(archive)); return -1; }
+	struct dirent *de;
+	while ((de = readdir(d))) {
+		if (de->d_name[0] == '.') continue;
+		/* Check if it's a directory (tracked file) */
+		char sub[16384]; snprintf(sub, sizeof(sub), "%s/%s", hd, de->d_name);
+		struct stat st;
+		if (stat(sub, &st) == 0 && S_ISDIR(st.st_mode)) {
+			/* Count versions */
+			DIR *sd = opendir(sub);
+			if (!sd) continue;
+			int vc = 0;
+			struct dirent *sde;
+			while ((sde = readdir(sd))) {
+				if (sde->d_name[0] != '.') vc++;
+			}
+			closedir(sd);
+			printf("  %s  (%d versions)\n", de->d_name, vc);
+		}
+	}
+	closedir(d);
+	return 0;
+}
+
+static int cmd_hist_cat(const char *archive, const char *path, const char *rev) {
+	char file[16384];
+	snprintf(file, sizeof(file), "%s/%s/%s", hist_dir(archive), path, rev);
+	FILE *fp = fopen(file, "rb");
+	if (!fp) { perror("fopen"); return -1; }
+	fseek(fp, 0, SEEK_END); long sz = ftell(fp); fseek(fp, 0, SEEK_SET);
+	char *buf = malloc((size_t)sz ? (size_t)sz : 1);
+	if (!buf) { fclose(fp); return -1; }
+	fread(buf, 1, (size_t)sz, fp);
+	fclose(fp);
+	fwrite(buf, 1, (size_t)sz, stdout);
+	free(buf);
+	return 0;
+}
+
+static int cmd_hist_diff(const char *archive, const char *path, const char *rev1, const char *rev2) {
+	char f1[16384], f2[8192];
+	snprintf(f1, sizeof(f1), "%s/%s/%s", hist_dir(archive), path, rev1);
+	snprintf(f2, sizeof(f2), "%s/%s/%s", hist_dir(archive), path, rev2);
+
+	char cmd[16384];
+	snprintf(cmd, sizeof(cmd), "diff -u %s %s 2>/dev/null || true", f1, f2);
+	return system(cmd);
+}
+
+/* ── overlay wrappers ── */
 
 struct archive {
 	int is_overlay;
@@ -159,6 +314,7 @@ struct archive {
 	struct msys_overlay *overlay;
 };
 
+/* ── overlay dispatch ── (same as before) */
 static struct archive *open_archive(const char *arg, const char *overlay_arg) {
 	struct archive *a = calloc(1, sizeof(*a));
 	if (!a) { errno = ENOMEM; return NULL; }
@@ -180,19 +336,18 @@ static struct archive *open_archive(const char *arg, const char *overlay_arg) {
 	}
 	return a;
 }
-
 static void close_archive(struct archive *a) {
 	if (!a) return;
 	if (a->is_overlay) msys_overlay_close(a->overlay); else msys_close(a->single);
 	free(a);
 }
-
 static int arch_ls(struct archive *a, const char *dir) {
 	return a->is_overlay ? msys_overlay_readdir(a->overlay, dir ? dir : "", ls_cb, NULL)
 	                     : msys_readdir(a->single, dir ? dir : "", ls_cb, NULL);
 }
 static int arch_load(struct archive *a, const char *path, void **buf, size_t *sz) {
-	return a->is_overlay ? msys_overlay_load(a->overlay, path, buf, sz) : msys_load(a->single, path, buf, sz);
+	return a->is_overlay ? msys_overlay_load(a->overlay, path, buf, sz)
+	                     : msys_load(a->single, path, buf, sz);
 }
 static int arch_verify_all(struct archive *a) {
 	if (a->is_overlay) {
@@ -212,8 +367,7 @@ static int arch_verify_all(struct archive *a) {
 		printf("All OK\n"); return 0;
 	}
 	int r = msys_verify_all(a->single);
-	printf(r == 0 ? "All OK\n" : "FAILED\n");
-	return r;
+	printf(r == 0 ? "All OK\n" : "FAILED\n"); return r;
 }
 static void arch_tree(struct archive *a) {
 	if (a->is_overlay) {
@@ -235,8 +389,6 @@ static int arch_stat(struct archive *a, const char *path) {
 	}
 	return cmd_stat(a->single, path);
 }
-
-/* ---- extract overlay ---- */
 static int arch_extract(struct archive *a, const char *dir) {
 	if (!a->is_overlay) return cmd_extract(a->single, dir);
 	uint32_t c = (uint32_t)msys_overlay_count(a->overlay); size_t extracted = 0;
@@ -249,7 +401,7 @@ static int arch_extract(struct archive *a, const char *dir) {
 			if (nlen > 0 && name[0] == '@') continue;
 			char namebuf[4096]; if (nlen >= sizeof(namebuf)) continue;
 			memcpy(namebuf, name, nlen); namebuf[nlen] = '\0';
-			char path[8192]; snprintf(path, sizeof(path), "%s/%s", dir, namebuf);
+			char path[16384]; snprintf(path, sizeof(path), "%s/%s", dir, namebuf);
 			if (access(path, F_OK) == 0) continue;
 			char *slash = strrchr(path, '/');
 			if (slash && slash != path) { *slash = '\0'; mkdir(path, 0755); *slash = '/'; }
@@ -264,12 +416,39 @@ static int arch_extract(struct archive *a, const char *dir) {
 	return 0;
 }
 
-/* ---- main ---- */
+/* ── main ── */
 int main(int argc, char *argv[]) {
+	if (argc < 2) usage();
+
+	/* hist subcommand */
+	if (strcmp(argv[1], "hist") == 0) {
+		if (argc < 4) { fprintf(stderr, "Usage: msysctl hist <add|list|cat|diff> <archive> [args...]\n"); return 1; }
+		const char *sub = argv[2];
+		const char *archive = argv[3];
+
+		if (strcmp(sub, "add") == 0) {
+			if (argc < 5) { fprintf(stderr, "Usage: msysctl hist add <archive> <path> [msg]\n"); return 1; }
+			return cmd_hist_add(archive, argv[4], argc > 5 ? argv[5] : NULL);
+		}
+		if (strcmp(sub, "list") == 0)
+			return cmd_hist_list(archive, argc > 4 ? argv[4] : NULL);
+		if (strcmp(sub, "cat") == 0) {
+			if (argc < 6) { fprintf(stderr, "Usage: msysctl hist cat <archive> <path> <rev>\n"); return 1; }
+			return cmd_hist_cat(archive, argv[4], argv[5]);
+		}
+		if (strcmp(sub, "diff") == 0) {
+			if (argc < 7) { fprintf(stderr, "Usage: msysctl hist diff <archive> <path> <rev1> <rev2>\n"); return 1; }
+			return cmd_hist_diff(archive, argv[4], argv[5], argv[6]);
+		}
+		fprintf(stderr, "Unknown hist subcommand: %s\n", sub);
+		return 1;
+	}
+
 	if (argc < 3) usage();
+
 	const char *overlay_arg = NULL;
 	const char *cmd, *archive;
-	int path_idx; /* index of first path argument in argv */
+	int path_idx;
 
 	if (strcmp(argv[1], "--overlay") == 0) {
 		if (argc < 4) usage();
@@ -282,6 +461,7 @@ int main(int argc, char *argv[]) {
 		archive = argv[2];
 		path_idx = 3;
 	}
+
 	struct archive *a = open_archive(archive, overlay_arg);
 	if (!a) die(overlay_arg ? overlay_arg : archive);
 

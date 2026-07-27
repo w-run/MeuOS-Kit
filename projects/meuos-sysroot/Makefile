@@ -56,7 +56,7 @@ $(MSYSCTL_BIN): $(MSYSCTL_OBJS) $(MSYS_LIB)
 
 $(OBJDIR)/msysctl/main.o: src/msysctl/main.c include/mt/msys.h
 	@mkdir -p $(dir $@)
-	$(HOST_CC) $(CFLAGS) -Iinclude -c -o $@ $<
+	$(HOST_CC) $(CFLAGS) -Wno-format-truncation -Iinclude -c -o $@ $<
 
 # test
 $(TEST_BIN): $(TEST_SRCS) $(MSYS_LIB)
