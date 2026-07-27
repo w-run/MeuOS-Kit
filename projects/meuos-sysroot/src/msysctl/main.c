@@ -450,6 +450,27 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
+	/* import: handle before archive open (tar file, not .msys) */
+	if (strcmp(argv[1], "import") == 0) {
+		if (argc < 4) { fprintf(stderr, "Usage: msysctl import <tarfile> <output.msys>\n"); return 1; }
+		const char *tarpath = argv[2];
+		const char *outpath = argv[3];
+		char tmpdir[256]; snprintf(tmpdir, sizeof(tmpdir), "/tmp/msys-import-XXXXXX");
+		if (!mkdtemp(tmpdir)) { perror("mkdtemp"); return 1; }
+		char cmdline[8192];
+		snprintf(cmdline, sizeof(cmdline), "tar -xf %s -C %s 2>/dev/null", tarpath, tmpdir);
+		if (system(cmdline) != 0) { fprintf(stderr, "tar extraction failed: %s\n", tarpath); return 1; }
+		snprintf(cmdline, sizeof(cmdline),
+			 "build/mkmsys --format v2 -o %s %s 2>/dev/null || "
+			 "../build/mkmsys --format v2 -o %s %s 2>/dev/null || "
+			 "projects/meuos-sysroot/build/mkmsys --format v2 -o %s %s 2>/dev/null",
+			 outpath, tmpdir, outpath, tmpdir, outpath, tmpdir);
+		if (system(cmdline) != 0) { fprintf(stderr, "mkmsys failed\n"); rmdir(tmpdir); return 1; }
+		printf("imported %s -> %s\n", tarpath, outpath);
+		rmdir(tmpdir);
+		return 0;
+	}
+
 	if (argc < 3) usage();
 
 	const char *overlay_arg = NULL;
@@ -743,6 +764,53 @@ int main(int argc, char *argv[]) {
 					free(copy);
 				}
 				free(data);
+			}
+		}
+	}
+	/* ── export: .msys → tar ── */
+	else if (strcmp(cmd, "export") == 0) {
+		if (path_idx > argc) { usage(); ret = 1; }
+		else {
+			const char *tarpath = path_idx < argc ? argv[path_idx] : "output.tar";
+			FILE *tar = fopen(tarpath, "wb");
+			if (!tar) { perror(tarpath); ret = -1; }
+			else {
+				struct msys *m = a->is_overlay ? msys_overlay_get(a->overlay, 0) : a->single;
+				uint32_t cnt = msys_count(m);
+				uint64_t total_data = 0; int nfiles = 0;
+				for (uint32_t i = 0; i < cnt; i++) {
+					const char *name; size_t nlen, dsize;
+					if (msys_enumerate(m, i, &name, &nlen, &dsize) < 0) continue;
+					if (nlen > 0 && name[0] == '@') continue;
+					char namebuf[4096]; if (nlen >= sizeof(namebuf)) continue;
+					memcpy(namebuf, name, nlen); namebuf[nlen] = '\0';
+					void *data;
+					if (arch_load(a, namebuf, &data, NULL) < 0) continue;
+					char hdr[512]; memset(hdr, 0, 512);
+					size_t nc = nlen < 100 ? nlen : 99;
+					memcpy(hdr, namebuf, nc);
+					snprintf(hdr + 100, 8, "%07o", 0644);
+					snprintf(hdr + 108, 8, "%07o", 0);
+					snprintf(hdr + 116, 8, "%07o", 0);
+					snprintf(hdr + 124, 12, "%011llo", (unsigned long long)dsize);
+					snprintf(hdr + 136, 12, "%011llo", 0ULL);
+					memcpy(hdr + 257, "ustar", 5);
+					hdr[263] = '0'; hdr[264] = '0';
+					hdr[156] = '0';
+					memset(hdr + 148, ' ', 8);
+					unsigned chk = 0;
+					for (int j = 0; j < 512; j++) chk += (unsigned char)hdr[j];
+					snprintf(hdr + 148, 8, "%06o ", chk);
+					fwrite(hdr, 512, 1, tar);
+					fwrite(data, 1, dsize, tar);
+					size_t pad = (512 - dsize % 512) % 512;
+					if (pad) { char z[512]; memset(z, 0, pad); fwrite(z, 1, pad, tar); }
+					total_data += dsize; nfiles++;
+					free(data);
+				}
+				{ char z[1024]; memset(z, 0, 1024); fwrite(z, 1, 1024, tar); }
+				fclose(tar);
+				printf("exported %d files (%lu bytes) to %s\n", nfiles, (unsigned long)total_data, tarpath);
 			}
 		}
 	}
