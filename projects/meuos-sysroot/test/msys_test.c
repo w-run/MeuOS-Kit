@@ -133,7 +133,43 @@ static int test_basic(void)
 		}
 	}
 
-	printf("PASS: all %d entries verified\n", 4);
+	printf("PASS: all %d entries verified (msys_search, msys_read)\n", 4);
+
+	/* Test msys_count + msys_enumerate */
+	{
+		uint32_t cnt = msys_count(m);
+		if (cnt < 4) {
+			fprintf(stderr, "FAIL: msys_count() = %u, expected at least 4\n", (unsigned)cnt);
+			goto close_cleanup;
+		}
+		/* Verify enumerate returns known files */
+		int found = 0;
+		for (uint32_t i = 0; i < cnt; i++) {
+			const char *ename; size_t elen, esize;
+			if (msys_enumerate(m, i, &ename, &elen, &esize) < 0)
+				continue;
+			/* Check each of the known names */
+			for (int j = 0; files[j]; j += 2) {
+				if (strlen(files[j]) == elen &&
+				    memcmp(ename, files[j], elen) == 0) {
+					found++;
+					break;
+				}
+			}
+		}
+		if (found < 4) {
+			fprintf(stderr, "FAIL: msys_enumerate found only %d/4 known files\n", found);
+			goto close_cleanup;
+		}
+		/* Boundary: idx == count */
+		const char *bname; size_t bnlen, bsize;
+		if (msys_enumerate(m, cnt, &bname, &bnlen, &bsize) == 0) {
+			fprintf(stderr, "FAIL: msys_enumerate should fail at idx == count\n");
+			goto close_cleanup;
+		}
+		printf("PASS: msys_count/enumerate (%u entries, %d known)\n", (unsigned)cnt, found);
+	}
+
 	ret = 0;
 
 close_cleanup:

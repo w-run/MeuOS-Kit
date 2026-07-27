@@ -95,6 +95,21 @@ int   msys_load(struct msys *m, const char *path, void **buf, size_t *size);
  *   m: handle to close (NULL is safe). */
 void msys_close(struct msys *m);
 
+/* Return the number of entries in the archive.
+ *   m: handle from msys_open
+ *   Returns entry count (0 if m is NULL). */
+uint32_t msys_count(struct msys *m);
+
+/* Enumerate entry at position idx (0-based).
+ *   m:    handle from msys_open
+ *   idx:  entry index (0 ... msys_count(m)-1)
+ *   name: out parameter, receives pointer to name string (NOT NUL-terminated)
+ *   nlen: out parameter, receives name length in bytes
+ *   size: out parameter, receives data size in bytes
+ *   Returns 0 on success, -1 on error (errno = ERANGE if idx out of range). */
+int msys_enumerate(struct msys *m, uint32_t idx,
+                   const char **name, size_t *nlen, size_t *size);
+
 /* FNV-1a 32-bit hash helper.
  *   name: pointer to data to hash
  *   len:  number of bytes

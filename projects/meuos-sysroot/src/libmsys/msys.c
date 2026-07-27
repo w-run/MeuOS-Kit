@@ -163,6 +163,33 @@ void msys_close(struct msys *m)
 	free(m);
 }
 
+/* ---- enumerate / count ---- */
+
+uint32_t msys_count(struct msys *m)
+{
+	return m ? m->hdr->index_count : 0;
+}
+
+int msys_enumerate(struct msys *m, uint32_t idx,
+                   const char **name, size_t *nlen, size_t *size)
+{
+	if (!m || !name || !nlen || !size) { errno = EINVAL; return -1; }
+	if (idx >= m->hdr->index_count) { errno = ERANGE; return -1; }
+
+	unsigned char *entry = m->entries[idx];
+	uint64_t off   = read48(entry + 4);
+	uint32_t dsize = read32(entry + 10);
+	uint16_t nl    = read16(entry + 14);
+
+	*name  = (const char *)(entry + 16);
+	*nlen  = nl;
+	*size  = dsize;
+
+	/* Validate data offset is within file */
+	if (off + dsize > m->size) { errno = EIO; return -1; }
+	return 0;
+}
+
 /* ---- search (binary search by name_hash, verify name string) ---- */
 
 const void *msys_search(struct msys *m, const char *name, size_t *size)
