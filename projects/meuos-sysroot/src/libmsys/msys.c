@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -220,4 +221,38 @@ int msys_read(struct msys *m, const char *name, void *buf, size_t buflen)
 		buflen = dsize;
 	memcpy(buf, data, buflen);
 	return (int)buflen;
+}
+
+/* ---- VFS: fopen a file within the archive ---- */
+
+FILE *msys_fopen(struct msys *m, const char *path, const char *mode)
+{
+	size_t dsize;
+	const void *data;
+
+	if (!m || !path) { errno = EINVAL; return NULL; }
+	data = msys_search(m, path, &dsize);
+	if (!data) return NULL;
+
+	/* fmemopen needs a non-const buffer; msys_search returns const from mmap.
+	 * For "r" mode, casting const away is safe since fmemopen won't write. */
+	return fmemopen((void *)data, dsize, mode);
+}
+
+/* ---- VFS: load file content into malloc'd memory ---- */
+
+int msys_load(struct msys *m, const char *path, void **buf, size_t *size)
+{
+	size_t dsize;
+	const void *data;
+
+	if (!m || !path || !buf) { errno = EINVAL; return -1; }
+	data = msys_search(m, path, &dsize);
+	if (!data) return -1;
+
+	*buf = malloc(dsize ? dsize : 1);
+	if (!*buf) return -1;
+	memcpy(*buf, data, dsize);
+	if (size) *size = dsize;
+	return (int)dsize;
 }

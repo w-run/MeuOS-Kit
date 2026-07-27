@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -63,6 +64,20 @@ const void *msys_search(struct msys *m, const char *name, size_t *size);
  *   buflen: maximum bytes to read
  *   Returns number of bytes copied on success, or -1 on error (errno set). */
 int msys_read(struct msys *m, const char *name, void *buf, size_t buflen);
+
+/* VFS: Open a file from within the .msys archive as a FILE* (fmemopen wrapper).
+ *   path:  path within archive, e.g. "usr/include/stdio.h" (no leading /)
+ *   mode:  fopen mode string (typically "r")
+ *   Returns a FILE* on success, or NULL on error (errno set).
+ *   If m is NULL or the path is not found, returns NULL (errno = ENOENT). */
+FILE *msys_fopen(struct msys *m, const char *path, const char *mode);
+
+/* VFS: Load entire file content from within the .msys archive into malloc'd memory.
+ *   path:  path within archive
+ *   buf:   out parameter, receives pointer to allocated memory (caller must free)
+ *   size:  out parameter, receives number of bytes read (may be NULL)
+ *   Returns number of bytes on success, or -1 on error (errno set). */
+int   msys_load(struct msys *m, const char *path, void **buf, size_t *size);
 
 /* Close a .msys handle, munmap the file, free memory.
  *   m: handle to close (NULL is safe). */
