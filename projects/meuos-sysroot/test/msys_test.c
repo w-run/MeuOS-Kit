@@ -36,6 +36,10 @@ static const char *find_mkmsys(void)
 	return "build/mkmsys"; /* fallback, will fail with useful error */
 }
 
+/* msys_readdir callbacks (defined before use) */
+static int root_cb(const char *name, size_t nlen, size_t size, int is_dir, void *arg);
+static int sub_cb(const char *name, size_t nlen, size_t size, int is_dir, void *arg);
+
 static int test_basic(void)
 {
 	const char *mkmsys = find_mkmsys();
@@ -170,6 +174,34 @@ static int test_basic(void)
 		printf("PASS: msys_count/enumerate (%u entries, %d known)\n", (unsigned)cnt, found);
 	}
 
+	/* Test msys_readdir */
+	{
+		/* Root should list hello.txt, greeting.txt, sub/, empty.txt */
+		int root_seen[4] = {0};
+		int rc = msys_readdir(m, "", &root_cb, root_seen);
+		if (rc < 0) { perror("msys_readdir(root)"); goto close_cleanup; }
+		if (!root_seen[0] || !root_seen[1] || !root_seen[2] || !root_seen[3]) {
+			fprintf(stderr, "FAIL: msys_readdir(root) missed: hello=%d greeting=%d sub=%d empty=%d\n",
+			        root_seen[0], root_seen[1], root_seen[2], root_seen[3]);
+			goto close_cleanup;
+		}
+		/* List sub/ */
+		int sub_seen = 0;
+		rc = msys_readdir(m, "sub", &sub_cb, &sub_seen);
+		if (rc < 0) { perror("msys_readdir(sub)"); goto close_cleanup; }
+		if (sub_seen != 1) {
+			fprintf(stderr, "FAIL: msys_readdir(sub) expected 1 entry, got %d\n", sub_seen);
+			goto close_cleanup;
+		}
+		/* Non-existent dir */
+		rc = msys_readdir(m, "nonexistent", &root_cb, NULL);
+		if (rc == 0) {
+			fprintf(stderr, "FAIL: msys_readdir(nonexistent) should fail\n");
+			goto close_cleanup;
+		}
+		printf("PASS: msys_readdir (root 4, sub 1, nonexistent fails)\n");
+	}
+
 	ret = 0;
 
 close_cleanup:
@@ -181,6 +213,37 @@ cleanup:
 		system(rmcmd);
 	}
 	return ret;
+}
+
+/* msys_readdir callback: accumulate root entries */
+struct root_cb_arg { const char *name; size_t nlen; int seen; };
+
+static int root_cb(const char *name, size_t nlen, size_t size, int is_dir, void *arg)
+{
+	(void)size;
+	int *seen = (int *)arg;
+	static const char *expected[] = {"hello.txt","greeting.txt","sub","empty.txt"};
+	for (size_t i = 0; i < 4; i++) {
+		if (strlen(expected[i]) == nlen && memcmp(name, expected[i], nlen) == 0)
+			seen[i] = 1;
+	}
+	if (strncmp(name, "sub", 3) == 0 && !is_dir) {
+		fprintf(stderr, "FAIL: 'sub' should be detected as dir\n");
+		return 1;
+	}
+	return 0;
+}
+
+static int sub_cb(const char *name, size_t nlen, size_t size, int is_dir, void *arg)
+{
+	(void)size; (void)is_dir;
+	int *seen = (int *)arg;
+	(*seen)++;
+	if (nlen != 8 || memcmp(name, "deep.txt", 8) != 0) {
+		fprintf(stderr, "FAIL: sub/ expected 'deep.txt', got '%.*s'\n", (int)nlen, name);
+		return 1;
+	}
+	return 0;
 }
 
 int main(void)

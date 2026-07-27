@@ -110,6 +110,26 @@ uint32_t msys_count(struct msys *m);
 int msys_enumerate(struct msys *m, uint32_t idx,
                    const char **name, size_t *nlen, size_t *size);
 
+/* Callback for msys_readdir.
+ *   name:  immediate child name (NOT NUL-terminated, single path component)
+ *   nlen:  name length in bytes
+ *   size:  data size in bytes (0 for synthetic directories)
+ *   is_dir: non-zero if this child appears to be a subdirectory
+ *   arg:   opaque user pointer passed to msys_readdir
+ *   Returns 0 to continue iteration, non-zero to stop. */
+typedef int (*msys_dir_cb)(const char *name, size_t nlen,
+                           size_t size, int is_dir, void *arg);
+
+/* List immediate children of a directory within the archive.
+ *   m:   handle from msys_open
+ *   dir: directory path, e.g. "usr/lib" or "" for root
+ *   cb:  callback invoked for each immediate child
+ *   arg: opaque pointer passed through to cb
+ *   Returns 0 on success, -1 on error (errno set).
+ *   If dir is not found or has no children, returns 0 (no cb calls).
+ *   This is a linear scan (O(N) over total entries). */
+int msys_readdir(struct msys *m, const char *dir, msys_dir_cb cb, void *arg);
+
 /* FNV-1a 32-bit hash helper.
  *   name: pointer to data to hash
  *   len:  number of bytes

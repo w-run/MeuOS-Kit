@@ -190,6 +190,87 @@ int msys_enumerate(struct msys *m, uint32_t idx,
 	return 0;
 }
 
+/* ---- readdir (directory listing by prefix scan) ---- */
+
+int msys_readdir(struct msys *m, const char *dir, msys_dir_cb cb, void *arg)
+{
+	if (!m || !dir || !cb) { errno = EINVAL; return -1; }
+
+	size_t dlen = strlen(dir);
+	uint32_t cnt = m->hdr->index_count;
+
+	/* Simple linear dedup: track unique children seen so far.
+	 * Typically few children per dir — O(N * seen) is fine. */
+	const char **seen = NULL;
+	size_t seen_cnt = 0, seen_cap = 0;
+
+	for (uint32_t i = 0; i < cnt; i++) {
+		unsigned char *entry = m->entries[i];
+		uint16_t nl = read16(entry + 14);
+		const char *ename = (const char *)(entry + 16);
+		uint32_t dsize = read32(entry + 10);
+
+		const char *child = ename;
+		size_t child_len = nl;
+		int is_dir = 0;
+
+		if (dlen > 0) {
+			/* Non-root: must start with dir prefix followed by '/' */
+			if (nl <= dlen) continue;
+			if (memcmp(ename, dir, dlen) != 0) continue;
+			if (ename[dlen] != '/') continue;
+			child = ename + dlen + 1;
+			child_len = nl - dlen - 1;
+		}
+
+		/* Extract first path component */
+		const char *slash = memchr(child, '/', child_len);
+		if (slash) {
+			child_len = (size_t)(slash - child);
+			is_dir = 1;
+		}
+
+		if (child_len == 0) continue; /* skip trailing slash entries */
+
+		/* Dedup: check if already reported */
+		int dup = 0;
+		for (size_t j = 0; j < seen_cnt; j++) {
+			if (seen[j] && memcmp(seen[j], child, child_len) == 0) {
+				dup = 1; break;
+			}
+		}
+		if (dup) continue;
+
+		/* Store for future dedup */
+		if (seen_cnt >= seen_cap) {
+			size_t nc = seen_cap ? seen_cap * 2 : 32;
+			const char **ns = realloc(seen, nc * sizeof(*ns));
+			if (!ns) { free(seen); errno = ENOMEM; return -1; }
+			seen = ns;
+			seen_cap = nc;
+		}
+		seen[seen_cnt] = NULL;
+		unsigned char *copy = malloc(child_len);
+		if (!copy) { free(seen); errno = ENOMEM; return -1; }
+		memcpy(copy, child, child_len);
+		seen[seen_cnt] = (const char *)copy;
+		seen_cnt++;
+
+		int ret = cb(child, child_len, is_dir ? 0 : dsize, is_dir, arg);
+		/* Don't free seen strings yet — we need them for dedup */
+		if (ret) {
+			for (size_t j = 0; j < seen_cnt; j++) free((void *)seen[j]);
+			free(seen);
+			return 0;
+		}
+	}
+	for (size_t j = 0; j < seen_cnt; j++) free((void *)seen[j]);
+	free(seen);
+
+	if (seen_cnt == 0) { errno = ENOENT; return -1; }
+	return 0;
+}
+
 /* ---- search (binary search by name_hash, verify name string) ---- */
 
 const void *msys_search(struct msys *m, const char *name, size_t *size)
