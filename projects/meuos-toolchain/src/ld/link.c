@@ -634,7 +634,8 @@ prepare_object_symbol(struct ld_context *ctx, struct ld_object *object)
 		                        &object->view, (uint16_t)section.link,
 		                        &object->strtab) != MT_ELF_OK ||
 		    object->strtab.type != MT_SHT_STRTAB ||
-		    section.entry_size < MT_ELF64_SYM_SIZE ||
+		    (section.entry_size != MT_ELF64_SYM_SIZE &&
+		     section.entry_size != MT_ELF32_SYM_SIZE) ||
 		    section.size % section.entry_size != 0)
 			return ld_errorf(ctx, "invalid symbol table", object->name);
 		object->symtab_index = i;

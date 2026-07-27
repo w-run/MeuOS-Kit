@@ -54,6 +54,7 @@ mt_elf64_parse(const void *bytes, size_t size, struct mt_elf64_view *view)
 {
 	const unsigned char *p = (const unsigned char *)bytes;
 	uint16_t phentsize, phnum, shentsize, shnum;
+	int is_elf32;
 
 	if (!p || !view)
 		return MT_ELF_E_ARGUMENT;
@@ -61,38 +62,71 @@ mt_elf64_parse(const void *bytes, size_t size, struct mt_elf64_view *view)
 		return MT_ELF_E_TRUNCATED;
 	if (memcmp(p, "\177ELF", 4) != 0)
 		return MT_ELF_E_MAGIC;
-	if (p[4] != MT_ELFCLASS64)
+	if (p[4] == MT_ELFCLASS32) {
+		is_elf32 = 1;
+	} else if (p[4] == MT_ELFCLASS64) {
+		is_elf32 = 0;
+	} else {
 		return MT_ELF_E_CLASS;
+	}
 	if (p[5] != MT_ELFDATA2LSB)
 		return MT_ELF_E_ENCODING;
 	if (p[6] != MT_EV_CURRENT || read32(p + 20) != MT_EV_CURRENT)
 		return MT_ELF_E_VERSION;
 
-	phentsize = read16(p + 54);
-	phnum = read16(p + 56);
-	shentsize = read16(p + 58);
-	shnum = read16(p + 60);
-	if (read16(p + 52) < MT_ELF64_EHDR_SIZE ||
-	    (phnum && phentsize < MT_ELF64_PHDR_SIZE) ||
-	    (shnum && shentsize < MT_ELF64_SHDR_SIZE) ||
-	    !table_valid(read64(p + 32), phentsize, phnum, size) ||
-	    !table_valid(read64(p + 40), shentsize, shnum, size))
-		return MT_ELF_E_LAYOUT;
-
-	memset(view, 0, sizeof(*view));
-	view->type = read16(p + 16);
-	view->machine = read16(p + 18);
-	view->version = read32(p + 20);
-	view->entry = read64(p + 24);
-	view->program_offset = read64(p + 32);
-	view->section_offset = read64(p + 40);
-	view->flags = read32(p + 48);
-	view->header_size = read16(p + 52);
-	view->program_entry_size = phentsize;
-	view->program_count = phnum;
-	view->section_entry_size = shentsize;
-	view->section_count = shnum;
-	view->section_name_index = read16(p + 62);
+	if (is_elf32) {
+		if (size < MT_ELF32_EHDR_SIZE)
+			return MT_ELF_E_TRUNCATED;
+		phentsize = read16(p + 42);
+		phnum = read16(p + 44);
+		shentsize = read16(p + 46);
+		shnum = read16(p + 48);
+		if (read16(p + 40) < MT_ELF32_EHDR_SIZE ||
+		    (phnum && phentsize < MT_ELF32_PHDR_SIZE) ||
+		    (shnum && shentsize < MT_ELF32_SHDR_SIZE) ||
+		    !table_valid(read32(p + 28), phentsize, phnum, size) ||
+		    !table_valid(read32(p + 32), shentsize, shnum, size))
+			return MT_ELF_E_LAYOUT;
+		memset(view, 0, sizeof(*view));
+		view->type = read16(p + 16);
+		view->machine = read16(p + 18);
+		view->version = read32(p + 20);
+		view->entry = read32(p + 24);
+		view->program_offset = read32(p + 28);
+		view->section_offset = read32(p + 32);
+		view->flags = read32(p + 36);
+		view->header_size = read16(p + 40);
+		view->program_entry_size = phentsize;
+		view->program_count = phnum;
+		view->section_entry_size = shentsize;
+		view->section_count = shnum;
+		view->section_name_index = read16(p + 50);
+	} else {
+		phentsize = read16(p + 54);
+		phnum = read16(p + 56);
+		shentsize = read16(p + 58);
+		shnum = read16(p + 60);
+		if (read16(p + 52) < MT_ELF64_EHDR_SIZE ||
+		    (phnum && phentsize < MT_ELF64_PHDR_SIZE) ||
+		    (shnum && shentsize < MT_ELF64_SHDR_SIZE) ||
+		    !table_valid(read64(p + 32), phentsize, phnum, size) ||
+		    !table_valid(read64(p + 40), shentsize, shnum, size))
+			return MT_ELF_E_LAYOUT;
+		memset(view, 0, sizeof(*view));
+		view->type = read16(p + 16);
+		view->machine = read16(p + 18);
+		view->version = read32(p + 20);
+		view->entry = read64(p + 24);
+		view->program_offset = read64(p + 32);
+		view->section_offset = read64(p + 40);
+		view->flags = read32(p + 48);
+		view->header_size = read16(p + 52);
+		view->program_entry_size = phentsize;
+		view->program_count = phnum;
+		view->section_entry_size = shentsize;
+		view->section_count = shnum;
+		view->section_name_index = read16(p + 62);
+	}
 	return MT_ELF_OK;
 }
 
@@ -103,33 +137,46 @@ mt_elf64_get_section(const void *bytes, size_t size,
 {
 	const unsigned char *p = (const unsigned char *)bytes;
 	uint64_t offset;
+	int is_elf32;
 
 	if (!p || !view || !section)
 		return MT_ELF_E_ARGUMENT;
 	if (index >= view->section_count)
 		return MT_ELF_E_LAYOUT;
-	if (view->section_entry_size < MT_ELF64_SHDR_SIZE)
+	is_elf32 = (view->section_entry_size == MT_ELF32_SHDR_SIZE);
+	if (!is_elf32 && view->section_entry_size < MT_ELF64_SHDR_SIZE)
 		return MT_ELF_E_LAYOUT;
 	if ((uint64_t)index > UINT64_MAX / view->section_entry_size)
 		return MT_ELF_E_LAYOUT;
 	offset = view->section_offset +
 	         (uint64_t)index * view->section_entry_size;
 	if (offset < view->section_offset ||
-	    !range_valid(offset, MT_ELF64_SHDR_SIZE, size))
+	    !range_valid(offset, is_elf32 ? MT_ELF32_SHDR_SIZE : MT_ELF64_SHDR_SIZE, size))
 		return MT_ELF_E_LAYOUT;
 
 	p += offset;
 	memset(section, 0, sizeof(*section));
 	section->name = read32(p + 0);
 	section->type = read32(p + 4);
-	section->flags = read64(p + 8);
-	section->address = read64(p + 16);
-	section->offset = read64(p + 24);
-	section->size = read64(p + 32);
+	if (is_elf32) {
+		section->flags = read32(p + 8);
+		section->address = read32(p + 12);
+		section->offset = read32(p + 16);
+		section->size = read32(p + 20);
+		section->link = read32(p + 24);
+		section->info = read32(p + 28);
+		section->alignment = read32(p + 32);
+		section->entry_size = read32(p + 36);
+	} else {
+		section->flags = read64(p + 8);
+		section->address = read64(p + 16);
+		section->offset = read64(p + 24);
+		section->size = read64(p + 32);
 	section->link = read32(p + 40);
 	section->info = read32(p + 44);
-	section->alignment = read64(p + 48);
-	section->entry_size = read64(p + 56);
+		section->alignment = read64(p + 48);
+		section->entry_size = read64(p + 56);
+	}
 	if (section->type != MT_SHT_NOBITS &&
 	    !range_valid(section->offset, section->size, size))
 		return MT_ELF_E_LAYOUT;
@@ -143,19 +190,22 @@ mt_elf64_get_symbol(const void *bytes, size_t size,
 {
 	const unsigned char *p = (const unsigned char *)bytes;
 	uint64_t offset;
+	int is_elf32;
 
 	if (!p || !table || !symbol)
 		return MT_ELF_E_ARGUMENT;
 	if (table->type != MT_SHT_SYMTAB && table->type != MT_SHT_DYNSYM)
 		return MT_ELF_E_ARGUMENT;
-	if (table->entry_size < MT_ELF64_SYM_SIZE ||
+	is_elf32 = (table->entry_size == MT_ELF32_SYM_SIZE);
+	if (!is_elf32 && (table->entry_size < MT_ELF64_SYM_SIZE ||
 	    table->size % table->entry_size != 0 ||
-	    index >= table->size / table->entry_size)
+	    index >= table->size / table->entry_size))
 		return MT_ELF_E_LAYOUT;
 	if (index > UINT64_MAX / table->entry_size)
 		return MT_ELF_E_LAYOUT;
 	offset = table->offset + index * table->entry_size;
-	if (offset < table->offset || !range_valid(offset, MT_ELF64_SYM_SIZE, size))
+	if (offset < table->offset || !range_valid(offset,
+	    is_elf32 ? MT_ELF32_SYM_SIZE : MT_ELF64_SYM_SIZE, size))
 		return MT_ELF_E_LAYOUT;
 
 	p += offset;
@@ -164,8 +214,13 @@ mt_elf64_get_symbol(const void *bytes, size_t size,
 	symbol->info = p[4];
 	symbol->other = p[5];
 	symbol->section = read16(p + 6);
-	symbol->value = read64(p + 8);
-	symbol->size = read64(p + 16);
+	if (is_elf32) {
+		symbol->value = read32(p + 8);
+		symbol->size = read32(p + 12);
+	} else {
+		symbol->value = read64(p + 8);
+		symbol->size = read64(p + 16);
+	}
 	return MT_ELF_OK;
 }
 
