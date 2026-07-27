@@ -1098,6 +1098,231 @@ mt_ar_foreach(const char *archive, mt_ar_data_callback callback, void *context)
 	return walk_archive(archive, data_member, &visit);
 }
 
+/* ---- In-memory archive parsing (for VFS .msys) ---- */
+
+/* Read header from memory buffer. Returns same semantics as read_header(). */
+static int
+mem_read_header(const unsigned char **pp, const unsigned char *end,
+                char raw_name[MT_AR_MEMBER_NAME_SIZE + 1], uint64_t *size)
+{
+	const unsigned char *p = *pp;
+	char *end_name;
+	size_t i;
+
+	if (end - p < MT_AR_HEADER_SIZE)
+		return end == p ? 1 : -1;
+	if (p[58] != '`' || p[59] != '\n') {
+		set_error(MT_AR_E_FORMAT);
+		return -1;
+	}
+	memcpy(raw_name, p, MT_AR_MEMBER_NAME_SIZE);
+	raw_name[MT_AR_MEMBER_NAME_SIZE] = '\0';
+	end_name = raw_name + MT_AR_MEMBER_NAME_SIZE;
+	while (end_name > raw_name && end_name[-1] == ' ')
+		--end_name;
+	*end_name = '\0';
+	for (i = 0; i < MT_AR_MEMBER_NAME_SIZE && raw_name[i] != '\0'; ++i) {
+		if ((unsigned char)raw_name[i] < 0x20 && raw_name[i] != '\t') {
+			set_error(MT_AR_E_FORMAT);
+			return -1;
+		}
+	}
+	if (parse_decimal((const char *)p + 48, 10, size) != 0) {
+		set_error(MT_AR_E_FORMAT);
+		return -1;
+	}
+	*pp = p + MT_AR_HEADER_SIZE;
+	return 0;
+}
+
+/* Load all archive members from a memory buffer into a collection. */
+static int
+load_archive_mem(const unsigned char *buf, size_t buf_size,
+                 struct ar_collection *collection)
+{
+	const unsigned char *p = buf;
+	const unsigned char *end = buf + buf_size;
+	char raw_name[MT_AR_MEMBER_NAME_SIZE + 1];
+	unsigned char *longnames = NULL;
+	uint64_t long_size = 0;
+	uint64_t member_size;
+	int result;
+
+	memset(collection, 0, sizeof(*collection));
+	if (buf_size < MT_AR_MAGIC_SIZE ||
+	    memcmp(p, MT_AR_MAGIC, MT_AR_MAGIC_SIZE) != 0) {
+		set_error(MT_AR_E_FORMAT);
+		return -1;
+	}
+	p += MT_AR_MAGIC_SIZE;
+
+	for (;;) {
+		unsigned char *data = NULL;
+		char *name = NULL;
+
+		result = mem_read_header(&p, end, raw_name, &member_size);
+		if (result == 1)
+			break;
+		if (result != 0)
+			goto fail;
+
+		result = resolve_long_name(raw_name, longnames, (size_t)long_size, &name);
+		if (result < 0)
+			goto fail;
+
+		if (result == 2) {
+			/* Long-name table */
+			free(longnames);
+			longnames = NULL;
+			if ((size_t)(end - p) < (size_t)member_size ||
+			    member_size > SIZE_MAX) {
+				set_error(MT_AR_E_FORMAT);
+				goto fail;
+			}
+			longnames = (unsigned char *)mt_malloc((size_t)member_size);
+			if (!longnames)
+				goto fail;
+			memcpy(longnames, p, (size_t)member_size);
+			long_size = member_size;
+			p += (size_t)member_size;
+			if ((member_size & 1u) != 0) {
+				if (p >= end || *p != '\n') {
+					set_error(MT_AR_E_FORMAT);
+					goto fail;
+				}
+				++p;
+			}
+			continue;
+		}
+
+		if (result == 1) {
+			/* Symbol index: skip */
+			size_t skip = (size_t)member_size;
+			if ((size_t)(end - p) < skip) {
+				set_error(MT_AR_E_FORMAT);
+				goto fail;
+			}
+			p += skip;
+			if ((member_size & 1u) != 0) {
+				if (p >= end || *p != '\n') {
+					set_error(MT_AR_E_FORMAT);
+					goto fail;
+				}
+				++p;
+			}
+			continue;
+		}
+
+		if (result >= 3) {
+			/* BSD #1/ format */
+			size_t name_len = (size_t)result;
+			if (name_len > member_size ||
+			    (size_t)(end - p) < (size_t)member_size) {
+				set_error(MT_AR_E_FORMAT);
+				goto fail;
+			}
+			data = (unsigned char *)mt_malloc((size_t)member_size);
+			if (!data)
+				goto fail;
+			memcpy(data, p, (size_t)member_size);
+			name = (char *)mt_malloc(name_len + 1);
+			if (!name) {
+				free(data);
+				goto fail;
+			}
+			memcpy(name, data, name_len);
+			name[name_len] = '\0';
+			{
+				size_t content_size = (size_t)member_size - name_len;
+				unsigned char *content = (unsigned char *)
+					mt_malloc(content_size ? content_size : 1);
+				if (!content) {
+					free(name);
+					free(data);
+					goto fail;
+				}
+				memcpy(content, data + name_len, content_size);
+				free(data);
+				data = content;
+				member_size = content_size & ~1u;
+			}
+			p += (size_t)member_size + name_len;
+			/* BSD padding already includes the name; adjust */
+			if ((member_size + name_len) & 1u) {
+				if (p >= end || *p != '\n') {
+					set_error(MT_AR_E_FORMAT);
+					free(name); free(data); goto fail;
+				}
+				++p;
+			}
+		} else {
+			/* Regular member */
+			if ((size_t)(end - p) < (size_t)member_size) {
+				set_error(MT_AR_E_FORMAT);
+				goto fail;
+			}
+			data = (unsigned char *)mt_malloc((size_t)member_size);
+			if (!data)
+				goto fail;
+			memcpy(data, p, (size_t)member_size);
+			p += (size_t)member_size;
+			if ((member_size & 1u) != 0) {
+				if (p >= end || *p != '\n') {
+					set_error(MT_AR_E_FORMAT);
+					free(name); free(data);
+					goto fail;
+				}
+				++p;
+			}
+		}
+
+		if (append_blob(collection, name, data, (size_t)member_size) != 0) {
+			free(name);
+			free(data);
+			goto fail;
+		}
+	}
+
+	free(longnames);
+	return 0;
+
+fail:
+	free(longnames);
+	free_collection(collection);
+	return -1;
+}
+
+int
+mt_ar_foreach_mem(const unsigned char *data, size_t size,
+                  mt_ar_data_callback callback, void *context)
+{
+	struct ar_collection collection;
+	struct mt_ar_member member;
+	struct data_context visit;
+	size_t i;
+	int result;
+
+	if (!data || !callback) {
+		set_error(MT_AR_E_ARGUMENT);
+		return -1;
+	}
+	if (load_archive_mem(data, size, &collection) != 0)
+		return -1;
+	visit.callback = callback;
+	visit.context = context;
+	for (i = 0; i < collection.count; ++i) {
+		member.name = collection.items[i].name;
+		member.size = collection.items[i].size;
+		result = data_member(&member, collection.items[i].data, &visit);
+		if (result != 0) {
+			free_collection(&collection);
+			return result > 0 ? 0 : -1;
+		}
+	}
+	free_collection(&collection);
+	return 0;
+}
+
 struct names_context {
 	const char *const *names;
 	size_t count;

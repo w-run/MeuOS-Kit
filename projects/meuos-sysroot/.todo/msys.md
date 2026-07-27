@@ -49,9 +49,15 @@ Data blocks: 按 data_offset 排列，4 字节对齐
 - [x] mt/ld 链接 libmsys.a
 - [x] 端到端验证通过（`make check` + `check-i386-e2e`）
 
-### Phase 4 — 构建流水线 ⬜ 待启动
+### Phase 4 — 构建流水线 + mkmsys 改进 ✅
 
-- [ ] `make msys`：自动从 sysroot 目录生成 .msys
+- [x] `msys.h`：添加 `MSYS_F_ZLIB`、`MSYS_F_ZSTD`、`MSYS_F_INCREMENTAL` 压缩标志
+- [x] `mkmsys`：添加 `--incremental`/`--compress` CLI 选项（桩实现）
+- [x] `mkmsys`：添加 `--help` 详细帮助输出
+- [x] `make msys`：自动从 sysroot 目录生成 .msys
+- [x] `make check-msys`：验证生成的 .msys 可被正确读取
+- [ ] `mkmsys --incremental` 实际增量逻辑（计划后续实现）
+- [ ] `mkmsys --compress=zlib` 实际压缩逻辑（计划后续实现，dlopen 动态加载 libz）
 - [ ] `bootstrap.sh` 阶段产出 .msys
 
 ## 验收

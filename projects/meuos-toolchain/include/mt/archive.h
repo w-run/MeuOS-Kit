@@ -57,6 +57,10 @@ int mt_ar_list(const char *archive, mt_ar_member_callback callback,
 int mt_ar_foreach(const char *archive, mt_ar_data_callback callback,
                   void *context);
 
+/* 在内存中遍历 archive 成员（用于 VFS .msys 场景，数据已在内存中时使用） */
+int mt_ar_foreach_mem(const unsigned char *data, size_t size,
+                      mt_ar_data_callback callback, void *context);
+
 /* 输出成员内容；names 为空时处理全部成员。 */
 int mt_ar_print(const char *archive, const char *const *names,
                 size_t name_count, FILE *output);

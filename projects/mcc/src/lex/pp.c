@@ -10,6 +10,7 @@
 #include "util.h"
 #include "mcc.h"
 #include "pp_internal.h"
+#include "mt/msys.h"
 
 /* Forward declarations for functions defined later */
 static FILE *openinclude(const char *, bool, char **);
@@ -69,6 +70,12 @@ static size_t macrodepth;
 
 /* include search paths supplied via -I (array of char *) */
 static struct array inclpaths;
+
+/* VFS handle for .msys sysroot — set by the driver when the sysroot
+ * is a .msys file.  Used as a fallback in openinclude() when fopen
+ * fails on real filesystem paths. */
+extern struct msys *msys_sysroot_handle;
+extern const char *msys_sysroot_path;
 
 /* files brought in via #include, tracked for -M/-MD dependency output */
 static struct array ppdeps;
@@ -592,6 +599,19 @@ openinclude(const char *name, bool angled, char **path_out)
 		strcpy(path + dlen + 1, name);
 		f = fopen(path, "r");
 		if (f) { *path_out = path; return f; }
+
+		/* If the path is within a .msys sysroot, fall back to VFS
+		 * (msys_fopen reads from the mmap'd archive).  Strip the
+		 * sysroot path prefix to get the archive-relative path. */
+		if (!f && msys_sysroot_handle && msys_sysroot_path) {
+			size_t slen = strlen(msys_sysroot_path);
+			if (strncmp(path, msys_sysroot_path, slen) == 0 && path[slen] == '/') {
+				const char *rel = path + slen + 1;  /* skip "/" */
+				f = msys_fopen(msys_sysroot_handle, rel, "r");
+				if (f) { *path_out = path; return f; }
+			}
+		}
+
 		free(path);
 	}
 	(void)angled;

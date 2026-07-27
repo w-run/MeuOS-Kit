@@ -13,6 +13,12 @@ extern "C" {
 #define MSYS_MAGIC "Msys1\0\0\0"
 #define MSYS_MAGIC_LEN 8
 
+/* Flags for msys_header.flags */
+#define MSYS_F_NONE      0x00  /* no compression */
+#define MSYS_F_ZLIB      0x01  /* zlib deflate (data blocks) */
+#define MSYS_F_ZSTD      0x02  /* zstd compression (future) */
+#define MSYS_F_INCREMENTAL 0x04  /* incremental mode (future) */
+
 /* .msys file header (32 bytes on disk) */
 struct msys_header {
 	char     magic[8];       /* "Msys1\0\0\0" */

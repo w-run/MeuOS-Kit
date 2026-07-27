@@ -4,6 +4,7 @@
 #include "mt/elf.h"
 #include "mt/elf32.h"
 #include "mt/target.h"
+#include "mt/msys.h"
 
 #include <errno.h>
 #include <stdint.h>
@@ -23,6 +24,10 @@ extern int i386_apply_reloc(unsigned reloc_type, unsigned char *place,
                             uint64_t S, int64_t A, uint64_t P);
 extern int mt_apply_arm_reloc(unsigned type, unsigned char *loc,
                               uint64_t S, int64_t A, uint64_t P);
+
+/* msys VFS support: globals from main.c */
+extern struct msys *ld_msys;
+extern int msys_vfs_load(const char *path, void **buf, size_t *size);
 
 #define LD_SHF_WRITE 0x1ULL
 #define LD_SHF_ALLOC 0x2ULL
@@ -147,6 +152,11 @@ struct ld_context {
 	uint64_t tls_tdata_size;
 	uint64_t tls_size;
 	uint64_t tls_align;
+	/* In-memory archive data (for VFS .msys archives) */
+	unsigned char **archive_mem_data;
+	size_t *archive_mem_size;
+	size_t archive_mem_count;
+	size_t archive_mem_capacity;
 	char error[512];
 };
 
@@ -496,6 +506,11 @@ free_context(struct ld_context *ctx)
 	free(ctx->groups);
 	free(ctx->globals.items);
 	free(ctx->got.items);
+	/* Free in-memory archive data (from .msys VFS) */
+	for (i = 0; i < ctx->archive_mem_count; ++i)
+		free(ctx->archive_mem_data[i]);
+	free(ctx->archive_mem_data);
+	free(ctx->archive_mem_size);
 	memset(ctx, 0, sizeof(*ctx));
 }
 
@@ -572,28 +587,42 @@ read_file(const char *path, unsigned char **data, size_t *size)
 	long length;
 	unsigned char *buffer;
 
+	/* Try regular fopen first */
 	file = fopen(path, "rb");
-	if (!file)
-		return -1;
-	if (fseek(file, 0, SEEK_END) != 0 || (length = ftell(file)) < 0 ||
-	    fseek(file, 0, SEEK_SET) != 0 || (uint64_t)length > SIZE_MAX) {
-		fclose(file);
-		return -1;
+	if (file) {
+		if (fseek(file, 0, SEEK_END) != 0 || (length = ftell(file)) < 0 ||
+		    fseek(file, 0, SEEK_SET) != 0 || (uint64_t)length > SIZE_MAX) {
+			fclose(file);
+			return -1;
+		}
+		buffer = (unsigned char *)ld_malloc((size_t)length);
+		if (!buffer || (length != 0 && fread(buffer, 1, (size_t)length, file) !=
+		                (size_t)length)) {
+			free(buffer);
+			fclose(file);
+			return -1;
+		}
+		if (fclose(file) != 0) {
+			free(buffer);
+			return -1;
+		}
+		*data = buffer;
+		*size = (size_t)length;
+		return 0;
 	}
-	buffer = (unsigned char *)ld_malloc((size_t)length);
-	if (!buffer || (length != 0 && fread(buffer, 1, (size_t)length, file) !=
-	                (size_t)length)) {
-		free(buffer);
-		fclose(file);
-		return -1;
+
+	/* Fallback: try .msys VFS for @msys: paths */
+	if (strncmp(path, "@msys:", 6) == 0) {
+		void *msys_buf = NULL;
+		size_t msys_sz = 0;
+		if (msys_vfs_load(path, &msys_buf, &msys_sz) > 0) {
+			*data = (unsigned char *)msys_buf;
+			if (size) *size = msys_sz;
+			return 0;
+		}
 	}
-	if (fclose(file) != 0) {
-		free(buffer);
-		return -1;
-	}
-	*data = buffer;
-	*size = (size_t)length;
-	return 0;
+
+	return -1;
 }
 
 static int
@@ -622,8 +651,38 @@ load_input(struct ld_context *ctx, const char *path)
 	unsigned char *data;
 	size_t size;
 	const char *suffix = strrchr(path, '.');
-	if (suffix && strcmp(suffix, ".a") == 0)
+	if (suffix && strcmp(suffix, ".a") == 0) {
+		/* For .a files from msys VFS, read the data and store it in-memory
+		 * so extract_archives can use mt_ar_foreach_mem(). */
+		if (strncmp(path, "@msys:", 6) == 0) {
+			void *msys_buf = NULL;
+			size_t msys_sz = 0;
+			if (msys_vfs_load(path, &msys_buf, &msys_sz) <= 0)
+				return ld_errorf(ctx, "cannot read archive from .msys", path);
+			/* Store in in-memory archive array */
+			if (ctx->archive_mem_count == ctx->archive_mem_capacity) {
+				size_t cap = ctx->archive_mem_capacity
+					? ctx->archive_mem_capacity * 2 : 8;
+				unsigned char **d = (unsigned char **)ld_realloc(
+					ctx->archive_mem_data, cap * sizeof(*d));
+				size_t *s = (size_t *)ld_realloc(
+					ctx->archive_mem_size, cap * sizeof(*s));
+				if (!d || !s) {
+					free(d); free(s);
+					return ld_error(ctx, "out of memory");
+				}
+				ctx->archive_mem_data = d;
+				ctx->archive_mem_size = s;
+				ctx->archive_mem_capacity = cap;
+			}
+			ctx->archive_mem_data[ctx->archive_mem_count] =
+				(unsigned char *)msys_buf;
+			ctx->archive_mem_size[ctx->archive_mem_count] = msys_sz;
+			ctx->archive_mem_count++;
+			return remember_archive(ctx, path);
+		}
 		return remember_archive(ctx, path);
+	}
 	if (read_file(path, &data, &size) != 0)
 		return ld_errorf(ctx, "cannot read input", path);
 	if (append_object(ctx, path, data, size) != 0) {
@@ -1058,10 +1117,22 @@ extract_archives(struct ld_context *ctx)
 			struct archive_extract_context extract = {
 				.ctx = ctx, .archive = ctx->archives.paths[i], .added = 0
 			};
-			if (mt_ar_foreach(ctx->archives.paths[i], extract_archive_member,
-			                  &extract) != 0)
-				return ld_errorf(ctx, "cannot extract archive",
-				                 ctx->archives.paths[i]);
+			/* Use in-memory archive data if available (VFS .msys) */
+			if (i < ctx->archive_mem_count &&
+			    ctx->archive_mem_data[i] != NULL) {
+				if (mt_ar_foreach_mem(ctx->archive_mem_data[i],
+				                      ctx->archive_mem_size[i],
+				                      extract_archive_member,
+				                      &extract) != 0)
+					return ld_errorf(ctx, "cannot extract archive",
+					                 ctx->archives.paths[i]);
+			} else {
+				if (mt_ar_foreach(ctx->archives.paths[i],
+				                  extract_archive_member,
+				                  &extract) != 0)
+					return ld_errorf(ctx, "cannot extract archive",
+					                 ctx->archives.paths[i]);
+			}
 			if (extract.added)
 				changed = 1;
 		}

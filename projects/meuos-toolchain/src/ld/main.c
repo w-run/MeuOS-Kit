@@ -31,6 +31,10 @@ usage(FILE *out)
 	        "  -static          static link (default, ignored for compat)\n");
 }
 
+/* Forward declarations for msys VFS helpers (defined below). */
+static int find_library_msys(const char *name, char *result, size_t result_size);
+static int find_library_msys_exact(const char *name, char *result, size_t result_size);
+
 /* Search for lib<name>.a in search paths; return 0 on success. */
 static int
 find_library(const char *name, const char **libpaths, int libpath_count,
@@ -43,24 +47,11 @@ find_library(const char *name, const char **libpaths, int libpath_count,
 		if (stat(result, &st) == 0 && S_ISREG(st.st_mode))
 			return 0;
 	}
-	return -1;
+	/* Fallback: search in .msys VFS handles */
+	return find_library_msys(name, result, result_size);
 }
 
-/* ---- .msys single-file sysroot support ---- */
-
-/* Track the temp sysroot path for atexit cleanup. */
-static char *msys_temp_sysroot = NULL;
-
-static void
-cleanup_msys_temp(void)
-{
-	if (msys_temp_sysroot) {
-		char cmd[4096];
-		snprintf(cmd, sizeof(cmd), "rm -rf %s", msys_temp_sysroot);
-		system(cmd);
-		msys_temp_sysroot = NULL;
-	}
-}
+/* ---- .msys single-file sysroot VFS support ---- */
 
 /* Check if a path ends with ".msys". */
 static int
@@ -70,95 +61,107 @@ msys_is_sysroot(const char *path)
 	return len >= 5 && strcmp(path + len - 5, ".msys") == 0;
 }
 
-/* Extract all files from a .msys archive to a target directory. */
-static int
-msys_extract_to(const char *msys_path, const char *dest)
+/* Global msys handles for VFS zero-extract mode. */
+struct msys *ld_msys = NULL;
+#define LD_MAX_MSYS_LIBS 16
+static struct msys *ld_msys_libs[LD_MAX_MSYS_LIBS] = {NULL};
+static int ld_msys_lib_count = 0;
+
+/* Cleanup all msys handles at exit. */
+static void
+cleanup_msys_vfs(void)
 {
-	struct msys *m = msys_open(msys_path);
-	unsigned char *index_bytes;
-	char path_buf[4096];
-	size_t i;
-
-	if (!m)
-		return -1;
-
-	index_bytes = (unsigned char *)m->index;
-
-	for (i = 0; i < m->hdr->index_count; ) {
-		struct msys_index_entry *entry = (struct msys_index_entry *)(index_bytes);
-		uint16_t name_len = (uint16_t)entry->name_len[0] |
-		                    ((uint16_t)entry->name_len[1] << 8);
-		uint64_t d_off = (uint64_t)entry->data_offset[0] |
-		                 ((uint64_t)entry->data_offset[1] << 8) |
-		                 ((uint64_t)entry->data_offset[2] << 16) |
-		                 ((uint64_t)entry->data_offset[3] << 24) |
-		                 ((uint64_t)entry->data_offset[4] << 32) |
-		                 ((uint64_t)entry->data_offset[5] << 40);
-		uint32_t d_size = (uint32_t)entry->data_size[0] |
-		                  ((uint32_t)entry->data_size[1] << 8) |
-		                  ((uint32_t)entry->data_size[2] << 16) |
-		                  ((uint32_t)entry->data_size[3] << 24);
-		char *fname = (char *)(index_bytes + 16);
-		const void *data = (const char *)m->base + d_off;
-		FILE *out;
-		size_t j;
-
-		if (name_len >= sizeof(path_buf) - 1)
-			name_len = sizeof(path_buf) - 1;
-		memcpy(path_buf, dest, strlen(dest));
-		path_buf[strlen(dest)] = '/';
-		memcpy(path_buf + strlen(dest) + 1, fname, name_len);
-		path_buf[strlen(dest) + 1 + name_len] = '\0';
-
-		/* Create subdirectories */
-		for (j = strlen(dest) + 1; path_buf[j]; ++j) {
-			if (path_buf[j] == '/') {
-				char saved = path_buf[j];
-				path_buf[j] = '\0';
-				mkdir(path_buf, 0755);
-				path_buf[j] = saved;
-			}
-		}
-
-		out = fopen(path_buf, "wb");
-		if (!out) {
-			perror(path_buf);
-			msys_close(m);
-			return -1;
-		}
-		if (fwrite(data, 1, d_size, out) != d_size) {
-			fclose(out);
-			msys_close(m);
-			return -1;
-		}
-		fclose(out);
-
-		i++;
-		index_bytes += 16 + name_len;
+	int i;
+	if (ld_msys) {
+		msys_close(ld_msys);
+		ld_msys = NULL;
 	}
-
-	msys_close(m);
-	return 0;
+	for (i = 0; i < ld_msys_lib_count; ++i) {
+		if (ld_msys_libs[i]) {
+			msys_close(ld_msys_libs[i]);
+			ld_msys_libs[i] = NULL;
+		}
+	}
 }
 
-/* Open a .msys file by extracting to a temp directory.
- * Returns the temp directory path (owned by atexit cleanup), or NULL on error. */
-static char *
-msys_sysroot_open(const char *sysroot_path)
+/* Try to find a library inside all available msys handles.
+ * Returns 0 with result set to "@msys:ID:internal_path" on success. */
+static int
+find_library_msys(const char *name, char *result, size_t result_size)
 {
-	char template[] = "/tmp/meuos-ld-sysroot-XXXXXX";
+	size_t sz;
 
-	if (!msys_is_sysroot(sysroot_path))
-		return NULL;
-	if (mkdtemp(template) == NULL)
-		return NULL;
-	if (msys_extract_to(sysroot_path, template) != 0) {
-		char cmd[4096];
-		snprintf(cmd, sizeof(cmd), "rm -rf %s", template);
-		system(cmd);
-		return NULL;
+	/* Primary sysroot msys handle */
+	if (ld_msys) {
+		/* Write directly to result to avoid -Wformat-truncation false positive.
+		 * Build: "@msys:0:usr/lib/lib<name>.a" */
+		snprintf(result, result_size, "@msys:0:usr/lib/lib%s.a", name);
+		if (msys_search(ld_msys, result + 7, &sz))
+			return 0;
 	}
-	return strdup(template);
+	/* Extra -L .msys handles */
+	for (int i = 0; i < ld_msys_lib_count; ++i) {
+		if (!ld_msys_libs[i]) continue;
+		snprintf(result, result_size, "@msys:%d:usr/lib/lib%s.a", i + 1, name);
+		/* Skip past "@msys:N:" to get the internal path for search */
+		const char *internal = strchr(result + 6, ':') + 1;
+		if (internal && msys_search(ld_msys_libs[i], internal, &sz))
+			return 0;
+	}
+	return -1;
+}
+
+/* Try to find an exact filename inside all msys handles.
+ * Constructs "usr/lib/<name>" since that's how search paths map to .msys. */
+static int
+find_library_msys_exact(const char *name, char *result, size_t result_size)
+{
+	size_t sz;
+
+	if (ld_msys) {
+		snprintf(result, result_size, "@msys:0:usr/lib/%s", name);
+		if (msys_search(ld_msys, result + 7, &sz))
+			return 0;
+	}
+	for (int i = 0; i < ld_msys_lib_count; ++i) {
+		if (!ld_msys_libs[i]) continue;
+		snprintf(result, result_size, "@msys:%d:usr/lib/%s", i + 1, name);
+		const char *internal = strchr(result + 6, ':') + 1;
+		if (internal && msys_search(ld_msys_libs[i], internal, &sz))
+			return 0;
+	}
+	return -1;
+}
+
+/* Resolve a @msys:HANDLE_ID:internal_path reference.
+ * Returns bytes loaded on success (buf is malloc'd), or -1 on error (errno set). */
+int
+msys_vfs_load(const char *path, void **buf, size_t *size)
+{
+	int id;
+	const char *internal;
+	struct msys *handle;
+
+	if (strncmp(path, "@msys:", 6) != 0)
+		return -1;
+
+	id = atoi(path + 6);
+	internal = strchr(path + 6, ':');
+	if (!internal)
+		return -1;
+	internal++;
+
+	if (id == 0)
+		handle = ld_msys;
+	else if (id >= 1 && id <= ld_msys_lib_count)
+		handle = ld_msys_libs[id - 1];
+	else
+		return -1;
+
+	if (!handle)
+		return -1;
+
+	return msys_load(handle, internal, buf, size);
 }
 
 int
@@ -231,15 +234,15 @@ main(int argc, char **argv)
 		if (strncmp(argv[i], "--sysroot=", 10) == 0) {
 			sysroot = argv[i] + 10;
 			if (msys_is_sysroot(sysroot)) {
-				char *tmp = msys_sysroot_open(sysroot);
-				if (!tmp) {
-					fprintf(stderr, "ld: failed to extract .msys sysroot: %s\n",
+				ld_msys = msys_open(sysroot);
+				if (!ld_msys) {
+					fprintf(stderr, "ld: failed to open .msys sysroot: %s\n",
 					        sysroot);
 					return 2;
 				}
-				sysroot = tmp;
-				msys_temp_sysroot = tmp;
-				atexit(cleanup_msys_temp);
+				/* Keep sysroot pointing to .msys path -- no extraction.
+				 * read_file() will fall back to msys_load when fopen fails. */
+				atexit(cleanup_msys_vfs);
 			}
 			continue;
 		}
@@ -251,30 +254,42 @@ main(int argc, char **argv)
 			}
 			sysroot = argv[i];
 			if (msys_is_sysroot(sysroot)) {
-				char *tmp = msys_sysroot_open(sysroot);
-				if (!tmp) {
-					fprintf(stderr, "ld: failed to extract .msys sysroot: %s\n",
+				ld_msys = msys_open(sysroot);
+				if (!ld_msys) {
+					fprintf(stderr, "ld: failed to open .msys sysroot: %s\n",
 					        sysroot);
 					return 2;
 				}
-				sysroot = tmp;
-				msys_temp_sysroot = tmp;
-				atexit(cleanup_msys_temp);
 			}
 			continue;
 		}
 		/* -L<dir> or -L <dir> */
 		if (argv[i][0] == '-' && argv[i][1] == 'L') {
+			const char *Lpath;
 			if (argv[i][2]) {
-				if (libpath_count < MAX_LIBPATHS)
-					libpaths[libpath_count++] = argv[i] + 2;
+				Lpath = argv[i] + 2;
 			} else {
 				if (++i >= argc) {
 					usage(stderr);
 					return 2;
 				}
-				if (libpath_count < MAX_LIBPATHS)
-					libpaths[libpath_count++] = argv[i];
+				Lpath = argv[i];
+			}
+			/* If -L points to a .msys file, open it as a VFS handle */
+			if (msys_is_sysroot(Lpath)) {
+				if (ld_msys_lib_count < LD_MAX_MSYS_LIBS) {
+					struct msys *m = msys_open(Lpath);
+					if (!m) {
+						fprintf(stderr, "ld: failed to open -L .msys: %s\n", Lpath);
+						return 2;
+					}
+					ld_msys_libs[ld_msys_lib_count++] = m;
+				} else {
+					fprintf(stderr, "ld: too many -L .msys files\n");
+					return 2;
+				}
+			} else if (libpath_count < MAX_LIBPATHS) {
+				libpaths[libpath_count++] = Lpath;
 			}
 			continue;
 		}
@@ -304,8 +319,11 @@ main(int argc, char **argv)
 						break;
 				}
 				if (j >= npaths) {
-					fprintf(stderr, "ld: cannot find -l:%s\n", libname);
-					return 1;
+					/* Fallback: search in .msys VFS handles */
+					if (find_library_msys_exact(libname, path, sizeof(path)) != 0) {
+						fprintf(stderr, "ld: cannot find -l:%s\n", libname);
+						return 1;
+					}
 				}
 			} else if (find_library(libname, paths, npaths, path, sizeof(path)) != 0) {
 				fprintf(stderr, "ld: cannot find -l%s\n", libname);

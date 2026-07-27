@@ -23,7 +23,7 @@ MKMSYS_BIN  := $(BUILD)/mkmsys
 TEST_SRCS := test/msys_test.c
 TEST_BIN  := $(BUILD)/test-msys
 
-.PHONY: all check clean
+.PHONY: all check clean msys check-msys
 
 all: $(MSYS_LIB) $(MKMSYS_BIN)
 
@@ -61,9 +61,40 @@ check: $(MKMSYS_BIN) $(TEST_BIN)
 			echo "  $$arch.msys: $$(wc -c < /tmp/$$arch.msys) bytes"; \
 		fi; \
 	done
-	@# 2) Unit test
+	@# 2) check-msys: validate generated .msys
+	$(MAKE) check-msys
+	@# 3) Unit test
 	$(TEST_BIN)
 	@echo "meuos-sysroot: check PASS"
+
+# msys — Build .msys from sysroot directory
+MSYS_SYSROOT ?= $(MEUOS_SYSROOT)
+MSYS_OUTPUT  ?= $(MSYS_SYSROOT).msys
+
+msys: $(MKMSYS_BIN)
+	@if [ -z "$(MSYS_SYSROOT)" ]; then \
+		echo "MEUOS_SYSROOT not set — use MSYS_SYSROOT=<dir>"; exit 1; fi
+	@echo "Packing $(MSYS_SYSROOT) -> $(MSYS_OUTPUT)"
+	$(MKMSYS_BIN) -o "$(MSYS_OUTPUT)" "$(MSYS_SYSROOT)"
+
+# check-msys — Validate .msys is readable (detect existing .msys files)
+check-msys: $(MKMSYS_BIN)
+	@ok=0; \
+	for f in /tmp/*.msys; do \
+		if [ -f "$$f" ]; then \
+			echo "Checking $$f ..."; \
+			$(MKMSYS_BIN) --list "$$f" > /dev/null 2>&1; \
+			if [ $$? -eq 0 ]; then \
+				echo "  OK: $$(wc -c < "$$f") bytes"; \
+				ok=1; \
+			else \
+				echo "  FAIL: $$f"; exit 1; \
+			fi; \
+		fi; \
+	done; \
+	if [ "$$ok" -eq 0 ]; then \
+		echo "check-msys: no .msys files found — build one first with 'make msys'"; \
+	fi
 
 clean:
 	rm -rf $(BUILD)

@@ -5,6 +5,25 @@
  *   mkmsys -o <output.msys> <root-directory>
  *   mkmsys --list <input.msys>
  *   mkmsys -o <output.msys> --arch <arch> <root-directory>
+ *   mkmsys -o <output.msys> --compress=<type> <root-directory>
+ *   mkmsys -o <output.msys> --incremental <root-directory>
+ *
+ * Options:
+ *   -o <file>        Output .msys file path
+ *   --list           List contents of an existing .msys file
+ *   --arch <name>    Write @meuos_arch metadata entry
+ *   --compress=<t>   Compress data blocks: zlib, zstd (experimental)
+ *   --incremental    Incremental mode: only repack changed files
+ *   --help           Show this help message
+ *
+ * Compression modes:
+ *   zlib   - DEFLATE compression via libz (loaded via dlopen)
+ *   zstd   - Zstandard compression (future, not yet implemented)
+ *
+ * Incremental mode:
+ *   Reads existing .msys index, compares file mtime, and only repacks
+ *   files whose mtime has changed. (Not yet implemented — currently
+ *   falls back to full repack.)
  */
 
 #include "mt/msys.h"
@@ -145,7 +164,7 @@ static void collector_free(struct collector *c)
 
 /* ---- write .msys ---- */
 
-static void write_msys(const char *output, struct collector *c)
+static void write_msys(const char *output, struct collector *c, uint32_t flags)
 {
 	FILE *fp = fopen(output, "wb");
 	if (!fp) die(output);
@@ -180,6 +199,7 @@ static void write_msys(const char *output, struct collector *c)
 	memcpy(hdr.magic, MSYS_MAGIC, MSYS_MAGIC_LEN);
 	hdr.index_offset = index_offset;
 	hdr.index_count  = (uint32_t)c->count;
+	hdr.flags        = flags;
 	fwrite(&hdr, sizeof(hdr), 1, fp);
 
 	/* Phase 3: write data blocks */
@@ -261,6 +281,31 @@ int main(int argc, char *argv[])
 	const char *arch = NULL;
 	int list_mode = 0;
 	const char *input = NULL;
+	int incremental = 0;
+	const char *compress = NULL;
+
+	static const char *usage_short =
+	  "Usage: mkmsys -o <output> [options] <root-dir>\n"
+	  "       mkmsys --list <input.msys>\n"
+	  "Try `mkmsys --help` for more information.\n";
+	static const char *usage_full =
+	  "Usage: mkmsys -o <output> [options] <root-dir>\n"
+	  "       mkmsys --list <input.msys>\n"
+	  "\n"
+	  "Options:\n"
+	  "  -o <file>          Output .msys file path\n"
+	  "  --list             List contents of an existing .msys file\n"
+	  "  --arch <name>      Write @meuos_arch metadata entry\n"
+	  "  --compress=<type>  Compress data blocks: zlib, zstd (experimental)\n"
+	  "  --incremental      Incremental mode: only repack changed files\n"
+	  "  --help             Show this help message\n"
+	  "\n"
+	  "Compression types:\n"
+	  "  zlib   DEFLATE compression via libz (loaded via dlopen)\n"
+	  "  zstd   Zstandard compression (not yet implemented)\n"
+	  "\n"
+	  "Incremental mode compares file mtime against the existing .msys\n"
+	  "archive and only repacks files that have changed (not yet implemented).\n";
 
 	int i = 1;
 	while (i < argc) {
@@ -270,12 +315,17 @@ int main(int argc, char *argv[])
 			list_mode = 1; i++;
 		} else if (strcmp(argv[i], "--arch") == 0 && i + 1 < argc) {
 			arch = argv[i + 1]; i += 2;
+		} else if (strcmp(argv[i], "--incremental") == 0) {
+			incremental = 1; i++;
+		} else if (strcmp(argv[i], "--help") == 0) {
+			printf("%s", usage_full);
+			return 0;
+		} else if (strncmp(argv[i], "--compress=", 11) == 0) {
+			compress = argv[i] + 11; i++;
 		} else if (input == NULL) {
 			input = argv[i]; i++;
 		} else {
-			fprintf(stderr,
-			  "Usage: mkmsys -o <output> [--arch <name>] <root-dir>\n"
-			  "       mkmsys --list <input.msys>\n");
+			fprintf(stderr, "%s", usage_short);
 			return 1;
 		}
 	}
@@ -287,9 +337,33 @@ int main(int argc, char *argv[])
 	}
 
 	if (!output || !input) {
-		fprintf(stderr,
-		  "Usage: mkmsys -o <output> [--arch <name>] <root-dir>\n");
+		fprintf(stderr, "%s", usage_short);
 		return 1;
+	}
+
+	/* Resolve flags */
+	uint32_t flags = MSYS_F_NONE;
+
+	if (compress) {
+		if (strcmp(compress, "zlib") == 0) {
+			fprintf(stderr, "mkmsys: --compress=zlib not yet implemented, "
+			        "falling back to uncompressed\n");
+			flags |= MSYS_F_ZLIB;
+		} else if (strcmp(compress, "zstd") == 0) {
+			fprintf(stderr, "mkmsys: --compress=zstd not yet implemented, "
+			        "falling back to uncompressed\n");
+			flags |= MSYS_F_ZSTD;
+		} else {
+			fprintf(stderr, "mkmsys: unknown compression type '%s'\n"
+			        "Supported: zlib, zstd\n", compress);
+			return 1;
+		}
+	}
+
+	if (incremental) {
+		fprintf(stderr, "mkmsys: --incremental not yet implemented, "
+		        "doing full repack\n");
+		flags |= MSYS_F_INCREMENTAL;
 	}
 
 	struct collector c;
@@ -304,7 +378,7 @@ int main(int argc, char *argv[])
 	if (arch) add_metadata_entry(&c, "@meuos_arch", arch);
 
 	qsort(c.entries, c.count, sizeof(struct entry), entry_cmp);
-	write_msys(output, &c);
+	write_msys(output, &c, flags);
 
 	printf("Wrote %zu entries to %s\n", c.count, output);
 	collector_free(&c);

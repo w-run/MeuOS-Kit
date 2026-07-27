@@ -29,8 +29,13 @@
 #include "driver_internal.h"
 
 /* .msys single-file sysroot support */
+#include "mt/msys.h"
 int msys_is_sysroot(const char *path);
-char *msys_sysroot_open(const char *sysroot_path);
+struct msys *msys_sysroot_open(const char *sysroot_path);
+/* Global msys handle and path exposed to the preprocessor (pp.c) for
+ * VFS-based include file reading (msys_fopen fallback). */
+struct msys *msys_sysroot_handle;
+const char *msys_sysroot_path;
 
 /* Global IR backend state (declared extern in ir.h).
  * Per-arch Target objects are declared extern in driver_internal.h. */
@@ -89,7 +94,7 @@ main(int argc, char *argv[])
 	bool verbose = false, nostdinc = false, nostdlib = false, nodefaultlibs = false;
 	bool static_link = false, shared = false, pic = false, meuos_specs = false;
 	char *output = NULL, *target = NULL, *first_input = NULL, *sysroot = NULL;
-	char *msys_sysroot_path = NULL;
+	struct msys *msys_handle = NULL;
 	int depmode = 0;       /* 0 none, 1 -M, 2 -MM, 3 -MD, 4 -MMD */
 	char *depfile = NULL;
 	int i;
@@ -274,14 +279,18 @@ main(int argc, char *argv[])
 			static_link = true;
 	}
 	if (sysroot) {
-		/* If sysroot is a .msys file, extract to temp directory */
+		/* If sysroot is a .msys file, open via VFS instead of extracting */
 		if (msys_is_sysroot(sysroot)) {
-			msys_sysroot_path = msys_sysroot_open(sysroot);
-			if (msys_sysroot_path)
-				sysroot = msys_sysroot_path;
+			msys_handle = msys_sysroot_open(sysroot);
+			if (msys_handle)
+				msys_sysroot_path = sysroot;
 		}
-		arrayaddptr(&libdirs, sysrootpath(sysroot, "lib"));
-		arrayaddptr(&libdirs, sysrootpath(sysroot, "usr/lib"));
+		/* For .msys sysroots, skip libdirs (lib/ and usr/lib/ do not exist
+		 * as real directories — library files are accessed via VFS). */
+		if (!msys_is_sysroot(sysroot)) {
+			arrayaddptr(&libdirs, sysrootpath(sysroot, "lib"));
+			arrayaddptr(&libdirs, sysrootpath(sysroot, "usr/lib"));
+		}
 	}
 
 	/* An invocation containing only linkable inputs must bypass lexing and
