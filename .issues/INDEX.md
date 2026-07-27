@@ -81,8 +81,8 @@ src/compat/
 
 | ID | 组件 | 架构 | 描述 | 状态 |
 |----|------|------|------|------|
-| bug-riscv64-emit | mcc backend | riscv64 | `riscv64_emit.c:664 assert(isreg(rb))` — emit 条件分支 slot/const 未 reg 降级 | 🔴 |
-| bug-loong64-emit | mcc backend | loongarch64 | `loongarch64_emit.c:514 assert(isreg(rb))` — 同上模式 | 🔴 |
+| bug-riscv64-emit | mcc backend | riscv64 | `riscv64_emit.c:664 assert(isreg(rb))` — emit 条件分支 slot/const 未 reg 降级 | 🟢 |
+| bug-loong64-emit | mcc backend | loongarch64 | `loongarch64_emit.c:514 assert(isreg(rb))` — 同上模式 | 🟢 |
 | bug-arm-isel | mcc backend | arm | `arm_isel.c: slot %(null) is read but never stored to` — IR 诊断阻塞 self-rebuild | 🔴 |
 | bug-i386-tls | mcc isel/sema | i386 | TLS 模型选择：非静态 `_Thread_local` 发出 IE(`@gotntpoff`) 而非 LE(`@ntpoff`) | 🔴 |
 | bug-loong64-tls-reloc | mt/ld | loongarch64 | TLS LE 重定位 `.tdata` 初始值损坏（`2a000000` → `20c30000`） | 🔴 |
@@ -312,10 +312,10 @@ enum target_feature {
 | libc 运行时 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | mt/as | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | mt/ld | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| libc 全量构建 | ✅ | ✅ | ❌ bug-riscv64-emit | ✅ | ❌ bug-loong64-emit/bug-loong64-tls-reloc | ✅ |
+| libc 全量构建 | ✅ | ✅ | ✅ bug-riscv64-emit | ✅ | ✅ bug-loong64-emit/bug-loong64-tls-reloc | ✅ |
 | qemu 运行时验证 | ✅ 完整 | ✅ 完整 | ⚠️ exit=42 | ⚠️ qemu system | ⚠️ exit=42 | ✅ 完整 |
-| TLS 端到端 | ✅ | ✅ | ❌ bug-riscv64-emit | ❌ bug-i386-tls | ❌ bug-loong64-tls-reloc/bug-loong64-tls-errno | ✅ |
-| self-rebuild | ✅ | ✅ | ❌ bug-riscv64-emit | ❌ bug-i386-tls | ❌ bug-loong64-emit | ❌ bug-arm-isel |
+| TLS 端到端 | ✅ | ✅ | ✅ bug-riscv64-emit | ❌ bug-i386-tls | ❌ bug-loong64-tls-reloc/bug-loong64-tls-errno | ✅ |
+| self-rebuild | ✅ | ✅ | ✅ bug-riscv64-emit | ❌ bug-i386-tls | ✅ bug-loong64-emit | ❌ bug-arm-isel |
 | 动态链接 | 🔄 ld-shared...ld-so | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
 | DWARF 调试信息 | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
 | mcc 诊断/警告 | 🔄 mcc-diagnostics...mcc-generic | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
@@ -707,10 +707,10 @@ readelf 已实现部分 DWARF 节区头解析。
 | libc 运行时 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | mt/as | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | mt/ld | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| libc 全量构建 | ✅ | ✅ | ❌ bug-riscv64-emit | ✅ | ❌ bug-loong64-emit/bug-loong64-tls-reloc | ✅ |
+| libc 全量构建 | ✅ | ✅ | ✅ bug-riscv64-emit | ✅ | ✅ bug-loong64-emit/bug-loong64-tls-reloc | ✅ |
 | qemu 运行时验证 | ✅ 完整 | ✅ 完整 | ⚠️ exit=42 | ⚠️ qemu system | ⚠️ exit=42 | ✅ 完整 |
-| TLS 端到端 | ✅ | ✅ | ❌ bug-riscv64-emit | ❌ bug-i386-tls | ❌ bug-loong64-tls-reloc/bug-loong64-tls-errno | ✅ |
-| self-rebuild | ✅ | ✅ | ❌ bug-riscv64-emit | ❌ bug-i386-tls | ❌ bug-loong64-emit | ❌ bug-arm-isel |
+| TLS 端到端 | ✅ | ✅ | ✅ bug-riscv64-emit | ❌ bug-i386-tls | ❌ bug-loong64-tls-reloc/bug-loong64-tls-errno | ✅ |
+| self-rebuild | ✅ | ✅ | ✅ bug-riscv64-emit | ❌ bug-i386-tls | ✅ bug-loong64-emit | ❌ bug-arm-isel |
 | 动态链接 | 🔄 ld-shared...ld-so | 🔄 ld-shared...ld-so | 🔄 ld-shared...ld-so | 🔄 ld-shared...ld-so | 🔄 ld-shared...ld-so | 🔄 ld-shared...ld-so |
 | DWARF 调试信息 | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge |
 

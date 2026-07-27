@@ -650,16 +650,24 @@ rv64_emitfn(Fn *fn, FILE *f)
 				ra = rb;
 				rb = rt;
 			}
-			if (rtype(ra) == RSlot) {
-				ii.arg[0] = ra;
-				emitf("lw t6, %M0", &ii, fn, f);
-				ra = TMP(T6);
-			}
-			if (rtype(rb) == RSlot) {
-				ii.arg[0] = rb;
-				emitf("lw t6, %M0", &ii, fn, f);
-				rb = TMP(T6);
-			}
+		if (rtype(ra) == RSlot) {
+			ii.arg[0] = ra;
+			emitf("lw t6, %M0", &ii, fn, f);
+			ra = TMP(T6);
+		}
+		if (rtype(ra) == RCon) {
+			loadcon(&fn->con[ra.val], T6, Kl, f);
+			ra = TMP(T6);
+		}
+		if (rtype(rb) == RSlot) {
+			ii.arg[0] = rb;
+			emitf("lw t6, %M0", &ii, fn, f);
+			rb = TMP(T6);
+		}
+		if (rtype(rb) == RCon) {
+			loadcon(&fn->con[rb.val], T6, Kl, f);
+			rb = TMP(T6);
+		}
 			assert(isreg(ra));
 			assert(isreg(rb));
 			fprintf(f,

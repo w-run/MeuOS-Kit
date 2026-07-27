@@ -505,9 +505,17 @@ la64_emitfn(Fn *fn, FILE *f)
 				emitf("ld.w $t8, %M0", &ii, fn, f);
 				ra = TMP(T8);
 			}
+			if (rtype(ra) == RCon) {
+				loadcon(&fn->con[ra.val], T8, Kl, f);
+				ra = TMP(T8);
+			}
 			if (rtype(rb) == RSlot) {
 				ii.arg[0] = rb;
 				emitf("ld.w $t8, %M0", &ii, fn, f);
+				rb = TMP(T8);
+			}
+			if (rtype(rb) == RCon) {
+				loadcon(&fn->con[rb.val], T8, Kl, f);
 				rb = TMP(T8);
 			}
 			assert(isreg(ra));
