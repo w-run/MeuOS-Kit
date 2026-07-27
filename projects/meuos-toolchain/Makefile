@@ -12,8 +12,8 @@ PREFIX ?= /usr
 DESTDIR ?=
 BUILD ?= build
 
-CPPFLAGS += -Iinclude
-CFLAGS ?= -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror
+CPPFLAGS += -Iinclude -I../meuos-sysroot/include
+CFLAGS ?= -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -D_POSIX_C_SOURCE=200809L
 CFLAGS += -MMD -MP
 LDFLAGS ?=
 LDLIBS ?=
@@ -90,7 +90,7 @@ $(AS_BIN): $(AS_OBJS) $(TARGET_OBJS) $(LIBELF_LIB)
 
 $(LD_BIN): $(LD_OBJS) $(AR_CORE_OBJ) $(TARGET_OBJS) $(LIBELF_LIB)
 	@mkdir -p $(dir $@)
-	$(HOST_CC) $(LDFLAGS) -o $@ $(LD_OBJS) $(AR_CORE_OBJ) $(TARGET_OBJS) $(LIBELF_LIB) $(LDLIBS)
+	$(HOST_CC) $(LDFLAGS) -o $@ $(LD_OBJS) $(AR_CORE_OBJ) $(TARGET_OBJS) $(LIBELF_LIB) -L../meuos-sysroot/build -lmsys $(LDLIBS)
 
 $(RANLIB_BIN): $(RANLIB_OBJS) $(LIBELF_LIB)
 	@mkdir -p $(dir $@)

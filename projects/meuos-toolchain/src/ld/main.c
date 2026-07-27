@@ -1,11 +1,13 @@
 /* ld - MeuOS Toolchain static linker with multi-arch ELF output. */
 #include "mt/ld.h"
 #include "mt/target.h"
+#include "mt/msys.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #define MT_LD_VERSION "0.2.0"
 #define MAX_INPUTS 512
@@ -42,6 +44,121 @@ find_library(const char *name, const char **libpaths, int libpath_count,
 			return 0;
 	}
 	return -1;
+}
+
+/* ---- .msys single-file sysroot support ---- */
+
+/* Track the temp sysroot path for atexit cleanup. */
+static char *msys_temp_sysroot = NULL;
+
+static void
+cleanup_msys_temp(void)
+{
+	if (msys_temp_sysroot) {
+		char cmd[4096];
+		snprintf(cmd, sizeof(cmd), "rm -rf %s", msys_temp_sysroot);
+		system(cmd);
+		msys_temp_sysroot = NULL;
+	}
+}
+
+/* Check if a path ends with ".msys". */
+static int
+msys_is_sysroot(const char *path)
+{
+	size_t len = path ? strlen(path) : 0;
+	return len >= 5 && strcmp(path + len - 5, ".msys") == 0;
+}
+
+/* Extract all files from a .msys archive to a target directory. */
+static int
+msys_extract_to(const char *msys_path, const char *dest)
+{
+	struct msys *m = msys_open(msys_path);
+	unsigned char *index_bytes;
+	char path_buf[4096];
+	size_t i;
+
+	if (!m)
+		return -1;
+
+	index_bytes = (unsigned char *)m->index;
+
+	for (i = 0; i < m->hdr->index_count; ) {
+		struct msys_index_entry *entry = (struct msys_index_entry *)(index_bytes);
+		uint16_t name_len = (uint16_t)entry->name_len[0] |
+		                    ((uint16_t)entry->name_len[1] << 8);
+		uint64_t d_off = (uint64_t)entry->data_offset[0] |
+		                 ((uint64_t)entry->data_offset[1] << 8) |
+		                 ((uint64_t)entry->data_offset[2] << 16) |
+		                 ((uint64_t)entry->data_offset[3] << 24) |
+		                 ((uint64_t)entry->data_offset[4] << 32) |
+		                 ((uint64_t)entry->data_offset[5] << 40);
+		uint32_t d_size = (uint32_t)entry->data_size[0] |
+		                  ((uint32_t)entry->data_size[1] << 8) |
+		                  ((uint32_t)entry->data_size[2] << 16) |
+		                  ((uint32_t)entry->data_size[3] << 24);
+		char *fname = (char *)(index_bytes + 16);
+		const void *data = (const char *)m->base + d_off;
+		FILE *out;
+		size_t j;
+
+		if (name_len >= sizeof(path_buf) - 1)
+			name_len = sizeof(path_buf) - 1;
+		memcpy(path_buf, dest, strlen(dest));
+		path_buf[strlen(dest)] = '/';
+		memcpy(path_buf + strlen(dest) + 1, fname, name_len);
+		path_buf[strlen(dest) + 1 + name_len] = '\0';
+
+		/* Create subdirectories */
+		for (j = strlen(dest) + 1; path_buf[j]; ++j) {
+			if (path_buf[j] == '/') {
+				char saved = path_buf[j];
+				path_buf[j] = '\0';
+				mkdir(path_buf, 0755);
+				path_buf[j] = saved;
+			}
+		}
+
+		out = fopen(path_buf, "wb");
+		if (!out) {
+			perror(path_buf);
+			msys_close(m);
+			return -1;
+		}
+		if (fwrite(data, 1, d_size, out) != d_size) {
+			fclose(out);
+			msys_close(m);
+			return -1;
+		}
+		fclose(out);
+
+		i++;
+		index_bytes += 16 + name_len;
+	}
+
+	msys_close(m);
+	return 0;
+}
+
+/* Open a .msys file by extracting to a temp directory.
+ * Returns the temp directory path (owned by atexit cleanup), or NULL on error. */
+static char *
+msys_sysroot_open(const char *sysroot_path)
+{
+	char template[] = "/tmp/meuos-ld-sysroot-XXXXXX";
+
+	if (!msys_is_sysroot(sysroot_path))
+		return NULL;
+	if (mkdtemp(template) == NULL)
+		return NULL;
+	if (msys_extract_to(sysroot_path, template) != 0) {
+		char cmd[4096];
+		snprintf(cmd, sizeof(cmd), "rm -rf %s", template);
+		system(cmd);
+		return NULL;
+	}
+	return strdup(template);
 }
 
 int
@@ -113,6 +230,17 @@ main(int argc, char **argv)
 		/* --sysroot=<dir> */
 		if (strncmp(argv[i], "--sysroot=", 10) == 0) {
 			sysroot = argv[i] + 10;
+			if (msys_is_sysroot(sysroot)) {
+				char *tmp = msys_sysroot_open(sysroot);
+				if (!tmp) {
+					fprintf(stderr, "ld: failed to extract .msys sysroot: %s\n",
+					        sysroot);
+					return 2;
+				}
+				sysroot = tmp;
+				msys_temp_sysroot = tmp;
+				atexit(cleanup_msys_temp);
+			}
 			continue;
 		}
 		/* --sysroot <dir> (space-separated) */
@@ -122,6 +250,17 @@ main(int argc, char **argv)
 				return 2;
 			}
 			sysroot = argv[i];
+			if (msys_is_sysroot(sysroot)) {
+				char *tmp = msys_sysroot_open(sysroot);
+				if (!tmp) {
+					fprintf(stderr, "ld: failed to extract .msys sysroot: %s\n",
+					        sysroot);
+					return 2;
+				}
+				sysroot = tmp;
+				msys_temp_sysroot = tmp;
+				atexit(cleanup_msys_temp);
+			}
 			continue;
 		}
 		/* -L<dir> or -L <dir> */
