@@ -41,7 +41,7 @@ Target T_arm32 = {
 	.abi1 = arm32_abi,
 	.isel = arm32_isel,
 	.emitfn = arm32_emitfn,
-	.emitfin = elf_emitfin,
+	.emitfin = 0,
 	.asloc = ".L",
 	.cansel = 0,
 };

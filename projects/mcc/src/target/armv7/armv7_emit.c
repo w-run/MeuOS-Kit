@@ -96,6 +96,26 @@ static struct {
 	{ Oacmp,   Ki, "cmp %0, %1" },
 	{ Oacmn,   Ki, "cmn %0, %1" },
 	{ Oafcmp,  Ka, "vcmp.f64 %0, %1\n\tvmrs\tAPSR_nzcv, fpscr" },
+	{ Oceqw,   Ki, "cmp %0, %1\n\tmov\t%=, #0\n\tmoveq\t%=, #1" },
+	{ Oceql,   Ki, "cmp %0, %1\n\tmov\t%=, #0\n\tmoveq\t%=, #1" },
+	{ Ocnew,   Ki, "cmp %0, %1\n\tmov\t%=, #0\n\tmovne\t%=, #1" },
+	{ Ocnel,   Ki, "cmp %0, %1\n\tmov\t%=, #0\n\tmovne\t%=, #1" },
+	{ Ocsgew,  Ki, "cmp %0, %1\n\tmov\t%=, #0\n\tmovge\t%=, #1" },
+	{ Ocsgel,  Ki, "cmp %0, %1\n\tmov\t%=, #0\n\tmovge\t%=, #1" },
+	{ Ocsgtw,  Ki, "cmp %0, %1\n\tmov\t%=, #0\n\tmovgt\t%=, #1" },
+	{ Ocsgtl,  Ki, "cmp %0, %1\n\tmov\t%=, #0\n\tmovgt\t%=, #1" },
+	{ Ocslew,  Ki, "cmp %0, %1\n\tmov\t%=, #0\n\tmovle\t%=, #1" },
+	{ Ocslel,  Ki, "cmp %0, %1\n\tmov\t%=, #0\n\tmovle\t%=, #1" },
+	{ Ocsltw,  Ki, "cmp %0, %1\n\tmov\t%=, #0\n\tmovlt\t%=, #1" },
+	{ Ocsltl,  Ki, "cmp %0, %1\n\tmov\t%=, #0\n\tmovlt\t%=, #1" },
+	{ Ocugew,  Ki, "cmp %0, %1\n\tmov\t%=, #0\n\tmovcs\t%=, #1" },
+	{ Ocugel,  Ki, "cmp %0, %1\n\tmov\t%=, #0\n\tmovcs\t%=, #1" },
+	{ Ocugtw,  Ki, "cmp %0, %1\n\tmov\t%=, #0\n\tmovhi\t%=, #1" },
+	{ Ocugtl,  Ki, "cmp %0, %1\n\tmov\t%=, #0\n\tmovhi\t%=, #1" },
+	{ Oculew,  Ki, "cmp %0, %1\n\tmov\t%=, #0\n\tmovls\t%=, #1" },
+	{ Oculel,  Ki, "cmp %0, %1\n\tmov\t%=, #0\n\tmovls\t%=, #1" },
+	{ Ocultw,  Ki, "cmp %0, %1\n\tmov\t%=, #0\n\tmovcc\t%=, #1" },
+	{ Ocultl,  Ki, "cmp %0, %1\n\tmov\t%=, #0\n\tmovcc\t%=, #1" },
 #define X(c, str, _) { Oflag+c, Ki, "mov %=, #0\n\tmov" str "\t%=, #1" },
 	CMP(X)
 #undef X
@@ -195,10 +215,18 @@ emitf(char *s, Ins *i, Fn *fn, FILE *f)
 			assert(c == '0' || c == '1' || c == '=');
 			r = c == '=' ? i->to : i->arg[c - '0'];
 			switch (rtype(r)) {
-			default: die("todo: unhandled ref for memory");
+			default:
+				die("todo: unhandled ref for memory");
 			case RTmp:
 				assert(isreg(r));
 				fprintf(f, "[%s]", rname(r.val, Kl));
+				break;
+			case RCon:
+				pc = &fn->con[r.val];
+				assert(pc->type == CAddr);
+				fputs("=", f);
+				fputs(str(pc->sym.id), f);
+				if (pc->bits.i) fprintf(f, "+%"PRIi64, pc->bits.i);
 				break;
 			case RSlot:
 				fprintf(f, "[r11, #%" PRIu64 "]", slot(r, fn, 0));
@@ -388,6 +416,6 @@ arm32_emitfn(Fn *fn, FILE *f)
 		}
 	}
 	id0 += fn->nblk;
-	if (!T.apple)
-		elf_emitfnfin(fn->name, f);
+	fprintf(f, ".type %s, %%function\n", fn->name);
+	fprintf(f, ".size %s, .-%s\n", fn->name, fn->name);
 }

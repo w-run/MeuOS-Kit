@@ -17,7 +17,7 @@ bits arm32_argregs(Ref r, int p[2]) {
 	return BIT(R0) | BIT(R1) | BIT(R2) | BIT(R3);
 }
 
-/* selret — lower return jump to Jret0 + copy to return register. */
+/* selret — lower block's return jump to Jret0 + copy to return register. */
 static void
 selret(Blk *b, Fn *fn)
 {
@@ -58,6 +58,9 @@ arm32_abi(Fn *fn)
 {
 	Blk *b;
 
-	for (b = fn->start; b; b = b->link)
+	for (b = fn->start; b; b = b->link) {
+		curi = &insb[NIns];
 		selret(b, fn);
+		idup(b, curi, &insb[NIns] - curi);
+	}
 }
