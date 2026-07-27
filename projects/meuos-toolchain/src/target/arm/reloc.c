@@ -50,14 +50,22 @@ arm_reloc_name(unsigned type)
 {
 	switch (type) {
 	case R_ARM_NONE: return "R_ARM_NONE";
+	case R_ARM_PC24: return "R_ARM_PC24";
 	case R_ARM_ABS32: return "R_ARM_ABS32";
 	case R_ARM_REL32: return "R_ARM_REL32";
+	case R_ARM_LDR_PC_G0: return "R_ARM_LDR_PC_G0";
+	case R_ARM_THM_CALL: return "R_ARM_THM_CALL";
+	case R_ARM_GOT32: return "R_ARM_GOT32";
+	case R_ARM_PLT32: return "R_ARM_PLT32";
 	case R_ARM_CALL: return "R_ARM_CALL";
 	case R_ARM_JUMP24: return "R_ARM_JUMP24";
+	case R_ARM_ALU_PCREL_0: return "R_ARM_ALU_PCREL_0";
 	case R_ARM_MOVW_ABS_NC: return "R_ARM_MOVW_ABS_NC";
 	case R_ARM_MOVT_ABS: return "R_ARM_MOVT_ABS";
 	case R_ARM_MOVW_PREL_NC: return "R_ARM_MOVW_PREL_NC";
 	case R_ARM_MOVT_PREL: return "R_ARM_MOVT_PREL";
+	case R_ARM_TLS_GD32: return "R_ARM_TLS_GD32";
+	case R_ARM_TLS_LDO32: return "R_ARM_TLS_LDO32";
 	case R_ARM_TLS_LE32: return "R_ARM_TLS_LE32";
 	case R_ARM_GOT_PREL: return "R_ARM_GOT_PREL";
 	default: return "R_ARM_??";

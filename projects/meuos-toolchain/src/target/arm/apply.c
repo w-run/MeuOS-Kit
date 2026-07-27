@@ -88,8 +88,39 @@ mt_apply_arm_reloc(unsigned type, unsigned char *loc,
 		write32(loc, (uint32_t)(S + A));
 		return 0;
 
-	case 96: /* R_ARM_GOT_PREL */
-		return -1; /* not yet implemented */
+	case 96: /* R_ARM_GOT_PREL: GOT + A - P */
+		write32(loc, (uint32_t)(S + A - P));
+		return 0;
+
+	case 27: /* R_ARM_PLT32: PLT + A - P */
+		write32(loc, (uint32_t)(S + A - P));
+		return 0;
+
+	case 26: /* R_ARM_GOT32: GOT entry offset */
+		write32(loc, (uint32_t)(S + A));
+		return 0;
+
+	case 4: /* R_ARM_LDR_PC_G0: S + A - P (LDR literal) */
+		write32(loc, (uint32_t)(S + A - P));
+		return 0;
+
+	case 32: /* R_ARM_ALU_PCREL_0: (S + A - P) for ADR */
+		{
+			insn = read32(loc);
+			offset = (int64_t)(S + A - P);
+			if (offset < 0 || offset > 4095) return -1;
+			insn = (insn & 0xFFF00000) | (uint32_t)offset;
+			write32(loc, insn);
+			return 0;
+		}
+
+	case 104: /* R_ARM_TLS_GD32: GOT + A - P (TLS GD) */
+		write32(loc, (uint32_t)(S + A - P));
+		return 0;
+
+	case 106: /* R_ARM_TLS_LDO32: S + A - tp (TLS LDO) */
+		write32(loc, (uint32_t)(S + A));
+		return 0;
 
 	default:
 		return -1;
