@@ -54,3 +54,4 @@ stage/
 sysroot-*/
 sysroot/
 .vscode/
+*.msys

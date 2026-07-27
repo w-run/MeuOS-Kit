@@ -16,9 +16,13 @@
 > - 每次提交前必须跑对应组件的 `make check`，确保不引入回归。
 > - 提交信息格式：`<组件>: <描述>`，例如 `mcc: fix va_list alignment on i386`。
 >
-> **会话恢复流程**（按顺序执行）：
-> 1. **IMA 知识库查询** — 搜索知识库中 MeuOS 相关文档（`search_knowledge`），查看是否有新的设计文档或决策记录。详见 §9。
-> 2. **子项目上下文加载** — 读目标子项目的 `ARCHITECTURE.md`（结构/模块/状态/路线图）与 `.todo/`（待实现项），了解项目当前进度。
+> **会话恢复流程**（强制要求：新 agent 启动时**必须**按顺序执行以下步骤）：
+> 1. **读取 IMA 知识库规划文档** — Agent 启动后**必须主动**查询 IMA 知识库中的 MeuOS 规划文档
+>    （`search_knowledge_base` → `get_knowledge_list`），阅读所有标题含"规划"/"计划"/"路线图"/
+>    "需求"/"设计"的文档。这些文档包含当前阶段的需求、设计方案和任务计划，是理解"接下来做什么"
+>    的第一信息来源。详见 §9.4。
+> 2. **子项目上下文加载** — 读目标子项目的 `ARCHITECTURE.md`（结构/模块/状态/路线图）与 `.todo/`
+>    （待实现项），了解项目当前进度。
 > 3. **AGENTS.md 规约确认** — 重新确认项目规约（§4 禁止事项、§7 任务编排策略）和当前状态速查（§10）。
 > 4. **环境检查** — 确认 `MEUOS_SYSROOT` 已设置，宿主编译器和交叉工具链可用。
 >
@@ -793,16 +797,6 @@ make -C projects/meuos-toolchain clean
 | 追加调试记录到已有笔记               | notes              | `search_note` 找到笔记 → `append_doc`                                     |
 | 上传架构差异对照表文件到知识库       | knowledge-base     | `preflight-check` → `create_media` → COS Upload → `add_knowledge`        |
 
-**新 agent 会话启动时的知识库查询：**
-
-```sh
-# 在会话恢复流程（§0）中执行以下查询获取最新文档：
-# 使用 ima-skill 的 knowledge-base 模块：
-# 1. search_knowledge_base(query: "MeuOS") 找到对应的知识库
-# 2. get_knowledge_list(knowledge_base_id) 浏览知识库内容
-# 3. 根据标题判断需要阅读哪些文档
-```
-
 ### 9.3 配置要求
 
 使用 `ima-skill` 需要配置 IMA OpenAPI 凭证：
@@ -820,7 +814,78 @@ export IMA_OPENAPI_APIKEY="your_api_key"
 
 凭证优先级：环境变量 → 配置文件。缺少凭证时 API 调用以 code `-100` 退出。
 
-### 9.4 文档贡献指南
+### 9.4 Agent 启动时主动读取规划文档
+
+**这是项目的第一规约：任何 agent 会话启动后，必须主动读取 IMA 知识库中的规划文档。**
+
+规划文档是"接下来做什么"的权威来源，优先级高于代码仓库中的任何 .todo 文件。
+规划设计可能先于代码存在，只有主动读取才能理解当前阶段的目标。
+
+#### 执行步骤（在 §0 会话恢复流程的第 1 步执行）
+
+```sh
+# 1. 找到 MeuOS 知识库
+#    使用 ima-skill 的 knowledge-base 模块：
+#    search_knowledge_base(query: "MeuOS")
+
+# 2. 浏览知识库内容，查找规划类文档
+#    get_knowledge_list(knowledge_base_id="<上一步返回的 kb_id>")
+#    重点查找标题包含以下关键词的文档：
+#    - "规划" / "计划" / "路线图" / "路线"
+#    - "需求" / "功能规格" / "设计"
+#    - "阶段" / "Phase" / "P0" / "P1" / ...
+#    - "TODO" / "待办" / "任务"
+#    - "v4.0" / "v4"（最新的版本号）
+
+# 3. 阅读每个规划文档的原始内容
+#    get_media_info(media_id="<文档的 media_id>")
+#    下载并阅读全文，理解：
+#    - 当前阶段的目标是什么
+#    - 有哪些待实现的功能/架构
+#    - 设计方案和验收条件
+#    - 与其他组件的依赖关系
+
+# 4. 将规划内容与 AGENTS.md §10（项目状态速查）交叉对比
+#    - 规划中提到的待办项是否已在仓库 .todo 中记录
+#    - 规划中的设计决策是否需要更新 ARCHITECTURE.md
+```
+
+#### 查询模板（可直接执行）
+
+```bash
+source ~/.bashrc
+cd /workspace/MeuOS-Kit/.codebuddy/skills/ima-skill
+SKILL_DIR="$(pwd)"
+OPTS=$(printf '{"clientId":"%s","apiKey":"%s"}' "$IMA_OPENAPI_CLIENTID" "$IMA_OPENAPI_APIKEY")
+
+# 搜索 MeuOS 知识库
+resp=$(node "$SKILL_DIR/ima_api.cjs" "openapi/wiki/v1/search_knowledge_base" \
+  '{"query":"MeuOS","cursor":"","limit":5}' "$OPTS" 2>/dev/null)
+KB_ID=$(echo "$resp" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['info_list'][0]['kb_id'])" 2>/dev/null)
+
+# 浏览知识库内容
+node "$SKILL_DIR/ima_api.cjs" "openapi/wiki/v1/get_knowledge_list" \
+  "{\"knowledge_base_id\":\"$KB_ID\",\"cursor\":\"\",\"limit\":50}" "$OPTS" 2>/dev/null | \
+  python3 -c "
+import sys, json
+data = json.load(sys.stdin)['data']['info_list']
+for item in data:
+    title = item['title']
+    tags = ' '.join(['📋' if kw in title else '' for kw in ['规划','计划','路线','需求','设计','TODO','v4']])
+    print(f\"  {tags} {title}\")
+"
+```
+
+#### 阅读后的行动
+
+读取规划文档后，agent 应：
+
+1. **更新对当前阶段的理解**：规划文档中描述的目标是什么，当前进展到哪里
+2. **确认 .todo 的同步状态**：规划中提到的待办是否已在 .todo 中有对应条目
+3. **确定本次会话的工作范围**：从规划中选取一个具体的、可独立完成的任务
+4. **如有模糊之处**：在 IMA 知识库搜索相关设计笔记补充上下文，或向用户确认
+
+### 9.5 文档贡献指南
 
 向知识库贡献 MeuOS 文档时遵循以下原则：
 
