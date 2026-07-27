@@ -621,6 +621,69 @@ int main(int argc, char *argv[]) {
 		}
 		printf("%s\t%lu bytes, %d files\n", dir[0] ? dir : "/", (unsigned long)total, nfiles);
 	}
+	/* ── head: show first N lines ── */
+	else if (strcmp(cmd, "head") == 0) {
+		if (path_idx >= argc) { usage(); ret = 1; }
+		else {
+			int nlines = 10;
+			const char *path = argv[path_idx];
+			if (path_idx + 2 < argc && strcmp(argv[path_idx + 1], "-n") == 0)
+				{ nlines = atoi(argv[path_idx + 2]); path = argv[path_idx]; }
+			void *data; size_t dsize;
+			if (arch_load(a, path, &data, &dsize) < 0) { ret = -1; }
+			else {
+				const char *p = (const char *)data, *end = p + dsize;
+				int lines = 0;
+				while (p < end && lines < nlines) {
+					const char *nl = memchr(p, '\n', (size_t)(end - p));
+					size_t llen = nl ? (size_t)(nl - p + 1) : (size_t)(end - p);
+					fwrite(p, 1, llen, stdout);
+					p += llen; lines++;
+				}
+				free(data);
+			}
+		}
+	}
+	/* ── tail: show last N lines ── */
+	else if (strcmp(cmd, "tail") == 0) {
+		if (path_idx >= argc) { usage(); ret = 1; }
+		else {
+			int nlines = 10;
+			const char *path = argv[path_idx];
+			if (path_idx + 2 < argc && strcmp(argv[path_idx + 1], "-n") == 0)
+				{ nlines = atoi(argv[path_idx + 2]); path = argv[path_idx]; }
+			void *data; size_t dsize;
+			if (arch_load(a, path, &data, &dsize) < 0) { ret = -1; }
+			else {
+				const char *p = (const char *)data, *end = p + dsize;
+				/* Count total lines */
+				int total_lines = 0;
+				for (const char *cp = p; cp < end; cp++) if (*cp == '\n') total_lines++;
+				if (*(end-1) != '\n') total_lines++;
+				/* Scan to start line */
+				int skip = total_lines > nlines ? total_lines - nlines : 0;
+				const char *start = p;
+				for (int i = 0; i < skip && start < end; start++) if (*start == '\n') i++;
+				fwrite(start, 1, (size_t)(end - start), stdout);
+				free(data);
+			}
+		}
+	}
+	/* ── cp: copy file from archive to filesystem ── */
+	else if (strcmp(cmd, "cp") == 0) {
+		if (path_idx + 1 >= argc) { usage(); ret = 1; }
+		else {
+			const char *src = argv[path_idx];
+			const char *dst = argv[path_idx + 1];
+			void *data; size_t dsize;
+			if (arch_load(a, src, &data, &dsize) < 0) { ret = -1; }
+			else {
+				FILE *fp = fopen(dst, "wb");
+				if (!fp) { perror(dst); free(data); ret = -1; }
+				else { fwrite(data, 1, dsize, fp); fclose(fp); printf("copied %s (%zu bytes) -> %s\n", src, dsize, dst); free(data); }
+			}
+		}
+	}
 	else { fprintf(stderr, "Unknown: %s\n", cmd); usage(); }
 
 	if (ret < 0) perror(cmd);
