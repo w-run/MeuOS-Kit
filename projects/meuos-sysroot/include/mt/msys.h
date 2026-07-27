@@ -130,6 +130,13 @@ typedef int (*msys_dir_cb)(const char *name, size_t nlen,
  *   This is a linear scan (O(N) over total entries). */
 int msys_readdir(struct msys *m, const char *dir, msys_dir_cb cb, void *arg);
 
+/* Stat a file by name — check existence and get data size.
+ *   m:    handle from msys_open
+ *   name: NUL-terminated path
+ *   size: out parameter, receives data size (may be NULL)
+ *   Returns 0 on success, -1 on error (errno set: ENOENT, ENOMSG). */
+int msys_fstat(struct msys *m, const char *name, size_t *size);
+
 /* FNV-1a 32-bit hash helper.
  *   name: pointer to data to hash
  *   len:  number of bytes

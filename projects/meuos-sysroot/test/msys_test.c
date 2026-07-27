@@ -202,6 +202,30 @@ static int test_basic(void)
 		printf("PASS: msys_readdir (root 4, sub 1, nonexistent fails)\n");
 	}
 
+	/* Test msys_fstat */
+	{
+		size_t fsize;
+		if (msys_fstat(m, "hello.txt", &fsize) < 0) {
+			perror("FAIL: msys_fstat(hello.txt)");
+			goto close_cleanup;
+		}
+		if (fsize != strlen("Hello, World!\n")) {
+			fprintf(stderr, "FAIL: msys_fstat size %zu != expected\n", fsize);
+			goto close_cleanup;
+		}
+		/* Non-existent */
+		if (msys_fstat(m, "no_such_file", NULL) == 0) {
+			fprintf(stderr, "FAIL: msys_fstat should fail for missing file\n");
+			goto close_cleanup;
+		}
+		/* NULL size should be OK */
+		if (msys_fstat(m, "hello.txt", NULL) < 0) {
+			perror("FAIL: msys_fstat with NULL size");
+			goto close_cleanup;
+		}
+		printf("PASS: msys_fstat\n");
+	}
+
 	ret = 0;
 
 close_cleanup:

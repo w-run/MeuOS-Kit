@@ -271,6 +271,16 @@ int msys_readdir(struct msys *m, const char *dir, msys_dir_cb cb, void *arg)
 	return 0;
 }
 
+/* ---- fstat ---- */
+
+int msys_fstat(struct msys *m, const char *name, size_t *size)
+{
+	size_t dsize;
+	if (!msys_search(m, name, &dsize)) return -1;
+	if (size) *size = dsize;
+	return 0;
+}
+
 /* ---- search (binary search by name_hash, verify name string) ---- */
 
 const void *msys_search(struct msys *m, const char *name, size_t *size)

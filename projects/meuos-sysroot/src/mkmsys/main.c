@@ -4,13 +4,15 @@
  * Usage:
  *   mkmsys -o <output.msys> <root-directory>
  *   mkmsys --list <input.msys>
+ *   mkmsys --extract <input.msys> -o <output-dir>
  *   mkmsys -o <output.msys> --arch <arch> <root-directory>
  *   mkmsys -o <output.msys> --compress=<type> <root-directory>
  *   mkmsys -o <output.msys> --incremental <root-directory>
  *
  * Options:
- *   -o <file>        Output .msys file path
+ *   -o <file>        Output .msys file path (or output dir with --extract)
  *   --list           List contents of an existing .msys file
+ *   --extract        Extract contents of .msys to a directory
  *   --arch <name>    Write @meuos_arch metadata entry
  *   --compress=<t>   Compress data blocks: zlib, zstd (experimental)
  *   --incremental    Incremental mode: only repack changed files
@@ -431,6 +433,76 @@ static int list_msys(const char *path)
 	return 0;
 }
 
+/* ---- extract ---- */
+
+static void ensure_parent(const char *path)
+{
+	char *p = strdup(path);
+	if (!p) die("strdup");
+	for (char *s = p + 1; *s; s++) {
+		if (*s == '/') {
+			*s = '\0';
+			mkdir(p, 0755);
+			*s = '/';
+		}
+	}
+	free(p);
+}
+
+static int extract_msys(const char *msys_path, const char *outdir)
+{
+	struct msys *m = msys_open(msys_path);
+	if (!m) die(msys_path);
+
+	uint32_t cnt = msys_count(m);
+	size_t extracted = 0;
+
+	for (uint32_t i = 0; i < cnt; i++) {
+		const char *name; size_t nlen, dsize;
+		if (msys_enumerate(m, i, &name, &nlen, &dsize) < 0)
+			continue;
+
+		/* Skip @mt/ metadata entries */
+		if (nlen > 4 && memcmp(name, "@mt/", 4) == 0) continue;
+
+		/* Build output path: outdir/name */
+		size_t odlen = strlen(outdir);
+		char *path = malloc(odlen + 1 + nlen + 1);
+		if (!path) die("malloc");
+		memcpy(path, outdir, odlen);
+		path[odlen] = '/';
+		memcpy(path + odlen + 1, name, nlen);
+		path[odlen + 1 + nlen] = '\0';
+
+		ensure_parent(path);
+
+		if (dsize > 0) {
+			void *buf = NULL;
+			if (msys_load(m, name, &buf, NULL) < 0) {
+				fprintf(stderr, "extract: failed to load '%.*s'\n", (int)nlen, name);
+				free(path);
+				continue;
+			}
+			FILE *fp = fopen(path, "wb");
+			if (!fp) { perror(path); free(buf); free(path); continue; }
+			fwrite(buf, 1, dsize, fp);
+			fclose(fp);
+			free(buf);
+		} else {
+			/* Empty file */
+			FILE *fp = fopen(path, "wb");
+			if (fp) fclose(fp);
+		}
+
+		free(path);
+		extracted++;
+	}
+
+	printf("Extracted %zu entries to %s\n", extracted, outdir);
+	msys_close(m);
+	return 0;
+}
+
 /* ---- add metadata entry ---- */
 
 static void add_metadata_entry(struct collector *c, const char *key,
@@ -446,6 +518,7 @@ int main(int argc, char *argv[])
 	const char *output = NULL;
 	const char *arch = NULL;
 	int list_mode = 0;
+	int extract_mode = 0;
 	const char *input = NULL;
 	int incremental = 0;
 	const char *compress = NULL;
@@ -453,14 +526,17 @@ int main(int argc, char *argv[])
 	static const char *usage_short =
 	  "Usage: mkmsys -o <output> [options] <root-dir>\n"
 	  "       mkmsys --list <input.msys>\n"
+	  "       mkmsys --extract <input.msys> -o <dir>\n"
 	  "Try `mkmsys --help` for more information.\n";
 	static const char *usage_full =
 	  "Usage: mkmsys -o <output> [options] <root-dir>\n"
 	  "       mkmsys --list <input.msys>\n"
+	  "       mkmsys --extract <input.msys> -o <dir>\n"
 	  "\n"
 	  "Options:\n"
-	  "  -o <file>          Output .msys file path\n"
+	  "  -o <file>          Output .msys file path (or output dir with --extract)\n"
 	  "  --list             List contents of an existing .msys file\n"
+	  "  --extract          Extract contents of .msys to directory\n"
 	  "  --arch <name>      Write @meuos_arch metadata entry\n"
 	  "  --compress=<type>  Compress data blocks: zlib, zstd (experimental)\n"
 	  "  --incremental      Incremental mode: only repack changed files\n"
@@ -479,6 +555,8 @@ int main(int argc, char *argv[])
 			output = argv[i + 1]; i += 2;
 		} else if (strcmp(argv[i], "--list") == 0) {
 			list_mode = 1; i++;
+		} else if (strcmp(argv[i], "--extract") == 0) {
+			extract_mode = 1; i++;
 		} else if (strcmp(argv[i], "--arch") == 0 && i + 1 < argc) {
 			arch = argv[i + 1]; i += 2;
 		} else if (strcmp(argv[i], "--incremental") == 0) {
@@ -500,6 +578,12 @@ int main(int argc, char *argv[])
 		if (!input) input = output;
 		if (!input) { fprintf(stderr, "Usage: mkmsys --list <input.msys>\n"); return 1; }
 		return list_msys(input);
+	}
+
+	if (extract_mode) {
+		if (!input) input = output;
+		if (!input) { fprintf(stderr, "Usage: mkmsys --extract <input.msys> -o <outdir>\n"); return 1; }
+		return extract_msys(input, output ? output : ".");
 	}
 
 	if (!output || !input) {
