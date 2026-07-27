@@ -684,6 +684,68 @@ int main(int argc, char *argv[]) {
 			}
 		}
 	}
+	/* ── wc: word/line/byte count ── */
+	else if (strcmp(cmd, "wc") == 0) {
+		if (path_idx >= argc) { usage(); ret = 1; }
+		else {
+			void *data; size_t dsize;
+			if (arch_load(a, argv[path_idx], &data, &dsize) < 0) { ret = -1; }
+			else {
+				int lines = 0, words = 0;
+				int in_word = 0;
+				for (size_t i = 0; i < dsize; i++) {
+					unsigned char c = ((unsigned char*)data)[i];
+					if (c == '\n') lines++;
+					if (c == ' ' || c == '\t' || c == '\n') { in_word = 0; }
+					else if (!in_word) { in_word = 1; words++; }
+				}
+				printf("  %d  %d  %zu  %s\n", lines, words, dsize, argv[path_idx]);
+				free(data);
+			}
+		}
+	}
+	/* ── sort: sorted output ── */
+	else if (strcmp(cmd, "sort") == 0) {
+		if (path_idx >= argc) { usage(); ret = 1; }
+		else {
+			void *data; size_t dsize;
+			if (arch_load(a, argv[path_idx], &data, &dsize) < 0) { ret = -1; }
+			else {
+				/* Split into lines, sort, print */
+				char *copy = malloc(dsize + 1);
+				if (!copy) { free(data); ret = -1; }
+				else {
+					memcpy(copy, data, dsize); copy[dsize] = '\0';
+					/* Count lines */
+					int nlines = 0;
+					for (size_t i = 0; i < dsize; i++) if (copy[i] == '\n') nlines++;
+					if (dsize > 0 && copy[dsize-1] != '\n') nlines++;
+
+					/* Build line array */
+					char **lines = malloc((size_t)nlines * sizeof(char *));
+					if (!lines) { free(copy); free(data); ret = -1; }
+					else {
+						int l = 0; char *p = copy;
+						while (p < copy + dsize) {
+							lines[l++] = p;
+							char *nl = memchr(p, '\n', (size_t)(copy + dsize - p));
+							if (nl) { *nl = '\0'; p = nl + 1; } else { p = copy + dsize; }
+						}
+						/* Simple bubble sort (line count is typically small) */
+						for (int i = 0; i < nlines - 1; i++)
+							for (int j = 0; j < nlines - i - 1; j++)
+								if (strcmp(lines[j], lines[j+1]) > 0) {
+									char *tmp = lines[j]; lines[j] = lines[j+1]; lines[j+1] = tmp;
+								}
+						for (int i = 0; i < nlines; i++) printf("%s\n", lines[i]);
+						free(lines);
+					}
+					free(copy);
+				}
+				free(data);
+			}
+		}
+	}
 	else { fprintf(stderr, "Unknown: %s\n", cmd); usage(); }
 
 	if (ret < 0) perror(cmd);
