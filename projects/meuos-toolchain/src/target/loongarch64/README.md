@@ -1,3 +1,5 @@
 # loongarch64 target
 
-架构占位。loongarch64 的 mt/as + mt/ld 支持在 后续 中实现。
+已完成。编码器 ~900 行，支持 LA64 完整指令集（整数/浮点/原子/TLS）。
+链接器支持 15 种重定位类型（含 TLS LE 和 GOT）。详见 `src/target/loongarch64/encode.c`、
+`src/target/loongarch64/apply.c`。
