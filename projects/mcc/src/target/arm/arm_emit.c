@@ -189,6 +189,14 @@ emitf(char *s, Ins *i, Fn *fn, FILE *f)
 		case '=':
 		case '0':
 			r = c == '=' ? i->to : i->arg[0];
+			if (rtype(r) == RSlot) {
+				fprintf(f, "[r11, #%" PRIu64 "]", slot(r, fn, 0));
+				/* BUG: data processing ops can't use [r11,#off] directly.
+				 * fixarg should load into IP before emitf is called. */
+				break;
+			}
+			assert(isreg(r));
+			fputs(rname(r.val, k), f);
 			assert(isreg(r));
 			fputs(rname(r.val, k), f);
 			break;
@@ -279,8 +287,13 @@ static void emitins(Ins *, Fn *, FILE *);
 static int
 fixarg(Ref *pr, int sz, int t, Fn *fn, FILE *f)
 {
-	(void)sz; (void)t; (void)fn; (void)f;
-	return 0;  /* no fixup needed for small ARM immediates */
+	(void)sz; (void)t;
+	if (rtype(*pr) == RSlot) {
+		int64_t off = slot(*pr, fn, 0);
+		fprintf(f, "\tldr\t%s, [r11, #%" PRIu64 "]\n", rname(IP, Kl), off);
+		*pr = TMP(IP);
+	}
+	return 0;
 }
 
 static void
@@ -289,10 +302,16 @@ emitins(Ins *i, Fn *fn, FILE *f)
 	Ref r; Con *c; uint64_t s; char *l, *p; int t, o;
 
 	switch (i->op) {
+	case Opar: case Oparc: case Opare:
+	case Oarg: case Oargc: case Oargv:
+		break;	/* 伪指令，emit 阶段无输出 */
 	default:
 	Table:
-		if (isload(i->op))
+		if (rtype(i->arg[0]) == RSlot)
 			fixarg(&i->arg[0], 0, IP, fn, f);
+		if (rtype(i->arg[1]) == RSlot)
+			fixarg(&i->arg[1], 0, IP, fn, f);
+		if (isload(i->op))
 		if (isstore(i->op))
 			fixarg(&i->arg[1], 0, IP, fn, f);
 		for (o = 0;; o++) {
@@ -399,6 +418,12 @@ arm32_emitfn(Fn *fn, FILE *f)
 		Jmp:
 			if (b->s1 != b->link)
 				fprintf(f, "\tb\t%s%d\n", T.asloc, id0 + b->s1->id);
+			else
+				lbl = 0;
+			break;
+		case Jjnz:
+			if (b->s1 != b->link)
+				fprintf(f, "\tbne\t%s%d\n", T.asloc, id0 + b->s2->id);
 			else
 				lbl = 0;
 			break;
