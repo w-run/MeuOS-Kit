@@ -43,10 +43,11 @@ Data blocks: 按 data_offset 排列，4 字节对齐
 - [x] preprocessor include 搜索支持 .msys
 - [x] 未显式传 `--target` 时，从 .msys 提取 `meuos_arch`
 
-### Phase 3 — mt/ld 集成 ⬜ 待启动
+### Phase 3 — mt/ld 集成 ✅ 已完成
 
-- [ ] mt/ld 的 `-L` 参数识别 .msys
-- [ ] 从 .msys 索引中读取 .a/.o 参与链接
+- [x] mt/ld 的 `--sysroot=<path>.msys` 自动解包到 temp 目录
+- [x] mt/ld 链接 libmsys.a
+- [x] 端到端验证通过（`make check` + `check-i386-e2e`）
 
 ### Phase 4 — 构建流水线 ⬜ 待启动
 

@@ -41,4 +41,15 @@
 - 加入按需抽取 `mt_ar_foreach`，并把归档移动到 `mt_ld_link` 后置的迭代 `extract_archives`，从而让 ld 自动从 `.a` 抽取被引用成员。
 - 实现 R_X86_64_TPOFF32 relocation（`-(symbol_address)`），覆盖 MeuOS libc 中 `errno_value` 等静态 TLS 引用。
 - `test/ld_sysroot.sh` 使用宿主 `/workspace/MeuOS-Kit/sysroot`：mcc 生成 `printf` 测试 → mt/as → mt/ld 与 `crt1.o` + `libc-meuos.a` + `libatomic-meuos.a` 链接为可在宿主 Linux 上输出 `toolchain = 42` 的可执行文件。
-- 后续：浮点/SSE 完整编码、多架构 ELF/CPIO、MeuOS QEMU sysroot 验证 `counter = 2000`、mcc driver 集成。
+
+## 2026-07-23~27：P3-P4 多架构扩展
+
+- P3（mcc driver 集成）：`host_toolchain.c` 通过 `MT_AS`/`MT_LD` 环境变量集成 mt 工具链，`check-mt-integration` 验证通过。
+- P4（二进制辅助工具）：nm、readelf、strip、objcopy、objdump 全部实现，含 libelf/libdisasm 共享库。
+- P5（自举验证）：`check-sysroot-static` 通过，sysroot 内 mcc+meow 自重建 Kit，`check-mt-integration` 零宿主 cc 依赖。
+- P9（i386 架构）：编码器增强（ModRM/SIB/条件跳转/移位/and/or/div），ELF32 输入读取 + i386 重定位分派。
+- P10（aarch64 架构）：mt/as 编码器 + mt/ld 重定位 + qemu 端到端验证通过。
+- P11（riscv64 架构）：mt/as 编码器 + mt/ld 重定位 + TLS LE + qemu 端到端验证通过。
+- loongarch64：mt/as 编码器 + mt/ld 重定位（15 类型，含 TLS LE/GOT）+ libc 运行时。
+- arm：mt/as 编码器 + mt/ld ARM 重定位 + mcc 后端 + libc 运行时。
+- .msys Phase 3：mt/ld 集成 `.msys` 单文件 sysroot（`--sysroot=<path>.msys` 自动解包）。

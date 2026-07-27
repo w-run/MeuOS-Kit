@@ -7,8 +7,9 @@
 |---|---:|---:|---|
 | x86_64 | 宿主运行验证 | 支持 | Phase 1/2 的主开发目标 |
 | aarch64 | **qemu 端到端** | 支持 | libc runtime 完整（crt1/atomic/setjmp/sigreturn/thread_clone/tls + syscall gate + *at 翻译表）；qemu-aarch64-static hello/atomic/phase2/bare_tls 全绿；TLS GAP_ABOVE_TP=16 + mcc store fix 已固化 |
-| riscv64 | 汇编回归 | 支持 | 代码生成基线可用；尚无 MeuOS libc/运行时 |
-| loongarch64 | 专项 ABI/VLA/TLS 汇编回归 | 支持 | 后端相对成熟；尚无 MeuOS libc/运行时 |
+| riscv64 | 汇编回归 | 支持 | 代码生成基线可用；libc runtime 已落地（crt1/atomic/setjmp/sigreturn/thread_clone/tls + syscall gate）；qemu 运行时门禁待交叉工具链就绪 |
+| loongarch64 | 专项 ABI/VLA/TLS 汇编回归 | 支持 | 后端相对成熟；libc runtime 已落地（crt1/atomic/setjmp/sigreturn/thread_clone/tls + syscall gate）；qemu 运行时门禁待交叉工具链就绪 |
+| arm | ARM 汇编回归 | 支持 | ARMv7 后端完成，qemu 运行时验证通过 |
 | i386 | 整数+浮点 SysV ABI 回归 | 支持 | x87 浮点完整（float 返回/二元运算/signed·unsigned 浮点↔整数转换）+ Ouwtof/Oultof + 跨函数 va_list 均通过回归；FPR 占位已收口（设计决策：x87 栈机不建模为 flat FPR 类，刻意 `nfpr=0`）；**完整代码生成 target**：端到端 runtime 数值验证已通过（P5）。双路径：(1) 宿主内核 `CONFIG_IA32_EMULATION` 直接执行静态 32 位 ELF；(2) **env qemu-system-i386 真实 32 位内核门禁**（`make check-i386-qemu` / `test/i386/qemu-runtime.sh`，Alpine 6.6.x + TCG，经 9p 共享编译+运行+回传） |
 
 ## 当前回归

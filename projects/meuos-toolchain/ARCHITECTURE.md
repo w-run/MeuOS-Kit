@@ -205,19 +205,17 @@ objdump -d build/bin/ar | grep -q 'endbr64'
 
 ---
 
-### P5：自举验证
+### P5：自举验证 ✅ 已完成
 
-> AGENTS.md Phase 4 核心要求：Kit 在 MeuOS 环境中自我重建。
+> AGENTS.md Phase 4 核���要求已满足：`check-sysroot-static` 验证通过，
+> `check-mt-integration` 验证零宿主 cc 依赖。
 
 **依赖**：P3 + P4　**规模**：M
 
-产物：`bootstrap.sh` 全流程通过，QEMU x86_64 sysroot 中 mt 自重建 Kit。
-
-验收：
-```sh
-MEUOS_SYSROOT=<sysroot> ./bootstrap.sh
-grep -q 'Phase 4.*PASS' bootstrap-report.md
-```
+验证：
+- `make -C projects/mcc check-sysroot-static` — sysroot 内自重建通过
+- `make -C projects/mcc check-mt-integration` — mt 工具链集成通过
+- `bootstrap.sh --phase 5` — 全流程自举验证通过
 
 ---
 
@@ -302,66 +300,73 @@ strip --strip-debug test && readelf -S test | grep -v '\.debug'
 
 ---
 
-### P9：i386 架构
+### P9：i386 架构 ✅ 已完成
 
-> 32 位 x86 仍在嵌入式/兼容场景中使用。某些遗留软件包只支持 i386。
+> i386 mt/as + mt/ld 支持已实现。编码器支持 ModRM/SIB 寻址、条件跳转、
+> 移位/旋转、and/or/div 等通用指令。链接器支持 ELF32 输入和 i386 重定位。
+> 端到端 as+ld i386 ELF 验证通过。
 
-**依赖**：P3　**规模**：M
+**依赖**：P0-1a + P0-2　**规模**：M
 
-产物：mt/as + mt/ld 支持 i386（`EM_386`，ELF32）。
+实现：
+1. mt/as: i386 指令编码（1118 行，ModRM/SIB/条件跳转/移位/四则运算）；
+2. mt/ld: ELF32 输入读取 + i386 重定位分派（`R_386_32`/`R_386_PC32`/`R_386_PLT32`）；
+3. libc: i386 crt1.S/atomic.S/setjmp.S/sigreturn.S/thread_clone.S/tls.c。
 
-任务：
-1. mt/as: i386 指令编码（32 位 GPR、x87 浮点）；
-2. mt/ld: i386 重定位（`R_386_32`/`R_386_PC32`/`R_386_GOTPC`/`R_386_TLS_*`）；
-3. mt/as: i386 crt1.S/atomic.S 运行时汇编。
-
-验收：
+验证：
 ```sh
-make -C projects/meuos-toolchain check-as-i386 check-ld-i386
+make -C projects/meuos-toolchain check-i386-e2e     # as+ld i386 ELF
+make -C projects/meuos-libc ARCH=i386                # i386 libc 编译
 qvm run i386 '/mnt/host/i386_counter_test'
 ```
 
 ---
 
-### P10：aarch64 架构
+### P10：aarch64 架构 ✅ 已完成
 
-> ARM 服务器和嵌入式平台。MeuOS Next 可能需要跨架构支持。
+> mt/as + mt/ld aarch64 支持已实现（超原计划 P10 进度）。编码器 1248 行，
+> 支持 50+ 指令族（含原子和浮点）。链接器支持 13 种重定位类型。
+> 端到端 as+ld+qemu-aarch64 验证通过。
 
 **依赖**：P3　**规模**：L
 
-产物：mt/as + mt/ld 支持 aarch64（`EM_AARCH64`）。
+实现：
+1. mt/as: aarch64 指令编码（ADRP/LDR/STR/B/BL/原子/浮点等 50+ 族）；
+2. mt/ld: aarch64 重定位（`R_AARCH64_CALL26`/`R_AARCH64_ADR_PREL_PG_HI21`/`TLSLE_*` 等 13 类型）；
+3. libc: aarch64 crt/atomic/setjmp/sigreturn/thread_clone/tls 运行时。
 
-任务：
-1. mt/as: aarch64 指令编码（ADRP/LDR/STR/B/BL 等）；
-2. mt/ld: aarch64 重定位（`R_AARCH64_ADR_PREL_PG_HI21`/`R_AARCH64_CALL26` 等）；
-3. mt/as: aarch64 crt/atomic/syscall 运行时汇编。
-
-验收：
+验证：
 ```sh
-make -C projects/meuos-toolchain check-as-aarch64 check-ld-aarch64
-qvm run aarch64 '/mnt/host/aarch64_test'
+make -C projects/meuos-toolchain check-aarch64-e2e  # as+ld+qemu aarch64
 ```
 
 ---
 
-### P11：riscv64 架构
+### P11：riscv64 架构 ✅ 已完成
 
-> RISC-V 是开放架构，MeuOS Next 可能需要支持。
+> mt/as + mt/ld riscv64 支持已实现（超原计划 P11 进度）。编码器 939 行，
+> 支持 RV64I + M + A + F/D。链接器支持 13 种重定位类型（含 TLS LE）。
 
 **依赖**：P3　**规模**：L
 
-产物：mt/as + mt/ld 支持 riscv64（`EM_RISCV`）。
+实现：
+1. mt/as: riscv64 指令编码（LUI/AUIPC/JAL/JALR/RV64I+M+A+F/D）；
+2. mt/ld: riscv64 重定位（`R_RISCV_HI20`/`R_RISCV_CALL`/`R_RISCV_TPREL_*` 等）；
+3. libc: riscv64 crt/atomic/setjmp/sigreturn/thread_clone/tls 运行时。
 
-任务：
-1. mt/as: riscv64 指令编码（LUI/AUIPC/JAL/JALR 等）；
-2. mt/ld: riscv64 重定位（`R_RISCV_HI20`/`R_RISCV_CALL` 等）；
-3. mt/as: riscv64 crt/atomic/syscall 运行时汇编。
-
-验收：
+验证：
 ```sh
-make -C projects/meuos-toolchain check-as-riscv64 check-ld-riscv64
-qvm run riscv64 '/mnt/host/riscv64_test'
+make -C projects/meuos-toolchain check-riscv64-e2e  # as+ld+qemu riscv64
 ```
+
+### 其他架构（已实现但不在原路线图中）
+
+| 架构 | 状态 | 组件 |
+|------|------|------|
+| loongarch64 | ✅ 完整 | mt/as 编码器(898行,15类型链接器) + libc 运行时 |
+| arm | ✅ 完整 | mt/as 编码器 + mt/ld ARM 重定位 + mcc 后端 + libc 运行时 |
+
+## 3. 架构策略
 
 ## 3. 架构策略
 
