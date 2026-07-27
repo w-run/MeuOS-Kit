@@ -771,8 +771,78 @@ static void write_msys_v2(const char *output, struct collector *c, uint32_t flag
 		}
 	}
 
-	/* Phase 2: compute offsets */
-	size_t hdr_size = sizeof(struct msys_header_v2); /* 64 bytes */
+	/* Phase 2: build directory block + compute offsets */
+
+	/* Build directory block: for each entry, extract parent->child mapping */
+	/* Format: parent_hash_trunc[2] | name_len[1] | entry_type[1] | name[] */
+	unsigned char *dir_block = NULL;
+	size_t dir_block_size = 0, dir_block_cap = 0;
+	uint32_t dir_count = 0;
+
+	for (size_t i = 0; i < c->count; i++) {
+		struct entry *e = &c->entries[i];
+		if (e->name[0] == '@' && e->name_len > 0 && e->name[0] == '@')
+			continue; /* skip metadata entries */
+		/* Extract each path component */
+		char pathcopy[4096];
+		if (e->name_len >= sizeof(pathcopy)) continue;
+		memcpy(pathcopy, e->name, e->name_len);
+		pathcopy[e->name_len] = '\0';
+		/* Walk path components */
+		char *part = pathcopy;
+		while (part && *part) {
+			char *slash = strchr(part, '/');
+			if (slash) *slash = '\0';
+			/* Compute parent hash (hash of everything before this component) */
+			size_t parent_len = (size_t)(part - pathcopy);
+			uint32_t parent_hash = 0;
+			if (parent_len > 0) {
+				/* Remove trailing slash for hash */
+				parent_hash = msys_fnv1a((const unsigned char *)pathcopy, parent_len - 1);
+			}
+			/* parent_hash_trunc = top 16 bits */
+			uint16_t ph_trunc = (uint16_t)(parent_hash >> 16);
+			uint8_t nlen = (uint8_t)strlen(part);
+			uint8_t entry_type = slash ? MSYS_FILE_DIR : (uint8_t)e->file_type;
+
+			/* Dedup: check if this (ph_trunc, name) already exists */
+			int dup = 0;
+			unsigned char *dp = dir_block;
+			for (uint32_t d = 0; d < dir_count; d++) {
+				uint16_t dph = (uint16_t)dp[0] | ((uint16_t)dp[1] << 8);
+				uint8_t dnlen = dp[2];
+				if (dph == ph_trunc && dnlen == nlen &&
+				    memcmp(dp + 4, part, nlen) == 0) {
+					dup = 1; break;
+				}
+				dp += 4 + dnlen;
+			}
+			if (dup) { if (slash) { *slash = '/'; part = slash + 1; } else break; continue; }
+
+			/* Allocate */
+			size_t ent_sz = 4 + nlen;
+			if (dir_block_size + ent_sz > dir_block_cap) {
+				size_t nc = dir_block_cap ? dir_block_cap * 2 : 256;
+				unsigned char *ns = realloc(dir_block, nc);
+				if (!ns) die("realloc");
+				dir_block = ns;
+				dir_block_cap = nc;
+			}
+			/* Write: parent_hash_trunc[2] + name_len[1] + entry_type[1] + name[] */
+			dir_block[dir_block_size]     = ph_trunc & 0xff;
+			dir_block[dir_block_size + 1] = (ph_trunc >> 8) & 0xff;
+			dir_block[dir_block_size + 2] = nlen;
+			dir_block[dir_block_size + 3] = entry_type;
+			memcpy(dir_block + dir_block_size + 4, part, nlen);
+			dir_block_size += ent_sz;
+			dir_count++;
+
+			if (slash) { *slash = '/'; part = slash + 1; }
+			else break;
+		}
+	}
+
+	size_t hdr_size = sizeof(struct msys_header_v2);
 	size_t cur = hdr_size;
 	size_t *data_offsets = malloc(c->count * sizeof(size_t));
 	if (!data_offsets) die("malloc");
@@ -784,7 +854,8 @@ static void write_msys_v2(const char *output, struct collector *c, uint32_t flag
 		cur += ((is_zlib || is_zstd) && compressed[i])
 			? comp_sizes[i] : e->data_size;
 	}
-	uint64_t index_offset = align4(cur);
+	uint64_t dir_offset = align4(cur);   /* directory block after data */
+	uint64_t index_offset = align4(cur + dir_block_size);
 
 	/* Phase 3: write v2 header */
 	struct msys_header_v2 hdr;
@@ -793,8 +864,8 @@ static void write_msys_v2(const char *output, struct collector *c, uint32_t flag
 	hdr.index_offset = index_offset;
 	hdr.index_count  = (uint32_t)c->count;
 	hdr.flags        = flags | MSYS_F_DIR_BLOCK;
-	hdr.dir_offset   = 0;   /* directory block not implemented yet */
-	hdr.dir_count    = 0;
+	hdr.dir_offset   = dir_offset;
+	hdr.dir_count    = dir_count;
 	hdr.extension_offset = 0;
 	hdr.data_size_total  = 0;
 	hdr.content_hash     = 0;
@@ -803,7 +874,6 @@ static void write_msys_v2(const char *output, struct collector *c, uint32_t flag
 	/* Phase 4: write data blocks */
 	for (size_t i = 0; i < c->count; i++) {
 		struct entry *e = &c->entries[i];
-		/* Align to 4 bytes */
 		long pos = ftell(fp);
 		while ((size_t)pos < align4((size_t)pos)) { fputc(0, fp); pos++; }
 		if (e->data_size == 0) continue;
@@ -811,6 +881,14 @@ static void write_msys_v2(const char *output, struct collector *c, uint32_t flag
 			fwrite(compressed[i], 1, comp_sizes[i], fp);
 		else
 			fwrite(e->data, 1, e->data_size, fp);
+	}
+
+	/* Phase 4.5: write directory block */
+	if (dir_block) {
+		long pos = ftell(fp);
+		while ((size_t)pos < align4((size_t)pos)) { fputc(0, fp); pos++; }
+		fwrite(dir_block, 1, dir_block_size, fp);
+		free(dir_block);
 	}
 
 	/* Phase 5: write v2 index entries */

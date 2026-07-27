@@ -261,6 +261,33 @@ int msys_readdir(struct msys *m, const char *dir, msys_dir_cb cb, void *arg)
 
 	size_t dlen = strlen(dir);
 	int v2 = (m->format_version == MSYS_FORMAT_V2);
+
+	/* v2 with directory block: O(dir_count) hash lookup */
+	if (v2 && m->hdr_v2->dir_count > 0) {
+		uint32_t parent_hash = (dlen > 0)
+			? msys_fnv1a((const unsigned char *)dir, dlen)
+			: 0;
+		uint16_t ph_trunc = (uint16_t)(parent_hash >> 16);
+		unsigned char *dp = (unsigned char *)m->base + m->hdr_v2->dir_offset;
+		uint32_t found = 0;
+
+		for (uint32_t i = 0; i < m->hdr_v2->dir_count; i++) {
+			uint16_t dph = (uint16_t)dp[0] | ((uint16_t)dp[1] << 8);
+			uint8_t dnlen = dp[2];
+			uint8_t dtype = dp[3];
+			if (dph == ph_trunc) {
+				found++;
+				int is_dir = (dtype == MSYS_FILE_DIR);
+				int ret = cb((const char *)(dp + 4), dnlen, 0, is_dir, arg);
+				if (ret) return 0;
+			}
+			dp += 4 + dnlen;
+		}
+		if (found == 0) { errno = ENOENT; return -1; }
+		return 0;
+	}
+
+	/* Fallback: v1 or v2 without dir block — O(N) prefix scan */
 	uint32_t cnt = m->hdr->index_count;
 
 	/* Simple linear dedup: track unique children seen so far.
