@@ -1,5 +1,6 @@
 #include "mt/msys.h"
 
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -8,6 +9,20 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+/* ---- Minimal zlib struct for dynamic decompression ---- */
+typedef struct {
+	unsigned char *next_in;  unsigned int avail_in;  unsigned long total_in;
+	unsigned char *next_out; unsigned int avail_out; unsigned long total_out;
+	const char *msg; void *state;
+	void *(*zalloc)(void *, unsigned int, unsigned int);
+	void  (*zfree)(void *, void *);
+	void *opaque;
+	int data_type; unsigned long adler; unsigned long reserved;
+} z_stream_min;
+#define Z_OK            0
+#define Z_STREAM_END    1
+#define Z_FINISH 4
 
 /* ---- helpers for uint48 (6-byte LE) ---- */
 
@@ -225,6 +240,76 @@ int msys_read(struct msys *m, const char *name, void *buf, size_t buflen)
 
 /* ---- VFS: fopen a file within the archive ---- */
 
+/* Decompress data if the archive has MSYS_F_ZLIB flag set.
+ * Returns allocated buffer (caller must free) on success, NULL on error.
+ * On success, *out_size receives decompressed size. */
+static void *
+decompress(struct msys *m, const void *compressed, size_t csize, size_t *out_size)
+{
+	(void)m; /* unused - flag is checked by callers */
+	static void *zlib_handle;
+	static int (*zlib_inflateInit)(void *, const char *, int);
+	static int (*zlib_inflate)(void *, int);
+	static int (*zlib_inflateEnd)(void *);
+	static int zlib_loaded;
+
+	if (!zlib_loaded) {
+		zlib_loaded = 1;
+		zlib_handle = dlopen("libz.so.1", RTLD_LAZY | RTLD_LOCAL);
+		if (!zlib_handle) zlib_handle = dlopen("libz.so", RTLD_LAZY | RTLD_LOCAL);
+		if (zlib_handle) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+			zlib_inflateInit = (int (*)(void *, const char *, int))dlsym(zlib_handle, "inflateInit_");
+			zlib_inflate     = (int (*)(void *, int))dlsym(zlib_handle, "inflate");
+			zlib_inflateEnd  = (int (*)(void *))dlsym(zlib_handle, "inflateEnd");
+#pragma GCC diagnostic pop
+		}
+	}
+
+	if (!zlib_handle || !zlib_inflate || !zlib_inflateInit)
+		return NULL; /* No decompression available */
+
+	unsigned long guess = csize * 4 + 1024; /* conservative estimate */
+	void *decomp = malloc(guess);
+	if (!decomp) return NULL;
+
+	z_stream_min strm;
+	memset(&strm, 0, sizeof(strm));
+	strm.next_in = (unsigned char *)compressed;
+	strm.avail_in = (unsigned int)csize;
+	strm.next_out = (unsigned char *)decomp;
+	strm.avail_out = (unsigned int)guess;
+
+	if ((*zlib_inflateInit)(&strm, "1.", (int)sizeof(z_stream_min)) != Z_OK) {
+		free(decomp); return NULL;
+	}
+
+	/* Inflate with retry for buffer growth */
+	int ret;
+	while (1) {
+		ret = (*zlib_inflate)(&strm, Z_FINISH);
+		if (ret == Z_STREAM_END) break;
+		if (ret != Z_OK && strm.avail_out != 0) {
+			/* Error, not just need more space */
+			(*zlib_inflateEnd)(&strm);
+			free(decomp); return NULL;
+		}
+		/* Need more space - double the buffer */
+		size_t consumed = (size_t)(strm.next_out - (unsigned char *)decomp);
+		guess *= 2;
+		void *newbuf = realloc(decomp, guess);
+		if (!newbuf) { free(decomp); (*zlib_inflateEnd)(&strm); return NULL; }
+		decomp = newbuf;
+		strm.next_out = (unsigned char *)decomp + consumed;
+		strm.avail_out = (unsigned int)(guess - consumed);
+	}
+	(*zlib_inflateEnd)(&strm);
+
+	*out_size = strm.total_out;
+	return decomp;
+}
+
 FILE *msys_fopen(struct msys *m, const char *path, const char *mode)
 {
 	size_t dsize;
@@ -233,6 +318,19 @@ FILE *msys_fopen(struct msys *m, const char *path, const char *mode)
 	if (!m || !path) { errno = EINVAL; return NULL; }
 	data = msys_search(m, path, &dsize);
 	if (!data) return NULL;
+
+	if (m->hdr->flags & MSYS_F_ZLIB) {
+		size_t usize;
+		void *decomp = decompress(m, data, dsize, &usize);
+		if (!decomp) return NULL;
+		/* fmemopen does NOT adopt the buffer; we'd leak.
+		 * Use tmpfile + write instead, or use funopen.
+		 * Simplest: msys_fopen on compressed data is not supported yet.
+		 * Return NULL; callers should use msys_load for compressed archives. */
+		free(decomp);
+		errno = ENOTSUP;
+		return NULL;
+	}
 
 	/* fmemopen needs a non-const buffer; msys_search returns const from mmap.
 	 * For "r" mode, casting const away is safe since fmemopen won't write. */
@@ -249,6 +347,14 @@ int msys_load(struct msys *m, const char *path, void **buf, size_t *size)
 	if (!m || !path || !buf) { errno = EINVAL; return -1; }
 	data = msys_search(m, path, &dsize);
 	if (!data) return -1;
+
+	if (m->hdr->flags & MSYS_F_ZLIB) {
+		void *decomp = decompress(m, data, dsize, &dsize);
+		if (!decomp) return -1;
+		*buf = decomp;
+		if (size) *size = dsize;
+		return (int)dsize;
+	}
 
 	*buf = malloc(dsize ? dsize : 1);
 	if (!*buf) return -1;

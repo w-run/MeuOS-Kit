@@ -29,12 +29,30 @@
 #include "mt/msys.h"
 
 #include <dirent.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+/* ---- Minimal zlib struct for dynamic loading ---- */
+/* Must match the real z_stream layout exactly for deflateInit_ version check */
+typedef struct {
+	unsigned char *next_in;  unsigned int avail_in;  unsigned long total_in;
+	unsigned char *next_out; unsigned int avail_out; unsigned long total_out;
+	const char *msg; void *state;
+	void *(*zalloc)(void *, unsigned int, unsigned int);
+	void  (*zfree)(void *, void *);
+	void *opaque;
+	int data_type; unsigned long adler; unsigned long reserved;
+} z_stream_min;
+#define Z_OK            0
+#define Z_STREAM_END    1
+#define Z_DEFAULT_COMPRESSION  (-1)
+#define Z_FINISH 4
+#define ZLIB_VER_MAJOR 1
 
 /* ---- LE read/write helpers ---- */
 
@@ -172,15 +190,82 @@ static void write_msys(const char *output, struct collector *c, uint32_t flags)
 	/* Layout:
 	 *   [Header (32 bytes)]
 	 *   [Data block 1]  (4-byte aligned)
-	 *   [Data block 2]
 	 *   ...
 	 *   [Data block N]
-	 *   [Index block]   (begins at index_offset)
-	 *
-	 * We pre-compute all offsets then write sequentially.
+	 *   [Index block]
 	 */
 
-	/* Phase 1: compute offsets */
+	/* ---- zlib compression via dlopen ---- */
+	void *zlib_handle = NULL;
+	int (*zlib_deflateInit)(void *, int, const char *, int) = NULL;
+	int (*zlib_deflate)(void *, int) = NULL;
+	int (*zlib_deflateEnd)(void *) = NULL;
+	unsigned long (*zlib_compressBound)(unsigned long) = NULL;
+
+	if (flags & MSYS_F_ZLIB) {
+		zlib_handle = dlopen("libz.so.1", RTLD_LAZY | RTLD_LOCAL);
+		if (!zlib_handle) zlib_handle = dlopen("libz.so", RTLD_LAZY | RTLD_LOCAL);
+		if (!zlib_handle) {
+			fprintf(stderr, "mkmsys: --compress=zlib but libz.so not found, "
+			        "falling back to uncompressed\n");
+			flags &= ~MSYS_F_ZLIB;
+		} else {
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
+			zlib_deflateInit = (int (*)(void *, int, const char *, int))dlsym(zlib_handle, "deflateInit_");
+			zlib_deflate     = (int (*)(void *, int))dlsym(zlib_handle, "deflate");
+			zlib_deflateEnd  = (int (*)(void *))dlsym(zlib_handle, "deflateEnd");
+			zlib_compressBound = (unsigned long (*)(unsigned long))dlsym(zlib_handle, "compressBound");
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+			if (!zlib_deflateInit || !zlib_deflate || !zlib_deflateEnd) {
+				fprintf(stderr, "mkmsys: libz missing required symbols, "
+				        "falling back to uncompressed\n");
+				dlclose(zlib_handle); zlib_handle = NULL;
+				flags &= ~MSYS_F_ZLIB;
+			}
+		}
+	}
+
+	/* Phase 1: compute data sizes (compress each block if zlib) */
+	unsigned char **compressed = NULL;
+	size_t *comp_sizes = NULL;
+	if (flags & MSYS_F_ZLIB) {
+		compressed = calloc(c->count, sizeof(*compressed));
+		comp_sizes = calloc(c->count, sizeof(*comp_sizes));
+		if (!compressed || !comp_sizes) die("malloc");
+		for (size_t i = 0; i < c->count; i++) {
+			struct entry *e = &c->entries[i];
+			if (e->data_size == 0) { comp_sizes[i] = 0; continue; }
+			unsigned long bound = (*zlib_compressBound)((unsigned long)e->data_size);
+			compressed[i] = malloc(bound + 8);
+			if (!compressed[i]) die("malloc");
+			/* Simple deflate in zlib format */
+			z_stream_min strm;
+			memset(&strm, 0, sizeof(strm));
+			strm.next_in = e->data;
+			strm.avail_in = (unsigned int)e->data_size;
+			strm.next_out = compressed[i];
+			strm.avail_out = (unsigned int)(bound + 8);
+			if ((*zlib_deflateInit)(&strm, Z_DEFAULT_COMPRESSION, "1.2.3", (int)sizeof(z_stream_min)) != Z_OK)
+				die("deflateInit");
+			int ret = (*zlib_deflate)(&strm, Z_FINISH);
+			if (ret != Z_STREAM_END) die("deflate");
+			(*zlib_deflateEnd)(&strm);
+			comp_sizes[i] = strm.total_out;
+			if (comp_sizes[i] >= e->data_size) {
+				/* Compression didn't help; store uncompressed */
+				free(compressed[i]);
+				compressed[i] = NULL;
+				comp_sizes[i] = e->data_size;
+			}
+		}
+	}
+
+	/* Phase 2: compute offsets */
 	size_t hdr_size = sizeof(struct msys_header);
 	size_t cur = hdr_size;
 	size_t *data_offsets = malloc(c->count * sizeof(size_t));
@@ -189,11 +274,12 @@ static void write_msys(const char *output, struct collector *c, uint32_t flags)
 	for (size_t i = 0; i < c->count; i++) {
 		cur = align4(cur);
 		data_offsets[i] = cur;
-		cur += c->entries[i].data_size;
+		cur += (flags & MSYS_F_ZLIB && compressed[i])
+			? comp_sizes[i] : c->entries[i].data_size;
 	}
 	uint64_t index_offset = align4(cur);
 
-	/* Phase 2: write header */
+	/* Phase 3: write header */
 	struct msys_header hdr;
 	memset(&hdr, 0, sizeof(hdr));
 	memcpy(hdr.magic, MSYS_MAGIC, MSYS_MAGIC_LEN);
@@ -202,16 +288,19 @@ static void write_msys(const char *output, struct collector *c, uint32_t flags)
 	hdr.flags        = flags;
 	fwrite(&hdr, sizeof(hdr), 1, fp);
 
-	/* Phase 3: write data blocks */
+	/* Phase 4: write data blocks */
 	for (size_t i = 0; i < c->count; i++) {
 		struct entry *e = &c->entries[i];
-		/* Pad to 4-byte alignment */
 		long pos = ftell(fp);
 		while ((size_t)pos < align4((size_t)pos)) {
 			fputc(0, fp); pos++;
 		}
-		if (e->data_size > 0)
+		if (e->data_size == 0) continue;
+		if (flags & MSYS_F_ZLIB && compressed[i]) {
+			fwrite(compressed[i], 1, comp_sizes[i], fp);
+		} else {
 			fwrite(e->data, 1, e->data_size, fp);
+		}
 	}
 
 	/* Pad index to alignment */
@@ -220,19 +309,27 @@ static void write_msys(const char *output, struct collector *c, uint32_t flags)
 		while ((size_t)pos < align4((size_t)pos)) { fputc(0, fp); pos++; }
 	}
 
-	/* Phase 4: write index entries (sorted by hash, already sorted) */
+	/* Phase 5: write index entries (sorted by hash, already sorted) */
 	for (size_t i = 0; i < c->count; i++) {
 		struct entry *e = &c->entries[i];
+		uint64_t dsize = (flags & MSYS_F_ZLIB && compressed[i])
+			? comp_sizes[i] : e->data_size;
 		uint8_t buf[16];
 		wr32(buf,     e->hash);
 		wr48(buf + 4, data_offsets[i]);
-		wr32(buf + 10, (uint32_t)e->data_size);
+		wr32(buf + 10, (uint32_t)dsize);
 		wr16(buf + 14, (uint16_t)e->name_len);
 		fwrite(buf, 16, 1, fp);
 		fwrite(e->name, 1, e->name_len, fp);
 	}
 
 	free(data_offsets);
+	if (compressed) {
+		for (size_t i = 0; i < c->count; i++) free(compressed[i]);
+		free(compressed);
+	}
+	free(comp_sizes);
+	if (zlib_handle) dlclose(zlib_handle);
 	fclose(fp);
 }
 
@@ -346,8 +443,6 @@ int main(int argc, char *argv[])
 
 	if (compress) {
 		if (strcmp(compress, "zlib") == 0) {
-			fprintf(stderr, "mkmsys: --compress=zlib not yet implemented, "
-			        "falling back to uncompressed\n");
 			flags |= MSYS_F_ZLIB;
 		} else if (strcmp(compress, "zstd") == 0) {
 			fprintf(stderr, "mkmsys: --compress=zstd not yet implemented, "

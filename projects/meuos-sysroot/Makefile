@@ -39,7 +39,7 @@ $(OBJDIR)/%.o: src/%.c include/mt/msys.h
 # mkmsys — .msys packer (standalone binary)
 $(MKMSYS_BIN): $(MKMSYS_OBJS) $(MSYS_LIB)
 	@mkdir -p $(dir $@)
-	$(HOST_CC) $(CFLAGS) -o $@ $(MKMSYS_OBJS) $(MSYS_LIB)
+	$(HOST_CC) $(CFLAGS) -o $@ $(MKMSYS_OBJS) $(MSYS_LIB) -ldl
 
 $(OBJDIR)/mkmsys/main.o: src/mkmsys/main.c include/mt/msys.h
 	@mkdir -p $(dir $@)
