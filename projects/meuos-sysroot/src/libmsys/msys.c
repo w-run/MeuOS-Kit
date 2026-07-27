@@ -590,6 +590,66 @@ int msys_get_extension(struct msys *m, uint32_t type,
 	return -1;
 }
 
+/* ---- signature verification ---- */
+
+#include "ed25519.h"
+
+int msys_verify_signature(struct msys *m, const uint8_t pk[32])
+{
+	if (!m || !pk) { errno = EINVAL; return -1; }
+	if (m->format_version != MSYS_FORMAT_V2) { errno = ENOSYS; return -1; }
+
+	const void *sig_data = NULL;
+	uint32_t sig_len = 0;
+	if (msys_get_extension(m, 0x6e676973, &sig_data, &sig_len) < 0) {
+		errno = ENOENT; /* no signature extension */
+		return -1;
+	}
+	if (sig_len != 64) { errno = EINVAL; return -1; }
+
+	/* Compute SHA-256 of the index block as the signed message */
+	uint8_t index_hash[32];
+	{
+		uint64_t idx_off = (m->format_version == MSYS_FORMAT_V2)
+			? m->hdr_v2->index_offset : m->hdr->index_offset;
+		uint32_t idx_count = m->hdr->index_count;
+
+		/* Compute index block size from entry-at-end parsing */
+		/* Walk entries to find end of index */
+		unsigned char *p = (unsigned char *)m->base + idx_off;
+		uint64_t avail = m->size - idx_off;
+		uint64_t idx_end = idx_off;
+		int v2 = (m->format_version == MSYS_FORMAT_V2);
+
+		for (uint32_t i = 0; i < idx_count; i++) {
+			uint16_t nlen;
+			if (v2) {
+				if (avail < 32) break;
+				nlen = p[30];
+				uint8_t chp = p[31];
+				p += 32 + nlen + (chp ? 32 : 0);
+				avail -= 32 + nlen + (chp ? 32 : 0);
+			} else {
+				if (avail < 16) break;
+				nlen = (uint16_t)p[14] | ((uint16_t)p[15] << 8);
+				p += 16 + nlen;
+				avail -= 16 + nlen;
+			}
+		}
+		idx_end = (uint64_t)(p - (unsigned char *)m->base);
+
+		sha256((const unsigned char *)m->base + idx_off,
+		       (size_t)(idx_end - idx_off), index_hash);
+	}
+
+	/* Verify ed25519 signature */
+	if (ed25519_verify(pk, index_hash, 32, (const uint8_t *)sig_data) != 1) {
+		errno = EINVAL;
+		return -1;
+	}
+	return 0;
+}
+
 /* ---- search (binary search by name_hash, verify name string) ---- */
 
 const void *msys_search(struct msys *m, const char *name, size_t *size)

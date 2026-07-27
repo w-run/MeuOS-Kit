@@ -107,11 +107,11 @@ Data blocks: 按 data_offset 排列，4 字节对齐
 - [x] 同名文件覆盖语义（搜索从高层到底层，首次匹配返回）
 - [x] `msys_overlay_search/read/stat/readlink/load/fopen/readdir/verify/close` API
 
-#### 5.7 签名 / 认证（待实现）
+#### 5.7 签名 / 认证 ✅
 
-- [ ] 扩展块 ed25519 签名
-- [ ] `msys_verify_signature()` API
-- [ ] `mkmsys --sign=<keyfile>`
+- [x] 扩展块 ed25519 签名（libsodium dlopen 实现）
+- [x] `msys_verify_signature(pk)` API（验证索引块 SHA-256 + ed25519 签名）
+- [x] `mkmsys --sign=<keyfile>`（32B seed 或 64B 完整密钥）
 
 #### 5.8 流式消费（待实现）
 

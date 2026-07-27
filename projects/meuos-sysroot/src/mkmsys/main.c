@@ -30,6 +30,7 @@
 
 #include "mt/msys.h"
 #include "sha256.h"
+#include "ed25519.h"
 
 #include <dirent.h>
 #include <dlfcn.h>
@@ -647,12 +648,14 @@ static int extract_msys(const char *msys_path, const char *outdir)
 	return 0;
 }
 
-/* ---- write v2 .msys ---- */
+	/* ---- write v2 .msys ---- */
 
 static void write_msys_v2(const char *output, struct collector *c, uint32_t flags,
-                          const void *ext_data, uint32_t ext_len)
+                          const void *ext_data, uint32_t ext_len,
+                          const uint8_t sign_sk[64], const uint8_t sign_pk[32])
 {
-	FILE *fp = fopen(output, "wb");
+	(void)sign_pk; /* public key stored separately in key file for verification */
+	FILE *fp = fopen(output, "w+b");
 	if (!fp) die(output);
 
 	/* Layout:
@@ -979,11 +982,43 @@ static void write_msys_v2(const char *output, struct collector *c, uint32_t flag
 	}
 
 	/* Phase 6: write extension blocks (after index) */
-	if (ext_data && ext_len > 0) {
+	ext_offset_value = 0;
+
+	/* If secret key provided, compute ed25519 signature over the index block */
+	uint8_t sig_buf[64];
+	int have_sig = 0;
+	if (sign_sk) {
+		fflush(fp); /* ensure index is flushed before reading back */
+		long idx_end_pos = ftell(fp); /* current position = end of index */
+		size_t idx_size = (size_t)(idx_end_pos - (long)index_offset);
+
+		uint8_t *idx_data = malloc(idx_size);
+		if (idx_data) {
+			fseek(fp, (long)index_offset, SEEK_SET);
+			fread(idx_data, 1, idx_size, fp);
+			uint8_t idx_hash[32];
+			sha256(idx_data, idx_size, idx_hash);
+			free(idx_data);
+			ed25519_sign(sign_sk, idx_hash, 32, sig_buf);
+			have_sig = 1;
+		}
+		fseek(fp, 0, SEEK_END); /* back to end for extension write */
+	}
+
+	if (have_sig || (ext_data && ext_len > 0)) {
 		ext_offset_value = (uint64_t)ftell(fp);
 		while (ext_offset_value < align4((size_t)ext_offset_value)) {
 			fputc(0, fp); ext_offset_value++;
 		}
+	}
+	if (have_sig) {
+		uint8_t ext_hdr[8];
+		wr32(ext_hdr,     0x6e676973); /* "sign" fourcc */
+		wr32(ext_hdr + 4, 64);
+		fwrite(ext_hdr, 8, 1, fp);
+		fwrite(sig_buf, 1, 64, fp);
+	}
+	if (ext_data && ext_len > 0) {
 		uint8_t ext_hdr[8];
 		wr32(ext_hdr,     0x6e676973); /* "sign" fourcc */
 		wr32(ext_hdr + 4, ext_len);
@@ -1041,6 +1076,7 @@ int main(int argc, char *argv[])
 	const char *input = NULL;
 	int incremental = 0;
 	int dedup_mode = 0;
+	const char *sign_keyfile = NULL;
 	int format_v2 = 0;
 	const char *compress = NULL;
 
@@ -1065,6 +1101,7 @@ int main(int argc, char *argv[])
 	  "  --compress=<type>  Compress data blocks: zlib, zstd\n"
 	  "  --incremental      Incremental mode: only repack changed files\n"
 	  "  --dedup            Content dedup (v2 only): SHA-256 identical data stored once\n"
+	  "  --sign=<keyfile>   Sign the index with ed25519 secret key (v2 only)\n"
 	  "  --format <v1|v2>   Output format version (default: v1)\n"
 	  "  --help             Show this help message\n"
 	  "\n"
@@ -1091,6 +1128,8 @@ int main(int argc, char *argv[])
 			incremental = 1; i++;
 		} else if (strcmp(argv[i], "--dedup") == 0) {
 			dedup_mode = 1; i++;
+		} else if (strncmp(argv[i], "--sign=", 7) == 0) {
+			sign_keyfile = argv[i] + 7; i++;
 		} else if (strcmp(argv[i], "--format") == 0 && i + 1 < argc) {
 			format_v2 = (strcmp(argv[i + 1], "v2") == 0); i += 2;
 		} else if (strcmp(argv[i], "--help") == 0) {
@@ -1209,8 +1248,38 @@ int main(int argc, char *argv[])
 	}
 
 	qsort(c.entries, c.count, sizeof(struct entry), entry_cmp);
+
+	/* Read ed25519 secret key for signing (if --sign) */
+	uint8_t sign_sk[64] = {0};
+	uint8_t sign_pk[32] = {0};
+	const uint8_t *sign_sk_ptr = NULL;
+	const uint8_t *sign_pk_ptr = NULL;
+	if (sign_keyfile) {
+		FILE *kf = fopen(sign_keyfile, "rb");
+		if (!kf) { perror(sign_keyfile); return 1; }
+		uint8_t key_buf[64];
+		size_t klen = fread(key_buf, 1, 64, kf);
+		fclose(kf);
+		if (klen == 32) {
+			/* Seed: generate key pair */
+			ed25519_keypair(key_buf, sign_sk, sign_pk);
+			sign_sk_ptr = sign_sk;
+			sign_pk_ptr = sign_pk;
+		} else if (klen == 64) {
+			/* Full secret key */
+			memcpy(sign_sk, key_buf, 64);
+			memcpy(sign_pk, key_buf + 32, 32);
+			sign_sk_ptr = sign_sk;
+			sign_pk_ptr = sign_pk;
+		} else {
+			fprintf(stderr, "mkmsys: invalid key file '%s' — expected 32 (seed) or 64 bytes\n",
+			        sign_keyfile);
+			return 1;
+		}
+	}
+
 	if (format_v2)
-		write_msys_v2(output, &c, flags, NULL, 0);
+		write_msys_v2(output, &c, flags, NULL, 0, sign_sk_ptr, sign_pk_ptr);
 	else
 		write_msys(output, &c, flags);
 

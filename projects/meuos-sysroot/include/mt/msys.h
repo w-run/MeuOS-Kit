@@ -246,6 +246,15 @@ int msys_verify_all(struct msys *m);
 int msys_get_extension(struct msys *m, uint32_t type,
                        const void **data, uint32_t *dlen);
 
+/* Verify the ed25519 signature stored in extension block (v2 only).
+ * The signature is computed over the entire index block.
+ *   m:   handle from msys_open
+ *   pk:  32-byte ed25519 public key
+ *   Returns 0 if signature is valid, -1 if invalid or no signature
+ *   (errno = ENOENT if no signature, EINVAL if signature bytes wrong length,
+ *    ENOSYS for v1 archives, ENOPKG if libsodium unavailable. */
+int msys_verify_signature(struct msys *m, const uint8_t pk[32]);
+
 /* FNV-1a 32-bit hash helper.
  *   name: pointer to data to hash
  *   len:  number of bytes
