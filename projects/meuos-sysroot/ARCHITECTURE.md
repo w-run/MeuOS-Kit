@@ -58,7 +58,7 @@ meuos-sysroot/
 
 ## 格式规范
 
-### 文件布局
+### v1 格式（32 字节 header，16+name_len 索引条目）
 
 ```
 [Header (32 bytes)]
@@ -70,36 +70,58 @@ meuos-sysroot/
 [Index block]        ← 连续存放的变长索引条目
 ```
 
-### Header (32 bytes)
+### v2 格式（72 字节 header，32+name_len+opt 索引条目）
+
+```
+[Header (72 bytes)]
+[Data block 1]       ← 4 字节对齐
+[Data block 2]
+...
+[Data block N]
+[Directory block]    ← NEW: O(1) 目录列表
+[Index block]        ← 32B/entry + name + 可选 SHA-256
+[Extension blocks]   ← NEW: type(4)+length(4)+data() 链
+```
+
+### v2 Header (72 bytes)
 
 | 偏移 | 大小 | 字段 | 说明 |
 |------|------|------|------|
-| 0 | 8 | magic | `"Msys1\0\0\0"` |
-| 8 | 8 | index_offset | 从文件头到索引块的偏移 (uint64 LE) |
-| 16 | 4 | index_count | 索引条目数 (uint32 LE) |
-| 20 | 4 | flags | 标志位（见下方） |
-| 24 | 8 | reserved | 保留，必须为 0 |
+| 0 | 8 | magic | `"Msys2\0\0\0"` |
+| 8 | 8 | index_offset | 索引块偏移 (uint64 LE) |
+| 16 | 4 | index_count | 条目数 (uint32 LE) |
+| 20 | 4 | flags | 标志位 |
+| 24 | 8 | dir_offset | 目录块偏移，0=无 (uint64 LE) |
+| 32 | 4 | dir_count | 目录条目数，0=无 (uint32 LE) |
+| 36 | 4 | extension_offset | 扩展块偏移，0=无 (uint32 LE) |
+| 40 | 8 | data_size_total | 所有未压缩数据总和 (uint64 LE) |
+| 48 | 8 | content_hash | 索引块 SHA-256 前 8 字节 |
+| 56 | 16 | reserved | 保留，必须为 0 |
 
-### Flags
-
-| 标志 | 值 | 说明 |
-|------|-----|------|
-| `MSYS_F_NONE` | 0x00 | 无压缩 |
-| `MSYS_F_ZLIB` | 0x01 | zlib deflate 压缩（单文件级别，非整体） |
-| `MSYS_F_ZSTD` | 0x02 | zstd 压缩（预留，未实现） |
-| `MSYS_F_INCREMENTAL` | 0x04 | 增量模式（预留，未实现） |
-
-### Index entry (16 + name_len bytes)
+### v2 Index Entry (32 + name_len + 可选 32 字节)
 
 | 偏移 | 大小 | 字段 | 说明 |
 |------|------|------|------|
 | 0 | 4 | name_hash | FNV-1a 32-bit, LE |
-| 4 | 6 | data_offset | 数据块在文件中的偏移 (uint48 LE) |
-| 10 | 4 | data_size | 数据块大小 (uint32 LE) |
-| 14 | 2 | name_len | 文件名长度 (uint16 LE) |
-| 16+ | name_len | name | 文件名（无 NUL 终止符） |
+| 4 | 6 | data_offset | 数据块偏移 (uint48 LE) |
+| 10 | 4 | data_size | 存储大小 (uint32 LE, 压缩时=压缩后大小) |
+| 14 | 4 | uncompressed_size | 原始大小 (uint32 LE, 0=未压缩) |
+| 18 | 2 | file_type | 文件类型 (uint16 LE: MSYS_FILE_*) |
+| 20 | 2 | mode | 权限 (uint16 LE) |
+| 22 | 4 | uid | 属主 (uint32 LE) |
+| 26 | 4 | gid | 属组 (uint32 LE) |
+| 30 | 1 | name_len | 名称长度 (uint8, 最大 255) |
+| 31 | 1 | content_hash_present | 0=无, 1=末尾追加 32 字节 SHA-256 |
+| 32+ | name_len | name | 文件名（无 NUL 终止符） |
 
-索引按 `name_hash` 升序排列，哈希冲突时按 `name` 字典序排列。
+### 目录块条目 (4 + name_len 字节)
+
+| 偏移 | 大小 | 字段 | 说明 |
+|------|------|------|------|
+| 0 | 2 | parent_hash_trunc | 父路径 FNV-1a 哈希的高 16 位 |
+| 2 | 1 | name_len | 名称长度 (uint8) |
+| 3 | 1 | entry_type | 类型 (0=文件, 1=目录, 2=符号链接) |
+| 4+ | name_len | name | 条目名称 |
 
 ### 元数据条目
 
