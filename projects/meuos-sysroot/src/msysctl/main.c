@@ -474,6 +474,54 @@ int main(int argc, char *argv[]) {
 		return 0;
 	}
 
+	/* init: create empty .msys archive */
+	if (strcmp(argv[1], "init") == 0) {
+		if (argc < 3) { fprintf(stderr, "Usage: msysctl init <archive.msys>\n"); return 1; }
+		const char *out = argv[2];
+		FILE *fp = fopen(out, "wb");
+		if (!fp) { perror(out); return 1; }
+		/* v2 header with no entries */
+		struct msys_header_v2 hdr;
+		memset(&hdr, 0, sizeof(hdr));
+		memcpy(hdr.magic, "Msys2\0\0\0", 8);
+		hdr.index_offset = sizeof(hdr);
+		hdr.flags = MSYS_F_DIR_BLOCK;
+		fwrite(&hdr, sizeof(hdr), 1, fp);
+		/* Empty directory block: dir_offset points here, dir_count=0 */
+		uint32_t zero = 0;
+		fwrite(&zero, 1, 4, fp);
+		fclose(fp);
+		printf("initialized empty archive: %s\n", out);
+		return 0;
+	}
+
+	/* env: extract to temp dir and spawn shell */
+	if (strcmp(argv[1], "env") == 0) {
+		if (argc < 3) { fprintf(stderr, "Usage: msysctl env <archive.msys>\n"); return 1; }
+		const char *arch = argv[2];
+		/* Open and extract to temp dir */
+		struct msys *m = msys_open(arch);
+		if (!m) { perror(arch); return 1; }
+		char tmpdir[256];
+		snprintf(tmpdir, sizeof(tmpdir), "/tmp/msys-env-XXXXXX");
+		if (!mkdtemp(tmpdir)) { perror("mkdtemp"); msys_close(m); return 1; }
+		cmd_extract(m, tmpdir);
+		msys_close(m);
+		printf("Entering env: %s → %s\n", arch, tmpdir);
+		printf("Type 'exit' or Ctrl-D to leave (changes discarded)\n");
+
+		/* Spawn shell */
+		const char *shell = getenv("SHELL");
+		if (!shell) shell = "/bin/sh";
+		int rc = system(shell);
+
+		/* Cleanup */
+		char rm[1024]; snprintf(rm, sizeof(rm), "rm -rf %s", tmpdir);
+		system(rm);
+		printf("env closed (shell exited with %d)\n", rc);
+		return rc;
+	}
+
 	if (argc < 3) usage();
 
 	const char *overlay_arg = NULL;
