@@ -486,6 +486,69 @@ int main(int argc, char *argv[]) {
 	else if (strcmp(cmd, "info") == 0) ret = cmd_info(a);
 	else if (strcmp(cmd, "verify") == 0) ret = arch_verify_all(a);
 	else if (strcmp(cmd, "stat") == 0) ret = path_idx >= argc ? (usage(), 1) : arch_stat(a, argv[path_idx]);
+	else if (strcmp(cmd, "grep") == 0) {
+		if (path_idx >= argc) { usage(); ret = 1; }
+		else { const char *pat = argv[path_idx]; int count = 0;
+			if (a->is_overlay) {
+				/* Overlay: for each unique visible file, search the matching layer */
+				/* First collect all files from all layers (top-first) */
+				int nlayers = msys_overlay_count(a->overlay);
+				for (int li = nlayers - 1; li >= 0; li--) {
+					struct msys *m = msys_overlay_get(a->overlay, li);
+					uint32_t cnt = msys_count(m);
+					for (uint32_t i = 0; i < cnt; i++) {
+						const char *name; size_t nlen, dsize;
+						if (msys_enumerate(m, i, &name, &nlen, &dsize) < 0) continue;
+						if (nlen > 0 && name[0] == '@') continue;
+						if (dsize == 0) continue;
+						char namebuf[4096]; if (nlen >= sizeof(namebuf)) continue;
+						memcpy(namebuf, name, nlen); namebuf[nlen] = '\0';
+						/* Check if a higher layer shadows this file */
+						int shadowed = 0;
+						for (int hl = nlayers - 1; hl > li; hl--) {
+							if (msys_search(msys_overlay_get(a->overlay, hl), namebuf, NULL)) {
+								shadowed = 1; break;
+							}
+						}
+						if (shadowed) continue;
+						/* Check if already reported from a lower layer */
+						/* Load and search */
+						void *data;
+						if (arch_load(a, namebuf, &data, NULL) < 0) continue;
+						const unsigned char *p = (const unsigned char *)data;
+						size_t plen = strlen(pat);
+						int found = 0;
+						for (size_t j = 0; j + plen <= dsize; j++)
+							if (memcmp(p + j, pat, plen) == 0) { found = 1; break; }
+						if (found) { printf("%s\n", namebuf); count++; }
+						free(data);
+					}
+				}
+			} else {
+				struct msys *m = a->single;
+				uint32_t cnt = msys_count(m);
+				for (uint32_t i = 0; i < cnt; i++) {
+					const char *name; size_t nlen, dsize;
+					if (msys_enumerate(m, i, &name, &nlen, &dsize) < 0) continue;
+					if (nlen > 0 && name[0] == '@') continue;
+					if (dsize == 0) continue;
+					char namebuf[4096]; if (nlen >= sizeof(namebuf)) continue;
+					memcpy(namebuf, name, nlen); namebuf[nlen] = '\0';
+					void *data;
+					if (arch_load(a, namebuf, &data, NULL) < 0) continue;
+					const unsigned char *p = (const unsigned char *)data;
+					size_t plen = strlen(pat);
+					int found = 0;
+					for (size_t j = 0; j + plen <= dsize; j++)
+						if (memcmp(p + j, pat, plen) == 0) { found = 1; break; }
+					if (found) { printf("%s\n", namebuf); count++; }
+					free(data);
+				}
+			}
+			if (count > 0) printf("-- %d match%s\n", count, count == 1 ? "" : "es");
+			if (count == 0) { ret = -1; errno = ENOENT; }
+		}
+	}
 	else { fprintf(stderr, "Unknown: %s\n", cmd); usage(); }
 
 	if (ret < 0) perror(cmd);
