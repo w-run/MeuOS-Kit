@@ -15,6 +15,7 @@ OBJDIR  ?= $(BUILD)/obj
 MSYS_SRCS := src/libmsys/msys.c src/libmsys/sha256.c src/libmsys/overlay.c src/libmsys/ed25519.c src/libmsys/stream.c
 MSYS_OBJS := $(patsubst src/%.c,$(OBJDIR)/%.o,$(MSYS_SRCS))
 MSYS_LIB  := $(BUILD)/libmsys.a
+MSYS_SO   := $(BUILD)/libmsys.so
 
 MKMSYS_SRCS := src/mkmsys/main.c
 MKMSYS_OBJS := $(patsubst src/%.c,$(OBJDIR)/%.o,$(MKMSYS_SRCS))
@@ -39,6 +40,13 @@ $(MSYS_LIB): $(MSYS_OBJS)
 $(OBJDIR)/%.o: src/%.c include/mt/msys.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(CFLAGS) -Iinclude -c -o $@ $<
+
+# Shared library for Python bindings
+$(MSYS_SO): CFLAGS += -fPIC
+$(MSYS_SO): $(MSYS_OBJS)
+	$(HOST_CC) -shared -o $@ $^ -ldl
+
+so: $(MSYS_SO)
 
 # mkmsys — .msys packer (standalone binary)
 $(MKMSYS_BIN): $(MKMSYS_OBJS) $(MSYS_LIB)
