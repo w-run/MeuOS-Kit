@@ -23,12 +23,8 @@ $AS --target=i386 /tmp/meuos-i386-e2e.S -o /tmp/meuos-i386-e2e.o 2>&1 || {
 	echo "FAIL: mt/as assembly failed"; exit 1; }
 echo "  as: PASS (i386 ELF32 object)"
 
-$LD --target=i386 -o /tmp/meuos-i386-e2e /tmp/meuos-i386-e2e.o 2>&1; rc=$?
-if [ "$rc" != "0" ]; then
-	echo "  ld: SKIP (ELF32 input not yet supported - P0-1a)"
-	echo "i386 e2e: PASS (as only, ld pending ELF32 support)"
-	exit 0
-fi
+$LD --target=i386 -o /tmp/meuos-i386-e2e /tmp/meuos-i386-e2e.o 2>&1 || {
+	echo "FAIL: mt/ld link failed"; exit 1; }
 
 file /tmp/meuos-i386-e2e | grep -q "ELF.*32-bit.*80386" || {
 	echo "FAIL: output is not i386 ELF"

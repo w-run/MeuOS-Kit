@@ -79,8 +79,8 @@ mt_elf32_parse(const void *bytes, size_t size, struct mt_elf32_view *view)
 	view->version = read32(p + 20);
 	view->entry = read32(p + 24);
 	view->program_offset = read32(p + 28);
-	view->section_offset = read32(p + 36);
-	view->flags = read32(p + 32);  /* not meaningful in practice */
+	view->section_offset = read32(p + 32);
+	view->flags = read32(p + 36);  /* not meaningful in practice */
 	view->header_size = read16(p + 40);
 	view->program_entry_size = phentsize;
 	view->program_count = phnum;
