@@ -460,15 +460,14 @@ int msys_readlink(struct msys *m, const char *name, char *buf, size_t bufsize)
 						errno = EINVAL;
 						return -1;
 					}
-					/* Read symlink target from data */
-					void *data = NULL;
-					size_t sz;
-					int r = msys_load(m, name, &data, &sz);
-					if (r < 0) return -1;
-					size_t tocpy = sz < bufsize ? sz : bufsize - 1;
-					memcpy(buf, data, tocpy);
+					/* Read symlink target from data via msys_search (NOT msys_load,
+					 * which resolves symlinks — we need the raw link target). */
+					size_t sz2;
+					const void *raw = msys_search(m, name, &sz2);
+					if (!raw) return -1;
+					size_t tocpy = sz2 < bufsize ? sz2 : bufsize - 1;
+					memcpy(buf, raw, tocpy);
 					buf[tocpy] = '\0';
-					free(data);
 					return (int)tocpy;
 				}
 				scan++;
@@ -477,6 +476,59 @@ int msys_readlink(struct msys *m, const char *name, char *buf, size_t bufsize)
 		}
 	}
 	errno = EINVAL;
+	return -1;
+}
+
+/* ---- extended attributes ---- */
+
+int msys_getxattr(struct msys *m, const char *name, const char *key,
+                  char *buf, size_t bufsize)
+{
+	if (!m || !name || !key || !buf) { errno = EINVAL; return -1; }
+
+	/* Build @xattr/<name> path */
+	size_t nlen = strlen(name);
+	size_t xlen = 7 + nlen; /* "@xattr/" prefix */
+	char *xpath = malloc(xlen + 1);
+	if (!xpath) return -1;
+	memcpy(xpath, "@xattr/", 7);
+	memcpy(xpath + 7, name, nlen);
+	xpath[xlen] = '\0';
+
+	size_t dsize;
+	const void *data = msys_search(m, xpath, &dsize);
+	free(xpath);
+	if (!data) return -1;
+
+	/* Parse key=value pairs (newline-separated) */
+	const char *p = (const char *)data;
+	size_t remaining = dsize;
+	size_t klen = strlen(key);
+
+	while (remaining > 0) {
+		/* Find newline or end */
+		const char *nl = memchr(p, '\n', remaining);
+		size_t linelen = nl ? (size_t)(nl - p) : remaining;
+
+		/* Find '=' separator */
+		const char *eq = memchr(p, '=', linelen);
+		if (eq) {
+			size_t ekl = (size_t)(eq - p);
+			if (ekl == klen && memcmp(p, key, klen) == 0) {
+				size_t vlen = linelen - ekl - 1;
+				if (vlen >= bufsize) vlen = bufsize - 1;
+				memcpy(buf, eq + 1, vlen);
+				buf[vlen] = '\0';
+				return (int)vlen;
+			}
+		}
+
+		if (!nl) break;
+		remaining -= linelen + 1;
+		p = nl + 1;
+	}
+
+	errno = ENOENT;
 	return -1;
 }
 
@@ -898,7 +950,19 @@ FILE *msys_fopen(struct msys *m, const char *path, const char *mode)
 
 /* ---- VFS: load file content into malloc'd memory ---- */
 
+/* Forward declaration for symlink following */
+static int msys_load_depth(struct msys *m, const char *path, void **buf,
+                           size_t *size, int depth);
+
 int msys_load(struct msys *m, const char *path, void **buf, size_t *size)
+{
+	return msys_load_depth(m, path, buf, size, 8);
+}
+
+/* Internal: msys_load with depth limit for symlink chain resolution */
+static int
+msys_load_depth(struct msys *m, const char *path, void **buf, size_t *size,
+                int depth)
 {
 	size_t dsize;
 	const void *data;
@@ -907,6 +971,46 @@ int msys_load(struct msys *m, const char *path, void **buf, size_t *size)
 	data = msys_search(m, path, &dsize);
 	if (!data) return -1;
 
+	/* Auto-follow symlinks for v2 archives */
+	if (depth > 0 && m->format_version == MSYS_FORMAT_V2) {
+		/* Find the index entry to check file_type */
+		uint32_t target = msys_fnv1a((const unsigned char *)path, strlen(path));
+		uint32_t lo = 0, hi = m->hdr->index_count;
+		while (lo < hi) {
+			uint32_t mid = lo + (hi - lo) / 2;
+			unsigned char *e = m->entries[mid];
+			uint32_t eh = read32(e);
+			if (eh < target) { lo = mid + 1; continue; }
+			if (eh > target) { hi = mid; continue; }
+			uint32_t scan = mid;
+			while (scan > lo) {
+				if (read32(m->entries[scan - 1]) != target) break;
+				scan--;
+			}
+			while (scan < m->hdr->index_count) {
+				unsigned char *p = m->entries[scan];
+				if (read32(p) != target) break;
+				size_t nl = entry_nlen(p, 1);
+				if (nl == strlen(path) &&
+				    memcmp(entry_name(p, 1), path, nl) == 0) {
+					uint16_t ft = (uint16_t)p[18] | ((uint16_t)p[19] << 8);
+					if (ft == MSYS_FILE_SYMLINK) {
+						/* Read link target and follow it */
+						char linkbuf[4096];
+						size_t linklen = dsize < sizeof(linkbuf) ? dsize : sizeof(linkbuf) - 1;
+						memcpy(linkbuf, data, linklen);
+						linkbuf[linklen] = '\0';
+						return msys_load_depth(m, linkbuf, buf, size, depth - 1);
+					}
+					goto load_data;
+				}
+				scan++;
+			}
+			break;
+		}
+	}
+
+load_data:
 	if (m->hdr->flags & (MSYS_F_ZLIB | MSYS_F_ZSTD)) {
 		void *decomp = decompress(m, data, dsize, &dsize);
 		if (!decomp) return -1;

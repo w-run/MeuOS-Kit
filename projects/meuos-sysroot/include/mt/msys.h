@@ -223,6 +223,17 @@ int msys_stat(struct msys *m, const char *name, struct msys_stat *st);
  *   (errno = EINVAL if not a symlink, ENOENT if not found). */
 int msys_readlink(struct msys *m, const char *name, char *buf, size_t bufsize);
 
+/* Get extended attribute for a file in the archive.
+ * xattr entries are stored as @xattr/<name> with format: key=value\n...
+ *   m:       handle from msys_open
+ *   name:    NUL-terminated path
+ *   key:     xattr key (e.g. "user.mime_type")
+ *   buf:     destination buffer for value
+ *   bufsize: buffer size
+ *   Returns length of value on success, -1 on error (errno set). */
+int msys_getxattr(struct msys *m, const char *name, const char *key,
+                  char *buf, size_t bufsize);
+
 /* Verify content integrity of a single file by recomputing SHA-256.
  *   m:    handle from msys_open
  *   name: NUL-terminated path

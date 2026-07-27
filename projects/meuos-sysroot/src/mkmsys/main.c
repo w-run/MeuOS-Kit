@@ -39,6 +39,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/xattr.h>
 #include <unistd.h>
 
 /* ---- Minimal zlib struct for dynamic loading ---- */
@@ -174,6 +175,41 @@ static void collector_walk(struct collector *c, const char *dir,
 			collector_add(c, relpath, buf, nread, st.st_mtime,
 			              file_type, mode_bits, uid, gid);
 			free(buf);
+			/* Pack extended attributes as @xattr/<relpath> */
+			{
+				ssize_t xlist_len = llistxattr(abspath, NULL, 0);
+				if (xlist_len > 0) {
+					char *xlist = malloc((size_t)xlist_len);
+					if (xlist && llistxattr(abspath, xlist, (size_t)xlist_len) > 0) {
+						/* Build xattr data: key=value\nkey=value\n... */
+						char xbuf[4096];
+						size_t xpos = 0;
+						char *xptr = xlist;
+						while (xptr < xlist + xlist_len) {
+							size_t kn = strlen(xptr);
+							char xval[4096];
+							ssize_t vl = getxattr(abspath, xptr, xval, sizeof(xval) - 1);
+							if (vl > 0) {
+								int needed = snprintf(xbuf + xpos, sizeof(xbuf) - xpos,
+								                       "%s=%.*s\n", xptr, (int)vl, xval);
+								if (needed > 0) xpos += (size_t)needed;
+							}
+							xptr += kn + 1;
+						}
+						if (xpos > 0) {
+							size_t xname_len = 7 + strlen(relpath); /* @xattr/ */
+							char *xname = malloc(xname_len + 1);
+							if (xname) {
+								memcpy(xname, "@xattr/", 7);
+								memcpy(xname + 7, relpath, strlen(relpath) + 1);
+								collector_add(c, xname, xbuf, xpos, 0, MSYS_FILE_REG, 0, 0, 0);
+								free(xname);
+							}
+						}
+					}
+					free(xlist);
+				}
+			}
 		} else if (S_ISDIR(st.st_mode)) {
 			file_type = MSYS_FILE_DIR;
 			mode_bits = (uint16_t)(st.st_mode & 07777);

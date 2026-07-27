@@ -85,13 +85,14 @@ Data blocks: 按 data_offset 排列，4 字节对齐
 - [x] 权限位（`0775` 等 Unix 权限）
 - [x] uid/gid（数字）
 - [x] mtime（通过 @mt/ 元数据存储）
-- [ ] 可选 xattr（待 Phase 2F 扩展块）
+- [x] 可选 xattr（@xattr/<name> 条目，`msys_getxattr()` API）
+- [x] 打包时自动收集 xattr（sys/xattr.h）
 
 #### 5.3 符号链接 ✅
 
 - [x] file_type=SYMLINK，数据块存储目标路径
 - [x] `msys_readlink()` API 返回链接目标
-- [ ] 读取时自动解析（待后续版本）
+- [x] `msys_load()` 自动解析符号链接（递归跟随，8 层深度限制）
 
 #### 5.4 SHA-256 + 去重 ✅
 
