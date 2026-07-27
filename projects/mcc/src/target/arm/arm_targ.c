@@ -1,4 +1,4 @@
-#include "armv7.h"
+#include "arm.h"
 
 int armv7_op[NOp] = {
 #define O(op, t, x) [O##op] =

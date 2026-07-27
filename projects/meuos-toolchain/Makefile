@@ -26,7 +26,7 @@ LIBDISASM_SRCS := $(sort $(wildcard src/libdisasm/*.c))
 LIBDISASM_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(LIBDISASM_SRCS))
 LIBDISASM_LIB := $(BUILD)/lib/libdisasm.a
 
-TARGET_SRCS := $(sort $(wildcard src/target/*.c) $(wildcard src/target/x86_64/*.c) $(wildcard src/target/i386/*.c) $(wildcard src/target/aarch64/*.c) $(wildcard src/target/riscv64/*.c) $(wildcard src/target/loongarch64/*.c) $(wildcard src/target/armv7/*.c))
+TARGET_SRCS := $(sort $(wildcard src/target/*.c) $(wildcard src/target/x86_64/*.c) $(wildcard src/target/i386/*.c) $(wildcard src/target/aarch64/*.c) $(wildcard src/target/riscv64/*.c) $(wildcard src/target/loongarch64/*.c) $(wildcard src/target/arm/*.c))
 TARGET_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(TARGET_SRCS))
 
 AR_SRCS := $(sort $(wildcard src/ar/*.c))
@@ -194,7 +194,7 @@ check-target-dispatch: $(AS_BIN) $(LD_BIN)
 	printf '%s' '--target=riscv64 as: '; LANG=C readelf -h "$$tmp/main.o" | grep 'Machine:'; \
 	$(AS_BIN) --target=loongarch64 -o "$$tmp/main.o" "$$tmp/min.s"; \
 	printf '%s' '--target=loongarch64 as: '; LANG=C readelf -h "$$tmp/main.o" | grep 'Machine:'; \
-	$(AS_BIN) --target=armv7 "$$tmp/min.s" 2>&1 && exit 1 || printf 'unsupported target rejected: PASS\n'; \
+	$(AS_BIN) --target=arm "$$tmp/min.s" 2>&1 && exit 1 || printf 'unsupported target rejected: PASS\n'; \
 	$(LD_BIN) --target=x86_64 --version | grep -q 'x86_64' && printf 'ld --target=x86_64 --version: PASS\n'; \
 	$(LD_BIN) --target=i386 --version | grep -q 'i386' && printf 'ld --target=i386 --version: PASS\n'; \
 	printf 'check-target-dispatch: PASS\n'

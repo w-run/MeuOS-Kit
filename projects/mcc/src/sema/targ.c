@@ -74,7 +74,7 @@ static const struct target alltargs[] = {
 		.signedchar = 1,
 	},
 	{
-		.name = "armv7",
+		.name = "arm",
 		/* armv7 ILP32: va_list is a struct { void *__p; } of 4 bytes,
 		 * same as i386.  Modelling as a struct (rather than a bare
 		 * pointer) ensures cross-function va_list correctness. */

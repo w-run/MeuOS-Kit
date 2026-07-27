@@ -1,5 +1,5 @@
 #!/bin/sh
-# armv7-bootstrap.sh -- armv7 cross-compile self-check + optional qemu runtime gate.
+# arm-bootstrap.sh -- arm cross-compile self-check + optional qemu runtime gate.
 #
 # Goals:
 #   1) Verify mcc + meuos-libc produce valid ELF32/ARM binaries.
@@ -10,7 +10,7 @@
 #      expect phase2 "counter = 2000", bare_tls
 #      "tls main=5 child=9 errno=31/47", atomic / malloc_threads exit 0.
 #
-# armv7 differs from 64-bit targets in that it has VFP hard-float and uses
+# arm differs from 64-bit targets in that it has VFP hard-float and uses
 # set_tls.S (the main thread installs tp via `mcr p15,0,r0,c13,c0,3`).
 #
 # qemu lookup order: $MEUOS_ARMV7_QEMU > env/qemu/qemu-arm-static >
@@ -20,26 +20,26 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 mcc=${MCC:-"$root/../mcc/mcc"}
 ascc=${ASCC:-"arm-linux-gnu-gcc"}
-arch=${ARCH:-"-march=armv7-a -mfloat-abi=hard -mfpu=vfpv3-d16"}
+arch=${ARCH:-"-march=arm-a -mfloat-abi=hard -mfpu=vfpv3-d16"}
 mt_ld=${MT_LD:-"$root/../meuos-toolchain/build/bin/ld"}
 mt_as=${MT_AS:-"$root/../meuos-toolchain/build/bin/as"}
-build=${BUILD:-"$root/build/armv7"}
+build=${BUILD:-"$root/build/arm"}
 sysroot=${SYSROOT:-"$root/../sysroot"}
 qemu=${MEUOS_ARMV7_QEMU:-}
-work=${TMPDIR:-/tmp}/meuos-armv7-bootstrap.$$
+work=${TMPDIR:-/tmp}/meuos-arm-bootstrap.$$
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 mkdir -p "$work"
 
-# Verify armv7 build artefacts exist.
+# Verify arm build artefacts exist.
 if [ ! -f "$build/libc-meuos.a" ] || [ ! -f "$build/libatomic-meuos.a" ] || [ ! -f "$build/crt1.o" ]; then
-	printf 'armv7 build artefacts missing under %s; run "make ARCH=armv7" first\n' "$build" >&2
+	printf 'arm build artefacts missing under %s; run "make ARCH=arm" first\n' "$build" >&2
 	exit 1
 fi
 
 # ===== Test sources =====
 cat > "$work/hello.c" <<'CEOF'
 #include <unistd.h>
-int main(void) { if (getpid() <= 0) return 2; return write(1, "armv7 MeuOS libc\n", 18) == 18 ? 0 : 1; }
+int main(void) { if (getpid() <= 0) return 2; return write(1, "arm MeuOS libc\n", 18) == 18 ? 0 : 1; }
 CEOF
 cat > "$work/atomic.c" <<'CEOF'
 #include <stdatomic.h>
@@ -135,15 +135,15 @@ arch_runtime_objs() {
 "$ascc" $arch -I"$root/include" -c -o "$work/bare_tls.o" "$work/bare_tls.c"
 "$ascc" $arch -I"$root/include" -c -o "$work/malloc_threads.o" "$work/malloc_threads.c"
 arch_runtime_objs \
-	"$root/crt/armv7/crt1.S" \
-	"$root/src/internal/arch/armv7/syscall.S" \
-	"$root/src/arch/armv7/atomic.S" \
-	"$root/src/arch/armv7/setjmp.S" \
-	"$root/src/arch/armv7/sigreturn.S" \
-	"$root/src/arch/armv7/thread_clone.S" \
-	"$root/src/arch/armv7/set_tls.S"
+	"$root/crt/arm/crt1.S" \
+	"$root/src/internal/arch/arm/syscall.S" \
+	"$root/src/arch/arm/atomic.S" \
+	"$root/src/arch/arm/setjmp.S" \
+	"$root/src/arch/arm/sigreturn.S" \
+	"$root/src/arch/arm/thread_clone.S" \
+	"$root/src/arch/arm/set_tls.S"
 
-# ===== Link (via cross-gcc: host linker for armv7) =====
+# ===== Link (via cross-gcc: host linker for arm) =====
 link_full() {
 	local out=$1 main=$2; shift 2
 	"$ascc" $arch -nostdlib -static -o "$out" "$work/crt1.o" "$main" "$work/asm-syscall.o" "$work/asm-atomic.o" \
@@ -184,7 +184,7 @@ if [ "${MEUOS_ARMV7_RUN:-0}" = 1 ]; then
 	fi
 	# 1) hello
 	out=$("$qemu" "$work/hello" 2>&1) || { echo "hello failed: $out" >&2; exit 1; }
-	[ "$out" = "armv7 MeuOS libc" ] || { echo "hello wrong output: $out" >&2; exit 1; }
+	[ "$out" = "arm MeuOS libc" ] || { echo "hello wrong output: $out" >&2; exit 1; }
 	# 2) atomic
 	"$qemu" "$work/atomic-test" || { echo "atomic-test failed" >&2; exit 1; }
 	# 3) setjmp
@@ -200,5 +200,4 @@ if [ "${MEUOS_ARMV7_RUN:-0}" = 1 ]; then
 	"$qemu" "$work/malloc-threads" || { echo "malloc-threads failed" >&2; exit 1; }
 fi
 
-printf '%s\n' 'armv7 bootstrap ELF32/ARM check passed'
-		local
+printf '%s\n' 'arm bootstrap ELF32/ARM check passed'

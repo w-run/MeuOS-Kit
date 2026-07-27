@@ -1,0 +1,22 @@
+# ARM 32-bit (arm) libc runtime — 子架构特性
+
+本目录实现 ARM 32-bit 通用运行时。v7(hf 硬浮点)作为子架构配置，
+由编译器 -march/-mfloat-abi 标志控制，非独立目标。
+
+## 子架构配置
+
+| 特性 | 默认值 | 说明 |
+|------|--------|------|
+| ARM_ARCH | armv7-a | ARM 架构版本（v7-a, v6, v8-a） |
+| ARM_FLOAT_ABI | hard | 浮点 ABI（hard, softfp, soft） |
+| ARM_FPU | vfpv3-d16 | FPU 类型（vfpv3-d16, neon, vfpv4） |
+
+当前验证的子架构组合：
+- armv7-a + hard-float + vfpv3-d16 ✅（已测试通过）
+
+## 范围
+
+- ARM EABI hard-float 的 crt1、syscall gate、原子、TLS、setjmp/sigreturn、clone；
+- 区分整数寄存器和 VFP 参数/返回值，验证 8 字节参数对齐与结构体返回；
+- Linux ARM syscall 编号与参数约定；
+- QEMU arm 用户态或完整 VM 的静态 Phase-2 回归。

@@ -1194,7 +1194,7 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 			return 0;
 		return ld_errorf(ctx, "unsupported relocation type", name);
 	}
-	if (strcmp(ctx->target->name, "armv7") == 0) {
+	if (strcmp(ctx->target->name, "arm") == 0) {
 		if (mt_apply_arm_reloc(type, target->data + target_offset,
 		                       resolved_value, addend, place) == 0)
 			return 0;

@@ -46,7 +46,7 @@
 #define R_ARM_GOT_PREL    96
 
 const char *
-armv7_reloc_name(unsigned type)
+arm_reloc_name(unsigned type)
 {
 	switch (type) {
 	case R_ARM_NONE: return "R_ARM_NONE";

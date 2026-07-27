@@ -2,7 +2,7 @@
  *
  * AAPCS: return in R0 (int/ptr), R0:R1 (64-bit), D0 (float/double).
  *        4 GPR arg registers (R0-R3), 8 VFP arg registers (D0-D7). */
-#include "armv7.h"
+#include "arm.h"
 #include <assert.h>
 
 bits arm32_retregs(Ref r, int p[2]) {

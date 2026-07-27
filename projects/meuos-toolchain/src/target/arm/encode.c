@@ -51,7 +51,7 @@ static int reg_num(const char *s, int *r) {
 }
 
 /* ---- Main encode function ---- */
-int armv7_encode_insn(const struct mt_target *target,
+int arm_encode_insn(const struct mt_target *target,
                       const char *mnemonic, const char *operand_text,
                       struct mt_insn *out)
 {

@@ -10,7 +10,7 @@
  * the 4K range for small-to-moderate frames, so this function is
  * currently a no-op — the omap table + emitins handle everything. */
 
-#include "armv7.h"
+#include "arm.h"
 #include <assert.h>
 
 static int

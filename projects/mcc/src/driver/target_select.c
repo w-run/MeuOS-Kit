@@ -15,7 +15,7 @@ pick_target(const char *triplet)
 		if (strcmp(MCC_DEFAULT_TARGET, "riscv64") == 0)    return &T_rv64;
 		if (strcmp(MCC_DEFAULT_TARGET, "loongarch64") == 0) return &T_la64;
 		if (strcmp(MCC_DEFAULT_TARGET, "i386") == 0)       return &T_i386_sysv;
-		if (strcmp(MCC_DEFAULT_TARGET, "armv7") == 0)      return &T_arm32;
+		if (strcmp(MCC_DEFAULT_TARGET, "arm") == 0)      return &T_arm32;
 #endif
 #if defined(__x86_64__)
 		return &T_amd64_sysv;
@@ -36,7 +36,7 @@ pick_target(const char *triplet)
 		return &T_rv64;
 	if (strncmp(triplet, "loongarch64", 11) == 0 || strncmp(triplet, "la64", 4) == 0)
 		return &T_la64;
-	if (strncmp(triplet, "armv7", 5) == 0 || strncmp(triplet, "arm", 3) == 0)
+	if (strncmp(triplet, "arm", 5) == 0 || strncmp(triplet, "arm", 3) == 0)
 		return &T_arm32;
 	if (strncmp(triplet, "i386", 4) == 0
 	|| strncmp(triplet, "i486", 4) == 0
@@ -63,8 +63,8 @@ targ_name(const char *triplet)
 		return "riscv64";
 	if (strncmp(triplet, "loongarch64", 11) == 0 || strncmp(triplet, "la64", 4) == 0)
 		return "loongarch64";
-	if (strncmp(triplet, "armv7", 5) == 0 || strncmp(triplet, "arm", 3) == 0)
-		return "armv7";
+	if (strncmp(triplet, "arm", 5) == 0 || strncmp(triplet, "arm", 3) == 0)
+		return "arm";
 	if (strncmp(triplet, "i386", 4) == 0
 	|| strncmp(triplet, "i486", 4) == 0
 	|| strncmp(triplet, "i586", 4) == 0
