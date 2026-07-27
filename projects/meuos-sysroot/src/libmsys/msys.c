@@ -555,6 +555,41 @@ int msys_verify_all(struct msys *m)
 	return 0;
 }
 
+/* ---- extension blocks ---- */
+
+int msys_get_extension(struct msys *m, uint32_t type,
+                        const void **data, uint32_t *dlen)
+{
+	if (!m || !data || !dlen) { errno = EINVAL; return -1; }
+	if (m->format_version != MSYS_FORMAT_V2) { errno = ENOSYS; return -1; }
+
+	uint32_t ext_off = m->hdr_v2->extension_offset;
+	if (ext_off == 0) { errno = ENOENT; return -1; }
+
+	unsigned char *p = (unsigned char *)m->base + ext_off;
+	uint64_t avail = m->size - ext_off;
+
+	while (avail >= 8) {
+		uint32_t bt = read32(p);      /* block type */
+		uint32_t bl = read32(p + 4);  /* block length */
+		p += 8; avail -= 8;
+
+		if (avail < bl) break; /* truncated block — stop */
+
+		if (bt == type) {
+			*data = p;
+			*dlen = bl;
+			return 0;
+		}
+
+		p += bl;
+		avail -= bl;
+	}
+
+	errno = ENOENT;
+	return -1;
+}
+
 /* ---- search (binary search by name_hash, verify name string) ---- */
 
 const void *msys_search(struct msys *m, const char *name, size_t *size)

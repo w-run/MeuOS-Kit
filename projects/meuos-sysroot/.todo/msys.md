@@ -118,11 +118,11 @@ Data blocks: 按 data_offset 排列，4 字节对齐
 - [ ] 支持按顺序流式读取出所有文件的（name, data）对
 - [ ] `MSYS_F_STREAMING` 顺序布局
 
-#### 5.9 扩展块机制（待实现）
+#### 5.9 扩展块机制 ✅
 
-- [ ] 索引块后跟 optional extension blocks
-- [ ] 格式：`type(4) | length(4) | data(length)`
-- [ ] `msys_get_extension()` API
+- [x] 索引块后跟 optional extension blocks（`type(4)+length(4)+data(length)`）
+- [x] `msys_get_extension()` API（线性扫描，按 type 查找）
+- [x] mkmsys 写入端支持扩展块（`ext_data`/`ext_len` 参数）
 
 ## 验收
 

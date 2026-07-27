@@ -234,6 +234,18 @@ int msys_verify(struct msys *m, const char *name);
  *   Returns 0 if all verifiable entries match, -1 on first mismatch. */
 int msys_verify_all(struct msys *m);
 
+/* Get the first extension block with the given type (v2 only).
+ * Extension blocks are stored after the index in the format:
+ *   type[4] (uint32 LE) | length[4] (uint32 LE) | data[length]
+ *   m:     handle from msys_open
+ *   type:  type identifier (e.g., fourcc code like 0x6e676973 = "sign")
+ *   data:  out parameter, receives pointer to data within mmap'd region
+ *   dlen:  out parameter, receives data length in bytes
+ *   Returns 0 on success, -1 if type not found (errno = ENOENT)
+ *   or archive is v1/not a v2 archive (errno = ENOSYS). */
+int msys_get_extension(struct msys *m, uint32_t type,
+                       const void **data, uint32_t *dlen);
+
 /* FNV-1a 32-bit hash helper.
  *   name: pointer to data to hash
  *   len:  number of bytes

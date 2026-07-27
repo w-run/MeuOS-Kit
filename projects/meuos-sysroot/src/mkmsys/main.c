@@ -649,7 +649,8 @@ static int extract_msys(const char *msys_path, const char *outdir)
 
 /* ---- write v2 .msys ---- */
 
-static void write_msys_v2(const char *output, struct collector *c, uint32_t flags)
+static void write_msys_v2(const char *output, struct collector *c, uint32_t flags,
+                          const void *ext_data, uint32_t ext_len)
 {
 	FILE *fp = fopen(output, "wb");
 	if (!fp) die(output);
@@ -937,22 +938,11 @@ static void write_msys_v2(const char *output, struct collector *c, uint32_t flag
 		fputc(0, fp); index_offset++;
 	}
 
-	/* Seek back and rewrite header with real offsets */
+	/* Phase 5: write v2 index entries */
+	uint64_t ext_offset_value = 0;
 	{
-		struct msys_header_v2 hdr2;
-		memset(&hdr2, 0, sizeof(hdr2));
-		memcpy(hdr2.magic, MSYS_MAGIC_V2, 8);
-		hdr2.index_offset = index_offset;
-		hdr2.index_count  = (uint32_t)c->count;
-		hdr2.flags        = flags | MSYS_F_DIR_BLOCK;
-		hdr2.dir_offset   = dir_offset_ftell;
-		hdr2.dir_count    = dir_count;
-		hdr2.extension_offset = 0;
-		hdr2.data_size_total  = 0;
-		hdr2.content_hash     = 0;
-		fseek(fp, 0, SEEK_SET);
-		fwrite(&hdr2, sizeof(hdr2), 1, fp);
-		fseek(fp, 0, SEEK_END); /* seek back to end for index write */
+		long pos = ftell(fp);
+		while ((size_t)pos < align4((size_t)pos)) { fputc(0, fp); pos++; }
 	}
 	for (size_t i = 0; i < c->count; i++) {
 		struct entry *e = &c->entries[i];
@@ -986,6 +976,36 @@ static void write_msys_v2(const char *output, struct collector *c, uint32_t flag
 		/* Write SHA-256 hash if content_hash_present */
 		if (buf[31])
 			fwrite(e->content_hash, 1, 32, fp);
+	}
+
+	/* Phase 6: write extension blocks (after index) */
+	if (ext_data && ext_len > 0) {
+		ext_offset_value = (uint64_t)ftell(fp);
+		while (ext_offset_value < align4((size_t)ext_offset_value)) {
+			fputc(0, fp); ext_offset_value++;
+		}
+		uint8_t ext_hdr[8];
+		wr32(ext_hdr,     0x6e676973); /* "sign" fourcc */
+		wr32(ext_hdr + 4, ext_len);
+		fwrite(ext_hdr, 8, 1, fp);
+		fwrite(ext_data, 1, ext_len, fp);
+	}
+
+	/* Seek back and rewrite header with real final offsets */
+	{
+		struct msys_header_v2 hdr2;
+		memset(&hdr2, 0, sizeof(hdr2));
+		memcpy(hdr2.magic, MSYS_MAGIC_V2, 8);
+		hdr2.index_offset = index_offset;
+		hdr2.index_count  = (uint32_t)c->count;
+		hdr2.flags        = flags | MSYS_F_DIR_BLOCK;
+		hdr2.dir_offset   = dir_offset_ftell;
+		hdr2.dir_count    = dir_count;
+		hdr2.extension_offset = ext_offset_value;
+		hdr2.data_size_total  = 0;
+		hdr2.content_hash     = 0;
+		fseek(fp, 0, SEEK_SET);
+		fwrite(&hdr2, sizeof(hdr2), 1, fp);
 	}
 
 	free(data_offsets);
@@ -1190,7 +1210,7 @@ int main(int argc, char *argv[])
 
 	qsort(c.entries, c.count, sizeof(struct entry), entry_cmp);
 	if (format_v2)
-		write_msys_v2(output, &c, flags);
+		write_msys_v2(output, &c, flags, NULL, 0);
 	else
 		write_msys(output, &c, flags);
 
