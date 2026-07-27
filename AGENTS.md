@@ -591,7 +591,7 @@ env/bin/qvm stop aarch64          # 停止 VM
 ### 8.2 组件构建
 
 ```sh
-# mcc（默认宿主架构，5 个后端全部内置）
+# mcc（默认宿主架构，6 个后端全部内置）
 make -C projects/mcc                          # 构建 mcc 二进制
 make -C projects/mcc HOST_CC=tcc              # 用 tcc 替代 gcc
 
@@ -839,7 +839,8 @@ export IMA_OPENAPI_APIKEY="your_api_key"
 
 - **mcc C11 完整实现** — `_Atomic`/`_Generic`/`_Thread_local`/`_Alignas`/`_Alignof`/`_Noreturn`/`_Static_assert`/匿名结构体/复合字面量/变长数组
 - **mcc C23 特性** — `constexpr`/`typeof`/`typeof_unqual`/`nullptr_t`/`#embed`/`__has_include`/`[[]]` 属性/`#elifdef`/`#elifndef`/`#warning`/二进制字面量/数字分隔符/空初始化器/`auto` 类型推导/Labeled break/continue/`bool`/`true`/`false`/`_BitInt(N)`/`_Decimal32`/`64`/`128`/`static_assert` 无消息
-- **5 个后端全部内置** — x86_64 / aarch64 / riscv64 / i386 / loongarch64
+- **6 个后端全部内置** — x86_64 / aarch64 / riscv64 / i386 / loongarch64 / arm（新增）
+- **arm 完整移植（2026-07-27）** — mcc 后端 + libc 运行时（9 文件）+ mt as+ld，qemu-arm 验证通过
 - **meuos-libc x86_64 完整运行验证** — stdio/stdlib/string/thread/signal/syscall/compat 全覆盖
 - **meuos-libc aarch64 qemu 端到端验证通过**
 - **meow 构建系统** — YAML 配方 / Makefile 兼容 / 并行构建（`-jN`）/ DAG 增量构建
@@ -859,8 +860,7 @@ export IMA_OPENAPI_APIKEY="your_api_key"
 | mt 动态链接（P6）                       | ⏳ 待启动 | 共享库 / PIE / ld.so / dlopen                                     |
 | mt TLS 动态模型（P7）                   | ⏳ 待启动 | GD / LD 模型实现                                                   |
 | mt DWARF 调试信息（P8）                 | ⏳ 待启动 | 调试信息生成                                                      |
-| mt aarch64 后端（P10）                  | ⏳ 待启动 | 汇编器 aarch64 支持                                                |
-| mt riscv64 后端（P11）                  | ⏳ 待启动 | 汇编器 riscv64 支持                                                |
+| mt/ld ARM full e2e                      | 🔄 进行中 | 当前 bootstrap 用 cross-gcc，待 mt/ld ELF32 全链路                  |
 | meow DAG 去重                          | 🔄 进行中 | 解决 -jN 并行构建的间接依赖重复执行问题                             |
 | meow 原生 shell 替代                   | 🔄 进行中 | 用 msh 替代 /bin/sh                                                |
 | .msys 构建流水线（Phase 4）             | ⏳ 待启动 | mkmsys 集成到 meow 构建流程                                        |
@@ -871,10 +871,11 @@ export IMA_OPENAPI_APIKEY="your_api_key"
 | 架构         | mcc 后端 | libc 核心 | mt/as     | mt/ld     | qemu 运行时验证       | 系统依赖                   |
 | ------------- | -------- | --------- | --------- | --------- | --------------------- | -------------------------- |
 | x86_64        | ✅       | ✅        | ✅ P0-P9  | ✅ P0-P9  | ✅ 完整验证           | 无                         |
-| aarch64       | ✅       | ✅        | ⏳ P10     | ⏳ P10     | ✅ qemu 端到端        | `aarch64-linux-gnu-gcc`    |
-| riscv64       | ✅       | ✅        | ⏳ P11     | ⏳ P11     | ⚪ 代码落地待验证       | `riscv64-linux-gnu-gcc`    |
-| i386          | ✅       | ✅        | ✅ P9     | ⏳ P9     | ⚪ 被 mcc 缺口阻塞     | `gcc -m32` + 32-bit libc   |
-| loongarch64   | ✅       | ✅        | ✅        | ⏳         | ⚪ 代码落地待验证       | `loongarch64-linux-gnu-gcc` |
+| aarch64       | ✅       | ✅        | ✅        | ✅        | ✅ qemu 端到端        | `aarch64-linux-gnu-gcc`    |
+| riscv64       | ✅       | ✅        | ✅ P11    | ✅ P11    | 🟡 exit=42 通过       | `riscv64-linux-gnu-gcc`    |
+| i386          | ✅       | ✅        | ✅        | ✅        | 🟡 qemu 系统仿真      | `gcc -m32` + 32-bit libc   |
+| loongarch64   | ✅       | ✅        | ✅        | ✅        | 🟡 exit=42 通过       | `loongarch64-linux-gnu-gcc` |
+| arm           | ✅       | ✅        | ✅        | ✅        | ✅ qemu-arm 运行时     | `arm-linux-gnueabihf-gcc`  |
 
 ### 10.4 相关文档索引
 
