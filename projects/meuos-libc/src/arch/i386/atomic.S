@@ -15,6 +15,21 @@ __atomic_exchange_1: movl 4(%esp), %ecx; movl 8(%esp), %eax; xchgb %al, (%ecx); 
 __atomic_fetch_add_1: movl 4(%esp), %ecx; movl 8(%esp), %eax; lock xaddb %al, (%ecx); movzbl %al, %eax; ret
 .globl __atomic_fetch_sub_1
 __atomic_fetch_sub_1: movl 4(%esp), %ecx; movl 8(%esp), %eax; negb %al; lock xaddb %al, (%ecx); movzbl %al, %eax; ret
+.globl __atomic_fetch_and_1
+__atomic_fetch_and_1:
+	pushl %ebx; movl 8(%esp), %edx; movl 12(%esp), %ecx
+1:	movzbl (%edx), %eax; movl %eax, %ebx; andb %cl, %bl; lock cmpxchgb %bl, (%edx); jne 1b
+	movzbl %al, %eax; popl %ebx; ret
+.globl __atomic_fetch_or_1
+__atomic_fetch_or_1:
+	pushl %ebx; movl 8(%esp), %edx; movl 12(%esp), %ecx
+1:	movzbl (%edx), %eax; movl %eax, %ebx; orb %cl, %bl; lock cmpxchgb %bl, (%edx); jne 1b
+	movzbl %al, %eax; popl %ebx; ret
+.globl __atomic_fetch_xor_1
+__atomic_fetch_xor_1:
+	pushl %ebx; movl 8(%esp), %edx; movl 12(%esp), %ecx
+1:	movzbl (%edx), %eax; movl %eax, %ebx; xorb %cl, %bl; lock cmpxchgb %bl, (%edx); jne 1b
+	movzbl %al, %eax; popl %ebx; ret
 .globl __atomic_compare_exchange_1
 __atomic_compare_exchange_1:
 	pushl %ebx; movl 8(%esp), %edx; movl 12(%esp), %ecx; movzbl (%ecx), %eax; movl 16(%esp), %ebx; lock cmpxchgb %bl, (%edx); jne 1f; movl $1, %eax; popl %ebx; ret
@@ -30,6 +45,21 @@ __atomic_exchange_2: movl 4(%esp), %ecx; movl 8(%esp), %eax; xchgw %ax, (%ecx); 
 __atomic_fetch_add_2: movl 4(%esp), %ecx; movl 8(%esp), %eax; lock xaddw %ax, (%ecx); movzwl %ax, %eax; ret
 .globl __atomic_fetch_sub_2
 __atomic_fetch_sub_2: movl 4(%esp), %ecx; movl 8(%esp), %eax; negw %ax; lock xaddw %ax, (%ecx); movzwl %ax, %eax; ret
+.globl __atomic_fetch_and_2
+__atomic_fetch_and_2:
+	pushl %ebx; movl 8(%esp), %edx; movl 12(%esp), %ecx
+1:	movzwl (%edx), %eax; movl %eax, %ebx; andw %cx, %bx; lock cmpxchgw %bx, (%edx); jne 1b
+	movzwl %ax, %eax; popl %ebx; ret
+.globl __atomic_fetch_or_2
+__atomic_fetch_or_2:
+	pushl %ebx; movl 8(%esp), %edx; movl 12(%esp), %ecx
+1:	movzwl (%edx), %eax; movl %eax, %ebx; orw %cx, %bx; lock cmpxchgw %bx, (%edx); jne 1b
+	movzwl %ax, %eax; popl %ebx; ret
+.globl __atomic_fetch_xor_2
+__atomic_fetch_xor_2:
+	pushl %ebx; movl 8(%esp), %edx; movl 12(%esp), %ecx
+1:	movzwl (%edx), %eax; movl %eax, %ebx; xorw %cx, %bx; lock cmpxchgw %bx, (%edx); jne 1b
+	movzwl %ax, %eax; popl %ebx; ret
 .globl __atomic_compare_exchange_2
 __atomic_compare_exchange_2:
 	pushl %ebx; movl 8(%esp), %edx; movl 12(%esp), %ecx; movzwl (%ecx), %eax; movl 16(%esp), %ebx; lock cmpxchgw %bx, (%edx); jne 1f; movl $1, %eax; popl %ebx; ret
@@ -65,8 +95,6 @@ __atomic_compare_exchange_4:
 	movl 16(%esp), %esi; lock cmpxchgl %esi, (%edx); jne 1f
 	movl $1, %eax; popl %esi; ret
 1: movl %eax, (%ecx); xorl %eax, %eax; popl %esi; ret
-
-.section .note.GNU-stack,"",@progbits
 
 /* ---- 8-byte (Kl) atomics via lock cmpxchg8b ----
  * On i386 there is no direct 8-byte RMW; each helper loops
@@ -111,14 +139,63 @@ __atomic_fetch_add_8:
 	pushl %ebx
 	pushl %esi
 	movl 12(%esp), %esi
-	movl 16(%esp), %ebx
-	movl 20(%esp), %ecx
 1:	movl (%esi), %eax
 	movl 4(%esi), %edx
 	movl %eax, %ebx
 	movl %edx, %ecx
 	addl 16(%esp), %ebx
 	adcl 20(%esp), %ecx
+	lock cmpxchg8b (%esi)
+	jne 1b
+	popl %esi
+	popl %ebx
+	ret
+
+.globl __atomic_fetch_and_8
+__atomic_fetch_and_8:
+	pushl %ebx
+	pushl %esi
+	movl 12(%esp), %esi
+1:	movl (%esi), %eax
+	movl 4(%esi), %edx
+	movl %eax, %ebx
+	movl %edx, %ecx
+	andl 16(%esp), %ebx
+	andl 20(%esp), %ecx
+	lock cmpxchg8b (%esi)
+	jne 1b
+	popl %esi
+	popl %ebx
+	ret
+
+.globl __atomic_fetch_or_8
+__atomic_fetch_or_8:
+	pushl %ebx
+	pushl %esi
+	movl 12(%esp), %esi
+1:	movl (%esi), %eax
+	movl 4(%esi), %edx
+	movl %eax, %ebx
+	movl %edx, %ecx
+	orl 16(%esp), %ebx
+	orl 20(%esp), %ecx
+	lock cmpxchg8b (%esi)
+	jne 1b
+	popl %esi
+	popl %ebx
+	ret
+
+.globl __atomic_fetch_xor_8
+__atomic_fetch_xor_8:
+	pushl %ebx
+	pushl %esi
+	movl 12(%esp), %esi
+1:	movl (%esi), %eax
+	movl 4(%esi), %edx
+	movl %eax, %ebx
+	movl %edx, %ecx
+	xorl 16(%esp), %ebx
+	xorl 20(%esp), %ecx
 	lock cmpxchg8b (%esi)
 	jne 1b
 	popl %esi
@@ -167,3 +244,6 @@ __atomic_compare_exchange_8:
 	popl %esi
 	popl %ebx
 	ret
+
+.section .note.GNU-stack,"",@progbits
+
