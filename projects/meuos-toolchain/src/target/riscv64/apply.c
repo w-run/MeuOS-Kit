@@ -143,12 +143,30 @@ riscv64_apply_reloc(unsigned reloc_type, unsigned char *place,
 		return 0;
 	}
 
-	case 38: /* R_RISCV_TPREL_ADD: add TP offset (no-op in static link) */
+	case 38: /* R_RISCV_TPREL_ADD: rd = rd + tp (zero contribution in static link) */
 		return 0;
 
-	case 39: /* R_RISCV_TPREL_LO12_I */
-	case 40: /* R_RISCV_TPREL_LO12_S */
-	case 41: /* R_RISCV_TPREL_HI20 */
+	case 39: /* R_RISCV_TPREL_LO12_I: (S + A) & 0xFFF → I-type immediate */
+		delta = (int64_t)(S + (uint64_t)A);
+		set_bits(place, 31, 20, (uint32_t)(delta & 0xFFF) << 20);
+		return 0;
+
+	case 40: /* R_RISCV_TPREL_LO12_S: (S + A) & 0xFFF → S-type store immediate */
+		delta = (int64_t)(S + (uint64_t)A);
+		{
+			uint32_t val = (uint32_t)(delta & 0xFFF);
+			uint32_t lo = val & 0x1F;
+			uint32_t hi = (val >> 5) & 0x7F;
+			set_bits(place, 11, 7, lo << 7);
+			set_bits(place, 31, 25, hi << 25);
+		}
+		return 0;
+
+	case 41: /* R_RISCV_TPREL_HI20: (S + A + 0x800) >> 12 → LUI imm20 */
+		delta = (int64_t)(S + (uint64_t)A);
+		set_bits(place, 31, 12, (uint32_t)((delta + 0x800) >> 12) << 12);
+		return 0;
+
 	default:
 		return -1; /* unsupported */
 	}

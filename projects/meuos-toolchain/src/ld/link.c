@@ -1193,6 +1193,13 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 		return ld_errorf(ctx, "unsupported relocation type", name);
 	}
 	if (strcmp(ctx->target->name, "riscv64") == 0) {
+		/* TLS LE relocations need TP-relative offset, not full VA */
+		if (type == 39 || type == 40 || type == 41) {
+			uint64_t tls_off;
+			if (symbol_tls_offset(ctx, object, symbol_index, &tls_off) != 0)
+				return ld_errorf(ctx, "unsupported TLS relocation", name);
+			resolved_value = tls_off;
+		}
 		if (riscv64_apply_reloc(type, target->data + target_offset,
 		                         resolved_value, addend, place) == 0)
 			return 0;
