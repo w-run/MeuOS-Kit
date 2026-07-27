@@ -992,7 +992,7 @@ patch_le(struct as_file *as, struct as_section *section, size_t offset,
 static int
 build_output_sections(struct as_file *as, struct out_section **out_sections,
                       size_t *out_count, int **section_map,
-                      struct reloc_group *groups)
+                      struct reloc_group *groups, int elf_class)
 {
 	struct out_section *out;
 	int *map;
@@ -1031,7 +1031,7 @@ build_output_sections(struct as_file *as, struct out_section **out_sections,
 		out[include].type = MT_SHT_RELA;
 		out[include].flags = 0;
 		out[include].align = 8;
-		out[include].entry_size = 24;
+		out[include].entry_size = (elf_class == 1) ? 12 : 24;
 		out[include].info = (uint32_t)map[i];
 		++include;
 	}
@@ -1412,7 +1412,8 @@ write_object(struct as_file *as, const struct mt_target *target,
 	}
 	if (resolve_fixups(as, section_map, groups) != 0)
 		goto out;
-	if (build_output_sections(as, &out, &out_count, &section_map, groups) != 0) {
+	if (build_output_sections(as, &out, &out_count, &section_map, groups,
+	                          target->elf_class) != 0) {
 		as_error(as, "unable to build ELF section table");
 		goto out;
 	}
