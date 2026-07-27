@@ -89,7 +89,7 @@ check: $(BUILD)/meow
 	cd .. && ./meow/$(BUILD)/meow clean meow-parallel-fail
 	cd .. && ./meow/$(BUILD)/meow list | grep -qx meow-smoke
 	cd .. && ./meow/$(BUILD)/meow list | grep -qx dash
-	cd test/make-compat && MEUOS_SYSROOT=./test-sysroot ../../$(BUILD)/meow build .
+	cd test/make-compat && env -u MAKEFLAGS -u MFLAGS MEUOS_SYSROOT=./test-sysroot ../../$(BUILD)/meow build .
 	cd .. && CC=cc ./meow/$(BUILD)/meow --bootstrap
 	cd .. && $(MAKE) -C meow clean all
 

@@ -45,10 +45,23 @@ run_target(struct target *target)
 		size_t active = 0;
 		int failed = 0;
 
+		/* Collect unique direct dependencies — skip already-done and
+		 * duplicate entries so the same target is never forked twice. */
+		struct target *uniques[TARGET_DEPS_MAX];
+		size_t nuniques = 0;
 		for (size_t i = 0; i < target->ndeps; ++i) {
 			struct target *dependency = find_target(target->deps[i]);
-			if (!dependency)
+			if (!dependency || dependency->done)
 				continue;
+			int skip = 0;
+			for (size_t j = 0; j < nuniques; j++)
+				if (uniques[j] == dependency) { skip = 1; break; }
+			if (!skip)
+				uniques[nuniques++] = dependency;
+		}
+
+		for (size_t i = 0; i < nuniques; ++i) {
+			struct target *dependency = uniques[i];
 			while (active == (size_t)parallel_jobs) {
 				int status;
 				pid_t done = waitpid(-1, &status, 0);
@@ -85,9 +98,21 @@ run_target(struct target *target)
 		if (failed)
 			return -1;
 	} else {
+		/* Serial execution: dedup and skip already-done deps */
+		struct target *uniques[TARGET_DEPS_MAX];
+		size_t nuniques = 0;
 		for (size_t i = 0; i < target->ndeps; ++i) {
 			struct target *dependency = find_target(target->deps[i]);
-			if (dependency && run_target(dependency) != 0)
+			if (!dependency || dependency->done)
+				continue;
+			int skip = 0;
+			for (size_t j = 0; j < nuniques; j++)
+				if (uniques[j] == dependency) { skip = 1; break; }
+			if (!skip)
+				uniques[nuniques++] = dependency;
+		}
+		for (size_t i = 0; i < nuniques; ++i) {
+			if (run_target(uniques[i]) != 0)
 				return -1;
 		}
 	}
