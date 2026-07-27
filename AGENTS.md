@@ -912,7 +912,7 @@ for item in data:
 - **meuos-toolchain 9 工具** — as/ld/ar/ranlib/nm/readelf/strip/objcopy/objdump
 - **Phase 4 自举验证通过** — sysroot 内 mcc + meow 自重建全套工具
 - **Phase 5 零宿主依赖验证通过** — mcc driver 集成 `MT_AS`/`MT_LD`，`check-mt-integration` 通过
-- **.msys 单文件 sysroot** — libmsys + mkmsys + mcc/ld 集成
+- **.msys 单文件 sysroot** — libmsys + mkmsys + mcc/ld 集成，zlib/zstd 压缩，--incremental 增量打包，bootstrap 自动生成
 
 ### 10.2 待启动/进行中工作
 
@@ -928,7 +928,6 @@ for item in data:
 | mt/ld ARM full e2e                      | 🔄 进行中 | 当前 bootstrap 用 cross-gcc，待 mt/ld ELF32 全链路                  |
 | meow DAG 去重                          | 🔄 进行中 | 解决 -jN 并行构建的间接依赖重复执行问题                             |
 | meow 原生 shell 替代                   | 🔄 进行中 | 用 msh 替代 /bin/sh                                                |
-| .msys 构建流水线（Phase 4）             | ⏳ 待启动 | mkmsys 集成到 meow 构建流程                                        |
 | i386 TLS 端到端验证                     | ⏳ 阻塞中 | 被 mcc i386 后端缺口阻塞                                           |
 
 ### 10.3 各架构支持矩阵

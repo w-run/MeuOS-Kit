@@ -63,9 +63,9 @@ Data blocks: 按 data_offset 排列，4 字节对齐
 - [x] `msys.h`：`struct msys` 添加 `struct msys_chunk *chunks` 链表
 - [x] `make msys`：自动从 sysroot 目录生成 .msys
 - [x] `make check-msys`：验证生成的 .msys 可被正确读取
-- [ ] `mkmsys --incremental` 实际增量逻辑（计划后续实现）
-- [ ] `mkmsys --compress=zstd` 实际压缩逻辑（zstd 支持，flags 已定义）
-- [ ] `bootstrap.sh` 阶段产出 .msys
+- [x] `mkmsys --incremental` 实际增量逻辑（对比 @mt mtime，未变文件从旧存档读取）
+- [x] `mkmsys --compress=zstd` 实际压缩逻辑（dlopen libzstd.so, ZSTD_compress）
+- [x] `bootstrap.sh` 阶段产出 .msys（Phase 4 验证通过后自动生成）
 
 ### Phase 5 — v2 格式设计（规划中）
 
