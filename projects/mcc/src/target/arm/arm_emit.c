@@ -197,8 +197,6 @@ emitf(char *s, Ins *i, Fn *fn, FILE *f)
 			}
 			assert(isreg(r));
 			fputs(rname(r.val, k), f);
-			assert(isreg(r));
-			fputs(rname(r.val, k), f);
 			break;
 		case '1':
 			r = i->arg[1];
