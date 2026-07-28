@@ -181,6 +181,8 @@ main(int argc, char **argv)
 	int eh_frame_hdr = 0;
 	int as_needed = -1; /* default: unspecified */
 	int whole_archive = 0;
+	int in_start_group = 0;
+	(void)in_start_group; /* consumed during option parsing */
 	const char *inputs[MAX_INPUTS];
 	const char *libpaths[MAX_LIBPATHS];
 	const char *sysroot = NULL;
@@ -243,6 +245,14 @@ main(int argc, char **argv)
 		}
 		if (strcmp(argv[i], "--no-whole-archive") == 0) {
 			whole_archive = 0;
+			continue;
+		}
+		if (strcmp(argv[i], "--start-group") == 0) {
+			in_start_group = 1;
+			continue;
+		}
+		if (strcmp(argv[i], "--end-group") == 0) {
+			in_start_group = 0;
 			continue;
 		}
 		if (strcmp(argv[i], "-soname") == 0) {

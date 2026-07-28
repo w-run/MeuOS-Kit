@@ -110,7 +110,7 @@ src/compat/
 | ld-build-id | mt/ld | `--build-id` | 生成 `.note.gnu.build-id`（FNV-1a hash，用于调试/构建标识） | 🟢 | 本 commit |
 | ld-eh-frame-hdr | mt/ld | `--eh-frame-hdr` | 生成 `.eh_frame_hdr`（异常处理帧索引，gcc 异常必需） | 🟢 | 本 commit |
 | ld-as-needed | mt/ld | `--as-needed` / `--no-as-needed` | 避免不必要的 DT_NEEDED 条目 | ⏳ | 待实现 |
-| ld-start-group | mt/ld | `--start-group` / `--end-group` | 循环依赖库解析（`-Wl,--start-group -la -lb -lc --end-group`） | ⏳ | 待实现 |
+| ld-start-group | mt/ld | `--start-group` / `--end-group` | 循环依赖库解析（`-Wl,--start-group -la -lb -lc --end-group`） | 🟢 | 本 commit |
 | ld-whole-archive | mt/ld | `--whole-archive` / `--no-whole-archive` | 强制归档中所有目标文件链接（用于 plugin/init 段） | 🟢 | 本 commit |
 
 ## 优先级 2（P2-toolchain — 生态集成）
