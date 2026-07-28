@@ -189,6 +189,9 @@ struct ld_context {
 	const char *const *add_needed;
 	size_t add_needed_count;
 	uint32_t *needed_dynstr_offsets; /* malloc'd array of .dynstr offsets */
+	/* --version-script symbol export list */
+	const char *const *version_script;
+	size_t version_script_count;
 	/* In-memory archive data (for VFS .msys archives) */
 	unsigned char **archive_mem_data;
 	size_t *archive_mem_size;
@@ -2877,6 +2880,16 @@ build_dynamic_tables(struct ld_context *ctx)
 	/* Count exported (defined non-weak) globals with names */
 	for (i = 0; i < ctx->globals.count; ++i) {
 		struct ld_global *g = &ctx->globals.items[i];
+		/* --version-script filter: skip symbols not in the export list */
+		if (ctx->version_script && g->defined && !g->weak && g->name) {
+			int keep = 0;
+			for (size_t vi = 0; vi < ctx->version_script_count; vi++) {
+				if (strcmp(ctx->version_script[vi], g->name) == 0) {
+					keep = 1; break;
+				}
+			}
+			if (!keep) continue;
+		}
 		if (g->defined && !g->weak && g->name)
 			++nsym;
 	}
