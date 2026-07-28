@@ -201,7 +201,7 @@ run_mt_as(const char *asm_path, const char *output, bool verbose,
 static void
 run_mt_ld(struct array *objects, const char *output, bool verbose,
     struct array *libdirs, struct array *libs, bool static_link,
-    bool nostdlib, bool nodefaultlibs, bool meuos_specs,
+    bool shared, bool nostdlib, bool nodefaultlibs, bool meuos_specs,
     const char *asm_path_for_atomic, const char *target_triple)
 {
 	struct array cmd = {0};
@@ -217,6 +217,9 @@ run_mt_ld(struct array *objects, const char *output, bool verbose,
 	/* mt/ld is static by default; -static is accepted for compatibility. */
 	if (static_link)
 		arrayaddbuf(&cmd, " -static", 8);
+	/* -shared triggers ET_DYN output for shared libraries. */
+	if (shared)
+		arrayaddbuf(&cmd, " -shared", 8);
 	/* MEUOS_SYSROOT is also exposed to mt/ld via --sysroot so the linker
 	 * searches <sysroot>/usr/lib in addition to the explicit -L paths.
 	 * The -L paths from the driver remain authoritative. */
@@ -237,14 +240,15 @@ run_mt_ld(struct array *objects, const char *output, bool verbose,
 		cmdadd(&cmd, p[i]);
 	}
 	/* crt1.o provides _start; needed when nostdlib+meuos_specs select the
-	 * MeuOS CRT instead of the host startup objects. */
-	if (meuos_specs && nostdlib)
+	 * MeuOS CRT instead of the host startup objects.
+	 * Shared libraries have no _start entry point. */
+	if (meuos_specs && nostdlib && !shared)
 		arrayaddbuf(&cmd, " -l:crt1.o", 10);
 	for (i = 0, p = libs->val; i < libs->len / sizeof(char *); ++i) {
 		arrayaddbuf(&cmd, " -l", 3);
 		cmdadd(&cmd, p[i]);
 	}
-	if (meuos_specs && !nodefaultlibs)
+	if (meuos_specs && !nodefaultlibs && !shared)
 		arrayaddbuf(&cmd, " -lc-meuos", 10);
 	/* Atomic runtime: same detection as run_host_cc. */
 	if (!nostdlib && !nodefaultlibs && asm_path_for_atomic &&
@@ -274,8 +278,8 @@ run_host_cc(const char *asm_path, const char *output, bool compile_only,
 
 	/* P3: mt integration.  Bypass the host cc when MT_AS/MT_LD are set
 	 * and the target is supported (all 5 architectures: x86_64, aarch64,
-	 * riscv64, loongarch64, i386).  -shared still needs the host cc
-	 * because mt/ld does not emit shared objects.
+	 * riscv64, loongarch64, i386).  mt/ld now supports -shared for shared
+	 * libraries as well (ET_DYN with .dynsym/.dynstr/.hash).
 	 *
 	 * -c (assemble only): mt/as needs no CRT/libc, so any MT-enabled
 	 *   build assembles via mt/as.
@@ -284,7 +288,7 @@ run_host_cc(const char *asm_path, const char *output, bool compile_only,
 	 *   Without specs the host cc still provides the host libc/CRT, so
 	 *   fall back to it (this preserves `mcc hello.c -o hello` and the
 	 *   `make check` smoke link). */
-	if (mt_mode_enabled() && !shared &&
+	if (mt_mode_enabled() &&
 	    mt_target_supported(target_triple)) {
 		if (compile_only) {
 			run_mt_as(asm_path, output, verbose, target_triple);
@@ -305,7 +309,7 @@ run_host_cc(const char *asm_path, const char *output, bool compile_only,
 			struct array objs = {0};
 			arrayaddptr(&objs, tmpl);
 			run_mt_ld(&objs, output, verbose, libdirs, libs,
-			    static_link, nostdlib, nodefaultlibs, meuos_specs,
+			    static_link, shared, nostdlib, nodefaultlibs, meuos_specs,
 			    asm_path, target_triple);
 			unlink(tmpl);
 			return;
@@ -378,11 +382,12 @@ run_host_link(struct array *objects, const char *output, bool verbose,
 
 	/* P3: mt integration.  Drive mt/ld directly for any supported target
 	 * under --specs=meuos (the only mode where mcc manages crt1.o and
-	 * libc-meuos).  -shared and non-meuos-specs fall back to the host cc. */
-	if (mt_mode_enabled() && !shared &&
+	 * libc-meuos).  mt/ld now supports -shared (ET_DYN), so both static
+	 * and shared links go through mt/ld. */
+	if (mt_mode_enabled() &&
 	    mt_target_supported(target_triple) && meuos_specs) {
 		run_mt_ld(objects, output, verbose, libdirs, libs, static_link,
-		    nostdlib, nodefaultlibs, meuos_specs, NULL, target_triple);
+		    shared, nostdlib, nodefaultlibs, meuos_specs, NULL, target_triple);
 		return;
 	}
 
