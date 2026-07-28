@@ -120,7 +120,7 @@ src/compat/
 |----|------|------|------|------|---------|
 | meow-native-shell | ⛔ | 原生 shell 替代 | 阻塞于 msh（不在本次 worktree 范围） | ⛔ | 不在范围 |
 | mcc-msys-link | mcc driver | `.msys` + host linker | host cc 链接时自动提取 `.a` 到 temp + ARM triplet 识别使 mt/as 可处理 arm 编译 | 🟢 | `16e683e`（msys.c 已有基础 + ARM 集成） |
-| ld-tls-dynamic | mt/ld | TLS 动态模型 | GD/LD 模型、`__tls_get_addr`（依赖 ld-shared，已就绪） | 🟡 | 待实现（阻塞已解除：ld-shared/ld-so 均已完成） |
+| ld-tls-dynamic | mt/ld | TLS 动态模型 | GD/LD 模型、`__tls_get_addr`（依赖 ld-shared，已就绪） | 🟢 | link.c 添加 R_X86_64_TLSGD/TLSLD/DTPMOD/DTPOFF 处理：静态链接放松为 LE(TPOFF32)，PIE/shared 保留动态重定位由 ld.so 解析。端到端验证：`mcc -fPIC` 发 TLSGD+__tls_get_addr → mt/ld 链 PIE 运行 exit=0 |
 | ld-gc-sections | mt/ld | 死代码消除 | 未引用节区的裁剪。概念有用，实现应自己设计，不照搬 GNU `--gc-sections` 的复杂逻辑 | 🟢 | 本 commit（gc_sweep + section_rank .text.*/.data.* 支持） |
 | ld-linker-script | mt/ld | 链接布局控制 | ❌ **不做 GNU `.ld` 脚本解析**。需要时改为 YAML 格式描述节区布局（链接器内嵌或独立文件） | 🟢 | -T/--link-script 自定义 rank 排序已实现 |
 | as-macro | mt/as | `.rept`/`.endr` 重复伪指令 | 基本的行重复机制，用于汇编展开和填充 | 🟢 | 本 commit（assemble.c: .rept N 保存 ftell 位置，.endr 迭代 fseek 回退；单层嵌套限制；回归测试） |
@@ -139,7 +139,7 @@ src/compat/
 | ld-cref | mt/ld | `--cref` | 交叉引用表输出 | 🟢 | 已实现 |
 | ld-compress-debug | mt/ld | `--compress-debug-sections` | DWARF 节区压缩（zlib/zstd） | 🟢 | 已实现 |
 | meow-multi-dir | meow | 多目录构建 | 跨目录包依赖的 YAML 配方 | 🟢 | 本 commit（build all + load_recipe 路径支持） |
-| tool-binary | 新建 | 统一二进制分析工具 | **不做 size/strings/addr2line/ldd 各自一个工具**。设计一个 `mt-info` 或集成到 `objdump`/`readelf` 中，通过 subcommand 提供多种分析能力 | 🔄 重设计 | 待设计 |
+| tool-binary | 新建 | 统一二进制分析工具 | **不做 size/strings/addr2line/ldd 各自一个工具**。设计一个 `mt-info` 或集成到 `objdump`/`readelf` 中，通过 subcommand 提供多种分析能力 | 🟢 | mt-info 已实现（`src/mt-info/` 9 文件：info/headers/deps/strings/which/diff/inspect + ui/load/main）。复用 libelf，统一 `--json/--quiet/--verbose/--no-color` 跨工具约定。验证：info/headers 彩色卡 + --json + deps 递归 DT_NEEDED（对 /bin/ls 正确显示 libselinux/libcap/libc）均通过 |
 
 ## 优先级 3（P3-libc — libc 标准接口完备）
 
@@ -236,13 +236,13 @@ src/compat/
 | ID | 描述 | 优先 | 实施情况 |
 |----|------|------|---------|
 | target-features | **`Target.features` 设计**：在 Target 中添加 `uint64_t features` 位图 + `const char *features_desc[]`。定义架构无关的公共特性位和架构特有的特性位 | 🔴 高 | 🟢 `058c882`（`struct mt_target` 添加 `features` 字段 + `MT_FEATURE_*` 常量定义） |
-| march-generic | **`-march=` 解析通用化**：从仅 ARM 推广到全架构。x86_64 解析 `native`/`x86-64`/`x86-64-v2`/`v3`/`v4`；riscv64 解析 `rv64gc`/`rv64imafdc`；aarch64 解析 `armv8-a`/`armv8.2-a` 等 | 🔴 高 | 🟢 cpu_detect.c（detect_cpu_features + march_x86_64_v_level + /proc/cpuinfo 回退）；main.c 通用 -march= 解析；g_target_features 全局位图 |
-| x86-isa-levels | **x86_64 ISA 级别门控**：实现 `-march=x86-64-v2`/`v3`/`v4` 代码生成差异。至少：v2 启用 SSE4.2+POPCNT，v3 启用 AVX2+BMI2，v4 启用 AVX-512 | 🔴 高 | 🟢 检测层完成（cpu_detect.c march_x86_64_v_level）；emit 层 ISA 门控待实现 |
+| march-generic | **`-march=` 解析通用化**：从仅 ARM 推广到全架构。x86_64 解析 `native`/`x86-64`/`x86-64-v2`/`v3`/`v4`；riscv64 解析 `rv64gc`/`rv64imafdc`；aarch64 解析 `armv8-a`/`armv8.2-a` 等 | 🔴 高 | 🟢 完成：cpu_detect.c（detect_cpu_features + march_x86_64_v_level + /proc/cpuinfo 跨架构回退）；main.c 通用 -march= 解析（x86_64 的 native/vN 全部走 cpu_detect.c，ARM 仍保留原 march/mcpu）；g_target_features 全局位图已建立 |
+| x86-isa-levels | **x86_64 ISA 级别门控**：实现 `-march=x86-64-v2`/`v3`/`v4` 代码生成差异。至少：v2 启用 SSE4.2+POPCNT，v3 启用 AVX2+BMI2，v4 启用 AVX-512 | 🔴 高 | 🟡 检测层完成（cpu_detect.c march_x86_64_v_level）；emit 层 ISA 门控待实现（emit/isel 需读取 g_target_features 来做指令选择器分支） |
 | riscv-extensions | **riscv64 扩展选择**：实现 `-march=rv64imafdc` 解析，根据扩展集发射指令。`-mabi=lp64d`/`lp64`/`ilp32d`/`ilp32` | 🟡 中 | 待实现 |
 | arm-multiver | **arm 多版本后端**：根据 `-march` 切换 ARMv6/v7/v8 指令选择器和发射器差异（Thumb/ARM 模式、DMB 变体等） | 🟡 中 | 待实现 |
 | aarch64-ext | **aarch64 架构扩展**：FEAT_FP16/FEAT_RDM/FEAT_JSCVT 等特性位与代码生成 | 🟢 低 | 待实现 |
-| march-native | **`-march=native`**：通过 CPUID（x86）或 `/proc/cpuinfo` 查询宿主机特性并设置 Target.features | 🟡 中 | 🟢 cpu_detect.c（x86_64 CPUID 内联汇编 + xgetbv 验证 AVX、/proc/cpuinfo 跨架构回退），main.c 集成 |
-| as-isa-gating | **mt/as 指令门控**：编码器根据 insn 要求的特性位进行验证，不支持的指令报错而非默默生成 | 🟡 中 | 待实现 |
+| march-native | **`-march=native`**：通过 CPUID（x86）或 `/proc/cpuinfo` 查询宿主机特性并设置 Target.features | 🟡 中 | 🟢 完成：cpu_detect.c（x86_64 CPUID 内联汇编 + xgetbv 验证 AVX OS 支持、/proc/cpuinfo 跨架构回退），main.c 集成（解析 `-march=native` → 标记 g_march_native_requested → 目标选择后 detect_cpu_features 填充 g_target_features）。check-c99/check-c11/check-c23 全部通过 |
+| as-isa-gating | **mt/as 指令门控**：编码器根据 insn 要求的特性位进行验证，不支持的指令报错而非默默生成 | 🟡 中 | 待实现（依赖 x86-isa-levels 完成后，emit 层先消费 g_target_features，as 才能知道合法指令集） |
 | i386-variants | **i386 变体区分**：486/586/686 在 cmpxchg/CMPXCHG8B/FPU 存在性上的差异映射到特性位 | 🟢 低 | 待实现 |
 
 ### 设计提案
@@ -1184,6 +1184,14 @@ mcc: slot %(null) is read but never stored to
 **原因**: bug-loong64-tls-reloc 导致 TLS LE 不可用，libc 被迫回退到非线程安全的备用方案。
 
 **验收**: loongarch64 qemu 下多线程 `errno` 隔离验证通过。
+
+---
+
+## 待修复的 Bug（本次 worktree 发现）
+
+| ID | 组件 | 描述 | 状态 |
+|----|------|------|------|
+| bug-ld-pie-dynamic | mt/ld + mcc | `mcc -pie` 生成的 PIE 二进制**缺少 .dynamic 节区**（readelf -d 显示 "no dynamic section"），导致 `mt deps` 无法显示 DT_NEEDED。静态链接（ET_EXEC）正常。ld-pie 任务虽标记 🟢 但动态段生成不完整 | 🔴 待修复 |
 
 ---
 

@@ -64,6 +64,10 @@ OBJDUMP_SRCS := $(sort $(wildcard src/objdump/*.c))
 OBJDUMP_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(OBJDUMP_SRCS))
 OBJDUMP_BIN := $(BUILD)/bin/objdump
 
+MTINFO_SRCS := $(sort $(wildcard src/mt-info/*.c))
+MTINFO_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(MTINFO_SRCS))
+MTINFO_BIN := $(BUILD)/bin/mt-info
+
 RTLD_SRCS := $(sort $(wildcard src/rtld/*.c))
 RTLD_ASM_SRCS := $(sort $(wildcard src/rtld/x86_64/*.S))
 RTLD_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(RTLD_SRCS)) $(patsubst %.S,$(BUILD)/%.o,$(RTLD_ASM_SRCS))
@@ -73,9 +77,9 @@ ELF_PROBE := $(BUILD)/test/elf_probe
 TEST_FIXTURE_OBJ := $(BUILD)/test/hello.o
 TEST_ARCHIVE := $(BUILD)/test/libhello.a
 TEST_EXEC := $(BUILD)/test/hello.exec
-DEPS := $(LIBELF_OBJS:.o=.d) $(LIBDISASM_OBJS:.o=.d) $(AR_OBJS:.o=.d) $(AS_OBJS:.o=.d) $(LD_OBJS:.o=.d) $(RANLIB_OBJS:.o=.d) $(NM_OBJS:.o=.d) $(READELF_OBJS:.o=.d) $(STRIP_OBJS:.o=.d) $(OBJCOPY_OBJS:.o=.d) $(OBJDUMP_OBJS:.o=.d) $(TARGET_OBJS:.o=.d) $(RTLD_OBJS:.o=.d) $(ELF_PROBE).d
+DEPS := $(LIBELF_OBJS:.o=.d) $(LIBDISASM_OBJS:.o=.d) $(AR_OBJS:.o=.d) $(AS_OBJS:.o=.d) $(LD_OBJS:.o=.d) $(RANLIB_OBJS:.o=.d) $(NM_OBJS:.o=.d) $(READELF_OBJS:.o=.d) $(STRIP_OBJS:.o=.d) $(OBJCOPY_OBJS:.o=.d) $(OBJDUMP_OBJS:.o=.d) $(MTINFO_OBJS:.o=.d) $(TARGET_OBJS:.o=.d) $(RTLD_OBJS:.o=.d) $(ELF_PROBE).d
 
-all: $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(STRIP_BIN) $(OBJCOPY_BIN) $(OBJDUMP_BIN)
+all: $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(STRIP_BIN) $(OBJCOPY_BIN) $(OBJDUMP_BIN) $(MTINFO_BIN)
 
 $(LIBELF_LIB): $(LIBELF_OBJS)
 	@mkdir -p $(dir $@)
@@ -120,6 +124,10 @@ $(OBJCOPY_BIN): $(OBJCOPY_OBJS) $(LIBELF_LIB)
 $(OBJDUMP_BIN): $(OBJDUMP_OBJS) $(LIBELF_LIB) $(LIBDISASM_LIB)
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(LDFLAGS) -o $@ $(OBJDUMP_OBJS) $(LIBELF_LIB) $(LIBDISASM_LIB) $(LDLIBS)
+
+$(MTINFO_BIN): $(MTINFO_OBJS) $(LIBELF_LIB)
+	@mkdir -p $(dir $@)
+	$(HOST_CC) $(LDFLAGS) -o $@ $(MTINFO_OBJS) $(LIBELF_LIB) $(LDLIBS)
 
 # ld.so: dynamic linker — no libc, static build with custom entry
 RTLD_CFLAGS := -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -ffreestanding -fno-builtin -D_POSIX_C_SOURCE=200809L -MMD -MP

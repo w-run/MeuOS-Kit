@@ -207,6 +207,18 @@ struct rtld_lib {
 	size_t init_arraysz;
 	void (**fini_array)(void);
 	size_t fini_arraysz;
+
+	/* TLS (per-module).  modid == 0 means "no TLS".  The main
+	 * executable is assigned modid 1, libraries 2..N in load order.
+	 * tls_image is the runtime address of this module's TLS block,
+	 * placed inside the single contiguous TLS area whose end is the
+	 * thread pointer (x86_64 Variant II). */
+	int tls_modid;
+	uintptr_t tls_vaddr;  /* vaddr of .tdata within the library image */
+	size_t tls_filesz;    /* size of initialized data (.tdata) */
+	size_t tls_memsz;     /* total TLS block size (.tdata + .tbss) */
+	size_t tls_align;     /* TLS alignment requirement */
+	uintptr_t tls_image;  /* runtime base of this module's TLS block */
 };
 
 /* Global state */
@@ -215,6 +227,13 @@ struct rtld_state {
 	int lib_count;
 	uintptr_t base_addr;  /* ld.so's own base */
 	size_t page_size;
+
+	/* TLS thread pointer.  x86_64 Variant II: %fs:0 points at the
+	 * end of the contiguous TLS area; a variable in module M at
+	 * block-relative offset O has address tls_tp + (block_base - tls_tp)
+	 * + O.  tls_mod_count is the number of TLS modules registered. */
+	uintptr_t tls_tp;     /* thread pointer value (%fs base) */
+	int tls_mod_count;
 };
 
 /* syscall.c */

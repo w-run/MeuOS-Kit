@@ -299,6 +299,12 @@ rtld_load_lib(const char *path, struct rtld_state *st)
 	lib->init_arraysz = 0;
 	lib->fini_array = 0;
 	lib->fini_arraysz = 0;
+	lib->tls_modid = 0;
+	lib->tls_vaddr = 0;
+	lib->tls_filesz = 0;
+	lib->tls_memsz = 0;
+	lib->tls_align = 0;
+	lib->tls_image = 0;
 
 	/* Parse dynamic section from program headers */
 	for (unsigned i = 0; i < phnum; i++) {
@@ -355,6 +361,18 @@ rtld_load_lib(const char *path, struct rtld_state *st)
 			break;
 		case DT_FINI_ARRAYSZ:
 			lib->fini_arraysz = (size_t)d->d_val;
+			break;
+		}
+	}
+
+	/* Scan PT_TLS to record this module's TLS block layout. */
+	for (unsigned i = 0; i < phnum; i++) {
+		parse_phdr(file_map, phoff + i * ELF64_PHDR_SIZE, &phdr);
+		if (phdr.type == PT_TLS) {
+			lib->tls_vaddr  = load_base + phdr.vaddr;
+			lib->tls_filesz = (size_t)phdr.filesz;
+			lib->tls_memsz  = (size_t)phdr.memsz;
+			lib->tls_align  = phdr.align ? (size_t)phdr.align : 1;
 			break;
 		}
 	}
@@ -471,12 +489,49 @@ rtld_apply_rela(struct rtld_lib *lib, struct rtld_state *st)
 			*loc = resolve_sym_value(lib, sym, base);
 			break;
 		}
-		case R_X86_64_DTPMOD64:
-			*(uint64_t *)loc = 1;  /* lib index 0 = this module */
+		case R_X86_64_DTPMOD64: {
+			/* Module id for the library that defines this TLS
+			 * symbol.  Resolve globally, then use the owning
+			 * library's assigned module id. */
+			const char *sym_name = 0;
+			if (lib->symtab && lib->strtab && lib->strsz) {
+				Sym64 *s = &lib->symtab[rsym];
+				if (s->name > 0 && s->name < lib->strsz)
+					sym_name = lib->strtab + s->name;
+			}
+			int def_lib = -1;
+			if (sym_name)
+				rtld_find_sym(st, sym_name, &def_lib);
+			if (def_lib >= 0 && st->libs[def_lib].tls_modid > 0)
+				*(uint64_t *)loc = (uint64_t)st->libs[def_lib].tls_modid;
+			else
+				*(uint64_t *)loc = (uint64_t)lib->tls_modid;
 			break;
+		}
 		case R_X86_64_DTPOFF64: {
-			Sym64 *sym = &lib->symtab[rsym];
-			*(uint64_t *)loc = sym->value + (uint64_t)r->r_addend;
+			/* TP-relative offset of the symbol.  The compiler's
+			 * __tls_get_addr resolves `tp + ti_offset`, so we store
+			 *   (module_block_base + sym_offset) - tp. */
+			const char *sym_name = 0;
+			if (lib->symtab && lib->strtab && lib->strsz) {
+				Sym64 *s = &lib->symtab[rsym];
+				if (s->name > 0 && s->name < lib->strsz)
+					sym_name = lib->strtab + s->name;
+			}
+			int def_lib = -1;
+			Sym64 *def_sym = 0;
+			if (sym_name)
+				def_sym = rtld_find_sym(st, sym_name, &def_lib);
+			uintptr_t block_base = lib->tls_image;
+			uint64_t sym_off = (uint64_t)r->r_addend;
+			if (def_sym) {
+				sym_off = def_sym->value + (uint64_t)r->r_addend;
+				if (def_lib >= 0)
+					block_base = st->libs[def_lib].tls_image;
+			}
+			*(uint64_t *)loc =
+				(uint64_t)((int64_t)(block_base + sym_off)
+				           - (int64_t)st->tls_tp);
 			break;
 		}
 		case R_X86_64_NONE:
@@ -573,6 +628,81 @@ rtld_load_needed(struct rtld_state *st, struct rtld_lib *lib)
 	}
 }
 
+/* ---- TLS module setup ---- */
+
+/* Build the initial TLS layout (x86_64 Variant II).
+ *
+ * All modules that have a PT_TLS are laid out back-to-back in a single
+ * contiguous region.  The thread pointer (%fs base) points at the END of
+ * this region (Variant II).  Each variable's address is therefore
+ *   block_base[symbol] + offset - tls_tp  (TP-relative)
+ * which the compiler's __tls_get_addr resolves as `tp + ti_offset`.
+ *
+ * Called once after every library is loaded and before relocations, so
+ * that R_X86_64_DTPMOD64/DTPOFF64 can be filled in. */
+static void
+rtld_tls_setup(struct rtld_state *st)
+{
+	st->tls_mod_count = 0;
+	st->tls_tp = 0;
+
+	/* Count total TLS bytes and reserve a 16-byte TCB at the top. */
+	size_t total = 16; /* TCB (holds DTV slot / pthread at tp-8) */
+	for (int l = 0; l < st->lib_count; l++) {
+		struct rtld_lib *lib = &st->libs[l];
+		if (lib->tls_memsz == 0)
+			continue;
+		size_t align = lib->tls_align > 16 ? lib->tls_align : 16;
+		total += (lib->tls_memsz + align - 1) & ~(align - 1);
+	}
+	if (total == 16)
+		return; /* no TLS at all */
+
+	/* Allocate the contiguous TLS area. */
+	uintptr_t area = (uintptr_t)rtld_alloc(total);
+	if (!area)
+		return;
+	/* The thread pointer is the END of the area. */
+	uintptr_t tp = area + total;
+	st->tls_tp = tp;
+
+	/* Lay out modules from the top down (module with the highest
+	 * modid sits just below the TCB).  Assign modids 1..N. */
+	uintptr_t cursor = tp;
+	/* Main executable first (modid 1). */
+	if (st->libs[0].tls_memsz > 0) {
+		struct rtld_lib *lib = &st->libs[0];
+		size_t align = lib->tls_align > 16 ? lib->tls_align : 16;
+		size_t sz = (lib->tls_memsz + align - 1) & ~(align - 1);
+		cursor -= sz;
+		lib->tls_modid = ++st->tls_mod_count;
+		lib->tls_image = cursor;
+		for (size_t i = 0; i < lib->tls_memsz; i++)
+			((unsigned char *)cursor)[i] = 0;
+		for (size_t i = 0; i < lib->tls_filesz; i++)
+			((unsigned char *)cursor)[i] =
+				((unsigned char *)lib->tls_vaddr)[i];
+	}
+	for (int l = 1; l < st->lib_count; l++) {
+		struct rtld_lib *lib = &st->libs[l];
+		if (lib->tls_memsz == 0)
+			continue;
+		size_t align = lib->tls_align > 16 ? lib->tls_align : 16;
+		size_t sz = (lib->tls_memsz + align - 1) & ~(align - 1);
+		cursor -= sz;
+		lib->tls_modid = ++st->tls_mod_count;
+		lib->tls_image = cursor;
+		for (size_t i = 0; i < lib->tls_memsz; i++)
+			((unsigned char *)cursor)[i] = 0;
+		for (size_t i = 0; i < lib->tls_filesz; i++)
+			((unsigned char *)cursor)[i] =
+				((unsigned char *)lib->tls_vaddr)[i];
+	}
+
+	/* Point %fs at the thread pointer. */
+	rtld_arch_prctl(0x1002 /* ARCH_SET_FS */, (unsigned long)tp);
+}
+
 /* ---- main entry (called from dlstart.S) ---- */
 
 uintptr_t
@@ -611,6 +741,12 @@ rtld_main(size_t *sp)
 	main_lib->jmprel = 0;
 	main_lib->jmprelsz = 0;
 	main_lib->pltrel = 0;
+	main_lib->tls_modid = 0;
+	main_lib->tls_vaddr = 0;
+	main_lib->tls_filesz = 0;
+	main_lib->tls_memsz = 0;
+	main_lib->tls_align = 0;
+	main_lib->tls_image = 0;
 
 	/* Get the main executable's base from AT_PHDR.
 	 * For PIE, the program headers are at a vaddr relative to the
@@ -628,6 +764,11 @@ rtld_main(size_t *sp)
 		            i * at_phent, &ph);
 		if (ph.type == PT_DYNAMIC) {
 			main_lib->dynv = (Dyn64 *)(at_phdr + ph.vaddr - phdr_vaddr);
+		} else if (ph.type == PT_TLS) {
+			main_lib->tls_vaddr  = main_base + ph.vaddr;
+			main_lib->tls_filesz = (size_t)ph.filesz;
+			main_lib->tls_memsz  = (size_t)ph.memsz;
+			main_lib->tls_align  = ph.align ? (size_t)ph.align : 1;
 		}
 	}
 
@@ -674,6 +815,11 @@ rtld_main(size_t *sp)
 	rtld_load_needed(&st, main_lib);
 		}
 	}
+
+	/* Register TLS modules, assign module IDs, lay out the contiguous
+	 * TLS area, and set %fs before resolving DTPMOD64/DTPOFF64
+	 * relocations. */
+	rtld_tls_setup(&st);
 
 	/* Apply main executable relocations first */
 	rtld_apply_rela(main_lib, &st);
