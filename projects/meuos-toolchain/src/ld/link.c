@@ -138,6 +138,15 @@ struct ld_got {
 	int group;
 };
 
+/* One exported symbol recorded for the dynamic symbol table (.dynsym).
+ * The actual .dynsym entry bytes are filled in after layout (when the final
+ * virtual addresses are known), so we keep the metadata here. */
+struct ld_dynsym_entry {
+	struct ld_global *global;  /* back-pointer into ctx->globals */
+	uint32_t dynstr_offset;    /* offset of the name within .dynstr */
+	int stt;                   /* STT_FUNC / STT_OBJECT / STT_TLS */
+};
+
 struct ld_context {
 	const struct mt_target *target;
 	struct ld_objects objects;
@@ -154,6 +163,12 @@ struct ld_context {
 	uint64_t tls_align;
 	int shared;          /* 1 = ET_DYN (shared library), 0 = ET_EXEC */
 	const char *soname;  /* DT_SONAME for shared lib (may be NULL) */
+	/* Dynamic symbol table bookkeeping (shared libs only) */
+	struct ld_dynsym_entry *dynsym_entries;
+	size_t dynsym_count;
+	size_t dynsym_capacity;
+	uint64_t dynsym_data_offset;   /* offset of first entry within .dynsym group */
+	uint32_t soname_dynstr_offset; /* .dynstr offset of DT_SONAME string (0 if none) */
 	/* In-memory archive data (for VFS .msys archives) */
 	unsigned char **archive_mem_data;
 	size_t *archive_mem_size;
@@ -511,6 +526,7 @@ free_context(struct ld_context *ctx)
 	free(ctx->groups);
 	free(ctx->globals.items);
 	free(ctx->got.items);
+	free(ctx->dynsym_entries);
 	/* Free in-memory archive data (from .msys VFS) */
 	for (i = 0; i < ctx->archive_mem_count; ++i)
 		free(ctx->archive_mem_data[i]);
@@ -704,6 +720,9 @@ section_rank(const char *name)
 	if (strcmp(name, ".text") == 0) return 0;
 	if (strcmp(name, ".rodata") == 0) return 1;
 	if (strcmp(name, ".eh_frame") == 0) return 1;
+	if (strcmp(name, ".dynsym") == 0) return 1;
+	if (strcmp(name, ".dynstr") == 0) return 1;
+	if (strcmp(name, ".hash") == 0) return 1;
 	if (strcmp(name, ".got") == 0) return 2;
 	if (strcmp(name, ".dynamic") == 0) return 2;
 	if (strcmp(name, ".data") == 0 || strcmp(name, ".tdata") == 0) return 3;
@@ -1339,7 +1358,7 @@ layout_output(struct ld_context *ctx)
 	uint64_t offset = LD_PAGE;
 	/* For shared libraries (ET_DYN) the base load address is 0; the
 	 * dynamic loader chooses the final address at load time. */
-	// base resolved inline via ctx->shared ternary
+	uint64_t base = ctx->shared ? 0 : LD_BASE;
 	int have_rw = 0;
 	int rank;
 	size_t i;
@@ -1382,7 +1401,7 @@ layout_output(struct ld_context *ctx)
 				continue;
 			offset = align_up(offset, group->align ? group->align : 1);
 			group->file_offset = offset;
-			group->address = ctx->shared ? 0 : LD_BASE + offset;
+			group->address = base + offset;
 			offset += group->size;
 		}
 	}
@@ -1397,7 +1416,7 @@ layout_output(struct ld_context *ctx)
 				continue;
 			offset = align_up(offset, group->align ? group->align : 1);
 			group->file_offset = offset;
-			group->address = ctx->shared ? 0 : LD_BASE + offset;
+			group->address = base + offset;
 			/* NOBITS: does not advance file offset */
 		}
 	}
@@ -1427,7 +1446,7 @@ layout_output(struct ld_context *ctx)
 		} else {
 			/* No .tdata: allocate beyond non-TLS sections */
 			g->file_offset = offset;
-			g->address = ctx->shared ? 0 : LD_BASE + offset;
+			g->address = base + offset;
 			offset += g->size;
 			}
 		}
@@ -1672,6 +1691,8 @@ struct ld_output_section {
 	uint64_t offset;
 	uint64_t size;
 	uint64_t align;
+	uint32_t link;   /* sh_link */
+	uint32_t info;   /* sh_info */
 };
 
 struct ld_strings {
@@ -1820,10 +1841,29 @@ write_executable(struct ld_context *ctx, const char *path,
 			.address = ctx->groups[i].address,
 			.offset = ctx->groups[i].file_offset,
 			.size = ctx->groups[i].size,
-			.align = ctx->groups[i].align
+			.align = ctx->groups[i].align,
+			.link = 0,
+			.info = 0
 		};
 		if (strings_add(&shstr, sections[i + 1].name, &name_offsets[i + 1]) != 0)
 			goto out_strings;
+	}
+	/* Set sh_link / sh_info for dynamic symbol table */
+	if (ctx->shared) {
+		/* Find .dynstr section index */
+		uint32_t dynstr_sec = 0;
+		uint32_t dynsym_sec = 0;
+		for (i = 0; i < ctx->group_count; ++i) {
+			const char *gn = ctx->groups[i].name;
+			if (strcmp(gn, ".dynstr") == 0)
+				dynstr_sec = (uint32_t)(i + 1);
+			if (strcmp(gn, ".dynsym") == 0)
+				dynsym_sec = (uint32_t)(i + 1);
+		}
+		if (dynsym_sec && dynstr_sec) {
+			sections[dynsym_sec].link = dynstr_sec;
+			sections[dynsym_sec].info = 1; /* first non-local symbol index */
+		}
 	}
 	alloc_file_end = file_end;
 	shstr_index = (uint32_t)(output_count - 1);
@@ -1955,6 +1995,8 @@ write_executable(struct ld_context *ctx, const char *path,
 		write64(sh + 16, sections[i].address);
 		write64(sh + 24, sections[i].offset);
 		write64(sh + 32, sections[i].size);
+		write32(sh + 40, sections[i].link);
+		write32(sh + 44, sections[i].info);
 		write64(sh + 48, sections[i].align ? sections[i].align : 1);
 		if (fwrite(sh, 1, sizeof(sh), file) != sizeof(sh))
 			goto out_file;
@@ -1978,10 +2020,337 @@ out:
 	return result;
 }
 
-/* Create a minimal .dynamic section containing a single DT_NULL entry.
- * Real dynamic tags (DT_SONAME, DT_STRTAB, …) are filled by a future
- * build_dynamic() pass; for now the section merely exists so the ET_DYN
- * output carries a valid PT_DYNAMIC program header. */
+/* ---- Dynamic section helpers for -shared output ---- */
+
+/* Return the smallest prime >= n. */
+static uint32_t
+next_prime32(uint32_t n)
+{
+	uint32_t p, i;
+	for (p = n < 2 ? 2 : n; ; ++p) {
+		int isp = 1;
+		for (i = 2; i * i <= p; ++i) {
+			if (p % i == 0) { isp = 0; break; }
+		}
+		if (isp) return p;
+	}
+}
+
+/* Standard ELF-32 hash (used for both 32 and 64 bit .hash). */
+static uint32_t
+elf_hash32(const char *name)
+{
+	uint32_t h = 0, g;
+	while (*name) {
+		h = (h << 4) + (unsigned char)*name++;
+		if ((g = h & 0xf0000000u))
+			h ^= g >> 24;
+		h &= ~g;
+	}
+	return h;
+}
+
+/* Write an ElfXX_Sym entry at p (64 or 32 bit depending on elf64). */
+static void
+write_dynsym_entry(unsigned char *p, int elf64,
+                   uint32_t name, uint8_t info, uint8_t other,
+                   uint16_t shndx, uint64_t value, uint64_t size)
+{
+	if (elf64) {
+		write32(p + 0, name);
+		p[4] = info;
+		p[5] = other;
+		write16(p + 6, shndx);
+		write64(p + 8, value);
+		write64(p + 16, size);
+	} else {
+		write32(p + 0, name);
+		write32(p + 4, (uint32_t)value);
+		write32(p + 8, (uint32_t)size);
+		p[12] = info;
+		p[13] = other;
+		write16(p + 14, shndx);
+	}
+}
+
+/* Pass 1: collect exported globals, create .dynsym / .dynstr / .hash groups
+ * and fill their content (except symbol values which need layout addresses). */
+static int
+build_dynamic_tables(struct ld_context *ctx)
+{
+	size_t i;
+	size_t nsym = 0;
+
+	if (!ctx->shared)
+		return 0;
+
+	/* Count exported (defined non-weak) globals */
+	for (i = 0; i < ctx->globals.count; ++i) {
+		struct ld_global *g = &ctx->globals.items[i];
+		if (g->defined && !g->weak)
+			++nsym;
+	}
+
+	/* Allocate local dynsym metadata array */
+	if (nsym > ctx->dynsym_capacity) {
+		size_t cap = ctx->dynsym_capacity ? ctx->dynsym_capacity * 2 : 64;
+		while (cap < nsym) cap *= 2;
+		struct ld_dynsym_entry *e = (struct ld_dynsym_entry *)ld_realloc(
+		    ctx->dynsym_entries, cap * sizeof(*e));
+		if (!e) return ld_error(ctx, "out of memory");
+		ctx->dynsym_entries = e;
+		ctx->dynsym_capacity = cap;
+	}
+	ctx->dynsym_count = nsym;
+
+	int elf64 = (ctx->target->elf_class == MT_ELFCLASS64);
+	size_t symsize = elf64 ? MT_ELF64_SYM_SIZE : MT_ELF32_SYM_SIZE;
+
+	/* ---- .dynstr ---- */
+	int dg_str = get_group(ctx, ".dynstr", MT_SHT_STRTAB,
+	                       LD_SHF_ALLOC, 1);
+	if (dg_str < 0) return ld_error(ctx, "out of memory");
+	struct ld_group *gstr = &ctx->groups[dg_str];
+	/* Leading NUL byte (string table index 0 = empty string) */
+	uint64_t stroff;
+	if (append_group_data(ctx, gstr, (const unsigned char *)"", 1, 1, &stroff) != 0)
+		return -1;
+
+	/* Store soname string (if any) and append its name to .dynstr */
+	ctx->soname_dynstr_offset = 0;
+	if (ctx->soname) {
+		uint64_t so_off;
+		if (append_group_data(ctx, gstr,
+		                      (const unsigned char *)ctx->soname,
+		                      strlen(ctx->soname) + 1, 1, &so_off) != 0)
+			return -1;
+		ctx->soname_dynstr_offset = (uint32_t)so_off;
+	}
+
+	/* ---- .dynsym (placeholder, filled in pass 2) ---- */
+	int dg_sym = get_group(ctx, ".dynsym", MT_SHT_DYNSYM,
+	                       LD_SHF_ALLOC, 8);
+	if (dg_sym < 0) return ld_error(ctx, "out of memory");
+	struct ld_group *gsym = &ctx->groups[dg_sym];
+	size_t nsym_total = nsym + 1; /* index 0 = null symbol */
+	size_t dysize = nsym_total * symsize;
+	/* Zero-fill the entire .dynsym (null symbol at 0 stays zero) */
+	unsigned char *dz = (unsigned char *)ld_malloc(dysize ? dysize : 1);
+	if (!dz) return ld_error(ctx, "out of memory");
+	memset(dz, 0, dysize);
+	uint64_t sym_data_off;
+	if (append_group_data(ctx, gsym, dz, dysize, 8, &sym_data_off) != 0) {
+		free(dz);
+		return -1;
+	}
+	free(dz);
+	ctx->dynsym_data_offset = sym_data_off;
+
+	/* ---- .hash (SysV format, 32-bit entries) ---- */
+	int dg_hash = get_group(ctx, ".hash", MT_SHT_HASH,
+	                        LD_SHF_ALLOC, 4);
+	if (dg_hash < 0) return ld_error(ctx, "out of memory");
+	struct ld_group *ghash = &ctx->groups[dg_hash];
+	uint32_t nbucket = next_prime32((uint32_t)(nsym_total > 1 ? nsym_total : 3));
+	uint32_t nchain = (uint32_t)nsym_total;
+	size_t hash_size = (size_t)(2 + nbucket + nchain) * 4;
+	unsigned char *hb = (unsigned char *)ld_malloc(hash_size);
+	if (!hb) return ld_error(ctx, "out of memory");
+	memset(hb, 0, hash_size);
+	write32(hb, nbucket);
+	write32(hb + 4, nchain);
+	uint32_t *bucket = (uint32_t *)(hb + 8);
+	uint32_t *chain = (uint32_t *)(hb + 8 + (size_t)nbucket * 4);
+	/* For each exported symbol (index 1..nsym in .dynsym) */
+	for (i = 0; i < nsym; ++i) {
+		struct ld_dynsym_entry *e = &ctx->dynsym_entries[i];
+		uint32_t h = elf_hash32(e->global->name);
+		uint32_t bi = h % nbucket;
+		uint32_t sym_ndx = (uint32_t)(i + 1);
+		chain[sym_ndx] = bucket[bi];
+		bucket[bi] = sym_ndx;
+	}
+	uint64_t hash_off;
+	if (append_group_data(ctx, ghash, hb, hash_size, 4, &hash_off) != 0) {
+		free(hb);
+		return -1;
+	}
+	free(hb);
+
+	/* ---- .dynamic (placeholder with correct size, filled in pass 2) ---- */
+	size_t ntags = 5; /* SYMTAB, SYMENT, STRTAB, STRSZ, HASH */
+	if (ctx->soname) ntags++;
+	ntags++; /* DT_NULL terminator */
+	size_t dynent = elf64 ? 16 : 8;
+	size_t dyn_total = ntags * dynent;
+	int dg_dyn = find_group(ctx, ".dynamic"); /* created by ensure_dynamic_section */
+	if (dg_dyn < 0) return ld_error(ctx, "out of memory");
+	struct ld_group *gdyn = &ctx->groups[dg_dyn];
+	unsigned char *dd = (unsigned char *)ld_malloc(dyn_total ? dyn_total : 1);
+	if (!dd) return ld_error(ctx, "out of memory");
+	memset(dd, 0, dyn_total);
+	uint64_t dyn_off;
+	if (append_group_data(ctx, gdyn, dd, dyn_total, 8, &dyn_off) != 0) {
+		free(dd);
+		return -1;
+	}
+	free(dd);
+
+	/* Now populate the dynsym_entries metadata (name → dynstr_offset) */
+	/* Re-scan globals to fill dynsym_entries in the same order as counted. */
+	size_t ei = 0;
+	for (i = 0; i < ctx->globals.count; ++i) {
+		struct ld_global *g = &ctx->globals.items[i];
+		if (!(g->defined && !g->weak))
+			continue;
+		/* Determine st_type */
+		int stt = MT_STT_OBJECT;
+		if (g->group >= 0) {
+			const char *gname = ctx->groups[g->group].name;
+			if (gname && strcmp(gname, ".text") == 0)
+				stt = MT_STT_FUNC;
+			else if (g->group == ctx->tls_tdata_group ||
+			         g->group == ctx->tls_tbss_group)
+				stt = MT_STT_TLS;
+		}
+		uint32_t dynstr_off;
+		if (append_group_data(ctx, gstr,
+		                      (const unsigned char *)g->name,
+		                      strlen(g->name) + 1, 1, &stroff) != 0)
+			return -1;
+		dynstr_off = (uint32_t)stroff;
+		ctx->dynsym_entries[ei].global = g;
+		ctx->dynsym_entries[ei].dynstr_offset = dynstr_off;
+		ctx->dynsym_entries[ei].stt = stt;
+		++ei;
+	}
+	return 0;
+}
+
+/* Pass 2: after layout, fill .dynsym entry values and .dynamic DT entries.
+ * Called after layout_output and before write_executable. */
+static int
+fill_dynamic_addresses(struct ld_context *ctx)
+{
+	size_t i;
+
+	if (!ctx->shared)
+		return 0;
+
+	int elf64 = (ctx->target->elf_class == MT_ELFCLASS64);
+	size_t symsize = elf64 ? MT_ELF64_SYM_SIZE : MT_ELF32_SYM_SIZE;
+
+	int dg_sym = find_group(ctx, ".dynsym");
+	int dg_str = find_group(ctx, ".dynstr");
+	int dg_hash = find_group(ctx, ".hash");
+	int dg_dyn = find_group(ctx, ".dynamic");
+	if (dg_sym < 0 || dg_str < 0 || dg_hash < 0 || dg_dyn < 0)
+		return ld_error(ctx, "internal: dynamic sections not created");
+
+	struct ld_group *gsym = &ctx->groups[dg_sym];
+	struct ld_group *gstr = &ctx->groups[dg_str];
+	struct ld_group *ghash = &ctx->groups[dg_hash];
+	struct ld_group *gdyn = &ctx->groups[dg_dyn];
+
+	uint64_t sym_addr   = gsym->address;
+	uint64_t str_addr   = gstr->address;
+	uint64_t hash_addr  = ghash->address;
+
+	/* Fill .dynsym entries (skip null symbol at index 0) */
+	for (i = 0; i < ctx->dynsym_count; ++i) {
+		struct ld_dynsym_entry *e = &ctx->dynsym_entries[i];
+		struct ld_global *g = e->global;
+		uint64_t st_value = ctx->groups[g->group].address + g->offset;
+		uint16_t st_shndx = (uint16_t)(g->group + 1); /* output section index */
+		uint8_t info = (uint8_t)((LD_STB_GLOBAL << LD_STB_SHIFT) | e->stt);
+		unsigned char *p = gsym->data + ctx->dynsym_data_offset +
+		                   (i + 1) * symsize;
+		write_dynsym_entry(p, elf64, e->dynstr_offset, info, 0,
+		                   st_shndx, st_value, g->size);
+	}
+
+	/* Fill .dynamic DT entries in the order reserved by build_dynamic_tables:
+	 *   SYMTAB, SYMENT, STRTAB, STRSZ, HASH, [SONAME,] NULL */
+	size_t k = 0;
+	unsigned char *dp = gdyn->data;
+
+	/* DT_SYMTAB */
+	if (elf64) {
+		write64(dp + k * 16 + 0, MT_DT_SYMTAB);
+		write64(dp + k * 16 + 8, sym_addr);
+	} else {
+		write32(dp + k * 8 + 0, MT_DT_SYMTAB);
+		write32(dp + k * 8 + 4, (uint32_t)sym_addr);
+	}
+	++k;
+
+	/* DT_SYMENT */
+	if (elf64) {
+		write64(dp + k * 16 + 0, MT_DT_SYMENT);
+		write64(dp + k * 16 + 8, (uint64_t)symsize);
+	} else {
+		write32(dp + k * 8 + 0, MT_DT_SYMENT);
+		write32(dp + k * 8 + 4, (uint32_t)symsize);
+	}
+	++k;
+
+	/* DT_STRTAB */
+	if (elf64) {
+		write64(dp + k * 16 + 0, MT_DT_STRTAB);
+		write64(dp + k * 16 + 8, str_addr);
+	} else {
+		write32(dp + k * 8 + 0, MT_DT_STRTAB);
+		write32(dp + k * 8 + 4, (uint32_t)str_addr);
+	}
+	++k;
+
+	/* DT_STRSZ */
+	if (elf64) {
+		write64(dp + k * 16 + 0, MT_DT_STRSZ);
+		write64(dp + k * 16 + 8, (uint64_t)gstr->size);
+	} else {
+		write32(dp + k * 8 + 0, MT_DT_STRSZ);
+		write32(dp + k * 8 + 4, (uint32_t)gstr->size);
+	}
+	++k;
+
+	/* DT_HASH */
+	if (elf64) {
+		write64(dp + k * 16 + 0, MT_DT_HASH);
+		write64(dp + k * 16 + 8, hash_addr);
+	} else {
+		write32(dp + k * 8 + 0, MT_DT_HASH);
+		write32(dp + k * 8 + 4, (uint32_t)hash_addr);
+	}
+	++k;
+
+	/* DT_SONAME (optional) */
+	if (ctx->soname) {
+		if (elf64) {
+			write64(dp + k * 16 + 0, MT_DT_SONAME);
+			write64(dp + k * 16 + 8, ctx->soname_dynstr_offset);
+		} else {
+			write32(dp + k * 8 + 0, MT_DT_SONAME);
+			write32(dp + k * 8 + 4, ctx->soname_dynstr_offset);
+		}
+		++k;
+	}
+
+	/* DT_NULL terminator is already zeroed in the placeholder — but write
+	 * it explicitly for clarity. */
+	if (elf64) {
+		write64(dp + k * 16 + 0, MT_DT_NULL);
+		write64(dp + k * 16 + 8, 0);
+	} else {
+		write32(dp + k * 8 + 0, MT_DT_NULL);
+		write32(dp + k * 8 + 4, 0);
+	}
+	return 0;
+}
+
+/* Ensure the .dynamic output section group exists for -shared.
+ * Actual content (DT entries) is built later by build_dynamic_tables /
+ * fill_dynamic_addresses. */
 static int
 ensure_dynamic_section(struct ld_context *ctx)
 {
@@ -1992,11 +2361,6 @@ ensure_dynamic_section(struct ld_context *ctx)
 	if (g < 0)
 		return ld_error(ctx, "out of memory");
 	ctx->groups[g].rank = 2; /* same rank as .got, inside the RW region */
-	size_t ent = ctx->target->elf_class == MT_ELFCLASS64 ? 16 : 8;
-	unsigned char zero[16] = {0};
-	uint64_t off;
-	if (append_group_data(ctx, &ctx->groups[g], zero, ent, 8, &off) != 0)
-		return -1;
 	return 0;
 }
 
@@ -2037,9 +2401,12 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 	    extract_archives(&ctx) != 0 || allocate_common(&ctx) != 0 ||
 	    collect_got_relocations(&ctx) != 0)
 		goto out;
+	if (build_dynamic_tables(&ctx) != 0)
+		goto out;
 	if (ctx.got.count != 0)
 		ctx.got.group = find_group(&ctx, ".got");
-	if (layout_output(&ctx) != 0 || fill_got(&ctx) != 0 ||
+	if (layout_output(&ctx) != 0 || fill_dynamic_addresses(&ctx) != 0 ||
+	    fill_got(&ctx) != 0 ||
 	    apply_relocations(&ctx) != 0 ||
 	    write_executable(&ctx, opts ? opts->output : "a.out",
 	                     opts ? opts->entry : "_start",
