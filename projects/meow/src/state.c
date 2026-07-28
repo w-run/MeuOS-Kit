@@ -8,3 +8,4 @@ size_t ntargets;
 char *default_target;
 int parallel_jobs = 1;
 char *build_arch;  /* NULL = auto-detect */
+const char *build_target;  /* full triple from --target=, or NULL */

@@ -143,6 +143,10 @@ main(int argc, char **argv)
 		return list_packages() == 0 ? 0 : 1;
 	if (count == 1 && strcmp(arguments[0], "env") == 0)
 		return cmd_env();
+	if (count == 1 && strcmp(arguments[0], "lint") == 0)
+		return cmd_lint(0, NULL);
+	if (count >= 2 && strcmp(arguments[0], "lint") == 0)
+		return cmd_lint(count - 1, arguments + 1);
 	if (count == 1 && strcmp(arguments[0], "--bootstrap") == 0) {
 		if (run("CC=\"${CC:-cc}\" make -C meow clean all") != 0)
 			return 1;

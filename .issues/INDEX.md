@@ -104,6 +104,8 @@ src/compat/
 | mcc-pic-verify | mcc | PIC 代码生成加固 | 全架构验证 `-fPIC` 输出（GOT/PLT/TLS GD 路径）（riscv64 GOT 为空缺） | 🟢 | 本 commit（新增 pic_verify.sh；riscv64 需修复 `%got_pcrel_hi` emit） |
 | mcc-shared-mt | mcc driver | `-shared` mt/ld 集成 | 去掉 `-shared` 回退到 host cc 的限制 | 🟢 | `acce6c6` |
 | ld-so | 新建 | ld.so 动态链接器 | **完整端到端验证通过**：x86_64 PIE + shared library 动态链接运行 exit=0 ✅。ELF 加载 + DT_NEEDED 传递遍历 + 符号解析 (SysV hash) + RELA 重定位 (RELATIVE/GLOB_DAT/JUMP_SLOT) + init_array | 🟢 | `525ab54` + `99dab32` (DT_NEEDED recursive) + `37ce60c` (main_base fix) |
+| ld-so-tls | ld.so (rtld.c) | ld.so 动态 TLS 支持 | rtld.c 实现 PT_TLS 扫描、模块 ID 分配（main=1, libs=2..N）、连续 TLS 布局（Variant II，%fs 指向区块末端 `tp`）、`R_X86_64_DTPMOD64`/`DTPOFF64` 解析为 TP 相对偏移，与 libc `__tls_get_addr` 的 `tp + ti_offset` 约定一致 | 🟢 | worktree（rtld.c + rtld.h：tls_modid/tls_image/tls_tp 字段；rtld_tls_setup 布局+arch_prctl(ARCH_SET_FS)；rela 处理 DTPMOD/DTPOFF） |
+| bug-mt-so-undef | mt/ld | `-shared` 未定义符号 | **新发现阻塞**：mt/ld 链接 `.so` 时，对**真正未定义的外部符号**（如 `__tls_get_addr`——由 ld.so 运行时提供）直接报错 `undefined symbol`，导致无法产出含 GD TLS 的 .so。经实测，同一 .so 内的跨函数调用（如 foo→foo_helper）**不会**触发此错误，仅限外部/运行时符号。需在 shared 模式下：将未定义 STT_FUNC 符号写入 `.dynsym`(UND) 并生成 PLT + JUMP_SLOT 动态重定位，而非报错。属 ld-shared/ld-as-needed 范畴，阻塞 ld-tls-dynamic 的 shared 端到端验证（静态/PIE 路径已通过）。 | 🟡 | 待修（ld.so 侧 rtld.c 已就绪，仅差 mt/ld 产出含未定义符号的 .so） |
 | libc-dl | meuos-libc | `dlfcn.h` + `dl*` 实现 | `dlopen`/`dlsym`/`dlclose`/`dlerror` | 🟢 | `fd05074` mmap-based ELF 加载器 + SysV hash 符号查找 + RELA 重定位 + 急切解析 |
 | mcc-dwarf | mcc | DWARF 调试信息 | `-g` 生成 DWARF v5（`.debug_info`/`.abbrev`/`.line`/`.str`/`.loc`/`.ranges`），包含行号、变量、类型信息 | 🟢 | `a9a065c` 行号表(阶段1); .debug_info/abbrev/str 阶段2待实现 |
 | as-dwarf | mt/as | DWARF 汇编伪指令 | `.loc`/`.file`/`.cfi_*` 支持 — **阻塞 mcc-dwarf**，无此 as 无法处理 `-g` 输出 | 🟢 | `a5f49c0` |
@@ -120,7 +122,7 @@ src/compat/
 |----|------|------|------|------|---------|
 | meow-native-shell | ⛔ | 原生 shell 替代 | 阻塞于 msh（不在本次 worktree 范围） | ⛔ | 不在范围 |
 | mcc-msys-link | mcc driver | `.msys` + host linker | host cc 链接时自动提取 `.a` 到 temp + ARM triplet 识别使 mt/as 可处理 arm 编译 | 🟢 | `16e683e`（msys.c 已有基础 + ARM 集成） |
-| ld-tls-dynamic | mt/ld | TLS 动态模型 | GD/LD 模型、`__tls_get_addr`（依赖 ld-shared，已就绪） | 🟢 | link.c 添加 R_X86_64_TLSGD/TLSLD/DTPMOD/DTPOFF 处理：静态链接放松为 LE(TPOFF32)，PIE/shared 保留动态重定位由 ld.so 解析。端到端验证：`mcc -fPIC` 发 TLSGD+__tls_get_addr → mt/ld 链 PIE 运行 exit=0 |
+| ld-tls-dynamic | mt/ld + ld.so | TLS 动态模型 | GD/LD 模型、`__tls_get_addr`（依赖 ld-shared，已就绪） | 🟢 | link.c 添加 R_X86_64_TLSGD/TLSLD/DTPMOD/DTPOFF 处理：静态链接放松为 LE(TPOFF32)，PIE/shared 保留动态重定位。**ld.so 侧 rtld.c 已完成**：PT_TLS 扫描、模块 ID 分配、连续 TLS 布局（Variant II，%fs 指向区块末端）、R_X86_64_DTPMOD64/DTPOFF64 解析为 TP 相对偏移（与 libc `__tls_get_addr` 的 `tp + ti_offset` 约定一致）。**遗留阻塞**：mt/ld 链接 shared 库时遇未定义符号（如 `__tls_get_addr`）直接报错 `undefined symbol`，导致无法产出含 GD TLS 的 .so；需补齐 shared 库的未定义符号→.dynsym(UND)+GLOB_DAT/JUMP_SLOT 动态重定位（属 ld-shared/ld-as-needed 范畴）。 |
 | ld-gc-sections | mt/ld | 死代码消除 | 未引用节区的裁剪。概念有用，实现应自己设计，不照搬 GNU `--gc-sections` 的复杂逻辑 | 🟢 | 本 commit（gc_sweep + section_rank .text.*/.data.* 支持） |
 | ld-linker-script | mt/ld | 链接布局控制 | ❌ **不做 GNU `.ld` 脚本解析**。需要时改为 YAML 格式描述节区布局（链接器内嵌或独立文件） | 🟢 | -T/--link-script 自定义 rank 排序已实现 |
 | as-macro | mt/as | `.rept`/`.endr` 重复伪指令 | 基本的行重复机制，用于汇编展开和填充 | 🟢 | 本 commit（assemble.c: .rept N 保存 ftell 位置，.endr 迭代 fseek 回退；单层嵌套限制；回归测试） |
@@ -171,7 +173,7 @@ src/compat/
 | ID | 组件 | 描述 | 优先 | 实施情况 |
 |----|------|------|------|---------|
 | mcc-diagnostics | mcc | 诊断质量 | 带源位置和 caret（`^`）的错误消息。这是 Clang 推广的好设计，非 GNU 包袱 | 🟡 | 🟢 本 commit（token.c 添加 caret ^ 错误指示） |
-| mcc-warnings | mcc | 警告体系 | ⚠️ `-Wall`/`-Wextra` 是 GCC 命名约定。我们应该设计自己的警告体系（`--warn=all`/`--warn=extra` 或 `-W` 风格但自己定义哪些组别） | 🔄 重设计 | 待设计 |
+| mcc-warnings | mcc | 警告体系 | ⚠️ `-Wall`/`-Wextra` 是 GCC 命名约定。我们应该设计自己的警告体系（`--warn=all`/`--warn=extra` 或 `-W` 风格但自己定义哪些组别） | 🟡 | 🟢 解析层（9713bfe）：`--warn=all/portable/style/performance/pedantic` 语义组 + ir.h WARN_* 位扩展；`-Wall`/`-Wextra` 保留为 --warn=all 兼容别名。⚠️ 待补：sema 层 `cc_warn()` 发射点（未使用变量/隐式转换/类型不匹配等警告尚未实际发射） |
 | mcc-attributes | mcc compat | `__attribute__` | GCC 属性语法。按设计原则应走 compat 映射层，核心不直接处理 | 🟢 | `7c087f8`（支持 weak/used/noinline/always_inline/visibility/unused/aligned/section/packed/noreturn/deprecated/constructor/destructor） |
 | mcc-pragma | mcc compat | `#pragma` | GCC/Clang pragma。同样走 compat 映射层 | 🟢 | `cffc405`（`#pragma once` 等已接收并忽略；`_Pragma` 操作符在 expand 中处理） |
 | mcc-builtins | mcc compat | `__builtin_*` | GCC/Clang 内建函数已实现：expect/constant_p/offsetof/alloca/unreachable/va_*/types_compatible_p/inff/nanf/atomic_fetch_* | 🟢 | scope.c 中完整的 builtin 表 + expr_primary.c 中处理原子操作 |
@@ -371,11 +373,11 @@ p8-meow ── meow 构建系统完备（替代 make+autoconf+libtool+pkg-config
 | ID | 主题 | 描述 | 涉及组件 | 优先 | 实施情况 |
 |----|------|------|---------|------|---------|
 | specs-default | **`--specs=meuos` 默认化** | `MEUOS_SYSROOT` 设置时自动隐含 `--specs=meuos`，不再需要显式传入。新增 `--specs=host` 切回宿主模式 | 🟢 | `42a53ed` |
-| meow-auto-config | **meow 自动决策编译参数** | `meow build <pkg> --target=<triplet>` 自动解析 triple → arch/abi/float/subarch, 自动设 CC/CFLAGS/LDFLAGS, 自动跑 probe 生成 config.h | meow + mcc | 🔴 高 | 待实现 |
-| triple-format | **MeuOS triple 格式设计** | 定义 `<arch>[-subarch][-vendor][-os][-abi]` 格式。vendor=`meuos` 隐含 MeuOS 默认行为；os=`meuos-next` 为未来原生环境。见下方详细设计 | meow + mcc + mt | 🔴 高 | 设计已定稿，待实现 |
-| triple-lib | **共享 triple 解析库** | meow 和 mcc 共享同一套 triple 解析逻辑，避免两处分叉。提取为 `libtriple` 或共用头文件 | meow + mcc | 🔴 高 | 待实现 |
+| meow-auto-config | **meow 自动决策编译参数** | `meow build <pkg> --target=<triplet>` 自动解析 triple → arch/abi/float/subarch, 自动设 CC/CFLAGS/LDFLAGS, 自动跑 probe 生成 config.h | meow + mcc | 🔴 高 | 🟢 94068b9：`set_arch_env()` 在 build_target 非 NULL 时导出 TARGET_TRIPLE 变量；`parse_triple_arch()` 支持别名（amd64→x86_64）；probe 自动检测已存在 |
+| triple-format | **MeuOS triple 格式设计** | 定义 `<arch>[-subarch][-vendor][-os][-abi]` 格式。vendor=`meuos` 隐含 MeuOS 默认行为；os=`meuos-next` 为未来原生环境。见下方详细设计 | meow + mcc + mt | 🔴 高 | 🟢 mcc 侧（`src/driver/triple.h` + `triple.c` + `target_select.c`）+ meow 侧（`src/triple.c` + `--target=` 解析）。双组件均支持完整 triple 解析 + 架构别名 |
+| triple-lib | **共享 triple 解析库** | meow 和 mcc 共享同一套 triple 解析逻辑，避免两处分叉。提取为 `libtriple` 或共用头文件 | meow + mcc | 🔴 高 | 🟢 mcc 侧 `triple.h/c` + meow 侧 `triple.c`（逻辑相同）。暂未提取为独立共享库——两副本各自维护，逻辑一致。后续如需共享库，可提取到 `meuos-toolchain/lib/triple/` |
 | triple-abi-map | **Triple → ABI 自动映射** | `--target=<triplet>` 精确提取 ABI/lp64/float 信息并选择对应 Target/ABI 降级 | mcc sema | 🟡 中 | 待实现 |
-| meow-zero-args | **meow 零参数构建** | `meow build` 无参数时自动嗅探当前架构/sysroot/源码，生成完整构建环境；只有需要定制时才传入参数 | meow | 🔴 高 | 待实现 |
+| meow-zero-args | **meow 零参数构建** | `meow build` 无参数时自动嗅探当前架构/sysroot/源码，生成完整构建环境；只有需要定制时才传入参数 | meow | 🔴 高 | 🟢 已实现（main.c: 当 count==1 && "build" 时自动检测当前目录 meow.yaml 或回退 Makefile 兼容模式），`--target=` 解析完备后，`meow build` 即可零配置构建目标架构 |
 
 ### Triple 格式设计
 
