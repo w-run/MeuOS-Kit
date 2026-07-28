@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -101,11 +102,33 @@ main(int argc, char **argv)
 	}
 	if (count == 1 && strcmp(arguments[0], "--help") == 0) {
 		printf("usage: meow [-jN] [--arch <arch>] build <package> [target]\n");
+		printf("       meow [-jN] [--arch <arch>] build all\n");
 		printf("       meow [-jN] [--arch <arch>] clean <package>\n");
 		printf("       meow list\n");
 		printf("       meow --bootstrap\n");
 		printf("       meow --help\n");
 		return 0;
+	}
+	/* Build all packages: scan pkgs/ and build each one */
+	if (count == 2 && strcmp(arguments[0], "build") == 0 &&
+	    strcmp(arguments[1], "all") == 0) {
+		DIR *dir = opendir("pkgs");
+		if (!dir) return 1;
+		struct dirent *entry;
+		int failures = 0;
+		while ((entry = readdir(dir))) {
+			if (entry->d_name[0] == '.') continue;
+			printf("meow: building %s\n", entry->d_name);
+			char cmd[1024];
+			snprintf(cmd, sizeof(cmd), "meow build %s", entry->d_name);
+			if (run(cmd) != 0) {
+				printf("meow: %s failed\n", entry->d_name);
+				failures++;
+			}
+		}
+		closedir(dir);
+		printf("meow: built all packages (%d failures)\n", failures);
+		return failures ? 1 : 0;
 	}
 	if ((count != 2 && count != 3) ||
 	    (strcmp(arguments[0], "build") != 0 && strcmp(arguments[0], "clean") != 0)) {

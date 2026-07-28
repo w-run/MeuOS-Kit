@@ -16,11 +16,18 @@ load_recipe(const char *package, char *path, size_t path_size, char *data)
 	int descriptor;
 	ssize_t count;
 
-	if (strlen(prefix) + strlen(package) + strlen(suffix) + 1 > path_size)
-		return -1;
-	strcpy(path, prefix);
-	strcpy(path + strlen(path), package);
-	strcpy(path + strlen(path), suffix);
+	/* If package starts with '.' or '/', treat as a direct path */
+	if (package[0] == '.' || package[0] == '/') {
+		if (strlen(package) + 1 > path_size)
+			return -1;
+		strcpy(path, package);
+	} else {
+		if (strlen(prefix) + strlen(package) + strlen(suffix) + 1 > path_size)
+			return -1;
+		strcpy(path, prefix);
+		strcpy(path + strlen(path), package);
+		strcpy(path + strlen(path), suffix);
+	}
 	descriptor = open(path, O_RDONLY);
 	if (descriptor < 0)
 		return -1;

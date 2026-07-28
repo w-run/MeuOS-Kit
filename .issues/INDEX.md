@@ -144,7 +144,7 @@ src/compat/
 | ld-no-undefined | mt/ld | `--no-undefined` | 未定义符号时报错（`-z defs` / `-z undefs`） | 🟢 | 本 commit |
 | ld-cref | mt/ld | `--cref` | 交叉引用表输出 | 🟢 | 已实现 |
 | ld-compress-debug | mt/ld | `--compress-debug-sections` | DWARF 节区压缩（zlib/zstd） | 🟢 | 已实现 |
-| meow-multi-dir | meow | 多目录构建 | 跨目录包依赖的 YAML 配方 | ⏳ | 待实现 |
+| meow-multi-dir | meow | 多目录构建 | 跨目录包依赖的 YAML 配方 | 🟢 | 本 commit（build all + load_recipe 路径支持） |
 | tool-binary | 新建 | 统一二进制分析工具 | **不做 size/strings/addr2line/ldd 各自一个工具**。设计一个 `mt-info` 或集成到 `objdump`/`readelf` 中，通过 subcommand 提供多种分析能力 | 🔄 重设计 | 待设计 |
 
 ## 优先级 3（P3-libc — libc 标准接口完备）
