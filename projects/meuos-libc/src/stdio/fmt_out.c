@@ -184,6 +184,11 @@ __meuos_vformat(struct __meuos_print_sink *sink, const char *format, va_list arg
 			if (__meuos_sink_number(sink, value, 16, width, zero, 0, "0x") < 0) return -1;
 			break;
 		}
+		case 'n': {
+			int *ptr = va_arg(arguments, int *);
+			if (ptr) *ptr = sink->total;
+			break;
+		}
 		case 'f':
 		case 'F':
 		case 'e':
