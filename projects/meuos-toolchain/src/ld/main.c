@@ -180,6 +180,7 @@ main(int argc, char **argv)
 	int build_id = 0;
 	int eh_frame_hdr = 0;
 	int as_needed = -1; /* default: unspecified */
+	int whole_archive = 0;
 	const char *inputs[MAX_INPUTS];
 	const char *libpaths[MAX_LIBPATHS];
 	const char *sysroot = NULL;
@@ -234,6 +235,14 @@ main(int argc, char **argv)
 		}
 		if (strcmp(argv[i], "--no-as-needed") == 0) {
 			as_needed = 0;
+			continue;
+		}
+		if (strcmp(argv[i], "--whole-archive") == 0) {
+			whole_archive = 1;
+			continue;
+		}
+		if (strcmp(argv[i], "--no-whole-archive") == 0) {
+			whole_archive = 0;
 			continue;
 		}
 		if (strcmp(argv[i], "-soname") == 0) {
@@ -407,6 +416,7 @@ main(int argc, char **argv)
 	opts.build_id    = build_id;
 	opts.eh_frame_hdr = eh_frame_hdr;
 	opts.as_needed   = as_needed;
+	opts.whole_archive = whole_archive;
 	if (mt_ld_link_opts(&opts, inputs, (size_t)input_count,
 	                    target_name, &error) != 0) {
 		fprintf(stderr, "ld: %s\n", error ? error : "link failed");

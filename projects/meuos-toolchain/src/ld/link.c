@@ -165,6 +165,7 @@ struct ld_context {
 	int pie;             /* 1 = PIE (ET_DYN + PT_INTERP) */
 	int build_id;        /* 1 = generate .note.gnu.build-id */
 	int eh_frame_hdr;    /* 1 = generate .eh_frame_hdr */
+	int whole_archive;   /* 1 = force-extract all archive members */
 	int as_needed;        /* 1 = --as-needed, 0 = --no-as-needed */
 	const char *soname;  /* DT_SONAME for shared lib (may be NULL) */
 	/* Dynamic symbol table bookkeeping (shared libs only) */
@@ -1128,16 +1129,30 @@ extract_archive_member(const struct mt_ar_member *member,
 	struct ld_context *ctx = extract->ctx;
 	char display[512];
 	size_t index;
-	int needed = archive_member_needed(ctx, data, (size_t)member->size);
+	int needed = ctx->whole_archive ? 1 :
+	             archive_member_needed(ctx, data, (size_t)member->size);
 	if (needed < 0)
 		return ld_errorf(ctx, "invalid archive member", member->name);
 	if (!needed)
 		return 0;
 	snprintf(display, sizeof(display), "%s(%s)", extract->archive, member->name);
 	index = ctx->objects.count;
-	if (append_object(ctx, display, data, (size_t)member->size) != 0 ||
-	    collect_one_object_sections(ctx, index) != 0 ||
-	    collect_one_object_symbols(ctx, index) != 0)
+
+	/* With --whole-archive, skip already-extracted members to avoid
+	 * infinite re-extraction in the do-while loop. */
+	if (ctx->whole_archive) {
+		size_t oi;
+		for (oi = 0; oi < ctx->objects.count; oi++) {
+			if (strcmp(ctx->objects.items[oi].name, display) == 0)
+				return 0; /* already extracted */
+		}
+	}
+
+	if (append_object(ctx, display, data, (size_t)member->size) != 0)
+		return -1;
+	if (collect_one_object_sections(ctx, index) != 0)
+		return -1;
+	if (collect_one_object_symbols(ctx, index) != 0)
 		return -1;
 	extract->added = 1;
 	return 0;
@@ -2810,6 +2825,7 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 		ctx.build_id = opts->build_id;
 		ctx.eh_frame_hdr = opts->eh_frame_hdr;
 		ctx.as_needed = opts->as_needed;
+		ctx.whole_archive = opts->whole_archive;
 		/* Default: --no-as-needed when unset */
 		if (ctx.as_needed < 0)
 			ctx.as_needed = 0;
