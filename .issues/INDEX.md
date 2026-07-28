@@ -288,7 +288,7 @@ enum target_feature {
 | c23-attributes | `[[]]` 属性语法全位置覆盖（声明/类型/语句/标签） | ⏳ | 待实现 |
 | c23-bool | `bool`/`true`/`false` 关键字 vs `<stdbool.h>` 宏兼容 | 🟢 | mcc 有 TBOOL/TTRUE/TFALSE 关键字；stdbool.h 定义宏兼容 |
 | c23-embed | `#embed` 边界情况（大文件/`limit(N)`/`prefix`/`suffix`/`if_empty`） | ⏳ | 待实现 |
-| c23-typeof | `typeof`/`typeof_unqual` 在复杂声明中的应用 | ⏳ | 待实现 |
+| c23-typeof | `typeof`/`typeof_unqual` 在复杂声明中的应用 | 🟢 | 已支持 typeof 和 typeof_unqual 关键字 |
 
 ## 优先级 3（P3-libc — 社区测试兼容性，低优先级）
 
