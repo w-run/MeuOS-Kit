@@ -124,7 +124,7 @@ src/compat/
 | ld-gc-sections | mt/ld | 死代码消除 | 未引用节区的裁剪。概念有用，实现应自己设计，不照搬 GNU `--gc-sections` 的复杂逻辑 | 🟢 | 本 commit（gc_sweep + section_rank .text.*/.data.* 支持） |
 | ld-linker-script | mt/ld | 链接布局控制 | ❌ **不做 GNU `.ld` 脚本解析**。需要时改为 YAML 格式描述节区布局（链接器内嵌或独立文件） | 🟢 | -T/--link-script 自定义 rank 排序已实现 |
 | as-macro | mt/as | `.rept`/`.endr` 重复伪指令 | 基本的行重复机制，用于汇编展开和填充 | 🟢 | 本 commit（assemble.c: .rept N 保存 ftell 位置，.endr 迭代 fseek 回退；单层嵌套限制；回归测试） |
-| as-full-isa | mt/as | 全架构指令完整覆盖 | 各架构缺的少用指令补全（x86_64 最完整、ARM 最小需补缺） | 🟡 | x86_64 1075 行 SSE/ALU/跳转完整；ARM 321 行需扩展 |
+| as-full-isa | mt/as | 全架构指令完整覆盖 | 各架构缺的少用指令补全（ARM 从 321→449 行，新增 22 种指令形式：3-op 数据处理、乘法、桶形移位器、字节/半字加载存储、clz、移位指令） | 🟡 | ARM 编码完善（449 行，仍有 VFP/NEON 和剩余指令待实现）；x86_64 1075 行最完整 |
 | as-cond | mt/as | 条件汇编 | `.if`/`.ifdef`/`.ifndef`/`.else`/`.endif` — 通用汇编概念，非 GAS 特有 | 🟢 | 本 commit |
 | as-align | mt/as | 对齐/填充伪指令 | `.balign`/`.p2align` — 通用汇编概念，不是 GAS 特有 | 🟢 | 已实现（assemble.c:763-771） |
 | as-section | mt/as | 节区控制伪指令 | `.pushsection`/`.popsection` — 通用概念，用于 gcc asm 属性 | 🟢 | 本 commit |
@@ -314,7 +314,7 @@ enum target_feature {
 | DWARF 调试信息 | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
 | mcc 诊断/警告 | 🔄 mcc-diagnostics...mcc-generic | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
 | libc 完整 POSIX | 🔄 libc-math...libc-threads | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
-| mt/as 完整指令 | 🔄 as-macro+as-full-isa+as-cond+as-align+as-section+as-equ+as-diag | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
+| mt/as 完整指令 | 🟢 x86_64 1075 行 (align/equ/diag/rept/cond/section/as-dwarf) | 🟢 aarch64 1247 行 | 🟢 riscv64 939 行 | 🟢 i386 1118 行 | 🟢 loongarch64 898 行 | 🔄 ARM 449 行（新增 22 种指令形式，尚有 VFP/NEON 缺口） |
 | mt/ld 链接器特性 | 🔄 ld-gc-sections+ld-linker-script(重构)+ld-print-map(重构)+ld-start-group+ld-whole-archive+ld-build-id+ld-eh-frame-hdr+ld-as-needed | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
 | 工具链辅助工具 | 🔄 tool-binary（统一二进制分析工具） | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
 | C23 边缘情况 | 🔄 c23-xxxx | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
