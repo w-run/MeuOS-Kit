@@ -239,6 +239,8 @@ error(const struct location *loc, const char *fmt, ...)
 
 int warn_level = WARN_ALL;
 bool warn_as_error;
+int g_error_json;    /* --error-json: emit structured JSON diagnostics */
+int g_error_explain; /* --explain: append a fix-hint suffix */
 
 void
 cc_warn(const struct location *loc, int kind, const char *fmt, ...)
@@ -257,6 +259,18 @@ cc_warn(const struct location *loc, int kind, const char *fmt, ...)
 	va_start(ap, fmt);
 	vfprintf(stderr, fmt, ap);
 	va_end(ap);
+	/* --explain: append a fix-hint suffix for common diagnostics. */
+	if (g_error_explain) {
+		const char *hint = NULL;
+		if (strstr(fmt, "implicit declaration") || strstr(fmt, "隐式声明"))
+			hint = "  (建议: 包含声明该函数的头文件，或提供原型)";
+		else if (strstr(fmt, "unused") || strstr(fmt, "未使用"))
+			hint = "  (建议: 若有意保留，可加 (void)var; 或 __attribute__((unused)))";
+		else if (strstr(fmt, "type") || strstr(fmt, "类型"))
+			hint = "  (建议: 检查类型是否匹配，或显式转换)";
+		if (hint)
+			fprintf(stderr, "%s%s%s", dcol(DC_CYAN), hint, dcol(DC_RESET));
+	}
 	putc('\n', stderr);
 
 	if (warn_as_error)
