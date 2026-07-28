@@ -99,11 +99,11 @@ src/compat/
 | mcc-loong64-qemu | mcc+libc | loongarch64 qemu 门禁 | 完整 qemu 运行时门禁：hello/atomic/setjmp/phase2/bare_tls/malloc_threads 全部通过。TLS 端到端验证（_Thread_local 初始值+线程隔离）+ TLS errno 线程隔离均通过 | 🟢 | `ed49dbd`（tls.c 指针间接引用修复 + TLS errno 切换） |
 | mcc-i386-tls-e2e | mcc+libc | i386 TLS e2e | bug-i386-tls 修复后的 TLS 端到端验证 | 🟢 | 本 commit |
 | mcc-i386-tls-doc | mcc(i386) | `gd-tls.md` 文档 | 被 3 个文件引用但文件不存在 | 🟢 | `03e8618` |
-| ld-shared | mt/ld | `-shared` 输出 `ET_DYN` | 🟢 ET_DYN + PHDR/DYNAMIC + dynsym/dynstr/hash/dynamic。**后续增量**：需加 RELA 动态重定位段、PLT/GOT、DT_INIT/FINI、PT_GNU_RELRO 才能被 ld.so 使用。已知 bug 已修复（TLS 组初始化/dynsym 填充顺序/无名符号） | `a0822fe` + `1c43b23`（3 个 crash bug fix） |
-| ld-pie | mt/ld | `--pie`/`--no-pie` 支持 | PIE 二进制输出（`ET_DYN` + `PT_INTERP` + 相对重定位） | 🟢 | `4ae63b1` |
+| ld-shared | mt/ld | `-shared` 输出 `ET_DYN` | 🟢 ET_DYN + PHDR/DYNAMIC + dynsym/dynstr/hash/dynamic + .rela.dyn (R_X86_64_RELATIVE/GLOB_DAT) + DT_NEEDED + DT_INIT_ARRAY/FINI_ARRAY + PT_GNU_RELRO。**可被 ld.so 正确加载**。已知 bug 已修复（TLS 组初始化/dynsym 填充顺序/无名符号/REX_GOTPCRELX） | `a0822fe` + `1c43b23` + `355c7c8` + `f0e3a54` (DT_NEEDED) |
+| ld-pie | mt/ld | `--pie`/`--no-pie` 支持 | PIE 二进制输出（`ET_DYN` + `PT_INTERP` + 相对重定位 + DT_NEEDED + PT_GNU_RELRO） | 🟢 | `4ae63b1` + `9f43641` + `f0e3a54` |
 | mcc-pic-verify | mcc | PIC 代码生成加固 | 全架构验证 `-fPIC` 输出（GOT/PLT/TLS GD 路径）（riscv64 GOT 为空缺） | 🟢 | 本 commit（新增 pic_verify.sh；riscv64 需修复 `%got_pcrel_hi` emit） |
 | mcc-shared-mt | mcc driver | `-shared` mt/ld 集成 | 去掉 `-shared` 回退到 host cc 的限制 | 🟢 | `acce6c6` |
-| ld-so | 新建 | ld.so 动态链接器 | ELF 加载、DT_NEEDED 图遍历、符号解析、重定位应用、延迟绑定、TLS init | 🟡 | `525ab54` 骨架实现（x86_64、ELF 加载+符号解析+重定位+裸 syscall） |
+| ld-so | 新建 | ld.so 动态链接器 | **完整端到端验证通过**：x86_64 PIE + shared library 动态链接运行 exit=0 ✅。ELF 加载 + DT_NEEDED 传递遍历 + 符号解析 (SysV hash) + RELA 重定位 (RELATIVE/GLOB_DAT/JUMP_SLOT) + init_array | 🟢 | `525ab54` + `99dab32` (DT_NEEDED recursive) + `37ce60c` (main_base fix) |
 | libc-dl | meuos-libc | `dlfcn.h` + `dl*` 实现 | `dlopen`/`dlsym`/`dlclose`/`dlerror` | 🟡 | `ef0edd0` 头文件+框架（阶段1），阶段2需要完整 ELF 加载实现 |
 | mcc-dwarf | mcc | DWARF 调试信息 | `-g` 生成 DWARF v5（`.debug_info`/`.abbrev`/`.line`/`.str`/`.loc`/`.ranges`），包含行号、变量、类型信息 | 🟢 | `a9a065c` 行号表(阶段1); .debug_info/abbrev/str 阶段2待实现 |
 | as-dwarf | mt/as | DWARF 汇编伪指令 | `.loc`/`.file`/`.cfi_*` 支持 — **阻塞 mcc-dwarf**，无此 as 无法处理 `-g` 输出 | 🟢 | `a5f49c0` |
@@ -705,7 +705,7 @@ readelf 已实现部分 DWARF 节区头解析。
 | qemu 运行时验证 | ✅ 完整 | ✅ 完整 | ✅ hello/atomic/setjmp（线程跳过 qemu-user 限制） | ⚠️ qemu system | ✅ 完整（hello/atomic/setjmp/phase2/bare_tls/malloc_threads 全部通过） | ✅ 完整 |
 | TLS 端到端 | ✅ | ✅ | ✅ bug-riscv64-emit | ❌ bug-i386-tls | ✅ | ✅ |
 | self-rebuild | ✅ | ✅ | ✅ bug-riscv64-emit | ❌ bug-i386-tls | ✅ bug-loong64-emit | ❌ bug-arm-isel |
-| 动态链接 | 🔄 ld.so (ld-shared 已完成) | 🔄 ld.so (ld-shared 已完成) | 🔄 ld.so (ld-shared 已完成) | 🔄 ld.so (ld-shared 已完成) | 🔄 ld.so (ld-shared 已完成) | 🔄 ld.so (ld-shared 已完成) |
+| 动态链接 | ✅ ld.so 端到端验证通过（x86_64 PIE + .so） | 🔄 跨架构适配 | 🔄 跨架构适配 | 🔄 | 🔄 | 🔄 |
 | DWARF 调试信息 | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge |
 
 ---
