@@ -1240,13 +1240,31 @@ parse_source(struct as_file *as, FILE *input)
 			if (dlen > 0 && dlen < 64) {
 				memcpy(d, tp, dlen);
 				d[dlen] = '\0';
-				if (strcmp(d, ".if") == 0 || strcmp(d, ".ifdef") == 0 ||
-				    strcmp(d, ".ifndef") == 0 ||
-				    strcmp(d, ".else") == 0 || strcmp(d, ".endif") == 0) {
-					if (parse_conditional(as, d, ep) != 0)
-						return -1;
-					cond_handled = 1;
-				}
+			if (strcmp(d, ".if") == 0 || strcmp(d, ".ifdef") == 0 ||
+			    strcmp(d, ".ifndef") == 0 ||
+			    strcmp(d, ".else") == 0 || strcmp(d, ".endif") == 0) {
+				if (parse_conditional(as, d, ep) != 0)
+					return -1;
+				cond_handled = 1;
+			} else if (strcmp(d, ".rept") == 0) {
+				/* .rept N: repeat the following lines N times */
+				if (as->rept_count != 0)
+					return as_error(as, "nested .rept not supported");
+				int64_t n = strtoll(ep, NULL, 10);
+				if (n <= 0)
+					return as_error(as, "invalid .rept count");
+				as->rept_count = (int)n;
+				/* Save position of the NEXT line so .endr can seek back */
+				as->rept_pos = ftell(input);
+				cond_handled = 1; /* skip assembling the .rept line */
+			} else if (strcmp(d, ".endr") == 0) {
+				if (as->rept_count == 0)
+					return as_error(as, ".endr without .rept");
+				as->rept_count--;
+				if (as->rept_count > 0)
+					fseek(input, as->rept_pos, SEEK_SET);
+				cond_handled = 1;
+			}
 			}
 		}
 		/* Skip lines when inside a false conditional branch.

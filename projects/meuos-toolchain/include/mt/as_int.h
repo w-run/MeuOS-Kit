@@ -69,6 +69,8 @@ struct as_file {
 	int section_stack_depth;
 	int cond_stack[16];     /* 0=active, 1=skipping (.if false) */
 	int cond_depth;
+	int rept_count;         /* remaining iterations for .rept (0 = not in rept) */
+	long rept_pos;          /* ftell position at `rept line (to re-read) */
 	const char *filename;
 	unsigned line;
 	char error[256];

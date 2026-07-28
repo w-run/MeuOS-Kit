@@ -197,6 +197,7 @@ check-as-x86_64: $(AS_BIN)
 	LANG=C readelf -h "$$tmp/main.o" | grep -Eq 'Type:[[:space:]]+REL'; \
 	LANG=C readelf -s "$$tmp/main.o" | grep -Eq '[[:space:]]main$$'; \
 	printf 'mt as x86_64 check: PASS\n'
+	sh test/as_rept.sh "$(abspath $(AS_BIN))"
 
 check-target-dispatch: $(AS_BIN) $(LD_BIN)
 	@set -eu; \
