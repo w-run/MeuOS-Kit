@@ -173,6 +173,32 @@ error(const struct location *loc, const char *fmt, ...)
 	vfprintf(stderr, fmt, ap);
 	va_end(ap);
 	putc('\n', stderr);
+
+	/* Caret diagnostic: show the source line with ^ marker.
+	 * loc->line is 0-based — the first line is line 0. */
+	if (loc && loc->file) {
+		FILE *src = fopen(loc->file, "r");
+		if (src) {
+			char linebuf[4096];
+			size_t target = loc->line; /* 0-based */
+			size_t l = 0;
+			while (l <= target && fgets(linebuf, sizeof(linebuf), src))
+				l++;
+			if (l > target) {
+				size_t len = strlen(linebuf);
+				while (len > 0 && (linebuf[len-1] == '\n' || linebuf[len-1] == '\r'))
+					linebuf[--len] = '\0';
+				fprintf(stderr, "    %s\n", linebuf);
+				fprintf(stderr, "    ");
+				size_t ci;
+				for (ci = 1; ci < loc->col; ci++)
+					fputc(linebuf[ci-1] == '\t' ? '\t' : ' ', stderr);
+				fprintf(stderr, "^\n");
+			}
+			fclose(src);
+		}
+	}
+
 	exit(1);
 }
 

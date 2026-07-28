@@ -176,7 +176,7 @@ src/compat/
 
 | ID | 组件 | 描述 | 优先 | 实施情况 |
 |----|------|------|------|---------|
-| mcc-diagnostics | mcc | 诊断质量 | 带源位置和 caret（`^`）的错误消息。这是 Clang 推广的好设计，非 GNU 包袱 | 🟡 | 待实现 |
+| mcc-diagnostics | mcc | 诊断质量 | 带源位置和 caret（`^`）的错误消息。这是 Clang 推广的好设计，非 GNU 包袱 | 🟡 | 🟢 本 commit（token.c 添加 caret ^ 错误指示） |
 | mcc-warnings | mcc | 警告体系 | ⚠️ `-Wall`/`-Wextra` 是 GCC 命名约定。我们应该设计自己的警告体系（`--warn=all`/`--warn=extra` 或 `-W` 风格但自己定义哪些组别） | 🔄 重设计 | 待设计 |
 | mcc-attributes | mcc compat | `__attribute__` | GCC 属性语法。按设计原则应走 compat 映射层，核心不直接处理 | 🟡 | 待实现 |
 | mcc-pragma | mcc compat | `#pragma` | GCC/Clang pragma。同样走 compat 映射层 | 🟡 | 待实现 |
