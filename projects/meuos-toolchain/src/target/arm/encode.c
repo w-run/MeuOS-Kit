@@ -1042,5 +1042,57 @@ ldr_mem:
 		emit32(out->bytes, 0xE129F000 | rm); return 0;
 	}
 
+	/* ---- SXTAB/SXTAB16/UXTAB: extend and add ---- */
+	if (nops >= 3) {
+		if (strcmp(mnemonic,"sxtab")==0) {
+			int rd,rn,rm; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rn)<0||reg_num(ops[2],&rm)<0) return -1;
+			emit32(out->bytes, 0xE6A00070|(rn<<16)|(rd<<12)|rm); return 0;
+		}
+		if (strcmp(mnemonic,"sxtab16")==0) {
+			int rd,rn,rm; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rn)<0||reg_num(ops[2],&rm)<0) return -1;
+			emit32(out->bytes, 0xE6800070|(rn<<16)|(rd<<12)|rm); return 0;
+		}
+		if (strcmp(mnemonic,"uxtab")==0) {
+			int rd,rn,rm; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rn)<0||reg_num(ops[2],&rm)<0) return -1;
+			emit32(out->bytes, 0xE6E00070|(rn<<16)|(rd<<12)|rm); return 0;
+		}
+	}
+
+	/* ---- SMUAD/SMUSD: signed multiply dual ---- */
+	if (nops >= 3 && (strcmp(mnemonic,"smuad")==0||strcmp(mnemonic,"smusd")==0)) {
+		int rd,rn,rm; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rn)<0||reg_num(ops[2],&rm)<0) return -1;
+		emit32(out->bytes, (mnemonic[3]=='a'?0xE7000F10:0xE7400F10)|(rd<<16)|(rn<<0)|(rm<<8));
+		return 0;
+	}
+
+	/* ---- SMMUL/SMMLA: signed multiply most significant ---- */
+	if (nops >= 3 && strcmp(mnemonic,"smmul")==0) {
+		int rd,rn,rm; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rn)<0||reg_num(ops[2],&rm)<0) return -1;
+		emit32(out->bytes, 0xE7500F10|(rd<<16)|(rn<<0)|(rm<<8)); return 0;
+	}
+
+	/* ---- NEON vmul/vmla/vmls: floating-point SIMD ---- */
+	if (nops >= 3 && (strcmp(mnemonic,"vmul")==0||strcmp(mnemonic,"vmla")==0)) {
+		int rd,rn,rm; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rn)<0||reg_num(ops[2],&rm)<0) return -1;
+		int is_mul = (mnemonic[1]=='m'&&mnemonic[2]=='u');
+		uint32_t d=(uint32_t)(rd&0x1F),n=(uint32_t)(rn&0x1F),m=(uint32_t)(rm&0x1F);
+		uint32_t base=is_mul?0xF3000D50:0xF2000D40;
+		emit32(out->bytes, base|((d>>1)<<12)|((d&1)<<22)|((n>>1)<<16)|((n&1)<<7)|((m>>1)<<0)|((m&1)<<5));
+		return 0;
+	}
+
+	/* ---- PLI (preload instruction) ---- */
+	if (nops >= 1 && strcmp(mnemonic,"pli")==0) {
+		int rn=0; const char *mem=ops[0]; if(mem[0]=='[')mem++;
+		sscanf(mem,"r%i",&rn);
+		emit32(out->bytes, 0xF450F000|(rn<<16)); return 0;
+	}
+
+	/* ---- SETEND: set endianness ---- */
+	if (nops >= 1 && strcmp(mnemonic,"setend")==0) {
+		int be = (strcmp(ops[0],"be")==0);
+		emit32(out->bytes, be?0xF1010000:0xF1000000); return 0;
+	}
+
 	return -1; /* unsupported */
 }
