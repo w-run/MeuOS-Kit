@@ -1888,6 +1888,61 @@ fill_got(struct ld_context *ctx)
 	return 0;
 }
 
+/* ---- .rela.dyn dynamic relocation section ---- */
+
+/* Append one RELA entry to the .rela.dyn section.
+ * ELF64 RELA: 24 bytes (r_offset:8, r_info:8, r_addend:8). */
+static int
+rela_dyn_add(struct ld_context *ctx, uint64_t offset, uint64_t info, int64_t addend)
+{
+	int rg = find_group(ctx, ".rela.dyn");
+	int elf64 = (ctx->target->elf_class == MT_ELFCLASS64);
+	size_t entry_size = elf64 ? 24 : 12;
+	unsigned char entry[24];
+	if (rg < 0) return -1;
+	if (elf64) {
+		write64(entry, offset);
+		write64(entry + 8, info);
+		write64(entry + 16, (uint64_t)addend);
+	} else {
+		write32(entry, (uint32_t)offset);
+		write32(entry + 4, (uint32_t)info);
+		write32(entry + 8, (uint32_t)addend);
+	}
+	uint64_t n;
+	return append_group_data(ctx, &ctx->groups[rg], entry, entry_size, 8, &n);
+}
+
+/* Build the .rela.dyn section from GOT entries for shared library output.
+ * Each GOT entry gets an R_X86_64_RELATIVE dynamic relocation so that
+ * ld.so can adjust the GOT value at load time. */
+static int
+build_rela_dyn(struct ld_context *ctx)
+{
+	size_t i;
+	if (!ctx->shared || ctx->got.count == 0)
+		return 0;
+	/* .rela.dyn was pre-created in build_dynamic_tables */
+	int rg = find_group(ctx, ".rela.dyn");
+	if (rg < 0) return 0; /* no GOT entries, nothing to relocate */
+	uint64_t got_addr = ctx->groups[ctx->got.group].address;
+	for (i = 0; i < ctx->got.count; ++i) {
+		uint64_t got_entry = got_addr + ctx->got.items[i].offset;
+		struct ld_global *g = find_global(ctx, ctx->got.items[i].name);
+		if (!g) continue;
+		uint64_t sym_value = ctx->groups[g->group].address + g->offset;
+		/* R_X86_64_RELATIVE: *(base + got_entry) = base + sym_value */
+		uint64_t info = ((uint64_t)MT_R_X86_64_RELATIVE);
+		if (ctx->target->elf_class == MT_ELFCLASS32)
+			info = (uint64_t)MT_R_X86_64_RELATIVE;
+		else
+			info = (0ULL << 32) | MT_R_X86_64_RELATIVE;
+		if (rela_dyn_add(ctx, got_entry, info, (int64_t)sym_value) != 0)
+			return -1;
+	}
+	return 0;
+}
+
 /* ---- Build ID: FNV-1a 64-bit hash over output data ---- */
 
 /* FNV-1a 64-bit hash, offset basis and prime from the FNV spec.
@@ -2802,6 +2857,18 @@ build_dynamic_tables(struct ld_context *ctx)
 	/* ---- .dynamic (placeholder with correct size, filled in pass 2) ---- */
 	size_t ntags = 5; /* SYMTAB, SYMENT, STRTAB, STRSZ, HASH */
 	if (ctx->soname) ntags++;
+	/* Pre-create .rela.dyn group for dynamic relocations (must exist before
+	 * layout_output assigns addresses).  Content is filled by build_rela_dyn()
+	 * after layout. */
+	int have_rela = (ctx->shared && ctx->got.count > 0);
+	if (have_rela) {
+		ntags += 3; /* DT_RELA, DT_RELASZ, DT_RELAENT */
+		int rg = get_group(ctx, ".rela.dyn", MT_SHT_RELA,
+		                   LD_SHF_ALLOC, 8);
+		if (rg < 0)
+			return ld_error(ctx, "out of memory");
+		ctx->groups[rg].rank = 1; /* same rank as .rodata/dynstr/dynsym */
+	}
 	ntags++; /* DT_NULL terminator */
 	size_t dynent = elf64 ? 16 : 8;
 	size_t dyn_total = ntags * dynent;
@@ -2926,6 +2993,40 @@ fill_dynamic_addresses(struct ld_context *ctx)
 		} else {
 			write32(dp + k * 8 + 0, MT_DT_SONAME);
 			write32(dp + k * 8 + 4, ctx->soname_dynstr_offset);
+		}
+		++k;
+	}
+
+	/* DT_RELA / DT_RELASZ / DT_RELAENT (for shared libraries with GOT) */
+	int dg_rela = find_group(ctx, ".rela.dyn");
+	if (dg_rela >= 0) {
+		struct ld_group *grela = &ctx->groups[dg_rela];
+		/* DT_RELA: address of .rela.dyn */
+		if (elf64) {
+			write64(dp + k * 16 + 0, MT_DT_RELA);
+			write64(dp + k * 16 + 8, grela->address);
+		} else {
+			write32(dp + k * 8 + 0, MT_DT_RELA);
+			write32(dp + k * 8 + 4, (uint32_t)grela->address);
+		}
+		++k;
+		/* DT_RELASZ: size of .rela.dyn */
+		if (elf64) {
+			write64(dp + k * 16 + 0, MT_DT_RELASZ);
+			write64(dp + k * 16 + 8, (uint64_t)grela->size);
+		} else {
+			write32(dp + k * 8 + 0, MT_DT_RELASZ);
+			write32(dp + k * 8 + 4, (uint32_t)grela->size);
+		}
+		++k;
+		/* DT_RELAENT: size of each RELA entry (24 for ELF64, 12 for ELF32) */
+		uint64_t rela_entsize = elf64 ? 24 : 12;
+		if (elf64) {
+			write64(dp + k * 16 + 0, MT_DT_RELAENT);
+			write64(dp + k * 16 + 8, rela_entsize);
+		} else {
+			write32(dp + k * 8 + 0, MT_DT_RELAENT);
+			write32(dp + k * 8 + 4, (uint32_t)rela_entsize);
 		}
 		++k;
 	}
@@ -3166,6 +3267,7 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 	}
 	if (layout_output(&ctx) != 0 || fill_dynamic_addresses(&ctx) != 0 ||
 	    fill_got(&ctx) != 0 ||
+	    build_rela_dyn(&ctx) != 0 ||
 	    apply_relocations(&ctx) != 0 ||
 	    write_executable(&ctx, opts ? opts->output : "a.out",
 	                     opts ? opts->entry : "_start",
