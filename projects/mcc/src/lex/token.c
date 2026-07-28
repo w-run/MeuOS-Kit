@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include "util.h"
 #include "mcc.h"
 #include "ir.h"
@@ -13,6 +14,22 @@
 struct token tok;
 static struct map tokmap;  /* maps string to token */
 static struct array tokstr;  /* maps token to string */
+
+/* Min-color support for diagnostics (p9-ui: colored error/warn like clang).
+ * No external dependency — gated on isatty(stderr). */
+static int diag_color_on(void)
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = isatty(fileno(stderr)) ? 1 : 0;
+	return cached;
+}
+#define DC_RED    "\033[31m"
+#define DC_YELLOW "\033[33m"
+#define DC_CYAN   "\033[36m"
+#define DC_BOLD   "\033[1m"
+#define DC_RESET  "\033[0m"
+#define dcol(c) (diag_color_on() ? (c) : "")
 
 void
 tokeninit(void)
@@ -159,7 +176,8 @@ tokencheck(const struct token *t, enum tokenkind kind, const char *msg)
 void
 diagloc(const struct location *loc)
 {
-	fprintf(stderr, "%s:%zu:%zu: ", loc->file, loc->line + 1, loc->col);
+	fprintf(stderr, "%s%s:%zu:%zu:%s ", dcol(DC_CYAN), loc->file,
+	        loc->line + 1, loc->col, dcol(DC_RESET));
 }
 
 void
@@ -167,8 +185,25 @@ error(const struct location *loc, const char *fmt, ...)
 {
 	va_list ap;
 
+	/* --error-json: emit one structured JSON object per diagnostic so
+	 * tooling (editors, CI) can parse diagnostics without scraping text.
+	 * Format: {"level":"error","file":...,"line":N,"col":M,"message":"..."} */
+	if (g_error_json) {
+		char msg[1024];
+		va_start(ap, fmt);
+		vsnprintf(msg, sizeof(msg), fmt, ap);
+		va_end(ap);
+		if (loc && loc->file)
+			fprintf(stderr, "{\"level\":\"error\",\"file\":\"%s\",\"line\":%zu,"
+			        "\"col\":%zu,\"message\":\"%s\"}\n",
+			        loc->file, loc->line + 1, loc->col, msg);
+		else
+			fprintf(stderr, "{\"level\":\"error\",\"message\":\"%s\"}\n", msg);
+		exit(1);
+	}
+
 	diagloc(loc);
-	fputs("error: ", stderr);
+	fprintf(stderr, "%serror: %s", dcol(DC_BOLD DC_RED), dcol(DC_RESET));
 	va_start(ap, fmt);
 	vfprintf(stderr, fmt, ap);
 	va_end(ap);
@@ -189,11 +224,11 @@ error(const struct location *loc, const char *fmt, ...)
 				while (len > 0 && (linebuf[len-1] == '\n' || linebuf[len-1] == '\r'))
 					linebuf[--len] = '\0';
 				fprintf(stderr, "    %s\n", linebuf);
-				fprintf(stderr, "    ");
+				fprintf(stderr, "    %s", dcol(DC_RED));
 				size_t ci;
 				for (ci = 1; ci < loc->col; ci++)
 					fputc(linebuf[ci-1] == '\t' ? '\t' : ' ', stderr);
-				fprintf(stderr, "^\n");
+				fprintf(stderr, "^%s\n", dcol(DC_RESET));
 			}
 			fclose(src);
 		}
@@ -214,10 +249,11 @@ cc_warn(const struct location *loc, int kind, const char *fmt, ...)
 		return;
 
 	if (loc)
-		fprintf(stderr, "%s:%zu:%zu: ", loc->file, loc->line + 1, loc->col);
+		fprintf(stderr, "%s%s:%zu:%zu:%s ", dcol(DC_CYAN), loc->file,
+		        loc->line + 1, loc->col, dcol(DC_RESET));
 	else
-		fprintf(stderr, "%s: ", argv0);
-	fputs("warning: ", stderr);
+		fprintf(stderr, "%s%s: %s", dcol(DC_CYAN), argv0, dcol(DC_RESET));
+	fprintf(stderr, "%swarning: %s", dcol(DC_BOLD DC_YELLOW), dcol(DC_RESET));
 	va_start(ap, fmt);
 	vfprintf(stderr, fmt, ap);
 	va_end(ap);
