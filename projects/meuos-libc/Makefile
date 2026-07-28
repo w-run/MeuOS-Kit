@@ -179,11 +179,12 @@ SUPPORT_OBJS   += $(BUILD)/errno/errno.o
 endif
 SYSCALL_GATE_OBJ := $(BUILD)/internal/arch/$(ARCH)/syscall.o
 CRT1_OBJ := $(BUILD)/crt1.o
+DL_OBJS := $(BUILD)/dlfcn.o
 LIBC_LIB := $(BUILD)/libc-meuos.a
 
 ALL_OBJS := $(STRING_OBJS) $(STDLIB_OBJS) $(STDIO_OBJS) $(SYSCALL_OBJS) \
             $(ARCH_PRCTL_OBJ) $(THREAD_OBJS) $(SUPPORT_OBJS) $(SYSCALL_GATE_OBJ) \
-            $(ARCH_RT_OBJS) $(ATOMIC_OBJ)
+            $(ARCH_RT_OBJS) $(ATOMIC_OBJ) $(DL_OBJS)
 
 # ============================================================
 # Build rules
