@@ -17,11 +17,6 @@ struct tm *localtime(const time_t *t) {
     return NULL;
 }
 
-char *setlocale(int c, const char *l) {
-    (void)c; (void)l;
-    return "C";
-}
-
 /* mkdtemp: creates a temp directory from template (XXXXXX suffix).
  * Uses a PID-based approach instead of rand() since meuos-libc's
  * stdlib.h does not currently declare rand(). */

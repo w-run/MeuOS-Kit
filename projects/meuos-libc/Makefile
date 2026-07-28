@@ -170,7 +170,7 @@ THREAD_OBJS    := $(BUILD)/thread/state.o $(BUILD)/thread/c11_threads.o \
                   $(BUILD)/thread/condvar.o $(BUILD)/thread/call_once.o \
                   $(BUILD)/thread/pthread.o
 SUPPORT_OBJS   := $(BUILD)/ctype/ctype.o $(BUILD)/signal/signal.o \
-                  $(BUILD)/dirent/dirent.o
+                  $(BUILD)/dirent/dirent.o $(BUILD)/locale/locale.o
 # errno: loongarch64 uses non-TLS version (binutils BFD assertion workaround)
 # Other architectures use the standard _Thread_local errno
 ifeq ($(ARCH),loongarch64)

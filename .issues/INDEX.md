@@ -160,7 +160,7 @@ src/compat/
 | libc-pthread | `<pthread.h>` | rwlock/barrier/spinlock/cleanup handler 完整覆盖 | 🟡 中 | 待实现 |
 | libc-str | `<string.h>` | `strerror_r` 线程安全变体、`strcoll`/`strxfrm` locale 感知 | 🟢 低 | 🟢 本 commit（+strspn/strcspn/strcasecmp/strncasecmp/strerror_r） |
 | libc-wchar | `<wchar.h>` | 宽字符 I/O、宽字符 `printf`/`scanf`、wcsftime | 🟢 低 | 待实现 |
-| libc-locale | `<locale.h>` | locale 感知函数（`setlocale` 当前 stub） | 🟢 低 | 待实现 |
+| libc-locale | `<locale.h>` | locale 感知函数（`setlocale` 当前 stub） | 🟢 低 | 🟢 本 commit（setlocale/localeconv 实现 + struct lconv） |
 | libc-complex | `<complex.h>` | 复数算术和数学函数 | 🟢 低 | 待实现 |
 | libc-socket | POSIX 网络 | `<sys/socket.h>`、`<netdb.h>`、`<netinet/in.h>`、`<arpa/inet.h>` | 🟡 中 | 待实现 |
 | libc-regex | POSIX 正则 | `<regex.h>` — `regcomp`/`regexec`/`regerror`/`regfree` | 🟡 中 | 待实现 |
