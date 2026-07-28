@@ -487,5 +487,50 @@ ldr_mem:
 		return 0;
 	}
 
+	/* ---- VFP ALU: fadds/fsubs/fmuls/fdivs/fcpys/fnegs/fabss sd, sm ---- */
+	if (nops >= 2) {
+		static const struct { const char *name; uint32_t base; } vfp_alu[] = {
+			{"fadds", 0x0E300A00}, {"fsubs", 0x0E300A40},
+			{"fmuls", 0x0E200A00}, {"fdivs", 0x0E800A00},
+			{"fcpys", 0x0EB00A40}, {"fnegs", 0x0EB10A40},
+			{"fabss", 0x0EB00AC0},
+			{"faddd", 0x0E300B00}, {"fsubd", 0x0E300B40},
+			{"fmuld", 0x0E200B00}, {"fdivd", 0x0E800B00},
+			{"fcpyd", 0x0EB00B40}, {"fnegd", 0x0EB10B40},
+			{"fabsd", 0x0EB00BC0},
+			{0, 0}
+		};
+		for (int vi = 0; vfp_alu[vi].name; vi++) {
+			if (strcmp(mnemonic, vfp_alu[vi].name) != 0) continue;
+			int rd, rm;
+			if (reg_num(ops[0], &rd) < 0) return -1;
+			if (reg_num(ops[1], &rm) < 0) return -1;
+			uint32_t d = (uint32_t)(rd & 0x1F);
+			uint32_t m = (uint32_t)(rm & 0x1F);
+			uint32_t base = vfp_alu[vi].base;
+			base |= ((d & 1) << 22) | ((d >> 1) << 12);
+			base |= ((m & 1) << 5) | ((m >> 1) << 16);
+			emit32(out->bytes, base);
+			return 0;
+		}
+	}
+
+	/* ---- VFP compare: fcmps/fcmpd sd, sm ---- */
+	if (nops >= 2) {
+		int is_double = (mnemonic[4] == 'd' || mnemonic[4] == 0);
+		if (strcmp(mnemonic, "fcmps") == 0 || strcmp(mnemonic, "fcmpd") == 0) {
+			int rd, rm;
+			if (reg_num(ops[0], &rd) < 0) return -1;
+			if (reg_num(ops[1], &rm) < 0) return -1;
+			uint32_t d = (uint32_t)(rd & 0x1F);
+			uint32_t m = (uint32_t)(rm & 0x1F);
+			uint32_t base = is_double ? 0x0EB40B40 : 0x0EB40A40;
+			base |= ((d & 1) << 22) | ((d >> 1) << 12);
+			base |= ((m & 1) << 5) | ((m >> 1) << 16);
+			emit32(out->bytes, base);
+			return 0;
+		}
+	}
+
 	return -1; /* unsupported */
 }
