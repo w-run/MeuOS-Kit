@@ -602,5 +602,69 @@ ldr_mem:
 		}
 	}
 
+	/* ---- VFP <-> int conversion: fsitos/ftosiz/ftosis/fcvt = convert ---- */
+	if (nops >= 2) {
+		if (strcmp(mnemonic, "fsitos") == 0 || strcmp(mnemonic, "fsitod") == 0) {
+			int rd, rm; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rm)<0) return -1;
+			int is_double = (mnemonic[5] == 'd');
+			uint32_t d = (uint32_t)(rd & 0x1F), m = (uint32_t)(rm & 0x1F);
+			uint32_t base = is_double ? 0x0EB80BC0 : 0x0EB80AC0;
+			base |= ((d & 1) << 22) | ((d >> 1) << 12);
+			base |= ((m & 1) << 5) | ((m >> 1) << 16);
+			emit32(out->bytes, base); return 0;
+		}
+		if (strcmp(mnemonic, "ftosis") == 0 || strcmp(mnemonic, "ftosizs") == 0 ||
+		    strcmp(mnemonic, "ftosid") == 0 || strcmp(mnemonic, "ftosizd") == 0) {
+			int rd, rm; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rm)<0) return -1;
+			int is_double = (mnemonic[5] == 'd') || (mnemonic[6] == 'd');
+			int is_roundz = (mnemonic[5] == 'z');
+			uint32_t d = (uint32_t)(rd & 0x1F), m = (uint32_t)(rm & 0x1F);
+			uint32_t base = is_double ? 0x0EBD0BC0 : 0x0EBD0AC0;
+			if (is_roundz) base |= (1 << 16); /* use rm[0] bit to select round mode */
+			base |= ((d & 1) << 22) | ((d >> 1) << 12);
+			base |= ((m & 1) << 5) | ((m >> 1) << 16);
+			emit32(out->bytes, base); return 0;
+		}
+	}
+
+	/* ---- VFP move: vmov rd, rm (between core and VFP registers) ---- */
+	if (nops >= 2 && strcmp(mnemonic, "vmov") == 0) {
+		/* vmov sN, rM or vmov rM, sN */
+		int is_vfp_to_core = (ops[0][0] == 'r' || ops[0][0] == 's');
+		/* Using bit[20] = 1 for VFP to ARM, 0 for ARM to VFP */
+		uint32_t base = 0x0E100A10;
+		if (is_vfp_to_core && ops[1][0] == 's') {
+			int sn, rd; if (reg_num(ops[1], &sn) < 0 || reg_num(ops[0], &rd) < 0) return -1;
+			uint32_t s = (uint32_t)(sn & 0x1F);
+			base = 0x0E100A10 | ((s & 1) << 16) | ((s >> 1) << 0);
+			emit32(out->bytes, base | (rd<<12) | (1<<20));
+			return 0;
+		}
+		if (ops[0][0] == 's' && (ops[1][0] == 'r' || ops[1][0] == 's' || ops[1][0] == 'd')) {
+			int sd, rm; if (reg_num(ops[0], &sd) < 0 || reg_num(ops[1], &rm) < 0) return -1;
+			uint32_t s = (uint32_t)(sd & 0x1F);
+			base = 0x0E000A10 | ((s & 1) << 16) | ((s >> 1) << 0);
+			emit32(out->bytes, base | (rm<<12));
+			return 0;
+		}
+	}
+
+	/* ---- preload: pld [rn, #off] ---- */
+	if (nops >= 1 && strcmp(mnemonic, "pld") == 0) {
+		int rn = 0; uint32_t off = 0;
+		const char *mem = ops[0];
+		if (mem[0] == '[') mem++;
+		char rn_str[16]; int i2 = 0;
+		while (*mem && *mem != ']' && *mem != ',' && *mem != '#' && i2 < 15) rn_str[i2++] = *mem++;
+		rn_str[i2] = '\0';
+		if (reg_num(rn_str, &rn) < 0) return -1;
+		if (*mem == ',' || *mem == '#') {
+			while (*mem && (*mem == ',' || *mem == ' ' || *mem == '#')) mem++;
+			sscanf(mem, "%u", &off);
+		}
+		emit32(out->bytes, 0xF550F000 | (rn<<16) | off);
+		return 0;
+	}
+
 	return -1; /* unsupported */
 }
