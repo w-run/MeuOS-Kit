@@ -119,6 +119,7 @@ struct ld_global {
 	int defined;
 	int weak;
 	int common;
+	int absolute;  /* 1 = value is an absolute address (from --defsym) */
 };
 
 struct ld_globals {
@@ -1128,6 +1129,56 @@ collect_symbols(struct ld_context *ctx)
 	return 0;
 }
 
+/* Apply --defsym: create or override a symbol at a fixed absolute address.
+ * Format: SYM=VAL (VAL may use a 0x prefix for hexadecimal).
+ * The new global is marked absolute so symbol_value() returns its raw
+ * address without consulting any output section. */
+static int
+apply_defsym(struct ld_context *ctx, const char *defsym)
+{
+	char symname[256];
+	const char *eq, *valstr;
+	size_t namelen;
+	uint64_t val;
+	struct ld_global *global;
+
+	if (!defsym || !*defsym)
+		return 0;
+	eq = strchr(defsym, '=');
+	if (!eq) {
+		ld_errorf(ctx, "invalid --defsym (expect SYM=VAL)", defsym);
+		return -1;
+	}
+	namelen = (size_t)(eq - defsym);
+	if (namelen == 0 || namelen >= sizeof(symname)) {
+		ld_errorf(ctx, "invalid --defsym symbol name", defsym);
+		return -1;
+	}
+	memcpy(symname, defsym, namelen);
+	symname[namelen] = '\0';
+
+	valstr = eq + 1;
+	if (valstr[0] == '0' && (valstr[1] == 'x' || valstr[1] == 'X')) {
+		if (sscanf(valstr + 2, "%llx", (unsigned long long *)&val) != 1) {
+			ld_errorf(ctx, "invalid --defsym hexadecimal value", defsym);
+			return -1;
+		}
+	} else {
+		val = (uint64_t)atol(valstr);
+	}
+
+	global = get_global(ctx, symname);
+	if (!global)
+		return ld_error(ctx, "out of memory");
+	global->defined = 1;
+	global->absolute = 1;
+	global->weak = 0;
+	global->common = 0;
+	global->group = -1;
+	global->offset = val;
+	return 0;
+}
+
 struct archive_extract_context {
 	struct ld_context *ctx;
 	const char *archive;
@@ -1273,8 +1324,11 @@ symbol_value(struct ld_context *ctx, struct ld_object *object,
 		global = find_global(ctx, name);
 		if (!global || !global->defined)
 			return ld_errorf(ctx, "undefined symbol", name);
-		*value = ctx->groups[global->group].address + global->offset +
-		         symbol.value;
+		if (global->absolute)
+			*value = global->offset + symbol.value;
+		else
+			*value = ctx->groups[global->group].address +
+			         global->offset + symbol.value;
 		return 0;
 	}
 	if (symbol.section == LD_SHN_COMMON) {
@@ -2990,6 +3044,12 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 	    extract_archives(&ctx) != 0 || allocate_common(&ctx) != 0 ||
 	    collect_got_relocations(&ctx) != 0)
 		goto out;
+	/* --defsym: define absolute symbols (must run before --no-undefined
+	 * so the new symbols are treated as satisfied references). */
+	if (opts && opts->defsym) {
+		if (apply_defsym(&ctx, opts->defsym) != 0)
+			goto out;
+	}
 	/* --no-undefined: check for unresolved symbols */
 	if (ctx.no_undefined) {
 		size_t ui;

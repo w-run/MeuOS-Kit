@@ -32,6 +32,8 @@ usage(FILE *out)
 	        "  --sysroot=<dir>  set system root (adds <dir>/usr/lib to search path)\n"
 	        "  -e <entry>       entry symbol (default: _start)\n"
 	        "  --build-id       generate .note.gnu.build-id (FNV-1a hash)\n"
+	        "  --defsym=SYM=VAL define symbol SYM to absolute value VAL\n"
+	        "                    (VAL may use 0x prefix for hexadecimal)\n"
 	        "  -static          static link (default, ignored for compat)\n");
 }
 
@@ -187,6 +189,7 @@ main(int argc, char **argv)
 	int gc_sections = 0;
 	int print_map = 0;
 	const char *link_script = NULL;
+	const char *opts_defsym = NULL;
 	const char *inputs[MAX_INPUTS];
 	const char *libpaths[MAX_LIBPATHS];
 	const char *sysroot = NULL;
@@ -284,6 +287,10 @@ main(int argc, char **argv)
 		}
 		if (strcmp(argv[i], "--print-map") == 0 || strcmp(argv[i], "-Map") == 0) {
 			print_map = 1;
+			continue;
+		}
+		if (strncmp(argv[i], "--defsym=", 9) == 0) {
+			opts_defsym = argv[i] + 9;
 			continue;
 		}
 		if (strcmp(argv[i], "-T") == 0) {
@@ -472,6 +479,7 @@ main(int argc, char **argv)
 	opts.gc_sections = gc_sections;
 	opts.print_map = print_map;
 	opts.link_script = link_script;
+	opts.defsym = opts_defsym;
 	if (mt_ld_link_opts(&opts, inputs, (size_t)input_count,
 	                    target_name, &error) != 0) {
 		fprintf(stderr, "ld: %s\n", error ? error : "link failed");
