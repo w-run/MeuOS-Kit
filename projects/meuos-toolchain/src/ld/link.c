@@ -3047,8 +3047,11 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 	/* --defsym: define absolute symbols (must run before --no-undefined
 	 * so the new symbols are treated as satisfied references). */
 	if (opts && opts->defsym) {
-		if (apply_defsym(&ctx, opts->defsym) != 0)
-			goto out;
+		size_t di;
+		for (di = 0; di < opts->defsym_count; ++di) {
+			if (apply_defsym(&ctx, opts->defsym[di]) != 0)
+				goto out;
+		}
 	}
 	/* --no-undefined: check for unresolved symbols */
 	if (ctx.no_undefined) {

@@ -19,9 +19,11 @@ struct mt_ld_options {
 	int         gc_sections;   /* 1 = garbage-collect unused sections */
 	int         print_map;     /* 1 = output link map to stderr */
 	const char *link_script;   /* path to section layout script (NULL = none) */
-	const char *defsym;        /* --defsym=SYM=VAL (NULL = none).
-	                           Simple SYM=VAL pair; VAL may use 0x prefix for
-	                           hexadecimal. Only a single --defsym is supported. */
+	const char *const *defsym; /* --defsym=SYM=VAL list (NULL = none).
+	                           Each entry is a SYM=VAL pair; VAL may use a 0x
+	                           prefix for hexadecimal. Multiple --defsym flags
+	                           are collected into this array. */
+	size_t      defsym_count;  /* number of entries in defsym[] */
 };
 
 /* Static linker entry point (original API, shared=0).

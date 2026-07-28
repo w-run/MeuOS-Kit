@@ -33,7 +33,8 @@ usage(FILE *out)
 	        "  -e <entry>       entry symbol (default: _start)\n"
 	        "  --build-id       generate .note.gnu.build-id (FNV-1a hash)\n"
 	        "  --defsym=SYM=VAL define symbol SYM to absolute value VAL\n"
-	        "                    (VAL may use 0x prefix for hexadecimal)\n"
+	        "                    (VAL may use 0x prefix for hexadecimal;\n"
+	        "                     may be repeated for multiple symbols)\n"
 	        "  -static          static link (default, ignored for compat)\n");
 }
 
@@ -189,7 +190,8 @@ main(int argc, char **argv)
 	int gc_sections = 0;
 	int print_map = 0;
 	const char *link_script = NULL;
-	const char *opts_defsym = NULL;
+	const char *defsym_list[64];
+	size_t defsym_count = 0;
 	const char *inputs[MAX_INPUTS];
 	const char *libpaths[MAX_LIBPATHS];
 	const char *sysroot = NULL;
@@ -290,7 +292,8 @@ main(int argc, char **argv)
 			continue;
 		}
 		if (strncmp(argv[i], "--defsym=", 9) == 0) {
-			opts_defsym = argv[i] + 9;
+			if (defsym_count < 64)
+				defsym_list[defsym_count++] = argv[i] + 9;
 			continue;
 		}
 		if (strcmp(argv[i], "-T") == 0) {
@@ -479,7 +482,8 @@ main(int argc, char **argv)
 	opts.gc_sections = gc_sections;
 	opts.print_map = print_map;
 	opts.link_script = link_script;
-	opts.defsym = opts_defsym;
+	opts.defsym = defsym_count ? defsym_list : NULL;
+	opts.defsym_count = defsym_count;
 	if (mt_ld_link_opts(&opts, inputs, (size_t)input_count,
 	                    target_name, &error) != 0) {
 		fprintf(stderr, "ld: %s\n", error ? error : "link failed");

@@ -40,4 +40,16 @@ fi
 }
 printf '%s\n' 'mt ld --defsym: decimal equivalent PASS'
 
+# Multiple --defsym instances (GNU ld compatible).
+cat >"$work/ref2.c" <<'CEOF'
+extern int a, b;
+int main(void) { return (long)(&a) != 0x10 || (long)(&b) != 0x20; }
+CEOF
+gcc -c -fno-pic -o "$work/ref2.o" "$work/ref2.c"
+"$ld" -e main --defsym=a=0x10 --defsym=b=0x20 -o "$work/multi.elf" "$work/ref2.o" 2>/dev/null || {
+	printf '%s\n' 'FAIL: multiple --defsym link failed'
+	exit 1
+}
+printf '%s\n' 'mt ld --defsym: multiple instances PASS'
+
 printf '%s\n' 'mt ld --defsym: all checks PASS'
