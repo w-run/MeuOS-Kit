@@ -159,6 +159,9 @@ struct ld_context {
 	size_t *archive_mem_size;
 	size_t archive_mem_count;
 	size_t archive_mem_capacity;
+	/* Linker options (copied from struct mt_ld_options) */
+	const char *output;     /* output file path */
+	const char *entry;      /* entry symbol (default "_start") */
 	char error[512];
 };
 
@@ -702,6 +705,7 @@ section_rank(const char *name)
 	if (strcmp(name, ".rodata") == 0) return 1;
 	if (strcmp(name, ".eh_frame") == 0) return 1;
 	if (strcmp(name, ".got") == 0) return 2;
+	if (strcmp(name, ".dynamic") == 0) return 2;
 	if (strcmp(name, ".data") == 0 || strcmp(name, ".tdata") == 0) return 3;
 	if (strcmp(name, ".bss") == 0 || strcmp(name, ".tbss") == 0) return 4;
 	return 5;
@@ -1333,6 +1337,9 @@ static int
 layout_output(struct ld_context *ctx)
 {
 	uint64_t offset = LD_PAGE;
+	/* For shared libraries (ET_DYN) the base load address is 0; the
+	 * dynamic loader chooses the final address at load time. */
+	// base resolved inline via ctx->shared ternary
 	int have_rw = 0;
 	int rank;
 	size_t i;
@@ -1760,6 +1767,11 @@ write_executable(struct ld_context *ctx, const char *path,
 	size_t i;
 	int output_count;
 	int result = -1;
+	/* For shared libraries (ET_DYN) the load base is 0; the dynamic
+	 * loader relocates the image at run time. */
+	uint64_t base_addr = ctx->shared ? 0 : LD_BASE;
+	/* Program header count: PT_LOAD + optional PT_TLS + (shared) PT_PHDR/PT_DYNAMIC. */
+	int phnum;
 
 	entry_symbol = NULL;
 	entry_address = 0;
@@ -1843,13 +1855,10 @@ write_executable(struct ld_context *ctx, const char *path,
 		write32(h + 48, target->e_flags);
 		write16(h + 52, target->ehdr_size);
 		write16(h + 54, 56);
-		{
-			/* e_phnum: PT_LOAD + PT_TLS (optional) + PT_PHDR + PT_DYNAMIC (shared) */
-			int phnum = 1; /* PT_LOAD */
-			if (ctx->tls_size) phnum++;
-			if (ctx->shared) phnum += 2; /* PT_PHDR + PT_DYNAMIC */
-			write16(h + 56, phnum);
-		}
+		phnum = 1; /* PT_LOAD */
+		if (ctx->tls_size) phnum++;
+		if (ctx->shared) phnum += 2; /* PT_PHDR + PT_DYNAMIC */
+		write16(h + 56, phnum);
 		write16(h + 58, target->shdr_size);
 		write16(h + 60, (uint16_t)output_count);
 		write16(h + 62, (uint16_t)shstr_index);
@@ -1864,7 +1873,6 @@ write_executable(struct ld_context *ctx, const char *path,
 	 * Set FileSiz to load_file_end (non-NOBITS data only) so the kernel
 	 * zero-fills the BSS area (between load_file_end and memory_end). */
 	{
-		uint64_t base_addr = ctx->shared ? 0 : LD_BASE;
 		uint64_t single_end = memory_end > rx_end ? memory_end : rx_end;
 		uint64_t filesz = alloc_file_end > LD_PAGE ? alloc_file_end : LD_PAGE;
 		uint64_t memsz = single_end > LD_PAGE ? single_end : LD_PAGE;
@@ -1882,16 +1890,25 @@ write_executable(struct ld_context *ctx, const char *path,
 	}
 	/* PT_PHDR and PT_DYNAMIC for shared libraries (ET_DYN) */
 	if (ctx->shared) {
-		/* PT_PHDR: program header table itself at file offset 64 */
-		if (write_program_header_type(file, MT_PT_PHDR,
-		                             LD_PF_R | LD_PF_W,
-		                             0, 0, 0, 0, 8) != 0)
+		/* PT_PHDR: describes the program header table itself. The
+		 * table sits right after the ELF header (file offset = ehdr_size)
+		 * and is mapped at base_addr + ehdr_size by the single LOAD. */
+		uint64_t phoff = target->ehdr_size;
+		if (write_program_header_type(file, MT_PT_PHDR, LD_PF_R,
+		                             phoff, base_addr + phoff,
+		                             (uint64_t)phnum * 56,
+		                             (uint64_t)phnum * 56, 8) != 0)
 			goto out_file;
-		/* PT_DYNAMIC: placeholder */
-		if (write_program_header_type(file, MT_PT_DYNAMIC,
-		                             LD_PF_R | LD_PF_W,
-		                             0, 0, 0, 0, 8) != 0)
-			goto out_file;
+		/* PT_DYNAMIC: points at the .dynamic section created above. */
+		int dg = find_group(ctx, ".dynamic");
+		if (dg >= 0) {
+			struct ld_group *dyn = &ctx->groups[dg];
+			if (write_program_header_type(file, MT_PT_DYNAMIC,
+			                             LD_PF_R | LD_PF_W,
+			                             dyn->file_offset, dyn->address,
+			                             dyn->size, dyn->size, 8) != 0)
+				goto out_file;
+		}
 	}
 	if (ctx->tls_size) {
 		uint64_t tls_addr = 0, tls_off = 0, tls_filesz = 0;
@@ -1961,6 +1978,28 @@ out:
 	return result;
 }
 
+/* Create a minimal .dynamic section containing a single DT_NULL entry.
+ * Real dynamic tags (DT_SONAME, DT_STRTAB, …) are filled by a future
+ * build_dynamic() pass; for now the section merely exists so the ET_DYN
+ * output carries a valid PT_DYNAMIC program header. */
+static int
+ensure_dynamic_section(struct ld_context *ctx)
+{
+	if (!ctx->shared)
+		return 0;
+	int g = get_group(ctx, ".dynamic", MT_SHT_PROGBITS,
+	                  LD_SHF_ALLOC | LD_SHF_WRITE, 8);
+	if (g < 0)
+		return ld_error(ctx, "out of memory");
+	ctx->groups[g].rank = 2; /* same rank as .got, inside the RW region */
+	size_t ent = ctx->target->elf_class == MT_ELFCLASS64 ? 16 : 8;
+	unsigned char zero[16] = {0};
+	uint64_t off;
+	if (append_group_data(ctx, &ctx->groups[g], zero, ent, 8, &off) != 0)
+		return -1;
+	return 0;
+}
+
 int
 mt_ld_link_opts(const struct mt_ld_options *opts,
                 const char *const *inputs, size_t input_count,
@@ -1993,7 +2032,8 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 		ld_error(&ctx, "no object files were loaded");
 		goto out;
 	}
-	if (collect_sections(&ctx) != 0 || collect_symbols(&ctx) != 0 ||
+	if (collect_sections(&ctx) != 0 || ensure_dynamic_section(&ctx) != 0 ||
+	    collect_symbols(&ctx) != 0 ||
 	    extract_archives(&ctx) != 0 || allocate_common(&ctx) != 0 ||
 	    collect_got_relocations(&ctx) != 0)
 		goto out;
@@ -2026,49 +2066,10 @@ mt_ld_link(const char *output, const char *entry,
            const char *target_name,
            const char **error_message)
 {
-	struct ld_context ctx;
-	size_t i;
-	int result = -1;
-	memset(&ctx, 0, sizeof(ctx));
-	if (target_name) {
-		ctx.target = mt_target_lookup(target_name);
-		if (!ctx.target) {
-			if (error_message)
-				*error_message = "unsupported target architecture";
-			return 1;
-		}
-	} else {
-		ctx.target = &mt_target_x86_64;
-	}
-	ctx.got.group = -1;
-	for (i = 0; i < input_count; ++i)
-		if (load_input(&ctx, inputs[i]) != 0)
-			goto out;
-	if (ctx.objects.count == 0) {
-		ld_error(&ctx, "no object files were loaded");
-		goto out;
-	}
-	if (collect_sections(&ctx) != 0 || collect_symbols(&ctx) != 0 ||
-	    extract_archives(&ctx) != 0 || allocate_common(&ctx) != 0 ||
-	    collect_got_relocations(&ctx) != 0)
-		goto out;
-	if (ctx.got.count != 0)
-		ctx.got.group = find_group(&ctx, ".got");
-	if (layout_output(&ctx) != 0 || fill_got(&ctx) != 0 ||
-	    apply_relocations(&ctx) != 0 ||
-	    write_executable(&ctx, output, entry, ctx.target) != 0)
-		goto out;
-	result = 0;
-out:
-	if (result != 0) {
-		static char reported_error[512];
-		if (!ctx.error[0])
-			strcpy(ctx.error, "link failed");
-		strncpy(reported_error, ctx.error, sizeof(reported_error) - 1);
-		reported_error[sizeof(reported_error) - 1] = '\0';
-		if (error_message)
-			*error_message = reported_error;
-	}
-	free_context(&ctx);
-	return result;
+	struct mt_ld_options opts = {0};
+	opts.output = output;
+	opts.entry = entry;
+	opts.shared = 0;
+	return mt_ld_link_opts(&opts, inputs, input_count, target_name,
+	                       error_message);
 }
