@@ -574,6 +574,14 @@ openinclude(const char *name, bool angled, char **path_out)
 	size_t i, n;
 
 	*path_out = NULL;
+	/* Absolute path: try directly */
+	if (name[0] == '/') {
+		path = xmalloc(strlen(name) + 1);
+		strcpy(path, name);
+		f = fopen(path, "r");
+		if (f) { *path_out = path; return f; }
+		free(path);
+	}
 	if (!angled) {
 		const char *cur = scanfile();
 		if (cur) {
