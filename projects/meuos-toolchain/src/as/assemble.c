@@ -706,6 +706,31 @@ parse_directive(struct as_file *as, char *directive, char *rest)
 		as->current = section;
 		return 0;
 	}
+	if (strcmp(directive, ".pushsection") == 0) {
+		char section_name[128];
+		size_t length = 0;
+		while (rest[length] && rest[length] != ',' &&
+		       !isspace((unsigned char)rest[length]))
+			++length;
+		if (length == 0 || length >= sizeof(section_name))
+			return as_error(as, "invalid section name");
+		if (as->section_stack_depth >= 16)
+			return as_error(as, "section stack overflow");
+		as->section_stack[as->section_stack_depth++] = as->current;
+		memcpy(section_name, rest, length);
+		section_name[length] = '\0';
+		section = get_section(as, section_name);
+		if (section < 0)
+			return -1;
+		as->current = section;
+		return 0;
+	}
+	if (strcmp(directive, ".popsection") == 0) {
+		if (as->section_stack_depth <= 0)
+			return as_error(as, "section stack underflow");
+		as->current = as->section_stack[--as->section_stack_depth];
+		return 0;
+	}
 	if (strcmp(directive, ".section") == 0) {
 		char section_name[128];
 		size_t length = 0;

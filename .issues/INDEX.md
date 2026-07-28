@@ -132,8 +132,8 @@ src/compat/
 | ld-compress-debug | mt/ld | DWARF 压缩 | ⚠️ 可使用通用 `--compress` 而非照搬 `--compress-debug-sections` 命名 | 🟡 | 待实现 |
 | as-full-isa | mt/as | 全架构指令完整覆盖 | 各架构缺的少用指令补全 | ⏳ | 待实现 |
 | as-cond | mt/as | 条件汇编 | ⚠️ `.if`/`.ifdef` — GAS 语法。如果 mcc 生成汇编则需求不大；但如果要能汇编手写 `.S` 则有用。按需实现 | 🟡 | 待实现 |
-| as-align | mt/as | 对齐/填充伪指令 | `.balign`/`.p2align` — 通用汇编概念，不是 GAS 特有 | 🟡 | 待实现 |
-| as-section | mt/as | 节区控制伪指令 | `.pushsection`/`.popsection` — 通用概念，用于 gcc asm 属性 | 🟡 | 待实现 |
+| as-align | mt/as | 对齐/填充伪指令 | `.balign`/`.p2align` — 通用汇编概念，不是 GAS 特有 | 🟢 | 已实现（assemble.c:763-771） |
+| as-section | mt/as | 节区控制伪指令 | `.pushsection`/`.popsection` — 通用概念，用于 gcc asm 属性 | 🟢 | 本 commit |
 | as-equ | mt/as | 常量/符号定义 | `.equ`/`.set` — 通用概念 | 🟢 | 已实现 |
 | as-diag | mt/as | 汇编诊断 | `.abort`/`.error`/`.warning` | 🟢 | 已实现 |
 | ld-linker-script | mt/ld | 链接脚本支持 | `.ld` 脚本解析与布局控制（替代 `-T` 占位） | ⏳ | 待实现 |

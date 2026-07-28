@@ -65,6 +65,8 @@ struct as_file {
 	size_t fixup_count;
 	size_t fixup_capacity;
 	int current;
+	int section_stack[16];   /* for .pushsection/.popsection */
+	int section_stack_depth;
 	const char *filename;
 	unsigned line;
 	char error[256];
