@@ -532,5 +532,75 @@ ldr_mem:
 		}
 	}
 
+	/* ---- sdiv/udiv rd, rn, rm ---- */
+	if (nops >= 3) {
+		if (strcmp(mnemonic, "sdiv") == 0 || strcmp(mnemonic, "udiv") == 0) {
+			int rd, rn, rm;
+			if (reg_num(ops[0], &rd) < 0) return -1;
+			if (reg_num(ops[1], &rn) < 0) return -1;
+			if (reg_num(ops[2], &rm) < 0) return -1;
+			uint32_t base = (mnemonic[0] == 's') ? 0xE710F010 : 0xE730F010;
+			emit32(out->bytes, base | (rd<<16) | (rn<<8) | rm);
+			return 0;
+		}
+	}
+
+	/* ---- smull/umull rdlo, rdhi, rn, rm ---- */
+	if (nops >= 4) {
+		if (strcmp(mnemonic, "smull") == 0 || strcmp(mnemonic, "umull") == 0) {
+			int rdlo, rdhi, rn, rm;
+			if (reg_num(ops[0], &rdlo) < 0) return -1;
+			if (reg_num(ops[1], &rdhi) < 0) return -1;
+			if (reg_num(ops[2], &rn) < 0) return -1;
+			if (reg_num(ops[3], &rm) < 0) return -1;
+			uint32_t base = (mnemonic[0] == 's') ? 0xE0C00090 : 0xE0800090;
+			emit32(out->bytes, base | (rdhi<<16) | (rdlo<<12) | (rn<<8) | rm);
+			return 0;
+		}
+	}
+
+	/* ---- rev/rev16/revsh rd, rm ---- */
+	if (nops >= 2) {
+		if (strcmp(mnemonic, "rev") == 0) {
+			int rd, rm; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rm)<0) return -1;
+			emit32(out->bytes, 0xE6BF0F30 | (rd<<12) | rm); return 0;
+		}
+		if (strcmp(mnemonic, "rev16") == 0) {
+			int rd, rm; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rm)<0) return -1;
+			emit32(out->bytes, 0xE6BF0FB0 | (rd<<12) | rm); return 0;
+		}
+		if (strcmp(mnemonic, "revsh") == 0) {
+			int rd, rm; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rm)<0) return -1;
+			emit32(out->bytes, 0xE6FF0FB0 | (rd<<12) | rm); return 0;
+		}
+	}
+
+	/* ---- ldmia/stmia rn, {rlist} ---- */
+	if (nops >= 2 && (strcmp(mnemonic, "ldmia") == 0 || strcmp(mnemonic, "stmia") == 0)) {
+		int rn; if (reg_num(ops[0], &rn) < 0) return -1;
+		uint16_t reglist = 0;
+		int ri = 1;
+		while (ri < nops) {
+			int r; if (reg_num(ops[ri], &r) < 0) return -1;
+			reglist |= 1 << r; ri++;
+		}
+		int is_load = (mnemonic[0] == 'l');
+		emit32(out->bytes, (is_load ? 0xE8B00000 : 0xE8A00000) | (rn<<16) | reglist);
+		return 0;
+	}
+
+	/* ---- VFP convert: fcvtsd (double->single), fcvtds (single->double) ---- */
+	if (nops >= 2) {
+		if (strcmp(mnemonic, "fcvtsd") == 0 || strcmp(mnemonic, "fcvtds") == 0) {
+			int rd, rm; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rm)<0) return -1;
+			int to_double = (mnemonic[4] == 'd');
+			uint32_t d = (uint32_t)(rd & 0x1F), m = (uint32_t)(rm & 0x1F);
+			uint32_t base = to_double ? 0x0EB70BC0 : 0x0EB70AC0;
+			base |= ((d & 1) << 22) | ((d >> 1) << 12);
+			base |= ((m & 1) << 5) | ((m >> 1) << 16);
+			emit32(out->bytes, base); return 0;
+		}
+	}
+
 	return -1; /* unsupported */
 }
