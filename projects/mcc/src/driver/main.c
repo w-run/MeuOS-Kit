@@ -98,7 +98,7 @@ main(int argc, char *argv[])
 	struct array defines = {0}, undefs = {0};
 	bool pponly = false, emit_asm_only = false, compile_only = false;
 	bool verbose = false, nostdinc = false, nostdlib = false, nodefaultlibs = false;
-	bool static_link = false, shared = false, pic = false;
+	bool static_link = false, shared = false, pic = false, pie = false;
 	bool meuos_specs = false, meuos_specs_host = false;
 	char *output = NULL, *target = NULL, *first_input = NULL, *sysroot = NULL;
 	struct msys *msys_handle = NULL;
@@ -153,7 +153,7 @@ main(int argc, char *argv[])
 	if (strcmp(a, "--pedantic") == 0 || strcmp(a, "--pedantic-errors") == 0)
 		continue;
 	if (strcmp(a, "--pipe") == 0) continue;
-	if (strcmp(a, "--pie") == 0) continue;
+	if (strcmp(a, "--pie") == 0) { pie = true; continue; }
 	/* -fPIE/-fpie/-fPIC/-fpic: -f is a category prefix, stays single-dash */
 	if (strcmp(a, "-fPIE") == 0 || strcmp(a, "-fpie") == 0 ||
 	    strcmp(a, "-fPIC") == 0 || strcmp(a, "-fpic") == 0)
@@ -367,8 +367,10 @@ main(int argc, char *argv[])
 	if (meuos_specs) {
 		nostdlib = true;
 		/* MeuOS libc ships only static archives; the specs mode must produce
-		 * fully static executables unless --shared was explicitly requested. */
-		if (!shared)
+		 * fully static executables unless --shared or --pie was explicitly
+		 * requested.  PIE outputs an ET_DYN with PT_INTERP while still
+		 * linking static archives. */
+		if (!shared && !pie)
 			static_link = true;
 	}
 	/* For fully static non-PIC builds, all TLS is necessarily local —
@@ -419,7 +421,7 @@ main(int argc, char *argv[])
 			if (pponly || emit_asm_only || compile_only)
 				usage();
 			run_host_link(&inputs, output ? output : "a.out", verbose,
-				&libdirs, &libs, static_link, shared, nostdlib,
+				&libdirs, &libs, static_link, shared, pie, nostdlib,
 				nodefaultlibs, meuos_specs, target);
 			return 0;
 		}
@@ -618,14 +620,16 @@ main(int argc, char *argv[])
 				outpath = default_out_name(first_input, ".o");
 			fclose(stdout);
 			run_host_cc(asm_tmp_path, outpath, true, verbose,
-			            &libdirs, &libs, static_link, shared, nostdlib, nodefaultlibs,
+			            &libdirs, &libs, static_link, shared, pie,
+			            nostdlib, nodefaultlibs,
 			            meuos_specs, target);
 		} else {
 			if (!outpath)
 				outpath = "a.out";
 			fclose(stdout);
 			run_host_cc(asm_tmp_path, outpath, false, verbose,
-			            &libdirs, &libs, static_link, shared, nostdlib, nodefaultlibs,
+			            &libdirs, &libs, static_link, shared, pie,
+			            nostdlib, nodefaultlibs,
 			            meuos_specs, target);
 		}
 		unlink(asm_tmp_path);

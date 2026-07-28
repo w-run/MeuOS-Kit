@@ -235,7 +235,7 @@ run_mt_as(const char *asm_path, const char *output, bool verbose,
 static void
 run_mt_ld(struct array *objects, const char *output, bool verbose,
     struct array *libdirs, struct array *libs, bool static_link,
-    bool shared, bool nostdlib, bool nodefaultlibs, bool meuos_specs,
+    bool shared, bool pie, bool nostdlib, bool nodefaultlibs, bool meuos_specs,
     const char *asm_path_for_atomic, const char *target_triple)
 {
 	struct array cmd = {0};
@@ -254,6 +254,10 @@ run_mt_ld(struct array *objects, const char *output, bool verbose,
 	/* -shared triggers ET_DYN output for shared libraries. */
 	if (shared)
 		arrayaddbuf(&cmd, " -shared", 8);
+	/* -pie triggers PIE output (ET_DYN + PT_INTERP).  mt/ld defaults to
+	 * ET_EXEC when neither -shared nor -pie is given. */
+	if (pie && !static_link && !shared)
+		arrayaddbuf(&cmd, " -pie", 5);
 	/* MEUOS_SYSROOT is also exposed to mt/ld via --sysroot so the linker
 	 * searches <sysroot>/usr/lib in addition to the explicit -L paths.
 	 * The -L paths from the driver remain authoritative. */
@@ -302,7 +306,7 @@ run_mt_ld(struct array *objects, const char *output, bool verbose,
 void
 run_host_cc(const char *asm_path, const char *output, bool compile_only,
             bool verbose, struct array *libdirs, struct array *libs,
-            bool static_link, bool shared, bool nostdlib, bool nodefaultlibs,
+            bool static_link, bool shared, bool pie, bool nostdlib, bool nodefaultlibs,
             bool meuos_specs, const char *target_triple)
 {
 	struct array cmd = {0};
@@ -343,7 +347,7 @@ run_host_cc(const char *asm_path, const char *output, bool compile_only,
 			struct array objs = {0};
 			arrayaddptr(&objs, tmpl);
 			run_mt_ld(&objs, output, verbose, libdirs, libs,
-			    static_link, shared, nostdlib, nodefaultlibs, meuos_specs,
+			    static_link, shared, pie, nostdlib, nodefaultlibs, meuos_specs,
 			    asm_path, target_triple);
 			unlink(tmpl);
 			return;
@@ -367,6 +371,8 @@ run_host_cc(const char *asm_path, const char *output, bool compile_only,
 		arrayaddbuf(&cmd, " -static", 8);
 	if (shared)
 		arrayaddbuf(&cmd, " -shared", 8);
+	if (pie && !static_link && !shared)
+		arrayaddbuf(&cmd, " -pie", 5);
 	if (nostdlib)
 		arrayaddbuf(&cmd, " -nostdlib", 10);
 	if (nodefaultlibs)
@@ -407,7 +413,8 @@ run_host_cc(const char *asm_path, const char *output, bool compile_only,
 void
 run_host_link(struct array *objects, const char *output, bool verbose,
 	struct array *libdirs, struct array *libs, bool static_link, bool shared,
-	bool nostdlib, bool nodefaultlibs, bool meuos_specs, const char *target_triple)
+	bool pie, bool nostdlib, bool nodefaultlibs, bool meuos_specs,
+	const char *target_triple)
 {
 	struct array cmd = {0};
 	const char *cc = pick_host_cc(target_triple);
@@ -416,12 +423,13 @@ run_host_link(struct array *objects, const char *output, bool verbose,
 
 	/* P3: mt integration.  Drive mt/ld directly for any supported target
 	 * under --specs=meuos (the only mode where mcc manages crt1.o and
-	 * libc-meuos).  mt/ld now supports -shared (ET_DYN), so both static
-	 * and shared links go through mt/ld. */
+	 * libc-meuos).  mt/ld now supports -shared (ET_DYN) and -pie (PIE),
+	 * so both static and shared links go through mt/ld. */
 	if (mt_mode_enabled() &&
 	    mt_target_supported(target_triple) && meuos_specs) {
 		run_mt_ld(objects, output, verbose, libdirs, libs, static_link,
-		    shared, nostdlib, nodefaultlibs, meuos_specs, NULL, target_triple);
+		    shared, pie, nostdlib, nodefaultlibs, meuos_specs, NULL,
+		    target_triple);
 		return;
 	}
 
@@ -440,6 +448,8 @@ run_host_link(struct array *objects, const char *output, bool verbose,
 		arrayaddbuf(&cmd, " -static", 8);
 	if (shared)
 		arrayaddbuf(&cmd, " -shared", 8);
+	if (pie && !static_link && !shared)
+		arrayaddbuf(&cmd, " -pie", 5);
 	if (nostdlib)
 		arrayaddbuf(&cmd, " -nostdlib", 10);
 	if (nodefaultlibs)

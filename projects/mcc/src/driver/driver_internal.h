@@ -35,11 +35,11 @@ const char *targ_name(const char *triplet);
 char *sysrootpath(const char *root, const char *suffix);
 void run_host_cc(const char *asm_path, const char *output, bool compile_only,
                  bool verbose, struct array *libdirs, struct array *libs,
-                 bool static_link, bool shared, bool nostdlib,
+                 bool static_link, bool shared, bool pie, bool nostdlib,
                  bool nodefaultlibs, bool meuos_specs, const char *target_triple);
 void run_host_link(struct array *objects, const char *output, bool verbose,
                    struct array *libdirs, struct array *libs, bool static_link,
-                   bool shared, bool nostdlib, bool nodefaultlibs,
+                   bool shared, bool pie, bool nostdlib, bool nodefaultlibs,
                    bool meuos_specs, const char *target_triple);
 bool is_link_input(const char *path);
 char *default_out_name(const char *input, const char *desc);
