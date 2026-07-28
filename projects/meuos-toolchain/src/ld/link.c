@@ -2917,23 +2917,45 @@ build_dynamic_tables(struct ld_context *ctx)
 		ctx->soname_dynstr_offset = (uint32_t)so_off;
 	}
 
-	/* Append --add-needed sonames to .dynstr and record their offsets */
+	/* Append --add-needed sonames to .dynstr and record their offsets.
+	 * Also auto-generate DT_NEEDED entries for input .so files. */
 	ctx->needed_dynstr_offsets = NULL;
-	if (ctx->add_needed_count > 0) {
+	/* Count total needed entries: CLI --add-needed + input .so files */
+	size_t needed_from_cli = ctx->add_needed_count;
+	size_t needed_from_dso = 0;
+	for (i = 0; i < ctx->objects.count; i++)
+		if (ctx->objects.items[i].is_shared)
+			needed_from_dso++;
+	size_t total_needed = needed_from_cli + needed_from_dso;
+
+	if (total_needed > 0) {
 		ctx->needed_dynstr_offsets = (uint32_t *)ld_malloc(
-		    ctx->add_needed_count * sizeof(uint32_t));
-		if (ctx->needed_dynstr_offsets)
-			memset(ctx->needed_dynstr_offsets, 0,
-			       ctx->add_needed_count * sizeof(uint32_t));
+		    total_needed * sizeof(uint32_t));
 		if (!ctx->needed_dynstr_offsets)
 			return ld_error(ctx, "out of memory");
+		memset(ctx->needed_dynstr_offsets, 0,
+		       total_needed * sizeof(uint32_t));
+		size_t needed_idx = 0;
+		/* --add-needed entries */
 		for (i = 0; i < ctx->add_needed_count; ++i) {
 			uint64_t no_off;
 			if (append_group_data(ctx, gstr,
 			                      (const unsigned char *)ctx->add_needed[i],
 			                      strlen(ctx->add_needed[i]) + 1, 1, &no_off) != 0)
 				return -1;
-			ctx->needed_dynstr_offsets[i] = (uint32_t)no_off;
+			ctx->needed_dynstr_offsets[needed_idx++] = (uint32_t)no_off;
+		}
+		/* Auto-generated entries from input .so files */
+		for (i = 0; i < ctx->objects.count; i++) {
+			struct ld_object *obj = &ctx->objects.items[i];
+			if (!obj->is_shared) continue;
+			/* Use SONAME from .so's dynamic section if available */
+			uint64_t no_off;
+			if (append_group_data(ctx, gstr,
+			                      (const unsigned char *)obj->name,
+			                      strlen(obj->name) + 1, 1, &no_off) != 0)
+				return -1;
+			ctx->needed_dynstr_offsets[needed_idx++] = (uint32_t)no_off;
 		}
 	}
 
@@ -3045,8 +3067,15 @@ build_dynamic_tables(struct ld_context *ctx)
 	if (have_init_arr) ntags += 2;  /* DT_INIT_ARRAY + DT_INIT_ARRAYSZ */
 	if (have_fini_arr) ntags += 2;  /* DT_FINI_ARRAY + DT_FINI_ARRAYSZ */
 	if (have_preinit_arr) ntags += 2; /* DT_PREINIT_ARRAY + DT_PREINIT_ARRAYSZ */
-	if (ctx->add_needed_count > 0)
-		ntags += ctx->add_needed_count; /* DT_NEEDED entries */
+	/* Count DT_NEEDED entries: CLI --add-needed + input .so files */
+	{
+		size_t dso_needed = 0;
+		for (i = 0; i < ctx->objects.count; i++)
+			if (ctx->objects.items[i].is_shared)
+				dso_needed++;
+		if (ctx->add_needed_count > 0 || dso_needed > 0)
+			ntags += ctx->add_needed_count + dso_needed;
+	}
 	ntags++; /* DT_NULL terminator */
 	size_t dynent = elf64 ? 16 : 8;
 	size_t dyn_total = ntags * dynent;
@@ -3192,16 +3221,22 @@ fill_dynamic_addresses(struct ld_context *ctx)
 		++k;
 	}
 
-	/* DT_NEEDED entries from --add-needed */
-	for (i = 0; i < ctx->add_needed_count; ++i) {
-		if (elf64) {
-			write64(dp + k * 16 + 0, MT_DT_NEEDED);
-			write64(dp + k * 16 + 8, ctx->needed_dynstr_offsets[i]);
-		} else {
-			write32(dp + k * 8 + 0, MT_DT_NEEDED);
-			write32(dp + k * 8 + 4, ctx->needed_dynstr_offsets[i]);
+	/* DT_NEEDED entries from --add-needed and input .so files */
+	if (ctx->needed_dynstr_offsets) {
+		size_t needed_total = ctx->add_needed_count;
+		for (i = 0; i < ctx->objects.count; i++)
+			if (ctx->objects.items[i].is_shared)
+				needed_total++;
+		for (i = 0; i < needed_total; ++i) {
+			if (elf64) {
+				write64(dp + k * 16 + 0, MT_DT_NEEDED);
+				write64(dp + k * 16 + 8, ctx->needed_dynstr_offsets[i]);
+			} else {
+				write32(dp + k * 8 + 0, MT_DT_NEEDED);
+				write32(dp + k * 8 + 4, ctx->needed_dynstr_offsets[i]);
+			}
+			++k;
 		}
-		++k;
 	}
 
 	/* DT_INIT / DT_FINI / DT_INIT_ARRAY / DT_FINI_ARRAY / DT_PREINIT_ARRAY */
