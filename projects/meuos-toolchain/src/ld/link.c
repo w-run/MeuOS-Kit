@@ -741,7 +741,11 @@ section_rank(const char *name)
 	if (strcmp(name, ".dynamic") == 0) return 2;
 	if (strcmp(name, ".data") == 0 || strcmp(name, ".tdata") == 0) return 3;
 	if (strcmp(name, ".bss") == 0 || strcmp(name, ".tbss") == 0) return 4;
-	return 5;
+	/* Debug and other non-allocatable sections go after ALL loaded sections */
+	if (strncmp(name, ".debug", 6) == 0) return 5;
+	if (strncmp(name, ".note", 5) == 0) return 5;
+	if (strncmp(name, ".comment", 8) == 0) return 5;
+	return 6;
 }
 
 static int
@@ -852,8 +856,9 @@ collect_sections(struct ld_context *ctx)
 			if (section.type != MT_SHT_PROGBITS &&
 			    section.type != MT_SHT_NOBITS)
 				continue;
-			if (!(section.flags & LD_SHF_ALLOC))
-				continue;
+			/* Allocatable and non-allocatable PROGBITS sections
+			 * (e.g. .debug_*) are both collected.  Non-allocatable
+			 * sections get rank 5+ and are placed after loaded data. */
 			name = object_section_name(object, j);
 			if (!name || !*name)
 				return ld_errorf(ctx, "section has no name", object->name);
@@ -899,8 +904,6 @@ collect_one_object_sections(struct ld_context *ctx, size_t object_index)
 			return ld_errorf(ctx, "invalid section in object", object->name);
 		if (section.type != MT_SHT_PROGBITS && section.type != MT_SHT_NOBITS)
 			continue;
-		if (!(section.flags & LD_SHF_ALLOC))
-			continue;
 		name = object_section_name(object, j);
 		if (!name || !*name)
 			return ld_errorf(ctx, "section has no name", object->name);
@@ -908,7 +911,18 @@ collect_one_object_sections(struct ld_context *ctx, size_t object_index)
 		                  section.alignment ? section.alignment : 1);
 		if (group < 0)
 			return ld_error(ctx, "out of memory");
+		if (strncmp(name, ".debug", 6) == 0)
+			fprintf(stderr, "DEBUG collect: section[%u]=%s group=%d\n", j, name, group);
 		out = &ctx->groups[group];
+		/* Set up group rank and flags based on section attributes */
+		if (section.flags & LD_SHF_ALLOC) {
+			/* Allocatable sections keep their original attributes */
+		} else {
+			/* Non-allocatable sections (debug, comments, etc.) go at
+			 * the end of the file, after all loadable content.  They
+			 * are NOT included in PT_LOAD segments. */
+			ctx->groups[group].flags = section.flags;
+		}
 		if (section.type == MT_SHT_NOBITS) {
 			if (append_group_data(ctx, out, NULL, (size_t)section.size,
 			                      section.alignment ? section.alignment : 1,
