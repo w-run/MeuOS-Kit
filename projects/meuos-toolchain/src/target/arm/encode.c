@@ -95,6 +95,18 @@ int arm_encode_insn(const struct mt_target *target,
 		if (*p == ',') p++;
 	}
 
+	/* Strip curly braces from operands (e.g., {lr} → lr for push/pop) */
+	for (int oi = 0; oi < nops; oi++) {
+		char *s = ops[oi];
+		size_t sl = strlen(s);
+		if (sl > 0 && s[0] == '{') {
+			memmove(s, s+1, sl);
+			sl--;
+		}
+		if (sl > 0 && s[sl-1] == '}')
+			s[sl-1] = '\0';
+	}
+
 	/* ---- Branch: b label or bl label ---- */
 	if (strcmp(mnemonic, "b") == 0 && nops >= 1) {
 		out->fixed = 0;

@@ -150,12 +150,14 @@ mt_target_name(const char *target_triple)
 	    strncmp(target_triple, "i586", 4) == 0 ||
 	    strncmp(target_triple, "i686", 4) == 0)
 		return "i386";
+	if (strncmp(target_triple, "arm", 3) == 0)
+		return "arm";
 	/* Unknown triplet: return NULL to let caller fall back to host cc. */
 	return NULL;
 }
 
-/* mt/as now supports all 5 architectures (x86_64, aarch64, riscv64,
- * loongarch64, i386).  A NULL target means "host" (x86_64).  Only return
+/* mt/as now supports all 6 architectures (x86_64, aarch64, riscv64,
+ * loongarch64, i386, arm).  A NULL target means "host" (x86_64).  Only return
  * false when the triplet is genuinely unknown. */
 static bool
 mt_target_supported(const char *target_triple)
