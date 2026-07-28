@@ -666,5 +666,50 @@ ldr_mem:
 		return 0;
 	}
 
+	/* ---- sign/zero extension: sxtb/sxth/uxtb/uxth rd, rm ---- */
+	if (nops >= 2) {
+		if (strcmp(mnemonic, "sxtb") == 0) {
+			int rd, rm; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rm)<0) return -1;
+			emit32(out->bytes, 0xE6AF0070 | (rd<<12) | rm); return 0;
+		}
+		if (strcmp(mnemonic, "sxth") == 0) {
+			int rd, rm; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rm)<0) return -1;
+			emit32(out->bytes, 0xE6BF0070 | (rd<<12) | rm); return 0;
+		}
+		if (strcmp(mnemonic, "uxtb") == 0) {
+			int rd, rm; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rm)<0) return -1;
+			emit32(out->bytes, 0xE6EF0070 | (rd<<12) | rm); return 0;
+		}
+		if (strcmp(mnemonic, "uxth") == 0) {
+			int rd, rm; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rm)<0) return -1;
+			emit32(out->bytes, 0xE6FF0070 | (rd<<12) | rm); return 0;
+		}
+	}
+
+	/* ---- bit manipulation: rbit rd, rm / clz rd, rm ---- */
+	if (nops >= 2 && strcmp(mnemonic, "rbit") == 0) {
+		int rd, rm; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rm)<0) return -1;
+		emit32(out->bytes, 0xE6FF0F30 | (rd<<12) | rm); return 0;
+	}
+
+	/* ---- condition select: sel rd, rn, rm ---- */
+	if (nops >= 3 && strcmp(mnemonic, "sel") == 0) {
+		int rd, rn, rm;
+		if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rn)<0||reg_num(ops[2],&rm)<0) return -1;
+		emit32(out->bytes, 0xE68000B0 | (rd<<16) | (rn<<0) | (rm<<8));
+		return 0;
+	}
+
+	/* ---- NEON: vadd/vsub/vmul (integer) ---- */
+	if (nops >= 3 && mnemonic[0] == 'v') {
+		if (strcmp(mnemonic, "vadd") == 0 && ops[2][0] == 'd') {
+			int rd, rn, rm;
+			if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rn)<0||reg_num(ops[2],&rm)<0) return -1;
+			uint32_t d=(uint32_t)(rd&0x1F), n=(uint32_t)(rn&0x1F), m=(uint32_t)(rm&0x1F);
+			emit32(out->bytes, 0xF2000D00 | ((d>>1)<<12)|((d&1)<<22)|((n>>1)<<16)|((n&1)<<7)|((m>>1)<<0)|((m&1)<<5));
+			return 0;
+		}
+	}
+
 	return -1; /* unsupported */
 }
