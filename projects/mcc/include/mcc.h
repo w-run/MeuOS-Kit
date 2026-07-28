@@ -344,9 +344,25 @@ void cc_warn(const struct location *, int, const char *, ...) __attribute__((for
 extern int warn_level;
 extern bool warn_as_error;
 
+/* Diagnostic output mode (p9-ui): --error-json emits diagnostics as
+ * structured JSON lines for tooling; --explain adds a fix-hint suffix. */
+extern int g_error_json;
+extern int g_error_explain;
+
 /* Target features bitmask (MT_FEATURE_*), set by -march=native or
- * -march=x86-64-vN. 0 = baseline only. */
+ * -march=x86-64-vN. 0 = baseline only.
+ *
+ * 位布局与 mt/as (include/mt/target.h) 保持一致，确保跨工具链（mcc / mt/as）
+ * 对相同特性的位定义一致：
+ *   x86:  SSE SSE2 SSE3 SSSE3 SSE4_1 SSE4_2 AVX AVX2 POPCNT ... (0..15)
+ *   riscv: RV_F RV_D RV_C RV_V  (32..35) */
 extern uint64_t g_target_features;
+
+/* RISC-V extension feature bits (mirrors include/mt/target.h bit layout). */
+#define MT_FEATURE_RV_F  (1ULL << 32)  /* riscv F (single-precision float) */
+#define MT_FEATURE_RV_D  (1ULL << 33)  /* riscv D (double-precision float) */
+#define MT_FEATURE_RV_C  (1ULL << 34)  /* riscv C (compressed) */
+#define MT_FEATURE_RV_V  (1ULL << 35)  /* riscv V (vector) */
 
 /* scan */
 

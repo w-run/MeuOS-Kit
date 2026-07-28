@@ -218,12 +218,35 @@ main(int argc, char *argv[])
 				(void)march_native_marker;
 				extern int g_march_native_requested;
 				g_march_native_requested = 1;
-			} else if (strncmp(march_val, "x86-64-v", 8) == 0 ||
-			           (march_val[0] == 'v' && march_val[1] >= '2')) {
-				/* -march=x86-64-vN: map to feature bitmask */
-				extern uint64_t march_x86_64_v_level(const char *);
-				g_target_features |= march_x86_64_v_level(march_val);
-			} else {
+		} else if (strncmp(march_val, "x86-64-v", 8) == 0 ||
+		           (march_val[0] == 'v' && march_val[1] >= '2')) {
+			/* -march=x86-64-vN: map to feature bitmask */
+			extern uint64_t march_x86_64_v_level(const char *);
+			g_target_features |= march_x86_64_v_level(march_val);
+		} else if (strncmp(march_val, "rv64", 4) == 0 ||
+		           strncmp(march_val, "riscv64", 7) == 0) {
+			/* RISC-V extension selection: parse rv64imafdc / rv64gc etc.
+			 * The base ISA (rv64i) is implicit; each letter adds a feature
+			 * bit. g_target_features is consumed by the riscv64 backend
+			 * emit/isel for instruction gating. */
+			const char *p = march_val;
+			while (*p) {
+				switch (*p) {
+				case 'i': case 'I': break; /* base integer, always on */
+				case 'm': case 'M': g_target_features |= 0; break; /* mul/div: baseline for rv64im */
+				case 'a': case 'A': g_target_features |= 0; break; /* atomics: baseline */
+				case 'f': case 'F': g_target_features |= MT_FEATURE_RV_F; break;
+				case 'd': case 'D': g_target_features |= MT_FEATURE_RV_D; break;
+				case 'c': case 'C': g_target_features |= MT_FEATURE_RV_C; break;
+				case 'v': case 'V': g_target_features |= MT_FEATURE_RV_V; break;
+				case 'g': /* g = imafd ("general") */
+					g_target_features |= MT_FEATURE_RV_F | MT_FEATURE_RV_D;
+					break;
+				default: break; /* ignore unknown (e.g. trailing -linux) */
+				}
+				++p;
+			}
+		} else {
 				/* Unknown march for non-ARM arch: store as-is in
 				 * ARM variable to avoid silent ignore, but only
 				 * apply if arch is ARM later. */
@@ -280,6 +303,15 @@ main(int argc, char *argv[])
 			meuos_specs = true;
 		else if (strcmp(spec, "host") == 0 || strcmp(spec, "system") == 0)
 			meuos_specs_host = true;
+		continue;
+	}
+	/* p9-ui 诊断输出模式：--error-json 结构化错误，--explain 附加修复建议 */
+	if (strcmp(a, "--error-json") == 0) {
+		g_error_json = 1;
+		continue;
+	}
+	if (strcmp(a, "--explain") == 0) {
+		g_error_explain = 1;
 		continue;
 	}
 
