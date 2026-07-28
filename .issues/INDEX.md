@@ -124,7 +124,7 @@ src/compat/
 | ld-gc-sections | mt/ld | 死代码消除 | 未引用节区的裁剪。概念有用，实现应自己设计，不照搬 GNU `--gc-sections` 的复杂逻辑 | 🟢 | 本 commit（gc_sweep + section_rank .text.*/.data.* 支持） |
 | ld-linker-script | mt/ld | 链接布局控制 | ❌ **不做 GNU `.ld` 脚本解析**。需要时改为 YAML 格式描述节区布局（链接器内嵌或独立文件） | 🟢 | -T/--link-script 自定义 rank 排序已实现 |
 | as-macro | mt/as | `.rept`/`.endr` 重复伪指令 | 基本的行重复机制，用于汇编展开和填充 | 🟢 | 本 commit（assemble.c: .rept N 保存 ftell 位置，.endr 迭代 fseek 回退；单层嵌套限制；回归测试） |
-| as-full-isa | mt/as | 全架构指令完整覆盖 | 各架构缺的少用指令补全（ARM 从 321→715 行，含除法/64位乘/字节反转/VFP全系列/符号扩展/rbit/sel/NEON基础/多寄存器存取/pld） | 🟡 | ARM 编码完善（715 行，仍有 NEON 待完善）；x86_64 1075 行最完整 |
+| as-full-isa | mt/as | 全架构指令完整覆盖 | 各架构缺的少用指令补全（ARM 从 321→831 行，含乘累加/位域/位反转/VFP全系列/NEON基础/DSP/除法/多寄存器存取/提示指令等） | 🟡 | ARM 编码完善（831 行，仍有 NEON/Thumb 待完善）；x86_64 1075 行最完整 |
 | as-cond | mt/as | 条件汇编 | `.if`/`.ifdef`/`.ifndef`/`.else`/`.endif` — 通用汇编概念，非 GAS 特有 | 🟢 | 本 commit |
 | as-align | mt/as | 对齐/填充伪指令 | `.balign`/`.p2align` — 通用汇编概念，不是 GAS 特有 | 🟢 | 已实现（assemble.c:763-771） |
 | as-section | mt/as | 节区控制伪指令 | `.pushsection`/`.popsection` — 通用概念，用于 gcc asm 属性 | 🟢 | 本 commit |
