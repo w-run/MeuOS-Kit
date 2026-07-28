@@ -602,6 +602,17 @@ x86_64_encode_insn(const struct mt_target *target,
 	for (i = 0; mnemonic[i] && i < (int)sizeof(base) - 1; ++i)
 		base[i] = (char)tolower((unsigned char)mnemonic[i]);
 	base[i] = '\0';
+
+	/* ISA feature gating (as-isa-gating): reject instructions whose required
+	 * ISA extension is not enabled for the target. AVX/AVX2 instructions use a
+	 * VEX prefix and start with 'v' (vaddps, vmovaps, vpxor, ...). When the
+	 * target lacks MT_FEATURE_AVX we must error rather than silently emit a
+	 * VEX-encoded instruction that will #UD on the target CPU. */
+	if (base[0] == 'v' && base[1] != '\0') {
+		if ((target->features & MT_FEATURE_AVX) == 0)
+			return -1;  /* caller reports "unsupported instruction" */
+	}
+
 	if (strcmp(base, "endbr64") == 0) {
 		emit_u8(out->bytes, &out->size, 0xf3);
 		emit_u8(out->bytes, &out->size, 0x0f);

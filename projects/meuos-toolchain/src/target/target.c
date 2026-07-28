@@ -34,7 +34,7 @@ static const struct mt_target targets[] = {
 };
 
 const struct mt_target mt_target_x86_64 = {
-	"x86_64", MT_EM_X86_64, 2, 1, 0, 64, 64, 0, x86_64_encode_insn,
+	"x86_64", MT_EM_X86_64, 2, 1, 0, 64, 64, MT_FEATURE_SSE2, x86_64_encode_insn,
 };
 
 const struct mt_target *

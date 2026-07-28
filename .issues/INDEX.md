@@ -244,7 +244,7 @@ src/compat/
 | arm-multiver | **arm 多版本后端**：根据 `-march` 切换 ARMv6/v7/v8 指令选择器和发射器差异（Thumb/ARM 模式、DMB 变体等） | 🟡 中 | 待实现 |
 | aarch64-ext | **aarch64 架构扩展**：FEAT_FP16/FEAT_RDM/FEAT_JSCVT 等特性位与代码生成 | 🟢 低 | 待实现 |
 | march-native | **`-march=native`**：通过 CPUID（x86）或 `/proc/cpuinfo` 查询宿主机特性并设置 Target.features | 🟡 中 | 🟢 完成：cpu_detect.c（x86_64 CPUID 内联汇编 + xgetbv 验证 AVX OS 支持、/proc/cpuinfo 跨架构回退），main.c 集成（解析 `-march=native` → 标记 g_march_native_requested → 目标选择后 detect_cpu_features 填充 g_target_features）。check-c99/check-c11/check-c23 全部通过 |
-| as-isa-gating | **mt/as 指令门控**：编码器根据 insn 要求的特性位进行验证，不支持的指令报错而非默默生成 | 🟡 中 | 待实现（依赖 x86-isa-levels 完成后，emit 层先消费 g_target_features，as 才能知道合法指令集） |
+| as-isa-gating | **mt/as 指令门控**：编码器根据 insn 要求的特性位进行验证，不支持的指令报错而非默默生成 | 🟡 中 | 🟢 实现（`src/target/x86_64/encode.c`）：`x86_64_encode_insn` 在指令分发前检查以 `v` 开头（VEX/AVX）的指令是否启用 `MT_FEATURE_AVX`，未启用则报错 `unsupported instruction`。`mt_target_x86_64` 默认 `features = MT_FEATURE_SSE2`（x86_64 基线），AVX 指令默认被门控。验证：`movaps` 汇编 exit=0；`vmovaps` 被拒 `unsupported instruction`。`make check` 全 PASS（含 mt as x86_64 / SSE）。注意：mt/as 暂不支持 `-march=avx` 显式启用（后续增强），当前保守行为=默认拒绝高阶指令。 |
 | i386-variants | **i386 变体区分**：486/586/686 在 cmpxchg/CMPXCHG8B/FPU 存在性上的差异映射到特性位 | 🟢 低 | 待实现 |
 
 ### 设计提案
@@ -1068,8 +1068,8 @@ build:
 | ID | 组件 | 描述 | 优先 | 实施情况 |
 |----|------|------|------|---------|
 | meow-cli | meow | 彩色进度条/分层输出/--json/meow env TUI 概览 | 🟡 中 | 🟢 `83d395d`（color.c/env.c + main.c/graph.c/exec.c 修改） |
-| mt-info | meuos-toolchain | 统一 ELF 分析工具（info/inspect/deps/diff/strings/which 子命令），含 TUI 交互模式 | 🟡 中 | 待设计 |
-| mcc-diag-output | mcc | 彩色错误输出/自定义 --warn 体系/--error-json/--explain | 🟢 低 | 待设计 |
+| mt-info | meuos-toolchain | 统一 ELF 分析工具（info/inspect/deps/diff/strings/which 子命令），含 TUI 交互模式 | 🟡 中 | 🟢 已实现（src/mt-info/ 9 文件 + 统一 --json/--quiet/--no-color 跨工具约定；见 144 行 P2 详细状态） |
+| mcc-diag-output | mcc | 彩色错误输出/自定义 --warn 体系/--error-json/--explain | 🟢 低 | 🟡 部分：彩色错误/警告输出已完成（1ded4c3，token.c ANSI 颜色 + isatty 自动开关）；`--warn=` 体系已完成（9713bfe）；待补：`--error-json`/`--explain` 结构化错误输出 |
 | as-debug-output | mt/as | --debug 逐指令可视化/--stats | 🟢 低 | 待设计 |
 | ld-tui-map | mt/ld | --map-tui TUI 链接映射/--why 符号溯源 | 🟢 低 | 待设计 |
 | msysctl-upgrade | meuos-sysroot | tree/diff/--json 升级 | 🟢 低 | 待设计 |
@@ -1077,8 +1077,8 @@ build:
 | meow-auto-diag | meow+ld | 构建失败时自动调用 ld --why 诊断 | 🟢 低 | 待设计 |
 | post-check-hooks | meow | meow.yaml post_check 钩子 + mt-info 集成 | 🟢 低 | 待设计 |
 | json-pipeline | 跨组件 | 统一 JSON lines 管道协议，工具可管道串接 | 🟢 低 | 待设计 |
-| mt-info | meuos-toolchain | 统一 ELF 分析工具（info/inspect/deps/diff/strings/which 子命令），含 TUI 交互模式 | 🟡 中 | 待设计 |
-| mcc-diag-output | mcc | 彩色错误输出/自定义 --warn 体系/--error-json/--explain | 🟢 低 | 待设计 |
+| mt-info | meuos-toolchain | 统一 ELF 分析工具（info/inspect/deps/diff/strings/which 子命令），含 TUI 交互模式 | 🟡 中 | 🟢 已实现（src/mt-info/ 9 文件 + 统一 --json/--quiet/--no-color 跨工具约定；见 144 行 P2 详细状态） |
+| mcc-diag-output | mcc | 彩色错误输出/自定义 --warn 体系/--error-json/--explain | 🟢 低 | 🟡 部分：彩色错误/警告输出已完成（1ded4c3，token.c ANSI 颜色 + isatty 自动开关）；`--warn=` 体系已完成（9713bfe）；待补：`--error-json`/`--explain` 结构化错误输出 |
 | as-debug-output | mt/as | --debug 逐指令可视化/--stats | 🟢 低 | 待设计 |
 | ld-tui-map | mt/ld | --map-tui TUI 链接映射/--why 符号溯源 | 🟢 低 | 待设计 |
 | msysctl-upgrade | meuos-sysroot | tree/diff/--json 升级 | 🟢 低 | 待设计 |
