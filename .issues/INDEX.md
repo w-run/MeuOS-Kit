@@ -98,7 +98,7 @@ src/compat/
 | mcc-loong64-qemu | mcc+libc | loongarch64 qemu 门禁 | 完整 qemu 运行时门禁（当前仅 exit=42） | ⏳ | 待实现 |
 | mcc-i386-tls-e2e | mcc+libc | i386 TLS e2e | bug-i386-tls 修复后的 TLS 端到端验证 | ⏳ | 待实现 |
 | mcc-i386-tls-doc | mcc(i386) | `gd-tls.md` 文档 | 被 3 个文件引用但文件不存在 | 🟢 | `03e8618` |
-| ld-shared | mt/ld | `-shared` 输出 `ET_DYN` | 🟡 ET_DYN 输出 + PHDR/DYNAMIC 框架完成。待填充：dynsym/dynstr/hash/dynamic 数据 | `53aec7c` + `2e29bef` 框架；ld-shared-dynsym 进行中 |
+| ld-shared | mt/ld | `-shared` 输出 `ET_DYN` | 🟢 ET_DYN + PHDR/DYNAMIC + dynsym/dynstr/hash/dynamic 完整实现 | `a0822fe` 动态节区数据填充 |
 | ld-pie | mt/ld | `--pie`/`--no-pie` 支持 | PIE 二进制输出（`ET_DYN` + `PT_INTERP` + 相对重定位） | ⏳ | 待实现 |
 | mcc-pic-verify | mcc | PIC 代码生成加固 | 全架构验证 `-fPIC` 输出（GOT/PLT/TLS GD 路径） | ⏳ | 待实现 |
 | mcc-shared-mt | mcc driver | `-shared` mt/ld 集成 | 去掉 `-shared` 回退到 host cc 的限制 | ⏳ | 待实现（依赖 ld-shared 完成） |
@@ -711,7 +711,7 @@ readelf 已实现部分 DWARF 节区头解析。
 | qemu 运行时验证 | ✅ 完整 | ✅ 完整 | ⚠️ exit=42 | ⚠️ qemu system | ⚠️ exit=42 | ✅ 完整 |
 | TLS 端到端 | ✅ | ✅ | ✅ bug-riscv64-emit | ❌ bug-i386-tls | ❌ bug-loong64-tls-reloc/bug-loong64-tls-errno | ✅ |
 | self-rebuild | ✅ | ✅ | ✅ bug-riscv64-emit | ❌ bug-i386-tls | ✅ bug-loong64-emit | ❌ bug-arm-isel |
-| 动态链接 | 🔄 ld-shared...ld-so | 🔄 ld-shared...ld-so | 🔄 ld-shared...ld-so | 🔄 ld-shared...ld-so | 🔄 ld-shared...ld-so | 🔄 ld-shared...ld-so |
+| 动态链接 | 🔄 ld.so (ld-shared 已完成) | 🔄 ld.so (ld-shared 已完成) | 🔄 ld.so (ld-shared 已完成) | 🔄 ld.so (ld-shared 已完成) | 🔄 ld.so (ld-shared 已完成) | 🔄 ld.so (ld-shared 已完成) |
 | DWARF 调试信息 | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge |
 
 ---
