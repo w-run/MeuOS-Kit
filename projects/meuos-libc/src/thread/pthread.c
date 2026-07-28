@@ -208,3 +208,124 @@ pthread_setspecific(pthread_key_t key, const void *value)
 {
 	return tss_set(key, (void *)value) == thrd_success ? 0 : -1;
 }
+
+/* ---- rwlock ---- */
+int
+pthread_rwlock_init(pthread_rwlock_t *rw, const pthread_rwlockattr_t *attr)
+{
+	(void)attr;
+	rw->readers = 0; rw->writer = 0;
+	mtx_init(&rw->lock, mtx_plain);
+	cnd_init(&rw->rcond);
+	cnd_init(&rw->wcond);
+	return 0;
+}
+int pthread_rwlock_destroy(pthread_rwlock_t *rw) {
+	(void)rw; return 0;
+}
+int pthread_rwlock_rdlock(pthread_rwlock_t *rw) {
+	mtx_lock(&rw->lock);
+	while (rw->writer) cnd_wait(&rw->rcond, &rw->lock);
+	rw->readers++;
+	mtx_unlock(&rw->lock);
+	return 0;
+}
+int pthread_rwlock_wrlock(pthread_rwlock_t *rw) {
+	mtx_lock(&rw->lock);
+	while (rw->readers || rw->writer) cnd_wait(&rw->wcond, &rw->lock);
+	rw->writer = 1;
+	mtx_unlock(&rw->lock);
+	return 0;
+}
+int pthread_rwlock_unlock(pthread_rwlock_t *rw) {
+	mtx_lock(&rw->lock);
+	if (rw->writer) { rw->writer = 0; cnd_signal(&rw->wcond); }
+	else { rw->readers--; if (rw->readers == 0) cnd_signal(&rw->wcond); }
+	cnd_broadcast(&rw->rcond);
+	mtx_unlock(&rw->lock);
+	return 0;
+}
+int pthread_rwlock_tryrdlock(pthread_rwlock_t *rw) {
+	mtx_lock(&rw->lock);
+	if (rw->writer) { mtx_unlock(&rw->lock); return EBUSY; }
+	rw->readers++;
+	mtx_unlock(&rw->lock);
+	return 0;
+}
+int pthread_rwlock_trywrlock(pthread_rwlock_t *rw) {
+	mtx_lock(&rw->lock);
+	if (rw->readers || rw->writer) { mtx_unlock(&rw->lock); return EBUSY; }
+	rw->writer = 1;
+	mtx_unlock(&rw->lock);
+	return 0;
+}
+
+/* ---- barrier ---- */
+int
+pthread_barrier_init(pthread_barrier_t *b, const pthread_barrierattr_t *attr, unsigned count)
+{
+	(void)attr;
+	b->count = (int)count;
+	b->reached = 0;
+	mtx_init(&b->lock, mtx_plain);
+	cnd_init(&b->cond);
+	return 0;
+}
+int pthread_barrier_destroy(pthread_barrier_t *b) { (void)b; return 0; }
+int
+pthread_barrier_wait(pthread_barrier_t *b)
+{
+	mtx_lock(&b->lock);
+	b->reached++;
+	if (b->reached >= b->count) {
+		b->reached = 0;
+		cnd_broadcast(&b->cond);
+		mtx_unlock(&b->lock);
+		return 1; /* PTHREAD_BARRIER_SERIAL_THREAD */
+	}
+	cnd_wait(&b->cond, &b->lock);
+	mtx_unlock(&b->lock);
+	return 0;
+}
+
+/* ---- spinlock ---- */
+int pthread_spin_init(pthread_spinlock_t *sp, int pshared) { (void)pshared; *sp = 0; return 0; }
+int pthread_spin_destroy(pthread_spinlock_t *sp) { (void)sp; return 0; }
+int
+pthread_spin_lock(pthread_spinlock_t *sp)
+{
+	while (__sync_lock_test_and_set(sp, 1))
+		while (*sp) asm volatile("pause" ::: "memory");
+	return 0;
+}
+int
+pthread_spin_trylock(pthread_spinlock_t *sp)
+{
+	return __sync_lock_test_and_set(sp, 1) ? EBUSY : 0;
+}
+int
+pthread_spin_unlock(pthread_spinlock_t *sp)
+{
+	__sync_lock_release(sp);
+	return 0;
+}
+
+/* ---- cleanup handlers ---- */
+static struct pthread_cleanup_buffer *cleanup_stack;
+
+void
+_pthread_cleanup_push(struct pthread_cleanup_buffer *buf,
+                      void (*routine)(void *), void *arg)
+{
+	buf->routine = routine;
+	buf->arg = arg;
+	buf->prev = cleanup_stack;
+	cleanup_stack = buf;
+}
+
+void
+_pthread_cleanup_pop(struct pthread_cleanup_buffer *buf, int execute)
+{
+	cleanup_stack = buf->prev;
+	if (execute) buf->routine(buf->arg);
+}

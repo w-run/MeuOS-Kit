@@ -38,6 +38,44 @@ typedef tss_t pthread_key_t;
 #define PTHREAD_MUTEX_NORMAL       mtx_plain
 #define PTHREAD_MUTEX_RECURSIVE    mtx_recursive
 
+/* ---- rwlock ---- */
+typedef struct { int readers; int writer; mtx_t lock; cnd_t rcond; cnd_t wcond; } pthread_rwlock_t;
+typedef struct { int dummy; } pthread_rwlockattr_t;
+#define PTHREAD_RWLOCK_INITIALIZER {0, 0, mtx_plain_init, cnd_init_value, cnd_init_value}
+int pthread_rwlock_init(pthread_rwlock_t *, const pthread_rwlockattr_t *);
+int pthread_rwlock_destroy(pthread_rwlock_t *);
+int pthread_rwlock_rdlock(pthread_rwlock_t *);
+int pthread_rwlock_wrlock(pthread_rwlock_t *);
+int pthread_rwlock_unlock(pthread_rwlock_t *);
+int pthread_rwlock_tryrdlock(pthread_rwlock_t *);
+int pthread_rwlock_trywrlock(pthread_rwlock_t *);
+
+/* ---- barrier ---- */
+typedef struct { int count; int reached; mtx_t lock; cnd_t cond; } pthread_barrier_t;
+typedef struct { int dummy; } pthread_barrierattr_t;
+int pthread_barrier_init(pthread_barrier_t *, const pthread_barrierattr_t *, unsigned);
+int pthread_barrier_destroy(pthread_barrier_t *);
+int pthread_barrier_wait(pthread_barrier_t *);
+
+/* ---- spinlock ---- */
+typedef volatile int pthread_spinlock_t;
+int pthread_spin_init(pthread_spinlock_t *, int);
+int pthread_spin_destroy(pthread_spinlock_t *);
+int pthread_spin_lock(pthread_spinlock_t *);
+int pthread_spin_trylock(pthread_spinlock_t *);
+int pthread_spin_unlock(pthread_spinlock_t *);
+
+/* ---- cleanup handlers ---- */
+struct pthread_cleanup_buffer {
+	void (*routine)(void *);
+	void *arg;
+	struct pthread_cleanup_buffer *prev;
+};
+void _pthread_cleanup_push(struct pthread_cleanup_buffer *, void (*)(void *), void *);
+void _pthread_cleanup_pop(struct pthread_cleanup_buffer *, int);
+#define pthread_cleanup_push(r, a) do { struct pthread_cleanup_buffer _cupb; _pthread_cleanup_push(&_cupb, (r), (a));
+#define pthread_cleanup_pop(e) _pthread_cleanup_pop(&_cupb, (e)); } while (0)
+
 int pthread_create(pthread_t *, const pthread_attr_t *,
     void *(*)(void *), void *);
 int pthread_join(pthread_t, void **);
