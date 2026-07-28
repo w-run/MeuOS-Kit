@@ -50,6 +50,13 @@ static const char *arm_mcpu   = NULL;
 static const char *arm_mfpu   = "vfpv3-d16";
 static const char *arm_mfloat_abi = "hard";
 
+/* Global target features bitmask (MT_FEATURE_*), set by -march=native or
+ * -march=x86-64-vN. 0 = baseline only. Used by backend emit to gate ISA
+ * levels (second phase); for now it records the user's intent. */
+uint64_t g_target_features = 0;
+/* Set when -march=native is requested; resolved after target selection. */
+int g_march_native_requested = 0;
+
 /* Parse ARM architecture version from -march string (e.g., "armv7-a" -> 7) */
 static int arm_arch_from_march(const char *m) {
 	if (!m) return 7;
@@ -176,7 +183,34 @@ main(int argc, char *argv[])
 	}
 	if (a[1] == 'f') continue;   /* -fxxx feature flags */
 	if (a[1] == 'm') {           /* -march=, -mcpu=, -mfpu=, -mfloat-abi= */
-		if (strncmp(a, "-march=", 7) == 0) arm_march = a + 7;
+		if (strncmp(a, "-march=", 7) == 0) {
+			const char *march_val = a + 7;
+			if (strncmp(march_val, "arm", 3) == 0) {
+				/* ARM-specific march: pass through to ARM handler */
+				arm_march = march_val;
+			} else if (strcmp(march_val, "native") == 0) {
+				/* -march=native: detect host CPU features.
+				 * We can't call detect_cpu_features() here because
+				 * the target arch isn't known yet; defer to after
+				 * target selection. Store marker, process later. */
+				arm_march = "armv7-a";  /* safe fallback for ARM */
+				/* For x86_64/others, set native marker */
+				static const char *march_native_marker = "native";
+				(void)march_native_marker;
+				extern int g_march_native_requested;
+				g_march_native_requested = 1;
+			} else if (strncmp(march_val, "x86-64-v", 8) == 0 ||
+			           (march_val[0] == 'v' && march_val[1] >= '2')) {
+				/* -march=x86-64-vN: map to feature bitmask */
+				extern uint64_t march_x86_64_v_level(const char *);
+				g_target_features |= march_x86_64_v_level(march_val);
+			} else {
+				/* Unknown march for non-ARM arch: store as-is in
+				 * ARM variable to avoid silent ignore, but only
+				 * apply if arch is ARM later. */
+				arm_march = march_val;
+			}
+		}
 		else if (strncmp(a, "-mcpu=", 6) == 0) arm_mcpu = a + 6;
 		else if (strncmp(a, "-mfpu=", 6) == 0) arm_mfpu = a + 6;
 		else if (strcmp(a, "-mfloat-abi=soft") == 0) arm_mfloat_abi = "soft";
@@ -343,6 +377,21 @@ main(int argc, char *argv[])
 	/* ----- IR backend + frontend init ----- */
 	T = *pick_target(target);
 	T.pic = pic;
+
+	/* -march=native: now that we know the target architecture, detect
+	 * host CPU features and merge into g_target_features. */
+	if (g_march_native_requested) {
+		const char *arch = targ_name(target);
+		if (arch) {
+			uint64_t host = detect_cpu_features(arch);
+			g_target_features |= host;
+		}
+	}
+
+	/* Wire ISA feature bitmask into the target structure so emit/isel
+	 * stages can gate instructions on available CPU extensions. */
+	T.features = g_target_features;
+
 	targinit(targ_name(target));
 	/* IR's global `typ[]` table is normally populated by the text-IL
 	 * parser. mcc constructs IR directly, so no text IL is ever parsed -

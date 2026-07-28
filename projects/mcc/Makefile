@@ -26,7 +26,7 @@ AR      ?= ar
 # (unused params, sign compares, missing braces in designated initializers,
 # pointer casts, etc.). Phase 1a gate is functional correctness, not warning
 # hygiene. We revisit warnings once mcc can self-host.
-CFLAGS  ?= -O2 -g -std=gnu11 -Iinclude -I../meuos-sysroot/include -Wno-all
+CFLAGS  ?= -O2 -g -std=gnu11 -Iinclude -I../meuos-sysroot/include -I../meuos-toolchain/include -Wno-all
 LDFLAGS ?=
 LDLIBS  ?=
 

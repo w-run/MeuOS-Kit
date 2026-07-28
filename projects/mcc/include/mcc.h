@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 struct func;
 
@@ -342,6 +343,10 @@ noreturn void error(const struct location *, const char *, ...);
 void cc_warn(const struct location *, int, const char *, ...) __attribute__((format(printf, 3, 4)));
 extern int warn_level;
 extern bool warn_as_error;
+
+/* Target features bitmask (MT_FEATURE_*), set by -march=native or
+ * -march=x86-64-vN. 0 = baseline only. */
+extern uint64_t g_target_features;
 
 /* scan */
 

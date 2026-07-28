@@ -236,12 +236,12 @@ src/compat/
 | ID | 描述 | 优先 | 实施情况 |
 |----|------|------|---------|
 | target-features | **`Target.features` 设计**：在 Target 中添加 `uint64_t features` 位图 + `const char *features_desc[]`。定义架构无关的公共特性位和架构特有的特性位 | 🔴 高 | 🟢 `058c882`（`struct mt_target` 添加 `features` 字段 + `MT_FEATURE_*` 常量定义） |
-| march-generic | **`-march=` 解析通用化**：从仅 ARM 推广到全架构。x86_64 解析 `native`/`x86-64`/`x86-64-v2`/`v3`/`v4`；riscv64 解析 `rv64gc`/`rv64imafdc`；aarch64 解析 `armv8-a`/`armv8.2-a` 等 | 🔴 高 | 待实现 |
-| x86-isa-levels | **x86_64 ISA 级别门控**：实现 `-march=x86-64-v2`/`v3`/`v4` 代码生成差异。至少：v2 启用 SSE4.2+POPCNT，v3 启用 AVX2+BMI2，v4 启用 AVX-512 | 🔴 高 | 待实现 |
+| march-generic | **`-march=` 解析通用化**：从仅 ARM 推广到全架构。x86_64 解析 `native`/`x86-64`/`x86-64-v2`/`v3`/`v4`；riscv64 解析 `rv64gc`/`rv64imafdc`；aarch64 解析 `armv8-a`/`armv8.2-a` 等 | 🔴 高 | 🟢 cpu_detect.c（detect_cpu_features + march_x86_64_v_level + /proc/cpuinfo 回退）；main.c 通用 -march= 解析；g_target_features 全局位图 |
+| x86-isa-levels | **x86_64 ISA 级别门控**：实现 `-march=x86-64-v2`/`v3`/`v4` 代码生成差异。至少：v2 启用 SSE4.2+POPCNT，v3 启用 AVX2+BMI2，v4 启用 AVX-512 | 🔴 高 | 🟢 检测层完成（cpu_detect.c march_x86_64_v_level）；emit 层 ISA 门控待实现 |
 | riscv-extensions | **riscv64 扩展选择**：实现 `-march=rv64imafdc` 解析，根据扩展集发射指令。`-mabi=lp64d`/`lp64`/`ilp32d`/`ilp32` | 🟡 中 | 待实现 |
 | arm-multiver | **arm 多版本后端**：根据 `-march` 切换 ARMv6/v7/v8 指令选择器和发射器差异（Thumb/ARM 模式、DMB 变体等） | 🟡 中 | 待实现 |
 | aarch64-ext | **aarch64 架构扩展**：FEAT_FP16/FEAT_RDM/FEAT_JSCVT 等特性位与代码生成 | 🟢 低 | 待实现 |
-| march-native | **`-march=native`**：通过 CPUID（x86）或 `/proc/cpuinfo` 查询宿主机特性并设置 Target.features | 🟡 中 | 待实现 |
+| march-native | **`-march=native`**：通过 CPUID（x86）或 `/proc/cpuinfo` 查询宿主机特性并设置 Target.features | 🟡 中 | 🟢 cpu_detect.c（x86_64 CPUID 内联汇编 + xgetbv 验证 AVX、/proc/cpuinfo 跨架构回退），main.c 集成 |
 | as-isa-gating | **mt/as 指令门控**：编码器根据 insn 要求的特性位进行验证，不支持的指令报错而非默默生成 | 🟡 中 | 待实现 |
 | i386-variants | **i386 变体区分**：486/586/686 在 cmpxchg/CMPXCHG8B/FPU 存在性上的差异映射到特性位 | 🟢 低 | 待实现 |
 
@@ -707,6 +707,379 @@ readelf 已实现部分 DWARF 节区头解析。
 | self-rebuild | ✅ | ✅ | ✅ bug-riscv64-emit | ❌ bug-i386-tls | ✅ bug-loong64-emit | ❌ bug-arm-isel |
 | 动态链接 | ✅ ld.so 端到端验证通过（x86_64 PIE + .so） | 🔄 跨架构适配 | 🔄 跨架构适配 | 🔄 | 🔄 | 🔄 |
 | DWARF 调试信息 | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 mcc-dwarf+ld-dwarf-merge |
+
+---
+
+## 优先级 9（p9-ui — CLI/TUI 用户体验设计）
+
+> **核心理念：不做传家宝，做现代工具箱。**
+>
+> 我们不是在做"又一个 GNU 工具链"。没有人会感激我们再实现一遍 `-Wall -Wextra -Wpedantic` 这一坨历史遗物。
+> 每个工具的 CLI/TUI 都应该像 `bat`/`delta`/`ripgrep`/`htop`/`cargo` 那样——装完打开就觉得"这才对"。
+>
+> 参考的现代化工具精神：
+> - `bat` — 装好就好看（不需要 `--color=auto` 别名）
+> - `fd` — 命名直觉，默认行为合理（不需要 `-type f -name` 那套）
+> - `ripgrep` — 快、彩色、默认递归、智能忽略 `.gitignore`
+> - `delta` — 语法高亮、行内 diff，一眼看出改动点
+> - `htop` / `btm` — TUI 交互式浏览，鼠标支持，树形视图
+> - `cargo` / `go build` — 零参数构建，输出干净
+> - `fzf` — 模糊搜索即交互方式
+
+### 传家宝 vs 现代化——对照表
+
+| 维度 | 传家宝（GNU 那套） | 现代化（我们要做的） |
+|------|-------------------|-------------------|
+| 默认输出 | 灰底白字，啥也看不清 | 彩色+符号+高亮，开箱即美 |
+| 错误消息 | "undefined reference to `foo'" | "符号 foo 未定义。你是否想要：`bar`? (来自 baz.o)" |
+| 选项命名 | `-Wall -Wextra -Wpedantic`（为什么叫 wall??） | `--warn=all` / `--warn=style` / `--warn=portable` |
+| 配置流程 | `./configure && make && make install`（背口诀） | `meow build`（零参数，一步到位） |
+| 输出格式 | 纯文本，想解析得写正则 | `--json` 是一等公民，不是事后追加 |
+| 跨工具统一 | tar 用 `-xvf`，ps 用 `aux`，各说各话 | 所有工具统一 `--json`/`--quiet`/`--verbose`/`--no-color` |
+| 帮助文档 | `man` 手册像本小说 | `--help` 三行示例解决 80% 需求，`--explain` 才有细节 |
+| 交互方式 | 退出终端用别的工具再看 | TUI 内置：搜索/过滤/展开/折叠/导出 |
+| 汉语支持 | 想都别想 | `--帮助` / `--版本` / `--详细`，不强制记英文 |
+
+### 明确不做的"传家宝"行为
+
+| 不做 | 因为 |
+|------|------|
+| ❌ 不支持 `-Wall` / `-Wextra` / `-Wpedantic` | 这些命名毫无语义，用 `--warn=` |
+| ❌ 不支持 `.ld` 链接脚本 | 那是 GNU ld 的历史格式，用 meow YAML 配方 |
+| ❌ 不做 `info` 页面 | GNU info 是上古排版系统，用 `--help` + `--explain` |
+| ❌ 不做 `./configure && make && make install` | 那是 autoconf 时代的痛，meow 一步搞定 |
+| ❌ 不做 gcc 风格的 `-O0 -O1 -O2 -O3 -Os -Ofast` | 简化：`-O0` / `-O1` / `-O2` / `-Os`，不搞 `-Ofast` 这种危险项 |
+| ❌ 不做 gcc 风格的 `-Wno-*` 关闭单个警告 | `--warn=all` 默认开启但可分组管理，不需要逐个关 |
+| ❌ 不支持环境变量 `CFLAGS` / `LDFLAGS` 作为唯一配置方式 | 那是 make 时代的残渣，用 meow.yaml 声明式配置 |
+| ❌ 不把 stdout 和 stderr 混在一起 | 正常输出走 stdout，错误/警告走 stderr，`--json` 走 stdout |
+| ❌ 不让用户背 `-xvf` / `-ajf` 这种字母迷宫 | 长选项名清晰自明，如 `--extract` / `--compress` |
+| ❌ 不做 `size` / `strings` / `addr2line` / `ldd` / `nm` / `readelf` 各一个工具 | 一个 `mt-info` 统一切入点，子命令区分 |
+| ❌ 不支持 `--help` 输出 200 行 | 短版三行示例，详细版 `--help=all` |
+
+### 应用场景 vs 命令设计
+
+不从"工具有什么选项"出发，从"用户想干什么"出发：
+
+| 用户场景 | 传家宝做法 | 现代化做法 |
+|---------|----------|----------|
+| 我想编译这个项目 | `./configure && make -j4 && sudo make install` | `meow build` |
+| 我想看看这个二进制是什么 | `file foo; readelf -h foo; nm foo \| head` | `mt info foo` |
+| 这个二进制依赖谁 | `ldd foo`（不一定装了） | `mt deps foo` |
+| 我写的代码哪里有问题 | 看 gcc 的错误输出，翻到对应行 | `mcc -c test.c` 输出彩色错误，带 caret 标记 |
+| 这个警告是什么意思 | 退出编辑器，`man` 搜半天 | `mcc --explain W004` |
+| 两个 ELF 有什么不同 | `objdump -d a.out > /tmp/a; diff /tmp/a /tmp/b` | `mt diff old.elf new.elf` |
+| 我的构建环境是怎样的 | `gcc --version; ls /usr/include` | `meow env`（neofetch 风格一览） |
+| 这个函数在哪个库里 | `nm -o /usr/lib/*.a 2>/dev/null \| grep foo` | `mt which foo` → `libfoo.a:bar.o` |
+
+### 逐组件设计
+
+#### meow（构建系统）— 对标 cargo/go build
+
+```
+meow build                    # 零参数构建。自动检测一切。
+meow build --target=aarch64   # 交叉编译（架构自动映射 ABIs）
+meow env                      # neofetch 风格：编译器/架构/头文件/库路径
+meow lint                     # 配方检查，颜色标记问题
+meow deps                     # 依赖树（TUI 交互式：展开/折叠/搜索）
+meow graph                    # mermaid/DOT 依赖图
+meow info                     # 包详情：配方/版本/依赖/安装路径
+```
+
+输出体验：
+- **默认**（`--quiet`）：彩色进度条 `[▓▓▓▓░░░░] 45% (12/27)` + 编译计数 + 时间估计，失败红高亮
+- **`--verbose`**：展开完整编译命令，可点击的文件路径
+- **`--json`**：结构化事件流（`{"event":"compile_start","file":"foo.c"}`），供 TUI/IDE 消费
+- **不输出的东西**：`make` 那种 `Entering directory /foo/bar` 的噪音
+- **管道检测**：stdout 不是终端时自动 `--json`
+
+```
+# 使用示例
+$ meow build
+  [▓▓▓▓▓▓▓░░░░░] 64% (16/25) · 估计剩余 12s · 编译 zlib/src/deflate.c
+  ✔ 构建成功 (25 文件, 3.2s)
+
+$ meow build bzip2 --target=riscv64
+  [▓▓▓▓▓▓▓▓▓▓▓▓] 100% (8/8) · 构建 bzip2 (riscv64)
+  ✔ 安装到 $MEUOS_SYSROOT/usr
+
+$ meow env
+  meow v0.4.0
+  编译器: mcc 0.4.0 (x86_64-meuos-linux)
+  架构:   x86_64 (宿主) → x86_64-meuos-linux
+  sysroot: /home/user/MeuOS-Kit/sysroot (完整)
+  头文件:  /usr/include (1245 个)
+  库:      libc-meuos.a + libc-meuos-compat.a
+  工具链:  mt/as + mt/ld (零宿主依赖)
+```
+
+**文件**: `projects/meow/src/main.c` + 输出格式化相关文件
+
+**验收**: `meow build` 显示彩色进度条，`meow env` 显示环境一览
+
+#### mt-info（统一二进制分析工具）— 对标 bat/htop
+
+取代 9 个碎片工具：`size`/`strings`/`addr2line`/`ldd`/`nm`/`readelf`/`objdump`/`strip`/`objcopy`。
+
+不是"又一个 objdump"，而是 **"ELF 文件的一站式 TUI"**。
+
+```
+# CLI 子命令
+mt info foo.elf              # 信息卡：类型/架构/入口/节区/符号/依赖，一眼看完
+mt inspect foo.elf           # TUI 交互式浏览（见下方设计）
+mt deps foo.elf              # 递归 DT_NEEDED 依赖树（彩色，符号链接可跟随）
+mt diff a.elf b.elf          # 语义 diff：节区大小变化、符号增减、重定位差异
+mt strings foo.elf           # 智能字符串提取（去重、过滤 ASCII 噪音）
+mt headers foo.elf           # 快速 ELF/节区头查看（取代 readelf -h/-S 的 80% 用途）
+mt which foo                 # 搜索符号：哪个库里定义了 foo？
+```
+
+TUI（`mt inspect`）设计：
+
+```
+┌─── ELF: /usr/bin/ls ───────────────────── x86_64 · 142KB · PIE ───┐
+│                                                                      │
+│  ┌──────────┐  ┌────────────────────────────────────────────────┐   │
+│  │ 📐 节区   │  │ 节区名称        类型        地址        大小   │   │
+│  │ 📊 符号   │  │ .text          PROGBITS   0x1020    28168    │   │
+│  │ 🔗 重定位 │  │ .rodata        PROGBITS   0x8E20     5432    │   │
+│  │ 📦 依赖   │  │ .data          PROGBITS   0xA452      824    │   │
+│  │ 🔤 字符串  │  │ .bss           NOBITS     0xA7E0     4096    │   │
+│  │           │  │ .dynsym        DYNSYM     0xC000     1536    │   │
+│  │           │  │ .dynamic       DYNAMIC    0xC600      512    │   │
+│  │           │  │                                              │   │
+│  │           │  │ [Tab 切换面板  / 搜索  ↑↓ 滚动  Enter 详情]  │   │
+│  └──────────┘  └────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+交互：
+- **←→** 切换面板（节区/符号/重定位/依赖/字符串）
+- **↑↓** / **PgUp/PgDn** 滚动内容
+- **/** 搜索过滤（fzf 风格模糊匹配，实时高亮）
+- **Enter** 展开选中项详情
+- **Tab** 在面板列表和内容区之间切换焦点
+- **q** / **Ctrl+C** 退出
+- **鼠标**：可点击面板标签、滚动内容
+
+**关键设计决策**：
+- 调用现有 `libelf` 共享库，不重新实现 ELF 解析
+- TUI 先用 ANSI escape + stdin raw mode 实现（零外部依赖），未来可升级到 termbox
+- `mt diff` 输出格式对标 `delta`：语法高亮、行内差异标注、上下文行
+
+**文件**: `projects/meuos-toolchain/src/mt-info/`（新建目录）
+
+**验收**: `mt info /bin/ls` 显示彩色信息卡；`mt inspect /bin/ls` 进入 TUI 可浏览
+
+#### mcc（编译器）— 对标 rustc 的诊断质量
+
+**警告体系**（不叫 -Wall）：
+
+```
+--warn=all                  # 全部警告（不是 GCC 的 -Wall -Wextra 历史边界，我们重新定义）
+--warn=portable             # 可移植性（类型大小/字节序/对齐假设）
+--warn=style                # 代码风格（未使用变量/隐式转换/命名约定）
+--warn=performance          # 性能提示（不必要的拷贝/冗余计算）
+--warn=pedantic             # ISO 严格合规（比 all 更严）
+```
+
+**错误输出**（rustc 级别）：
+
+```
+$ mcc -c bug.c
+  ╭─ bug.c:24:7 ────────────────────────────────────── [E003] ─╮
+  │                                                             │
+  │   fn foo(void) {                                            │
+  │       int x = "hello";  /* 类型不匹配 */                      │
+  │       ~~~~~~~~^~~~~~~~                                      │
+  │                    ╰── 期望 int，得到 const char*            │
+  │                                                             │
+  │   💡 提示：字符串字面量不能赋值给 int。你可能是想用 'h'?      │
+  │   💡 帮助：mcc --explain E003                               │
+  ╰─────────────────────────────────────────────────────────────╯
+```
+
+**诊断特性**：
+- 错误带代码（`E003`），可用 `mcc --explain E003` 查看完整说明
+- 同类错误折叠：1 个错误折叠显示 `× 3 个类似错误（--verbose 展开）`
+- 进度指示器：大文件编译时底部显示 `[▓▓▓▓░░] 55% 解析中...`
+- 管道检测：stderr 输出到文件时自动去颜色、去折叠
+
+**文件**: `projects/mcc/src/parse/`（诊断输出）+ `projects/mcc/src/driver/`（--warn 解析）
+
+**验收**: `mcc --warn=all -c bug.c` 显示彩色分组错误
+
+#### mt/as — 汇编可视化
+
+```
+as --debug foo.s            # 逐指令显示：汇编源码 → 机器码 → 字节
+as --stats foo.s            # 统计：指令数/伪指令数/各节区大小/重定位数
+```
+
+`--debug` 输出示例：
+```
+$ as --debug foo.s
+  .text
+  00:  mov x0, #42        →  d2800540    (4 字节)
+  04:  mov x1, #1         →  d2800021    (4 字节)
+  08:  svc #0             →  d4000001    (4 字节)
+  0c:  ret                →  d65f03c0    (4 字节)
+  ────────────────────────────────────────────
+  总计: 4 条指令 · 16 字节 · 无重定位
+```
+
+#### mt/ld — 链接器诊断
+
+```
+ld --why=foo               # "符号 foo 来自 bar.o (libsomething.a)"
+ld --stat                  # 总大小/各节区大小 TOP5/符号数/重定位数
+ld --map-tui               # TUI 链接映射（交互式查看节区布局和地址分配）
+```
+
+`--why` 示例：
+```
+$ ld --why=printf
+  printf 被链接的原因链:
+    main.o 引用了 printf
+    → main.o 来自 app.elf 的输入文件
+    → 定义在 /usr/lib/libc-meuos.a(stdio/printf.o)
+```
+
+`--map-tui` TUI 模式复用 `mt inspect` 的框架。
+
+#### msysctl — CLI 升级
+
+```
+msysctl tree                # 树形内容（彩色，目录折叠）
+msysctl info                # .msys 信息卡（类型/大小/校验/签名/层叠关系）
+msysctl diff                # 两个 .msys 差异（格式对照 delta）
+msysctl --json              # 所有命令支持 JSON
+msysctl fzf                 # 已有交互式浏览器，升级彩色
+```
+
+### 跨工具一致性约定（非协商）
+
+以下约定**所有工具必须遵守**，不搞各说各话：
+
+| 约定 | 要求 |
+|------|------|
+| `--json` | 所有工具必须支持 JSON 输出，**不是事后追加的**，是一等公民输出格式 |
+| `--quiet` / `--verbose` / `--debug` | 三级输出控制，所有工具统一语义和退出码 |
+| 管道检测 | stdout 非终端时自动 `--json`（除非显式 `--no-color`），stderr 非终端时去颜色 |
+| 退出码 | `0`=成功, `1`=一般错误, `2`=用法错误（严格遵循 sysexits.h） |
+| `--help` | 前三行是示例（覆盖 80% 使用场景），然后是选项表，不 dump 200 行 |
+| `--version` | `工具名 v版本 (架构/操作系统)`，不输出 GPL 版权声明那种长文 |
+| 颜色语义 | 红=错误, 黄=警告, 青=信息, 绿=成功, 灰=次要信息。全局统一，不各自定义 |
+| 颜色方案 | 默认适配暗色终端；持 `NO_COLOR` 环境变量标准 |
+| 命名风格 | 长选项一律 `--单词`（不用 `-Wl,` 这种缩写体操） |
+
+### 工具联动体验
+
+> 单个工具的界面好看只是第一步。真正的好体验是工具之间"知道彼此存在"，配合无感。
+
+#### 1. 共享环境上下文
+
+所有工具共享同一套环境检测，不各自查一遍：
+
+```
+# 任何工具启动时自动检测（不重复）
+MEUOS_SYSROOT  →  sysroot 路径和完整性
+宿主编译器      →  mcc > gcc > tcc，版本检测
+交叉工具链      →  aarch64/riscv64/loongarch64 是否可用
+当前架构        →  宿主 + 目标架构（--target 覆盖）
+mt 工具链       →  MT_AS/MT_LD 是否就绪
+```
+
+实现方式：`libmeuosenv.so` 或统一的 `meuos_env.h`，所有工具链接同一个检测逻辑。
+生命周期内只检测一次，结果缓存。
+
+#### 2. meow 自动集成诊断
+
+```
+$ meow build
+  [▓▓▓▓▓▓▓▓▓▓▓▓] 100% (25/25)
+  ✘ 链接失败: 未定义符号 'compress2'
+
+  ╭─ 自动诊断 ──────────────────────────────────────────────╮
+  │  mt ld --why=compress2                                   │
+  │  → 符号 compress2 被 main.o 引用                         │
+  │  → 定义在 libz.a(compress.o) —— 但未链接 (-lz)            │
+  │                                                          │
+  │  💡 建议：在 meow.yaml 中添加 libraries: ["z"]           │
+  ╰──────────────────────────────────────────────────────────╯
+```
+
+**meow 在链接失败时自动调用 `ld --why` 获取解释**，而不是丢给用户一行冰冷链接器错误。
+
+#### 3. 编译 → 分析 → 诊断闭环
+
+```
+$ mcc -c foo.c --error-json | mt-analyze --suggest
+  # mt-analyze 接收 JSON 错误流，分析模式并提供修复建议
+
+$ mt info build/out.elf --warn
+  # 自动检查产物问题：未剥离调试符号、可执行栈、缺失 RELRO
+  # 这些本该是链接器警告的，但 mt-info 可以在 post-build 阶段检查
+```
+
+#### 4. 统一管道协议
+
+工具之间通过结构化数据（JSON lines）通信，不靠解析文本来传参：
+
+```
+# 编译错误 → 分析器 → 格式化输出
+mcc -c foo.c --error-json | mcc-diag-format | less -R
+
+# 依赖分析 → 可视化
+mt deps app.elf --json | meow graph --format=mermaid
+
+# 构建 → 验证 → 报告
+meow build --json | mt info --stdin-elf --json | meow report
+```
+
+#### 5. meow 后置检查钩子
+
+构建完成后自动跑验证：
+
+```yaml
+# meow.yaml
+build:
+  post_check:
+    - "mt info build/app.elf --warn"          # 检查 ELF 安全性
+    - "mt deps build/app.elf --no-unused"     # 检查未使用的依赖
+    - "mt diff build/app.elf previous.elf"    # 与上次构建对比
+```
+
+这些检查的输出集成到 meow 的彩色报告里，不是单独冒出一个工具的输出。
+
+#### 6. "一步到位"的典型工作流
+
+| 想做的事 | 传家宝做法 | 联动做法 |
+|---------|----------|---------|
+| 改代码 → 构建 → 验证 | `vim foo.c` → `make` → `readelf -h a.out \| head` | `mcc foo.c` → 自动 `mt info` 验证产物 |
+| 发现 bug → 追溯源码 | 看崩溃地址 → `addr2line` → 手动翻代码 | `mt addr 0x4023 app.elf` 自动关联源码行 |
+| 构建失败 → 找原因 | 看输出 → 猜 → 可能再跑一遍 | meow 自动调 `ld --why` 解释 |
+| 包依赖 → 查出谁引用了谁 | `nm -o *.a \| grep` 猜 | `mt which foo` → 来源库 + 来源目标文件 + 引用链 |
+| 要交叉编译 → 配环境 | 搜交叉工具链 → 设环境变量 → 祈祷 | `meow build --target=aarch64` 自动配好一切 |
+
+### 子任务
+
+| ID | 组件 | 描述 | 优先 | 实施情况 |
+|----|------|------|------|---------|
+| meow-cli | meow | 彩色进度条/分层输出/--json/meow env TUI 概览 | 🟡 中 | 🟢 `83d395d`（color.c/env.c + main.c/graph.c/exec.c 修改） |
+| mt-info | meuos-toolchain | 统一 ELF 分析工具（info/inspect/deps/diff/strings/which 子命令），含 TUI 交互模式 | 🟡 中 | 待设计 |
+| mcc-diag-output | mcc | 彩色错误输出/自定义 --warn 体系/--error-json/--explain | 🟢 低 | 待设计 |
+| as-debug-output | mt/as | --debug 逐指令可视化/--stats | 🟢 低 | 待设计 |
+| ld-tui-map | mt/ld | --map-tui TUI 链接映射/--why 符号溯源 | 🟢 低 | 待设计 |
+| msysctl-upgrade | meuos-sysroot | tree/diff/--json 升级 | 🟢 低 | 待设计 |
+| tool-integration | 跨组件 | 共享环境上下文（libmeuosenv/meuos_env.h） | 🟡 中 | 待设计 |
+| meow-auto-diag | meow+ld | 构建失败时自动调用 ld --why 诊断 | 🟢 低 | 待设计 |
+| post-check-hooks | meow | meow.yaml post_check 钩子 + mt-info 集成 | 🟢 低 | 待设计 |
+| json-pipeline | 跨组件 | 统一 JSON lines 管道协议，工具可管道串接 | 🟢 低 | 待设计 |
+| mt-info | meuos-toolchain | 统一 ELF 分析工具（info/inspect/deps/diff/strings/which 子命令），含 TUI 交互模式 | 🟡 中 | 待设计 |
+| mcc-diag-output | mcc | 彩色错误输出/自定义 --warn 体系/--error-json/--explain | 🟢 低 | 待设计 |
+| as-debug-output | mt/as | --debug 逐指令可视化/--stats | 🟢 低 | 待设计 |
+| ld-tui-map | mt/ld | --map-tui TUI 链接映射/--why 符号溯源 | 🟢 低 | 待设计 |
+| msysctl-upgrade | meuos-sysroot | tree/diff/--json 升级 | 🟢 低 | 待设计 |
 
 ---
 
