@@ -64,11 +64,16 @@ OBJDUMP_SRCS := $(sort $(wildcard src/objdump/*.c))
 OBJDUMP_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(OBJDUMP_SRCS))
 OBJDUMP_BIN := $(BUILD)/bin/objdump
 
+RTLD_SRCS := $(sort $(wildcard src/rtld/*.c))
+RTLD_ASM_SRCS := $(sort $(wildcard src/rtld/x86_64/*.S))
+RTLD_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(RTLD_SRCS)) $(patsubst %.S,$(BUILD)/%.o,$(RTLD_ASM_SRCS))
+RTLD_BIN := $(BUILD)/bin/ld.so
+
 ELF_PROBE := $(BUILD)/test/elf_probe
 TEST_FIXTURE_OBJ := $(BUILD)/test/hello.o
 TEST_ARCHIVE := $(BUILD)/test/libhello.a
 TEST_EXEC := $(BUILD)/test/hello.exec
-DEPS := $(LIBELF_OBJS:.o=.d) $(LIBDISASM_OBJS:.o=.d) $(AR_OBJS:.o=.d) $(AS_OBJS:.o=.d) $(LD_OBJS:.o=.d) $(RANLIB_OBJS:.o=.d) $(NM_OBJS:.o=.d) $(READELF_OBJS:.o=.d) $(STRIP_OBJS:.o=.d) $(OBJCOPY_OBJS:.o=.d) $(OBJDUMP_OBJS:.o=.d) $(TARGET_OBJS:.o=.d) $(ELF_PROBE).d
+DEPS := $(LIBELF_OBJS:.o=.d) $(LIBDISASM_OBJS:.o=.d) $(AR_OBJS:.o=.d) $(AS_OBJS:.o=.d) $(LD_OBJS:.o=.d) $(RANLIB_OBJS:.o=.d) $(NM_OBJS:.o=.d) $(READELF_OBJS:.o=.d) $(STRIP_OBJS:.o=.d) $(OBJCOPY_OBJS:.o=.d) $(OBJDUMP_OBJS:.o=.d) $(TARGET_OBJS:.o=.d) $(RTLD_OBJS:.o=.d) $(ELF_PROBE).d
 
 all: $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(STRIP_BIN) $(OBJCOPY_BIN) $(OBJDUMP_BIN)
 
@@ -115,6 +120,20 @@ $(OBJCOPY_BIN): $(OBJCOPY_OBJS) $(LIBELF_LIB)
 $(OBJDUMP_BIN): $(OBJDUMP_OBJS) $(LIBELF_LIB) $(LIBDISASM_LIB)
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(LDFLAGS) -o $@ $(OBJDUMP_OBJS) $(LIBELF_LIB) $(LIBDISASM_LIB) $(LDLIBS)
+
+# ld.so: dynamic linker — no libc, static build with custom entry
+RTLD_CFLAGS := -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -ffreestanding -fno-builtin -D_POSIX_C_SOURCE=200809L -MMD -MP
+$(BUILD)/src/rtld/%.o: CPPFLAGS += -Iinclude -I../meuos-sysroot/include
+$(BUILD)/src/rtld/%.o: CFLAGS := $(RTLD_CFLAGS)
+
+# .S -> .o (assembly for arch-specific startup)
+$(BUILD)/src/rtld/x86_64/dlstart.o: src/rtld/x86_64/dlstart.S
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -c -o $@ $<
+
+$(RTLD_BIN): $(RTLD_OBJS)
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -nostdlib -static -fno-pie -no-pie -e _dlstart $(LDFLAGS) -o $@ $(RTLD_OBJS) $(LDLIBS)
 
 $(ELF_PROBE): test/elf_probe.c $(LIBELF_LIB)
 	@mkdir -p $(dir $@)
