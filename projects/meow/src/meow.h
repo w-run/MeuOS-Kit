@@ -108,6 +108,7 @@ int probe_add_function(const char *name);
 int probe_add_code(const char *name, const char *code);
 int probe_add_decl(const char *name);
 int probe_add_library(const char *name);
+int probe_add_typesize(const char *name, const char *type_name);
 int probe_set_cc(const char *cc);
 int probe_set_cflags(const char *cflags);
 int probe_set_config(const char *name);

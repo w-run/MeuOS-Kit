@@ -248,7 +248,7 @@ add_command(struct target *target, char *command)
 int
 parse_recipe(char *data)
 {
-	enum { ROOT, PROBE, PROBE_HEADERS, PROBE_FUNCS, PROBE_CODES, PROBE_DECLS, VARIABLES, TARGETS, COMMANDS } section = ROOT;
+	enum { ROOT, PROBE, PROBE_HEADERS, PROBE_FUNCS, PROBE_CODES, PROBE_DECLS, PROBE_LIBS, PROBE_TYPESIZES, VARIABLES, TARGETS, COMMANDS } section = ROOT;
 	struct target *current = 0;
 	int probe_section = 0;  /* 0=none, 1=keyval, 2=list */
 	char *line = data;
@@ -283,7 +283,7 @@ parse_recipe(char *data)
 				section = TARGETS;
 			else if (strncmp(text, "default:", 8) == 0)
 				default_target = trim(text + 8);
-		} else if ((section == PROBE || section == PROBE_HEADERS || section == PROBE_FUNCS || section == PROBE_CODES || section == PROBE_DECLS) && indent == 2) {
+		} else if ((section == PROBE || section == PROBE_HEADERS || section == PROBE_FUNCS || section == PROBE_CODES || section == PROBE_DECLS || section == PROBE_LIBS || section == PROBE_TYPESIZES) && indent == 2) {
 			section = PROBE;
 			if (strcmp(text, "headers:") == 0) {
 				section = PROBE_HEADERS;
@@ -293,6 +293,8 @@ parse_recipe(char *data)
 				section = PROBE_CODES;
 			} else if (strcmp(text, "decls:") == 0) {
 				section = PROBE_DECLS;
+			} else if (strcmp(text, "typesizes:") == 0) {
+				section = PROBE_TYPESIZES;
 			} else {
 				/* key: value pairs */
 				char *colon = strchr(text, ':');
@@ -330,6 +332,15 @@ parse_recipe(char *data)
 				codeval++;
 			}
 			probe_add_code(codename, codeval);
+		} else if ((section == PROBE_TYPESIZES) && indent == 4 && *text == '-') {
+			/* typesizes: "- NAME: type_name" single-line format */
+			char *cp = trim(text + 1);
+			char *colon = strchr(cp, ':');
+			if (!colon) return -1;
+			*colon = 0;
+			char *tsname = trim(cp);
+			char *tstype = trim(colon + 1);
+			probe_add_typesize(tsname, tstype);
 		} else if (section == PROBE && indent > 2) {
 			/* skip unknown sub-items */
 		} else if (section == VARIABLES && indent == 2) {
