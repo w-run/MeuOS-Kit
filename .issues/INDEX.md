@@ -79,134 +79,134 @@ src/compat/
 
 ## 关键路径（p0-blockers）
 
-| ID | 组件 | 架构 | 描述 | 状态 |
-|----|------|------|------|------|
-| bug-riscv64-emit | mcc backend | riscv64 | `riscv64_emit.c:664 assert(isreg(rb))` — emit 条件分支 slot/const 未 reg 降级 | 🟢 |
-| bug-loong64-emit | mcc backend | loongarch64 | `loongarch64_emit.c:514 assert(isreg(rb))` — 同上模式 | 🟢 |
-| bug-arm-isel | mcc backend | arm | `arm_isel.c: slot %(null) is read but never stored to` — IR 诊断阻塞 self-rebuild | 🟢 |
-| bug-i386-tls | mcc isel/sema | i386 | TLS 模型选择：非静态 `_Thread_local` 发出 IE(`@gotntpoff`) 而非 LE(`@ntpoff`) | 🟢 |
-| bug-loong64-tls-reloc | mt/ld | loongarch64 | TLS LE 重定位 `.tdata` 初始值损坏（`2a000000` → `20c30000`） | 🔴 |
-| bug-loong64-tls-errno | meuos-libc | loongarch64 | TLS errno 回退到 `static int`（非线程安全 fallback） | 🔴 |
+| ID | 组件 | 架构 | 描述 | 状态 | 实施情况 |
+|----|------|------|------|------|---------|
+| bug-riscv64-emit | mcc backend | riscv64 | `riscv64_emit.c:664 assert(isreg(rb))` — emit 条件分支 slot/const 未 reg 降级 | 🟢 | `636f143` + `f6748e9` |
+| bug-loong64-emit | mcc backend | loongarch64 | `loongarch64_emit.c:514 assert(isreg(rb))` — 同上模式 | 🟢 | `636f143` + `f6748e9` |
+| bug-arm-isel | mcc backend | arm | `arm_isel.c: slot %(null) IR 诊断阻塞 self-rebuild` | 🟢 | `f6748e9` |
+| bug-i386-tls | mcc isel/sema | i386 | TLS 模型选择：非静态 `_Thread_local` 发出 IE 而非 LE | 🟢 | `833c9b3` |
+| bug-loong64-tls-reloc | mt/ld | loongarch64 | TLS LE 重定位 `.tdata` 初始值损坏 | 🔴 | `253de83` 部分分析，需 loongarch64 环境调试 |
+| bug-loong64-tls-errno | meuos-libc | loongarch64 | TLS errno 回退到 `static int`（非线程安全） | 🔴 | 阻塞于 bug-loong64-tls-reloc |
 
 ## 优先级 1（P1-core — 功能完善，需要实现）
 
-| ID | 组件 | 项目 | 描述 | 状态 |
-|----|------|------|------|------|
-| meow-dag-dedup | meow | DAG 去重 | `-jN` 并行构建时间接依赖重复执行（`.todo/dag-dedup.md`） | 🟢 |
-| mcc-atomic-voidptr | mcc sema | `_Atomic int*` → `void*` | C 6.3.2.3p1 限定对象指针应可转 `void*`（chibicc 测试报） | 🟢 |
-| mcc-riscv64-qemu | mcc | riscv64 qemu 门禁 | 完整 qemu 运行时门禁（当前仅 exit=42） | ⏳ |
-| mcc-loong64-qemu | mcc+libc | loongarch64 qemu 门禁 | 完整 qemu 运行时门禁（当前仅 exit=42） | ⏳ |
-| mcc-i386-tls-e2e | mcc+libc | i386 TLS e2e | bug-i386-tls 修复后的 TLS 端到端验证 | ⏳ |
-| mcc-i386-tls-doc | mcc(i386) | `gd-tls.md` 文档 | 被 3 个文件引用但文件不存在 | 🟢 |
-| ld-shared | mt/ld | `-shared` 输出 `ET_DYN` | 🟡 ET_DYN 输出 + PHDR/DYNAMIC 框架完成。待填充：dynsym/dynstr/hash/dynamic 数据 |
-| ld-pie | mt/ld | `--pie`/`--no-pie` 支持 | PIE 二进制输出（`ET_DYN` + `PT_INTERP` + 相对重定位） | ⏳ |
-| mcc-pic-verify | mcc | PIC 代码生成加固 | 全架构验证 `-fPIC` 输出（GOT/PLT/TLS GD 路径） | ⏳ |
-| mcc-shared-mt | mcc driver | `-shared` mt/ld 集成 | 去掉 `-shared` 回退到 host cc 的限制 | ⏳ |
-| ld-so | 新建 | ld.so 动态链接器 | ELF 加载、DT_NEEDED 图遍历、符号解析、重定位应用、延迟绑定、TLS init | ⏳ |
-| libc-dl | meuos-libc | `dlfcn.h` + `dl*` 实现 | `dlopen`/`dlsym`/`dlclose`/`dlerror` | ⏳ |
-| mcc-dwarf | mcc | DWARF 调试信息 | `-g` 生成 DWARF v5（`.debug_info`/`.abbrev`/`.line`/`.str`/`.loc`/`.ranges`），包含行号、变量、类型信息 | ⏳ |
-| as-dwarf | mt/as | DWARF 汇编伪指令 | `.loc`/`.file`/`.cfi_*` 支持 — **阻塞 mcc-dwarf**，无此 as 无法处理 `-g` 输出 | 🔴 |
-| ld-dwarf-merge | mt/ld | DWARF 节区合并 | 链接时合并 `.debug_*` 节区，生成 `.debug_line`/`.debug_info` 跨目标文件 | ⏳ |
-| ld-build-id | mt/ld | `--build-id` | 生成 `.note.gnu.build-id`（SHA1 note，用于调试/构建标识） | ⏳ |
-| ld-eh-frame-hdr | mt/ld | `--eh-frame-hdr` | 生成 `.eh_frame_hdr`（异常处理帧索引，gcc 异常必需） | ⏳ |
-| ld-as-needed | mt/ld | `--as-needed` / `--no-as-needed` | 避免不必要的 DT_NEEDED 条目 | ⏳ |
-| ld-start-group | mt/ld | `--start-group` / `--end-group` | 循环依赖库解析（`-Wl,--start-group -la -lb -lc --end-group`） | ⏳ |
-| ld-whole-archive | mt/ld | `--whole-archive` / `--no-whole-archive` | 强制归档中所有目标文件链接（用于 plugin/init 段） | ⏳ |
+| ID | 组件 | 项目 | 描述 | 状态 | 实施情况 |
+|----|------|------|------|------|---------|
+| meow-dag-dedup | meow | DAG 去重 | `-jN` 并行构建时间接依赖重复执行（`.todo/dag-dedup.md`） | 🟢 | `9c20ae2` |
+| mcc-atomic-voidptr | mcc sema | `_Atomic int*` → `void*` | C 6.3.2.3p1 限定对象指针应可转 `void*`（chibicc 测试报） | 🟢 | `03e8618` 验证通过 |
+| mcc-riscv64-qemu | mcc | riscv64 qemu 门禁 | 完整 qemu 运行时门禁（当前仅 exit=42） | ⏳ | 待实现 |
+| mcc-loong64-qemu | mcc+libc | loongarch64 qemu 门禁 | 完整 qemu 运行时门禁（当前仅 exit=42） | ⏳ | 待实现 |
+| mcc-i386-tls-e2e | mcc+libc | i386 TLS e2e | bug-i386-tls 修复后的 TLS 端到端验证 | ⏳ | 待实现 |
+| mcc-i386-tls-doc | mcc(i386) | `gd-tls.md` 文档 | 被 3 个文件引用但文件不存在 | 🟢 | `03e8618` |
+| ld-shared | mt/ld | `-shared` 输出 `ET_DYN` | 🟡 ET_DYN 输出 + PHDR/DYNAMIC 框架完成。待填充：dynsym/dynstr/hash/dynamic 数据 | `53aec7c` + `2e29bef` 框架；ld-shared-dynsym 进行中 |
+| ld-pie | mt/ld | `--pie`/`--no-pie` 支持 | PIE 二进制输出（`ET_DYN` + `PT_INTERP` + 相对重定位） | ⏳ | 待实现 |
+| mcc-pic-verify | mcc | PIC 代码生成加固 | 全架构验证 `-fPIC` 输出（GOT/PLT/TLS GD 路径） | ⏳ | 待实现 |
+| mcc-shared-mt | mcc driver | `-shared` mt/ld 集成 | 去掉 `-shared` 回退到 host cc 的限制 | ⏳ | 待实现（依赖 ld-shared 完成） |
+| ld-so | 新建 | ld.so 动态链接器 | ELF 加载、DT_NEEDED 图遍历、符号解析、重定位应用、延迟绑定、TLS init | ⏳ | 待实现 |
+| libc-dl | meuos-libc | `dlfcn.h` + `dl*` 实现 | `dlopen`/`dlsym`/`dlclose`/`dlerror` | ⏳ | 待实现 |
+| mcc-dwarf | mcc | DWARF 调试信息 | `-g` 生成 DWARF v5（`.debug_info`/`.abbrev`/`.line`/`.str`/`.loc`/`.ranges`），包含行号、变量、类型信息 | ⏳ | 待实现 |
+| as-dwarf | mt/as | DWARF 汇编伪指令 | `.loc`/`.file`/`.cfi_*` 支持 — **阻塞 mcc-dwarf**，无此 as 无法处理 `-g` 输出 | 🔴 | 待实现 |
+| ld-dwarf-merge | mt/ld | DWARF 节区合并 | 链接时合并 `.debug_*` 节区，生成 `.debug_line`/`.debug_info` 跨目标文件 | ⏳ | 待实现 |
+| ld-build-id | mt/ld | `--build-id` | 生成 `.note.gnu.build-id`（SHA1 note，用于调试/构建标识） | ⏳ | 待实现 |
+| ld-eh-frame-hdr | mt/ld | `--eh-frame-hdr` | 生成 `.eh_frame_hdr`（异常处理帧索引，gcc 异常必需） | ⏳ | 待实现 |
+| ld-as-needed | mt/ld | `--as-needed` / `--no-as-needed` | 避免不必要的 DT_NEEDED 条目 | ⏳ | 待实现 |
+| ld-start-group | mt/ld | `--start-group` / `--end-group` | 循环依赖库解析（`-Wl,--start-group -la -lb -lc --end-group`） | ⏳ | 待实现 |
+| ld-whole-archive | mt/ld | `--whole-archive` / `--no-whole-archive` | 强制归档中所有目标文件链接（用于 plugin/init 段） | ⏳ | 待实现 |
 
 ## 优先级 2（P2-toolchain — 生态集成）
 
-| ID | 组件 | 项目 | 描述 | 状态 |
-|----|------|------|------|------|
-| meow-native-shell | ⛔ | 原生 shell 替代 | 阻塞于 msh（不在本次 worktree 范围） | ⛔ |
-| mcc-msys-link | mcc driver | `.msys` + host linker | host cc 链接时自动提取 `.a` 到 temp | 🟡 |
-| ld-tls-dynamic | mt/ld | TLS 动态模型 | GD/LD 模型、`__tls_get_addr`（依赖 ld-shared） | ⏳ |
-| ld-gc-sections | mt/ld | 死代码消除 | 未引用节区的裁剪。概念有用，实现应自己设计，不照搬 GNU `--gc-sections` 的复杂逻辑 | ⏳ |
-| ld-linker-script | mt/ld | 链接布局控制 | ❌ **不做 GNU `.ld` 脚本解析**。需要时改为 YAML 格式描述节区布局（链接器内嵌或独立文件） | 🔄 重设计 |
-| ld-print-map | mt/ld | 链接摘要输出 | ⚠️ 如需要，设计自己的简洁输出格式，不仿 GNU ld map 的 clunky 排版 | 🟡 |
-| as-macro | mt/as | 宏/重复伪指令 | ⚠️ mcc 生成汇编的话，`.macro` 需求不大。保留但按需实现，不照搬 GAS 语法 | 🟡 |
-| ld-defsym | mt/ld | `--defsym` | ❓ 链接时定义符号——MeuOS 场景下是否真正需要？暂不实现 | ❓ |
-| ld-wrap | mt/ld | `--wrap` | ❓ GDB 风格的符号包装。暂不实现 | ❓ |
-| ld-version-script | mt/ld | 符号版本控制 | ❓ 复杂的版本脚本。暂不实现 | ❓ |
-| ld-no-undefined | mt/ld | `--no-undefined` | ⚠️ 有用但设计自己的行为——默认报错还是可配置？ | 🟡 |
-| ld-cref | mt/ld | `--cref` | ❓ GNU 交叉引用表格式。暂不实现 | ❓ |
-| ld-compress-debug | mt/ld | DWARF 压缩 | ⚠️ 可使用通用 `--compress` 而非照搬 `--compress-debug-sections` 命名 | 🟡 |
-| as-full-isa | mt/as | 全架构指令完整覆盖 | 各架构缺的少用指令补全 | ⏳ |
-| as-cond | mt/as | 条件汇编 | ⚠️ `.if`/`.ifdef` — GAS 语法。如果 mcc 生成汇编则需求不大；但如果要能汇编手写 `.S` 则有用。按需实现 | 🟡 |
-| as-align | mt/as | 对齐/填充伪指令 | `.balign`/`.p2align` — 通用汇编概念，不是 GAS 特有 | 🟡 |
-| as-section | mt/as | 节区控制伪指令 | `.pushsection`/`.popsection` — 通用概念，用于 gcc asm 属性 | 🟡 |
-| as-equ | mt/as | 常量/符号定义 | `.equ`/`.set` — 通用概念 | 🟢 |
-| as-diag | mt/as | 汇编诊断 | `.abort`/`.error`/`.warning` | 🟢 |
-| ld-linker-script | mt/ld | 链接脚本支持 | `.ld` 脚本解析与布局控制（替代 `-T` 占位） | ⏳ |
-| ld-print-map | mt/ld | `--print-map` | 链接映射输出 | ⏳ |
-| ld-defsym | mt/ld | `--defsym` | 链接时定义符号（`--defsym=foo=bar`） | 🟡 |
-| ld-wrap | mt/ld | `--wrap` | 符号包装（`--wrap=malloc` → `__wrap_malloc`）用于测试/mock | 🟡 |
-| ld-version-script | mt/ld | `--version-script` | 符号版本控制/导出限制（`.map` / `.ver` 文件） | 🟡 |
-| ld-no-undefined | mt/ld | `--no-undefined` | 未定义符号时报错（`-z undefs` / `--no-undefined`） | 🟡 |
-| ld-cref | mt/ld | `--cref` | 交叉引用表输出 | 🟢 |
-| ld-compress-debug | mt/ld | `--compress-debug-sections` | DWARF 节区压缩（zlib/zstd） | 🟢 |
-| meow-multi-dir | meow | 多目录构建 | 跨目录包依赖的 YAML 配方 | ⏳ |
-| tool-binary | 新建 | 统一二进制分析工具 | **不做 size/strings/addr2line/ldd 各自一个工具**。设计一个 `mt-info` 或集成到 `objdump`/`readelf` 中，通过 subcommand 提供多种分析能力 | 🔄 重设计 |
+| ID | 组件 | 项目 | 描述 | 状态 | 实施情况 |
+|----|------|------|------|------|---------|
+| meow-native-shell | ⛔ | 原生 shell 替代 | 阻塞于 msh（不在本次 worktree 范围） | ⛔ | 不在范围 |
+| mcc-msys-link | mcc driver | `.msys` + host linker | host cc 链接时自动提取 `.a` 到 temp | 🟡 | 部分实现（msys.c 已有基础） |
+| ld-tls-dynamic | mt/ld | TLS 动态模型 | GD/LD 模型、`__tls_get_addr`（依赖 ld-shared） | ⏳ | 待实现 |
+| ld-gc-sections | mt/ld | 死代码消除 | 未引用节区的裁剪。概念有用，实现应自己设计，不照搬 GNU `--gc-sections` 的复杂逻辑 | ⏳ | 待实现 |
+| ld-linker-script | mt/ld | 链接布局控制 | ❌ **不做 GNU `.ld` 脚本解析**。需要时改为 YAML 格式描述节区布局（链接器内嵌或独立文件） | 🔄 重设计 | 待设计 |
+| ld-print-map | mt/ld | 链接摘要输出 | ⚠️ 如需要，设计自己的简洁输出格式，不仿 GNU ld map 的 clunky 排版 | 🟡 | 待实现 |
+| as-macro | mt/as | 宏/重复伪指令 | ⚠️ mcc 生成汇编的话，`.macro` 需求不大。保留但按需实现，不照搬 GAS 语法 | 🟡 | 待实现 |
+| ld-defsym | mt/ld | `--defsym` | ❓ 链接时定义符号——MeuOS 场景下是否真正需要？暂不实现 | ❓ | 待定 |
+| ld-wrap | mt/ld | `--wrap` | ❓ GDB 风格的符号包装。暂不实现 | ❓ | 待定 |
+| ld-version-script | mt/ld | 符号版本控制 | ❓ 复杂的版本脚本。暂不实现 | ❓ | 待定 |
+| ld-no-undefined | mt/ld | `--no-undefined` | ⚠️ 有用但设计自己的行为——默认报错还是可配置？ | 🟡 | 待实现 |
+| ld-cref | mt/ld | `--cref` | ❓ GNU 交叉引用表格式。暂不实现 | ❓ | 待定 |
+| ld-compress-debug | mt/ld | DWARF 压缩 | ⚠️ 可使用通用 `--compress` 而非照搬 `--compress-debug-sections` 命名 | 🟡 | 待实现 |
+| as-full-isa | mt/as | 全架构指令完整覆盖 | 各架构缺的少用指令补全 | ⏳ | 待实现 |
+| as-cond | mt/as | 条件汇编 | ⚠️ `.if`/`.ifdef` — GAS 语法。如果 mcc 生成汇编则需求不大；但如果要能汇编手写 `.S` 则有用。按需实现 | 🟡 | 待实现 |
+| as-align | mt/as | 对齐/填充伪指令 | `.balign`/`.p2align` — 通用汇编概念，不是 GAS 特有 | 🟡 | 待实现 |
+| as-section | mt/as | 节区控制伪指令 | `.pushsection`/`.popsection` — 通用概念，用于 gcc asm 属性 | 🟡 | 待实现 |
+| as-equ | mt/as | 常量/符号定义 | `.equ`/`.set` — 通用概念 | 🟢 | 已实现 |
+| as-diag | mt/as | 汇编诊断 | `.abort`/`.error`/`.warning` | 🟢 | 已实现 |
+| ld-linker-script | mt/ld | 链接脚本支持 | `.ld` 脚本解析与布局控制（替代 `-T` 占位） | ⏳ | 待实现 |
+| ld-print-map | mt/ld | `--print-map` | 链接映射输出 | ⏳ | 待实现 |
+| ld-defsym | mt/ld | `--defsym` | 链接时定义符号（`--defsym=foo=bar`） | 🟡 | 待实现 |
+| ld-wrap | mt/ld | `--wrap` | 符号包装（`--wrap=malloc` → `__wrap_malloc`）用于测试/mock | 🟡 | 待实现 |
+| ld-version-script | mt/ld | `--version-script` | 符号版本控制/导出限制（`.map` / `.ver` 文件） | 🟡 | 待实现 |
+| ld-no-undefined | mt/ld | `--no-undefined` | 未定义符号时报错（`-z undefs` / `--no-undefined`） | 🟡 | 待实现 |
+| ld-cref | mt/ld | `--cref` | 交叉引用表输出 | 🟢 | 已实现 |
+| ld-compress-debug | mt/ld | `--compress-debug-sections` | DWARF 节区压缩（zlib/zstd） | 🟢 | 已实现 |
+| meow-multi-dir | meow | 多目录构建 | 跨目录包依赖的 YAML 配方 | ⏳ | 待实现 |
+| tool-binary | 新建 | 统一二进制分析工具 | **不做 size/strings/addr2line/ldd 各自一个工具**。设计一个 `mt-info` 或集成到 `objdump`/`readelf` 中，通过 subcommand 提供多种分析能力 | 🔄 重设计 | 待设计 |
 
 ## 优先级 3（P3-libc — libc 标准接口完备）
 
 > C 库标准接口（ISO C11 + POSIX）的完整实现。当前核心 libc 已有基础框架，
 > 以下为尚未实现的或仅 stub 的接口族。
 
-| ID | 模块 | 描述 | 优先 |
-|----|------|------|------|
-| libc-math | `<math.h>` | 数学库：`sin`/`cos`/`sqrt`/`log`/`exp`/`pow` 等 IEEE 754 浮点函数 | 🔴 高 |
-| libc-printf | `<stdio.h>` | 完整 `printf`/`scanf` 格式覆盖（浮点、`%n`、宽字符、长 double） | 🔴 高 |
-| libc-time | `<time.h>` | 完整 `strftime`、时区处理、`clock_gettime` POSIX 扩展 | 🟡 中 |
-| libc-pthread | `<pthread.h>` | rwlock/barrier/spinlock/cleanup handler 完整覆盖 | 🟡 中 |
-| libc-str | `<string.h>` | `strerror_r` 线程安全变体、`strcoll`/`strxfrm` locale 感知 | 🟢 低 |
-| libc-wchar | `<wchar.h>` | 宽字符 I/O、宽字符 `printf`/`scanf`、wcsftime | 🟢 低 |
-| libc-locale | `<locale.h>` | locale 感知函数（`setlocale` 当前 stub） | 🟢 低 |
-| libc-complex | `<complex.h>` | 复数算术和数学函数 | 🟢 低 |
-| libc-socket | POSIX 网络 | `<sys/socket.h>`、`<netdb.h>`、`<netinet/in.h>`、`<arpa/inet.h>` | 🟡 中 |
-| libc-regex | POSIX 正则 | `<regex.h>` — `regcomp`/`regexec`/`regerror`/`regfree` | 🟡 中 |
-| libc-termios | POSIX 终端 | `<termios.h>`、`<sys/ioctl.h>` | 🟢 低 |
-| libc-glob | POSIX glob | `<glob.h>`、`<fnmatch.h>` 模式匹配 | 🟡 中 |
-| libc-syslog | POSIX 环境 | `<syslog.h>`、`<utmpx.h>` | 🟢 低 |
-| libc-atomic | `<stdatomic.h>` | C11 atomic 的完整操作集（`atomic_compare_exchange_*` 变体等） | 🟡 中 |
-| libc-threads | `<threads.h>` | C11 thread 完整接口（`tss_*`、`call_once` 等） | 🟡 中 |
+| ID | 模块 | 描述 | 优先 | 实施情况 |
+|----|------|------|------|---------|
+| libc-math | `<math.h>` | 数学库：`sin`/`cos`/`sqrt`/`log`/`exp`/`pow` 等 IEEE 754 浮点函数 | 🔴 高 | 待实现 |
+| libc-printf | `<stdio.h>` | 完整 `printf`/`scanf` 格式覆盖（浮点、`%n`、宽字符、长 double） | 🔴 高 | 待实现 |
+| libc-time | `<time.h>` | 完整 `strftime`、时区处理、`clock_gettime` POSIX 扩展 | 🟡 中 | 待实现 |
+| libc-pthread | `<pthread.h>` | rwlock/barrier/spinlock/cleanup handler 完整覆盖 | 🟡 中 | 待实现 |
+| libc-str | `<string.h>` | `strerror_r` 线程安全变体、`strcoll`/`strxfrm` locale 感知 | 🟢 低 | 待实现 |
+| libc-wchar | `<wchar.h>` | 宽字符 I/O、宽字符 `printf`/`scanf`、wcsftime | 🟢 低 | 待实现 |
+| libc-locale | `<locale.h>` | locale 感知函数（`setlocale` 当前 stub） | 🟢 低 | 待实现 |
+| libc-complex | `<complex.h>` | 复数算术和数学函数 | 🟢 低 | 待实现 |
+| libc-socket | POSIX 网络 | `<sys/socket.h>`、`<netdb.h>`、`<netinet/in.h>`、`<arpa/inet.h>` | 🟡 中 | 待实现 |
+| libc-regex | POSIX 正则 | `<regex.h>` — `regcomp`/`regexec`/`regerror`/`regfree` | 🟡 中 | 待实现 |
+| libc-termios | POSIX 终端 | `<termios.h>`、`<sys/ioctl.h>` | 🟢 低 | 待实现 |
+| libc-glob | POSIX glob | `<glob.h>`、`<fnmatch.h>` 模式匹配 | 🟡 中 | 待实现 |
+| libc-syslog | POSIX 环境 | `<syslog.h>`、`<utmpx.h>` | 🟢 低 | 待实现 |
+| libc-atomic | `<stdatomic.h>` | C11 atomic 的完整操作集（`atomic_compare_exchange_*` 变体等） | 🟡 中 | 待实现 |
+| libc-threads | `<threads.h>` | C11 thread 完整接口（`tss_*`、`call_once` 等） | 🟡 中 | 待实现 |
 
 ## 优先级 4（P4-devexp — 开发者体验）
 
 > 编译器质量和开发者体验优化。这些项不影响功能正确性，但影响日常使用体验。
 
-| ID | 组件 | 描述 | 优先 |
-|----|------|------|------|
-| mcc-diagnostics | mcc | 诊断质量 | 带源位置和 caret（`^`）的错误消息。这是 Clang 推广的好设计，非 GNU 包袱 | 🟡 |
-| mcc-warnings | mcc | 警告体系 | ⚠️ `-Wall`/`-Wextra` 是 GCC 命名约定。我们应该设计自己的警告体系（`--warn=all`/`--warn=extra` 或 `-W` 风格但自己定义哪些组别） | 🔄 重设计 |
-| mcc-attributes | mcc compat | `__attribute__` | GCC 属性语法。按设计原则应走 compat 映射层，核心不直接处理 | 🟡 |
-| mcc-pragma | mcc compat | `#pragma` | GCC/Clang pragma。同样走 compat 映射层 | 🟡 |
-| mcc-builtins | mcc compat | `__builtin_*` | GCC/Clang 内建函数。同样走 compat 映射层（`__builtin_expect` → 宏等） | 🟢 |
-| mcc-generic | mcc | `_Generic` 完整 C11 匹配规则（含 qualified type 分派） | 🟡 中 |
-| as-errors | mt/as | 错误消息行号/列号 | 🟢 低 |
-| ld-errors | mt/ld | 未定义符号的友好诊断（列出候选目标文件） | 🟢 低 |
-| community-tests | 全项目 | 社区测试套件覆盖率（chibicc → C99/C11/C23 全量通过） | 🟡 中 |
-| meow-lint | meow | 配方语法检查器（`meow lint`） | 🟢 低 |
-| ci-pipeline | 全项目 | CI/CD 流水线（GitHub Actions + qemu-user 跨架构回归） | 🟡 中 |
+| ID | 组件 | 描述 | 优先 | 实施情况 |
+|----|------|------|------|---------|
+| mcc-diagnostics | mcc | 诊断质量 | 带源位置和 caret（`^`）的错误消息。这是 Clang 推广的好设计，非 GNU 包袱 | 🟡 | 待实现 |
+| mcc-warnings | mcc | 警告体系 | ⚠️ `-Wall`/`-Wextra` 是 GCC 命名约定。我们应该设计自己的警告体系（`--warn=all`/`--warn=extra` 或 `-W` 风格但自己定义哪些组别） | 🔄 重设计 | 待设计 |
+| mcc-attributes | mcc compat | `__attribute__` | GCC 属性语法。按设计原则应走 compat 映射层，核心不直接处理 | 🟡 | 待实现 |
+| mcc-pragma | mcc compat | `#pragma` | GCC/Clang pragma。同样走 compat 映射层 | 🟡 | 待实现 |
+| mcc-builtins | mcc compat | `__builtin_*` | GCC/Clang 内建函数。同样走 compat 映射层（`__builtin_expect` → 宏等） | 🟢 | 待实现 |
+| mcc-generic | mcc | `_Generic` 完整 C11 匹配规则（含 qualified type 分派） | 🟡 中 | 待实现 |
+| as-errors | mt/as | 错误消息行号/列号 | 🟢 低 | 待实现 |
+| ld-errors | mt/ld | 未定义符号的友好诊断（列出候选目标文件） | 🟢 低 | 待实现 |
+| community-tests | 全项目 | 社区测试套件覆盖率（chibicc → C99/C11/C23 全量通过） | 🟡 中 | 待实现 |
+| meow-lint | meow | 配方语法检查器（`meow lint`） | 🟢 低 | 待实现 |
+| ci-pipeline | 全项目 | CI/CD 流水线（GitHub Actions + qemu-user 跨架构回归） | 🟡 中 | 待实现 |
 
 ## 优先级 5（P5-meow — meow 构建系统完备）
 
 > meow 目标是替代 make + autoconf + libtool + pkg-config。当前约 40% Make、
 > 20% autoconf、0% pkg-config/libtool。以下按影响排序。
 
-| ID | 类别 | 描述 | 优先 |
-|----|------|------|------|
-| meow-template-subst | autoconf | **模板替换** | ⚠️ 不做 `@VAR@`（autoconf 遗留）。需要时用 YAML 原生表达式或 meow 自己的模板语法 | 🔄 重设计 |
-| meow-wildcard | make | **文件列表通配** | ⚠️ 不做 `$(wildcard)`（GNU make 语法）。用 YAML 原生匹配或 meow 自己的函数（`files('src/*.c')`） | 🔄 重设计 |
-| meow-check-library | autoconf | **`check_library` / `check_link`** | 链接测试检测 `-lz`、`-lpthread`。概念本身没问题——autoconf 的 probe 机制是合理的设计。实现时不照搬 autoconf 语法即可 | 🔴 高 |
-| meow-conditional | make | **条件语句** | ⚠️ 不做 `ifeq`/`ifdef`（GNU make 语法）。YAML 条件语句（`when: ARCH == "aarch64"`）或类似 DSL | 🔄 重设计 |
-| meow-type-size | autoconf | **`check_type_size`** | 检测 `sizeof(time_t)`。autoconf 的这个概念合理，不照搬其实现。meow 应有自己的 `type_size()` probe 函数 | 🟡 中 |
-| meow-probe-cache | autoconf | **Probe 缓存** | 缓存编译测试结果（`config.cache` 等价物）。概念好，实现不照搬 autoconf 的烦人缓存格式 | 🟡 中 |
-| meow-vpath | make | **出源码构建** | ⚠️ 不做 `$(srcdir)`（GNU make VPATH）。meow 默认出源码构建（`build/<pkg>/`），不用额外抽象 | 🔄 重设计 |
-| meow-subdirs | make | **多目录构建** | 跨目录包依赖的 YAML 配方。不是 GNU `AC_CONFIG_SUBDIRS`，是 meow 自己的依赖模型 | 🟡 中 |
-| meow-pkg-config | pkg-config | **`.pc` 文件查询** | ⚠️ 不做 `.pc` 解析（freedesktop.org 格式）。meow 应有自己的包元数据格式（YAML 原生），或只通过 `meow install` 注册的数据库查询 | 🔄 重设计 |
-| meow-libtool | libtool | **共享/静态库管理** | ❌ 不做 `.la` 文件。libtool 是历史遗留，mt/ld 直接管理库格式，meow 只需知道库路径 | ❌ 不做 |
-| meow-dag | meow | DAG 去重 | `-jN` 间接依赖重复执行。纯 meow 自己设计，无历史包袱 | ⏳ |
-| meowctl | meow | 配置界面 | ⚠️ 不做 `./configure` 克隆。meow 自动检测，真正的配置界面（如 `meow config` 查看检测结果）应该简洁 | 🔄 重设计 |
+| ID | 类别 | 描述 | 优先 | 实施情况 |
+|----|------|------|------|---------|
+| meow-template-subst | autoconf | **模板替换** | ⚠️ 不做 `@VAR@`（autoconf 遗留）。需要时用 YAML 原生表达式或 meow 自己的模板语法 | 🔄 重设计 | 待设计 |
+| meow-wildcard | make | **文件列表通配** | ⚠️ 不做 `$(wildcard)`（GNU make 语法）。用 YAML 原生匹配或 meow 自己的函数（`files('src/*.c')`） | 🔄 重设计 | 待设计 |
+| meow-check-library | autoconf | **`check_library` / `check_link`** | 链接测试检测 `-lz`、`-lpthread`。概念本身没问题——autoconf 的 probe 机制是合理的设计。实现时不照搬 autoconf 语法即可 | 🔴 高 | 待实现 |
+| meow-conditional | make | **条件语句** | ⚠️ 不做 `ifeq`/`ifdef`（GNU make 语法）。YAML 条件语句（`when: ARCH == "aarch64"`）或类似 DSL | 🔄 重设计 | 待设计 |
+| meow-type-size | autoconf | **`check_type_size`** | 检测 `sizeof(time_t)`。autoconf 的这个概念合理，不照搬其实现。meow 应有自己的 `type_size()` probe 函数 | 🟡 中 | 待实现 |
+| meow-probe-cache | autoconf | **Probe 缓存** | 缓存编译测试结果（`config.cache` 等价物）。概念好，实现不照搬 autoconf 的烦人缓存格式 | 🟡 中 | 待实现 |
+| meow-vpath | make | **出源码构建** | ⚠️ 不做 `$(srcdir)`（GNU make VPATH）。meow 默认出源码构建（`build/<pkg>/`），不用额外抽象 | 🔄 重设计 | 待设计 |
+| meow-subdirs | make | **多目录构建** | 跨目录包依赖的 YAML 配方。不是 GNU `AC_CONFIG_SUBDIRS`，是 meow 自己的依赖模型 | 🟡 中 | 待实现 |
+| meow-pkg-config | pkg-config | **`.pc` 文件查询** | ⚠️ 不做 `.pc` 解析（freedesktop.org 格式）。meow 应有自己的包元数据格式（YAML 原生），或只通过 `meow install` 注册的数据库查询 | 🔄 重设计 | 待设计 |
+| meow-libtool | libtool | **共享/静态库管理** | ❌ 不做 `.la` 文件。libtool 是历史遗留，mt/ld 直接管理库格式，meow 只需知道库路径 | ❌ 不做 | 不做 |
+| meow-dag | meow | DAG 去重 | `-jN` 间接依赖重复执行。纯 meow 自己设计，无历史包袱 | ⏳ | `9c20ae2` |
+| meowctl | meow | 配置界面 | ⚠️ 不做 `./configure` 克隆。meow 自动检测，真正的配置界面（如 `meow config` 查看检测结果）应该简洁 | 🔄 重设计 | 待设计 |
 
 ## 优先级 7（P7-subarch — 子架构与 CPU 特性支持）
 
@@ -239,17 +239,17 @@ src/compat/
 
 ### 子任务
 
-| ID | 描述 | 优先 |
-|----|------|------|
-| target-features | **`Target.features` 设计**：在 Target 中添加 `uint64_t features` 位图 + `const char *features_desc[]`。定义架构无关的公共特性位和架构特有的特性位 | 🔴 高 |
-| march-generic | **`-march=` 解析通用化**：从仅 ARM 推广到全架构。x86_64 解析 `native`/`x86-64`/`x86-64-v2`/`v3`/`v4`；riscv64 解析 `rv64gc`/`rv64imafdc`；aarch64 解析 `armv8-a`/`armv8.2-a` 等 | 🔴 高 |
-| x86-isa-levels | **x86_64 ISA 级别门控**：实现 `-march=x86-64-v2`/`v3`/`v4` 代码生成差异。至少：v2 启用 SSE4.2+POPCNT，v3 启用 AVX2+BMI2，v4 启用 AVX-512 | 🔴 高 |
-| riscv-extensions | **riscv64 扩展选择**：实现 `-march=rv64imafdc` 解析，根据扩展集发射指令。`-mabi=lp64d`/`lp64`/`ilp32d`/`ilp32` | 🟡 中 |
-| arm-multiver | **arm 多版本后端**：根据 `-march` 切换 ARMv6/v7/v8 指令选择器和发射器差异（Thumb/ARM 模式、DMB 变体等） | 🟡 中 |
-| aarch64-ext | **aarch64 架构扩展**：FEAT_FP16/FEAT_RDM/FEAT_JSCVT 等特性位与代码生成 | 🟢 低 |
-| march-native | **`-march=native`**：通过 CPUID（x86）或 `/proc/cpuinfo` 查询宿主机特性并设置 Target.features | 🟡 中 |
-| as-isa-gating | **mt/as 指令门控**：编码器根据 insn 要求的特性位进行验证，不支持的指令报错而非默默生成 | 🟡 中 |
-| i386-variants | **i386 变体区分**：486/586/686 在 cmpxchg/CMPXCHG8B/FPU 存在性上的差异映射到特性位 | 🟢 低 |
+| ID | 描述 | 优先 | 实施情况 |
+|----|------|------|---------|
+| target-features | **`Target.features` 设计**：在 Target 中添加 `uint64_t features` 位图 + `const char *features_desc[]`。定义架构无关的公共特性位和架构特有的特性位 | 🔴 高 | 待实现 |
+| march-generic | **`-march=` 解析通用化**：从仅 ARM 推广到全架构。x86_64 解析 `native`/`x86-64`/`x86-64-v2`/`v3`/`v4`；riscv64 解析 `rv64gc`/`rv64imafdc`；aarch64 解析 `armv8-a`/`armv8.2-a` 等 | 🔴 高 | 待实现 |
+| x86-isa-levels | **x86_64 ISA 级别门控**：实现 `-march=x86-64-v2`/`v3`/`v4` 代码生成差异。至少：v2 启用 SSE4.2+POPCNT，v3 启用 AVX2+BMI2，v4 启用 AVX-512 | 🔴 高 | 待实现 |
+| riscv-extensions | **riscv64 扩展选择**：实现 `-march=rv64imafdc` 解析，根据扩展集发射指令。`-mabi=lp64d`/`lp64`/`ilp32d`/`ilp32` | 🟡 中 | 待实现 |
+| arm-multiver | **arm 多版本后端**：根据 `-march` 切换 ARMv6/v7/v8 指令选择器和发射器差异（Thumb/ARM 模式、DMB 变体等） | 🟡 中 | 待实现 |
+| aarch64-ext | **aarch64 架构扩展**：FEAT_FP16/FEAT_RDM/FEAT_JSCVT 等特性位与代码生成 | 🟢 低 | 待实现 |
+| march-native | **`-march=native`**：通过 CPUID（x86）或 `/proc/cpuinfo` 查询宿主机特性并设置 Target.features | 🟡 中 | 待实现 |
+| as-isa-gating | **mt/as 指令门控**：编码器根据 insn 要求的特性位进行验证，不支持的指令报错而非默默生成 | 🟡 中 | 待实现 |
+| i386-variants | **i386 变体区分**：486/586/686 在 cmpxchg/CMPXCHG8B/FPU 存在性上的差异映射到特性位 | 🟢 低 | 待实现 |
 
 ### 设计提案
 
@@ -282,25 +282,25 @@ enum target_feature {
 
 > mcc 已实现 AGENTS.md §2.2 所列 C23 主要特性。以下为剩余边缘情况。
 
-| ID | 描述 | 状态 |
-|----|------|------|
-| c23-constexpr | `constexpr` 初始化规则（运行时 vs 编译期求值边界） | ⏳ |
-| c23-attributes | `[[]]` 属性语法全位置覆盖（声明/类型/语句/标签） | ⏳ |
-| c23-bool | `bool`/`true`/`false` 关键字 vs `<stdbool.h>` 宏兼容 | ⏳ |
-| c23-embed | `#embed` 边界情况（大文件/`limit(N)`/`prefix`/`suffix`/`if_empty`） | ⏳ |
-| c23-typeof | `typeof`/`typeof_unqual` 在复杂声明中的应用 | ⏳ |
+| ID | 描述 | 状态 | 实施情况 |
+|----|------|------|---------|
+| c23-constexpr | `constexpr` 初始化规则（运行时 vs 编译期求值边界） | ⏳ | 待实现 |
+| c23-attributes | `[[]]` 属性语法全位置覆盖（声明/类型/语句/标签） | ⏳ | 待实现 |
+| c23-bool | `bool`/`true`/`false` 关键字 vs `<stdbool.h>` 宏兼容 | ⏳ | 待实现 |
+| c23-embed | `#embed` 边界情况（大文件/`limit(N)`/`prefix`/`suffix`/`if_empty`） | ⏳ | 待实现 |
+| c23-typeof | `typeof`/`typeof_unqual` 在复杂声明中的应用 | ⏳ | 待实现 |
 
 ## 优先级 3（P3-libc — 社区测试兼容性，低优先级）
 
-| ID | 组件 | 描述 | 状态 |
-|----|------|------|------|
-| mcc-float-suffix | mcc lexer | C23 `100f` float 后缀支持 | ⏳ |
-| mcc-uint64-max | mcc sema | UINT64_MAX 字面量类型回退到 `unsigned long long` | ⏳ |
-| mcc-macro-redef | mcc preproc | 宏定义相同 token 序列允许重定义（C 6.10.3p2） | ⏳ |
-| mcc-line-num | mcc preproc | `__LINE__` 偏移 1 | ⏳ |
-| mcc-common-sym | mcc sema | common/tentative-definition 合并行为 | ⏳ |
-| mcc-unicode | mcc lexer | Unicode/C11 标识符（$/UCN/UTF-8） | ⏳ |
-| mcc-va-end | mcc | `__builtin_va_end` 类型检查时机（宏定义处而非使用处） | ⏳ |
+| ID | 组件 | 描述 | 状态 | 实施情况 |
+|----|------|------|------|---------|
+| mcc-float-suffix | mcc lexer | C23 `100f` float 后缀支持 | ⏳ | 待实现 |
+| mcc-uint64-max | mcc sema | UINT64_MAX 字面量类型回退到 `unsigned long long` | ⏳ | 待实现 |
+| mcc-macro-redef | mcc preproc | 宏定义相同 token 序列允许重定义（C 6.10.3p2） | ⏳ | 待实现 |
+| mcc-line-num | mcc preproc | `__LINE__` 偏移 1 | ⏳ | 待实现 |
+| mcc-common-sym | mcc sema | common/tentative-definition 合并行为 | ⏳ | 待实现 |
+| mcc-unicode | mcc lexer | Unicode/C11 标识符（$/UCN/UTF-8） | ⏳ | 待实现 |
+| mcc-va-end | mcc | `__builtin_va_end` 类型检查时机（宏定义处而非使用处） | ⏳ | 待实现 |
 
 ---
 
@@ -374,14 +374,14 @@ p8-meow ── meow 构建系统完备（替代 make+autoconf+libtool+pkg-config
 
 ### 跨域设计项（影响多个组件）
 
-| ID | 主题 | 描述 | 涉及组件 | 优先 |
-|----|------|------|---------|------|
-| specs-default | **`--specs=meuos` 默认化** | `MEUOS_SYSROOT` 设置时自动隐含 `--specs=meuos`，不再需要显式传入。新增 `--specs=host` 切回宿主模式 | 🟢 |
-| meow-auto-config | **meow 自动决策编译参数** | `meow build <pkg> --target=<triplet>` 自动解析 triple → arch/abi/float/subarch, 自动设 CC/CFLAGS/LDFLAGS, 自动跑 probe 生成 config.h | meow + mcc | 🔴 高 |
-| triple-format | **MeuOS triple 格式设计** | 定义 `<arch>[-subarch][-vendor][-os][-abi]` 格式。vendor=`meuos` 隐含 MeuOS 默认行为；os=`meuos-next` 为未来原生环境。见下方详细设计 | meow + mcc + mt | 🔴 高 |
-| triple-lib | **共享 triple 解析库** | meow 和 mcc 共享同一套 triple 解析逻辑，避免两处分叉。提取为 `libtriple` 或共用头文件 | meow + mcc | 🔴 高 |
-| triple-abi-map | **Triple → ABI 自动映射** | `--target=<triplet>` 精确提取 ABI/lp64/float 信息并选择对应 Target/ABI 降级 | mcc sema | 🟡 中 |
-| meow-zero-args | **meow 零参数构建** | `meow build` 无参数时自动嗅探当前架构/sysroot/源码，生成完整构建环境；只有需要定制时才传入参数 | meow | 🔴 高 |
+| ID | 主题 | 描述 | 涉及组件 | 优先 | 实施情况 |
+|----|------|------|---------|------|---------|
+| specs-default | **`--specs=meuos` 默认化** | `MEUOS_SYSROOT` 设置时自动隐含 `--specs=meuos`，不再需要显式传入。新增 `--specs=host` 切回宿主模式 | 🟢 | `42a53ed` |
+| meow-auto-config | **meow 自动决策编译参数** | `meow build <pkg> --target=<triplet>` 自动解析 triple → arch/abi/float/subarch, 自动设 CC/CFLAGS/LDFLAGS, 自动跑 probe 生成 config.h | meow + mcc | 🔴 高 | 待实现 |
+| triple-format | **MeuOS triple 格式设计** | 定义 `<arch>[-subarch][-vendor][-os][-abi]` 格式。vendor=`meuos` 隐含 MeuOS 默认行为；os=`meuos-next` 为未来原生环境。见下方详细设计 | meow + mcc + mt | 🔴 高 | 设计已定稿，待实现 |
+| triple-lib | **共享 triple 解析库** | meow 和 mcc 共享同一套 triple 解析逻辑，避免两处分叉。提取为 `libtriple` 或共用头文件 | meow + mcc | 🔴 高 | 待实现 |
+| triple-abi-map | **Triple → ABI 自动映射** | `--target=<triplet>` 精确提取 ABI/lp64/float 信息并选择对应 Target/ABI 降级 | mcc sema | 🟡 中 | 待实现 |
+| meow-zero-args | **meow 零参数构建** | `meow build` 无参数时自动嗅探当前架构/sysroot/源码，生成完整构建环境；只有需要定制时才传入参数 | meow | 🔴 高 | 待实现 |
 
 ### Triple 格式设计
 
