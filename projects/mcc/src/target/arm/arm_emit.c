@@ -1,5 +1,9 @@
 #include "arm.h"
 
+/* ARM architecture version (set by driver from -march=armvN).
+ * gate movw/movt use: ARMv6T2+ (movw available) vs ARMv6 (literal pool). */
+extern int g_arm_arch_ver;
+
 /* ARMv7 assembly emitter — mirrors aarch64's emit framework.
  *
  * The omap[] table maps (IR op, class) → `emitf` format strings.
@@ -246,12 +250,17 @@ emitf(char *s, Ins *i, Fn *fn, FILE *f)
 static void
 loadaddr(Con *c, char *rn, FILE *f)
 {
-	/* For global symbols, emit movw/movt pair. */
+	/* For global symbols, emit movw/movt pair (ARMv6T2+).
+	 * For ARMv6, fall back to ldr rd, =sym (literal pool). */
 	switch (c->sym.type) {
 	default: die("unreachable");
 	case SGlo:
-		fprintf(f, "\tmovw\t%s, #:lower16:%s%c%" PRIi64 "%s\n", rn, T.assym, str(c->sym.id), c->bits.i, T.assym[0] ? "" : "");
-		fprintf(f, "\tmovt\t%s, #:upper16:%s%c%" PRIi64 "\n", rn, T.assym, str(c->sym.id), c->bits.i);
+		if (g_arm_arch_ver >= 7) {
+			fprintf(f, "\tmovw\t%s, #:lower16:%s%c%" PRIi64 "%s\n", rn, T.assym, str(c->sym.id), c->bits.i, T.assym[0] ? "" : "");
+			fprintf(f, "\tmovt\t%s, #:upper16:%s%c%" PRIi64 "\n", rn, T.assym, str(c->sym.id), c->bits.i);
+		} else {
+			fprintf(f, "\tldr\t%s, =%s%c%" PRIi64 "%s\n", rn, T.assym, str(c->sym.id), c->bits.i, T.assym[0] ? "" : "");
+		}
 		break;
 	case SThr:
 		fprintf(f, "\tmrc\tp15, 0, %s, c13, c0, 3\n", rn);
@@ -259,8 +268,12 @@ loadaddr(Con *c, char *rn, FILE *f)
 		fprintf(f, "\tadd\t%s, %s, #:tprel_lo12_nc:%s\n", rn, rn, str(c->sym.id)); /* FIXME: use hi12/lo12 pair */
 		break;
 	case SExt:
-		fprintf(f, "\tmovw\t%s, #:lower16:%s\n", rn, str(c->sym.id));
-		fprintf(f, "\tmovt\t%s, #:upper16:%s\n", rn, str(c->sym.id));
+		if (g_arm_arch_ver >= 7) {
+			fprintf(f, "\tmovw\t%s, #:lower16:%s\n", rn, str(c->sym.id));
+			fprintf(f, "\tmovt\t%s, #:upper16:%s\n", rn, str(c->sym.id));
+		} else {
+			fprintf(f, "\tldr\t%s, =%s\n", rn, str(c->sym.id));
+		}
 		break;
 	}
 }
@@ -272,12 +285,16 @@ loadcon(Con *c, int r, int k, FILE *f)
 		loadaddr(c, (char *)rname(r, Kl), f);
 		return;
 	}
-	/* Simple constant load via movw/movt */
+	/* Simple constant load via movw/movt (ARMv6T2+) or ldr =literal. */
 	int64_t n = c->bits.i;
 	if (k == Kw) n = (int32_t)n;
-	fprintf(f, "\tmovw\t%s, #0x%x\n", rname(r, k), (unsigned)(n & 0xFFFF));
-	if (n & ~0xFFFF)
-		fprintf(f, "\tmovt\t%s, #0x%x\n", rname(r, k), (unsigned)((n >> 16) & 0xFFFF));
+	if (g_arm_arch_ver >= 7) {
+		fprintf(f, "\tmovw\t%s, #0x%x\n", rname(r, k), (unsigned)(n & 0xFFFF));
+		if (n & ~0xFFFF)
+			fprintf(f, "\tmovt\t%s, #0x%x\n", rname(r, k), (unsigned)((n >> 16) & 0xFFFF));
+	} else {
+		fprintf(f, "\tldr\t%s, =0x%llx\n", rname(r, k), (unsigned long long)n);
+	}
 }
 
 static void emitins(Ins *, Fn *, FILE *);

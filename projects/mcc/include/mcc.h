@@ -358,6 +358,10 @@ extern int g_error_explain;
  *   riscv: RV_F RV_D RV_C RV_V  (32..35) */
 extern uint64_t g_target_features;
 
+/* ARM architecture version (from -march=armvN), 0 = default (7).
+ * Used by arm_emit.c to gate movw/movt (ARMv6T2+) vs literal pool loads. */
+extern int g_arm_arch_ver;
+
 /* RISC-V extension feature bits (mirrors include/mt/target.h bit layout). */
 #define MT_FEATURE_RV_F  (1ULL << 32)  /* riscv F (single-precision float) */
 #define MT_FEATURE_RV_D  (1ULL << 33)  /* riscv D (double-precision float) */

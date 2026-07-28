@@ -30,6 +30,8 @@ extern Target T_arm32;
 /* target_select.c */
 Target *pick_target(const char *triplet);
 const char *targ_name(const char *triplet);
+const char *targ_subarch(const char *triplet);
+const char *targ_abi(const char *triplet);
 
 /* host_toolchain.c */
 char *sysrootpath(const char *root, const char *suffix);

@@ -54,6 +54,7 @@ static const char *arm_mfloat_abi = "hard";
  * -march=x86-64-vN. 0 = baseline only. Used by backend emit to gate ISA
  * levels (second phase); for now it records the user's intent. */
 uint64_t g_target_features = 0;
+int g_arm_arch_ver = 7;  /* ARM architecture version (default armv7) */
 /* Set when -march=native is requested; resolved after target selection. */
 int g_march_native_requested = 0;
 
@@ -67,6 +68,7 @@ static int arm_arch_from_march(const char *m) {
 /* Set ARM-specific predefines based on -march/-mcpu/-mfpu/-mfloat-abi flags */
 static void arm_set_target_defines(void) {
 	int arch_ver = arm_arch_from_march(arm_march ? arm_march : arm_mcpu);
+	g_arm_arch_ver = arch_ver;
 	ppdefine("__arm__", "1");
 	ppdefine("__ARM_ARCH", "");
 	char *arch_num = malloc(16);
