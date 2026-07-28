@@ -3,14 +3,30 @@
 
 #include <stddef.h>
 
-/* Static linker entry point.
+/* Linker options structure for extended output control.
+ * Default (zero-initialized) provides the original ET_EXEC static link. */
+struct mt_ld_options {
+	const char *output;    /* output file path */
+	const char *entry;     /* entry symbol (default "_start") */
+	const char *soname;    /* DT_SONAME for shared libraries (may be NULL) */
+	int         shared;    /* 1 = ET_DYN (shared library), 0 = ET_EXEC */
+};
+
+/* Static linker entry point (original API, shared=0).
  *
  * target  is the architecture name ("x86_64", …) or NULL to default to x86_64.
- * All other architectures now parse correctly to set ELF header fields,
- * but relocation support is currently limited to x86_64. */
+ * All other architectures now parse correctly to set ELF header fields. */
 int mt_ld_link(const char *output, const char *entry,
                const char *const *inputs, size_t input_count,
                const char *target,
                const char **error_message);
+
+/* Extended linker entry point with mt_ld_options.
+ * When opts is NULL, behaves identically to mt_ld_link() with
+ * output=output, entry=entry, shared=0. */
+int mt_ld_link_opts(const struct mt_ld_options *opts,
+                    const char *const *inputs, size_t input_count,
+                    const char *target,
+                    const char **error_message);
 
 #endif

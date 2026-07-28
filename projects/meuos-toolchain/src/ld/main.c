@@ -17,13 +17,15 @@ static void
 usage(FILE *out)
 {
 	fprintf(out,
-	        "usage: ld [-static] [-e entry] [-Ldir...] [-llib...] [--sysroot=dir]\n"
-	        "          [--target=<arch>] -o output input.o [input.a ...]\n"
+	        "usage: ld [-static] [-shared] [-soname name] [-e entry] [-Ldir...] [-llib...]\n"
+	        "          [--sysroot=dir] [--target=<arch>] -o output input.o [input.a ...]\n"
 	        "       ld --help\n"
 	        "       ld --version\n"
 	        "supported targets: x86_64, i386, aarch64, riscv64, loongarch64\n"
 	        "options:\n"
 	        "  --target=<arch>  set target architecture (default: x86_64)\n"
+	        "  -shared          build shared library (ET_DYN)\n"
+	        "  -soname <name>   set DT_SONAME for shared library\n"
 	        "  -L<dir>          add library search path\n"
 	        "  -l<lib>          link lib<lib>.a (searched in -L paths and sysroot)\n"
 	        "  --sysroot=<dir>  set system root (adds <dir>/usr/lib to search path)\n"
@@ -170,6 +172,8 @@ main(int argc, char **argv)
 	const char *output = "a.out";
 	const char *entry = "_start";
 	const char *target_name = NULL;
+	const char *soname = NULL;
+	int shared = 0;
 	const char *inputs[MAX_INPUTS];
 	const char *libpaths[MAX_LIBPATHS];
 	const char *sysroot = NULL;
@@ -194,6 +198,15 @@ main(int argc, char **argv)
 		}
 		if (strcmp(argv[i], "-static") == 0 || strcmp(argv[i], "--static") == 0)
 			continue;
+		if (strcmp(argv[i], "-shared") == 0 || strcmp(argv[i], "--shared") == 0) {
+			shared = 1;
+			continue;
+		}
+		if (strcmp(argv[i], "-soname") == 0) {
+			if (++i >= argc) { usage(stderr); return 2; }
+			soname = argv[i];
+			continue;
+		}
 		if (strcmp(argv[i], "-o") == 0) {
 			if (++i >= argc) {
 				usage(stderr);
@@ -350,8 +363,14 @@ main(int argc, char **argv)
 		usage(stderr);
 		return 2;
 	}
-	if (mt_ld_link(output, entry, inputs, (size_t)input_count,
-	               target_name, &error) != 0) {
+	struct mt_ld_options opts;
+	memset(&opts, 0, sizeof(opts));
+	opts.output  = output;
+	opts.entry   = shared ? NULL : entry;
+	opts.soname  = soname;
+	opts.shared  = shared;
+	if (mt_ld_link_opts(&opts, inputs, (size_t)input_count,
+	                    target_name, &error) != 0) {
 		fprintf(stderr, "ld: %s\n", error ? error : "link failed");
 		return 1;
 	}

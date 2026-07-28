@@ -98,7 +98,7 @@ src/compat/
 | mcc-loong64-qemu | mcc+libc | loongarch64 qemu 门禁 | 完整 qemu 运行时门禁（当前仅 exit=42） | ⏳ |
 | mcc-i386-tls-e2e | mcc+libc | i386 TLS e2e | bug-i386-tls 修复后的 TLS 端到端验证 | ⏳ |
 | mcc-i386-tls-doc | mcc(i386) | `gd-tls.md` 文档 | 被 3 个文件引用但文件不存在 | 🟢 |
-| ld-shared | mt/ld | `-shared` 输出 `ET_DYN` | 生成 `.dynsym`/`.dynstr`/`.dynamic`/`.hash`/`.plt`/`.got.plt`/`.interp` 节区 + 动态程序头 | ⏳ |
+| ld-shared | mt/ld | `-shared` 输出 `ET_DYN` | 🟡 基本实现：ET_DYN header + PHDR + 空 DYNAMIC。待生成 dynsym/dynstr/hash/dynamic 节区 |
 | ld-pie | mt/ld | `--pie`/`--no-pie` 支持 | PIE 二进制输出（`ET_DYN` + `PT_INTERP` + 相对重定位） | ⏳ |
 | mcc-pic-verify | mcc | PIC 代码生成加固 | 全架构验证 `-fPIC` 输出（GOT/PLT/TLS GD 路径） | ⏳ |
 | mcc-shared-mt | mcc driver | `-shared` mt/ld 集成 | 去掉 `-shared` 回退到 host cc 的限制 | ⏳ |

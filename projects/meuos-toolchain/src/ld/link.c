@@ -152,6 +152,8 @@ struct ld_context {
 	uint64_t tls_tdata_size;
 	uint64_t tls_size;
 	uint64_t tls_align;
+	int shared;          /* 1 = ET_DYN (shared library), 0 = ET_EXEC */
+	const char *soname;  /* DT_SONAME for shared lib (may be NULL) */
 	/* In-memory archive data (for VFS .msys archives) */
 	unsigned char **archive_mem_data;
 	size_t *archive_mem_size;
@@ -1373,7 +1375,7 @@ layout_output(struct ld_context *ctx)
 				continue;
 			offset = align_up(offset, group->align ? group->align : 1);
 			group->file_offset = offset;
-			group->address = LD_BASE + offset;
+			group->address = ctx->shared ? 0 : LD_BASE + offset;
 			offset += group->size;
 		}
 	}
@@ -1388,7 +1390,7 @@ layout_output(struct ld_context *ctx)
 				continue;
 			offset = align_up(offset, group->align ? group->align : 1);
 			group->file_offset = offset;
-			group->address = LD_BASE + offset;
+			group->address = ctx->shared ? 0 : LD_BASE + offset;
 			/* NOBITS: does not advance file offset */
 		}
 	}
@@ -1406,7 +1408,7 @@ layout_output(struct ld_context *ctx)
 		struct ld_group *g = &ctx->groups[ctx->tls_tdata_group];
 		offset = align_up(offset, g->align ? g->align : 1);
 		g->file_offset = offset;
-		g->address = LD_BASE + offset;
+		g->address = ctx->shared ? 0 : LD_BASE + offset;
 		offset += g->size;
 	}
 	if (ctx->tls_tbss_group >= 0) {
@@ -1418,7 +1420,7 @@ layout_output(struct ld_context *ctx)
 		} else {
 			/* No .tdata: allocate beyond non-TLS sections */
 			g->file_offset = offset;
-			g->address = LD_BASE + offset;
+			g->address = ctx->shared ? 0 : LD_BASE + offset;
 			offset += g->size;
 			}
 		}
@@ -1759,11 +1761,15 @@ write_executable(struct ld_context *ctx, const char *path,
 	int output_count;
 	int result = -1;
 
-	entry_symbol = find_global(ctx, entry);
-	if (!entry_symbol || !entry_symbol->defined)
-		return ld_errorf(ctx, "entry symbol not found", entry);
-	entry_group = &ctx->groups[entry_symbol->group];
-	entry_address = entry_group->address + entry_symbol->offset;
+	entry_symbol = NULL;
+	entry_address = 0;
+	if (entry) {
+		entry_symbol = find_global(ctx, entry);
+		if (!entry_symbol || !entry_symbol->defined)
+			return ld_errorf(ctx, "entry symbol not found", entry);
+		entry_group = &ctx->groups[entry_symbol->group];
+		entry_address = entry_group->address + entry_symbol->offset;
+	}
 	for (i = 0; i < ctx->group_count; ++i) {
 		struct ld_group *group = &ctx->groups[i];
 		if (group->rank < 2)
@@ -1825,9 +1831,10 @@ write_executable(struct ld_context *ctx, const char *path,
 		goto out_strings;
 	/* ELF header — set fields from target descriptor. */
 	{
-		unsigned char h[64] = {0x7f, 'E', 'L', 'F',
-		                       target->elf_class, target->elf_endian, 1, 0};
-		write16(h + 16, 2);
+	unsigned char h[64] = {0x7f, 'E', 'L', 'F',
+	                       target->elf_class, target->elf_endian, 1, 0};
+		uint16_t e_type = ctx->shared ? MT_ET_DYN : MT_ET_EXEC;
+		write16(h + 16, e_type);
 		write16(h + 18, target->emachine);
 		write32(h + 20, 1);
 		write64(h + 24, entry_address);
@@ -1836,7 +1843,13 @@ write_executable(struct ld_context *ctx, const char *path,
 		write32(h + 48, target->e_flags);
 		write16(h + 52, target->ehdr_size);
 		write16(h + 54, 56);
-		write16(h + 56, 2); /* e_phnum: always 2 (single LOAD + optional TLS) */
+		{
+			/* e_phnum: PT_LOAD + PT_TLS (optional) + PT_PHDR + PT_DYNAMIC (shared) */
+			int phnum = 1; /* PT_LOAD */
+			if (ctx->tls_size) phnum++;
+			if (ctx->shared) phnum += 2; /* PT_PHDR + PT_DYNAMIC */
+			write16(h + 56, phnum);
+		}
 		write16(h + 58, target->shdr_size);
 		write16(h + 60, (uint16_t)output_count);
 		write16(h + 62, (uint16_t)shstr_index);
@@ -1851,6 +1864,7 @@ write_executable(struct ld_context *ctx, const char *path,
 	 * Set FileSiz to load_file_end (non-NOBITS data only) so the kernel
 	 * zero-fills the BSS area (between load_file_end and memory_end). */
 	{
+		uint64_t base_addr = ctx->shared ? 0 : LD_BASE;
 		uint64_t single_end = memory_end > rx_end ? memory_end : rx_end;
 		uint64_t filesz = alloc_file_end > LD_PAGE ? alloc_file_end : LD_PAGE;
 		uint64_t memsz = single_end > LD_PAGE ? single_end : LD_PAGE;
@@ -1863,7 +1877,20 @@ write_executable(struct ld_context *ctx, const char *path,
 			if (tde > memsz) memsz = tde;
 		}
 		if (write_program_header(file, LD_PF_R | LD_PF_W | LD_PF_X,
-		                         0, LD_BASE, filesz, memsz) != 0)
+		                         0, base_addr, filesz, memsz) != 0)
+			goto out_file;
+	}
+	/* PT_PHDR and PT_DYNAMIC for shared libraries (ET_DYN) */
+	if (ctx->shared) {
+		/* PT_PHDR: program header table itself at file offset 64 */
+		if (write_program_header_type(file, MT_PT_PHDR,
+		                             LD_PF_R | LD_PF_W,
+		                             0, 0, 0, 0, 8) != 0)
+			goto out_file;
+		/* PT_DYNAMIC: placeholder */
+		if (write_program_header_type(file, MT_PT_DYNAMIC,
+		                             LD_PF_R | LD_PF_W,
+		                             0, 0, 0, 0, 8) != 0)
 			goto out_file;
 	}
 	if (ctx->tls_size) {
@@ -1931,6 +1958,65 @@ out_strings:
 out:
 	free(sections);
 	free(name_offsets);
+	return result;
+}
+
+int
+mt_ld_link_opts(const struct mt_ld_options *opts,
+                const char *const *inputs, size_t input_count,
+                const char *target_name,
+                const char **error_message)
+{
+	struct ld_context ctx;
+	size_t i;
+	int result = -1;
+	memset(&ctx, 0, sizeof(ctx));
+	if (target_name) {
+		ctx.target = mt_target_lookup(target_name);
+		if (!ctx.target) {
+			if (error_message)
+				*error_message = "unsupported target architecture";
+			return 1;
+		}
+	} else {
+		ctx.target = &mt_target_x86_64;
+	}
+	if (opts) {
+		ctx.shared = opts->shared;
+		ctx.soname = opts->soname;
+	}
+	ctx.got.group = -1;
+	for (i = 0; i < input_count; ++i)
+		if (load_input(&ctx, inputs[i]) != 0)
+			goto out;
+	if (ctx.objects.count == 0) {
+		ld_error(&ctx, "no object files were loaded");
+		goto out;
+	}
+	if (collect_sections(&ctx) != 0 || collect_symbols(&ctx) != 0 ||
+	    extract_archives(&ctx) != 0 || allocate_common(&ctx) != 0 ||
+	    collect_got_relocations(&ctx) != 0)
+		goto out;
+	if (ctx.got.count != 0)
+		ctx.got.group = find_group(&ctx, ".got");
+	if (layout_output(&ctx) != 0 || fill_got(&ctx) != 0 ||
+	    apply_relocations(&ctx) != 0 ||
+	    write_executable(&ctx, opts ? opts->output : "a.out",
+	                     opts ? opts->entry : "_start",
+	                     ctx.target) != 0)
+		goto out;
+	result = 0;
+out:
+	if (result != 0) {
+		static char reported_error[512];
+		if (!ctx.error[0])
+			strcpy(ctx.error, "link failed");
+		strncpy(reported_error, ctx.error, sizeof(reported_error) - 1);
+		reported_error[sizeof(reported_error) - 1] = '\0';
+		if (error_message)
+			*error_message = reported_error;
+	}
+	free_context(&ctx);
 	return result;
 }
 
