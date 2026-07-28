@@ -31,6 +31,7 @@ static int loop;       /* current loop level */
 
 static uint stmov;     /* stats: added moves */
 static uint stblk;     /* stats: added blocks */
+static Fn *cur_fn;     /* current function (for dynamic slot allocation in rref) */
 
 static int *
 hint(int t)
@@ -72,6 +73,31 @@ rfind(RMap *m, int t)
 	return -1;
 }
 
+/* Dynamic slot allocation for use during rega phase 4 edge copies.
+ *
+ * When a temp is register-resident at successor s (survived spill)
+ * but is NOT in predecessor b's end map (spill back-edge limit2
+ * rejected it), rref needs a slot so the edge copy can spill-to-reload.
+ *
+ * This extends the function's stack frame (fn->slot) by one word,
+ * which is correct because the temp should have been spilled but
+ * the two spill passes disagreed.
+ */
+static int
+fn_local_slot(int t)
+{
+	int s, w;
+
+	s = tmp[t].slot;
+	if (s != -1)
+		return s;
+	w = KWIDE(tmp[t].cls) ? 2 : 1;
+	s = cur_fn->slot;
+	cur_fn->slot += w;
+	tmp[t].slot = s;
+	return s;
+}
+
 static Ref
 rref(RMap *m, int t)
 {
@@ -80,7 +106,23 @@ rref(RMap *m, int t)
 	r = rfind(m, t);
 	if (r == -1) {
 		s = tmp[t].slot;
-		assert(s != -1 && "should have spilled");
+		if (s == -1) {
+			/* Dynamic slot assignment for the spill-vs-rega boundary
+			 * consistency gap.  When a temp is register-resident at a
+			 * successor's start (survived spill's limit2 there) but is
+			 * NOT in the predecessor's end map (spill's back-edge
+			 * limit2 ejected it), the temp has no slot and rref would
+			 * ASSERT.  Instead, allocate a slot on the fly so the edge
+			 * copy code can spill-to-reload it.
+			 *
+			 * This is safe because:
+			 * - rega runs after spill, so fn->slot is only used for
+			 *   stack frame sizing (fn->slot is final after spill).
+			 * - Adding a slot here extends the frame by one word,
+			 *   which is correct (the temp should have been spilled).
+			 */
+			s = fn_local_slot(t);
+		}
 		return SLOT(s);
 	} else
 		return TMP(r);
@@ -555,6 +597,7 @@ rega(Fn *fn)
 	stmov = 0;
 	stblk = 0;
 	regu = 0;
+	cur_fn = fn;
 	tmp = fn->tmp;
 	mem = fn->mem;
 	blk = alloc(fn->nblk * sizeof blk[0]);

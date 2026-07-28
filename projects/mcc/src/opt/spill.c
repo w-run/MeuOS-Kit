@@ -612,7 +612,24 @@ spill(Fn *fn)
 	/* align the locals to a 16 byte boundary */
 	/* specific to NAlign == 3 */
 	slot8 += slot8 & 3;
-	fn->slot += slot8;
+	/* Ensure all temporaries in block entry sets have stack slots.
+	 * On targets with many caller-save registers, spill.c may leave
+	 * some live-across temporaries without slots (slot == -1).
+	 * Assign slots now to prevent rega.c:rref() asserting. */
+	{
+		int more_slots = 0;
+		for (b=fn->start; b; b=b->link) {
+			int _t;
+			for (_t = Tmp0; bsiter(b->in, &_t); _t++)
+				if (tmp[_t].slot == -1) {
+					slot(_t);
+					more_slots = 1;
+				}
+		}
+		if (more_slots)
+			slot8 += slot8 & 3; /* re-align after new slots */
+	}
+	fn->slot = locs + slot8;
 
 	if (debug['S']) {
 		fprintf(stderr, "\n> Block information:\n");

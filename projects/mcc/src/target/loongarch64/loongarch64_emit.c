@@ -389,8 +389,8 @@ emitins(Ins *i, Fn *fn, FILE *f)
 		} else emitf("jirl $ra, %0, 0", i, fn, f);
 		break;
 	case Osalloc:
-		emitf("sub.d sp, sp, %0", i, fn, f);
-		if (!req(i->to, R)) emitf("or %=, sp, zero", i, fn, f);
+		emitf("sub.d $sp, $sp, %0", i, fn, f);
+		if (!req(i->to, R)) emitf("or %=, $sp, $zero", i, fn, f);
 		break;
 	case Odbgloc:
 		emitdbgloc(i->arg[0].val, i->arg[1].val, f);

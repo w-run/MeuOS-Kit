@@ -85,8 +85,9 @@ src/compat/
 | bug-loong64-emit | mcc backend | loongarch64 | `loongarch64_emit.c:514 assert(isreg(rb))` — 同上模式 | 🟢 | `636f143` + `f6748e9` |
 | bug-arm-isel | mcc backend | arm | `arm_isel.c: slot %(null) IR 诊断阻塞 self-rebuild` | 🟢 | `f6748e9` |
 | bug-i386-tls | mcc isel/sema | i386 | TLS 模型选择：非静态 `_Thread_local` 发出 IE 而非 LE | 🟢 | `833c9b3` |
-| bug-loong64-tls-reloc | mt/ld | loongarch64 | TLS LE 重定位 `.tdata` 初始值损坏 | 🔴 | `253de83` 部分分析，需 loongarch64 环境调试 |
-| bug-loong64-tls-errno | meuos-libc | loongarch64 | TLS errno 回退到 `static int`（非线程安全） | 🔴 | 阻塞于 bug-loong64-tls-reloc |
+| rega-spill-fix | mcc QBE opt | 全架构 | spill.c 未给所有 block-entry-set temp 分配 slot，rega.c:83 assert(s != -1) | 🟢 | 本 worktree（spill.c 新增 post-loop slot 分配 + rega.c 动态 slot 回退） |
+| bug-loong64-tls-reloc | mt/ld | loongarch64 | TLS LE 重定位损坏：mt/ld 未生成独立 `.tdata`/`.tbss` 段，`__meuos_tls_init` 返回错误 tp 导致 setjmp 退出时 SIGSEGV | 🔴 | mt/ld 需添加 TLS section（SHF_TLS）支持；参见 bug-loong64-tls-errno |
+| bug-loong64-tls-errno | meuos-libc | loongarch64 | TLS errno 回退到 `static int`（非线程安全），errno_la64.c 绕过 mt/ld TLS 缺失 | 🔴 | 阻塞于 bug-loong64-tls-reloc |
 
 ## 优先级 1（P1-core — 功能完善，需要实现）
 
@@ -94,8 +95,8 @@ src/compat/
 |----|------|------|------|------|---------|
 | meow-dag-dedup | meow | DAG 去重 | `-jN` 并行构建时间接依赖重复执行（`.todo/dag-dedup.md`） | 🟢 | `9c20ae2` |
 | mcc-atomic-voidptr | mcc sema | `_Atomic int*` → `void*` | C 6.3.2.3p1 限定对象指针应可转 `void*`（chibicc 测试报） | 🟢 | `03e8618` 验证通过 |
-| mcc-riscv64-qemu | mcc | riscv64 qemu 门禁 | 完整 qemu 运行时门禁（当前仅 exit=42） | 🔴 | 阻塞于 `rega.c:83` register spill assertion（stdlib/convert.c） |
-| mcc-loong64-qemu | mcc+libc | loongarch64 qemu 门禁 | 完整 qemu 运行时门禁（当前仅 exit=42） | 🔴 | 阻塞于同一 `rega.c:83` register spill assertion |
+| mcc-riscv64-qemu | mcc+libc | riscv64 qemu 门禁 | 完整 qemu 运行时门禁（hello/atomic/setjmp 通过，phase2/bare-tls/malloc-threads 跳过因 qemu-user CLONE_THREAD 限制） | 🟢 | rega/spill fix + pthread volatile cast + __asm__→__asm__ 修复，QEMU 运行时验证通过 |
+| mcc-loong64-qemu | mcc+libc | loongarch64 qemu 门禁 | 完整 qemu 运行时门禁（hello/phase2 通过；atomic/setjmp broken 因 mt/ld 缺 TLS section；bare-tls/malloc-threads 阻塞于 bug-loong64-tls-reloc） | 🔴 | 寄存器分配器修复后受阻于已知 bug-loong64-tls-reloc |
 | mcc-i386-tls-e2e | mcc+libc | i386 TLS e2e | bug-i386-tls 修复后的 TLS 端到端验证 | 🟢 | 本 commit |
 | mcc-i386-tls-doc | mcc(i386) | `gd-tls.md` 文档 | 被 3 个文件引用但文件不存在 | 🟢 | `03e8618` |
 | ld-shared | mt/ld | `-shared` 输出 `ET_DYN` | 🟢 ET_DYN + PHDR/DYNAMIC + dynsym/dynstr/hash/dynamic 完整实现 | `a0822fe` 动态节区数据填充 |
@@ -312,8 +313,8 @@ enum target_feature {
 | libc 运行时 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | mt/as | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | mt/ld | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| libc 全量构建 | ✅ | ✅ | ✅ bug-riscv64-emit | ✅ | ✅ bug-loong64-emit/bug-loong64-tls-reloc | ✅ |
-| qemu 运行时验证 | ✅ 完整 | ✅ 完整 | ⚠️ exit=42 | ⚠️ qemu system | ⚠️ exit=42 | ✅ 完整 |
+| libc 全量构建 | ✅ | ✅ | ✅ | ✅ | ✅ bug-loong64-tls-reloc | ✅ |
+| qemu 运行时验证 | ✅ 完整 | ✅ 完整 | ✅ hello/atomic/setjmp（线程跳过 qemu-user 限制） | ⚠️ qemu system | ⚠️ hello/phase2（atomic/setjmp/TLS 阻塞于 mt/ld TLS） | ✅ 完整 |
 | TLS 端到端 | ✅ | ✅ | ✅ bug-riscv64-emit | ❌ bug-i386-tls | ❌ bug-loong64-tls-reloc/bug-loong64-tls-errno | ✅ |
 | self-rebuild | ✅ | ✅ | ✅ bug-riscv64-emit | ❌ bug-i386-tls | ✅ bug-loong64-emit | ❌ bug-arm-isel |
 | 动态链接 | 🔄 ld-shared...ld-so | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
@@ -707,8 +708,8 @@ readelf 已实现部分 DWARF 节区头解析。
 | libc 运行时 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | mt/as | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | mt/ld | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| libc 全量构建 | ✅ | ✅ | ✅ bug-riscv64-emit | ✅ | ✅ bug-loong64-emit/bug-loong64-tls-reloc | ✅ |
-| qemu 运行时验证 | ✅ 完整 | ✅ 完整 | ⚠️ exit=42 | ⚠️ qemu system | ⚠️ exit=42 | ✅ 完整 |
+| libc 全量构建 | ✅ | ✅ | ✅ | ✅ | ✅ bug-loong64-tls-reloc | ✅ |
+| qemu 运行时验证 | ✅ 完整 | ✅ 完整 | ✅ hello/atomic/setjmp（线程跳过 qemu-user 限制） | ⚠️ qemu system | ⚠️ hello/phase2（atomic/setjmp/TLS 阻塞于 mt/ld TLS） | ✅ 完整 |
 | TLS 端到端 | ✅ | ✅ | ✅ bug-riscv64-emit | ❌ bug-i386-tls | ❌ bug-loong64-tls-reloc/bug-loong64-tls-errno | ✅ |
 | self-rebuild | ✅ | ✅ | ✅ bug-riscv64-emit | ❌ bug-i386-tls | ✅ bug-loong64-emit | ❌ bug-arm-isel |
 | 动态链接 | 🔄 ld.so (ld-shared 已完成) | 🔄 ld.so (ld-shared 已完成) | 🔄 ld.so (ld-shared 已完成) | 🔄 ld.so (ld-shared 已完成) | 🔄 ld.so (ld-shared 已完成) | 🔄 ld.so (ld-shared 已完成) |

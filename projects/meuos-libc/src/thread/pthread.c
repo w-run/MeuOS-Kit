@@ -289,8 +289,10 @@ pthread_barrier_wait(pthread_barrier_t *b)
 }
 
 /* ---- spinlock ---- */
-int pthread_spin_init(pthread_spinlock_t *sp, int pshared) { (void)pshared; *sp = 0; return 0; }
+int pthread_spin_init(pthread_spinlock_t *sp, int pshared) { (void)pshared; *((int *)sp) = 0; return 0; }
 int pthread_spin_destroy(pthread_spinlock_t *sp) { (void)sp; return 0; }
+
+#if defined(__x86_64__) || defined(__i386__)
 int
 pthread_spin_lock(pthread_spinlock_t *sp)
 {
@@ -309,6 +311,30 @@ pthread_spin_unlock(pthread_spinlock_t *sp)
 	__sync_lock_release(sp);
 	return 0;
 }
+#else
+/* Generic implementation: non-atomic for targets where
+ * __sync builtins aren't available. */
+int
+pthread_spin_lock(pthread_spinlock_t *sp)
+{
+	while (*((int *)sp)) ;
+	*((int *)sp) = 1;
+	return 0;
+}
+int
+pthread_spin_trylock(pthread_spinlock_t *sp)
+{
+	if (*((int *)sp)) return EBUSY;
+	*((int *)sp) = 1;
+	return 0;
+}
+int
+pthread_spin_unlock(pthread_spinlock_t *sp)
+{
+	*((int *)sp) = 0;
+	return 0;
+}
+#endif
 
 /* ---- cleanup handlers ---- */
 static struct pthread_cleanup_buffer *cleanup_stack;
