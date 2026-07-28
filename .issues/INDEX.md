@@ -205,7 +205,7 @@ src/compat/
 | meow-subdirs | make | **多目录构建** | 跨目录包依赖的 YAML 配方。不是 GNU `AC_CONFIG_SUBDIRS`，是 meow 自己的依赖模型 | 🟡 中 | 待实现 |
 | meow-pkg-config | pkg-config | **`.pc` 文件查询** | ⚠️ 不做 `.pc` 解析（freedesktop.org 格式）。meow 应有自己的包元数据格式（YAML 原生），或只通过 `meow install` 注册的数据库查询 | 🔄 重设计 | 待设计 |
 | meow-libtool | libtool | **共享/静态库管理** | ❌ 不做 `.la` 文件。libtool 是历史遗留，mt/ld 直接管理库格式，meow 只需知道库路径 | ❌ 不做 | 不做 |
-| meow-dag | meow | DAG 去重 | `-jN` 间接依赖重复执行。纯 meow 自己设计，无历史包袱 | ⏳ | `9c20ae2` |
+| meow-dag | meow | DAG 去重 | `-jN` 间接依赖重复执行。纯 meow 自己设计，无历史包袱 | 🟢 | `9c20ae2` DAG 去重已完成 |
 | meowctl | meow | 配置界面 | ⚠️ 不做 `./configure` 克隆。meow 自动检测，真正的配置界面（如 `meow config` 查看检测结果）应该简洁 | 🔄 重设计 | 待设计 |
 
 ## 优先级 7（P7-subarch — 子架构与 CPU 特性支持）
