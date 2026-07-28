@@ -99,7 +99,7 @@ src/compat/
 | mcc-loong64-qemu | mcc+libc | loongarch64 qemu 门禁 | 完整 qemu 运行时门禁：hello/atomic/setjmp/phase2/bare_tls/malloc_threads 全部通过。TLS 端到端验证（_Thread_local 初始值+线程隔离）+ TLS errno 线程隔离均通过 | 🟢 | `ed49dbd`（tls.c 指针间接引用修复 + TLS errno 切换） |
 | mcc-i386-tls-e2e | mcc+libc | i386 TLS e2e | bug-i386-tls 修复后的 TLS 端到端验证 | 🟢 | 本 commit |
 | mcc-i386-tls-doc | mcc(i386) | `gd-tls.md` 文档 | 被 3 个文件引用但文件不存在 | 🟢 | `03e8618` |
-| ld-shared | mt/ld | `-shared` 输出 `ET_DYN` | 🟢 ET_DYN + PHDR/DYNAMIC + dynsym/dynstr/hash/dynamic 完整实现 | `a0822fe` 动态节区数据填充 |
+| ld-shared | mt/ld | `-shared` 输出 `ET_DYN` | 🟢 ET_DYN + PHDR/DYNAMIC + dynsym/dynstr/hash/dynamic。**后续增量**：需加 RELA 动态重定位段、PLT/GOT、DT_INIT/FINI、PT_GNU_RELRO 才能被 ld.so 使用。已知 bug 已修复（TLS 组初始化/dynsym 填充顺序/无名符号） | `a0822fe` + `1c43b23`（3 个 crash bug fix） |
 | ld-pie | mt/ld | `--pie`/`--no-pie` 支持 | PIE 二进制输出（`ET_DYN` + `PT_INTERP` + 相对重定位） | 🟢 | `4ae63b1` |
 | mcc-pic-verify | mcc | PIC 代码生成加固 | 全架构验证 `-fPIC` 输出（GOT/PLT/TLS GD 路径）（riscv64 GOT 为空缺） | 🟢 | 本 commit（新增 pic_verify.sh；riscv64 需修复 `%got_pcrel_hi` emit） |
 | mcc-shared-mt | mcc driver | `-shared` mt/ld 集成 | 去掉 `-shared` 回退到 host cc 的限制 | 🟢 | `acce6c6` |
