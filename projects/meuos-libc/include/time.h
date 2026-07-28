@@ -13,7 +13,12 @@ struct tm { int tm_sec, tm_min, tm_hour, tm_mday, tm_mon, tm_year, tm_wday, tm_y
 time_t time(time_t *);
 int nanosleep(const struct timespec *, struct timespec *);
 int clock_gettime(clockid_t, struct timespec *);
+
+struct tm *gmtime(const time_t *);
+struct tm *gmtime_r(const time_t *, struct tm *);
 struct tm *localtime(const time_t *);
+struct tm *localtime_r(const time_t *, struct tm *);
+time_t mktime(struct tm *);
 size_t strftime(char *, size_t, const char *, const struct tm *);
 
 #endif

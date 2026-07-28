@@ -156,7 +156,7 @@ src/compat/
 |----|------|------|------|---------|
 | libc-math | `<math.h>` | 数学库：`sin`/`cos`/`sqrt`/`log`/`exp`/`pow` 等 IEEE 754 浮点函数 | 🔴 高 | 待实现 |
 | libc-printf | `<stdio.h>` | 完整 `printf`/`scanf` 格式覆盖（浮点、`%n`、宽字符、长 double） | 🔴 高 | 待实现 |
-| libc-time | `<time.h>` | 完整 `strftime`、时区处理、`clock_gettime` POSIX 扩展 | 🟡 中 | 待实现 |
+| libc-time | `<time.h>` | 完整 `strftime`、时区处理、`clock_gettime` POSIX 扩展 | 🟡 中 | 🟢 本 commit（localtime/gmtime/mktime/strftime 完整覆盖） |
 | libc-pthread | `<pthread.h>` | rwlock/barrier/spinlock/cleanup handler 完整覆盖 | 🟡 中 | 待实现 |
 | libc-str | `<string.h>` | `strerror_r` 线程安全变体、`strcoll`/`strxfrm` locale 感知 | 🟢 低 | 🟢 本 commit（+strspn/strcspn/strcasecmp/strncasecmp/strerror_r） |
 | libc-wchar | `<wchar.h>` | 宽字符 I/O、宽字符 `printf`/`scanf`、wcsftime | 🟢 低 | 待实现 |

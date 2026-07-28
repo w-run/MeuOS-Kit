@@ -4,19 +4,6 @@
 #include <time.h>
 #include <sys/stat.h>
 
-/* Minimal stub: returns empty string to satisfy mcc __DATE__/__TIME__ macros. */
-size_t strftime(char *s, size_t max, const char *format, const struct tm *tm) {
-    (void)format;
-    (void)tm;
-    if (max > 0) s[0] = '\0';
-    return 0;
-}
-
-struct tm *localtime(const time_t *t) {
-    (void)t;
-    return NULL;
-}
-
 /* mkdtemp: creates a temp directory from template (XXXXXX suffix).
  * Uses a PID-based approach instead of rand() since meuos-libc's
  * stdlib.h does not currently declare rand(). */
