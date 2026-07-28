@@ -29,6 +29,9 @@ struct mt_ld_options {
 	                           are redirected to __wrap_SYM, and __real_SYM
 	                           points at the original SYM. */
 	size_t      wrap_count;    /* number of entries in wrap[] */
+	const char *const *add_needed; /* --add-needed=<soname> list (NULL = none).
+	                               Each entry is a DT_NEEDED soname to add. */
+	size_t      add_needed_count;  /* number of entries in add_needed[] */
 };
 
 /* Static linker entry point (original API, shared=0).

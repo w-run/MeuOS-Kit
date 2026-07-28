@@ -196,6 +196,8 @@ main(int argc, char **argv)
 	size_t defsym_count = 0;
 	const char *wrap_list[64];
 	size_t wrap_count = 0;
+	const char *needed_list[64];
+	size_t needed_count = 0;
 	const char *inputs[MAX_INPUTS];
 	const char *libpaths[MAX_LIBPATHS];
 	const char *sysroot = NULL;
@@ -303,6 +305,11 @@ main(int argc, char **argv)
 		if (strncmp(argv[i], "--wrap=", 7) == 0) {
 			if (wrap_count < 64)
 				wrap_list[wrap_count++] = argv[i] + 7;
+			continue;
+		}
+		if (strncmp(argv[i], "--add-needed=", 13) == 0) {
+			if (needed_count < 64)
+				needed_list[needed_count++] = argv[i] + 13;
 			continue;
 		}
 		if (strcmp(argv[i], "-T") == 0) {
@@ -495,6 +502,8 @@ main(int argc, char **argv)
 	opts.defsym_count = defsym_count;
 	opts.wrap = wrap_count ? wrap_list : NULL;
 	opts.wrap_count = wrap_count;
+	opts.add_needed = needed_count ? needed_list : NULL;
+	opts.add_needed_count = needed_count;
 	if (mt_ld_link_opts(&opts, inputs, (size_t)input_count,
 	                    target_name, &error) != 0) {
 		fprintf(stderr, "ld: %s\n", error ? error : "link failed");

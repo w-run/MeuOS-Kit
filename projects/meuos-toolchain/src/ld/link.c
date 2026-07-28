@@ -183,6 +183,10 @@ struct ld_context {
 	size_t dynsym_capacity;
 	uint64_t dynsym_data_offset;   /* offset of first entry within .dynsym group */
 	uint32_t soname_dynstr_offset; /* .dynstr offset of DT_SONAME string (0 if none) */
+	/* --add-needed sonames: stored as (.dynstr_offset, .dynstr_offset, ...) */
+	const char *const *add_needed;
+	size_t add_needed_count;
+	uint32_t *needed_dynstr_offsets; /* malloc'd array of .dynstr offsets */
 	/* In-memory archive data (for VFS .msys archives) */
 	unsigned char **archive_mem_data;
 	size_t *archive_mem_size;
@@ -2515,7 +2519,7 @@ write_executable(struct ld_context *ctx, const char *path,
 		write16(h + 54, 56);
 		phnum = 1; /* PT_LOAD */
 		if (ctx->tls_size) phnum++;
-		if (ctx->shared) phnum += 2; /* PT_PHDR + PT_DYNAMIC */
+		if (ctx->shared || ctx->pie) phnum += 2; /* PT_PHDR + PT_DYNAMIC */
 		if (ctx->pie) phnum += 1;    /* PT_INTERP */
 		/* PT_GNU_RELRO if .dynamic or .got exists */
 		if (find_group(ctx, ".dynamic") >= 0 || find_group(ctx, ".got") >= 0)
@@ -2535,7 +2539,7 @@ write_executable(struct ld_context *ctx, const char *path,
 	 * Set FileSiz to load_file_end (non-NOBITS data only) so the kernel
 	 * zero-fills the BSS area (between load_file_end and memory_end). */
 	/* Program header order per ELF spec: PHDR (if present) before LOAD. */
-	if (ctx->shared) {
+	if (ctx->shared || ctx->pie) {
 		uint64_t phoff = target->ehdr_size;
 		if (write_program_header_type(file, MT_PT_PHDR, LD_PF_R,
 		                             phoff, base_addr + phoff,
@@ -2559,8 +2563,8 @@ write_executable(struct ld_context *ctx, const char *path,
 		                         0, base_addr, filesz, memsz) != 0)
 			goto out_file;
 	}
-	/* PT_DYNAMIC for shared libraries (ET_DYN) */
-	if (ctx->shared) {
+	/* PT_DYNAMIC for shared libraries and PIE executables (ET_DYN) */
+	if (ctx->shared || ctx->pie) {
 		int dg = find_group(ctx, ".dynamic");
 		if (dg >= 0) {
 			struct ld_group *dyn = &ctx->groups[dg];
@@ -2777,7 +2781,7 @@ build_dynamic_tables(struct ld_context *ctx)
 	size_t i;
 	size_t nsym = 0;
 
-	if (!ctx->shared)
+	if (!ctx->shared && !ctx->pie)
 		return 0;
 
 	/* Count exported (defined non-weak) globals with names */
@@ -2821,6 +2825,26 @@ build_dynamic_tables(struct ld_context *ctx)
 		                      strlen(ctx->soname) + 1, 1, &so_off) != 0)
 			return -1;
 		ctx->soname_dynstr_offset = (uint32_t)so_off;
+	}
+
+	/* Append --add-needed sonames to .dynstr and record their offsets */
+	ctx->needed_dynstr_offsets = NULL;
+	if (ctx->add_needed_count > 0) {
+		ctx->needed_dynstr_offsets = (uint32_t *)ld_malloc(
+		    ctx->add_needed_count * sizeof(uint32_t));
+		if (ctx->needed_dynstr_offsets)
+			memset(ctx->needed_dynstr_offsets, 0,
+			       ctx->add_needed_count * sizeof(uint32_t));
+		if (!ctx->needed_dynstr_offsets)
+			return ld_error(ctx, "out of memory");
+		for (i = 0; i < ctx->add_needed_count; ++i) {
+			uint64_t no_off;
+			if (append_group_data(ctx, gstr,
+			                      (const unsigned char *)ctx->add_needed[i],
+			                      strlen(ctx->add_needed[i]) + 1, 1, &no_off) != 0)
+				return -1;
+			ctx->needed_dynstr_offsets[i] = (uint32_t)no_off;
+		}
 	}
 
 	/* ---- .dynsym (placeholder, filled in pass 2) ---- */
@@ -2931,6 +2955,8 @@ build_dynamic_tables(struct ld_context *ctx)
 	if (have_init_arr) ntags += 2;  /* DT_INIT_ARRAY + DT_INIT_ARRAYSZ */
 	if (have_fini_arr) ntags += 2;  /* DT_FINI_ARRAY + DT_FINI_ARRAYSZ */
 	if (have_preinit_arr) ntags += 2; /* DT_PREINIT_ARRAY + DT_PREINIT_ARRAYSZ */
+	if (ctx->add_needed_count > 0)
+		ntags += ctx->add_needed_count; /* DT_NEEDED entries */
 	ntags++; /* DT_NULL terminator */
 	size_t dynent = elf64 ? 16 : 8;
 	size_t dyn_total = ntags * dynent;
@@ -2974,7 +3000,7 @@ fill_dynamic_addresses(struct ld_context *ctx)
 {
 	size_t i;
 
-	if (!ctx->shared)
+	if (!ctx->shared && !ctx->pie)
 		return 0;
 
 	int elf64 = (ctx->target->elf_class == MT_ELFCLASS64);
@@ -3076,6 +3102,18 @@ fill_dynamic_addresses(struct ld_context *ctx)
 		++k;
 	}
 
+	/* DT_NEEDED entries from --add-needed */
+	for (i = 0; i < ctx->add_needed_count; ++i) {
+		if (elf64) {
+			write64(dp + k * 16 + 0, MT_DT_NEEDED);
+			write64(dp + k * 16 + 8, ctx->needed_dynstr_offsets[i]);
+		} else {
+			write32(dp + k * 8 + 0, MT_DT_NEEDED);
+			write32(dp + k * 8 + 4, ctx->needed_dynstr_offsets[i]);
+		}
+		++k;
+	}
+
 	/* DT_INIT / DT_FINI / DT_INIT_ARRAY / DT_FINI_ARRAY / DT_PREINIT_ARRAY */
 	{
 		int dg;
@@ -3164,7 +3202,7 @@ fill_dynamic_addresses(struct ld_context *ctx)
 static int
 ensure_dynamic_section(struct ld_context *ctx)
 {
-	if (!ctx->shared)
+	if (!ctx->shared && !ctx->pie)
 		return 0;
 	int g = get_group(ctx, ".dynamic", MT_SHT_PROGBITS,
 	                  LD_SHF_ALLOC | LD_SHF_WRITE, 8);
@@ -3314,6 +3352,8 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 		ctx.gc_sections = opts->gc_sections;
 		ctx.print_map = opts->print_map;
 		ctx.link_script = opts->link_script;
+		ctx.add_needed = opts->add_needed;
+		ctx.add_needed_count = opts->add_needed_count;
 		/* Default: --no-as-needed when unset */
 		if (ctx.as_needed < 0)
 			ctx.as_needed = 0;
