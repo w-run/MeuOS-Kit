@@ -167,6 +167,7 @@ struct ld_context {
 	int eh_frame_hdr;    /* 1 = generate .eh_frame_hdr */
 	int whole_archive;   /* 1 = force-extract all archive members */
 	int as_needed;        /* 1 = --as-needed, 0 = --no-as-needed */
+	int no_undefined;    /* 1 = error on undefined symbols */
 	const char *soname;  /* DT_SONAME for shared lib (may be NULL) */
 	/* Dynamic symbol table bookkeeping (shared libs only) */
 	struct ld_dynsym_entry *dynsym_entries;
@@ -2826,6 +2827,7 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 		ctx.eh_frame_hdr = opts->eh_frame_hdr;
 		ctx.as_needed = opts->as_needed;
 		ctx.whole_archive = opts->whole_archive;
+		ctx.no_undefined = opts->no_undefined;
 		/* Default: --no-as-needed when unset */
 		if (ctx.as_needed < 0)
 			ctx.as_needed = 0;
@@ -2844,6 +2846,17 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 	    extract_archives(&ctx) != 0 || allocate_common(&ctx) != 0 ||
 	    collect_got_relocations(&ctx) != 0)
 		goto out;
+	/* --no-undefined: check for unresolved symbols */
+	if (ctx.no_undefined) {
+		size_t ui;
+		for (ui = 0; ui < ctx.globals.count; ++ui) {
+			if (!ctx.globals.items[ui].defined) {
+				ld_errorf(&ctx, "undefined reference to",
+				          ctx.globals.items[ui].name);
+				goto out;
+			}
+		}
+	}
 	if (build_dynamic_tables(&ctx) != 0)
 		goto out;
 	if (ctx.got.count != 0)

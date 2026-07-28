@@ -182,7 +182,8 @@ main(int argc, char **argv)
 	int as_needed = -1; /* default: unspecified */
 	int whole_archive = 0;
 	int in_start_group = 0;
-	(void)in_start_group; /* consumed during option parsing */
+	(void)in_start_group;
+	int no_undefined = 0;
 	const char *inputs[MAX_INPUTS];
 	const char *libpaths[MAX_LIBPATHS];
 	const char *sysroot = NULL;
@@ -253,6 +254,21 @@ main(int argc, char **argv)
 		}
 		if (strcmp(argv[i], "--end-group") == 0) {
 			in_start_group = 0;
+			continue;
+		}
+		if (strcmp(argv[i], "--no-undefined") == 0 ||
+		    strcmp(argv[i], "-z") == 0) {
+			no_undefined = 1;
+			if (strcmp(argv[i], "-z") == 0) {
+				/* -z defs / -z undefs */
+				if (++i >= argc) { usage(stderr); return 2; }
+				if (strcmp(argv[i], "defs") == 0 ||
+				    strcmp(argv[i], "undefs") == 0)
+					no_undefined = 1;
+				else if (strcmp(argv[i], "nodefs") == 0 ||
+				         strcmp(argv[i], "noundefs") == 0)
+					no_undefined = 0;
+			}
 			continue;
 		}
 		if (strcmp(argv[i], "-soname") == 0) {
@@ -427,6 +443,7 @@ main(int argc, char **argv)
 	opts.eh_frame_hdr = eh_frame_hdr;
 	opts.as_needed   = as_needed;
 	opts.whole_archive = whole_archive;
+	opts.no_undefined = no_undefined;
 	if (mt_ld_link_opts(&opts, inputs, (size_t)input_count,
 	                    target_name, &error) != 0) {
 		fprintf(stderr, "ld: %s\n", error ? error : "link failed");

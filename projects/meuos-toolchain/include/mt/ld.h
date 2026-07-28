@@ -15,6 +15,7 @@ struct mt_ld_options {
 	int         eh_frame_hdr; /* 1 = generate .eh_frame_hdr (exception index) */
 	int         as_needed;    /* 0 = --no-as-needed, 1 = --as-needed, -1 = default */
 	int         whole_archive; /* 1 = --whole-archive, 0 = --no-whole-archive */
+	int         no_undefined;  /* 1 = error on undefined symbols */
 };
 
 /* Static linker entry point (original API, shared=0).

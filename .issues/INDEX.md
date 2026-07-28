@@ -141,7 +141,7 @@ src/compat/
 | ld-defsym | mt/ld | `--defsym` | 链接时定义符号（`--defsym=foo=bar`） | 🟡 | 待实现 |
 | ld-wrap | mt/ld | `--wrap` | 符号包装（`--wrap=malloc` → `__wrap_malloc`）用于测试/mock | 🟡 | 待实现 |
 | ld-version-script | mt/ld | `--version-script` | 符号版本控制/导出限制（`.map` / `.ver` 文件） | 🟡 | 待实现 |
-| ld-no-undefined | mt/ld | `--no-undefined` | 未定义符号时报错（`-z undefs` / `--no-undefined`） | 🟡 | 待实现 |
+| ld-no-undefined | mt/ld | `--no-undefined` | 未定义符号时报错（`-z defs` / `-z undefs`） | 🟢 | 本 commit |
 | ld-cref | mt/ld | `--cref` | 交叉引用表输出 | 🟢 | 已实现 |
 | ld-compress-debug | mt/ld | `--compress-debug-sections` | DWARF 节区压缩（zlib/zstd） | 🟢 | 已实现 |
 | meow-multi-dir | meow | 多目录构建 | 跨目录包依赖的 YAML 配方 | ⏳ | 待实现 |
