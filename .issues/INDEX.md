@@ -173,7 +173,7 @@ src/compat/
 | mcc-diagnostics | mcc | 诊断质量 | 带源位置和 caret（`^`）的错误消息。这是 Clang 推广的好设计，非 GNU 包袱 | 🟡 | 🟢 本 commit（token.c 添加 caret ^ 错误指示） |
 | mcc-warnings | mcc | 警告体系 | ⚠️ `-Wall`/`-Wextra` 是 GCC 命名约定。我们应该设计自己的警告体系（`--warn=all`/`--warn=extra` 或 `-W` 风格但自己定义哪些组别） | 🔄 重设计 | 待设计 |
 | mcc-attributes | mcc compat | `__attribute__` | GCC 属性语法。按设计原则应走 compat 映射层，核心不直接处理 | 🟢 | `7c087f8`（支持 weak/used/noinline/always_inline/visibility/unused/aligned/section/packed/noreturn/deprecated/constructor/destructor） |
-| mcc-pragma | mcc compat | `#pragma` | GCC/Clang pragma。同样走 compat 映射层 | 🟡 | 待实现 |
+| mcc-pragma | mcc compat | `#pragma` | GCC/Clang pragma。同样走 compat 映射层 | 🟢 | `cffc405`（`#pragma once` 等已接收并忽略；`_Pragma` 操作符在 expand 中处理） |
 | mcc-builtins | mcc compat | `__builtin_*` | GCC/Clang 内建函数。同样走 compat 映射层（`__builtin_expect` → 宏等） | 🟢 | 待实现 |
 | mcc-generic | mcc | `_Generic` 完整 C11 匹配规则（含 qualified type 分派） | 🟢 已验证 `_Generic` 支持 qualified type 匹配，正确检测 multiple matches | `dc2d598`（移除 `qual==QUALNONE` 保护） |
 | as-errors | mt/as | 错误消息行号/列号 | 🟢 | 已有 line info（mt_as_assemble 通过 error_line 参数报告） |
