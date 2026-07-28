@@ -2674,10 +2674,10 @@ build_dynamic_tables(struct ld_context *ctx)
 	if (!ctx->shared)
 		return 0;
 
-	/* Count exported (defined non-weak) globals */
+	/* Count exported (defined non-weak) globals with names */
 	for (i = 0; i < ctx->globals.count; ++i) {
 		struct ld_global *g = &ctx->globals.items[i];
-		if (g->defined && !g->weak)
+		if (g->defined && !g->weak && g->name)
 			++nsym;
 	}
 
@@ -2736,6 +2736,38 @@ build_dynamic_tables(struct ld_context *ctx)
 	free(dz);
 	ctx->dynsym_data_offset = sym_data_off;
 
+	/* Now populate the dynsym_entries metadata (name → dynstr_offset).
+	 *
+	 * IMPORTANT: this MUST happen BEFORE building the .hash table,
+	 * because the hash loop accesses e->global->name. */
+	size_t ei = 0;
+	for (i = 0; i < ctx->globals.count; ++i) {
+		struct ld_global *g = &ctx->globals.items[i];
+		if (!(g->defined && !g->weak) || !g->name)
+			continue;
+		/* Determine st_type */
+		int stt = MT_STT_OBJECT;
+		if (g->group >= 0) {
+			const char *gname = ctx->groups[g->group].name;
+			if (gname && strcmp(gname, ".text") == 0)
+				stt = MT_STT_FUNC;
+			else if (g->group >= 0 &&
+			         (g->group == ctx->tls_tdata_group ||
+			          g->group == ctx->tls_tbss_group))
+				stt = MT_STT_TLS;
+		}
+		uint32_t dynstr_off;
+		if (append_group_data(ctx, gstr,
+		                      (const unsigned char *)g->name,
+		                      strlen(g->name) + 1, 1, &stroff) != 0)
+			return -1;
+		dynstr_off = (uint32_t)stroff;
+		ctx->dynsym_entries[ei].global = g;
+		ctx->dynsym_entries[ei].dynstr_offset = dynstr_off;
+		ctx->dynsym_entries[ei].stt = stt;
+		++ei;
+	}
+
 	/* ---- .hash (SysV format, 32-bit entries) ---- */
 	int dg_hash = get_group(ctx, ".hash", MT_SHT_HASH,
 	                        LD_SHF_ALLOC, 4);
@@ -2786,34 +2818,6 @@ build_dynamic_tables(struct ld_context *ctx)
 	}
 	free(dd);
 
-	/* Now populate the dynsym_entries metadata (name → dynstr_offset) */
-	/* Re-scan globals to fill dynsym_entries in the same order as counted. */
-	size_t ei = 0;
-	for (i = 0; i < ctx->globals.count; ++i) {
-		struct ld_global *g = &ctx->globals.items[i];
-		if (!(g->defined && !g->weak))
-			continue;
-		/* Determine st_type */
-		int stt = MT_STT_OBJECT;
-		if (g->group >= 0) {
-			const char *gname = ctx->groups[g->group].name;
-			if (gname && strcmp(gname, ".text") == 0)
-				stt = MT_STT_FUNC;
-			else if (g->group == ctx->tls_tdata_group ||
-			         g->group == ctx->tls_tbss_group)
-				stt = MT_STT_TLS;
-		}
-		uint32_t dynstr_off;
-		if (append_group_data(ctx, gstr,
-		                      (const unsigned char *)g->name,
-		                      strlen(g->name) + 1, 1, &stroff) != 0)
-			return -1;
-		dynstr_off = (uint32_t)stroff;
-		ctx->dynsym_entries[ei].global = g;
-		ctx->dynsym_entries[ei].dynstr_offset = dynstr_off;
-		ctx->dynsym_entries[ei].stt = stt;
-		++ei;
-	}
 	return 0;
 }
 
@@ -3069,6 +3073,9 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 	size_t i;
 	int result = -1;
 	memset(&ctx, 0, sizeof(ctx));
+	ctx.tls_tdata_group = -1;
+	ctx.tls_tbss_group = -1;
+	ctx.tls_align = 1;
 	if (target_name) {
 		ctx.target = mt_target_lookup(target_name);
 		if (!ctx.target) {
