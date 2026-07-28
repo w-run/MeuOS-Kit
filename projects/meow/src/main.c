@@ -154,19 +154,24 @@ main(int argc, char **argv)
 		return 0;
 	}
 	if (count == 1 && strcmp(arguments[0], "--help") == 0) {
-		printf("usage: meow [-jN] [--arch <arch>] build <package> [target]\n");
-		printf("       meow [-jN] [--arch <arch>] build all\n");
-		printf("       meow [-jN] [--arch <arch>] clean <package>\n");
+		printf("usage: meow [-jN] [--arch <arch>] [--target <triple>] build <package> [target]\n");
+		printf("       meow [-jN] [--arch <arch>] [--target <triple>] build        # auto 当前目录\n");
+		printf("       meow [-jN] [--arch <arch>] [--target <triple>] build all\n");
+		printf("       meow [-jN] [--arch <arch>] [--target <triple>] clean <package>\n");
 		printf("       meow [-jN] [--arch <arch>] env        # 打印构建环境\n");
 		printf("       meow list\n");
+		printf("       meow lint [<package>]  # 配方语法检查\n");
 		printf("       meow --bootstrap\n");
 		printf("       meow --help\n");
 		printf("\n选项:\n");
-		printf("  --quiet        仅显示错误（默认）\n");
-		printf("  --verbose      显示详细构建命令\n");
-		printf("  --debug        显示所有调试信息\n");
-		printf("  --json         以 JSON 格式输出\n");
-		printf("  --no-color     禁用颜色（管道模式自动禁用）\n");
+		printf("  --arch=<arch>   目标架构（x86_64 / aarch64 等，默认 auto-detect）\n");
+		printf("  --target=<triple>  完整 triple（如 x86_64-v3-meuos-linux）\n");
+		printf("  -jN             并行任务数\n");
+		printf("  --quiet         仅显示错误\n");
+		printf("  --verbose       显示详细构建命令\n");
+		printf("  --debug         显示所有调试信息\n");
+		printf("  --json          以 JSON 格式输出\n");
+		printf("  --no-color      禁用颜色（管道模式自动禁用）\n");
 		return 0;
 	}
 	/* Build all packages: scan pkgs/ and build each one */
@@ -220,7 +225,7 @@ main(int argc, char **argv)
 	}
 	if ((count != 2 && count != 3) ||
 	    (strcmp(arguments[0], "build") != 0 && strcmp(arguments[0], "clean") != 0)) {
-		printf("usage: meow [-jN] [--arch <arch>] [--target <triple>] build <package> [target] | meow [-jN] [--arch <arch>] build | meow [-jN] clean <package> | meow list | meow --bootstrap\n");
+		printf("usage: meow [-jN] [--arch <arch>] [--target <triple>] build <package> [target] | meow [-jN] [--arch <arch>] build | meow [-jN] [--arch <arch>] clean <package> | meow list | meow lint [<package>] | meow --bootstrap\n");
 		return 2;
 	}
 	data = malloc(RECIPE_MAX);
