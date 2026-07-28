@@ -911,5 +911,44 @@ ldr_mem:
 		return 0;
 	}
 
+	/* ---- VFP push/pop for VFP registers: vpush/vpop {d0-dN} or {s0-sN} ---- */
+	if (nops >= 1 && (strcmp(mnemonic, "vpush") == 0 || strcmp(mnemonic, "vpop") == 0)) {
+		const char *regtext = ops[0];
+		int is_pop = (mnemonic[1] == 'p');
+		/* Expecting {d0-dN} or d0-dN (braces already stripped) */
+		if (regtext[0] == 'd') {
+			int first, last;
+			if (sscanf(regtext, "d%d-d%d", &first, &last) < 2) return -1;
+			uint32_t dregs = (uint32_t)(last - first + 1);
+			uint32_t base = is_pop ? 0xECBD0B00 : 0xED2D0B00;
+			emit32(out->bytes, base | (((uint32_t)first >> 1) << 12) | ((first & 1) << 22) | dregs);
+			return 0;
+		}
+	}
+
+	/* ---- VFP vldr/vstr (different offset encoding) ---- */
+	if (nops >= 2 && (strcmp(mnemonic, "vldr") == 0 || strcmp(mnemonic, "vstr") == 0)) {
+		int is_load = (mnemonic[1] == 'l');
+		int rd; if (reg_num(ops[0], &rd) < 0) return -1;
+		const char *mem = ops[1];
+		if (mem[0] == '[') mem++;
+		char rn_str[16]; int i2 = 0;
+		while (*mem && *mem != ']' && *mem != ',' && *mem != '#' && i2 < 15) rn_str[i2++] = *mem++;
+		rn_str[i2] = '\0';
+		int rn; if (reg_num(rn_str, &rn) < 0) return -1;
+		int32_t off = 0;
+		if (*mem == ',' || *mem == '#') {
+			while (*mem && (*mem == ',' || *mem == ' ' || *mem == '#')) mem++;
+			sscanf(mem, "%i", &off);
+		}
+		uint32_t d = (uint32_t)(rd & 0x1F);
+		uint32_t imm8 = (uint32_t)(off >= 0 ? off : -off) >> 2;
+		int U = (off >= 0) ? 1 : 0;
+		uint32_t base = is_load ? 0xED100A00 : 0xED000A00;
+		base |= (rn<<16) | ((d&1)<<22) | ((d>>1)<<12) | (U<<23) | (imm8 & 0xFF);
+		emit32(out->bytes, base);
+		return 0;
+	}
+
 	return -1; /* unsupported */
 }
