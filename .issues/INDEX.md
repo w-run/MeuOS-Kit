@@ -104,7 +104,7 @@ src/compat/
 | mcc-pic-verify | mcc | PIC 代码生成加固 | 全架构验证 `-fPIC` 输出（GOT/PLT/TLS GD 路径）（riscv64 GOT 为空缺） | 🟢 | 本 commit（新增 pic_verify.sh；riscv64 需修复 `%got_pcrel_hi` emit） |
 | mcc-shared-mt | mcc driver | `-shared` mt/ld 集成 | 去掉 `-shared` 回退到 host cc 的限制 | 🟢 | `acce6c6` |
 | ld-so | 新建 | ld.so 动态链接器 | **完整端到端验证通过**：x86_64 PIE + shared library 动态链接运行 exit=0 ✅。ELF 加载 + DT_NEEDED 传递遍历 + 符号解析 (SysV hash) + RELA 重定位 (RELATIVE/GLOB_DAT/JUMP_SLOT) + init_array | 🟢 | `525ab54` + `99dab32` (DT_NEEDED recursive) + `37ce60c` (main_base fix) |
-| libc-dl | meuos-libc | `dlfcn.h` + `dl*` 实现 | `dlopen`/`dlsym`/`dlclose`/`dlerror` | 🟡 | `ef0edd0` 头文件+框架（阶段1），阶段2需要完整 ELF 加载实现 |
+| libc-dl | meuos-libc | `dlfcn.h` + `dl*` 实现 | `dlopen`/`dlsym`/`dlclose`/`dlerror` | 🟢 | `fd05074` mmap-based ELF 加载器 + SysV hash 符号查找 + RELA 重定位 + 急切解析 |
 | mcc-dwarf | mcc | DWARF 调试信息 | `-g` 生成 DWARF v5（`.debug_info`/`.abbrev`/`.line`/`.str`/`.loc`/`.ranges`），包含行号、变量、类型信息 | 🟢 | `a9a065c` 行号表(阶段1); .debug_info/abbrev/str 阶段2待实现 |
 | as-dwarf | mt/as | DWARF 汇编伪指令 | `.loc`/`.file`/`.cfi_*` 支持 — **阻塞 mcc-dwarf**，无此 as 无法处理 `-g` 输出 | 🟢 | `a5f49c0` |
 | ld-dwarf-merge | mt/ld | DWARF 节区合并 | 链接时合并 `.debug_*` 节区，生成 `.debug_line`/`.debug_info` 跨目标文件 | 🟢 | 本 commit（支持合并 `.debug_*` 非 ALLOC 节区；DWARF 重定位尚需独立调整） |
