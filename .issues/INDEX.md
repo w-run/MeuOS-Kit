@@ -104,7 +104,7 @@ src/compat/
 | mcc-shared-mt | mcc driver | `-shared` mt/ld 集成 | 去掉 `-shared` 回退到 host cc 的限制 | 🟢 | `acce6c6` |
 | ld-so | 新建 | ld.so 动态链接器 | ELF 加载、DT_NEEDED 图遍历、符号解析、重定位应用、延迟绑定、TLS init | 🟡 | `525ab54` 骨架实现（x86_64、ELF 加载+符号解析+重定位+裸 syscall） |
 | libc-dl | meuos-libc | `dlfcn.h` + `dl*` 实现 | `dlopen`/`dlsym`/`dlclose`/`dlerror` | ⏳ | 待实现 |
-| mcc-dwarf | mcc | DWARF 调试信息 | `-g` 生成 DWARF v5（`.debug_info`/`.abbrev`/`.line`/`.str`/`.loc`/`.ranges`），包含行号、变量、类型信息 | 🟡 | as-dwarf 已完成(`a5f49c0`)，行号表实现进行中(fork-8) |
+| mcc-dwarf | mcc | DWARF 调试信息 | `-g` 生成 DWARF v5（`.debug_info`/`.abbrev`/`.line`/`.str`/`.loc`/`.ranges`），包含行号、变量、类型信息 | 🟢 | `a9a065c` 行号表(阶段1); .debug_info/abbrev/str 阶段2待实现 |
 | as-dwarf | mt/as | DWARF 汇编伪指令 | `.loc`/`.file`/`.cfi_*` 支持 — **阻塞 mcc-dwarf**，无此 as 无法处理 `-g` 输出 | 🟢 | `a5f49c0` |
 | ld-dwarf-merge | mt/ld | DWARF 节区合并 | 链接时合并 `.debug_*` 节区，生成 `.debug_line`/`.debug_info` 跨目标文件 | ⏳ | 待实现 |
 | ld-build-id | mt/ld | `--build-id` | 生成 `.note.gnu.build-id`（SHA1 note，用于调试/构建标识） | ⏳ | 待实现 |
