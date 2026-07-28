@@ -1132,6 +1132,90 @@ parse_line(struct as_file *as, char *line)
 	return emit_instruction(as, mnemonic, rest);
 }
 
+/* Returns 1 when we are inside a false branch (should skip). */
+static int
+is_skipping(struct as_file *as)
+{
+	int i;
+	for (i = 0; i < as->cond_depth; i++)
+		if (as->cond_stack[i])
+			return 1;
+	return 0;
+}
+
+/* Parse a conditional assembly directive (.if/.ifdef/.ifndef/.else/.endif).
+ * Called from both the skipping path and parse_directive. */
+static int
+parse_conditional(struct as_file *as, const char *directive, const char *rest)
+{
+	/* .endif: pop the stack */
+	if (strcmp(directive, ".endif") == 0) {
+		if (as->cond_depth <= 0)
+			return as_error(as, ".endif without .if");
+		as->cond_depth--;
+		return 0;
+	}
+	/* .else: toggle the current level (only if not already toggled) */
+	if (strcmp(directive, ".else") == 0) {
+		if (as->cond_depth <= 0)
+			return as_error(as, ".else without .if");
+		/* .else toggles: if we were skipping (false branch), now we're
+		 * in the else part (active), and vice versa. But we need to
+		 * check whether there's a parent skip. */
+		int parent_skip = 0;
+		int i;
+		for (i = 0; i < as->cond_depth - 1; i++)
+			if (as->cond_stack[i]) parent_skip = 1;
+		/* Toggle only if no parent skip; otherwise the entire block is skipped */
+		if (!parent_skip)
+			as->cond_stack[as->cond_depth - 1] =
+				!as->cond_stack[as->cond_depth - 1];
+		return 0;
+	}
+	/* .if / .ifdef / .ifndef: push and evaluate */
+	if (as->cond_depth >= 16)
+		return as_error(as, "conditional nesting too deep");
+	/* Default: if we are already skipping, push 1 (still skipping) */
+	int result = 0;
+	if (is_skipping(as)) {
+		result = 1; /* still skipping */
+	} else {
+		/* Evaluate the condition */
+		int64_t value = 0;
+		char name[256];
+		const char *rp = rest;
+		while (*rp && isspace((unsigned char)*rp)) rp++;
+		if (strcmp(directive, ".ifdef") == 0 || strcmp(directive, ".ifndef") == 0) {
+			/* Extract symbol name */
+			size_t nl = 0;
+			while (rp[nl] && !isspace((unsigned char)rp[nl]) && rp[nl] != ',')
+				nl++;
+			if (nl == 0 || nl >= sizeof(name))
+				return as_error(as, "invalid .ifdef symbol");
+			memcpy(name, rp, nl);
+			name[nl] = '\0';
+			/* Look up in symbol table */
+			int found = 0;
+			size_t si;
+			for (si = 0; si < as->symbol_count; si++) {
+				if (strcmp(as->symbols[si].name, name) == 0 &&
+				    as->symbols[si].defined) {
+					found = 1;
+					break;
+				}
+			}
+			value = (strcmp(directive, ".ifdef") == 0) ? found : !found;
+		} else {
+			/* .if: parse integer expression */
+			char *end;
+			value = strtoll(rp, &end, 0);
+		}
+		result = (value == 0) ? 1 : 0;
+	}
+	as->cond_stack[as->cond_depth++] = result;
+	return 0;
+}
+
 static int
 parse_source(struct as_file *as, FILE *input)
 {
@@ -1143,9 +1227,37 @@ parse_source(struct as_file *as, FILE *input)
 		++as->line;
 		if (strchr(line, '\n') == NULL && !feof(input))
 			return as_error(as, "source line is too long");
+
+		/* Check for conditional directives (always, even when skipping) */
+		int cond_handled = 0;
+		char *tp = line;
+		while (*tp && isspace((unsigned char)*tp)) tp++;
+		if (*tp == '.') {
+			char d[64];
+			char *ep = tp;
+			while (*ep && !isspace((unsigned char)*ep)) ep++;
+			size_t dlen = (size_t)(ep - tp);
+			if (dlen > 0 && dlen < 64) {
+				memcpy(d, tp, dlen);
+				d[dlen] = '\0';
+				if (strcmp(d, ".if") == 0 || strcmp(d, ".ifdef") == 0 ||
+				    strcmp(d, ".ifndef") == 0 ||
+				    strcmp(d, ".else") == 0 || strcmp(d, ".endif") == 0) {
+					if (parse_conditional(as, d, ep) != 0)
+						return -1;
+					cond_handled = 1;
+				}
+			}
+		}
+		/* Skip lines when inside a false conditional branch.
+		 * Conditionals have already been processed above. */
+		if (cond_handled || is_skipping(as))
+			continue;
 		if (parse_line(as, line) != 0)
 			return -1;
 	}
+	if (as->cond_depth != 0)
+		return as_error(as, "unclosed .if/.ifdef");
 	if (ferror(input))
 		return as_error(as, "input read failed");
 	return 0;

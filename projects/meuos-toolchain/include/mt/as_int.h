@@ -67,6 +67,8 @@ struct as_file {
 	int current;
 	int section_stack[16];   /* for .pushsection/.popsection */
 	int section_stack_depth;
+	int cond_stack[16];     /* 0=active, 1=skipping (.if false) */
+	int cond_depth;
 	const char *filename;
 	unsigned line;
 	char error[256];
