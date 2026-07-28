@@ -537,6 +537,42 @@ rtld_init_lib(struct rtld_lib *lib)
 	}
 }
 
+/* Forward declaration */
+static void rtld_load_needed(struct rtld_state *st, struct rtld_lib *lib);
+
+/* Load all DT_NEEDED dependencies of a library (transitive). */
+static void
+rtld_load_needed(struct rtld_state *st, struct rtld_lib *lib)
+{
+	if (!lib->dynv || !lib->strtab || !lib->strsz)
+		return;
+	for (Dyn64 *d = lib->dynv; d->d_tag != DT_NULL; d++) {
+		if (d->d_tag != DT_NEEDED) continue;
+		if (d->d_val >= lib->strsz) continue;
+		const char *soname = lib->strtab + d->d_val;
+		int already = 0;
+		for (int i = 0; i < st->lib_count; i++) {
+			if (st->libs[i].name &&
+			    rtld_strcmp(st->libs[i].name, soname) == 0) {
+				already = 1; break;
+			}
+		}
+		if (already) continue;
+		struct rtld_lib *loaded = rtld_load_lib(soname, st);
+		if (!loaded) {
+			char libpath[512];
+			int k = 0;
+			const char *p = "/lib/";
+			while (*p) libpath[k++] = *p++;
+			p = soname;
+			while (*p) libpath[k++] = *p++;
+			libpath[k] = 0;
+			loaded = rtld_load_lib(libpath, st);
+		}
+		if (loaded) rtld_load_needed(st, loaded);
+	}
+}
+
 /* ---- main entry (called from dlstart.S) ---- */
 
 uintptr_t
@@ -577,16 +613,21 @@ rtld_main(size_t *sp)
 	main_lib->pltrel = 0;
 
 	/* Get the main executable's base from AT_PHDR.
-	 * For PIE, the pages containing phdrs are within the loaded
-	 * executable.  We calculate base as AT_PHDR rounded down. */
-	uintptr_t main_base = at_phdr & ~(st.page_size - 1);
+	 * For PIE, the program headers are at a vaddr relative to the
+	 * load base.  We compute the base by subtracting the first PHDR's
+	 * vaddr from the AT_PHDR pointer.  For shared libraries with
+	 * vaddr_start = 0, at_phdr equals main_base + 0x40 (ELF header). */
+	Phdr64 ph0;
+	parse_phdr((const unsigned char *)at_phdr, 0, &ph0);
+	uintptr_t phdr_vaddr = ph0.vaddr;
+	uintptr_t main_base = at_phdr - phdr_vaddr;
 	/* Walk the phdrs to find PT_DYNAMIC */
 	for (unsigned i = 0; i < at_phnum; i++) {
 		Phdr64 ph;
 		parse_phdr((const unsigned char *)at_phdr,
 		            i * at_phent, &ph);
 		if (ph.type == PT_DYNAMIC) {
-			main_lib->dynv = (Dyn64 *)(main_base + ph.vaddr);
+			main_lib->dynv = (Dyn64 *)(at_phdr + ph.vaddr - phdr_vaddr);
 		}
 	}
 

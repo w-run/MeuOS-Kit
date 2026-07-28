@@ -2332,7 +2332,7 @@ write_executable(struct ld_context *ctx, const char *path,
 	int result = -1;
 	/* For shared libraries (ET_DYN) the load base is 0; the dynamic
 	 * loader relocates the image at run time. */
-	uint64_t base_addr = (ctx->shared || ctx->pie) ? 0 : LD_BASE;
+	uint64_t base_addr = ctx->shared ? 0 : LD_BASE;
 	/* Program header count: PT_LOAD + optional PT_TLS + (shared) PT_PHDR/PT_DYNAMIC. */
 	int phnum;
 
