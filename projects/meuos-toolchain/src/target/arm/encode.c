@@ -457,5 +457,35 @@ ldr_mem:
 		return 0;
 	}
 
+	/* ---- VFP load/store: flds/fsts/fldd/fstd rd, [rn, #off] ---- */
+	if (nops >= 2 && (strcmp(mnemonic, "flds") == 0 ||
+	    strcmp(mnemonic, "fsts") == 0 ||
+	    strcmp(mnemonic, "fldd") == 0 ||
+	    strcmp(mnemonic, "fstd") == 0)) {
+		int rd, rn;
+		if (reg_num(ops[0], &rd) < 0) return -1;
+		int is_double = (mnemonic[3] == 'd');
+		int is_load = (mnemonic[1] == 'l');
+		const char *mem = ops[1];
+		if (mem[0] == '[') mem++;
+		char rn_str[16]; int i2 = 0;
+		while (*mem && *mem != ']' && *mem != ',' && *mem != '#' && i2 < 15)
+			rn_str[i2++] = *mem++;
+		rn_str[i2] = '\0';
+		if (reg_num(rn_str, &rn) < 0) return -1;
+		uint32_t off = 0;
+		if (*mem == ',' || *mem == '#') {
+			while (*mem && (*mem == ',' || *mem == ' ' || *mem == '#')) mem++;
+			sscanf(mem, "%u", &off);
+		}
+		if (off > 1023) off = 1023;
+		uint32_t base = is_load ? 0xED100A00 : 0xED000A00;
+		if (is_double) base |= 0x100;
+		uint32_t d = (uint32_t)(rd & 0x1F);
+		base |= (rn << 16) | ((d & 1) << 22) | ((d >> 1) << 12) | (off & 0xFF);
+		emit32(out->bytes, base);
+		return 0;
+	}
+
 	return -1; /* unsupported */
 }
