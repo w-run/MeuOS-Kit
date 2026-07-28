@@ -11,6 +11,9 @@ struct mt_ld_options {
 	const char *soname;    /* DT_SONAME for shared libraries (may be NULL) */
 	int         shared;    /* 1 = ET_DYN (shared library), 0 = ET_EXEC */
 	int         pie;       /* 1 = PIE (ET_DYN + PT_INTERP), 0 = 普通 */
+	int         build_id;   /* 1 = generate .note.gnu.build-id (FNV-1a hash) */
+	int         eh_frame_hdr; /* 1 = generate .eh_frame_hdr (exception index) */
+	int         as_needed;    /* 0 = --no-as-needed, 1 = --as-needed, -1 = default */
 };
 
 /* Static linker entry point (original API, shared=0).

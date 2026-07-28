@@ -31,6 +31,7 @@ usage(FILE *out)
 	        "  -l<lib>          link lib<lib>.a (searched in -L paths and sysroot)\n"
 	        "  --sysroot=<dir>  set system root (adds <dir>/usr/lib to search path)\n"
 	        "  -e <entry>       entry symbol (default: _start)\n"
+	        "  --build-id       generate .note.gnu.build-id (FNV-1a hash)\n"
 	        "  -static          static link (default, ignored for compat)\n");
 }
 
@@ -176,6 +177,9 @@ main(int argc, char **argv)
 	const char *soname = NULL;
 	int shared = 0;
 	int pie = 0;
+	int build_id = 0;
+	int eh_frame_hdr = 0;
+	int as_needed = -1; /* default: unspecified */
 	const char *inputs[MAX_INPUTS];
 	const char *libpaths[MAX_LIBPATHS];
 	const char *sysroot = NULL;
@@ -210,6 +214,26 @@ main(int argc, char **argv)
 		}
 		if (strcmp(argv[i], "-no-pie") == 0 || strcmp(argv[i], "--no-pie") == 0) {
 			pie = 0;
+			continue;
+		}
+		if (strcmp(argv[i], "--build-id") == 0 || strcmp(argv[i], "-build-id") == 0) {
+			build_id = 1;
+			continue;
+		}
+		if (strcmp(argv[i], "--no-build-id") == 0) {
+			build_id = 0;
+			continue;
+		}
+		if (strcmp(argv[i], "--eh-frame-hdr") == 0 || strcmp(argv[i], "-eh-frame-hdr") == 0) {
+			eh_frame_hdr = 1;
+			continue;
+		}
+		if (strcmp(argv[i], "--as-needed") == 0) {
+			as_needed = 1;
+			continue;
+		}
+		if (strcmp(argv[i], "--no-as-needed") == 0) {
+			as_needed = 0;
 			continue;
 		}
 		if (strcmp(argv[i], "-soname") == 0) {
@@ -380,6 +404,9 @@ main(int argc, char **argv)
 	opts.soname  = soname;
 	opts.shared  = shared;
 	opts.pie     = pie;
+	opts.build_id    = build_id;
+	opts.eh_frame_hdr = eh_frame_hdr;
+	opts.as_needed   = as_needed;
 	if (mt_ld_link_opts(&opts, inputs, (size_t)input_count,
 	                    target_name, &error) != 0) {
 		fprintf(stderr, "ld: %s\n", error ? error : "link failed");
