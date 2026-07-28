@@ -1,5 +1,14 @@
 #include "x86_64.h"
 
+/* Forward declare ISA gating helper. Required by x86-isa-levels task:
+ * check T.features for baseline ISA requirements before emitting SIMD
+ * instructions. x86_64 baseline (SSE2) is always present; this establishes
+ * the pattern for future AVX/AVX2/AVX-512 instruction gating. */
+static int x64_features_valid(void) {
+	return (T.features == 0) || /* 0 = baseline (no restrictions) */
+	       (T.features & 3) == 3; /* SSE + SSE2 bits (feature 0 & 1) */
+}
+
 
 typedef struct E E;
 
