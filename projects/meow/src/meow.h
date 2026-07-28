@@ -25,6 +25,16 @@
 #define TARGET_DEPS_MAX 64
 #define TARGET_COMMANDS_MAX 64
 
+/* Message levels for meow_msg(). */
+#define MSG_ERROR   0
+#define MSG_WARN    1
+#define MSG_INFO    2
+#define MSG_SUCCESS 3
+#define MSG_DEBUG   4
+
+/* Output modes. */
+enum output_mode { OUTPUT_NORMAL = 0, OUTPUT_QUIET, OUTPUT_VERBOSE, OUTPUT_DEBUG, OUTPUT_JSON };
+
 struct target {
 	char *name;
 	char *deps[TARGET_DEPS_MAX];
@@ -48,6 +58,25 @@ extern size_t ntargets;
 extern char *default_target;
 extern int parallel_jobs;
 extern char *build_arch;  /* NULL = auto-detect from uname */
+
+/* Global output state (defined in color.c). */
+extern enum output_mode g_output_mode;
+extern int g_color_enabled;
+extern int total_commands;
+extern int completed_commands;
+
+/* color.c */
+void color_init(void);
+const char *color_red(const char *text);
+const char *color_green(const char *text);
+const char *color_yellow(const char *text);
+const char *color_cyan(const char *text);
+const char *color_gray(const char *text);
+const char *color_bold(const char *text);
+void meow_msg(int level, const char *fmt, ...);
+
+/* env.c */
+int cmd_env(void);
 
 /* exec.c */
 int list_packages(void);

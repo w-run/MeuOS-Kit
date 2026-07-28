@@ -13,6 +13,10 @@
 
 /* Forward declaration of expand_env_vars from parse.c */
 
+/* Progress counters (declared extern in meow.h; defined here). */
+int total_commands = 0;
+int completed_commands = 0;
+
 /* Expand ${VAR} in path, using a stack buffer for the result.
  * Returns the original path if no expansion is needed, or a pointer
  * to a static buffer with the expanded result. */
@@ -31,6 +35,39 @@ expand_path(const char *path)
 static int target_out_of_date(struct target *);
 static int expand_command(struct target *, const char *, char *, size_t);
 
+/* Draw a progress bar to stdout. Called after each command completes
+ * during parallel builds. */
+static void
+show_progress(const char *current)
+{
+	if (g_output_mode == OUTPUT_QUIET || g_output_mode == OUTPUT_JSON)
+		return;
+	int pct = total_commands ? (completed_commands * 100 / total_commands) : 0;
+	int width = 12;
+	int filled = width * pct / 100;
+	/* Clear the current line, then draw progress. */
+	fprintf(stdout, "\r\033[K  [");
+	for (int i = 0; i < width; i++)
+		fprintf(stdout, "%s", i < filled ? "█" : "░");
+	if (current)
+		fprintf(stdout, "] %d%% (%d/%d) · %s", pct, completed_commands, total_commands, current);
+	else
+		fprintf(stdout, "] %d%% (%d/%d)", pct, completed_commands, total_commands);
+	fflush(stdout);
+	if (completed_commands >= total_commands)
+		fprintf(stdout, "\n");
+}
+
+/* Count total commands across all targets once. */
+static void
+count_total_commands(void)
+{
+	if (total_commands > 0)
+		return;
+	for (size_t i = 0; i < ntargets; i++)
+		total_commands += targets[i].ncommands;
+}
+
 int
 run_target(struct target *target)
 {
@@ -44,6 +81,7 @@ run_target(struct target *target)
 		struct target *child_targets[TARGET_DEPS_MAX];
 		size_t active = 0;
 		int failed = 0;
+		count_total_commands();
 
 		/* Collect unique direct dependencies — skip already-done and
 		 * duplicate entries so the same target is never forked twice. */
@@ -123,7 +161,14 @@ run_target(struct target *target)
 				if (expand_command(target, target->commands[i], command,
 					sizeof(command)) != 0 || run(command) != 0)
 				return -1;
+				completed_commands++;
+				if (parallel_jobs > 1)
+					show_progress(target->name);
 			}
+	else {
+		/* Target is up-to-date, still count for progress. */
+		completed_commands += target->ncommands;
+	}
 	target->visiting = 0;
 	target->done = 1;
 	return 0;

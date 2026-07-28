@@ -22,6 +22,8 @@ BUILD ?= build
 SRCS := $(sort $(wildcard src/*.c))
 OBJS := $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS))
 
+# color.c and env.c are picked up automatically via the wildcard above.
+
 ifeq ($(CC),../mcc/mcc)
   MEOW_CFLAGS := --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib -I../meuos-sysroot/include
   MEOW_LDLIBS := -l:libc-meuos.a -L$(abspath ../meuos-sysroot/build) -lmsys

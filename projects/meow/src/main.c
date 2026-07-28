@@ -64,6 +64,8 @@ main(int argc, char **argv)
 	char **arguments = argv + 1;
 	int count = argc - 1;
 
+	color_init();
+
 	while (count > 0) {
 		if (strncmp(arguments[0], "-j", 2) == 0) {
 			const char *value = arguments[0] + 2;
@@ -87,6 +89,27 @@ main(int argc, char **argv)
 			build_arch = arguments[0] + 7;
 			++arguments;
 			--count;
+		} else if (strcmp(arguments[0], "--quiet") == 0) {
+			g_output_mode = OUTPUT_QUIET;
+			++arguments;
+			--count;
+		} else if (strcmp(arguments[0], "--verbose") == 0) {
+			g_output_mode = OUTPUT_VERBOSE;
+			++arguments;
+			--count;
+		} else if (strcmp(arguments[0], "--debug") == 0) {
+			g_output_mode = OUTPUT_DEBUG;
+			++arguments;
+			--count;
+		} else if (strcmp(arguments[0], "--json") == 0) {
+			g_output_mode = OUTPUT_JSON;
+			g_color_enabled = 0;
+			++arguments;
+			--count;
+		} else if (strcmp(arguments[0], "--no-color") == 0) {
+			g_color_enabled = 0;
+			++arguments;
+			--count;
 		} else {
 			break;
 		}
@@ -94,19 +117,28 @@ main(int argc, char **argv)
 
 	if (count == 1 && strcmp(arguments[0], "list") == 0)
 		return list_packages() == 0 ? 0 : 1;
+	if (count == 1 && strcmp(arguments[0], "env") == 0)
+		return cmd_env();
 	if (count == 1 && strcmp(arguments[0], "--bootstrap") == 0) {
 		if (run("CC=\"${CC:-cc}\" make -C meow clean all") != 0)
 			return 1;
-		printf("meow: bootstrap build complete\n");
+		meow_msg(MSG_SUCCESS, "bootstrap build complete");
 		return 0;
 	}
 	if (count == 1 && strcmp(arguments[0], "--help") == 0) {
 		printf("usage: meow [-jN] [--arch <arch>] build <package> [target]\n");
 		printf("       meow [-jN] [--arch <arch>] build all\n");
 		printf("       meow [-jN] [--arch <arch>] clean <package>\n");
+		printf("       meow [-jN] [--arch <arch>] env        # 打印构建环境\n");
 		printf("       meow list\n");
 		printf("       meow --bootstrap\n");
 		printf("       meow --help\n");
+		printf("\n选项:\n");
+		printf("  --quiet        仅显示错误（默认）\n");
+		printf("  --verbose      显示详细构建命令\n");
+		printf("  --debug        显示所有调试信息\n");
+		printf("  --json         以 JSON 格式输出\n");
+		printf("  --no-color     禁用颜色（管道模式自动禁用）\n");
 		return 0;
 	}
 	/* Build all packages: scan pkgs/ and build each one */
@@ -118,16 +150,17 @@ main(int argc, char **argv)
 		int failures = 0;
 		while ((entry = readdir(dir))) {
 			if (entry->d_name[0] == '.') continue;
-			printf("meow: building %s\n", entry->d_name);
+			meow_msg(MSG_INFO, "building %s", entry->d_name);
 			char cmd[1024];
 			snprintf(cmd, sizeof(cmd), "meow build %s", entry->d_name);
 			if (run(cmd) != 0) {
-				printf("meow: %s failed\n", entry->d_name);
+				meow_msg(MSG_ERROR, "%s failed", entry->d_name);
 				failures++;
 			}
 		}
 		closedir(dir);
-		printf("meow: built all packages (%d failures)\n", failures);
+		meow_msg(failures ? MSG_ERROR : MSG_SUCCESS,
+		         "built all packages (%d failures)", failures);
 		return failures ? 1 : 0;
 	}
 	if ((count != 2 && count != 3) ||
@@ -142,14 +175,14 @@ main(int argc, char **argv)
 	}
 	if (load_recipe(arguments[1], path, sizeof(path), data) < 0 && strcmp(arguments[1], ".") == 0 && strcmp(arguments[0], "build") == 0) {
 		if (run("CC=mcc DESTDIR=\"${MEUOS_SYSROOT:-./sysroot}\" PREFIX=/usr make") != 0) {
-			printf("meow: Makefile compatibility build failed\n");
+			meow_msg(MSG_ERROR, "Makefile compatibility build failed");
 			return 1;
 		}
-		printf("meow: built current Makefile (compatibility mode)\n");
+		meow_msg(MSG_SUCCESS, "built current Makefile (compatibility mode)");
 		return 0;
 	}
 	if (load_recipe(arguments[1], path, sizeof(path), data) < 0 || parse_recipe(data) != 0) {
-		printf("meow: invalid or unreadable build file for %s\n", arguments[1]);
+		meow_msg(MSG_ERROR, "invalid or unreadable build file for %s", arguments[1]);
 		return 1;
 	}
 	/* Inject ARCH into recipe environment after parse. */
@@ -160,7 +193,7 @@ main(int argc, char **argv)
 	 * directory; recipes reference it via -I. or $PWD. */
 	{	char *build_dir = getenv("BLD_DIR");
 		if (probe_run(build_dir ? build_dir : ".") != 0) {
-			printf("meow: probe failed for %s\n", arguments[1]);
+			meow_msg(MSG_ERROR, "probe failed for %s", arguments[1]);
 			return 1;
 		}
 	}
@@ -168,10 +201,11 @@ main(int argc, char **argv)
 	if (!requested)
 		requested = find_target("all") ? "all" : "build";
 	if (run_target(find_target(requested)) != 0) {
-		printf("meow: target failed: %s (%s)\n", requested, path);
+		meow_msg(MSG_ERROR, "target failed: %s (%s)", requested, path);
 		return 1;
 	}
-	printf("meow: %s %s%s%s\n", strcmp(arguments[0], "clean") == 0 ? "cleaned" : "built",
-	       arguments[1], count == 3 ? " target " : "", count == 3 ? arguments[2] : "");
+	meow_msg(MSG_SUCCESS, "%s %s%s%s",
+	         strcmp(arguments[0], "clean") == 0 ? "cleaned" : "built",
+	         arguments[1], count == 3 ? " target " : "", count == 3 ? arguments[2] : "");
 	return 0;
 }
