@@ -168,7 +168,7 @@ src/compat/
 | libc-glob | POSIX glob | `<glob.h>`、`<fnmatch.h>` 模式匹配 | 🟡 中 | 🟢 本 commit（fnmatch + glob 完整实现） |
 | libc-syslog | POSIX 环境 | `<syslog.h>`、`<utmpx.h>` | 🟢 低 | 🟢 本 commit（syslog/openlog/closelog/vsyslog 实现） |
 | libc-atomic | `<stdatomic.h>` | C11 atomic 的完整操作集（`atomic_compare_exchange_*` 变体等） | 🟡 中 | 🟢 已实现（含 compare_exchange/fetch_add/sub/and/or/xor 及 memory_order） |
-| libc-threads | `<threads.h>` | C11 thread 完整接口（`tss_*`、`call_once` 等） | 🟡 中 | 待实现 |
+| libc-threads | `<threads.h>` | C11 thread 完整接口（`tss_*`、`call_once` 等） | 🟡 中 | 🟢 完整实现（thrd/mtx/cnd/tss/call_once + timed 变体） |
 
 ## 优先级 4（P4-devexp — 开发者体验）
 
