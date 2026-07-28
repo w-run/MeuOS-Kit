@@ -2,6 +2,7 @@
 #define MEUOS_STRING_H
 
 #include <stddef.h>
+#include <errno.h>
 
 void *memcpy(void *restrict, const void *restrict, size_t);
 void *memmove(void *, const void *, size_t);
@@ -23,7 +24,12 @@ char *strstr(const char *, const char *);
 char *strdup(const char *);
 char *strndup(const char *, size_t);
 char *strerror(int);
+int strerror_r(int, char *, size_t);
 char *strtok(char *restrict, const char *restrict);
 char *strtok_r(char *restrict, const char *restrict, char **restrict);
+size_t strspn(const char *, const char *);
+size_t strcspn(const char *, const char *);
+int strcasecmp(const char *, const char *);
+int strncasecmp(const char *, const char *, size_t);
 
 #endif

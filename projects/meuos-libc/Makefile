@@ -134,7 +134,8 @@ endif
 
 # Per-feature C objects.
 STRING_OBJS    := $(BUILD)/string/memory.o $(BUILD)/string/duplicate.o \
-                  $(BUILD)/string/error.o $(BUILD)/string/token.o
+                  $(BUILD)/string/error.o $(BUILD)/string/token.o \
+                  $(BUILD)/string/compare.o
 STDLIB_OBJS    := $(BUILD)/stdlib/malloc.o $(BUILD)/stdlib/convert.o \
                   $(BUILD)/stdlib/env.o $(BUILD)/stdlib/exit.o \
                   $(BUILD)/stdlib/process.o $(BUILD)/stdlib/search.o \
