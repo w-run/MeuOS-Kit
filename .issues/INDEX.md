@@ -376,7 +376,7 @@ p8-meow ── meow 构建系统完备（替代 make+autoconf+libtool+pkg-config
 | meow-auto-config | **meow 自动决策编译参数** | `meow build <pkg> --target=<triplet>` 自动解析 triple → arch/abi/float/subarch, 自动设 CC/CFLAGS/LDFLAGS, 自动跑 probe 生成 config.h | meow + mcc | 🔴 高 | 🟢 94068b9：`set_arch_env()` 在 build_target 非 NULL 时导出 TARGET_TRIPLE 变量；`parse_triple_arch()` 支持别名（amd64→x86_64）；probe 自动检测已存在 |
 | triple-format | **MeuOS triple 格式设计** | 定义 `<arch>[-subarch][-vendor][-os][-abi]` 格式。vendor=`meuos` 隐含 MeuOS 默认行为；os=`meuos-next` 为未来原生环境。见下方详细设计 | meow + mcc + mt | 🔴 高 | 🟢 mcc 侧（`src/driver/triple.h` + `triple.c` + `target_select.c`）+ meow 侧（`src/triple.c` + `--target=` 解析）。双组件均支持完整 triple 解析 + 架构别名 |
 | triple-lib | **共享 triple 解析库** | meow 和 mcc 共享同一套 triple 解析逻辑，避免两处分叉。提取为 `libtriple` 或共用头文件 | meow + mcc | 🔴 高 | 🟢 mcc 侧 `triple.h/c` + meow 侧 `triple.c`（逻辑相同）。暂未提取为独立共享库——两副本各自维护，逻辑一致。后续如需共享库，可提取到 `meuos-toolchain/lib/triple/` |
-| triple-abi-map | **Triple → ABI 自动映射** | `--target=<triplet>` 精确提取 ABI/lp64/float 信息并选择对应 Target/ABI 降级 | mcc sema | 🟡 中 | 待实现 |
+| triple-abi-map | **Triple → ABI 自动映射** | `--target=<triplet>` 精确提取 ABI/lp64/float 信息并选择对应 Target/ABI 降级 | mcc sema | 🟡 中 | 🟢 main.c 添加 ABI 自动映射：`targ_abi(target)` 从 triple 提取 ABI 后缀，自动设置 arm_mfloat_abi（hard/soft）。支持：lp64d/lp64f→hard(riscv FP)、lp64→soft(riscv)、gnueabihf→hard(ARM)、gnu→soft |
 | meow-zero-args | **meow 零参数构建** | `meow build` 无参数时自动嗅探当前架构/sysroot/源码，生成完整构建环境；只有需要定制时才传入参数 | meow | 🔴 高 | 🟢 已实现（main.c: 当 count==1 && "build" 时自动检测当前目录 meow.yaml 或回退 Makefile 兼容模式），`--target=` 解析完备后，`meow build` 即可零配置构建目标架构 |
 
 ### Triple 格式设计

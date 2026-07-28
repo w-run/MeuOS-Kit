@@ -431,6 +431,23 @@ main(int argc, char *argv[])
 	T = *pick_target(target);
 	T.pic = pic;
 
+	/* Triple → ABI auto-mapping (triple-abi-map). If the target triple
+	 * contains an ABI suffix (e.g. riscv64-meuos-linux-lp64d), extract
+	 * it and set the corresponding backend flags automatically without
+	 * requiring -mabi=. */
+	{	const char *abi = targ_abi(target);
+		if (abi && abi[0]) {
+			if (strcmp(abi, "lp64d") == 0 || strcmp(abi, "lp64f") == 0)
+				arm_mfloat_abi = "hard";  /* riscv floating-point ABI */
+			else if (strcmp(abi, "ilp32") == 0 || strcmp(abi, "lp64") == 0)
+				arm_mfloat_abi = "soft";
+			else if (strcmp(abi, "gnueabihf") == 0)
+				arm_mfloat_abi = "hard";  /* ARM hard-float */
+			else if (strcmp(abi, "gnu") == 0)
+				arm_mfloat_abi = "soft";
+		}
+	}
+
 	/* -march=native: now that we know the target architecture, detect
 	 * host CPU features and merge into g_target_features. */
 	if (g_march_native_requested) {
