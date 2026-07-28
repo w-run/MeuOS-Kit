@@ -70,6 +70,8 @@ set_arch_env(void)
 int
 main(int argc, char **argv)
 {
+	static const char *meow_self = NULL;  /* PATH to self, for recursive deps */
+	meow_self = argv[0];
 	char *data;
 	char path[512];
 	char *requested;
@@ -258,6 +260,18 @@ main(int argc, char **argv)
 			return 1;
 		}
 	}
+	/* Resolve cross-package dependencies (meow-subdirs): for each package
+	 * listed in recipe's `depends:` section, recursively build it first. */
+	for (size_t di = 0; di < nrecipe_deps; ++di) {
+		char dep_cmd[1024];
+		snprintf(dep_cmd, sizeof dep_cmd, "%s build %s",
+		         meow_self ? meow_self : "meow", recipe_deps[di]);
+		if (run(dep_cmd) != 0) {
+			meow_msg(MSG_ERROR, "dependency failed: %s", recipe_deps[di]);
+			return 1;
+		}
+	}
+
 	requested = strcmp(arguments[0], "clean") == 0 ? "clean" : count == 3 ? arguments[2] : default_target;
 	if (!requested)
 		requested = find_target("all") ? "all" : "build";

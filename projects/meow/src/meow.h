@@ -24,6 +24,7 @@
 #define TARGET_MAX 128
 #define TARGET_DEPS_MAX 64
 #define TARGET_COMMANDS_MAX 64
+#define RECIPE_DEPS_MAX 64
 
 /* Message levels for meow_msg(). */
 #define MSG_ERROR   0
@@ -59,6 +60,8 @@ extern char *default_target;
 extern int parallel_jobs;
 extern char *build_arch;  /* NULL = auto-detect from uname */
 extern const char *build_target;  /* full triple from --target=, or NULL */
+extern char recipe_deps[RECIPE_DEPS_MAX][128];
+extern size_t nrecipe_deps;
 
 /* Global output state (defined in color.c). */
 extern enum output_mode g_output_mode;

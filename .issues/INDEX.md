@@ -198,7 +198,7 @@ src/compat/
 | meow-type-size | autoconf | **`check_type_size`** | 检测 `sizeof(time_t)`。autoconf 的这个概念合理，不照搬其实现。meow 应有自己的 `type_size()` probe 函数 | 🟡 中 | 🟢 已完成：probe.c 添加 `probe_add_typesize()` + probe_run 中 typesize 探测（编译C程序 `printf("%zu", sizeof(TYPE))`、运行并捕获输出、写入 `#define SIZEOF_NAME N` 到 config.h）；parse.c 支持 `typesizes:` YAML 节区（`- NAME: type_name` 格式） |
 | meow-probe-cache | autoconf | **Probe 缓存** | 缓存编译测试结果（`config.cache` 等价物）。概念好，实现不照搬 autoconf 的烦人缓存格式 | 🟡 中 | 🟢 probe.c 实现 DJB2 指纹缓存：`probe_fingerprint()` 对全部 probe 注册（headers/funcs/codes/decls/libs/typesizes）计算哈希；`probe_run` 检查 config.h 首行 fingerprint，匹配则跳过全量 probe。缓存命中无编译开销 |
 | meow-vpath | make | **出源码构建** | ⚠️ 不做 `$(srcdir)`（GNU make VPATH）。meow 默认出源码构建（`build/<pkg>/`），不用额外抽象 | 🔄 重设计 | 待设计 |
-| meow-subdirs | make | **多目录构建** | 跨目录包依赖的 YAML 配方。不是 GNU `AC_CONFIG_SUBDIRS`，是 meow 自己的依赖模型 | 🟡 中 | 待实现 |
+| meow-subdirs | make | **多目录构建** | 跨目录包依赖的 YAML 配方。不是 GNU `AC_CONFIG_SUBDIRS`，是 meow 自己的依赖模型 | 🟡 中 | 🟢 meow 配方新增 `depends:` 顶级节区（YAML：`depends:\n  - pkgname`）。parse.c 解析 depends 列表存到 recipe_deps[]。main.c 构建前先递归 `$0 build <dep>` 构建每个依赖包。验证：libbase → app 依赖链正确构建；nonexistent-pkg 正确报错 "dependency failed"。同目录下的 pkgs/ 包可作为跨包依赖。 |
 | meow-pkg-config | pkg-config | **`.pc` 文件查询** | ⚠️ 不做 `.pc` 解析（freedesktop.org 格式）。meow 应有自己的包元数据格式（YAML 原生），或只通过 `meow install` 注册的数据库查询 | 🔄 重设计 | 待设计 |
 | meow-libtool | libtool | **共享/静态库管理** | ❌ 不做 `.la` 文件。libtool 是历史遗留，mt/ld 直接管理库格式，meow 只需知道库路径 | ❌ 不做 | 不做 |
 | meow-dag | meow | DAG 去重 | `-jN` 间接依赖重复执行。纯 meow 自己设计，无历史包袱 | 🟢 | `9c20ae2` DAG 去重已完成 |
