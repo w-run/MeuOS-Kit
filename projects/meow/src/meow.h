@@ -58,6 +58,7 @@ extern size_t ntargets;
 extern char *default_target;
 extern int parallel_jobs;
 extern char *build_arch;  /* NULL = auto-detect from uname */
+extern const char *build_target;  /* full triple from --target=, or NULL */
 
 /* Global output state (defined in color.c). */
 extern enum output_mode g_output_mode;
@@ -75,8 +76,15 @@ const char *color_gray(const char *text);
 const char *color_bold(const char *text);
 void meow_msg(int level, const char *fmt, ...);
 
+/* triple.c */
+const char *parse_triple_arch(const char *triplet);
+const char *parse_triple_subarch(const char *triplet);
+
 /* env.c */
 int cmd_env(void);
+
+/* lint.c */
+int cmd_lint(int argc, char **argv);
 
 /* exec.c */
 int list_packages(void);

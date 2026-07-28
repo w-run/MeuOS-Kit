@@ -46,10 +46,21 @@ set_arch_env(void)
 	else if (strcmp(arch, "i386")        == 0) host = "i686-unknown-linux-gnu";
 
 	if (len + 64 < sizeof(recipe_environment)) {
-		size_t n = snprintf(recipe_environment + len,
-		                    sizeof(recipe_environment) - len,
-		                    "export ARCH='%s'; export HOST='%s'; ",
-		                    arch, host ? host : "x86_64-unknown-linux-gnu");
+		size_t n;
+		if (build_target) {
+			/* --target=<triple> was set: use full triple as HOST
+			 * and export TARGET_TRIPLE for recipes to pass to mcc. */
+			n = snprintf(recipe_environment + len,
+			             sizeof(recipe_environment) - len,
+			             "export ARCH='%s'; export HOST='%s'; "
+			             "export TARGET_TRIPLE='%s'; ",
+			             arch, build_target, build_target);
+		} else {
+			n = snprintf(recipe_environment + len,
+			             sizeof(recipe_environment) - len,
+			             "export ARCH='%s'; export HOST='%s'; ",
+			             arch, host ? host : "x86_64-unknown-linux-gnu");
+		}
 		if (n > 0)
 			recipe_environment[len + n] = '\0';
 	}
@@ -87,6 +98,19 @@ main(int argc, char **argv)
 			count -= 2;
 		} else if (strncmp(arguments[0], "--arch=", 7) == 0) {
 			build_arch = arguments[0] + 7;
+			++arguments;
+			--count;
+		} else if (strncmp(arguments[0], "--target=", 9) == 0) {
+			/* 完整 triple：<arch>[-<subarch>][-<vendor>][-<os>][-<abi>]
+			 * 提取 canonical arch（支持别名如 amd64→x86_64）作为 build_arch，
+			 * 完整 triple 存入 build_target 供 recipe 引用。 */
+			const char *triple = arguments[0] + 9;
+			build_target = triple;
+			const char *arch_name = parse_triple_arch(triple);
+			static char archbuf[64];
+			snprintf(archbuf, sizeof(archbuf), "%s",
+			         arch_name ? arch_name : triple);
+			build_arch = archbuf;
 			++arguments;
 			--count;
 		} else if (strcmp(arguments[0], "--quiet") == 0) {
@@ -163,9 +187,36 @@ main(int argc, char **argv)
 		         "built all packages (%d failures)", failures);
 		return failures ? 1 : 0;
 	}
+	/* Zero-argument build: `meow build` with no package builds the current
+	 * directory's meow.yaml (auto-detect mode). This is the "zero-config"
+	 * experience — no need to name the package. */
+	if (count == 1 && strcmp(arguments[0], "build") == 0) {
+		if (load_recipe(".", path, sizeof(path), data) == 0 &&
+		    parse_recipe(data) == 0) {
+			set_arch_env();
+			{	char *build_dir = getenv("BLD_DIR");
+				if (probe_run(build_dir ? build_dir : ".") != 0) {
+					meow_msg(MSG_ERROR, "probe failed for current directory");
+					return 1;
+				}
+			}
+			requested = default_target;
+			if (!requested)
+				requested = find_target("all") ? "all" : "build";
+			if (run_target(find_target(requested)) != 0) {
+				meow_msg(MSG_ERROR, "target failed: %s (%s)", requested, path);
+				return 1;
+			}
+			meow_msg(MSG_SUCCESS, "built %s", path);
+			return 0;
+		}
+		/* No meow.yaml here: fall through to usage error. */
+		meow_msg(MSG_ERROR, "no meow.yaml in current directory; specify a package");
+		return 1;
+	}
 	if ((count != 2 && count != 3) ||
 	    (strcmp(arguments[0], "build") != 0 && strcmp(arguments[0], "clean") != 0)) {
-		printf("usage: meow [-jN] [--arch <arch>] build <package> [target] | meow [-jN] clean <package> | meow list | meow --bootstrap\n");
+		printf("usage: meow [-jN] [--arch <arch>] [--target <triple>] build <package> [target] | meow [-jN] [--arch <arch>] build | meow [-jN] clean <package> | meow list | meow --bootstrap\n");
 		return 2;
 	}
 	data = malloc(RECIPE_MAX);
