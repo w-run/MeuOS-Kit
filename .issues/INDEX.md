@@ -1191,13 +1191,15 @@ mcc: slot %(null) is read but never stored to
 
 ## 待修复的 Bug（本次 worktree 发现）
 
-| ID | 组件 | 描述 | 状态 |
-|----|------|------|------|
-| bug-ld-pie-dynamic | mt/ld + mcc | `mcc -pie` 生成的 PIE 二进制**缺少 .dynamic 节区**（readelf -d 显示 "no dynamic section"），导致 `mt deps` 无法显示 DT_NEEDED。静态链接（ET_EXEC）正常。ld-pie 任务虽标记 🟢 但动态段生成不完整 | 🔴 待修复 |
+（暂无）
 
 ---
 
 ## 已解决的问题
+
+| ID | 组件 | 描述 | 状态 |
+|----|------|------|------|
+| bug-ld-pie-dynamic | mt/ld + mcc | `mcc -pie` 生成的 PIE 二进制**缺少 .dynamic 节区**（readelf -d 显示 "no dynamic section"），导致 `mt deps` 无法显示 DT_NEEDED。静态链接（ET_EXEC）正常。ld-pie 任务虽标记 🟢 但动态段生成不完整 | 🟢 `2bf4f7a`（mcc driver 传递 -pie 到 mt/ld + specs 模式不强制 static） |
 
 | 旧 ID
 |-------|------|------|
