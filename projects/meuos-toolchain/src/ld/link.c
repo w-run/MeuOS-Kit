@@ -2517,6 +2517,9 @@ write_executable(struct ld_context *ctx, const char *path,
 		if (ctx->tls_size) phnum++;
 		if (ctx->shared) phnum += 2; /* PT_PHDR + PT_DYNAMIC */
 		if (ctx->pie) phnum += 1;    /* PT_INTERP */
+		/* PT_GNU_RELRO if .dynamic or .got exists */
+		if (find_group(ctx, ".dynamic") >= 0 || find_group(ctx, ".got") >= 0)
+			phnum++;
 		write16(h + 56, phnum);
 		write16(h + 58, target->shdr_size);
 		write16(h + 60, (uint16_t)output_count);
@@ -2531,6 +2534,15 @@ write_executable(struct ld_context *ctx, const char *path,
 	 *
 	 * Set FileSiz to load_file_end (non-NOBITS data only) so the kernel
 	 * zero-fills the BSS area (between load_file_end and memory_end). */
+	/* Program header order per ELF spec: PHDR (if present) before LOAD. */
+	if (ctx->shared) {
+		uint64_t phoff = target->ehdr_size;
+		if (write_program_header_type(file, MT_PT_PHDR, LD_PF_R,
+		                             phoff, base_addr + phoff,
+		                             (uint64_t)phnum * 56,
+		                             (uint64_t)phnum * 56, 8) != 0)
+			goto out_file;
+	}
 	{
 		uint64_t single_end = memory_end > rx_end ? memory_end : rx_end;
 		uint64_t filesz = alloc_file_end > LD_PAGE ? alloc_file_end : LD_PAGE;
@@ -2547,18 +2559,8 @@ write_executable(struct ld_context *ctx, const char *path,
 		                         0, base_addr, filesz, memsz) != 0)
 			goto out_file;
 	}
-	/* PT_PHDR and PT_DYNAMIC for shared libraries (ET_DYN) */
+	/* PT_DYNAMIC for shared libraries (ET_DYN) */
 	if (ctx->shared) {
-		/* PT_PHDR: describes the program header table itself. The
-		 * table sits right after the ELF header (file offset = ehdr_size)
-		 * and is mapped at base_addr + ehdr_size by the single LOAD. */
-		uint64_t phoff = target->ehdr_size;
-		if (write_program_header_type(file, MT_PT_PHDR, LD_PF_R,
-		                             phoff, base_addr + phoff,
-		                             (uint64_t)phnum * 56,
-		                             (uint64_t)phnum * 56, 8) != 0)
-			goto out_file;
-		/* PT_DYNAMIC: points at the .dynamic section created above. */
 		int dg = find_group(ctx, ".dynamic");
 		if (dg >= 0) {
 			struct ld_group *dyn = &ctx->groups[dg];
@@ -2601,6 +2603,34 @@ write_executable(struct ld_context *ctx, const char *path,
 		                               tls_addr, tls_filesz, ctx->tls_size,
 		                               ctx->tls_align > 0x1000 ? ctx->tls_align : 0x1000) != 0)
 			goto out_file;
+	}
+	/* PT_GNU_RELRO: mark .dynamic and .got as read-only after relocations.
+	 * This is an optional program header; emit it when both sections exist. */
+	if (ctx->shared || ctx->pie) {
+		int dg_relro = find_group(ctx, ".dynamic");
+		int gg_relro = find_group(ctx, ".got");
+		uint64_t relro_start = ~0ULL, relro_end = 0;
+		if (dg_relro >= 0) {
+			relro_start = ctx->groups[dg_relro].address;
+			relro_end = ctx->groups[dg_relro].address + ctx->groups[dg_relro].size;
+		}
+		if (gg_relro >= 0) {
+			uint64_t ga = ctx->groups[gg_relro].address;
+			uint64_t ge = ga + ctx->groups[gg_relro].size;
+			if (ga < relro_start) relro_start = ga;
+			if (ge > relro_end) relro_end = ge;
+		}
+		if (relro_end > 0) {
+			uint64_t rstart = relro_start & ~(uint64_t)(LD_PAGE - 1);
+			uint64_t rend = (relro_end + LD_PAGE - 1) & ~(uint64_t)(LD_PAGE - 1);
+			/* File offset = rstart - base_addr (p_vaddr mapping) */
+			uint64_t base_va = ctx->shared ? 0 : LD_BASE;
+			uint64_t roff = rstart - base_va;
+			if (write_program_header_type(file, MT_PT_GNU_RELRO, LD_PF_R,
+			                             roff, rstart, rend - rstart,
+			                             rend - rstart, 1) != 0)
+				goto out_file;
+		}
 	}
 	for (i = 0; i < ctx->group_count; ++i) {
 		struct ld_group *group = &ctx->groups[i];

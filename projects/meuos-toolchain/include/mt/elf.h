@@ -110,6 +110,7 @@
 #define MT_PT_GNU_EH_FRAME 0x6474e550
 #define MT_PT_GNU_STACK 0x6474e551
 #define MT_PT_GNU_RELRO 0x6474e552
+#define MT_PT_GNU_RELRO 0x6474e552
 
 #define MT_PF_X 0x1
 #define MT_PF_W 0x2
