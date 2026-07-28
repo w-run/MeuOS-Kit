@@ -51,6 +51,15 @@ extern int msys_vfs_load(const char *path, void **buf, size_t *size);
 #define LD_R_X86_64_32 10
 #define LD_R_X86_64_32S 11
 #define LD_R_X86_64_TPOFF32 23
+/* Dynamic TLS relocations (GD/LD model).  When linking a shared library
+ * (ET_DYN) these are preserved as RELATIVE/GLOB_DAT-style DTPMOD/DTPOFF
+ * entries in .rela.dyn so ld.so can resolve them at load time via the
+ * per-module TLS blocks and __tls_get_addr().  When linking a static
+ * executable (ET_EXEC) they are relaxed to the Local-Exec TPOFF32 model. */
+#define LD_R_X86_64_TLSGD   19  /* General Dynamic: lea sym@tlsgd(%rip), %rdi */
+#define LD_R_X86_64_TLSLD   20  /* Local Dynamic:  lea sym@tlsld(%rip), %rdi */
+#define LD_R_X86_64_DTPOFF  21  /* DTP-relative offset: sym@dtpoff */
+#define LD_R_X86_64_DTPMOD  22  /* Module id: sym@dtpmod */
 
 struct ld_group {
 	char *name;
@@ -1923,6 +1932,27 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 			return -1;
 		value = (uint64_t)((int64_t)tls_off - (int64_t)ctx->tls_size) + addend;
 		width = 4;
+	} else if (type == LD_R_X86_64_TLSGD || type == LD_R_X86_64_TLSLD ||
+	           type == LD_R_X86_64_DTPOFF || type == LD_R_X86_64_DTPMOD) {
+		/* Dynamic TLS model (GD/LD).  For a static executable the
+		 * linker knows the final TP-relative offset, so we relax to
+		 * Local-Exec (TPOFF32).  For a shared library the relocation
+		 * is preserved in .rela.dyn and resolved by ld.so. */
+		if (!ctx->shared && !ctx->pie) {
+			uint64_t tls_off;
+			if (symbol_tls_offset(ctx, object, symbol_index, &tls_off) != 0)
+				return -1;
+			value = (uint64_t)((int64_t)tls_off - (int64_t)ctx->tls_size) + addend;
+			width = 4;
+		} else {
+			/* Shared library or PIE: leave the GOT slot for ld.so.
+			 * The instruction sequence is:
+			 *   lea sym@tlsgd(%rip), %rdi; call __tls_get_addr
+			 * The two GOT slots are filled at load time.  We do not
+			 * write anything into the instruction stream here; the
+			 * GOT entries are created during GOT allocation. */
+			return 0;
+		}
 	} else if (type == LD_R_X86_64_64) {
 		value = resolved_value + addend;
 		width = 8;
