@@ -8,20 +8,16 @@
 - `src/arch/loongarch64/tls.c` — TLS 初始化（GAP_ABOVE_TP=0）
 - `crt/loongarch64/crt1.S` — _start 入口
 - `src/internal/arch/loongarch64/syscall.S` — syscall gate
-- `src/errno/errno_la64.c` — 非 TLS errno fallback（BFD 2.41 workaround）
 
-## 已验证 (2026-07-26)
-- ✅ `make ARCH=loongarch64` 全量编译通过（3 个产物：libc-meuos.a/libatomic-meuos.a/crt1.o）
-- ✅ qemu-loongarch64-static (v7.2.0) 运行时：
+## 已验证 (2026-07-28)
+- ✅ `make ARCH=loongarch64` 全量编译通过
+- ✅ qemu-loongarch64-static (v10.1.0) 运行时全部通过：
   - hello → "loongarch64 MeuOS libc" exit=0
   - atomic → "PASS" exit=0
   - setjmp → "setjmp ok" exit=0
   - phase2_counter → "counter = 2000" exit=0（线程+原子）
+  - bare_tls → exit=0（_Thread_local 隔离 + TLS errno 隔离）
   - malloc_threads → "PASS concurrent malloc" exit=0（线程+malloc）
-  - bare_tls → 自建 QEMU 10.1.0 仍 segfault。mt/ld 的 loongarch64 TLS LE 处理有 bug：
-    `.tdata` 初值（`2a000000`=42）链接后变为垃圾（`20c30000`），需修复 mt/ld`
 
 ## 已知限制
-- mt/ld loongarch64 TLS LE 重定位 bug：`.tdata` 初始值被破坏，单线程 TLS 不可用
-- errno 使用非 TLS static int fallback（BFD 2.41 workaround），多线程 errno 不隔离
-- 不影响非 TLS 功能：hello/atomic/setjmp/phase2/malloc_threads 全部通过
+- 无（所有运行时功能通过 QEMU 验证）
