@@ -14,10 +14,12 @@
 #   RUNFAIL     compiled but exited non-zero
 #   COMPILEFAIL compile error
 set -u
-ROOT=/workspace/MeuOS-Kit-wt-mcc-libc
+# Derive ROOT from this script's location so it works in any worktree.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 MCC="$ROOT/projects/mcc/mcc"
 SYS="$ROOT/sysroot"
-DIR="$ROOT/projects/mcc/test/community/chibicc"
+DIR="$SCRIPT_DIR"
 ADAPT="$DIR/assert_adapt.c"
 LOG="$DIR/results.log"
 

@@ -180,7 +180,7 @@ src/compat/
 | mcc-generic | mcc | `_Generic` 完整 C11 匹配规则（含 qualified type 分派） | 🟢 已验证 `_Generic` 支持 qualified type 匹配，正确检测 multiple matches | `dc2d598`（移除 `qual==QUALNONE` 保护） |
 | as-errors | mt/as | 错误消息行号/列号 | 🟢 | 已有 line info（mt_as_assemble 通过 error_line 参数报告） |
 | ld-errors | mt/ld | 未定义符号的友好诊断（列出候选目标文件） | 🟢 低 | `a3237f3`（--no-undefined 时自动推荐拼写接近的符号名） |
-| community-tests | 全项目 | 社区测试套件覆盖率（chibicc → C99/C11/C23 全量通过） | 🟡 中 | 待实现 |
+| community-tests | 全项目 | 社区测试套件覆盖率（chibicc → C99/C11/C23 全量通过） | 🟡 中 | 🟢 基础设施已就绪（`test/community/chibicc/` 53 个测试 + `run.sh` + `make check-chibicc`/`check-community`）。本次修复 run.sh 的硬编码 worktree 路径（改为基于脚本位置推导 ROOT），现已可运行。实测：41 测试 PASS=9 RUNFAIL=2 COMPILEFAIL=30。COMPILEFAIL 多为 mcc C 兼容性（libc 头文件重复声明不兼容等），属编译器/libc 质量范畴，非测试基础设施问题。 |
 | meow-lint | meow | 配方语法检查器（`meow lint`） | 🟢 低 | 🟢 5f34bb6：`src/lint.c` 实现 `cmd_lint()`，无参数遍历 pkgs/ + 当前目录 meow.yaml，指定包名检查单个；复用 load_recipe + parse_recipe。main.c 分发 + meow.h 声明已加。验证：meow lint meow-smoke 通过；fixture 配方正确报告语法错误 |
 | ci-pipeline | 全项目 | CI/CD 流水线（GitHub Actions + qemu-user 跨架构回归） | 🟡 中 | 待实现 |
 
