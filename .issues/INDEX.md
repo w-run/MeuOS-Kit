@@ -99,7 +99,7 @@ src/compat/
 | mcc-i386-tls-e2e | mcc+libc | i386 TLS e2e | bug-i386-tls 修复后的 TLS 端到端验证 | ⏳ | 待实现 |
 | mcc-i386-tls-doc | mcc(i386) | `gd-tls.md` 文档 | 被 3 个文件引用但文件不存在 | 🟢 | `03e8618` |
 | ld-shared | mt/ld | `-shared` 输出 `ET_DYN` | 🟢 ET_DYN + PHDR/DYNAMIC + dynsym/dynstr/hash/dynamic 完整实现 | `a0822fe` 动态节区数据填充 |
-| ld-pie | mt/ld | `--pie`/`--no-pie` 支持 | PIE 二进制输出（`ET_DYN` + `PT_INTERP` + 相对重定位） | ⏳ | 待实现 |
+| ld-pie | mt/ld | `--pie`/`--no-pie` 支持 | PIE 二进制输出（`ET_DYN` + `PT_INTERP` + 相对重定位） | 🟢 | `4ae63b1` |
 | mcc-pic-verify | mcc | PIC 代码生成加固 | 全架构验证 `-fPIC` 输出（GOT/PLT/TLS GD 路径） | ⏳ | 待实现 |
 | mcc-shared-mt | mcc driver | `-shared` mt/ld 集成 | 去掉 `-shared` 回退到 host cc 的限制 | 🟢 | `acce6c6` |
 | ld-so | 新建 | ld.so 动态链接器 | ELF 加载、DT_NEEDED 图遍历、符号解析、重定位应用、延迟绑定、TLS init | ⏳ | 待实现 |
