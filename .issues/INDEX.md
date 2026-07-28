@@ -102,7 +102,7 @@ src/compat/
 | ld-pie | mt/ld | `--pie`/`--no-pie` 支持 | PIE 二进制输出（`ET_DYN` + `PT_INTERP` + 相对重定位） | 🟢 | `4ae63b1` |
 | mcc-pic-verify | mcc | PIC 代码生成加固 | 全架构验证 `-fPIC` 输出（GOT/PLT/TLS GD 路径） | ⏳ | 待实现 |
 | mcc-shared-mt | mcc driver | `-shared` mt/ld 集成 | 去掉 `-shared` 回退到 host cc 的限制 | 🟢 | `acce6c6` |
-| ld-so | 新建 | ld.so 动态链接器 | ELF 加载、DT_NEEDED 图遍历、符号解析、重定位应用、延迟绑定、TLS init | ⏳ | 待实现 |
+| ld-so | 新建 | ld.so 动态链接器 | ELF 加载、DT_NEEDED 图遍历、符号解析、重定位应用、延迟绑定、TLS init | 🟡 | `525ab54` 骨架实现（x86_64、ELF 加载+符号解析+重定位+裸 syscall） |
 | libc-dl | meuos-libc | `dlfcn.h` + `dl*` 实现 | `dlopen`/`dlsym`/`dlclose`/`dlerror` | ⏳ | 待实现 |
 | mcc-dwarf | mcc | DWARF 调试信息 | `-g` 生成 DWARF v5（`.debug_info`/`.abbrev`/`.line`/`.str`/`.loc`/`.ranges`），包含行号、变量、类型信息 | 🟡 | as-dwarf 已完成(`a5f49c0`)，行号表实现进行中(fork-8) |
 | as-dwarf | mt/as | DWARF 汇编伪指令 | `.loc`/`.file`/`.cfi_*` 支持 — **阻塞 mcc-dwarf**，无此 as 无法处理 `-g` 输出 | 🟢 | `a5f49c0` |
