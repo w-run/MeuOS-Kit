@@ -181,7 +181,7 @@ src/compat/
 | as-errors | mt/as | 错误消息行号/列号 | 🟢 | 已有 line info（mt_as_assemble 通过 error_line 参数报告） |
 | ld-errors | mt/ld | 未定义符号的友好诊断（列出候选目标文件） | 🟢 低 | `a3237f3`（--no-undefined 时自动推荐拼写接近的符号名） |
 | community-tests | 全项目 | 社区测试套件覆盖率（chibicc → C99/C11/C23 全量通过） | 🟡 中 | 待实现 |
-| meow-lint | meow | 配方语法检查器（`meow lint`） | 🟢 低 | 待实现 |
+| meow-lint | meow | 配方语法检查器（`meow lint`） | 🟢 低 | 🟢 5f34bb6：`src/lint.c` 实现 `cmd_lint()`，无参数遍历 pkgs/ + 当前目录 meow.yaml，指定包名检查单个；复用 load_recipe + parse_recipe。main.c 分发 + meow.h 声明已加。验证：meow lint meow-smoke 通过；fixture 配方正确报告语法错误 |
 | ci-pipeline | 全项目 | CI/CD 流水线（GitHub Actions + qemu-user 跨架构回归） | 🟡 中 | 待实现 |
 
 ## 优先级 5（P5-meow — meow 构建系统完备）
