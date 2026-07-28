@@ -1533,6 +1533,7 @@ resolve_fixups(struct as_file *as, const int *section_map,
 			return as_error(as, "undefined internal symbol: %s", fix->symbol);
 		can_resolve = symbol->defined && symbol->section == fix->section &&
 		              fix->type != MT_R_X86_64_GOTPCREL &&
+		              fix->type != MT_R_X86_64_REX_GOTPCRELX &&
 		              fix->type != MT_R_X86_64_64 &&
 		              fix->type != MT_R_X86_64_32 &&
 		              fix->type != MT_R_X86_64_32S &&

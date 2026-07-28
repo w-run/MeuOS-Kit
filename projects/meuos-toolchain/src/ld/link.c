@@ -47,6 +47,7 @@ extern int msys_vfs_load(const char *path, void **buf, size_t *size);
 #define LD_R_X86_64_PC32 2
 #define LD_R_X86_64_PLT32 4
 #define LD_R_X86_64_GOTPCREL 9
+#define LD_R_X86_64_REX_GOTPCRELX 42
 #define LD_R_X86_64_32 10
 #define LD_R_X86_64_32S 11
 #define LD_R_X86_64_TPOFF32 23
@@ -1485,6 +1486,7 @@ collect_got_relocations(struct ld_context *ctx)
 					const unsigned char *p = object->data + section.offset + n * 12;
 					info32 = read32(p + 4);
 					if ((unsigned)info32 == LD_R_X86_64_GOTPCREL ||
+					    (unsigned)info32 == LD_R_X86_64_REX_GOTPCRELX ||
 					    (info32 & 0xff) == 75 || (info32 & 0xff) == 76) {
 						uint32_t sym_idx = info32 >> 8;
 						if (get_symbol_by_index(ctx, object, sym_idx, &symbol,
@@ -1501,7 +1503,8 @@ collect_got_relocations(struct ld_context *ctx)
 				for (n = 0; n < section.size / section.entry_size; ++n) {
 					const unsigned char *p = object->data + section.offset + n * section.entry_size;
 					info64 = read64(p + 8);
-					if ((unsigned)info64 != LD_R_X86_64_GOTPCREL) {
+					if ((unsigned)info64 != LD_R_X86_64_GOTPCREL &&
+					    (unsigned)info64 != LD_R_X86_64_REX_GOTPCRELX) {
 						unsigned rel_type = (unsigned)(info64 & 0xffffffff);
 						if (rel_type == 75 || rel_type == 76)
 							goto collect_got64;
@@ -1813,7 +1816,7 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 	 * for x86_64 — arch-specific dispatch above handles all others. */
 	if (strcmp(ctx->target->name, "x86_64") != 0)
 		return ld_errorf(ctx, "unsupported relocation type", name);
-	if (type == LD_R_X86_64_GOTPCREL) {
+	if (type == LD_R_X86_64_GOTPCREL || type == LD_R_X86_64_REX_GOTPCRELX) {
 		if (got_index(ctx, name, &got) != 0)
 			return ld_errorf(ctx, "missing GOT entry", name);
 		got_group = &ctx->groups[ctx->got.group];

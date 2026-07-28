@@ -165,6 +165,7 @@
 #define MT_R_X86_64_JUMP_SLOT 7
 #define MT_R_X86_64_RELATIVE 8
 #define MT_R_X86_64_GOTPCREL 9
+#define MT_R_X86_64_REX_GOTPCRELX 42
 #define MT_R_X86_64_32 10
 #define MT_R_X86_64_32S 11
 #define MT_R_X86_64_16 12

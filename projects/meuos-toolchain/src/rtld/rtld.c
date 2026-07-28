@@ -629,25 +629,8 @@ rtld_main(size_t *sp)
 		case DT_INIT_ARRAYSZ:
 			main_lib->init_arraysz = (size_t)d->d_val;
 			break;
-		case DT_NEEDED:
-			/* We will load shared libraries.  For now, just note that
-			 * something is needed.  The string is at strtab + d_val. */
-			if (main_lib->strtab && d->d_val < main_lib->strsz) {
-				const char *soname = main_lib->strtab + d->d_val;
-				/* Load the shared library */
-				if (rtld_load_lib(soname, &st) == 0) {
-					/* Try /lib/ prefix */
-					char libpath[512];
-					int k = 0;
-					const char *p = "/lib/";
-					while (*p) libpath[k++] = *p++;
-					p = soname;
-					while (*p) libpath[k++] = *p++;
-					libpath[k] = 0;
-					rtld_load_lib(libpath, &st);
-				}
-			}
-			break;
+	/* Load shared libraries via DT_NEEDED (transitive) */
+	rtld_load_needed(&st, main_lib);
 		}
 	}
 
