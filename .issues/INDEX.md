@@ -172,7 +172,7 @@ src/compat/
 |----|------|------|------|---------|
 | mcc-diagnostics | mcc | 诊断质量 | 带源位置和 caret（`^`）的错误消息。这是 Clang 推广的好设计，非 GNU 包袱 | 🟡 | 🟢 本 commit（token.c 添加 caret ^ 错误指示） |
 | mcc-warnings | mcc | 警告体系 | ⚠️ `-Wall`/`-Wextra` 是 GCC 命名约定。我们应该设计自己的警告体系（`--warn=all`/`--warn=extra` 或 `-W` 风格但自己定义哪些组别） | 🔄 重设计 | 待设计 |
-| mcc-attributes | mcc compat | `__attribute__` | GCC 属性语法。按设计原则应走 compat 映射层，核心不直接处理 | 🟡 | 待实现 |
+| mcc-attributes | mcc compat | `__attribute__` | GCC 属性语法。按设计原则应走 compat 映射层，核心不直接处理 | 🟢 | `7c087f8`（支持 weak/used/noinline/always_inline/visibility/unused/aligned/section/packed/noreturn/deprecated/constructor/destructor） |
 | mcc-pragma | mcc compat | `#pragma` | GCC/Clang pragma。同样走 compat 映射层 | 🟡 | 待实现 |
 | mcc-builtins | mcc compat | `__builtin_*` | GCC/Clang 内建函数。同样走 compat 映射层（`__builtin_expect` → 宏等） | 🟢 | 待实现 |
 | mcc-generic | mcc | `_Generic` 完整 C11 匹配规则（含 qualified type 分派） | 🟢 已验证 `_Generic` 支持 qualified type 匹配，正确检测 multiple matches | `dc2d598`（移除 `qual==QUALNONE` 保护） |
@@ -312,7 +312,7 @@ enum target_feature {
 | self-rebuild | ✅ | ✅ | ✅ bug-riscv64-emit | ❌ bug-i386-tls | ✅ bug-loong64-emit | ❌ bug-arm-isel |
 | 动态链接 | 🔄 ld-shared...ld-so | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
 | DWARF 调试信息 | 🔄 mcc-dwarf+ld-dwarf-merge | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
-| mcc 诊断/警告 | 🔄 mcc-diagnostics...mcc-generic | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
+| mcc 诊断/警告 | 🔄 mcc-diagnostics+attributes+generic | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
 | libc 完整 POSIX | 🔄 libc-math...libc-threads | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
 | mt/as 完整指令 | 🟢 x86_64 1075 行 (align/equ/diag/rept/cond/section/as-dwarf) | 🟢 aarch64 1247 行 | 🟢 riscv64 939 行 | 🟢 i386 1118 行 | 🟢 loongarch64 898 行 | 🔄 ARM 449 行（新增 22 种指令形式，尚有 VFP/NEON 缺口） |
 | mt/ld 链接器特性 | 🔄 ld-gc-sections+ld-linker-script(重构)+ld-print-map(重构)+ld-start-group+ld-whole-archive+ld-build-id+ld-eh-frame-hdr+ld-as-needed | 🔄 | 🔄 | 🔄 | 🔄 | 🔄 |
