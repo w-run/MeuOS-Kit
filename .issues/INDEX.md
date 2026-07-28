@@ -165,7 +165,7 @@ src/compat/
 | libc-socket | POSIX 网络 | `<sys/socket.h>`、`<netdb.h>`、`<netinet/in.h>`、`<arpa/inet.h>` | 🟡 中 | 待实现 |
 | libc-regex | POSIX 正则 | `<regex.h>` — `regcomp`/`regexec`/`regerror`/`regfree` | 🟡 中 | 待实现 |
 | libc-termios | POSIX 终端 | `<termios.h>`、`<sys/ioctl.h>` | 🟢 低 | 🟢 本 commit（termios.h + ioctl + tcgetattr/tcsetattr + cfmakeraw） |
-| libc-glob | POSIX glob | `<glob.h>`、`<fnmatch.h>` 模式匹配 | 🟡 中 | 待实现 |
+| libc-glob | POSIX glob | `<glob.h>`、`<fnmatch.h>` 模式匹配 | 🟡 中 | 🟢 本 commit（fnmatch + glob 完整实现） |
 | libc-syslog | POSIX 环境 | `<syslog.h>`、`<utmpx.h>` | 🟢 低 | 待实现 |
 | libc-atomic | `<stdatomic.h>` | C11 atomic 的完整操作集（`atomic_compare_exchange_*` 变体等） | 🟡 中 | 🟢 已实现（含 compare_exchange/fetch_add/sub/and/or/xor 及 memory_order） |
 | libc-threads | `<threads.h>` | C11 thread 完整接口（`tss_*`、`call_once` 等） | 🟡 中 | 待实现 |
