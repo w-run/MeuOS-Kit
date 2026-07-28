@@ -244,6 +244,7 @@ check-ld-x86_64: $(AS_BIN) $(AR_BIN) $(LD_BIN)
 	sh test/ld_smoke.sh "$(abspath $(AS_BIN))" "$(abspath $(AR_BIN))" "$(abspath $(LD_BIN))"
 	sh test/ld_sysroot.sh "$(abspath $(AS_BIN))" "$(abspath $(LD_BIN))"
 	sh test/ld_counter_e2e.sh "$(abspath $(AS_BIN))" "$(abspath $(LD_BIN))" "$(abspath $(MCC))" "$(SYSROOT)"
+	sh test/ld_defsym.sh "$(abspath $(LD_BIN))"
 
 
 check-ar-bsd: $(AS_BIN) $(AR_BIN) $(LD_BIN)
