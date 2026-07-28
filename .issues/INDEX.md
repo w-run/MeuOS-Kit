@@ -235,7 +235,7 @@ src/compat/
 
 | ID | 描述 | 优先 | 实施情况 |
 |----|------|------|---------|
-| target-features | **`Target.features` 设计**：在 Target 中添加 `uint64_t features` 位图 + `const char *features_desc[]`。定义架构无关的公共特性位和架构特有的特性位 | 🔴 高 | 待实现 |
+| target-features | **`Target.features` 设计**：在 Target 中添加 `uint64_t features` 位图 + `const char *features_desc[]`。定义架构无关的公共特性位和架构特有的特性位 | 🔴 高 | 🟢 `058c882`（`struct mt_target` 添加 `features` 字段 + `MT_FEATURE_*` 常量定义） |
 | march-generic | **`-march=` 解析通用化**：从仅 ARM 推广到全架构。x86_64 解析 `native`/`x86-64`/`x86-64-v2`/`v3`/`v4`；riscv64 解析 `rv64gc`/`rv64imafdc`；aarch64 解析 `armv8-a`/`armv8.2-a` 等 | 🔴 高 | 待实现 |
 | x86-isa-levels | **x86_64 ISA 级别门控**：实现 `-march=x86-64-v2`/`v3`/`v4` 代码生成差异。至少：v2 启用 SSE4.2+POPCNT，v3 启用 AVX2+BMI2，v4 启用 AVX-512 | 🔴 高 | 待实现 |
 | riscv-extensions | **riscv64 扩展选择**：实现 `-march=rv64imafdc` 解析，根据扩展集发射指令。`-mabi=lp64d`/`lp64`/`ilp32d`/`ilp32` | 🟡 中 | 待实现 |
