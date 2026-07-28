@@ -950,5 +950,97 @@ ldr_mem:
 		return 0;
 	}
 
+	/* ---- NEON vmax/vmin/vabd/vaba/vceq/vcge/vcgt ---- */
+	if (mnemonic[0] == 'v') {
+		static const struct { const char *name; uint32_t base; int two_op; } neon_more[] = {
+			{"vmax", 0xF2000D06, 0}, {"vmin", 0xF2000D46, 0},
+			{"vabd", 0xF2000D70, 0}, {"vaba", 0xF2000D7C, 0},
+			{"vceq", 0xF2000D08, 0}, {"vcge", 0xF3000D08, 0},
+			{"vcgt", 0xF3200D08, 0}, {"vabs", 0xF3B00500, 1},
+			{"vneg", 0xF3B00580, 1}, {"vqadd", 0xF2000D00, 0},
+			{"vqsub", 0xF3000D00, 0}, {"vrhadd", 0xF2000D10, 0},
+			{"vpadd", 0xF2000D02, 0}, {"vext", 0xF2E00000, 0},
+			{0, 0, 0}
+		};
+		for (int ni = 0; neon_more[ni].name; ni++) {
+			if (strcmp(mnemonic, neon_more[ni].name) != 0) continue;
+			int rd, rn = 0, rm = 0;
+			if (reg_num(ops[0],&rd)<0) return -1;
+			if (neon_more[ni].two_op) {
+				if (nops < 2 || reg_num(ops[1],&rm)<0) return -1;
+			} else {
+				if (nops < 3 || reg_num(ops[1],&rn)<0 || reg_num(ops[2],&rm)<0) return -1;
+			}
+			uint32_t d=(uint32_t)(rd&0x1F), n=(uint32_t)(rn&0x1F), m=(uint32_t)(rm&0x1F);
+			emit32(out->bytes, neon_more[ni].base|((d>>1)<<12)|((d&1)<<22)|((n>>1)<<16)|((n&1)<<7)|((m>>1)<<0)|((m&1)<<5));
+			return 0;
+		}
+	}
+
+	/* ---- SMLAL/SMULL/UMLAL: widening multiplies ---- */
+	if (nops >= 4 && (strcmp(mnemonic, "smlal") == 0 || strcmp(mnemonic, "umlal") == 0)) {
+		int rdlo, rdhi, rn, rm;
+		if (reg_num(ops[0],&rdlo)<0||reg_num(ops[1],&rdhi)<0||reg_num(ops[2],&rn)<0||reg_num(ops[3],&rm)<0) return -1;
+		uint32_t base = (mnemonic[0]=='s')?0xE0E00090:0xE0A00090;
+		emit32(out->bytes, base|(rdhi<<16)|(rdlo<<12)|(rn<<8)|rm);
+		return 0;
+	}
+
+	/* ---- QADD/QSUB/QDADD/QDSUB: saturating arithmetic ---- */
+	if (nops >= 3) {
+		if (strcmp(mnemonic, "qadd") == 0) {
+			int rd, rm, rn; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rm)<0||reg_num(ops[2],&rn)<0) return -1;
+			emit32(out->bytes, 0xE1000050|(rd<<16)|(rm<<0)|(rn<<8)); return 0;
+		}
+		if (strcmp(mnemonic, "qsub") == 0) {
+			int rd, rm, rn; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rm)<0||reg_num(ops[2],&rn)<0) return -1;
+			emit32(out->bytes, 0xE1200050|(rd<<16)|(rm<<0)|(rn<<8)); return 0;
+		}
+	}
+
+	/* ---- LDRD/STRD: doubleword load/store ---- */
+	if (nops >= 2 && (strcmp(mnemonic, "ldrd") == 0 || strcmp(mnemonic, "strd") == 0)) {
+		int rd, rn; if (reg_num(ops[0],&rd)<0) return -1;
+		const char *mem = ops[1];
+		if (mem[0]=='[') mem++;
+		char rn_str[16]; int i2=0;
+		while (*mem && *mem != ']' && *mem != ',' && *mem != '#' && i2 < 15) rn_str[i2++] = *mem++;
+		rn_str[i2]='\0'; if (reg_num(rn_str,&rn)<0) return -1;
+		uint32_t off=0;
+		if (*mem==','||*mem=='#') { while(*mem&&(*mem==','||*mem==' '||*mem=='#'))mem++; sscanf(mem,"%u",&off); }
+		int is_load = (mnemonic[0]=='l');
+		emit32(out->bytes, (is_load?0xE1D000D0:0xE1C000D0)|(rn<<16)|(rd<<12)|((off&0xF0)<<4)|(off&0xF));
+		return 0;
+	}
+
+	/* ---- RFE/SRS: return from exception / store return state ---- */
+	if (nops >= 1 && strcmp(mnemonic, "rfe") == 0) {
+		const char *mem = ops[0]; if (mem[0]=='[') mem++;
+		int rn; sscanf(mem, "r%i", &rn);
+		emit32(out->bytes, 0xF8100A00 | (rn<<16)); return 0;
+	}
+
+	/* ---- CPS: change processor state ---- */
+	if (nops >= 1 && strcmp(mnemonic, "cps") == 0) {
+		uint32_t mask=0;
+		for (int ci=0; ci<nops; ci++) {
+			if (strcmp(ops[ci],"ie")==0) mask|=0x10;
+			if (strcmp(ops[ci],"id")==0) mask|=0x20;
+			if (strcmp(ops[ci],"ae")==0) mask|=0x40;
+			if (strcmp(ops[ci],"ad")==0) mask|=0x80;
+		}
+		emit32(out->bytes, 0xF0200000 | mask); return 0;
+	}
+
+	/* ---- MRS/MSR: move to/from status register ---- */
+	if (nops >= 2 && strcmp(mnemonic, "mrs") == 0) {
+		int rd; if (reg_num(ops[0],&rd)<0) return -1;
+		emit32(out->bytes, 0xE10F0000 | (rd<<12)); return 0;
+	}
+	if (nops >= 2 && strcmp(mnemonic, "msr") == 0) {
+		int rm; if (reg_num(ops[nops-1],&rm)<0) return -1;
+		emit32(out->bytes, 0xE129F000 | rm); return 0;
+	}
+
 	return -1; /* unsupported */
 }
