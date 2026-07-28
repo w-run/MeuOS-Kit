@@ -125,9 +125,45 @@ ident(struct scanner *s)
 	int tok;
 
 	s->usebuf = true;
-	while (isalnum(s->chr) || s->chr == '_' || s->chr == '$'
-	    || (unsigned char)s->chr >= 0x80)
-		nextchar(s);
+	for (;;) {
+		if (isalnum(s->chr) || s->chr == '_' || s->chr == '$'
+		    || (unsigned char)s->chr >= 0x80) {
+			nextchar(s);
+		} else if (s->chr == '\\') {
+			/* UCN: \uXXXX or \UXXXXXXXX in identifiers.
+			 * We read the UCN directly from file, add UTF-8 to
+			 * the buffer, and leave s->chr pointing to the next
+			 * character (so the loop can continue). */
+			int ucn_val = 0, ucn_n = 0, hexdig;
+			int c1 = getc(s->file);
+			if (c1 == 'u') ucn_n = 4;
+			else if (c1 == 'U') ucn_n = 8;
+			else { ungetc(c1, s->file); break; }
+			for (hexdig = 0; hexdig < ucn_n; hexdig++) {
+				int hc = getc(s->file);
+				if (hc >= '0' && hc <= '9') ucn_val = (ucn_val << 4) | (hc - '0');
+				else if (hc >= 'a' && hc <= 'f') ucn_val = (ucn_val << 4) | (hc - 'a' + 10);
+				else if (hc >= 'A' && hc <= 'F') ucn_val = (ucn_val << 4) | (hc - 'A' + 10);
+				else { ungetc(hc, s->file); break; }
+			}
+			if (hexdig == ucn_n) {
+				/* Encode as UTF-8 and fill buffer */
+				unsigned char utf8[4]; int ulen = 1;
+				if (ucn_val < 0x80) utf8[0] = ucn_val;
+				else if (ucn_val < 0x800) { utf8[0] = 0xC0|(ucn_val>>6); utf8[1]=0x80|(ucn_val&0x3F); ulen=2; }
+				else if (ucn_val < 0x10000) { utf8[0]=0xE0|(ucn_val>>12); utf8[1]=0x80|((ucn_val>>6)&0x3F); utf8[2]=0x80|(ucn_val&0x3F); ulen=3; }
+				else { utf8[0]=0xF0|(ucn_val>>18); utf8[1]=0x80|((ucn_val>>12)&0x3F); utf8[2]=0x80|((ucn_val>>6)&0x3F); utf8[3]=0x80|(ucn_val&0x3F); ulen=4; }
+				for (int k = 0; k < ulen; k++) bufadd(&s->buf, utf8[k]);
+				/* Read the next character (don't buffer it yet) */
+				s->chr = getc(s->file);
+				/* s->chr now holds the char after UCN; loop will check it */
+			} else {
+				break;
+			}
+		} else {
+			break;
+		}
+	}
 	tok = tokenget(s->buf.str, s->buf.len);
 	s->usebuf = false;
 	s->buf.len = 0;
@@ -410,6 +446,13 @@ again:
 		if (isalpha(s->chr) || s->chr == '_' || s->chr == '$'
 		    || (unsigned char)s->chr >= 0x80)
 			return ident(s);
+		/* UCN \u / \U at start of identifier */
+		if (s->chr == '\\') {
+			int peek = getc(s->file);
+			ungetc(peek, s->file);
+			if (peek == 'u' || peek == 'U')
+				return ident(s);
+		}
 		s->usebuf = true;
 		nextchar(s);
 		return TOTHER;
