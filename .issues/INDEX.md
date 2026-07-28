@@ -162,7 +162,7 @@ src/compat/
 | libc-wchar | `<wchar.h>` | 宽字符 I/O、宽字符 `printf`/`scanf`、wcsftime | 🟢 低 | 待实现 |
 | libc-locale | `<locale.h>` | locale 感知函数（`setlocale` 当前 stub） | 🟢 低 | 🟢 本 commit（setlocale/localeconv 实现 + struct lconv） |
 | libc-complex | `<complex.h>` | 复数算术和数学函数 | 🟢 低 | 待实现 |
-| libc-socket | POSIX 网络 | `<sys/socket.h>`、`<netdb.h>`、`<netinet/in.h>`、`<arpa/inet.h>` | 🟡 中 | 待实现 |
+| libc-socket | POSIX 网络 | `<sys/socket.h>`、`<netdb.h>`、`<netinet/in.h>`、`<arpa/inet.h>` | 🟡 中 | 🟢 本 commit（socket/bind/listen/accept/connect/inet 实现 + netinet/in.h + arpa/inet.h） |
 | libc-regex | POSIX 正则 | `<regex.h>` — `regcomp`/`regexec`/`regerror`/`regfree` | 🟡 中 | 待实现 |
 | libc-termios | POSIX 终端 | `<termios.h>`、`<sys/ioctl.h>` | 🟢 低 | 🟢 本 commit（termios.h + ioctl + tcgetattr/tcsetattr + cfmakeraw） |
 | libc-glob | POSIX glob | `<glob.h>`、`<fnmatch.h>` 模式匹配 | 🟡 中 | 🟢 本 commit（fnmatch + glob 完整实现） |
