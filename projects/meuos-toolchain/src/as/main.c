@@ -24,6 +24,7 @@ main(int argc, char **argv)
 	const char *input = NULL;
 	const char *output = "a.out";
 	const char *target_name = NULL;
+	const char *march = NULL;
 	const char *error;
 	unsigned line;
 	int i;
@@ -61,6 +62,10 @@ main(int argc, char **argv)
 			target_name = name;
 			continue;
 		}
+		if (strncmp(argv[i], "--march=", 8) == 0) {
+			march = argv[i] + 8;
+			continue;
+		}
 		if (argv[i][0] == '-' && argv[i][1] == 'o' && argv[i][2] != '\0') {
 			output = argv[i] + 2;
 			continue;
@@ -79,7 +84,7 @@ main(int argc, char **argv)
 		usage(stderr);
 		return 2;
 	}
-	if (mt_as_assemble(input, output, target_name, &error, &line) != 0) {
+	if (mt_as_assemble(input, output, target_name, march, &error, &line) != 0) {
 		fprintf(stderr, "as: %s:%u: %s\n", input, line, error);
 		return 1;
 	}

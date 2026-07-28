@@ -225,6 +225,22 @@ parse_register(const char *text, int *reg, int *width)
 		free(copy);
 		return 0;
 	}
+	/* YMM0-YMM15: reg=0..15, width=32 (distinguishes from XMM=16) */
+	if (copy[0] == 'y' && copy[1] == 'm' && copy[2] == 'm' &&
+	    copy[3] >= '0' && copy[3] <= '9' && copy[4] == '\0') {
+		*reg = copy[3] - '0';
+		*width = 32;
+		free(copy);
+		return 0;
+	}
+	if (copy[0] == 'y' && copy[1] == 'm' && copy[2] == 'm' &&
+	    copy[3] == '1' && copy[4] >= '0' && copy[4] <= '5' &&
+	    copy[5] == '\0') {
+		*reg = 10 + (copy[4] - '0');
+		*width = 32;
+		free(copy);
+		return 0;
+	}
 	free(copy);
 	return -1;
 }
@@ -519,6 +535,31 @@ is_xmm(const struct x86_op *op)
 	return op->kind == OP_REG && op->width == 16;
 }
 
+static int
+is_ymm(const struct x86_op *op)
+{
+	return op->kind == OP_REG && op->width == 32;
+}
+
+/* Emit a 2-byte VEX prefix (VEX.128/256).  For 2-byte VEX, the pp field
+ * selects the mandatory SSE prefix equivalent (0=none, 1=0x66, 2=0xF3,
+ * 3=0xF2), L selects between 128/256-bit, and the R/v fields carry the
+ * inverted REX.R and inverted register-selector (vvvv).  When vvvv is
+ * unused (no source register), pass -1. */
+static void
+emit_vex(unsigned char *buf, size_t *size,
+         int need_256, int pp,
+         int reg_num, int vvvv_in)
+{
+	unsigned vex_byte;
+	int vvvv = (vvvv_in < 0) ? 0xf : (vvvv_in ^ 0xf);  /* invert */
+	unsigned R = (reg_num < 8) ? 1 : 0;                 /* inverted REX.R */
+	unsigned L = need_256 ? 1 : 0;
+	vex_byte = (R << 7) | ((vvvv & 0xf) << 3) | (L << 2) | (pp & 3);
+	emit_u8(buf, size, 0xC5);
+	emit_u8(buf, size, vex_byte);
+}
+
 static void
 emit_sse(unsigned char *buf, size_t *size, struct mt_insn *out,
          unsigned mandatory_prefix, unsigned opcode2,
@@ -586,7 +627,6 @@ x86_64_encode_insn(const struct mt_target *target,
 	};
 	char operand_buf[1024];
 
-	(void)target;
 	memset(out, 0, sizeof(*out));
 	out->fixed = 1;
 
@@ -603,15 +643,9 @@ x86_64_encode_insn(const struct mt_target *target,
 		base[i] = (char)tolower((unsigned char)mnemonic[i]);
 	base[i] = '\0';
 
-	/* ISA feature gating (as-isa-gating): reject instructions whose required
-	 * ISA extension is not enabled for the target. AVX/AVX2 instructions use a
-	 * VEX prefix and start with 'v' (vaddps, vmovaps, vpxor, ...). When the
-	 * target lacks MT_FEATURE_AVX we must error rather than silently emit a
-	 * VEX-encoded instruction that will #UD on the target CPU. */
-	if (base[0] == 'v' && base[1] != '\0') {
-		if ((target->features & MT_FEATURE_AVX) == 0)
-			return -1;  /* caller reports "unsupported instruction" */
-	}
+	/* ISA gating is handled by assemble.c emit_instruction() before calling
+	 * this encoder (pre-encode heuristic), so the encoder itself does not
+	 * need to check features — any instruction it can't handle returns -1. */
 
 	if (strcmp(base, "endbr64") == 0) {
 		emit_u8(out->bytes, &out->size, 0xf3);
@@ -742,6 +776,22 @@ x86_64_encode_insn(const struct mt_target *target,
 		emit_u8(out->bytes, &out->size, 0x0f);
 		emit_u8(out->bytes, &out->size, 0x90 | code);
 		emit_modrm(out->bytes, &out->size, out, 0, &op[0], R_X86_64_PC32, -4);
+		goto done;
+	}
+	/* popcnt rdst, rsrc — SSE4.2 (F3 0F B8 /r), GPR only. Tagged with
+	 * MT_FEATURE_SSE4_2 | MT_FEATURE_POPCNT so the assembler's ISA gate
+	 * rejects it on baseline x86_64 unless -march=x86-64-v2+ is given. */
+	if (strcmp(base, "popcnt") == 0 && n == 2) {
+		if (op[0].kind != OP_REG || op[1].kind != OP_REG)
+			goto unsupported;
+		out->required_features |= MT_FEATURE_SSE4_2 | MT_FEATURE_POPCNT;
+		width = op[0].width;
+		emit_u8(out->bytes, &out->size, 0xf3);
+		emit_rex(out->bytes, &out->size, width == 8, op[0].reg, op[1].reg);
+		emit_u8(out->bytes, &out->size, 0x0f);
+		emit_u8(out->bytes, &out->size, 0xb8);
+		emit_modrm(out->bytes, &out->size, out, op[0].reg, &op[1],
+		           R_X86_64_PC32, -4);
 		goto done;
 	}
 	if (strncmp(base, "cmov", 4) == 0 && n == 2) {
@@ -891,6 +941,53 @@ x86_64_encode_insn(const struct mt_target *target,
 		    is_xmm(&op[0]) && is_xmm(&op[1])) {
 			emit_sse(out->bytes, &out->size, out, 0x66, 0xEF,
 			         op[1].reg, &op[0], 0, R_X86_64_PC32, -4);
+			goto done;
+		}
+	}
+	/* --- AVX vector move instructions (as-isa-gating VEX gating) ---
+	 * vmovups/aps/apd: VEX.128/256.0F.{10,11,28,29} /r
+	 * The VEX prefix is emitted by emit_vex(), followed by the 0F opcode.
+	 * Gate: feature MT_FEATURE_AVX is set at line 638 above for all vX
+	 *       mnemonics, so the assembler rejects them on baseline targets. */
+	if (n >= 1) {
+		int is_avx_mov = 0;
+		unsigned avx_pp = 0, avx_op_load = 0, avx_op_store = 0;
+		int is_256 = (n == 2 && is_ymm(&op[0])) || is_ymm(&op[1]);
+		if (strcmp(base, "vmovups") == 0) {
+			avx_pp = 0; avx_op_load = 0x10; avx_op_store = 0x11; is_avx_mov = 1;
+		} else if (strcmp(base, "vmovupd") == 0) {
+			avx_pp = 1; avx_op_load = 0x10; avx_op_store = 0x11; is_avx_mov = 1;
+		} else if (strcmp(base, "vmovaps") == 0) {
+			avx_pp = 0; avx_op_load = 0x28; avx_op_store = 0x29; is_avx_mov = 1;
+		} else if (strcmp(base, "vmovapd") == 0) {
+			avx_pp = 1; avx_op_load = 0x28; avx_op_store = 0x29; is_avx_mov = 1;
+		}
+		if (is_avx_mov) {
+			unsigned opcode;
+			int reg_num;       /* ModRM.reg (destination) */
+			const struct x86_op *rm_op;   /* ModRM.r/m (source/memory) */
+			if (n == 2 && op[0].kind == OP_REG && op[1].kind == OP_REG) {
+				/* reg-reg: use load opcode, reg=dst, rm=src */
+				reg_num = op[0].reg;
+				rm_op = &op[1];
+				opcode = avx_op_load;
+			} else if (n == 2 && op[0].kind == OP_REG && op[1].kind == OP_MEM) {
+				/* load from mem: reg=dst, rm=mem */
+				reg_num = op[0].reg;
+				rm_op = &op[1];
+				opcode = avx_op_load;
+			} else if (n == 2 && op[0].kind == OP_MEM && op[1].kind == OP_REG) {
+				/* store to mem: reg=src, rm=mem */
+				reg_num = op[1].reg;
+				rm_op = &op[0];
+				opcode = avx_op_store;
+			} else
+				goto unsupported;
+			emit_vex(out->bytes, &out->size, is_256, avx_pp, reg_num, -1);
+			emit_u8(out->bytes, &out->size, 0x0F);
+			emit_u8(out->bytes, &out->size, opcode);
+			emit_modrm(out->bytes, &out->size, out, reg_num,
+			           rm_op, R_X86_64_PC32, -4);
 			goto done;
 		}
 	}

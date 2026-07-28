@@ -489,9 +489,43 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 	/* If the target has its own encoder, delegate entirely. */
 	if (as->target && as->target->encode_insn) {
 		struct mt_insn insn;
+		memset(&insn, 0, sizeof(insn));
+
+		/* Pre-encode ISA gating: heuristic check for VEX-prefix (AVX)
+		 * instructions before calling the encoder — because the encoder
+		 * itself returns -1 for any instruction it can't handle (including
+		 * VEX), we need to distinguish "missing CPU feature" from
+		 * "encoder doesn't support this yet".  The heuristic is simple:
+		 * mnemonic starts with 'v' → AVX required.  Future improvements
+		 * should use a proper VEX/EVEX opcode table. */
+		const char *mn = mnemonic;
+		while (*mn == '_' || *mn == '.') mn++;  /* skip decorators */
+		if (mn[0] == 'v' && mn[1] != '\0') {
+			if ((as->target->features & MT_FEATURE_AVX) == 0)
+				return as_error(as,
+					"instruction %s requires AVX (use -march=x86-64-v3 or higher)",
+					mnemonic);
+			/* AVX is enabled but encoder may lack VEX support. */
+			return as_error(as,
+				"instruction %s: encoder missing VEX/AVX support", mnemonic);
+		}
+
 		if (as->target->encode_insn(as->target, mnemonic, operand_text,
 		                             &insn) < 0) {
 			return as_error(as, "unsupported instruction: %s", mnemonic);
+		}
+		/* ISA feature gating (as-isa-gating): reject instructions whose
+		 * required ISA extension is not enabled for the active target.
+		 * The encoder sets insn.required_features; we report a precise
+		 * diagnostic naming the missing extension. */
+		if (insn.required_features) {
+			const char *missing =
+				mt_feature_name_missing(as->target->features,
+				                        insn.required_features);
+			if (missing)
+				return as_error(as,
+					"instruction %s requires disabled ISA extension '%s' "
+					"(enable via -march=)", mnemonic, missing);
 		}
 		if (as_append_bytes(as, section, insn.bytes, insn.size) != 0)
 			return -1;
@@ -2162,12 +2196,13 @@ eh_frame:
 
 int
 mt_as_assemble(const char *input, const char *output,
-               const char *target_name,
+               const char *target_name, const char *march,
                const char **error_message, unsigned *error_line)
 {
 	struct as_file as;
 	FILE *file;
 	const struct mt_target *target;
+	struct mt_target target_buf;
 	int result;
 
 	if (target_name) {
@@ -2179,6 +2214,14 @@ mt_as_assemble(const char *input, const char *output,
 		}
 	} else {
 		target = &mt_target_x86_64;
+	}
+
+	/* Apply -march= by cloning the base target with an overridden feature
+	 * bitmask.  The clone is stack-local so the shared static is untouched. */
+	if (march) {
+		uint64_t f = mt_target_features_for_march(target->name, march);
+		target_buf = mt_target_clone_with_features(target, f);
+		target = &target_buf;
 	}
 
 	memset(&as, 0, sizeof(as));

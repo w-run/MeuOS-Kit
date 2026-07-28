@@ -52,6 +52,12 @@ struct mt_insn {
 	unsigned    reloc_type;      /* relocation type constant */
 	const char *fixup_symbol;    /* symbol name (must stay valid) */
 	int64_t     fixup_addend;
+	/* ISA feature bits (MT_FEATURE_*) this instruction requires beyond
+	 * the baseline for its architecture.  The assembler compares these
+	 * against the active feature set and rejects the instruction when
+	 * a required bit is disabled (ISA gating).  Encoders set this to 0
+	 * for baseline instructions. */
+	uint64_t    required_features;
 };
 
 struct mt_target {
@@ -78,5 +84,22 @@ extern const struct mt_target mt_target_x86_64;
 /* Look up a target by name (e.g. "x86_64", "aarch64").  Returns NULL when
  * the target is not recognised. */
 const struct mt_target *mt_target_lookup(const char *name);
+
+/* Map a -march= value to an ISA feature bitmask for the given architecture
+ * name.  Returns 0 when the value is not recognised (caller keeps baseline).
+ * Examples (x86_64): "x86-64-v2"/"v2", "x86-64-v3"/"v3", "x86-64-v4"/"v4".
+ * Other architectures currently return 0 (baseline only). */
+uint64_t mt_target_features_for_march(const char *arch, const char *march);
+
+/* Return a stack-allocated copy of the base target with its ISA feature
+ * bitmask replaced by `features`.  Used by the assembler to apply -march=
+ * without mutating the shared static descriptor. */
+struct mt_target mt_target_clone_with_features(const struct mt_target *base,
+                                                uint64_t features);
+
+/* Human-readable name of the lowest ISA feature bit set in `mask` that is
+ * missing from `have`.  Returns NULL when all required bits are present.
+ * Used to build precise ISA-gating diagnostics. */
+const char *mt_feature_name_missing(uint64_t have, uint64_t required);
 
 #endif /* MT_TARGET_H */
