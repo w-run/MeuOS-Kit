@@ -195,7 +195,7 @@ src/compat/
 | meow-wildcard | make | **文件列表通配** | ⚠️ 不做 `$(wildcard)`（GNU make 语法）。用 YAML 原生匹配或 meow 自己的函数（`files('src/*.c')`） | 🔄 重设计 | 待设计 |
 | meow-check-library | autoconf | **`check_library` / `check_link`** | 链接测试检测 `-lz`、`-lpthread`。概念本身没问题——autoconf 的 probe 机制是合理的设计。实现时不照搬 autoconf 语法即可 | 🔴 高 | 🟢 本 commit（probe_add_library + probe_link，YAML libraries: 列表支持） |
 | meow-conditional | make | **条件语句** | ⚠️ 不做 `ifeq`/`ifdef`（GNU make 语法）。YAML 条件语句（`when: ARCH == "aarch64"`）或类似 DSL | 🔄 重设计 | 待设计 |
-| meow-type-size | autoconf | **`check_type_size`** | 检测 `sizeof(time_t)`。autoconf 的这个概念合理，不照搬其实现。meow 应有自己的 `type_size()` probe 函数 | 🟡 中 | 待实现 |
+| meow-type-size | autoconf | **`check_type_size`** | 检测 `sizeof(time_t)`。autoconf 的这个概念合理，不照搬其实现。meow 应有自己的 `type_size()` probe 函数 | 🟡 中 | 🟢 已完成：probe.c 添加 `probe_add_typesize()` + probe_run 中 typesize 探测（编译C程序 `printf("%zu", sizeof(TYPE))`、运行并捕获输出、写入 `#define SIZEOF_NAME N` 到 config.h）；parse.c 支持 `typesizes:` YAML 节区（`- NAME: type_name` 格式） |
 | meow-probe-cache | autoconf | **Probe 缓存** | 缓存编译测试结果（`config.cache` 等价物）。概念好，实现不照搬 autoconf 的烦人缓存格式 | 🟡 中 | 待实现 |
 | meow-vpath | make | **出源码构建** | ⚠️ 不做 `$(srcdir)`（GNU make VPATH）。meow 默认出源码构建（`build/<pkg>/`），不用额外抽象 | 🔄 重设计 | 待设计 |
 | meow-subdirs | make | **多目录构建** | 跨目录包依赖的 YAML 配方。不是 GNU `AC_CONFIG_SUBDIRS`，是 meow 自己的依赖模型 | 🟡 中 | 待实现 |
