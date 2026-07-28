@@ -62,6 +62,7 @@ struct ld_group {
 	uint64_t file_offset;
 	uint64_t address;
 	int rank;
+	int kept;      /* 1 = reachable from roots (for --gc-sections) */
 };
 
 struct ld_section_map {
@@ -168,6 +169,7 @@ struct ld_context {
 	int whole_archive;   /* 1 = force-extract all archive members */
 	int as_needed;        /* 1 = --as-needed, 0 = --no-as-needed */
 	int no_undefined;    /* 1 = error on undefined symbols */
+	int gc_sections;     /* 1 = garbage-collect unused sections */
 	const char *soname;  /* DT_SONAME for shared lib (may be NULL) */
 	/* Dynamic symbol table bookkeeping (shared libs only) */
 	struct ld_dynsym_entry *dynsym_entries;
@@ -730,6 +732,7 @@ static int
 section_rank(const char *name)
 {
 	if (strcmp(name, ".text") == 0) return 0;
+	if (strncmp(name, ".text.", 6) == 0) return 0;
 	if (strcmp(name, ".rodata") == 0) return 1;
 	if (strcmp(name, ".interp") == 0) return 1;
 	if (strcmp(name, ".eh_frame") == 0) return 1;
@@ -740,6 +743,7 @@ section_rank(const char *name)
 	if (strcmp(name, ".got") == 0) return 2;
 	if (strcmp(name, ".dynamic") == 0) return 2;
 	if (strcmp(name, ".data") == 0 || strcmp(name, ".tdata") == 0) return 3;
+	if (strncmp(name, ".data.", 6) == 0) return 3;
 	if (strcmp(name, ".bss") == 0 || strcmp(name, ".tbss") == 0) return 4;
 	/* Debug and other non-allocatable sections go after ALL loaded sections */
 	if (strncmp(name, ".debug", 6) == 0) return 5;
@@ -1564,6 +1568,8 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 	uint64_t target_offset;
 	unsigned width;
 
+	/* Skip relocations targeting GC'd (--gc-sections) sections */
+	if (target->size == 0) return 0;
 	if (offset > target->size || target->size - offset <
 	    (type == LD_R_X86_64_64 ? 8 : 4))
 		return ld_error(ctx, "relocation offset is outside output section");
@@ -1696,6 +1702,8 @@ apply_relocations(struct ld_context *ctx)
 			    object->maps[section.info].group < 0)
 				return ld_error(ctx, "relocation target was discarded");
 			group = object->maps[section.info].group;
+			/* Skip relocations targeting GC'd sections */
+			if (ctx->groups[group].size == 0) continue;
 			for (n = 0; n < section.size / section.entry_size; ++n)
 				if (write_relocation(ctx, object, &section,
 				                    &ctx->groups[group], n) != 0)
@@ -2813,6 +2821,89 @@ ensure_pie_section(struct ld_context *ctx)
 	return 0;
 }
 
+/* --gc-sections: garbage-collect unreferenced output groups.
+ * Called after collect_symbols() and extract_archives().
+ * Marks groups reachable from entry and .init_array/.fini_array
+ * as kept; all others have their data removed. */
+static int
+gc_sweep(struct ld_context *ctx, const char *entry_name)
+{
+	size_t i;
+	int changed;
+
+	/* Mark entry point's section and root sections */
+	if (entry_name) {
+		struct ld_global *entry_sym = find_global(ctx, entry_name);
+		if (entry_sym && entry_sym->defined && entry_sym->group >= 0)
+			ctx->groups[entry_sym->group].kept = 1;
+	}
+	for (i = 0; i < ctx->group_count; i++) {
+		if (strcmp(ctx->groups[i].name, ".init_array") == 0 ||
+		    strcmp(ctx->groups[i].name, ".fini_array") == 0 ||
+		    strcmp(ctx->groups[i].name, ".init") == 0 ||
+		    strcmp(ctx->groups[i].name, ".fini") == 0)
+			ctx->groups[i].kept = 1;
+	}
+
+	/* Propagate: walk relocations from kept sections */
+	do {
+		changed = 0;
+		for (i = 0; i < ctx->objects.count; i++) {
+			struct ld_object *obj = &ctx->objects.items[i];
+			uint16_t k;
+			for (k = 0; k < object_section_count(obj); k++) {
+				struct mt_elf64_section sec;
+				if (object_get_section(obj, k, &sec) != 0) continue;
+				if (sec.type != MT_SHT_RELA) continue;
+				int target_idx = (int)(unsigned)sec.info;
+				if (target_idx < 0 ||
+				    (size_t)target_idx >= object_section_count(obj)) continue;
+				int tg = obj->maps[target_idx].group;
+				if (tg < 0 || tg >= (int)ctx->group_count) continue;
+				if (!ctx->groups[tg].kept) continue;
+				/* This relocation section targets a kept group.
+				 * Walk individual relocations to find referenced sections */
+				size_t r;
+				for (r = 0; r < sec.size / sec.entry_size; r++) {
+					const unsigned char *p = obj->data + sec.offset +
+					    r * sec.entry_size;
+					uint64_t info;
+					uint64_t sym_idx;
+					struct mt_elf64_symbol sym;
+					if (obj->elf_class == 1) {
+						info = read32(p + 4);
+						sym_idx = info >> 8;
+					} else {
+						info = read64(p + 8);
+						sym_idx = info >> 32;
+					}
+					if (object_get_symbol(obj, sym_idx, &sym) != 0) continue;
+					if (sym.section > 0 && sym.section < object_section_count(obj)) {
+						int sg = obj->maps[sym.section].group;
+						if (sg >= 0 && sg < (int)ctx->group_count && !ctx->groups[sg].kept) {
+							ctx->groups[sg].kept = 1;
+							changed = 1;
+						}
+					}
+				}
+			}
+		}
+	} while (changed);
+
+	/* Remove unkept allocatable sections (text/data/bss sub-sections) */
+	for (i = 0; i < ctx->group_count; i++) {
+		if (ctx->groups[i].kept) continue;
+		/* Keep non-allocatable sections (.comment, .note, debug) as-is */
+		if (!(ctx->groups[i].flags & LD_SHF_ALLOC)) continue;
+		ctx->groups[i].size = 0;
+		ctx->groups[i].type = MT_SHT_NOBITS;
+		free(ctx->groups[i].data);
+		ctx->groups[i].data = NULL;
+	}
+
+	return 0;
+}
+
 int
 mt_ld_link_opts(const struct mt_ld_options *opts,
                 const char *const *inputs, size_t input_count,
@@ -2842,6 +2933,7 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 		ctx.as_needed = opts->as_needed;
 		ctx.whole_archive = opts->whole_archive;
 		ctx.no_undefined = opts->no_undefined;
+		ctx.gc_sections = opts->gc_sections;
 		/* Default: --no-as-needed when unset */
 		if (ctx.as_needed < 0)
 			ctx.as_needed = 0;
@@ -2870,6 +2962,10 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 				goto out;
 			}
 		}
+	}
+	if (ctx.gc_sections) {
+		if (gc_sweep(&ctx, opts ? opts->entry : "_start") != 0)
+			goto out;
 	}
 	if (build_dynamic_tables(&ctx) != 0)
 		goto out;
