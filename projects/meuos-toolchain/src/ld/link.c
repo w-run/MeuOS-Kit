@@ -162,6 +162,7 @@ struct ld_context {
 	uint64_t tls_size;
 	uint64_t tls_align;
 	int shared;          /* 1 = ET_DYN (shared library), 0 = ET_EXEC */
+	int pie;             /* 1 = PIE (ET_DYN + PT_INTERP) */
 	const char *soname;  /* DT_SONAME for shared lib (may be NULL) */
 	/* Dynamic symbol table bookkeeping (shared libs only) */
 	struct ld_dynsym_entry *dynsym_entries;
@@ -719,6 +720,7 @@ section_rank(const char *name)
 {
 	if (strcmp(name, ".text") == 0) return 0;
 	if (strcmp(name, ".rodata") == 0) return 1;
+	if (strcmp(name, ".interp") == 0) return 1;
 	if (strcmp(name, ".eh_frame") == 0) return 1;
 	if (strcmp(name, ".dynsym") == 0) return 1;
 	if (strcmp(name, ".dynstr") == 0) return 1;
@@ -1790,7 +1792,7 @@ write_executable(struct ld_context *ctx, const char *path,
 	int result = -1;
 	/* For shared libraries (ET_DYN) the load base is 0; the dynamic
 	 * loader relocates the image at run time. */
-	uint64_t base_addr = ctx->shared ? 0 : LD_BASE;
+	uint64_t base_addr = (ctx->shared || ctx->pie) ? 0 : LD_BASE;
 	/* Program header count: PT_LOAD + optional PT_TLS + (shared) PT_PHDR/PT_DYNAMIC. */
 	int phnum;
 
@@ -1885,7 +1887,7 @@ write_executable(struct ld_context *ctx, const char *path,
 	{
 	unsigned char h[64] = {0x7f, 'E', 'L', 'F',
 	                       target->elf_class, target->elf_endian, 1, 0};
-		uint16_t e_type = ctx->shared ? MT_ET_DYN : MT_ET_EXEC;
+		uint16_t e_type = (ctx->shared || ctx->pie) ? MT_ET_DYN : MT_ET_EXEC;
 		write16(h + 16, e_type);
 		write16(h + 18, target->emachine);
 		write32(h + 20, 1);
@@ -1898,6 +1900,7 @@ write_executable(struct ld_context *ctx, const char *path,
 		phnum = 1; /* PT_LOAD */
 		if (ctx->tls_size) phnum++;
 		if (ctx->shared) phnum += 2; /* PT_PHDR + PT_DYNAMIC */
+		if (ctx->pie) phnum += 1;    /* PT_INTERP */
 		write16(h + 56, phnum);
 		write16(h + 58, target->shdr_size);
 		write16(h + 60, (uint16_t)output_count);
@@ -1947,6 +1950,17 @@ write_executable(struct ld_context *ctx, const char *path,
 			                             LD_PF_R | LD_PF_W,
 			                             dyn->file_offset, dyn->address,
 			                             dyn->size, dyn->size, 8) != 0)
+				goto out_file;
+		}
+	}
+	/* PT_INTERP for PIE executables */
+	if (ctx->pie) {
+		int ig = find_group(ctx, ".interp");
+		if (ig >= 0) {
+			struct ld_group *interp = &ctx->groups[ig];
+			if (write_program_header_type(file, MT_PT_INTERP, LD_PF_R,
+			                             interp->file_offset, interp->address,
+			                             interp->size, interp->size, 1) != 0)
 				goto out_file;
 		}
 	}
@@ -2364,6 +2378,28 @@ ensure_dynamic_section(struct ld_context *ctx)
 	return 0;
 }
 
+/* For PIE executables, create the .interp section that holds the path to
+ * the dynamic linker.  The content is fixed (/lib/ld-meuos.so.1) so we
+ * fill it immediately; the section just needs to exist before layout(). */
+static int
+ensure_pie_section(struct ld_context *ctx)
+{
+	if (!ctx->pie)
+		return 0;
+	int g = get_group(ctx, ".interp", MT_SHT_PROGBITS,
+	                  LD_SHF_ALLOC, 1);
+	if (g < 0)
+		return ld_error(ctx, "out of memory");
+	ctx->groups[g].rank = 1; /* read-only region */
+	const char *interp = "/lib/ld-meuos.so.1";
+	uint64_t off;
+	if (append_group_data(ctx, &ctx->groups[g],
+	                       (const unsigned char *)interp,
+	                       strlen(interp) + 1, 1, &off) != 0)
+		return -1;
+	return 0;
+}
+
 int
 mt_ld_link_opts(const struct mt_ld_options *opts,
                 const char *const *inputs, size_t input_count,
@@ -2386,6 +2422,7 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 	}
 	if (opts) {
 		ctx.shared = opts->shared;
+		ctx.pie = opts->pie;
 		ctx.soname = opts->soname;
 	}
 	ctx.got.group = -1;
@@ -2397,6 +2434,7 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 		goto out;
 	}
 	if (collect_sections(&ctx) != 0 || ensure_dynamic_section(&ctx) != 0 ||
+	    ensure_pie_section(&ctx) != 0 ||
 	    collect_symbols(&ctx) != 0 ||
 	    extract_archives(&ctx) != 0 || allocate_common(&ctx) != 0 ||
 	    collect_got_relocations(&ctx) != 0)

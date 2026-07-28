@@ -10,6 +10,7 @@ struct mt_ld_options {
 	const char *entry;     /* entry symbol (default "_start") */
 	const char *soname;    /* DT_SONAME for shared libraries (may be NULL) */
 	int         shared;    /* 1 = ET_DYN (shared library), 0 = ET_EXEC */
+	int         pie;       /* 1 = PIE (ET_DYN + PT_INTERP), 0 = 普通 */
 };
 
 /* Static linker entry point (original API, shared=0).
