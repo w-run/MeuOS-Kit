@@ -63,6 +63,35 @@ probe_compile(const char *code, const char *cflags, const char *cc)
 	return rc == 0 ? 0 : -1;
 }
 
+/* Compile and link a minimal C program to test library availability.
+ * Unlike probe_compile, this runs the linker (no -c flag). */
+static int
+probe_link(const char *code, const char *cflags, const char *cc)
+{
+	char src[256], exe[256];
+	FILE *f;
+	int rc;
+
+	snprintf(src, sizeof src, "%s/probe-link.c", tmpdir);
+	snprintf(exe, sizeof exe, "%s/probe-link.exe", tmpdir);
+
+	f = fopen(src, "w");
+	if (!f) return -1;
+	fprintf(f, "%s\n", code);
+	fclose(f);
+
+	char cmd[2048];
+	int n = snprintf(cmd, sizeof cmd, "%s %s -o %s %s 2>/dev/null",
+	         cc ? cc : "mcc",
+	         cflags ? cflags : "",
+	         exe, src);
+	if (n < 0 || (size_t)n >= sizeof(cmd)) { unlink(src); return -1; }
+	rc = system(cmd);
+	unlink(exe);
+	unlink(src);
+	return rc == 0 ? 0 : -1;
+}
+
 /* Name normalisation: convert any name to HAVE_<UPPERCASE_SAFE>.
  * Removes non-alphanumeric characters; '/' and '.' become '_'. */
 static void
@@ -115,6 +144,8 @@ static struct probe_item probe_codes[PROBE_MAX];
 static size_t nprobe_codes;
 static struct probe_item probe_decls[PROBE_MAX];
 static size_t nprobe_decls;
+static struct probe_item probe_libs[PROBE_MAX];
+static size_t nprobe_libs;
 static char probe_cc[128] = "";
 static char probe_cflags[512] = "";
 static char probe_config[64] = "config.h";
@@ -126,6 +157,7 @@ probe_reset(void)
 	nprobe_funcs = 0;
 	nprobe_codes = 0;
 	nprobe_decls = 0;
+	nprobe_libs = 0;
 	probe_cc[0] = 0;
 	probe_cflags[0] = 0;
 	strcpy(probe_config, "config.h");
@@ -169,6 +201,15 @@ probe_add_decl(const char *name)
 }
 
 int
+probe_add_library(const char *name)
+{
+	if (nprobe_libs >= PROBE_MAX) return -1;
+	snprintf(probe_libs[nprobe_libs].name, sizeof probe_libs[0].name, "%s", name);
+	++nprobe_libs;
+	return 0;
+}
+
+int
 probe_set_cc(const char *cc)
 {
 	snprintf(probe_cc, sizeof probe_cc, "%s", cc);
@@ -196,7 +237,7 @@ probe_run(const char *build_dir)
 	char config_path[512];
 	FILE *f;
 	int rc = 0;
-	size_t total = nprobe_headers + nprobe_funcs + nprobe_codes + nprobe_decls;
+	size_t total = nprobe_headers + nprobe_funcs + nprobe_codes + nprobe_decls + nprobe_libs;
 
 	if (total == 0)
 		return 0; /* nothing to probe */
@@ -297,6 +338,20 @@ probe_run(const char *build_dir)
 
 		if (probe_compile(code, probe_cflags, probe_cc) == 0)
 			emit_define(f, probe_codes[i].name);
+	}
+
+	/* 5. Probe libraries: link a minimal program with -l<name>. */
+	for (size_t i = 0; i < nprobe_libs; ++i) {
+		char code[512];
+		snprintf(code, sizeof code,
+		         "int main(void){return 0;}\n");
+		char cflags[640];
+		snprintf(cflags, sizeof cflags, "%s -l%s", probe_cflags, probe_libs[i].name);
+		if (probe_link(code, cflags, probe_cc) == 0) {
+			char defname[128];
+			normalise_name(probe_libs[i].name, defname, sizeof defname);
+			emit_define(f, defname);
+		}
 	}
 
 	fprintf(f, "\n#endif /* MEOW_CONFIG_H */\n");
