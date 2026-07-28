@@ -186,6 +186,7 @@ main(int argc, char **argv)
 	int no_undefined = 0;
 	int gc_sections = 0;
 	int print_map = 0;
+	const char *link_script = NULL;
 	const char *inputs[MAX_INPUTS];
 	const char *libpaths[MAX_LIBPATHS];
 	const char *sysroot = NULL;
@@ -283,6 +284,16 @@ main(int argc, char **argv)
 		}
 		if (strcmp(argv[i], "--print-map") == 0 || strcmp(argv[i], "-Map") == 0) {
 			print_map = 1;
+			continue;
+		}
+		if (strcmp(argv[i], "-T") == 0) {
+			if (++i >= argc) { usage(stderr); return 2; }
+			link_script = argv[i];
+			continue;
+		}
+		if (strcmp(argv[i], "--link-script") == 0) {
+			if (++i >= argc) { usage(stderr); return 2; }
+			link_script = argv[i];
 			continue;
 		}
 		if (strcmp(argv[i], "-soname") == 0) {
@@ -460,6 +471,7 @@ main(int argc, char **argv)
 	opts.no_undefined = no_undefined;
 	opts.gc_sections = gc_sections;
 	opts.print_map = print_map;
+	opts.link_script = link_script;
 	if (mt_ld_link_opts(&opts, inputs, (size_t)input_count,
 	                    target_name, &error) != 0) {
 		fprintf(stderr, "ld: %s\n", error ? error : "link failed");

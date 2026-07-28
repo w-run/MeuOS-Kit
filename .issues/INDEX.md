@@ -136,7 +136,7 @@ src/compat/
 | as-section | mt/as | 节区控制伪指令 | `.pushsection`/`.popsection` — 通用概念，用于 gcc asm 属性 | 🟢 | 本 commit |
 | as-equ | mt/as | 常量/符号定义 | `.equ`/`.set` — 通用概念 | 🟢 | 已实现 |
 | as-diag | mt/as | 汇编诊断 | `.abort`/`.error`/`.warning` | 🟢 | 已实现 |
-| ld-linker-script | mt/ld | 链接脚本支持 | `.ld` 脚本解析与布局控制（替代 `-T` 占位） | ⏳ | 待实现 |
+| ld-linker-script | mt/ld | 链接脚本支持 | `-T` 文件格式描述节区布局（自定义 rank 排序，非 GNU .ld） | 🟢 | 本 commit（-T/--link-script: `section = rank` 格式控制放置顺序） |
 | ld-print-map | mt/ld | `--print-map` | 链接映射输出 | 🟢 | 本 commit（--print-map 输出节区地址/大小/偏移+入口点） |
 | ld-defsym | mt/ld | `--defsym` | 链接时定义符号（`--defsym=foo=bar`） | 🟡 | 待实现 |
 | ld-wrap | mt/ld | `--wrap` | 符号包装（`--wrap=malloc` → `__wrap_malloc`）用于测试/mock | 🟡 | 待实现 |

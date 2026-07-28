@@ -171,6 +171,7 @@ struct ld_context {
 	int no_undefined;    /* 1 = error on undefined symbols */
 	int gc_sections;     /* 1 = garbage-collect unused sections */
 	int print_map;       /* 1 = output link map */
+	const char *link_script; /* path to section layout script */
 	const char *soname;  /* DT_SONAME for shared lib (may be NULL) */
 	/* Dynamic symbol table bookkeeping (shared libs only) */
 	struct ld_dynsym_entry *dynsym_entries;
@@ -1396,6 +1397,40 @@ collect_got_relocations(struct ld_context *ctx)
 		                      &n) != 0)
 			return -1;
 	}
+	return 0;
+}
+
+/* Apply linker script: override section ranks for placement order.
+ * Script format: one "section_name = rank" per line.
+ * Lower rank = earlier placement (rank 0 = first).
+ * Lines starting with '#' are comments. */
+static int
+apply_link_script(struct ld_context *ctx, const char *path)
+{
+	FILE *f = fopen(path, "r");
+	if (!f) return ld_errorf(ctx, "cannot open link script", path);
+
+	char line[512];
+	while (fgets(line, sizeof(line), f)) {
+		char *p = line;
+		while (*p == ' ' || *p == '\t') p++;
+		if (*p == '#' || *p == '\n' || *p == '\0') continue;
+
+		/* Parse: section_name = rank_number */
+		char name[128];
+		int n = 0;
+		while (*p && *p != '=' && *p != ' ' && *p != '\t' && n < 126)
+			name[n++] = *p++;
+		name[n] = '\0';
+		while (*p && (*p == ' ' || *p == '\t' || *p == '=')) p++;
+		if (*p) {
+			int rank = atoi(p);
+			int g = find_group(ctx, name);
+			if (g >= 0)
+				ctx->groups[g].rank = rank;
+		}
+	}
+	fclose(f);
 	return 0;
 }
 
@@ -2936,6 +2971,7 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 		ctx.no_undefined = opts->no_undefined;
 		ctx.gc_sections = opts->gc_sections;
 		ctx.print_map = opts->print_map;
+		ctx.link_script = opts->link_script;
 		/* Default: --no-as-needed when unset */
 		if (ctx.as_needed < 0)
 			ctx.as_needed = 0;
@@ -2973,6 +3009,11 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 		goto out;
 	if (ctx.got.count != 0)
 		ctx.got.group = find_group(&ctx, ".got");
+	/* Apply link script (if provided) to adjust section ordering */
+	if (ctx.link_script) {
+		if (apply_link_script(&ctx, ctx.link_script) != 0)
+			goto out;
+	}
 	if (layout_output(&ctx) != 0 || fill_dynamic_addresses(&ctx) != 0 ||
 	    fill_got(&ctx) != 0 ||
 	    apply_relocations(&ctx) != 0 ||

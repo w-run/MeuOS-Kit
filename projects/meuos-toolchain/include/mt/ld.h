@@ -18,6 +18,7 @@ struct mt_ld_options {
 	int         no_undefined;  /* 1 = error on undefined symbols */
 	int         gc_sections;   /* 1 = garbage-collect unused sections */
 	int         print_map;     /* 1 = output link map to stderr */
+	const char *link_script;   /* path to section layout script (NULL = none) */
 };
 
 /* Static linker entry point (original API, shared=0).
