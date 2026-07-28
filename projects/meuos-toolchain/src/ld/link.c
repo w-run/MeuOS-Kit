@@ -145,6 +145,7 @@ struct ld_globals {
 struct ld_got_entry {
 	char *name;
 	uint64_t offset;
+	int reloc_type;  /* 0=RELATIVE(default), MT_R_X86_64_JUMP_SLOT for PLT imports */
 };
 
 struct ld_got {
@@ -1493,8 +1494,18 @@ symbol_value(struct ld_context *ctx, struct ld_object *object,
 		/* Follow alias chain (from --wrap) */
 		while (global->alias)
 			global = global->alias;
-		if (!global->defined)
+		if (!global->defined) {
+			/* For shared library output (ET_DYN), undefined external
+			 * symbols are resolved at load time by ld.so.  Return 0
+			 * as the placeholder value; the PLT32/GOTPCREL relocation
+			 * handler will allocate a GOT entry and emit a JUMP_SLOT
+			 * dynamic relocation so ld.so fills the correct address. */
+			if (ctx->shared) {
+				*value = 0;
+				return 0;
+			}
 			return ld_errorf(ctx, "undefined symbol", name);
+		}
 		if (global->absolute)
 			*value = global->offset + symbol.value;
 		else
@@ -1555,6 +1566,7 @@ add_got_entry(struct ld_context *ctx, const char *name)
 	if (!ctx->got.items[ctx->got.count].name)
 		return ld_error(ctx, "out of memory");
 	ctx->got.items[ctx->got.count].offset = ctx->got.count * 8;
+	ctx->got.items[ctx->got.count].reloc_type = 0; /* default RELATIVE */
 	++ctx->got.count;
 	return 0;
 }
@@ -1921,10 +1933,24 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 		got_group = &ctx->groups[ctx->got.group];
 		value = got_group->address + ctx->got.items[got].offset + addend - place;
 		width = 4;
-	} else if (type == LD_R_X86_64_PC32 || type == LD_R_X86_64_PLT32) {
-		value = resolved_value + addend - place;
+	} else if (type == LD_R_X86_64_PLT32) {
+		/* PLT32: call/jmp to a function.  In shared library mode,
+		 * undefined external symbols must go through the PLT/GOT
+		 * so ld.so can resolve them at load time. */
+		if (ctx->shared && resolved_value == 0) {
+			size_t got_idx = 0;
+			if (add_got_entry(ctx, name) != 0)
+				return ld_errorf(ctx, "cannot create GOT entry for %s", name);
+			got_index(ctx, name, &got_idx); /* succeeds after add */
+			got = got_idx;
+			ctx->got.items[got].reloc_type = MT_R_X86_64_JUMP_SLOT;
+			got_group = &ctx->groups[ctx->got.group];
+			value = got_group->address + ctx->got.items[got].offset + addend - place;
+		} else {
+			value = resolved_value + addend - place;
+		}
 		width = 4;
-	} else if (type == LD_R_X86_64_TPOFF32) {
+	} else if (type == LD_R_X86_64_PC32) {
 		/* x86_64 variant II TLS: %fs points at the end of the static
 		 * TLS block. tpoff = symbol_offset_in_tls_block - tls_size. */
 		uint64_t tls_off;
@@ -2050,8 +2076,9 @@ rela_dyn_add(struct ld_context *ctx, uint64_t offset, uint64_t info, int64_t add
 }
 
 /* Build the .rela.dyn section from GOT entries for shared library output.
- * Each GOT entry gets an R_X86_64_RELATIVE dynamic relocation so that
- * ld.so can adjust the GOT value at load time. */
+ * Defined symbols get R_X86_64_RELATIVE dynamic relocations; undefined
+ * symbols (PLT imports) get R_X86_64_JUMP_SLOT so ld.so resolves them
+ * by symbol name at load time. */
 static int
 build_rela_dyn(struct ld_context *ctx)
 {
@@ -2064,17 +2091,38 @@ build_rela_dyn(struct ld_context *ctx)
 	uint64_t got_addr = ctx->groups[ctx->got.group].address;
 	for (i = 0; i < ctx->got.count; ++i) {
 		uint64_t got_entry = got_addr + ctx->got.items[i].offset;
-		struct ld_global *g = find_global(ctx, ctx->got.items[i].name);
-		if (!g) continue;
-		uint64_t sym_value = ctx->groups[g->group].address + g->offset;
-		/* R_X86_64_RELATIVE: *(base + got_entry) = base + sym_value */
-		uint64_t info = ((uint64_t)MT_R_X86_64_RELATIVE);
-		if (ctx->target->elf_class == MT_ELFCLASS32)
-			info = (uint64_t)MT_R_X86_64_RELATIVE;
-		else
-			info = (0ULL << 32) | MT_R_X86_64_RELATIVE;
-		if (rela_dyn_add(ctx, got_entry, info, (int64_t)sym_value) != 0)
-			return -1;
+		if (ctx->got.items[i].reloc_type == MT_R_X86_64_JUMP_SLOT) {
+			/* Undefined symbol import: emit JUMP_SLOT dynamic
+			 * relocation so ld.so looks up the symbol by name
+			 * and fills the GOT slot. */
+			uint32_t sym_idx = 0;
+			for (size_t j = 0; j < ctx->dynsym_count; ++j) {
+				if (strcmp(ctx->dynsym_entries[j].global->name,
+				           ctx->got.items[i].name) == 0) {
+					sym_idx = (uint32_t)(j + 1); /* +1 for STN_UNDEF */
+					break;
+				}
+			}
+			uint64_t info;
+			if (ctx->target->elf_class == MT_ELFCLASS32)
+				info = (sym_idx << 8) | MT_R_X86_64_JUMP_SLOT;
+			else
+				info = ((uint64_t)sym_idx << 32) | MT_R_X86_64_JUMP_SLOT;
+			if (rela_dyn_add(ctx, got_entry, info, 0) != 0)
+				return -1;
+		} else {
+			/* Defined symbol: RELATIVE relocation. */
+			struct ld_global *g = find_global(ctx, ctx->got.items[i].name);
+			if (!g) continue;
+			uint64_t sym_value = ctx->groups[g->group].address + g->offset;
+			uint64_t info;
+			if (ctx->target->elf_class == MT_ELFCLASS32)
+				info = (uint64_t)MT_R_X86_64_RELATIVE;
+			else
+				info = (0ULL << 32) | MT_R_X86_64_RELATIVE;
+			if (rela_dyn_add(ctx, got_entry, info, (int64_t)sym_value) != 0)
+				return -1;
+		}
 	}
 	return 0;
 }
@@ -2924,6 +2972,23 @@ build_dynamic_tables(struct ld_context *ctx)
 			++nsym;
 	}
 
+	/* Also count imported (undefined) symbols that have GOT entries
+	 * with JUMP_SLOT relocations (needed for ld.so symbol resolution). */
+	for (i = 0; i < ctx->got.count; ++i) {
+		if (ctx->got.items[i].reloc_type == MT_R_X86_64_JUMP_SLOT) {
+			/* Avoid double-counting if already exported */
+			int already = 0;
+			for (size_t j = 0; j < ctx->globals.count; ++j) {
+				if (ctx->globals.items[j].defined &&
+				    ctx->globals.items[j].name &&
+				    strcmp(ctx->globals.items[j].name, ctx->got.items[i].name) == 0) {
+					already = 1; break;
+				}
+			}
+			if (!already) ++nsym;
+		}
+	}
+
 	/* Allocate local dynsym metadata array */
 	if (nsym > ctx->dynsym_capacity) {
 		size_t cap = ctx->dynsym_capacity ? ctx->dynsym_capacity * 2 : 64;
@@ -3063,6 +3128,38 @@ build_dynamic_tables(struct ld_context *ctx)
 		++ei;
 	}
 
+	/* Add imported (undefined) symbols: symbols referenced via JUMP_SLOT
+	 * GOT entries that were not already exported above.  These appear in
+	 * .dynsym as STT_FUNC with SHN_UNDEF (section 0), so ld.so can
+	 * resolve them by name at load time. */
+	for (i = 0; i < ctx->got.count; ++i) {
+		if (ctx->got.items[i].reloc_type != MT_R_X86_64_JUMP_SLOT)
+			continue;
+		/* Check if already exported above */
+		int already = 0;
+		for (size_t j = 0; j < ctx->globals.count; ++j) {
+			if (ctx->globals.items[j].defined &&
+			    ctx->globals.items[j].name &&
+			    strcmp(ctx->globals.items[j].name, ctx->got.items[i].name) == 0) {
+				already = 1; break;
+			}
+		}
+		if (already) continue;
+		/* Create a fake ld_global entry for this import */
+		struct ld_global *g = find_global(ctx, ctx->got.items[i].name);
+		if (!g) continue;
+		uint32_t dynstr_off;
+		if (append_group_data(ctx, gstr,
+		                      (const unsigned char *)g->name,
+		                      strlen(g->name) + 1, 1, &stroff) != 0)
+			return -1;
+		dynstr_off = (uint32_t)stroff;
+		ctx->dynsym_entries[ei].global = g;
+		ctx->dynsym_entries[ei].dynstr_offset = dynstr_off;
+		ctx->dynsym_entries[ei].stt = MT_STT_FUNC;
+		++ei;
+	}
+
 	/* ---- .hash (SysV format, 32-bit entries) ---- */
 	int dg_hash = get_group(ctx, ".hash", MT_SHT_HASH,
 	                        LD_SHF_ALLOC, 4);
@@ -3193,14 +3290,25 @@ fill_dynamic_addresses(struct ld_context *ctx)
 	uint64_t sym_addr   = gsym->address;
 	uint64_t str_addr   = gstr->address;
 	uint64_t hash_addr  = ghash->address;
+	(void)sym_addr; (void)str_addr; (void)hash_addr;
+	(void)gdyn;
 
 	/* Fill .dynsym entries (skip null symbol at index 0) */
 	for (i = 0; i < ctx->dynsym_count; ++i) {
 		struct ld_dynsym_entry *e = &ctx->dynsym_entries[i];
 		struct ld_global *g = e->global;
-		uint64_t st_value = ctx->groups[g->group].address + g->offset;
-		uint16_t st_shndx = (uint16_t)(g->group + 1); /* output section index */
-		uint8_t info = (uint8_t)((LD_STB_GLOBAL << LD_STB_SHIFT) | e->stt);
+		uint64_t st_value;
+		uint16_t st_shndx;
+		uint8_t st_bind = LD_STB_GLOBAL;
+		if (g->defined && g->group >= 0) {
+			st_value = ctx->groups[g->group].address + g->offset;
+			st_shndx = (uint16_t)(g->group + 1);
+		} else {
+			st_value = 0;
+			st_shndx = 0;
+			st_bind = g->weak ? LD_STB_WEAK : LD_STB_GLOBAL;
+		}
+		uint8_t info = (uint8_t)((st_bind << LD_STB_SHIFT) | e->stt);
 		unsigned char *p = gsym->data + ctx->dynsym_data_offset +
 		                   (i + 1) * symsize;
 		write_dynsym_entry(p, elf64, e->dynstr_offset, info, 0,
