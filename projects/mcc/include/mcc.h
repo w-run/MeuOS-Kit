@@ -368,6 +368,16 @@ extern int g_arm_arch_ver;
 #define MT_FEATURE_RV_C  (1ULL << 34)  /* riscv C (compressed) */
 #define MT_FEATURE_RV_V  (1ULL << 35)  /* riscv V (vector) */
 
+/* i386 variant feature bits */
+#define MT_FEATURE_I386_CMPXCHG   (1ULL << 40)  /* i486+: CMPXCHG */
+#define MT_FEATURE_I386_FPU       (1ULL << 41)  /* i586+: FPU */
+#define MT_FEATURE_I386_CMPXCHG8B (1ULL << 42)  /* i686+: CMPXCHG8B */
+
+/* aarch64 extension feature bits */
+#define MT_FEATURE_AARCH64_FP16   (1ULL << 48)  /* FEAT_FP16 */
+#define MT_FEATURE_AARCH64_RDM    (1ULL << 49)  /* FEAT_RDM */
+#define MT_FEATURE_AARCH64_JSCVT  (1ULL << 50)  /* FEAT_JSCVT */
+
 /* scan */
 
 void scanfrom(const char *, FILE *);

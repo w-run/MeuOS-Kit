@@ -248,8 +248,25 @@ main(int argc, char *argv[])
 				}
 				++p;
 			}
+		} else if (strncmp(march_val, "i48", 3) == 0 || strncmp(march_val, "i58", 3) == 0 || strncmp(march_val, "i68", 3) == 0) {
+			g_target_features |= MT_FEATURE_I386_CMPXCHG;
+			if (strncmp(march_val, "i58", 3) == 0)
+				g_target_features |= MT_FEATURE_I386_FPU;
+			if (strncmp(march_val, "i68", 3) == 0)
+				g_target_features |= MT_FEATURE_I386_CMPXCHG8B;
+			arm_march = march_val;
+		} else if (strncmp(march_val, "armv8.", 6) == 0) {
+			arm_march = march_val;
+			if (strstr(march_val, "8.2") || strstr(march_val, "8.3") ||
+			    strstr(march_val, "8.4") || strstr(march_val, "8.5")) {
+				g_target_features |= MT_FEATURE_AARCH64_FP16;
+				g_target_features |= MT_FEATURE_AARCH64_RDM;
+			}
+			if (strstr(march_val, "8.3") || strstr(march_val, "8.4") ||
+			    strstr(march_val, "8.5"))
+				g_target_features |= MT_FEATURE_AARCH64_JSCVT;
 		} else {
-				/* Unknown march for non-ARM arch: store as-is in
+			/* Unknown march for non-ARM arch: store as-is in
 				 * ARM variable to avoid silent ignore, but only
 				 * apply if arch is ARM later. */
 				arm_march = march_val;
