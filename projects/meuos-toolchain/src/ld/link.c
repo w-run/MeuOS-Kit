@@ -170,6 +170,7 @@ struct ld_context {
 	int as_needed;        /* 1 = --as-needed, 0 = --no-as-needed */
 	int no_undefined;    /* 1 = error on undefined symbols */
 	int gc_sections;     /* 1 = garbage-collect unused sections */
+	int print_map;       /* 1 = output link map */
 	const char *soname;  /* DT_SONAME for shared lib (may be NULL) */
 	/* Dynamic symbol table bookkeeping (shared libs only) */
 	struct ld_dynsym_entry *dynsym_entries;
@@ -2934,6 +2935,7 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 		ctx.whole_archive = opts->whole_archive;
 		ctx.no_undefined = opts->no_undefined;
 		ctx.gc_sections = opts->gc_sections;
+		ctx.print_map = opts->print_map;
 		/* Default: --no-as-needed when unset */
 		if (ctx.as_needed < 0)
 			ctx.as_needed = 0;
@@ -2978,6 +2980,31 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 	                     opts ? opts->entry : "_start",
 	                     ctx.target) != 0)
 		goto out;
+	/* --print-map: output section layout and symbol values */
+	if (ctx.print_map) {
+		fprintf(stderr, "\nLink map:\n");
+		fprintf(stderr, "%-20s %-18s %-10s %s\n", "Section", "Address", "Size", "File offset");
+		size_t mi;
+		for (mi = 0; mi < ctx.group_count; mi++) {
+			if (ctx.groups[mi].type == MT_SHT_NOBITS && ctx.groups[mi].size == 0) continue;
+			if (ctx.groups[mi].flags & LD_SHF_ALLOC || ctx.groups[mi].size > 0) {
+				fprintf(stderr, "%-20s 0x%016llx %-10llu %-10llu\n",
+				        ctx.groups[mi].name,
+				        (unsigned long long)ctx.groups[mi].address,
+				        (unsigned long long)ctx.groups[mi].size,
+				        (unsigned long long)ctx.groups[mi].file_offset);
+			}
+		}
+		/* Print entry point */
+		if (opts && opts->entry) {
+			struct ld_global *es = find_global(&ctx, opts->entry);
+			if (es && es->defined) {
+				uint64_t ea = ctx.groups[es->group].address + es->offset;
+				fprintf(stderr, "Entry: %s = 0x%llx\n", opts->entry,
+				        (unsigned long long)ea);
+			}
+		}
+	}
 	result = 0;
 out:
 	if (result != 0) {

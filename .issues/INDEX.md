@@ -137,7 +137,7 @@ src/compat/
 | as-equ | mt/as | 常量/符号定义 | `.equ`/`.set` — 通用概念 | 🟢 | 已实现 |
 | as-diag | mt/as | 汇编诊断 | `.abort`/`.error`/`.warning` | 🟢 | 已实现 |
 | ld-linker-script | mt/ld | 链接脚本支持 | `.ld` 脚本解析与布局控制（替代 `-T` 占位） | ⏳ | 待实现 |
-| ld-print-map | mt/ld | `--print-map` | 链接映射输出 | ⏳ | 待实现 |
+| ld-print-map | mt/ld | `--print-map` | 链接映射输出 | 🟢 | 本 commit（--print-map 输出节区地址/大小/偏移+入口点） |
 | ld-defsym | mt/ld | `--defsym` | 链接时定义符号（`--defsym=foo=bar`） | 🟡 | 待实现 |
 | ld-wrap | mt/ld | `--wrap` | 符号包装（`--wrap=malloc` → `__wrap_malloc`）用于测试/mock | 🟡 | 待实现 |
 | ld-version-script | mt/ld | `--version-script` | 符号版本控制/导出限制（`.map` / `.ver` 文件） | 🟡 | 待实现 |
