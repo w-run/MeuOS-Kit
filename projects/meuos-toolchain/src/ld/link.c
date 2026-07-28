@@ -1957,6 +1957,7 @@ struct ld_output_section {
 	uint64_t align;
 	uint32_t link;   /* sh_link */
 	uint32_t info;   /* sh_info */
+	uint64_t entry_size; /* sh_entsize */
 };
 
 struct ld_strings {
@@ -2369,8 +2370,17 @@ write_executable(struct ld_context *ctx, const char *path,
 	if (strings_init(&shstr) != 0)
 		goto out;
 	for (i = 0; i < ctx->group_count; ++i) {
+		const char *gn = ctx->groups[i].name;
+		int is_elf64 = (ctx->target->elf_class == MT_ELFCLASS64);
+		uint64_t es = 0; /* sh_entsize */
+		if (gn && strcmp(gn, ".dynsym") == 0)
+			es = is_elf64 ? MT_ELF64_SYM_SIZE : (uint64_t)MT_ELF32_SYM_SIZE;
+		else if (gn && strcmp(gn, ".rela.dyn") == 0)
+			es = is_elf64 ? 24 : 12;
+		else if (gn && strcmp(gn, ".hash") == 0)
+			es = 4;
 		sections[i + 1] = (struct ld_output_section){
-			.name = ctx->groups[i].name,
+			.name = gn,
 			.type = ctx->groups[i].type,
 			.flags = ctx->groups[i].flags,
 			.address = ctx->groups[i].address,
@@ -2378,7 +2388,8 @@ write_executable(struct ld_context *ctx, const char *path,
 			.size = ctx->groups[i].size,
 			.align = ctx->groups[i].align,
 			.link = 0,
-			.info = 0
+			.info = 0,
+			.entry_size = es
 		};
 		if (strings_add(&shstr, sections[i + 1].name, &name_offsets[i + 1]) != 0)
 			goto out_strings;
@@ -2642,6 +2653,7 @@ write_executable(struct ld_context *ctx, const char *path,
 		write32(sh + 40, sections[i].link);
 		write32(sh + 44, sections[i].info);
 		write64(sh + 48, sections[i].align ? sections[i].align : 1);
+		write64(sh + 56, sections[i].entry_size);
 		if (fwrite(sh, 1, sizeof(sh), file) != sizeof(sh))
 			goto out_file;
 	}
@@ -3001,6 +3013,11 @@ fill_dynamic_addresses(struct ld_context *ctx)
 	int dg_rela = find_group(ctx, ".rela.dyn");
 	if (dg_rela >= 0) {
 		struct ld_group *grela = &ctx->groups[dg_rela];
+		/* Compute RELASZ from GOT entries (each GOT entry = 1 RELA entry).
+		 * The .rela.dyn data is filled by build_rela_dyn() AFTER this
+		 * function runs, so we compute the expected size here. */
+		uint64_t rela_entsize = elf64 ? 24 : 12;
+		uint64_t rela_sz = ctx->got.count * rela_entsize;
 		/* DT_RELA: address of .rela.dyn */
 		if (elf64) {
 			write64(dp + k * 16 + 0, MT_DT_RELA);
@@ -3010,17 +3027,16 @@ fill_dynamic_addresses(struct ld_context *ctx)
 			write32(dp + k * 8 + 4, (uint32_t)grela->address);
 		}
 		++k;
-		/* DT_RELASZ: size of .rela.dyn */
+		/* DT_RELASZ: size of .rela.dyn (computed from GOT entry count) */
 		if (elf64) {
 			write64(dp + k * 16 + 0, MT_DT_RELASZ);
-			write64(dp + k * 16 + 8, (uint64_t)grela->size);
+			write64(dp + k * 16 + 8, rela_sz);
 		} else {
 			write32(dp + k * 8 + 0, MT_DT_RELASZ);
-			write32(dp + k * 8 + 4, (uint32_t)grela->size);
+			write32(dp + k * 8 + 4, (uint32_t)rela_sz);
 		}
 		++k;
-		/* DT_RELAENT: size of each RELA entry (24 for ELF64, 12 for ELF32) */
-		uint64_t rela_entsize = elf64 ? 24 : 12;
+		/* DT_RELAENT: size of each RELA entry */
 		if (elf64) {
 			write64(dp + k * 16 + 0, MT_DT_RELAENT);
 			write64(dp + k * 16 + 8, rela_entsize);
