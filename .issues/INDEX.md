@@ -182,7 +182,7 @@ src/compat/
 | mcc-pragma | mcc compat | `#pragma` | GCC/Clang pragma。同样走 compat 映射层 | 🟡 | 待实现 |
 | mcc-builtins | mcc compat | `__builtin_*` | GCC/Clang 内建函数。同样走 compat 映射层（`__builtin_expect` → 宏等） | 🟢 | 待实现 |
 | mcc-generic | mcc | `_Generic` 完整 C11 匹配规则（含 qualified type 分派） | 🟡 中 | 待实现 |
-| as-errors | mt/as | 错误消息行号/列号 | 🟢 低 | 待实现 |
+| as-errors | mt/as | 错误消息行号/列号 | 🟢 | 已有 line info（mt_as_assemble 通过 error_line 参数报告） |
 | ld-errors | mt/ld | 未定义符号的友好诊断（列出候选目标文件） | 🟢 低 | 待实现 |
 | community-tests | 全项目 | 社区测试套件覆盖率（chibicc → C99/C11/C23 全量通过） | 🟡 中 | 待实现 |
 | meow-lint | meow | 配方语法检查器（`meow lint`） | 🟢 低 | 待实现 |
