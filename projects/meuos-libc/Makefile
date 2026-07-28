@@ -175,7 +175,8 @@ SUPPORT_OBJS   := $(BUILD)/ctype/ctype.o $(BUILD)/signal/signal.o \
                   $(BUILD)/syslog/syslog.o \
                   $(BUILD)/socket/socket.o $(BUILD)/socket/inet.o \
                   $(BUILD)/regex/regex.o \
-                  $(BUILD)/complex/complex.o
+                  $(BUILD)/complex/complex.o \
+                  $(BUILD)/wchar/wchar.o
 # errno: loongarch64 uses non-TLS version (binutils BFD assertion workaround)
 # Other architectures use the standard _Thread_local errno
 ifeq ($(ARCH),loongarch64)
