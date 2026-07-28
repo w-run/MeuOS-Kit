@@ -294,7 +294,7 @@ enum target_feature {
 
 | ID | 组件 | 描述 | 状态 | 实施情况 |
 |----|------|------|------|---------|
-| mcc-float-suffix | mcc lexer | C23 `100f` float 后缀支持 | ⏳ | 待实现 |
+| mcc-float-suffix | mcc lexer | C23 `100f` float 后缀支持 | 🟢 | 本 commit（已在 expr_primary.c:82 实现，新增测试用例） |
 | mcc-uint64-max | mcc sema | UINT64_MAX 字面量类型回退到 `unsigned long long` | ⏳ | 待实现 |
 | mcc-macro-redef | mcc preproc | 宏定义相同 token 序列允许重定义（C 6.10.3p2） | ⏳ | 待实现 |
 | mcc-line-num | mcc preproc | `__LINE__` 偏移 1 | ⏳ | 待实现 |
