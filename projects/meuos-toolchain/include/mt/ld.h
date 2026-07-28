@@ -32,6 +32,8 @@ struct mt_ld_options {
 	const char *const *add_needed; /* --add-needed=<soname> list (NULL = none).
 	                               Each entry is a DT_NEEDED soname to add. */
 	size_t      add_needed_count;  /* number of entries in add_needed[] */
+	const char *version_script;    /* --version-script=<path> (NULL = none).
+	                               Path to a symbol version script file. */
 };
 
 /* Static linker entry point (original API, shared=0).

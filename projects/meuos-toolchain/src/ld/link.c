@@ -3000,6 +3000,16 @@ build_dynamic_tables(struct ld_context *ctx)
 		struct ld_global *g = &ctx->globals.items[i];
 		if (!(g->defined && !g->weak) || !g->name)
 			continue;
+		/* --version-script filter: skip symbols not in the export list */
+		if (ctx->version_script) {
+			int keep = 0;
+			for (size_t vi = 0; vi < ctx->version_script_count; vi++) {
+				if (strcmp(ctx->version_script[vi], g->name) == 0) {
+					keep = 1; break;
+				}
+			}
+			if (!keep) continue;
+		}
 		/* Determine st_type */
 		int stt = MT_STT_OBJECT;
 		if (g->group >= 0) {
@@ -3492,6 +3502,53 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 		ctx.link_script = opts->link_script;
 		ctx.add_needed = opts->add_needed;
 		ctx.add_needed_count = opts->add_needed_count;
+		/* Parse --version-script file into symbol list */
+		ctx.version_script = NULL;
+		ctx.version_script_count = 0;
+		if (opts->version_script) {
+			/* Simple parser: read file, find { global: ... ; local: * ; }
+			 * and extract global symbol names. */
+			FILE *vf = fopen(opts->version_script, "r");
+			if (!vf) {
+				ld_error(&ctx, "cannot open version script");
+				goto out;
+			}
+			char line[4096];
+			/* Allocate a large symbol array (up to 1024 entries) */
+			const char **vs = (const char **)ld_malloc(1024 * sizeof(const char *));
+			size_t vs_count = 0;
+			while (fgets(line, sizeof(line), vf)) {
+				char *p = line;
+				while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == '{' || *p == '}')
+					p++;
+				if (strncmp(p, "global:", 7) == 0) {
+					p += 7;
+					/* Parse semicolon-separated symbols */
+					while (*p) {
+						while (*p == ' ' || *p == '\t') p++;
+						if (*p == ';' || *p == '}' || *p == '\0') {
+							if (*p == ';') p++;
+							break;
+						}
+						/* Extract symbol name up to ; or space */
+						const char *start = p;
+						while (*p && *p != ';' && *p != ' ' && *p != '\t' && *p != '}') p++;
+						if (p > start && *start != '*' && vs_count < 1024) {
+							size_t nlen = (size_t)(p - start);
+							char *sym = (char *)ld_malloc(nlen + 1);
+							if (sym) {
+								memcpy(sym, start, nlen);
+								sym[nlen] = '\0';
+								vs[vs_count++] = sym;
+							}
+						}
+					}
+				}
+			}
+			fclose(vf);
+			ctx.version_script = vs;
+			ctx.version_script_count = vs_count;
+		}
 		/* Default: --no-as-needed when unset */
 		if (ctx.as_needed < 0)
 			ctx.as_needed = 0;

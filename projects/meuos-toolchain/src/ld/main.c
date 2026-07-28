@@ -192,6 +192,7 @@ main(int argc, char **argv)
 	int gc_sections = 0;
 	int print_map = 0;
 	const char *link_script = NULL;
+	const char *version_script = NULL;
 	const char *defsym_list[64];
 	size_t defsym_count = 0;
 	const char *wrap_list[64];
@@ -320,6 +321,10 @@ main(int argc, char **argv)
 		if (strcmp(argv[i], "--link-script") == 0) {
 			if (++i >= argc) { usage(stderr); return 2; }
 			link_script = argv[i];
+			continue;
+		}
+		if (strncmp(argv[i], "--version-script=", 17) == 0) {
+			version_script = argv[i] + 17;
 			continue;
 		}
 		if (strcmp(argv[i], "-soname") == 0) {
@@ -498,6 +503,7 @@ main(int argc, char **argv)
 	opts.gc_sections = gc_sections;
 	opts.print_map = print_map;
 	opts.link_script = link_script;
+	opts.version_script = version_script;
 	opts.defsym = defsym_count ? defsym_list : NULL;
 	opts.defsym_count = defsym_count;
 	opts.wrap = wrap_count ? wrap_list : NULL;
