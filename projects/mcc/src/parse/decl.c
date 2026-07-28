@@ -169,7 +169,9 @@ decl(struct scope *s, struct func *f)
 		} else {
 			asmname = NULL;
 		}
-		gnuattr(&a, 0);  /* appertains to identifier */
+		gnuattr(&a, (enum attrkind)(ATTRWEAK | ATTRUSED | ATTRNOINLINE | ATTRALWAYSINLINE |
+		    ATTRCONSTRUCTOR | ATTRDESTRUCTOR | ATTRSECTION | ATTRALIGNED |
+		    ATTRNORETURN | ATTRDEPRECATED));  /* appertains to identifier */
 		kind = sc & SCTYPEDEF ? DECLTYPE : t->kind == TYPEFUNC ? DECLFUNC : DECLOBJECT;
 		prior = scopegetdecl(s, name, false);
 		if (prior && prior->kind != kind)

@@ -145,7 +145,14 @@ declaratortypes(struct scope *s, struct list *result, char **name, int *align, s
 		case T__ATTRIBUTE__:
 			if (allowedattr == -1)
 				error(&tok.loc, "attribute not allowed after parenthesized declarator");
-			gnuattr(&a, allowedattr);
+			/* GNU attributes: allow all recognized GNU attrs */
+			{
+				enum attrkind gnu_allowed = (enum attrkind)(ATTRALIGNED | ATTRSECTION |
+				    ATTRWEAK | ATTRUSED | ATTRNOINLINE | ATTRALWAYSINLINE |
+				    ATTRCONSTRUCTOR | ATTRDESTRUCTOR | ATTRPACKED | ATTRNORETURN |
+				    ATTRDEPRECATED);
+				gnuattr(&a, gnu_allowed);
+			}
 		attr:
 			/* attribute applies to identifier if ptr->prev == result, otherwise type ptr->prev */
 			if (ptr->prev == result) {

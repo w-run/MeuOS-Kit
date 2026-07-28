@@ -446,7 +446,9 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 			break;
 
 		case T__ATTRIBUTE__:
-			gnuattr(NULL, 0);
+			gnuattr(NULL, (enum attrkind)(ATTRWEAK | ATTRUSED | ATTRNOINLINE | ATTRALWAYSINLINE |
+			    ATTRCONSTRUCTOR | ATTRDESTRUCTOR | ATTRSECTION | ATTRALIGNED | ATTRPACKED |
+			    ATTRNORETURN | ATTRDEPRECATED));
 			break;
 
 		case T__EXTENSION__:

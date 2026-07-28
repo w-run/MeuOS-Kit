@@ -441,6 +441,10 @@ enum attrkind {
 	ATTRNODISCARD   = 1<<7,
 	ATTRMAYBEUNUSED = 1<<8,
 	ATTRDEPRECATED  = 1<<9,
+	ATTRWEAK        = 1<<10,
+	ATTRUSED        = 1<<11,
+	ATTRNOINLINE    = 1<<12,
+	ATTRALWAYSINLINE = 1<<13,
 };
 
 struct attr {

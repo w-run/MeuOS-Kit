@@ -98,6 +98,22 @@ parseattr(struct attr *a, enum attrkind allowed, enum attrprefix prefix)
 			if (a)
 				a->section = section;
 			expect(TRPAREN, "after section name");
+		} else if (strcmp(name, "weak") == 0) {
+			kind = ATTRWEAK;
+		} else if (strcmp(name, "used") == 0) {
+			kind = ATTRUSED;
+		} else if (strcmp(name, "unused") == 0) {
+			/* silently accept unused */
+		} else if (strcmp(name, "noinline") == 0) {
+			kind = ATTRNOINLINE;
+		} else if (strcmp(name, "always_inline") == 0) {
+			kind = ATTRALWAYSINLINE;
+		} else if (strcmp(name, "visibility") == 0) {
+			/* silently accept visibility("...") */
+			if (consume(TLPAREN)) {
+				if (tok.kind == TSTRINGLIT) next();
+				expect(TRPAREN, "after visibility argument");
+			}
 		}
 		break;
 	}
