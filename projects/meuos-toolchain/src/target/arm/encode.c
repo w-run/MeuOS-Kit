@@ -141,7 +141,7 @@ int arm_encode_insn(const struct mt_target *target,
 		return 0;
 	}
 
-	/* ---- Data processing: add, sub, mov, cmp, and/orr/eor/bic ---- */
+/* ---- Data processing: add/sub/and/orr/eor/bic/mov/cmp etc. ---- */
 	static const struct { const char *name; uint32_t opcode; } dp_ops[] = {
 		{"and", 0}, {"eor", 1}, {"sub", 2}, {"rsb", 3},
 		{"add", 4}, {"adc", 5}, {"sbc", 6}, {"rsc", 7},
@@ -150,40 +150,138 @@ int arm_encode_insn(const struct mt_target *target,
 		{0, 0}
 	};
 
-	/* Data processing with 3 operands: add/sub/and/orr/eor r0, r1, r2
-	 * or with 2 operands: mov/cmp r0, r1 or mov/cmp r0, #imm */
 	if (nops >= 2) {
-		int rd, rn;
 		for (int d = 0; dp_ops[d].name; d++) {
 			if (strcmp(mnemonic, dp_ops[d].name) != 0) continue;
+			uint32_t opc = dp_ops[d].opcode;
 
-			if (nops == 2) {
-				/* Two-address: {mov,cmp} rd, rm */
-				if (reg_num(ops[1], &rd) < 0) {
-					/* Try immediate: #N */
-					int imm = 0;
-					if (ops[1][0] == '#') {
-						sscanf(ops[1]+1, "%i", &imm);
-						/* Encode rotated immediate */
-						uint32_t val = (uint32_t)imm;
-						if (val < 256) {
-							emit32(out->bytes, 0xE3A00000 | (dp_ops[d].opcode<<21) | 0x2000000);
-							// need to refine this with actual rd, rn
+			if (nops == 2 && (opc == 13 || opc == 15)) {
+				/* mov/mvn rd, rm  or  mov/mvn rd, #imm */
+				int rd; if (reg_num(ops[0], &rd) < 0) return -1;
+				if (ops[1][0] == '#') {
+					int imm = 0; sscanf(ops[1]+1, "%i", &imm);
+					uint32_t imm8 = 0, rot = 0;
+					uint32_t v = (uint32_t)imm;
+					if (v < 256) { imm8 = v; rot = 0; }
+					else {
+						for (int r = 1; r < 16; r++) {
+							uint32_t rv = (v >> (r*2)) | (v << (32 - r*2));
+							if (rv < 256) { imm8 = rv; rot = r; break; }
 						}
 					}
+					emit32(out->bytes, 0xE3A00000 | (opc==15?0x600000:0) | (rd<<12) | (rot<<8) | imm8);
+					return 0;
 				}
-				/* Simple case: register operand */
-				if (reg_num(ops[0], &rd) < 0) return -1;
-				if (reg_num(ops[1], &rn) < 0) return -1;
-				if (dp_ops[d].opcode == 13) /* mov */
-					emit32(out->bytes, 0xE1A00000 | (rd<<12) | rn);
-				else if (dp_ops[d].opcode == 10) /* cmp */
-					emit32(out->bytes, 0xE1500000 | (rd<<16) | rn);
-				else /* not supported for 2-addr */
-					return -1;
+				int rm; if (reg_num(ops[1], &rm) < 0) return -1;
+				emit32(out->bytes, 0xE1A00000 | (opc==15?0x600000:0) | (rd<<12) | rm);
 				return 0;
 			}
-			return -1;
+
+			if (nops == 2 && (opc == 10 || opc == 11 || opc == 8 || opc == 9)) {
+				/* cmp/cmn/tst/teq rn, rm  or  cmp rn, #imm */
+				int rn; if (reg_num(ops[0], &rn) < 0) return -1;
+				if (ops[1][0] == '#') {
+					int imm = 0; sscanf(ops[1]+1, "%i", &imm);
+					uint32_t imm8 = 0, rot = 0;
+					uint32_t v = (uint32_t)imm;
+					if (v < 256) { imm8 = v; rot = 0; }
+					else { for (int r = 1; r < 16; r++) {
+						uint32_t rv = (v >> (r*2)) | (v << (32 - r*2));
+						if (rv < 256) { imm8 = rv; rot = r; break; }
+					}}
+					emit32(out->bytes, 0xE3500000 | (opc<<21) | (rn<<16) | (rot<<8) | imm8);
+					return 0;
+				}
+				int rm; if (reg_num(ops[1], &rm) < 0) return -1;
+				emit32(out->bytes, 0xE1500000 | (opc<<21) | (rn<<16) | rm);
+				return 0;
+			}
+
+			if (nops >= 3) {
+				/* Three-address: add/sub/and/orr/eor/bic rd, rn, rm
+				 * or rd, rn, #imm  or rd, rn, rm, LSL #N */
+				int rd; if (reg_num(ops[0], &rd) < 0) return -1;
+				int rn; if (reg_num(ops[1], &rn) < 0) return -1;
+
+				if (ops[2][0] == '#') {
+					/* Immediate: rd, rn, #imm */
+					int imm = 0; sscanf(ops[2]+1, "%i", &imm);
+					uint32_t imm8 = 0, rot = 0;
+					uint32_t v = (uint32_t)imm;
+					if (v < 256) { imm8 = v; rot = 0; }
+					else { for (int r = 1; r < 16; r++) {
+						uint32_t rv = (v >> (r*2)) | (v << (32 - r*2));
+						if (rv < 256) { imm8 = rv; rot = r; break; }
+					}}
+					emit32(out->bytes, 0xE2000000 | (opc<<21) | (1<<25) | (rn<<16) | (rd<<12) | (rot<<8) | imm8);
+					return 0;
+				}
+
+				/* Register: rd, rn, rm  or  rd, rn, rm, {LSL|LSR|ASR|ROR} #N */
+				int rm; if (reg_num(ops[2], &rm) < 0) return -1;
+
+				if (nops >= 4) {
+					/* Barrel shifter: rd, rn, rm, SHIFT #N */
+					uint32_t shift_type = 0; /* 0=LSL, 1=LSR, 2=ASR, 3=ROR */
+					const char *sh = ops[3];
+					if (strncmp(sh, "LSL", 3) == 0) shift_type = 0;
+					else if (strncmp(sh, "LSR", 3) == 0) shift_type = 1;
+					else if (strncmp(sh, "ASR", 3) == 0) shift_type = 2;
+					else if (strncmp(sh, "ROR", 3) == 0) shift_type = 3;
+					else return -1;
+					const char *sv = sh + 3;
+					while (*sv == ' ' || *sv == '\t' || *sv == '#') sv++;
+					int shift_amt = 0; sscanf(sv, "%i", &shift_amt);
+					emit32(out->bytes, 0xE0000000 | (opc<<21) | (rn<<16) | (rd<<12)
+					       | (shift_amt<<7) | (shift_type<<5) | rm);
+					return 0;
+				}
+
+				emit32(out->bytes, 0xE0000000 | (opc<<21) | (rn<<16) | (rd<<12) | rm);
+				return 0;
+			}
+
+			if (nops == 2) {
+				/* Two-address: {add,sub,and,...} rd, rm */
+				int rd; if (reg_num(ops[0], &rd) < 0) return -1;
+				int rm; if (reg_num(ops[1], &rm) < 0) return -1;
+				emit32(out->bytes, 0xE0000000 | (opc<<21) | (rd<<16) | (rd<<12) | rm);
+				return 0;
+			}
+		}
+	}
+
+	/* ---- mul r0, r1, r2 ---- */
+	if (strcmp(mnemonic, "mul") == 0 && nops >= 3) {
+		int rd; if (reg_num(ops[0], &rd) < 0) return -1;
+		int rm; if (reg_num(ops[1], &rm) < 0) return -1;
+		int rs; if (reg_num(ops[2], &rs) < 0) return -1;
+		emit32(out->bytes, 0xE0000090 | (rd<<16) | (rs<<8) | rm);
+		return 0;
+	}
+
+	/* ---- clz r0, r1 ---- */
+	if (strcmp(mnemonic, "clz") == 0 && nops >= 2) {
+		int rd; if (reg_num(ops[0], &rd) < 0) return -1;
+		int rm; if (reg_num(ops[1], &rm) < 0) return -1;
+		emit32(out->bytes, 0xE16F0F10 | (rd<<12) | rm);
+		return 0;
+	}
+
+	/* ---- asr/lsr/lsl/ror rd, rm, #N (standalone shifts) ---- */
+	{
+		const char *shift_mn[] = {"asr", "lsr", "lsl", "ror", 0};
+		int shift_type = -1;
+		for (int i = 0; shift_mn[i]; i++)
+			if (strcmp(mnemonic, shift_mn[i]) == 0) { shift_type = i; break; }
+		if (shift_type >= 0 && nops >= 3) {
+			int rd; if (reg_num(ops[0], &rd) < 0) return -1;
+			int rm; if (reg_num(ops[1], &rm) < 0) return -1;
+			int amt = 0; const char *sv = ops[2];
+			while (*sv == '#' || *sv == ' ') sv++;
+			sscanf(sv, "%i", &amt);
+			emit32(out->bytes, 0xE1A00000 | (rd<<12) | (amt<<7) | (shift_type<<5) | rm);
+			return 0;
 		}
 	}
 
@@ -275,26 +373,56 @@ int arm_encode_insn(const struct mt_target *target,
 	}
 	/* fall through to ldr/str memory handling */
 
-	/* ---- Simple memory: ldr r0, [r1] or str r0, [r1] ---- */
+	/* ---- Memory: ldr/ldrb/ldrh/str/strb/strh rd, [rn] or rd, [rn, #off] ---- */
 ldr_mem:
-	if ((strcmp(mnemonic, "ldr") == 0 || strcmp(mnemonic, "str") == 0) && nops >= 2) {
-		int rd = 0, rn;
-		if (reg_num(ops[0], &rd) < 0) return -1;
-		int store = mnemonic[0] == 's';
-		const char *mem = ops[1];
-		if (mem[0] == '[') mem++;
-		char rn_str[16]; int i = 0;
-		while (*mem && *mem != ']' && *mem != ',' && *mem != '#' && i < 15)
-			rn_str[i++] = *mem++;
-		rn_str[i] = '\0';
-		if (reg_num(rn_str, &rn) < 0) return -1;
-		uint32_t off = 0;
-		if (*mem == ',' || *mem == '#') {
-			while (*mem && (*mem == ',' || *mem == ' ' || *mem == '#')) mem++;
-			sscanf(mem, "%u", &off);
+	{
+		int is_load = 0, is_byte = 0, is_half = 0;
+		if (strcmp(mnemonic, "ldr") == 0) { is_load = 1; }
+		else if (strcmp(mnemonic, "str") == 0) { is_load = 0; }
+		else if (strcmp(mnemonic, "ldrb") == 0) { is_load = 1; is_byte = 1; }
+		else if (strcmp(mnemonic, "strb") == 0) { is_load = 0; is_byte = 1; }
+		else if (strcmp(mnemonic, "ldrh") == 0) { is_load = 1; is_half = 1; }
+		else if (strcmp(mnemonic, "strh") == 0) { is_load = 0; is_half = 1; }
+		else if (strcmp(mnemonic, "ldrsb") == 0) { is_load = 1; is_half = 1; is_byte = 1; }
+		else if (strcmp(mnemonic, "ldrsh") == 0) { is_load = 1; is_half = 1; is_byte = 1; }
+		else is_load = -1; /* skip this block */
+
+		if (is_load >= 0 && nops >= 2) {
+			int rd = 0, rn;
+			if (reg_num(ops[0], &rd) < 0) return -1;
+			const char *mem = ops[1];
+			if (mem[0] == '[') mem++;
+			char rn_str[16]; int i = 0;
+			while (*mem && *mem != ']' && *mem != ',' && *mem != '#' && i < 15)
+				rn_str[i++] = *mem++;
+			rn_str[i] = '\0';
+			if (reg_num(rn_str, &rn) < 0) return -1;
+			uint32_t off = 0;
+			if (*mem == ',' || *mem == '#') {
+				while (*mem && (*mem == ',' || *mem == ' ' || *mem == '#')) mem++;
+				sscanf(mem, "%u", &off);
+			}
+			if (is_half) {
+				uint32_t hi = (off & 0xF0) << 4;
+				uint32_t lo = off & 0xF;
+				if (strcmp(mnemonic, "ldrsb") == 0)
+					emit32(out->bytes, 0xE1D000D0 | (rn<<16) | (rd<<12) | hi | lo);
+				else if (strcmp(mnemonic, "ldrsh") == 0)
+					emit32(out->bytes, 0xE1D000F0 | (rn<<16) | (rd<<12) | hi | lo);
+				else if (is_load)
+					emit32(out->bytes, 0xE1D000B0 | (rn<<16) | (rd<<12) | hi | lo);
+				else
+					emit32(out->bytes, 0xE1C000B0 | (rn<<16) | (rd<<12) | hi | lo);
+			} else if (is_byte) {
+				if (is_load)
+					emit32(out->bytes, 0xE5D00000 | (rn<<16) | (rd<<12) | off);
+				else
+					emit32(out->bytes, 0xE5C00000 | (rn<<16) | (rd<<12) | off);
+			} else {
+				emit32(out->bytes, 0xE5100000 | (is_load?1<<20:0) | (rn<<16) | (rd<<12) | off);
+			}
+			return 0;
 		}
-		emit32(out->bytes, 0xE5100000 | (store?0:1<<20) | (rn<<16) | (rd<<12) | off);
-		return 0;
 	}
 
 	/* ---- Conditional move: mov<cond> r0, #N ---- */
