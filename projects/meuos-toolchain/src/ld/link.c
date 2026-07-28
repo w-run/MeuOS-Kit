@@ -76,6 +76,7 @@ struct ld_object {
 	unsigned char *data;
 	size_t size;
 	int elf_class;
+	int is_shared;   /* 1 = this is a shared library (ET_DYN) input */
 	union {
 		struct mt_elf64_view v64;
 		struct mt_elf32_view v32;
@@ -304,14 +305,20 @@ object_parse(struct ld_context *ctx, struct ld_object *object)
 	enum mt_elf_status status;
 	if (ctx->target->elf_class == 1) {
 		status = mt_elf32_parse(object->data, object->size, &object->view.v32);
-		if (status != MT_ELF_OK || object->view.v32.type != MT_ET_REL ||
+		if (status != MT_ELF_OK ||
+		    (object->view.v32.type != MT_ET_REL &&
+		     object->view.v32.type != MT_ET_DYN) ||
 		    object->view.v32.machine != ctx->target->emachine)
 			return -1;
+		object->is_shared = (object->view.v32.type == MT_ET_DYN);
 	} else {
 		status = mt_elf64_parse(object->data, object->size, &object->view.v64);
-		if (status != MT_ELF_OK || object->view.v64.type != MT_ET_REL ||
+		if (status != MT_ELF_OK ||
+		    (object->view.v64.type != MT_ET_REL &&
+		     object->view.v64.type != MT_ET_DYN) ||
 		    object->view.v64.machine != ctx->target->emachine)
 			return -1;
+		object->is_shared = (object->view.v64.type == MT_ET_DYN);
 	}
 	object->elf_class = ctx->target->elf_class;
 	return 0;
@@ -868,6 +875,8 @@ collect_sections(struct ld_context *ctx)
 
 	for (i = 0; i < ctx->objects.count; ++i) {
 		struct ld_object *object = &ctx->objects.items[i];
+		if (object->is_shared)
+			continue;
 		for (j = 0; j < object_section_count(object); ++j) {
 			if (object_get_section(object, j, &section) != 0)
 			return ld_errorf(ctx, "invalid section in object", object->name);
@@ -920,6 +929,8 @@ collect_one_object_sections(struct ld_context *ctx, size_t object_index)
 	uint16_t j;
 	int group;
 	uint64_t offset;
+	if (object->is_shared)
+		return 0;
 	for (j = 0; j < object_section_count(object); ++j) {
 		if (object_get_section(object, j, &section) != 0)
 			return ld_errorf(ctx, "invalid section in object", object->name);
@@ -1112,6 +1123,8 @@ collect_one_object_symbols(struct ld_context *ctx, size_t object_index)
 	struct mt_elf64_symbol symbol;
 	const char *name;
 	uint64_t j, sym_count;
+	if (object->is_shared)
+		return 0;
 	if (prepare_object_symbol(ctx, object) != 0)
 		return -1;
 	if (!object->has_symtab)
@@ -1136,13 +1149,87 @@ collect_one_object_symbols(struct ld_context *ctx, size_t object_index)
 	return 0;
 }
 
+/* Extract exported symbols from a shared library (.so) object.
+ * .so files have SHT_DYNSYM (not SHT_SYMTAB) for exported symbols.
+ * Symbols are added to globals as "defined" to satisfy references
+ * from other objects, but without a group mapping (.so sections
+ * are not merged into the output). */
+static int
+collect_shared_object_symbols(struct ld_context *ctx, size_t object_index)
+{
+	struct ld_object *object = &ctx->objects.items[object_index];
+	struct mt_elf64_section section;
+	uint16_t j;
+	int dso_dynsym_sec = -1, dso_dynstr_sec = -1;
+
+	for (j = 0; j < object_section_count(object); ++j) {
+		if (object_get_section(object, j, &section) != 0) continue;
+		if (section.type == MT_SHT_DYNSYM) {
+			dso_dynsym_sec = j;
+			if (section.link < object_section_count(object))
+				dso_dynstr_sec = (int)section.link;
+			break;
+		}
+	}
+	if (dso_dynsym_sec < 0) return 0;
+
+	size_t entry_size = (size_t)section.entry_size;
+	size_t sym_size = (ctx->target->elf_class == 1) ? 16 : 24;
+	if (entry_size < sym_size || section.size < entry_size) return 0;
+	size_t sym_count = section.size / entry_size;
+
+	for (size_t si = 1; si < sym_count; si++) {
+		struct mt_elf64_section dynsym_sec;
+		struct mt_elf64_symbol sym;
+		if (object_get_section(object, (uint16_t)dso_dynsym_sec,
+		                       &dynsym_sec) != 0)
+			continue;
+		if (mt_elf64_get_symbol(object->data, object->size,
+		                        &dynsym_sec, si, &sym) != MT_ELF_OK)
+			continue;
+		if (sym.section == 0 || sym.name == 0) continue;
+		int binding = (sym.info >> 4) & 0xf;
+		if (binding == 0) continue;
+
+		/* Get name from .dynstr */
+		const char *symname = NULL;
+		if (dso_dynstr_sec >= 0) {
+			struct mt_elf64_section ds;
+			if (object_get_section(object, (uint16_t)dso_dynstr_sec, &ds) == 0) {
+				if (mt_elf64_get_string(object->data, object->size,
+				                        &ds, sym.name, &symname) != MT_ELF_OK)
+					symname = NULL;
+			}
+		}
+		if (!symname || !*symname) continue;
+
+		struct ld_global *g = get_global(ctx, symname);
+		if (!g) return ld_error(ctx, "out of memory");
+		if (!g->defined) {
+			g->defined = 1;
+			g->weak = (binding == 2);
+			g->offset = sym.value;
+			g->size = sym.size;
+			g->group = -1;
+		}
+	}
+	return 0;
+}
+
 static int
 collect_symbols(struct ld_context *ctx)
 {
 	size_t i;
-	for (i = 0; i < ctx->objects.count; ++i)
-		if (collect_one_object_symbols(ctx, i) != 0)
-			return -1;
+	for (i = 0; i < ctx->objects.count; ++i) {
+		struct ld_object *obj = &ctx->objects.items[i];
+		if (obj->is_shared) {
+			if (collect_shared_object_symbols(ctx, i) != 0)
+				return -1;
+		} else {
+			if (collect_one_object_symbols(ctx, i) != 0)
+				return -1;
+		}
+	}
 	return 0;
 }
 
