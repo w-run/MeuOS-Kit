@@ -177,7 +177,7 @@ src/compat/
 | mcc-builtins | mcc compat | `__builtin_*` | GCC/Clang 内建函数已实现：expect/constant_p/offsetof/alloca/unreachable/va_*/types_compatible_p/inff/nanf/atomic_fetch_* | 🟢 | scope.c 中完整的 builtin 表 + expr_primary.c 中处理原子操作 |
 | mcc-generic | mcc | `_Generic` 完整 C11 匹配规则（含 qualified type 分派） | 🟢 已验证 `_Generic` 支持 qualified type 匹配，正确检测 multiple matches | `dc2d598`（移除 `qual==QUALNONE` 保护） |
 | as-errors | mt/as | 错误消息行号/列号 | 🟢 | 已有 line info（mt_as_assemble 通过 error_line 参数报告） |
-| ld-errors | mt/ld | 未定义符号的友好诊断（列出候选目标文件） | 🟢 低 | 待实现 |
+| ld-errors | mt/ld | 未定义符号的友好诊断（列出候选目标文件） | 🟢 低 | `a3237f3`（--no-undefined 时自动推荐拼写接近的符号名） |
 | community-tests | 全项目 | 社区测试套件覆盖率（chibicc → C99/C11/C23 全量通过） | 🟡 中 | 待实现 |
 | meow-lint | meow | 配方语法检查器（`meow lint`） | 🟢 低 | 待实现 |
 | ci-pipeline | 全项目 | CI/CD 流水线（GitHub Actions + qemu-user 跨架构回归） | 🟡 中 | 待实现 |
