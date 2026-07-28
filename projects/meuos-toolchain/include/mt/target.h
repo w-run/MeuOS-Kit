@@ -13,6 +13,33 @@
  * without hardcoding per-arch values in every output path.
  */
 
+/* ISA feature bit definitions (for struct mt_target.features).
+ * Architecture-specific bits use the upper 32 bits (32-63). */
+#define MT_FEATURE_SSE       (1ULL << 0)  /* x86 SSE */
+#define MT_FEATURE_SSE2      (1ULL << 1)  /* x86 SSE2 */
+#define MT_FEATURE_SSE3      (1ULL << 2)  /* x86 SSE3 */
+#define MT_FEATURE_SSSE3     (1ULL << 3)  /* x86 SSSE3 */
+#define MT_FEATURE_SSE4_1    (1ULL << 4)  /* x86 SSE4.1 */
+#define MT_FEATURE_SSE4_2    (1ULL << 5)  /* x86 SSE4.2 */
+#define MT_FEATURE_AVX       (1ULL << 6)  /* x86 AVX */
+#define MT_FEATURE_AVX2      (1ULL << 7)  /* x86 AVX2 */
+#define MT_FEATURE_POPCNT    (1ULL << 8)  /* x86 POPCNT */
+#define MT_FEATURE_BMI       (1ULL << 9)  /* x86 BMI1/BMI2 */
+#define MT_FEATURE_SSE4A     (1ULL << 10) /* x86 SSE4a */
+#define MT_FEATURE_FMA       (1ULL << 11) /* x86 FMA3 */
+#define MT_FEATURE_AVX512F   (1ULL << 12) /* x86 AVX-512 F */
+#define MT_FEATURE_FP16      (1ULL << 13) /* aarch64 FEAT_FP16 */
+#define MT_FEATURE_SVE       (1ULL << 14) /* aarch64 SVE */
+#define MT_FEATURE_RV_F      (1ULL << 32) /* riscv F extension */
+#define MT_FEATURE_RV_D      (1ULL << 33) /* riscv D extension */
+#define MT_FEATURE_RV_C      (1ULL << 34) /* riscv C (compressed) */
+#define MT_FEATURE_RV_V      (1ULL << 35) /* riscv V (vector) */
+#define MT_FEATURE_VFP       (1ULL << 32) /* arm VFP */
+#define MT_FEATURE_NEON      (1ULL << 33) /* arm NEON */
+#define MT_FEATURE_THUMB     (1ULL << 34) /* arm Thumb */
+#define MT_FEATURE_LSX       (1ULL << 32) /* loongarch LSX */
+#define MT_FEATURE_LASX      (1ULL << 33) /* loongarch LASX */
+
 struct mt_insn {
 	int    ok;               /* 0 = parse/encode failed, 1 = ok */
 	int    fixed;            /* 1 = instruction is fully resolved */
@@ -35,6 +62,7 @@ struct mt_target {
 	uint32_t e_flags;       /* arch-specific ELF e_flags               */
 	uint16_t ehdr_size;     /* sizeof(ElfNN_Ehdr): 64 for ELF64, 52…   */
 	uint16_t shdr_size;     /* sizeof(ElfNN_Shdr): 64 for ELF64, 40…   */
+	uint64_t features;      /* ISA feature bitmask (0 = baseline only) */
 	/* Instruction encoder: parse mnemonic + operands, fill mt_insn.
 	 * Returns 0 on success, -1 on unsupported instruction.  When an
 	 * operand references a symbol, the encoder sets mt_insn.fixup_*
