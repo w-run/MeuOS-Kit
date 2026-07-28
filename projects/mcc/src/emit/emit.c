@@ -1,5 +1,7 @@
 #include "ir.h"
 
+int emit_debug;  /* set by -g flag in main.c */
+
 enum {
 	SecText,
 	SecData,
@@ -260,12 +262,13 @@ emitdbgfile(char *fn, FILE *f)
 	vgrow(&file, ++nfile);
 	file[nfile-1] = id;
 	curfile = nfile;
-	fprintf(f, ".file %u %s\n", curfile, fn);
+	fprintf(f, ".file %u \"%s\"\n", curfile, fn);  /* quotes for mt/as compat */
 }
 
 void
 emitdbgloc(uint line, uint col, FILE *f)
 {
+	if (!emit_debug) return;
 	if (col != 0)
 		fprintf(f, "\t.loc %u %u %u\n", curfile, line, col);
 	else

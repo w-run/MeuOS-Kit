@@ -28,6 +28,9 @@
 #include "mcc.h"
 #include "driver_internal.h"
 
+extern int emit_debug;  /* from emit/emit.c */
+extern void emitdbgfile(char *, FILE *);  /* from emit/emit.c */
+
 /* Global msys handle and path exposed to the preprocessor (pp.c) for
  * VFS-based include file reading (msys_fopen fallback). */
 struct msys *msys_sysroot_handle;
@@ -236,7 +239,7 @@ main(int argc, char *argv[])
 		case 't': target = ARGVAL(a + 2); break;  /* alias for -target */
 		case 'v': verbose = true; break;
 		case 'w': warn_level = 0; break;
-		case 'g': break;   /* debug info (recorded, not emitted) */
+		case 'g': emit_debug = 1; break;   /* debug info */
 		case 'd': { for (char *p = a + 2; *p; ++p) if (*p <= 'Z') debug[(unsigned char)*p] = 1; break; }
 		case 'P': break;   /* suppress line markers in -E */
 		case 'H': break;   /* print includes */
@@ -487,6 +490,8 @@ main(int argc, char *argv[])
 		}
 	} else {
 		scopeinit();
+		if (emit_debug && first_input)
+			emitdbgfile(first_input, stdout);
 		while (tok.kind != TEOF) {
 			if (!decl(&filescope, NULL)) {
 				if (tok.kind == TSEMICOLON)

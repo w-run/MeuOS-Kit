@@ -23,6 +23,9 @@
 #include <ctype.h>
 #include "irgen.h"
 
+extern int emit_debug;  /* from emit/emit.c */
+extern void emitdbgloc(uint, uint, FILE *);  /* from emit/emit.c */
+
 /* Translate a frontend class char ('w','l','s','d') to IR's class enum. */
 static int
 char_to_cls(int c)
@@ -676,6 +679,8 @@ emitfunc(struct func *f, bool global)
 
 	/* Run optimization + codegen pipeline, then emit asm. */
 	run_passes(fn);
+	if (emit_debug)
+		emitdbgloc(1, 0, stdout);  /* .loc 1 line col (line=1 as placeholder) */
 	T.emitfn(fn, stdout);
 	freeall();
 }
