@@ -435,13 +435,27 @@ struct Fn {
 	int warnlevel;  /* bitmask of WARN_* */
 };
 
-/* Warning bitmask definitions for fn->warnlevel */
-#define WARN_UNUSED    (1<<0)
-#define WARN_TYPE      (1<<1)
-#define WARN_IMPLICIT  (1<<2)
-#define WARN_RETURN    (1<<3)
-#define WARN_ALL       (WARN_UNUSED|WARN_TYPE|WARN_IMPLICIT|WARN_RETURN)
-#define WARN_ERROR     (1<<7)  /* -Werror flag (or'd into warnlevel) */
+/* Warning bitmask definitions for fn->warnlevel.
+ *
+ * 现代化警告体系（p9-ui）：不用 GCC 的 -Wall/-Wextra/-Wpedantic 无语义命名，
+ * 改用语义分组：
+ *   --warn=all        全部警告（WARN_ALL）
+ *   --warn=portable   可移植性（类型大小/字节序/对齐假设）→ WARN_TYPE/WARN_IMPLICIT
+ *   --warn=style      代码风格（未使用变量/隐式转换/命名）→ WARN_UNUSED/WARN_RETURN
+ *   --warn=performance 性能提示（冗余计算/不必要拷贝）→ WARN_PERFORMANCE
+ *   --warn=pedantic   ISO 严格合规（比 all 更严）→ WARN_ALL | WARN_PEDANTIC
+ *
+ * -Wall / -Wextra 保留为 --warn=all 的兼容别名（chibicc 等测试依赖）。 */
+#define WARN_UNUSED      (1<<0)  /* 未使用变量/函数 */
+#define WARN_TYPE        (1<<1)  /* 类型相关（隐式转换、大小不匹配） */
+#define WARN_IMPLICIT    (1<<2)  /* 隐式声明/转换 */
+#define WARN_RETURN      (1<<3)  /* 返回值相关 */
+#define WARN_PERFORMANCE (1<<4)  /* 性能提示（冗余拷贝/计算） */
+#define WARN_PEDANTIC    (1<<5)  /* ISO 严格合规（比 all 更严） */
+#define WARN_PORTABLE    (WARN_TYPE|WARN_IMPLICIT)  /* 可移植性分组 */
+#define WARN_STYLE       (WARN_UNUSED|WARN_RETURN)  /* 风格分组 */
+#define WARN_ALL         (WARN_UNUSED|WARN_TYPE|WARN_IMPLICIT|WARN_RETURN|WARN_PERFORMANCE)
+#define WARN_ERROR       (1<<7)  /* -Werror flag (or'd into warnlevel) */
 
 struct Typ {
 	char *name;

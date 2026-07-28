@@ -168,6 +168,25 @@ main(int argc, char *argv[])
 		warn_as_error = true;
 		continue;
 	}
+	/* --warn=<group>: 现代化警告体系（p9-ui 设计，不用 GCC -Wall 无语义命名）。
+	 * 语义组：all / portable / style / performance / pedantic。
+	 * 保留 -Wall 作为 --warn=all 的兼容别名。 */
+	if (strncmp(a, "--warn=", 7) == 0) {
+		const char *grp = a + 7;
+		if (strcmp(grp, "all") == 0)
+			warn_level = WARN_ALL;
+		else if (strcmp(grp, "portable") == 0)
+			warn_level = WARN_PORTABLE;
+		else if (strcmp(grp, "style") == 0)
+			warn_level = WARN_STYLE;
+		else if (strcmp(grp, "performance") == 0)
+			warn_level = WARN_PERFORMANCE;
+		else if (strcmp(grp, "pedantic") == 0)
+			warn_level = WARN_ALL | WARN_PEDANTIC;
+		else
+			fatal("unknown warning group '%s' (use all/portable/style/performance/pedantic)", grp);
+		continue;
+	}
 	if (a[1] == 'W') continue;   /* other -Wxxx warning flags */
 	if (strncmp(a, "-ftls-model=", 12) == 0) {
 		const char *val = a + 12;
