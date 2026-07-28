@@ -71,6 +71,10 @@ struct Target {
 	char asloc[4];
 	char assym[4];
 	uint cansel:1;
+	/* ISA feature bitmask (MT_FEATURE_*). Set by the driver from
+	 * -march= / -march=native so emit/isel stages can gate instructions
+	 * on available CPU extensions (see target-features task). */
+	uint64_t features;
 };
 
 #define BIT(n) ((bits)1 << (n))
