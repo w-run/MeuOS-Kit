@@ -177,13 +177,10 @@ SUPPORT_OBJS   := $(BUILD)/ctype/ctype.o $(BUILD)/signal/signal.o \
                   $(BUILD)/regex/regex.o \
                   $(BUILD)/complex/complex.o \
                   $(BUILD)/wchar/wchar.o
-# errno: loongarch64 uses non-TLS version (binutils BFD assertion workaround)
-# Other architectures use the standard _Thread_local errno
-ifeq ($(ARCH),loongarch64)
-SUPPORT_OBJS   += $(BUILD)/errno/errno_la64.o
-else
+# errno: TLS-based _Thread_local errno for all architectures
+# (loongarch64 previously used non-TLS errno_la64.c as a BFD 2.41 assertion
+# workaround; that is no longer needed with mt/ld linking.)
 SUPPORT_OBJS   += $(BUILD)/errno/errno.o
-endif
 SYSCALL_GATE_OBJ := $(BUILD)/internal/arch/$(ARCH)/syscall.o
 CRT1_OBJ := $(BUILD)/crt1.o
 DL_OBJS := $(BUILD)/dlfcn.o
