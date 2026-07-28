@@ -26,7 +26,6 @@ generic(struct scope *s)
 {
 	struct expr *e, *match = NULL, *def = NULL;
 	struct type *t, *want;
-	enum typequal qual;
 
 	next();
 	expect(TLPAREN, "after '_Generic'");
@@ -41,8 +40,7 @@ generic(struct scope *s)
 			expect(TCOLON, "after 'default'");
 			def = assignexpr(s);
 		} else {
-			qual = QUALNONE;
-			t = typename(s, &qual, NULL);
+			t = typename(s, NULL, NULL);
 			if (!t)
 				error(&tok.loc, "expected typename for generic association");
 			if (t->kind == TYPEFUNC)
@@ -53,7 +51,7 @@ generic(struct scope *s)
 				error(&tok.loc, "generic association has variably modified type");
 			expect(TCOLON, "after type name");
 			e = assignexpr(s);
-			if (typecompatible(t, want) && qual == QUALNONE) {
+			if (typecompatible(t, want)) {
 				if (match)
 					error(&tok.loc, "generic selector matches multiple associations");
 				match = e;
