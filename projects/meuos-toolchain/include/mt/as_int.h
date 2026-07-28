@@ -71,6 +71,37 @@ struct as_file {
 	size_t numeric_counts[10];
 	int block_comment;
 	const struct mt_target *target;
+
+	/* DWARF .file state */
+	struct as_dwarf_file {
+		int index;
+		char *name;
+	} *dwarf_files;
+	size_t dwarf_file_count, dwarf_file_capacity;
+
+	/* DWARF .loc state (buffered locs) */
+	struct as_dwarf_loc {
+		int section;
+		uint64_t offset;
+		int file;
+		unsigned line;
+		unsigned column;
+	} *dwarf_locs;
+	size_t dwarf_loc_count, dwarf_loc_capacity;
+
+	/* CFI state */
+	int cfi_active;
+	unsigned char *cfi_prog;
+	size_t cfi_prog_size, cfi_prog_capacity;
+	uint64_t cfi_func_start;
+
+	/* Completed FDE list */
+	uint64_t *cfi_func_offsets;
+	uint64_t *cfi_func_end;
+	char **cfi_func_labels;
+	unsigned char **cfi_fde_progs;
+	size_t *cfi_fde_sizes;
+	size_t cfi_fde_count, cfi_fde_capacity;
 };
 
 /* Functions shared between assemble.c and arch backends */
