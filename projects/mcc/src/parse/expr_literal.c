@@ -86,8 +86,12 @@ inttype(unsigned long long val, bool decimal, char *suffix)
 	 * largest signed type (signed two's complement).  Hex/oct/bin
 	 * constants have unsigned types in their list so they reach
 	 * &typeullong naturally via the step=1 loop above. */
-	if (decimal && !(flags & U) && typehasint(&typeullong, val, false))
-		return &typellong;
+	if (decimal && !(flags & U)) {
+		if (typehasint(&typellong, val, false))
+			return &typellong;
+		if (typehasint(&typeullong, val, false))
+			return &typeullong;
+	}
 notype:
 	error(&tok.loc, "no suitable type for constant '%s'", tok.lit);
 }
