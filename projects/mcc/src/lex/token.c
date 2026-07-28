@@ -159,7 +159,7 @@ tokencheck(const struct token *t, enum tokenkind kind, const char *msg)
 void
 diagloc(const struct location *loc)
 {
-	fprintf(stderr, "%s:%zu:%zu: ", loc->file, loc->line, loc->col);
+	fprintf(stderr, "%s:%zu:%zu: ", loc->file, loc->line + 1, loc->col);
 }
 
 void
@@ -188,7 +188,7 @@ cc_warn(const struct location *loc, int kind, const char *fmt, ...)
 		return;
 
 	if (loc)
-		fprintf(stderr, "%s:%zu:%zu: ", loc->file, loc->line, loc->col);
+		fprintf(stderr, "%s:%zu:%zu: ", loc->file, loc->line + 1, loc->col);
 	else
 		fprintf(stderr, "%s: ", argv0);
 	fputs("warning: ", stderr);

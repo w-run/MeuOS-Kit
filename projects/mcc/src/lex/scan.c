@@ -428,7 +428,7 @@ scanfrom(const char *name, FILE *file)
 	s->buf.cap = 0;
 	s->usebuf = false;
 	s->loc.file = name;
-	s->loc.line = 1;
+	s->loc.line = 0;
 	s->loc.col = 0;
 	s->next = scanner;
 	if (file)
