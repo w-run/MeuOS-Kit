@@ -702,13 +702,129 @@ ldr_mem:
 
 	/* ---- NEON: vadd/vsub/vmul (integer) ---- */
 	if (nops >= 3 && mnemonic[0] == 'v') {
-		if (strcmp(mnemonic, "vadd") == 0 && ops[2][0] == 'd') {
+		if (strcmp(mnemonic, "vadd") == 0) {
 			int rd, rn, rm;
 			if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rn)<0||reg_num(ops[2],&rm)<0) return -1;
 			uint32_t d=(uint32_t)(rd&0x1F), n=(uint32_t)(rn&0x1F), m=(uint32_t)(rm&0x1F);
-			emit32(out->bytes, 0xF2000D00 | ((d>>1)<<12)|((d&1)<<22)|((n>>1)<<16)|((n&1)<<7)|((m>>1)<<0)|((m&1)<<5));
+			emit32(out->bytes, 0xF2000D00|((d>>1)<<12)|((d&1)<<22)|((n>>1)<<16)|((n&1)<<7)|((m>>1)<<0)|((m&1)<<5));
 			return 0;
 		}
+	}
+
+	/* ---- mla rd, rn, rm, ra (multiply-accumulate) ---- */
+	if (nops >= 4 && strcmp(mnemonic, "mla") == 0) {
+		int rd, rn, rm, ra;
+		if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rn)<0||reg_num(ops[2],&rm)<0||reg_num(ops[3],&ra)<0) return -1;
+		emit32(out->bytes, 0xE0200090 | (rd<<16) | (ra<<12) | (rn<<8) | rm);
+		return 0;
+	}
+
+	/* ---- mls rd, rn, rm, ra (multiply-subtract) ---- */
+	if (nops >= 4 && strcmp(mnemonic, "mls") == 0) {
+		int rd, rn, rm, ra;
+		if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rn)<0||reg_num(ops[2],&rm)<0||reg_num(ops[3],&ra)<0) return -1;
+		emit32(out->bytes, 0xE0600090 | (rd<<16) | (ra<<12) | (rn<<8) | rm);
+		return 0;
+	}
+
+	/* ---- usad8 rd, rn, rm (unsigned sum of absolute differences) ---- */
+	if (nops >= 3 && strcmp(mnemonic, "usad8") == 0) {
+		int rd, rn, rm;
+		if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rn)<0||reg_num(ops[2],&rm)<0) return -1;
+		emit32(out->bytes, 0xE7800F10 | (rd<<16) | (rn<<0) | (rm<<8));
+		return 0;
+	}
+
+	/* ---- bfi rd, rn, #lsb, #width ---- */
+	if (nops >= 4 && strcmp(mnemonic, "bfi") == 0) {
+		int rd, rn, lsb, width;
+		if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rn)<0) return -1;
+		sscanf(ops[2], "#%i", &lsb);
+		sscanf(ops[3], "#%i", &width);
+		uint32_t msb = (uint32_t)(lsb + width - 1);
+		emit32(out->bytes, 0xE7C00010 | (rd<<12) | (rn<<0) | (msb<<16) | (lsb<<7));
+		return 0;
+	}
+
+	/* ---- bfc rd, #lsb, #width ---- */
+	if (nops >= 3 && strcmp(mnemonic, "bfc") == 0) {
+		int rd, lsb, width;
+		if (reg_num(ops[0],&rd)<0) return -1;
+		sscanf(ops[1], "#%i", &lsb);
+		sscanf(ops[2], "#%i", &width);
+		uint32_t msb = (uint32_t)(lsb + width - 1);
+		emit32(out->bytes, 0xE7C0001F | (rd<<12) | (msb<<16) | (lsb<<7));
+		return 0;
+	}
+
+	/* ---- sbfx rd, rn, #lsb, #width ---- */
+	if (nops >= 4 && strcmp(mnemonic, "sbfx") == 0) {
+		int rd, rn, lsb, width;
+		if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rn)<0) return -1;
+		sscanf(ops[2], "#%i", &lsb);
+		sscanf(ops[3], "#%i", &width);
+		uint32_t msb = (uint32_t)(lsb + width - 1);
+		emit32(out->bytes, 0xE7A00050 | (rd<<12) | (rn<<0) | (msb<<16) | (lsb<<7));
+		return 0;
+	}
+
+	/* ---- ubfx rd, rn, #lsb, #width ---- */
+	if (nops >= 4 && strcmp(mnemonic, "ubfx") == 0) {
+		int rd, rn, lsb, width;
+		if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rn)<0) return -1;
+		sscanf(ops[2], "#%i", &lsb);
+		sscanf(ops[3], "#%i", &width);
+		uint32_t msb = (uint32_t)(lsb + width - 1);
+		emit32(out->bytes, 0xE7E00050 | (rd<<12) | (rn<<0) | (msb<<16) | (lsb<<7));
+		return 0;
+	}
+
+	/* ---- count leading ones: cls rd, rm ---- */
+	if (nops >= 2 && strcmp(mnemonic, "cls") == 0) {
+		int rd, rm; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rm)<0) return -1;
+		emit32(out->bytes, 0xE16F0F10 | (rd<<12) | rm); return 0;
+	}
+
+	/* ---- hint instructions: wfe/wfi/sev/yield/nop ---- */
+	if (nops == 0) {
+		if (strcmp(mnemonic, "wfe") == 0) { emit32(out->bytes, 0xE3200F02); return 0; }
+		if (strcmp(mnemonic, "wfi") == 0) { emit32(out->bytes, 0xE3200F03); return 0; }
+		if (strcmp(mnemonic, "sev") == 0) { emit32(out->bytes, 0xE3200F04); return 0; }
+		if (strcmp(mnemonic, "yield") == 0) { emit32(out->bytes, 0xE3200F01); return 0; }
+	}
+
+	/* ---- dbg #n ---- */
+	if (nops >= 1 && strcmp(mnemonic, "dbg") == 0) {
+		int n = 0;
+		const char *ds = ops[0];
+		while (*ds == '#') ds++;
+		if (*ds) sscanf(ds, "%i", &n);
+		emit32(out->bytes, 0xE3200F10 | (n & 0xF)); return 0;
+	}
+
+	/* ---- VFP sqrt: fsqrts/fsqrtd sd, sm ---- */
+	if (nops >= 2) {
+		if (strcmp(mnemonic, "fsqrts") == 0 || strcmp(mnemonic, "fsqrtd") == 0) {
+			int rd, rm; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rm)<0) return -1;
+			int is_double = (mnemonic[5] == 'd');
+			uint32_t d=(uint32_t)(rd&0x1F), m=(uint32_t)(rm&0x1F);
+			uint32_t base = is_double ? 0x0EB10BC0 : 0x0EB10AC0;
+			base |= ((d&1)<<22)|((d>>1)<<12)|((m&1)<<5)|((m>>1)<<16);
+			emit32(out->bytes, base); return 0;
+		}
+	}
+
+	/* ---- VFP move immediate: fconsts/fconstd sd, #imm ---- */
+	if (nops >= 2 && (strcmp(mnemonic, "fconsts") == 0 || strcmp(mnemonic, "fconstd") == 0)) {
+		int rd; if (reg_num(ops[0],&rd)<0) return -1;
+		int imm = 0;
+		sscanf(ops[1], "#%i", &imm);
+		int is_double = (mnemonic[6] == 'd');
+		uint32_t d = (uint32_t)(rd & 0x1F);
+		uint32_t imm8 = (uint32_t)(imm & 0xFF);
+		uint32_t base = is_double ? 0x0EB00B00 : 0x0EB00A00;
+		base |= ((d&1)<<22)|((d>>1)<<12)|imm8;
+		emit32(out->bytes, base); return 0;
 	}
 
 	return -1; /* unsupported */
