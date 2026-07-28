@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include "meow.h"
+#include "triple.h"
 
 static void
 set_arch_env(void)
