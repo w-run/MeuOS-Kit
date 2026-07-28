@@ -24,6 +24,11 @@ struct mt_ld_options {
 	                           prefix for hexadecimal. Multiple --defsym flags
 	                           are collected into this array. */
 	size_t      defsym_count;  /* number of entries in defsym[] */
+	const char *const *wrap;   /* --wrap=SYM list (NULL = none).
+	                           Each entry is a symbol name; references to SYM
+	                           are redirected to __wrap_SYM, and __real_SYM
+	                           points at the original SYM. */
+	size_t      wrap_count;    /* number of entries in wrap[] */
 };
 
 /* Static linker entry point (original API, shared=0).

@@ -120,6 +120,9 @@ struct ld_global {
 	int weak;
 	int common;
 	int absolute;  /* 1 = value is an absolute address (from --defsym) */
+	struct ld_global *alias; /* non-NULL: this global redirects to alias target
+	                         * (used by --wrap). symbol_value() and other
+	                         * resolvers follow the alias chain automatically. */
 };
 
 struct ld_globals {
@@ -1179,6 +1182,56 @@ apply_defsym(struct ld_context *ctx, const char *defsym)
 	return 0;
 }
 
+/* Apply --wrap: redirect references to SYM to __wrap_SYM, and make
+ * __real_SYM point at the original SYM definition (if any).
+ *
+ * The implementation reuses struct ld_global's alias field:
+ *   SYM->alias = __wrap_SYM
+ * so that any lookup of SYM via symbol_value() (and related resolvers)
+ * follows the alias to __wrap_SYM.
+ *
+ * If SYM was defined, __real_SYM is set up as a copy of SYM's definition,
+ * giving the user access to the original function/data. */
+static int
+apply_wrap(struct ld_context *ctx, const char *sym)
+{
+	char wrap_name[256];
+	char real_name[256];
+	struct ld_global *g, *gw, *gr;
+
+	if (!sym || !*sym)
+		return 0;
+
+	snprintf(wrap_name, sizeof wrap_name, "__wrap_%s", sym);
+	snprintf(real_name, sizeof real_name, "__real_%s", sym);
+
+	g  = get_global(ctx, sym);
+	gw = get_global(ctx, wrap_name);
+	gr = get_global(ctx, real_name);
+	if (!g || !gw || !gr)
+		return ld_error(ctx, "out of memory");
+
+	/* If SYM has a definition, copy it to __real_SYM so the wrapped
+	 * function can call __real_foo to access the original. */
+	if (g->defined) {
+		gr->defined   = 1;
+		gr->absolute  = g->absolute;
+		gr->weak      = g->weak;
+		gr->common    = g->common;
+		gr->group     = g->group;
+		gr->offset    = g->offset;
+		gr->size      = g->size;
+		gr->align     = g->align;
+		gr->object    = g->object;
+		gr->symbol_index = g->symbol_index;
+	}
+
+	/* Redirect SYM to __wrap_SYM: any UNDEF reference to SYM will now
+	 * resolve to __wrap_SYM (via the alias field in symbol_value()). */
+	g->alias = gw;
+	return 0;
+}
+
 struct archive_extract_context {
 	struct ld_context *ctx;
 	const char *archive;
@@ -1322,7 +1375,12 @@ symbol_value(struct ld_context *ctx, struct ld_object *object,
 		*name_out = name;
 	if (symbol.section == MT_SHN_UNDEF) {
 		global = find_global(ctx, name);
-		if (!global || !global->defined)
+		if (!global)
+			return ld_errorf(ctx, "undefined symbol", name);
+		/* Follow alias chain (from --wrap) */
+		while (global->alias)
+			global = global->alias;
+		if (!global->defined)
 			return ld_errorf(ctx, "undefined symbol", name);
 		if (global->absolute)
 			*value = global->offset + symbol.value;
@@ -1602,7 +1660,12 @@ symbol_tls_offset(struct ld_context *ctx, struct ld_object *object,
 		return -1;
 	if (symbol.section == MT_SHN_UNDEF) {
 		global = find_global(ctx, name);
-		if (!global || !global->defined)
+		if (!global)
+			return ld_errorf(ctx, "undefined symbol", name);
+		/* Follow alias chain (from --wrap) */
+		while (global->alias)
+			global = global->alias;
+		if (!global->defined)
 			return ld_errorf(ctx, "undefined symbol", name);
 		if (global->group == ctx->tls_tdata_group)
 			*tls_offset = global->offset + symbol.value;
@@ -1815,6 +1878,8 @@ fill_got(struct ld_context *ctx)
 	got = &ctx->groups[ctx->got.group];
 	for (i = 0; i < ctx->got.count; ++i) {
 		global = find_global(ctx, ctx->got.items[i].name);
+		if (global && global->alias)
+			global = global->alias;
 		if (!global || !global->defined)
 			return ld_errorf(ctx, "undefined GOT symbol", ctx->got.items[i].name);
 		value = ctx->groups[global->group].address + global->offset;
@@ -3053,11 +3118,26 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 				goto out;
 		}
 	}
+	/* --wrap: redirect references to SYM to __wrap_SYM.
+	 * Must run after all symbols are collected (including from archives)
+	 * but before --no-undefined and relocation resolution. */
+	if (opts && opts->wrap) {
+		size_t wi;
+		for (wi = 0; wi < opts->wrap_count; ++wi) {
+			if (apply_wrap(&ctx, opts->wrap[wi]) != 0)
+				goto out;
+		}
+	}
 	/* --no-undefined: check for unresolved symbols */
 	if (ctx.no_undefined) {
 		size_t ui;
 		for (ui = 0; ui < ctx.globals.count; ++ui) {
-			if (!ctx.globals.items[ui].defined) {
+			struct ld_global *ug = &ctx.globals.items[ui];
+			/* Follow alias chain: a wrapped symbol redirects to __wrap_SYM,
+			 * so check the alias target's defined status. */
+			while (ug->alias)
+				ug = ug->alias;
+			if (!ug->defined) {
 				ld_errorf(&ctx, "undefined reference to",
 				          ctx.globals.items[ui].name);
 				goto out;
