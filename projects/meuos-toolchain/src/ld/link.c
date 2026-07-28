@@ -3596,8 +3596,33 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 			while (ug->alias)
 				ug = ug->alias;
 			if (!ug->defined) {
-				ld_errorf(&ctx, "undefined reference to",
-				          ctx.globals.items[ui].name);
+				const char *uname = ctx.globals.items[ui].name;
+				/* Build combined message with suggestion */
+				char msg[512];
+				snprintf(msg, sizeof(msg), "undefined reference to '%s'", uname);
+				/* Suggest close matches from defined symbols */
+				size_t namelen = strlen(uname);
+				int best_dist = 8, best_idx = -1;
+				for (size_t si = 0; si < ctx.globals.count; si++) {
+					if (!ctx.globals.items[si].defined ||
+					    !ctx.globals.items[si].name) continue;
+					const char *cname = ctx.globals.items[si].name;
+					if (strlen(cname) < namelen - 3 ||
+					    strlen(cname) > namelen + 3) continue;
+					int dist = 0;
+					for (const char *a = uname, *b = cname; *a || *b; a++, b++) {
+						if (!*a || !*b) { dist += 3; continue; }
+						if (*a != *b) dist++;
+					}
+					if (dist < best_dist) { best_dist = dist; best_idx = (int)si; }
+				}
+				if (best_idx >= 0) {
+					size_t mlen = strlen(msg);
+					snprintf(msg + mlen, sizeof(msg) - mlen,
+					         " (did you mean '%s'?)",
+					         ctx.globals.items[best_idx].name);
+				}
+				ld_error(&ctx, msg);
 				goto out;
 			}
 		}
