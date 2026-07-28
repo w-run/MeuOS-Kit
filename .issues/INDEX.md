@@ -100,7 +100,7 @@ src/compat/
 | mcc-i386-tls-doc | mcc(i386) | `gd-tls.md` 文档 | 被 3 个文件引用但文件不存在 | 🟢 | `03e8618` |
 | ld-shared | mt/ld | `-shared` 输出 `ET_DYN` | 🟢 ET_DYN + PHDR/DYNAMIC + dynsym/dynstr/hash/dynamic 完整实现 | `a0822fe` 动态节区数据填充 |
 | ld-pie | mt/ld | `--pie`/`--no-pie` 支持 | PIE 二进制输出（`ET_DYN` + `PT_INTERP` + 相对重定位） | 🟢 | `4ae63b1` |
-| mcc-pic-verify | mcc | PIC 代码生成加固 | 全架构验证 `-fPIC` 输出（GOT/PLT/TLS GD 路径） | ⏳ | 待实现 |
+| mcc-pic-verify | mcc | PIC 代码生成加固 | 全架构验证 `-fPIC` 输出（GOT/PLT/TLS GD 路径）（riscv64 GOT 为空缺） | 🟢 | 本 commit（新增 pic_verify.sh；riscv64 需修复 `%got_pcrel_hi` emit） |
 | mcc-shared-mt | mcc driver | `-shared` mt/ld 集成 | 去掉 `-shared` 回退到 host cc 的限制 | 🟢 | `acce6c6` |
 | ld-so | 新建 | ld.so 动态链接器 | ELF 加载、DT_NEEDED 图遍历、符号解析、重定位应用、延迟绑定、TLS init | 🟡 | `525ab54` 骨架实现（x86_64、ELF 加载+符号解析+重定位+裸 syscall） |
 | libc-dl | meuos-libc | `dlfcn.h` + `dl*` 实现 | `dlopen`/`dlsym`/`dlclose`/`dlerror` | 🟡 | `ef0edd0` 头文件+框架（阶段1），阶段2需要完整 ELF 加载实现 |

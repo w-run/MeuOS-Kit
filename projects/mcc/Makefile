@@ -139,6 +139,9 @@ check-aarch64-runtime: $(BIN)
 check-targets: $(BIN)
 	sh test/targets/regress.sh ./$(BIN)
 
+check-pic-verify: $(BIN)
+	sh test/pic_verify.sh ./$(BIN)
+
 # C11 atomic regressions use a small local <stdatomic.h> shim until
 # meuos-libc owns the installed public header.  Both runtime cases must pass.
 check-c11-atomic: $(BIN)
@@ -227,7 +230,7 @@ check-sysroot-static: $(BIN)
 # Compatibility alias for existing scripts.
 check-la64: check-loongarch64
 
-.PHONY: all clean check check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community
+.PHONY: all clean check check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community
 
 # chibicc community functional test suite (C11/C23 conformance).
 # Runs test/community/chibicc/run.sh against the MeuOS sysroot.
