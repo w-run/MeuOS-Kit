@@ -1409,7 +1409,8 @@ expand(struct token *t)
 	struct macro *m;
 	bool space;
 	static int file_token, line_token, date_token, time_token,
-	           counter_token, timestamp_token, base_file_token;
+	           counter_token, timestamp_token, base_file_token,
+	           pragma_token;
 	static unsigned int counter;
 	char line[32];
 	char *literal;
@@ -1425,6 +1426,25 @@ expand(struct token *t)
 		counter_token = tokenget("__COUNTER__", 11);
 		timestamp_token = tokenget("__TIMESTAMP__", 13);
 		base_file_token = tokenget("__BASE_FILE__", 13);
+		pragma_token = tokenget("_Pragma", 7);
+	}
+	if (t->kind == pragma_token) {
+		/* _Pragma("string"): evaluate the string as a #pragma directive.
+		 * Consume the argument and produce no tokens. */
+		struct token nt;
+		scan(&nt);
+		if (nt.kind != TLPAREN) return false;
+		scan(&nt);
+		if (nt.kind != TSTRINGLIT) return false;
+		/* pragma content is in nt.lit (quoted string). Skip rest. */
+		scan(&nt);
+		if (nt.kind == TCOMMA) {
+			while (nt.kind != TRPAREN && nt.kind != TNEWLINE && nt.kind != TEOF)
+				scan(&nt);
+		} else if (nt.kind != TRPAREN) {
+			return false;
+		}
+		return true;
 	}
 	if (t->kind == file_token) {
 		const char *name = t->loc.file ? t->loc.file : "<unknown>";
