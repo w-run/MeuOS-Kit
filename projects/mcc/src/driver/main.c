@@ -88,7 +88,8 @@ main(int argc, char *argv[])
 	struct array defines = {0}, undefs = {0};
 	bool pponly = false, emit_asm_only = false, compile_only = false;
 	bool verbose = false, nostdinc = false, nostdlib = false, nodefaultlibs = false;
-	bool static_link = false, shared = false, pic = false, meuos_specs = false;
+	bool static_link = false, shared = false, pic = false;
+	bool meuos_specs = false, meuos_specs_host = false;
 	char *output = NULL, *target = NULL, *first_input = NULL, *sysroot = NULL;
 	struct msys *msys_handle = NULL;
 	int depmode = 0;       /* 0 none, 1 -M, 2 -MM, 3 -MD, 4 -MMD */
@@ -213,12 +214,16 @@ main(int argc, char *argv[])
 	if (strncmp(a, "--specs=", 8) == 0) {
 		if (strcmp(a + 8, "meuos") == 0)
 			meuos_specs = true;
+		else if (strcmp(a + 8, "host") == 0 || strcmp(a + 8, "system") == 0)
+			meuos_specs_host = true;
 		continue;
 	}
 	if (strcmp(a, "--specs") == 0) {
 		char *spec = ARGVAL("");
 		if (strcmp(spec, "meuos") == 0)
 			meuos_specs = true;
+		else if (strcmp(spec, "host") == 0 || strcmp(spec, "system") == 0)
+			meuos_specs_host = true;
 		continue;
 	}
 
@@ -258,10 +263,14 @@ main(int argc, char *argv[])
 #undef ARGVAL
 
 	/* MeuOS is the default configuration when a sysroot is provided by the
-	 * environment.  An explicit --specs=meuos also selects it, but does not
-	 * invent a path: callers may still use -I/-L for a staged sysroot. */
+	 * environment.  An explicit --specs=meuos also selects it.  Use --specs=host
+	 * to force host-only mode (no MeuOS sysroot), overriding any MEUOS_SYSROOT. */
 	if (!sysroot)
 		sysroot = getenv("MEUOS_SYSROOT");
+	/* If MEUOS_SYSROOT is set, MeuOS specs are the implicit default.
+	 * Only --specs=host or --specs=system can override this. */
+	if (sysroot && !meuos_specs_host && !meuos_specs)
+		meuos_specs = true;
 	if (meuos_specs && !sysroot)
 		fprintf(stderr, "%s: --specs=meuos requires --sysroot or MEUOS_SYSROOT\n", argv0), exit(2);
 	/* MeuOS specs select the project CRT and libc, not a mixture with the

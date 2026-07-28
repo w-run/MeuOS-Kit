@@ -376,7 +376,7 @@ p8-meow ── meow 构建系统完备（替代 make+autoconf+libtool+pkg-config
 
 | ID | 主题 | 描述 | 涉及组件 | 优先 |
 |----|------|------|---------|------|
-| specs-default | **`--specs=meuos` 默认化** | `MEUOS_SYSROOT` 设置时自动隐含 `--specs=meuos`，不再需要显式传入。新增 `--specs=host` 切回宿主模式 | mcc driver | 🔴 高 |
+| specs-default | **`--specs=meuos` 默认化** | `MEUOS_SYSROOT` 设置时自动隐含 `--specs=meuos`，不再需要显式传入。新增 `--specs=host` 切回宿主模式 | 🟢 |
 | meow-auto-config | **meow 自动决策编译参数** | `meow build <pkg> --target=<triplet>` 自动解析 triple → arch/abi/float/subarch, 自动设 CC/CFLAGS/LDFLAGS, 自动跑 probe 生成 config.h | meow + mcc | 🔴 高 |
 | triple-format | **MeuOS triple 格式设计** | 定义 `<arch>[-subarch][-vendor][-os][-abi]` 格式。vendor=`meuos` 隐含 MeuOS 默认行为；os=`meuos-next` 为未来原生环境。见下方详细设计 | meow + mcc + mt | 🔴 高 |
 | triple-lib | **共享 triple 解析库** | meow 和 mcc 共享同一套 triple 解析逻辑，避免两处分叉。提取为 `libtriple` 或共用头文件 | meow + mcc | 🔴 高 |
