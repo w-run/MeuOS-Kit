@@ -25,7 +25,7 @@ trap 'rm -rf "$work"' EXIT HUP INT TERM
 mkdir -p "$work"
 
 fail=0
-for t in runtime_kl runtime_fp runtime_time64 runtime_va fp_unsigned fp_arith; do
+for t in runtime_kl runtime_fp runtime_time64 runtime_va fp_unsigned fp_arith tls; do
 	src="$root/test/i386/$t.c"
 	out="$work/$t"
 	printf '%s\n' "  i386 runtime: $t"

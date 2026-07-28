@@ -96,7 +96,7 @@ src/compat/
 | mcc-atomic-voidptr | mcc sema | `_Atomic int*` → `void*` | C 6.3.2.3p1 限定对象指针应可转 `void*`（chibicc 测试报） | 🟢 | `03e8618` 验证通过 |
 | mcc-riscv64-qemu | mcc | riscv64 qemu 门禁 | 完整 qemu 运行时门禁（当前仅 exit=42） | ⏳ | 待实现 |
 | mcc-loong64-qemu | mcc+libc | loongarch64 qemu 门禁 | 完整 qemu 运行时门禁（当前仅 exit=42） | ⏳ | 待实现 |
-| mcc-i386-tls-e2e | mcc+libc | i386 TLS e2e | bug-i386-tls 修复后的 TLS 端到端验证 | ⏳ | 待实现 |
+| mcc-i386-tls-e2e | mcc+libc | i386 TLS e2e | bug-i386-tls 修复后的 TLS 端到端验证 | 🟢 | 本 commit |
 | mcc-i386-tls-doc | mcc(i386) | `gd-tls.md` 文档 | 被 3 个文件引用但文件不存在 | 🟢 | `03e8618` |
 | ld-shared | mt/ld | `-shared` 输出 `ET_DYN` | 🟢 ET_DYN + PHDR/DYNAMIC + dynsym/dynstr/hash/dynamic 完整实现 | `a0822fe` 动态节区数据填充 |
 | ld-pie | mt/ld | `--pie`/`--no-pie` 支持 | PIE 二进制输出（`ET_DYN` + `PT_INTERP` + 相对重定位） | 🟢 | `4ae63b1` |
