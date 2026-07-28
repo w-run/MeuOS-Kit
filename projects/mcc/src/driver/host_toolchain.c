@@ -20,6 +20,27 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include "driver_internal.h"
+#include "mt/target.h"
+
+/* Global target feature bitmask set by main.c from -march= parsing. */
+extern uint64_t g_target_features;
+
+/* Derive a -march= value for mt/as from the compiler's resolved feature
+ * bitmask, so the assembler enforces the same ISA level that mcc selected
+ * (as-isa-gating integration).  Only x86_64 has ISA levels today. */
+static const char *
+mt_march_for_features(const char *mt_target, uint64_t features)
+{
+	if (strcmp(mt_target, "x86_64") != 0 || features == 0)
+		return NULL;
+	if (features & MT_FEATURE_AVX512F)
+		return "x86-64-v4";
+	if (features & MT_FEATURE_AVX2)
+		return "x86-64-v3";
+	if (features & (MT_FEATURE_SSE4_2 | MT_FEATURE_POPCNT))
+		return "x86-64-v2";
+	return NULL;
+}
 
 static void
 cmdadd(struct array *cmd, const char *s)
@@ -181,6 +202,17 @@ run_mt_as(const char *asm_path, const char *output, bool verbose,
 	cmdadd(&cmd, as);
 	arrayaddbuf(&cmd, " --target=", 10);
 	cmdadd(&cmd, mt_target ? mt_target : "x86_64");
+	/* Pass -march= so mt/as enforces the same ISA level mcc selected
+	 * (as-isa-gating).  Skipped when the level is baseline. */
+	{
+		const char *march =
+			mt_march_for_features(mt_target ? mt_target : "x86_64",
+			                      g_target_features);
+		if (march) {
+			arrayaddbuf(&cmd, " --march=", 10);
+			cmdadd(&cmd, march);
+		}
+	}
 	arrayaddbuf(&cmd, " -o ", 4);
 	cmdadd(&cmd, output);
 	arrayaddbuf(&cmd, " ", 1);

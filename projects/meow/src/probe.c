@@ -146,6 +146,8 @@ static struct probe_item probe_decls[PROBE_MAX];
 static size_t nprobe_decls;
 static struct probe_item probe_libs[PROBE_MAX];
 static size_t nprobe_libs;
+static struct probe_item probe_typesizes[PROBE_MAX];
+static size_t nprobe_typesizes;
 static char probe_cc[128] = "";
 static char probe_cflags[512] = "";
 static char probe_config[64] = "config.h";
@@ -158,6 +160,7 @@ probe_reset(void)
 	nprobe_codes = 0;
 	nprobe_decls = 0;
 	nprobe_libs = 0;
+	nprobe_typesizes = 0;
 	probe_cc[0] = 0;
 	probe_cflags[0] = 0;
 	strcpy(probe_config, "config.h");
@@ -210,6 +213,18 @@ probe_add_library(const char *name)
 }
 
 int
+probe_add_typesize(const char *name, const char *type_name)
+{
+	if (nprobe_typesizes >= PROBE_MAX) return -1;
+	snprintf(probe_typesizes[nprobe_typesizes].name,
+	         sizeof probe_typesizes[0].name, "%s", name);
+	snprintf(probe_typesizes[nprobe_typesizes].code,
+	         sizeof probe_typesizes[0].code, "%s", type_name);
+	++nprobe_typesizes;
+	return 0;
+}
+
+int
 probe_set_cc(const char *cc)
 {
 	snprintf(probe_cc, sizeof probe_cc, "%s", cc);
@@ -237,7 +252,7 @@ probe_run(const char *build_dir)
 	char config_path[512];
 	FILE *f;
 	int rc = 0;
-	size_t total = nprobe_headers + nprobe_funcs + nprobe_codes + nprobe_decls + nprobe_libs;
+	size_t total = nprobe_headers + nprobe_funcs + nprobe_codes + nprobe_decls + nprobe_libs + nprobe_typesizes;
 
 	if (total == 0)
 		return 0; /* nothing to probe */
@@ -354,11 +369,59 @@ probe_run(const char *build_dir)
 		}
 	}
 
+	/* 6. Probe type sizes: compile + run a program that prints sizeof(type)
+	 *    and use the output as the #define value. */
+	for (size_t i = 0; i < nprobe_typesizes; ++i) {
+		char code[512];
+		snprintf(code, sizeof code,
+		         "#include <sys/types.h>\n"
+		         "#include <stdlib.h>\n"
+		         "#include <stdio.h>\n"
+		         "#include <string.h>\n"
+		         "#include <time.h>\n"
+		         "#include <unistd.h>\n"
+		         "#include <fcntl.h>\n"
+		         "#include <signal.h>\n"
+		         "int main(void){printf(\"%%zu\\n\", sizeof(%s));return 0;}\n",
+		         probe_typesizes[i].code);
+		/* Compile to a temp executable */
+		char src[512], exe[512];
+		snprintf(src, sizeof src, "%s/probe-ts-%zu.c", tmpdir, i);
+		snprintf(exe, sizeof exe, "%s/probe-ts-%zu.exe", tmpdir, i);
+		FILE *sf = fopen(src, "w");
+		if (sf) {
+			fprintf(sf, "%s", code);
+			fclose(sf);
+			char cmd[1024];
+			snprintf(cmd, sizeof cmd, "%s %s -o %s %s 2>/dev/null",
+			         probe_cc[0] ? probe_cc : "cc",
+			         probe_cflags, exe, src);
+			if (system(cmd) == 0) {
+				/* Run the compiled binary and capture output */
+				char runcmd[1024];
+				snprintf(runcmd, sizeof runcmd, "%s 2>/dev/null", exe);
+				FILE *rf = popen(runcmd, "r");
+				if (rf) {
+					char val[64];
+					if (fgets(val, sizeof val, rf) != NULL) {
+						unsigned long sz = strtoul(val, NULL, 10);
+						char defname[128];
+						normalise_name(probe_typesizes[i].name, defname, sizeof defname);
+						fprintf(f, "#define %s %lu\n", defname, sz);
+					}
+					pclose(rf);
+				}
+			}
+			unlink(src);
+			unlink(exe);
+		}
+	}
+
 	fprintf(f, "\n#endif /* MEOW_CONFIG_H */\n");
 	fclose(f);
 
-	fprintf(stderr, "meow: probe: wrote %s (%zu checks, %zu headers, %zu funcs, %zu decls, %zu codes)\n",
-	        config_path, total, nprobe_headers, nprobe_funcs, nprobe_decls, nprobe_codes);
+	fprintf(stderr, "meow: probe: wrote %s (%zu checks, %zu headers, %zu funcs, %zu decls, %zu codes, %zu typesizes)\n",
+	        config_path, total, nprobe_headers, nprobe_funcs, nprobe_decls, nprobe_codes, nprobe_typesizes);
 
 	probe_fini();
 	return rc;
