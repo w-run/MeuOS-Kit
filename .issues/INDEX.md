@@ -109,7 +109,7 @@ src/compat/
 | ld-dwarf-merge | mt/ld | DWARF 节区合并 | 链接时合并 `.debug_*` 节区，生成 `.debug_line`/`.debug_info` 跨目标文件 | 🟢 | 本 commit（支持合并 `.debug_*` 非 ALLOC 节区；DWARF 重定位尚需独立调整） |
 | ld-build-id | mt/ld | `--build-id` | 生成 `.note.gnu.build-id`（FNV-1a hash，用于调试/构建标识） | 🟢 | 本 commit |
 | ld-eh-frame-hdr | mt/ld | `--eh-frame-hdr` | 生成 `.eh_frame_hdr`（异常处理帧索引，gcc 异常必需） | 🟢 | 本 commit |
-| ld-as-needed | mt/ld | `--as-needed` / `--no-as-needed` | 避免不必要的 DT_NEEDED 条目 | ⏳ | 待实现 |
+| ld-as-needed | mt/ld | `--as-needed` / `--no-as-needed` | 避免不必要的 DT_NEEDED 条目（阻塞于 .so 共享库输入支持） | ⏳ | CLI 框架已就位，需 .so 输入支持 |
 | ld-start-group | mt/ld | `--start-group` / `--end-group` | 循环依赖库解析（`-Wl,--start-group -la -lb -lc --end-group`） | 🟢 | 本 commit |
 | ld-whole-archive | mt/ld | `--whole-archive` / `--no-whole-archive` | 强制归档中所有目标文件链接（用于 plugin/init 段） | 🟢 | 本 commit |
 
