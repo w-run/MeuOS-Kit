@@ -964,28 +964,27 @@ x86_64_encode_insn(const struct mt_target *target,
 		}
 		if (is_avx_mov) {
 			unsigned opcode;
-			int reg_num;       /* ModRM.reg (destination) */
-			const struct x86_op *rm_op;   /* ModRM.r/m (source/memory) */
+			int reg_num;       /* ModRM.reg (destination / src when store) */
+			const struct x86_op *rm_op;   /* ModRM.r/m (source or memory) */
 			if (n == 2 && op[0].kind == OP_REG && op[1].kind == OP_REG) {
-				/* reg-reg: use load opcode, reg=dst, rm=src */
-				reg_num = op[0].reg;
-				rm_op = &op[1];
-				opcode = avx_op_load;
-			} else if (n == 2 && op[0].kind == OP_REG && op[1].kind == OP_MEM) {
-				/* load from mem: reg=dst, rm=mem */
-				reg_num = op[0].reg;
-				rm_op = &op[1];
-				opcode = avx_op_load;
-			} else if (n == 2 && op[0].kind == OP_MEM && op[1].kind == OP_REG) {
-				/* store to mem: reg=src, rm=mem */
+				/* vmov* %src, %dst: reg=dst, rm=src → load opcode */
 				reg_num = op[1].reg;
 				rm_op = &op[0];
+				opcode = avx_op_load;
+			} else if (n == 2 && op[0].kind == OP_REG && op[1].kind == OP_MEM) {
+				/* vmov* %src, (mem): reg=src, rm=mem → store opcode */
+				reg_num = op[0].reg;
+				rm_op = &op[1];
 				opcode = avx_op_store;
+			} else if (n == 2 && op[0].kind == OP_MEM && op[1].kind == OP_REG) {
+				/* vmov* (mem), %dst: reg=dst, rm=mem → load opcode */
+				reg_num = op[1].reg;
+				rm_op = &op[0];
+				opcode = avx_op_load;
 			} else
 				goto unsupported;
 			emit_vex(out->bytes, &out->size, is_256, avx_pp, reg_num, -1);
-			emit_u8(out->bytes, &out->size, 0x0F);
-			emit_u8(out->bytes, &out->size, opcode);
+			emit_u8(out->bytes, &out->size, opcode);  /* VEX (mmmmm=00001) implies 0x0F */
 			emit_modrm(out->bytes, &out->size, out, reg_num,
 			           rm_op, R_X86_64_PC32, -4);
 			goto done;

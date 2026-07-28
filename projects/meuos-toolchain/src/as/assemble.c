@@ -505,9 +505,8 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 				return as_error(as,
 					"instruction %s requires AVX (use -march=x86-64-v3 or higher)",
 					mnemonic);
-			/* AVX is enabled but encoder may lack VEX support. */
-			return as_error(as,
-				"instruction %s: encoder missing VEX/AVX support", mnemonic);
+			/* AVX is enabled — fall through to the encoder (it may still
+			 * reject the instruction if VEX encoding is not implemented). */
 		}
 
 		if (as->target->encode_insn(as->target, mnemonic, operand_text,
