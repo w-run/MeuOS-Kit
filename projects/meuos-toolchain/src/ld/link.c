@@ -750,6 +750,9 @@ section_rank(const char *name)
 	if (strcmp(name, ".dynamic") == 0) return 2;
 	if (strcmp(name, ".data") == 0 || strcmp(name, ".tdata") == 0) return 3;
 	if (strncmp(name, ".data.", 6) == 0) return 3;
+	if (strcmp(name, ".init_array") == 0) return 3;
+	if (strcmp(name, ".fini_array") == 0) return 3;
+	if (strcmp(name, ".preinit_array") == 0) return 3;
 	if (strcmp(name, ".bss") == 0 || strcmp(name, ".tbss") == 0) return 4;
 	/* Debug and other non-allocatable sections go after ALL loaded sections */
 	if (strncmp(name, ".debug", 6) == 0) return 5;
@@ -862,13 +865,16 @@ collect_sections(struct ld_context *ctx)
 		struct ld_object *object = &ctx->objects.items[i];
 		for (j = 0; j < object_section_count(object); ++j) {
 			if (object_get_section(object, j, &section) != 0)
-				return ld_errorf(ctx, "invalid section in object", object->name);
-			if (section.type != MT_SHT_PROGBITS &&
-			    section.type != MT_SHT_NOBITS)
-				continue;
-			/* Allocatable and non-allocatable PROGBITS sections
-			 * (e.g. .debug_*) are both collected.  Non-allocatable
-			 * sections get rank 5+ and are placed after loaded data. */
+			return ld_errorf(ctx, "invalid section in object", object->name);
+		if (section.type != MT_SHT_PROGBITS &&
+		    section.type != MT_SHT_NOBITS &&
+		    section.type != MT_SHT_INIT_ARRAY &&
+		    section.type != MT_SHT_FINI_ARRAY &&
+		    section.type != MT_SHT_PREINIT_ARRAY)
+			continue;
+		/* Allocatable and non-allocatable PROGBITS sections
+		 * (e.g. .debug_*) are both collected.  Non-allocatable
+		 * sections get rank 5+ and are placed after loaded data. */
 			name = object_section_name(object, j);
 			if (!name || !*name)
 				return ld_errorf(ctx, "section has no name", object->name);
@@ -912,7 +918,10 @@ collect_one_object_sections(struct ld_context *ctx, size_t object_index)
 	for (j = 0; j < object_section_count(object); ++j) {
 		if (object_get_section(object, j, &section) != 0)
 			return ld_errorf(ctx, "invalid section in object", object->name);
-		if (section.type != MT_SHT_PROGBITS && section.type != MT_SHT_NOBITS)
+		if (section.type != MT_SHT_PROGBITS && section.type != MT_SHT_NOBITS &&
+		    section.type != MT_SHT_INIT_ARRAY &&
+		    section.type != MT_SHT_FINI_ARRAY &&
+		    section.type != MT_SHT_PREINIT_ARRAY)
 			continue;
 		name = object_section_name(object, j);
 		if (!name || !*name)
@@ -2881,6 +2890,17 @@ build_dynamic_tables(struct ld_context *ctx)
 			return ld_error(ctx, "out of memory");
 		ctx->groups[rg].rank = 1; /* same rank as .rodata/dynstr/dynsym */
 	}
+	/* .init / .fini / .init_array / .fini_array / .preinit_array */
+	int have_init = (find_group(ctx, ".init") >= 0);
+	int have_fini = (find_group(ctx, ".fini") >= 0);
+	int have_init_arr = (find_group(ctx, ".init_array") >= 0);
+	int have_fini_arr = (find_group(ctx, ".fini_array") >= 0);
+	int have_preinit_arr = (find_group(ctx, ".preinit_array") >= 0);
+	if (have_init) ntags++;      /* DT_INIT */
+	if (have_fini) ntags++;      /* DT_FINI */
+	if (have_init_arr) ntags += 2;  /* DT_INIT_ARRAY + DT_INIT_ARRAYSZ */
+	if (have_fini_arr) ntags += 2;  /* DT_FINI_ARRAY + DT_FINI_ARRAYSZ */
+	if (have_preinit_arr) ntags += 2; /* DT_PREINIT_ARRAY + DT_PREINIT_ARRAYSZ */
 	ntags++; /* DT_NULL terminator */
 	size_t dynent = elf64 ? 16 : 8;
 	size_t dyn_total = ntags * dynent;
@@ -2897,6 +2917,23 @@ build_dynamic_tables(struct ld_context *ctx)
 	}
 	free(dd);
 
+	return 0;
+}
+
+/* Helper: write a DT_* entry with a uint64_t value (address or size).
+ * Advances *k after writing.  Returns 0 on success. */
+static int
+write_dt_addr(unsigned char *dp, int elf64, size_t *k,
+              uint64_t tag, uint64_t val)
+{
+	if (elf64) {
+		write64(dp + *k * 16 + 0, tag);
+		write64(dp + *k * 16 + 8, val);
+	} else {
+		write32(dp + *k * 8 + 0, (uint32_t)tag);
+		write32(dp + *k * 8 + 4, (uint32_t)val);
+	}
+	++*k;
 	return 0;
 }
 
@@ -3007,6 +3044,38 @@ fill_dynamic_addresses(struct ld_context *ctx)
 			write32(dp + k * 8 + 4, ctx->soname_dynstr_offset);
 		}
 		++k;
+	}
+
+	/* DT_INIT / DT_FINI / DT_INIT_ARRAY / DT_FINI_ARRAY / DT_PREINIT_ARRAY */
+	{
+		int dg;
+		dg = find_group(ctx, ".init");
+		if (dg >= 0 && write_dt_addr(dp, elf64, &k, MT_DT_INIT,
+		                             ctx->groups[dg].address) != 0) return -1;
+		dg = find_group(ctx, ".fini");
+		if (dg >= 0 && write_dt_addr(dp, elf64, &k, MT_DT_FINI,
+		                             ctx->groups[dg].address) != 0) return -1;
+		dg = find_group(ctx, ".init_array");
+		if (dg >= 0) {
+			if (write_dt_addr(dp, elf64, &k, MT_DT_INIT_ARRAY,
+			                  ctx->groups[dg].address) != 0) return -1;
+			if (write_dt_addr(dp, elf64, &k, MT_DT_INIT_ARRAYSZ,
+			                  ctx->groups[dg].size) != 0) return -1;
+		}
+		dg = find_group(ctx, ".fini_array");
+		if (dg >= 0) {
+			if (write_dt_addr(dp, elf64, &k, MT_DT_FINI_ARRAY,
+			                  ctx->groups[dg].address) != 0) return -1;
+			if (write_dt_addr(dp, elf64, &k, MT_DT_FINI_ARRAYSZ,
+			                  ctx->groups[dg].size) != 0) return -1;
+		}
+		dg = find_group(ctx, ".preinit_array");
+		if (dg >= 0) {
+			if (write_dt_addr(dp, elf64, &k, MT_DT_PREINIT_ARRAY,
+			                  ctx->groups[dg].address) != 0) return -1;
+			if (write_dt_addr(dp, elf64, &k, MT_DT_PREINIT_ARRAYSZ,
+			                  ctx->groups[dg].size) != 0) return -1;
+		}
 	}
 
 	/* DT_RELA / DT_RELASZ / DT_RELAENT (for shared libraries with GOT) */

@@ -145,6 +145,8 @@
 #define MT_DT_FINI_ARRAY 26
 #define MT_DT_INIT_ARRAYSZ 27
 #define MT_DT_FINI_ARRAYSZ 28
+#define MT_DT_PREINIT_ARRAY 32
+#define MT_DT_PREINIT_ARRAYSZ 33
 #define MT_DT_FLAGS 30
 #define MT_DT_GNU_HASH 0x6ffffef5
 #define MT_DT_VERSYM 0x6ffffff0
