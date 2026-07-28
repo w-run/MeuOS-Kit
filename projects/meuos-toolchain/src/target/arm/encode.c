@@ -700,15 +700,39 @@ ldr_mem:
 		return 0;
 	}
 
-	/* ---- NEON: vadd/vsub/vmul (integer) ---- */
-	if (nops >= 3 && mnemonic[0] == 'v') {
-		if (strcmp(mnemonic, "vadd") == 0) {
-			int rd, rn, rm;
-			if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rn)<0||reg_num(ops[2],&rm)<0) return -1;
+	/* ---- NEON: vadd/vsub/vand/vorr/veor/vmvn ---- */
+	if (mnemonic[0] == 'v') {
+		static const struct { const char *name; uint32_t base; int two_op; } neon_int[] = {
+			{"vadd", 0xF2000D00, 0}, {"vsub", 0xF3000D00, 0},
+			{"vand", 0xF2000D02, 0}, {"vorr", 0xF2200D02, 0},
+			{"veor", 0xF3000D02, 0}, {"vmvn", 0xF3B00500, 1},
+			{0, 0, 0}
+		};
+		for (int ni = 0; neon_int[ni].name; ni++) {
+			if (strcmp(mnemonic, neon_int[ni].name) != 0) continue;
+			int rd, rn = 0, rm = 0;
+			if (reg_num(ops[0],&rd)<0) return -1;
+			if (neon_int[ni].two_op) {
+				if (nops < 2 || reg_num(ops[1],&rm)<0) return -1;
+			} else {
+				if (nops < 3 || reg_num(ops[1],&rn)<0 || reg_num(ops[2],&rm)<0) return -1;
+			}
 			uint32_t d=(uint32_t)(rd&0x1F), n=(uint32_t)(rn&0x1F), m=(uint32_t)(rm&0x1F);
-			emit32(out->bytes, 0xF2000D00|((d>>1)<<12)|((d&1)<<22)|((n>>1)<<16)|((n&1)<<7)|((m>>1)<<0)|((m&1)<<5));
+			emit32(out->bytes, neon_int[ni].base|((d>>1)<<12)|((d&1)<<22)|((n>>1)<<16)|((n&1)<<7)|((m>>1)<<0)|((m&1)<<5));
 			return 0;
 		}
+	}
+
+	/* ---- NEON: vshl/vshr (immediate) ---- */
+	if (nops >= 2 && mnemonic[0] == 'v' && (strncmp(mnemonic, "vshl", 4) == 0 || strncmp(mnemonic, "vshr", 4) == 0)) {
+		int rd, rm, imm = 0;
+		if (reg_num(ops[0],&rd)<0) return -1;
+		if (nops >= 2 && reg_num(ops[1],&rm)<0) return -1;
+		if (nops >= 3) sscanf(ops[2], "#%i", &imm);
+		uint32_t d=(uint32_t)(rd&0x1F), m=(uint32_t)(rm&0x1F);
+		uint32_t base = (mnemonic[1] == 's' && mnemonic[3] == 'l') ? 0xF2800D00 : 0xF2800D00;
+		emit32(out->bytes, base|((d>>1)<<12)|((d&1)<<22)|((m>>1)<<0)|((m&1)<<5)|(imm&0x7F)<<16);
+		return 0;
 	}
 
 	/* ---- mla rd, rn, rm, ra (multiply-accumulate) ---- */
@@ -825,6 +849,66 @@ ldr_mem:
 		uint32_t base = is_double ? 0x0EB00B00 : 0x0EB00A00;
 		base |= ((d&1)<<22)|((d>>1)<<12)|imm8;
 		emit32(out->bytes, base); return 0;
+	}
+
+	/* ---- pkhtb/pkhbt rd, rn, rm ---- */
+	if (nops >= 3 && (strcmp(mnemonic, "pkhtb") == 0 || strcmp(mnemonic, "pkhbt") == 0)) {
+		int rd, rn, rm; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rn)<0||reg_num(ops[2],&rm)<0) return -1;
+		emit32(out->bytes, (mnemonic[2]=='h'?0xE6800010:0xE6800000) | (rd<<16) | (rn<<0) | (rm<<8));
+		return 0;
+	}
+
+	/* ---- ssat/usat rd, #sat, rn {,shift} ---- */
+	if (nops >= 3 && (strcmp(mnemonic, "ssat") == 0 || strcmp(mnemonic, "usat") == 0)) {
+		int rd, rn, sat = 0; if (reg_num(ops[0],&rd)<0||reg_num(ops[2],&rn)<0) return -1;
+		sscanf(ops[1], "#%i", &sat);
+		int is_usat = (mnemonic[0] == 'u');
+		uint32_t base = is_usat ? 0xE6E00010 : 0xE6A00010;
+		emit32(out->bytes, base | (rd<<16) | (rn<<0) | ((sat-1)<<16));
+		return 0;
+	}
+
+	/* ---- smlad rd, rn, rm, ra ---- */
+	if (nops >= 4 && strcmp(mnemonic, "smlad") == 0) {
+		int rd, rn, rm, ra;
+		if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rn)<0||reg_num(ops[2],&rm)<0||reg_num(ops[3],&ra)<0) return -1;
+		emit32(out->bytes, 0xE7000F10 | (rd<<16) | (ra<<12) | (rn<<0) | (rm<<8));
+		return 0;
+	}
+
+	/* ---- VFP compare to zero: fcmpzs/fcmpzd sd ---- */
+	if (nops >= 1 && (strcmp(mnemonic, "fcmpzs") == 0 || strcmp(mnemonic, "fcmpzd") == 0)) {
+		int rd; if (reg_num(ops[0],&rd)<0) return -1;
+		int is_double = (mnemonic[5] == 'd');
+		uint32_t d=(uint32_t)(rd&0x1F);
+		emit32(out->bytes, (is_double?0x0EB50BC0:0x0EB50AC0)|((d&1)<<22)|((d>>1)<<12));
+		return 0;
+	}
+
+	/* ---- VFP move: fmsr/fmrs (VFP<->core register) ---- */
+	if (nops >= 2 && (strcmp(mnemonic, "fmsr") == 0 || strcmp(mnemonic, "fmrs") == 0)) {
+		int to_vfp = (mnemonic[1] == 'm');
+		int rd, rm;
+		if (to_vfp) { /* fmsr: rd = core, rm = VFP */
+			if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rm)<0) return -1;
+		} else { /* fmrs: rd = VFP, rm = core */
+			if (reg_num(ops[0],&rm)<0||reg_num(ops[1],&rd)<0) return -1;
+		}
+		uint32_t s = (uint32_t)((to_vfp?rm:rd)&0x1F);
+		uint32_t core_r = (uint32_t)(to_vfp?rd:rm);
+		uint32_t base = 0x0E000A10 | ((s&1)<<16) | ((s>>1)<<0) | (core_r<<12);
+		emit32(out->bytes, base | (to_vfp?0:(1<<20)));
+		return 0;
+	}
+
+	/* ---- VFP vcmpe: compare with NaN check ---- */
+	if (nops >= 2 && (strcmp(mnemonic, "vcmpe") == 0 || strcmp(mnemonic, "vcmpes") == 0 || strcmp(mnemonic, "vcmped") == 0)) {
+		int rd, rm;
+		if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rm)<0) return -1;
+		int is_double = (mnemonic[5] == 'd');
+		uint32_t d=(uint32_t)(rd&0x1F), m=(uint32_t)(rm&0x1F);
+		emit32(out->bytes, (is_double?0x0EB40BC0:0x0EB40AC0)|((d&1)<<22)|((d>>1)<<12)|((m&1)<<5)|((m>>1)<<16)|(1<<7));
+		return 0;
 	}
 
 	return -1; /* unsupported */
