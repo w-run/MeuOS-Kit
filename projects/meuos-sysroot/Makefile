@@ -73,7 +73,7 @@ $(TEST_BIN): $(TEST_SRCS) $(MSYS_LIB)
 
 check: $(MKMSYS_BIN) $(TEST_BIN)
 	@# 1) Build a .msys from a real sysroot (if available)
-	@for d in ../sysroot ../sysroot-aarch64 ../sysroot-riscv64; do \
+	@for d in ../sysroot ../sysroot/aarch64 ../sysroot/riscv64; do \
 		if [ -d "$$d" ] && [ -f "$$d/usr/lib/libc-meuos.a" ]; then \
 			arch=$$(basename $$d | sed 's/sysroot-//'); \
 			[ "$$arch" = "sysroot" ] && arch=x86_64; \

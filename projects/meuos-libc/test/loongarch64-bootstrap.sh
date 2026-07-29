@@ -28,7 +28,7 @@ ascc=${ASCC:-loongarch64-linux-gnu-gcc}
 mt_ld=${MT_LD:-"$root/../meuos-toolchain/build/bin/ld"}
 mt_as=${MT_AS:-"$root/../meuos-toolchain/build/bin/as"}
 build=${BUILD:-"$root/build/loongarch64"}
-sysroot=${SYSROOT:-"$root/../sysroot-loongarch64"}
+sysroot=${SYSROOT:-"$root/../sysroot/loongarch64"}
 qemu=${MEUOS_LOONGARCH64_QEMU:-}
 work=${TMPDIR:-/tmp}/meuos-loongarch64-bootstrap.$$
 trap 'rm -rf "$work"' EXIT HUP INT TERM

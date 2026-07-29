@@ -14,7 +14,7 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 mcc=${1:-"$root/mcc"}
 kitroot=$(CDPATH= cd -- "$(dirname -- "$root")/.." && pwd)
-sysroot=${2:-"$kitroot/sysroot-aarch64"}
+sysroot=${2:-"$kitroot/sysroot/aarch64"}
 qvm=${QVM:-"$kitroot/env/bin/qvm"}
 
 if [ ! -f "$sysroot/usr/lib/libc-meuos.a" ]; then

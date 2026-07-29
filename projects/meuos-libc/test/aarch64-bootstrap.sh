@@ -18,7 +18,7 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 mcc=${MCC:-"$root/../mcc/mcc"}
 ascc=${ASCC:-aarch64-linux-gnu-gcc}
 build=${BUILD:-"$root/build/aarch64"}
-sysroot=${SYSROOT:-"$root/../sysroot-aarch64"}
+sysroot=${SYSROOT:-"$root/../sysroot/aarch64"}
 qemu=${MEUOS_AARCH64_QEMU:-}
 work=${TMPDIR:-/tmp}/meuos-aarch64-bootstrap.$$
 trap 'rm -rf "$work"' EXIT HUP INT TERM
