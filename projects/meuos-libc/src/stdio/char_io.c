@@ -156,7 +156,19 @@ puts(const char *text)
 int
 fflush(FILE *stream)
 {
+	if (!stream) {
+		/* Flush all output streams. This minimal libc has no internal
+		 * buffering — all writes go directly to write(2). For streams
+		 * backed by a FILE_COOKIE with writefn, there is no write-back
+		 * buffer either (each write calls writefn inline).  Nothing
+		 * to flush, fsync would be a no-op on stdout/stderr pipes
+		 * and is not worth a syscall. */
+		return 0;
+	}
+	/* For a specific stream: no buffer to flush. */
 	(void)stream;
+	/* POSIX requires fflush to set the error indicator on failure;
+	 * this minimal implementation always succeeds. */
 	return 0;
 }
 
