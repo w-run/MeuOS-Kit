@@ -2109,7 +2109,7 @@ build_rela_dyn(struct ld_context *ctx)
 			}
 			uint64_t info;
 			if (ctx->target->elf_class == MT_ELFCLASS32)
-				info = (sym_idx << 8) | MT_R_X86_64_JUMP_SLOT;
+				info = (sym_idx << 8) | MT_R_386_JUMP_SLOT;
 			else
 				info = ((uint64_t)sym_idx << 32) | MT_R_X86_64_JUMP_SLOT;
 			if (rela_dyn_add(ctx, got_entry, info, 0) != 0)

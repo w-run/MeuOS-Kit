@@ -1,0 +1,22 @@
+.text
+.globl main
+main:
+	endbr64
+	subq $48, %rsp
+	leaq 0(%rsp), %rax
+	addq $4, %rax
+	leaq 0(%rsp), %rcx
+	subq %rcx, %rax
+	movl $1, %ecx
+	cqto
+	idivq %rcx
+	movq %rax, 20(%rsp)
+	cmpq $32, %rax
+	movl $1, %ecx
+	movl $0, %eax
+	cmovl %ecx, %eax
+	addq $48, %rsp
+	ret
+.type main, @function
+.size main, .-main
+.section .note.GNU-stack,"",@progbits

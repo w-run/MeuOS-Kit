@@ -566,7 +566,17 @@ int msys_verify(struct msys *m, const char *name)
 					uint8_t stored[32];
 					memcpy(stored, p + 32 + nlen, 32);
 					uint8_t computed[32];
-					sha256(data, dsize, computed);
+					uint32_t usz = read32(p + 14); /* uncompressed_size */
+					if (usz != 0) {
+						/* Data is compressed — decompress first */
+						size_t dec_size;
+						void *dec = decompress(m, data, dsize, &dec_size);
+						if (!dec) return -1;
+						sha256(dec, dec_size, computed);
+						free(dec);
+					} else {
+						sha256(data, dsize, computed);
+					}
 					return memcmp(stored, computed, 32) == 0 ? 0 : -1;
 				}
 				scan++;
@@ -597,7 +607,16 @@ int msys_verify_all(struct msys *m)
 			uint8_t stored[32];
 			memcpy(stored, p + 32 + nlen, 32);
 			uint8_t computed[32];
-			sha256(data, sz, computed);
+			uint32_t usz = read32(p + 14);
+			if (usz != 0) {
+				size_t dec_sz;
+				void *dec = decompress(m, data, sz, &dec_sz);
+				if (!dec) continue;
+				sha256(dec, dec_sz, computed);
+				free(dec);
+			} else {
+				sha256(data, sz, computed);
+			}
 			if (memcmp(stored, computed, 32) != 0) {
 				errno = EIO;
 				return -1;

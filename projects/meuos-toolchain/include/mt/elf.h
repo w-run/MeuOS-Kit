@@ -184,6 +184,9 @@
 #define MT_R_X86_64_GOTPC32 26
 #define MT_R_X86_64_PLT32_B 43
 
+/* i386 relocation types */
+#define MT_R_386_JUMP_SLOT 7
+
 enum mt_elf_status {
 	MT_ELF_OK = 0,
 	MT_ELF_E_ARGUMENT = 1,

@@ -12,9 +12,13 @@ fnmatch(const char *pattern, const char *string, int flags)
 	int period   = !!(flags & FNM_PERIOD);
 	int casefold = !!(flags & FNM_CASEFOLD);
 
-	if (period && string[0] == '.' &&
-	    (pattern[0] != '.' || (pattern[0] == '.' && pattern[1] == '*')))
-		return FNM_NOMATCH;
+	if (period && string[0] == '.') {
+		/* Skip leading '*' to find first non-'*' char */
+		const char *p = pattern;
+		while (*p == '*') p++;
+		if (*p != '.')
+			return FNM_NOMATCH;
+	}
 
 	for (;;) {
 		unsigned char pc = (unsigned char)*pattern;

@@ -1,6 +1,7 @@
 /* meow - command execution and package discovery. */
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <dirent.h>
 #include <string.h>
 #include <sys/wait.h>
@@ -98,12 +99,24 @@ run(const char *command)
 			if (select(maxfd + 1, &rfds, NULL, NULL, NULL) < 0)
 				break;
 			if (!out_eof && FD_ISSET(out_pipe[0], &rfds)) {
-				if (out_len + 4096 > out_cap) { out_cap *= 2; out_buf = realloc(out_buf, out_cap); }
+				if (out_len + 4096 > out_cap) {
+					if (out_cap > SIZE_MAX / 2) { free(out_buf); free(err_buf); return -1; }
+					out_cap *= 2;
+					char *new_buf = realloc(out_buf, out_cap);
+					if (!new_buf) { free(out_buf); free(err_buf); return -1; }
+					out_buf = new_buf;
+				}
 				ssize_t n = read(out_pipe[0], out_buf + out_len, 4096);
 				if (n <= 0) out_eof = 1; else out_len += n;
 			}
 			if (!err_eof && FD_ISSET(err_pipe[0], &rfds)) {
-				if (err_len + 4096 > err_cap) { err_cap *= 2; err_buf = realloc(err_buf, err_cap); }
+				if (err_len + 4096 > err_cap) {
+					if (err_cap > SIZE_MAX / 2) { free(out_buf); free(err_buf); return -1; }
+					err_cap *= 2;
+					char *new_buf = realloc(err_buf, err_cap);
+					if (!new_buf) { free(out_buf); free(err_buf); return -1; }
+					err_buf = new_buf;
+				}
 				ssize_t n = read(err_pipe[0], err_buf + err_len, 4096);
 				if (n <= 0) err_eof = 1; else err_len += n;
 			}
