@@ -1188,7 +1188,7 @@ collect_shared_object_symbols(struct ld_context *ctx, size_t object_index)
 	if (dso_dynsym_sec < 0) return 0;
 
 	size_t entry_size = (size_t)section.entry_size;
-	size_t sym_size = (ctx->target->elf_class == 1) ? 16 : 24;
+	size_t sym_size = (object->elf_class == 1) ? 16 : 24;
 	if (entry_size < sym_size || section.size < entry_size) return 0;
 	size_t sym_count = section.size / entry_size;
 
