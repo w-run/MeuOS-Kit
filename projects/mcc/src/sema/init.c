@@ -51,8 +51,10 @@ initadd(struct initparser *p, struct init *new)
 			break;
 		/* replace any initializers that `new` covers */
 		if (old->end * 8 - old->bits.after <= new->end * 8 - new->bits.after) {
-			do old = old->next;
-			while (old && old->end * 8 - old->bits.after <= new->end * 8 - new->bits.after);
+			do {
+				old = old->next;
+				init = &(*init)->next;
+			} while (old && old->end * 8 - old->bits.after <= new->end * 8 - new->bits.after);
 			break;
 		}
 		/* `old` covers `new`, keep looking */

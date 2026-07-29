@@ -534,6 +534,9 @@ int msys_getxattr(struct msys *m, const char *name, const char *key,
 
 /* ---- verify (SHA-256 content integrity) ---- */
 
+/* Forward declaration: decompress is defined after the verify section */
+static void *decompress(struct msys *m, const void *data, size_t dsize, size_t *out_size);
+
 int msys_verify(struct msys *m, const char *name)
 {
 	size_t dsize;
