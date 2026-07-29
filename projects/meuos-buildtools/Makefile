@@ -22,6 +22,10 @@ MODULE_OBJS := $(MODULES:%=$(BUILD)/%.o)
 BIN := $(BUILD)/buildtools
 SYMLINKS := $(MODULES:%=$(BUILD)/%)
 
+# m4 engine library (from meow)
+MEOW_DIR := ../meow
+M4_ENGINE_O := $(MEOW_DIR)/$(BUILD)/libm4/m4_engine.o
+
 .PHONY: all clean check install
 
 all: $(BIN) $(SYMLINKS)
@@ -30,6 +34,11 @@ all: $(BIN) $(SYMLINKS)
 $(BUILD)/m4.o: $(SRC)/m4.c
 	@mkdir -p $(@D)
 	$(HOST_CC) -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -c -o $@ $<
+
+# Build m4_engine.o from meow source
+$(M4_ENGINE_O): $(MEOW_DIR)/src/libm4/m4_engine.c $(MEOW_DIR)/src/libm4/m4_engine.h
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -I$(MEOW_DIR)/src -I$(MEOW_DIR)/src/include -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -c -o $@ $<
 
 $(BUILD)/gperf.o: $(SRC)/gperf.c
 	@mkdir -p $(@D)
@@ -44,7 +53,7 @@ $(BUILD)/buildtools.o: $(SRC)/buildtools.c
 	$(HOST_CC) -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -c -o $@ $<
 
 # Link single binary
-$(BIN): $(BUILD)/buildtools.o $(MODULE_OBJS)
+$(BIN): $(BUILD)/buildtools.o $(MODULE_OBJS) $(M4_ENGINE_O)
 	$(HOST_CC) -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -o $@ $^
 
 # Create symlinks (BusyBox style)
