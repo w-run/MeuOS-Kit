@@ -1,0 +1,51 @@
+name: meuos-libc
+version: 1.0
+default: all
+
+[variables]
+  LIBC: /workspace/MeuOS-Kit/projects/meuos-libc
+  BLD: /workspace/MeuOS-Kit/projects/meuos-libc/build/x86_64
+  CC: cc
+  AR: ar
+
+[all]
+  deps: libc-meuos.a, libatomic-meuos.a, crt1.o
+
+[libc-meuos.a]
+  outputs: %BLD%/libc-meuos.a
+  run: |
+    mkdir -p %BLD%/arch %BLD%/crt %BLD%/internal %BLD%/string %BLD%/stdlib %BLD%/stdio %BLD%/syscall %BLD%/thread %BLD%/ctype %BLD%/signal %BLD%/dirent %BLD%/errno %BLD%/socket %BLD%/regex %BLD%/complex %BLD%/wchar %BLD%/locale %BLD%/time %BLD%/netdb %BLD%/termios %BLD%/dlfcn %BLD%/glob
+    cd %LIBC% && find src -path 'src/compat' -prune -o -name '*.c' -print | while read f; do mkdir -p "%BLD%/$(dirname "$f")"; %CC% -I%LIBC%/include -I%LIBC%/src -c "$f" -o "%BLD%/${f%.c}.o"; done
+    %CC% -c %LIBC%/crt/x86_64/crt1.S -o %BLD%/crt/crt1.o
+    %CC% -c %LIBC%/src/internal/arch/x86_64/syscall.S -o %BLD%/internal/syscall.o
+    %CC% -c %LIBC%/src/arch/x86_64/atomic.S -o %BLD%/arch/atomic.o
+    %CC% -c %LIBC%/src/arch/x86_64/setjmp.S -o %BLD%/arch/setjmp.o
+    %CC% -c %LIBC%/src/arch/x86_64/sigreturn.S -o %BLD%/arch/sigreturn.o
+    %CC% -c %LIBC%/src/arch/x86_64/thread_clone.S -o %BLD%/arch/thread_clone.o
+    cd %BLD% && find . -name '*.o' ! -name 'atomic.o' ! -name 'crt1.o' ! -path './compat/*' | sort | xargs %AR% rcs libc-meuos.a
+    cp %BLD%/crt/crt1.o %BLD%/crt1.o
+
+[libatomic-meuos.a]
+  outputs: %BLD%/libatomic-meuos.a
+  run: |
+    mkdir -p %BLD%/arch
+    %CC% -c %LIBC%/src/arch/x86_64/atomic.S -o %BLD%/arch/atomic.o
+    %AR% rcs %BLD%/libatomic-meuos.a %BLD%/arch/atomic.o
+
+[crt1.o]
+  outputs: %BLD%/crt1.o
+  run: |
+    mkdir -p %BLD%
+    %CC% -c %LIBC%/crt/x86_64/crt1.S -o %BLD%/crt1.o
+
+[install]
+  deps: all
+  run: |
+    mkdir -p /workspace/MeuOS-Kit/projects/sysroot/usr/lib /workspace/MeuOS-Kit/projects/sysroot/usr/include
+    cp %BLD%/libc-meuos.a /workspace/MeuOS-Kit/projects/sysroot/usr/lib/
+    cp %BLD%/libatomic-meuos.a /workspace/MeuOS-Kit/projects/sysroot/usr/lib/
+    cp %BLD%/crt1.o /workspace/MeuOS-Kit/projects/sysroot/usr/lib/
+    cp -r %LIBC%/include/. /workspace/MeuOS-Kit/projects/sysroot/usr/include/
+
+[clean]
+  run: rm -rf /workspace/MeuOS-Kit/projects/meuos-libc/build

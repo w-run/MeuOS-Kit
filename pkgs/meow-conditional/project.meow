@@ -1,0 +1,20 @@
+name: meow-conditional
+version: 1.0
+
+[native]
+  when: ARCH == "x86_64"
+  run: printf "native" > /tmp/meow-conditional.result
+
+[not-native]
+  when: ARCH != "x86_64"
+  run: printf "cross" > /tmp/meow-conditional.result
+
+[verify]
+  deps: native
+  run: test "$(cat /tmp/meow-conditional.result)" = "native"
+
+[all]
+  deps: native
+
+[clean]
+  run: rm -f /tmp/meow-conditional.result

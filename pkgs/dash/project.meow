@@ -1,0 +1,28 @@
+name: dash
+version: 0.5.12
+default: all
+
+[variables]
+  CC: mcc
+  CFLAGS: -O2 --sysroot=%MEUOS_SYSROOT%
+
+[all]
+  deps: install
+
+[fetch]
+  run: wget -c http://gondor.apana.org.au/~herbert/dash/files/dash-0.5.12.tar.gz -O %DL_DIR%/dash-0.5.12.tar.gz
+
+[unpack]
+  deps: fetch
+  run: mkdir -p %BUILD_DIR% && tar xf %DL_DIR%/dash-0.5.12.tar.gz -C %BUILD_DIR%
+
+[build]
+  deps: unpack
+  run: cd %BUILD_DIR%/dash-0.5.12 && ./configure --host=%HOST% --prefix=/usr && make
+
+[install]
+  deps: build
+  run: cd %BUILD_DIR%/dash-0.5.12 && make DESTDIR=%MEUOS_SYSROOT% install
+
+[clean]
+  run: rm -rf %BUILD_DIR%/dash-0.5.12

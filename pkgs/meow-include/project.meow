@@ -1,0 +1,15 @@
+name: meow-include
+version: 1
+default: all
+
+[all]
+  deps: verify
+  phony: true
+
+[verify]
+  phony: true
+  run: printf included > /tmp/meow-include.result
+
+[clean]
+  phony: true
+  run: rm -f /tmp/meow-include.result

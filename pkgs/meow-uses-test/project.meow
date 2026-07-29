@@ -1,0 +1,8 @@
+name: meow-uses-test
+version: 1.0
+uses: zlib
+default: show-vars
+
+[show-vars]
+  phony: true
+  run: echo "LIBS=%LIBS%"

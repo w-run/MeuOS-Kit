@@ -22,10 +22,17 @@
 
 /* 当前解析状态 */
 
+enum meow_section { SEC_NONE, SEC_PROBE, SEC_VARIABLES, SEC_DEPENDS };
+
 static struct target *current_target;
+static enum meow_section current_section;
 static int in_runblock;    /* 收集 run: 块的行 */
 static char runblock_buf[32768];
 static size_t runblock_len;
+
+/* 探测子节区（[probe] 内部） */
+static int in_probe_list;
+static char probe_list_type[32];
 
 /* Forward declarations */
 static void interpolate(const char *in, char *out, size_t outsz);
@@ -143,6 +150,9 @@ parse_meow(char *data)
 	runblock_len = 0;
 	runblock_buf[0] = '\0';
 	current_target = NULL;
+	current_section = SEC_NONE;
+	in_probe_list = 0;
+	probe_list_type[0] = '\0';
 	ntargets = 0;
 	nuses = 0;
 	default_target = NULL;
@@ -173,13 +183,40 @@ parse_meow(char *data)
 			}
 		}
 
-		/* [section] — 构建目标 */
+		/* [section] — 构建目标或特殊节区 */
 		if (text[0] == '[') {
 			flush_runblock();
 			char *closing = strchr(text, ']');
 			if (!closing) return -1;
 			*closing = '\0';
 			const char *tname = trim(text + 1);
+
+			/* 检查特殊节区 */
+			if (strcmp(tname, "probe") == 0) {
+				current_section = SEC_PROBE;
+				current_target = NULL;
+				probe_reset();
+				in_probe_list = 0;
+				probe_list_type[0] = '\0';
+				line = end;
+				continue;
+			}
+			if (strcmp(tname, "variables") == 0 || strcmp(tname, "env") == 0) {
+				current_section = SEC_VARIABLES;
+				current_target = NULL;
+				line = end;
+				continue;
+			}
+			if (strcmp(tname, "depends") == 0) {
+				current_section = SEC_DEPENDS;
+				current_target = NULL;
+				line = end;
+				continue;
+			}
+
+			/* 普通构建目标 */
+			current_section = SEC_NONE;
+			in_probe_list = 0;
 			current_target = add_target(tname);
 			if (!current_target) return -1;
 			state = 1;
@@ -193,6 +230,99 @@ parse_meow(char *data)
 			*colon++ = '\0';
 			char *key = trim(text);
 			char *val = trim(colon);
+
+			/* ———— 特殊节区内部的 key/value ———— */
+
+			/* [probe] 子项处理 */
+			if (current_section == SEC_PROBE) {
+				/* YAML 列表项: - item */
+				if (text[0] == '-' && in_probe_list) {
+					char *item = trim(text + 1);
+					if (strcmp(probe_list_type, "headers") == 0)
+						probe_add_header(item);
+					else if (strcmp(probe_list_type, "functions") == 0)
+						probe_add_function(item);
+					else if (strcmp(probe_list_type, "decls") == 0)
+						probe_add_decl(item);
+					else if (strcmp(probe_list_type, "libraries") == 0)
+						probe_add_library(item);
+					else if (strcmp(probe_list_type, "codes") == 0) {
+						char *code_body = strchr(item, ':');
+						if (code_body) {
+							*code_body++ = '\0';
+							probe_add_code(trim(item), trim(code_body));
+						}
+					} else if (strcmp(probe_list_type, "typesizes") == 0) {
+						char *type_name = strchr(item, ':');
+						if (type_name) {
+							*type_name++ = '\0';
+							probe_add_typesize(trim(item), trim(type_name));
+						}
+					}
+					line = end;
+					continue;
+				}
+				/* 探测节区 key: value */
+				in_probe_list = 0;
+				if (strcmp(key, "cc") == 0) { probe_set_cc(val); }
+				else if (strcmp(key, "cflags") == 0) { probe_set_cflags(val); }
+				else if (strcmp(key, "config") == 0) { probe_set_config(trim(val)); }
+				else if (strcmp(key, "headers") == 0) {
+					in_probe_list = 1; strcpy(probe_list_type, "headers");
+					/* 也可以用逗号分隔一行内指定: headers: stdio.h, stdlib.h */
+					char *p = val;
+					while (*p) {
+						while (*p == ' ' || *p == ',') p++;
+						if (!*p) break;
+						char *start = p;
+						while (*p && *p != ',') p++;
+						char saved = *p; *p = '\0';
+						probe_add_header(trim(start));
+						*p = saved;
+					}
+				}
+				else if (strcmp(key, "functions") == 0) {
+					in_probe_list = 1; strcpy(probe_list_type, "functions");
+					char *p = val;
+					while (*p) {
+						while (*p == ' ' || *p == ',') p++;
+						if (!*p) break;
+						char *start = p;
+						while (*p && *p != ',') p++;
+						char saved = *p; *p = '\0';
+						probe_add_function(trim(start));
+						*p = saved;
+					}
+				}
+				else if (strcmp(key, "decls") == 0) { in_probe_list = 1; strcpy(probe_list_type, "decls"); }
+				else if (strcmp(key, "libraries") == 0) { in_probe_list = 1; strcpy(probe_list_type, "libraries"); }
+				else if (strcmp(key, "codes") == 0) { in_probe_list = 1; strcpy(probe_list_type, "codes"); }
+				else if (strcmp(key, "typesizes") == 0) { in_probe_list = 1; strcpy(probe_list_type, "typesizes"); }
+				line = end;
+				continue;
+			}
+
+			/* [variables] / [env] 节区 */
+			if (current_section == SEC_VARIABLES) {
+				set_env(key, val);
+				line = end;
+				continue;
+			}
+
+			/* [depends] 节区 */
+			if (current_section == SEC_DEPENDS) {
+				if (text[0] == '-' || text[0] == '*') {
+					char *pkg = trim(text + 1);
+					if (nrecipe_deps < RECIPE_DEPS_MAX) {
+						snprintf(recipe_deps[nrecipe_deps], sizeof recipe_deps[0], "%s", pkg);
+						nrecipe_deps++;
+					}
+				}
+				line = end;
+				continue;
+			}
+
+			/* ———— 普通 target 节区 ———— */
 
 			/* deps: a, b, c — parse as comma-separated target deps */
 			if (strcmp(key, "deps") == 0 && current_target) {
@@ -218,7 +348,40 @@ parse_meow(char *data)
 				if (*trimmed)
 					current_target->when = strdup(trimmed);
 			}
-			/* default: target — 设置默认 target */
+			/* inputs: / outputs: — 增量构建跟踪 */
+			else if (strcmp(key, "inputs") == 0 && current_target) {
+				char *p = val;
+				while (*p) {
+					while (*p == ' ' || *p == ',') p++;
+					if (!*p) break;
+					char *start = p;
+					while (*p && *p != ',') p++;
+					char saved = *p; *p = '\0';
+					char *iname = trim(start);
+					if (current_target->ninputs < TARGET_DEPS_MAX)
+						current_target->inputs[current_target->ninputs++] = strdup(iname);
+					*p = saved;
+				}
+			}
+			else if (strcmp(key, "outputs") == 0 && current_target) {
+				char *p = val;
+				while (*p) {
+					while (*p == ' ' || *p == ',') p++;
+					if (!*p) break;
+					char *start = p;
+					while (*p && *p != ',') p++;
+					char saved = *p; *p = '\0';
+					char *oname = trim(start);
+					if (current_target->noutputs < TARGET_DEPS_MAX)
+						current_target->outputs[current_target->noutputs++] = strdup(oname);
+					*p = saved;
+				}
+			}
+			/* phony: true — 标记为伪目标 */
+			else if (strcmp(key, "phony") == 0 && current_target) {
+				if (strcmp(val, "true") == 0 || strcmp(val, "yes") == 0 || strcmp(val, "1") == 0)
+					current_target->phony = 1;
+			}
 			else if (strcmp(key, "default") == 0) {
 				default_target = strdup(val);
 			}
@@ -271,6 +434,23 @@ parse_meow(char *data)
 					}
 				}
 				setenv("CFLAGS", agg, 1);
+			}
+			/* depends: pkg1, pkg2 — 跨包依赖 */
+			else if (strcmp(key, "depends") == 0) {
+				char *p = val;
+				while (*p) {
+					while (*p == ' ' || *p == ',') p++;
+					if (!*p) break;
+					char *start = p;
+					while (*p && *p != ',') p++;
+					char saved = *p; *p = '\0';
+					if (nrecipe_deps < RECIPE_DEPS_MAX) {
+						snprintf(recipe_deps[nrecipe_deps], sizeof recipe_deps[0],
+						         "%s", trim(start));
+						nrecipe_deps++;
+					}
+					*p = saved;
+				}
 			}
 			/* name: / version: — 元数据，同时导出 %NAME%/%VERSION% 和 %PKG_NAME%/%PKG_VERSION% */
 			else if (strcmp(key, "name") == 0 || strcmp(key, "version") == 0) {

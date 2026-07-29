@@ -1,0 +1,8 @@
+name: meow-env-test
+version: 1
+
+[show]
+  run: echo "%ARCH%" ; echo "%HOST%"
+
+[clean]
+  run: :

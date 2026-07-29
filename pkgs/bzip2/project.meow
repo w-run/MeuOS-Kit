@@ -1,0 +1,88 @@
+name: bzip2
+version: 1.0.8
+default: all
+
+[variables]
+  CC: /workspace/MeuOS-Kit/projects/mcc/mcc
+  AR: ar
+  CFLAGS: -O2 --specs=meuos --sysroot=/workspace/MeuOS-Kit/sysroot -D_FILE_OFFSET_BITS=64 -I%SRC_DIR%
+  SRC_DIR: /tmp/meow-build/bzip2-1.0.8
+  BLD_DIR: /tmp/meow-build/bzip2-1.0.8
+  TARBALL: /tmp/bzip2-1.0.8.tar.gz
+
+[all]
+  deps: bzip2, bzip2recover
+
+[fetch]
+  run: test -f %TARBALL% || wget -c https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz -O %TARBALL%
+
+[unpack]
+  deps: fetch
+  run: mkdir -p /tmp/meow-build && tar xf %TARBALL% -C /tmp/meow-build
+
+[blocksort.o]
+  deps: unpack
+  outputs: %BLD_DIR%/blocksort.o
+  run: %CC% %CFLAGS% -c %SRC_DIR%/blocksort.c -o %BLD_DIR%/blocksort.o
+
+[huffman.o]
+  deps: unpack
+  outputs: %BLD_DIR%/huffman.o
+  run: %CC% %CFLAGS% -c %SRC_DIR%/huffman.c -o %BLD_DIR%/huffman.o
+
+[crctable.o]
+  deps: unpack
+  outputs: %BLD_DIR%/crctable.o
+  run: %CC% %CFLAGS% -c %SRC_DIR%/crctable.c -o %BLD_DIR%/crctable.o
+
+[randtable.o]
+  deps: unpack
+  outputs: %BLD_DIR%/randtable.o
+  run: %CC% %CFLAGS% -c %SRC_DIR%/randtable.c -o %BLD_DIR%/randtable.o
+
+[compress.o]
+  deps: unpack
+  outputs: %BLD_DIR%/compress.o
+  run: %CC% %CFLAGS% -c %SRC_DIR%/compress.c -o %BLD_DIR%/compress.o
+
+[decompress.o]
+  deps: unpack
+  outputs: %BLD_DIR%/decompress.o
+  run: %CC% %CFLAGS% -c %SRC_DIR%/decompress.c -o %BLD_DIR%/decompress.o
+
+[bzlib.o]
+  deps: unpack
+  outputs: %BLD_DIR%/bzlib.o
+  run: %CC% %CFLAGS% -c %SRC_DIR%/bzlib.c -o %BLD_DIR%/bzlib.o
+
+[bzip2.o]
+  deps: unpack
+  outputs: %BLD_DIR%/bzip2.o
+  run: %CC% %CFLAGS% -c %SRC_DIR%/bzip2.c -o %BLD_DIR%/bzip2.o
+
+[bzip2recover.o]
+  deps: unpack
+  outputs: %BLD_DIR%/bzip2recover.o
+  run: %CC% %CFLAGS% -c %SRC_DIR%/bzip2recover.c -o %BLD_DIR%/bzip2recover.o
+
+[libbz2.a]
+  deps: blocksort.o, huffman.o, crctable.o, randtable.o, compress.o, decompress.o, bzlib.o
+  outputs: %BLD_DIR%/libbz2.a
+  run: %AR% rcs %BLD_DIR%/libbz2.a %BLD_DIR%/blocksort.o %BLD_DIR%/huffman.o %BLD_DIR%/crctable.o %BLD_DIR%/randtable.o %BLD_DIR%/compress.o %BLD_DIR%/decompress.o %BLD_DIR%/bzlib.o
+
+[bzip2]
+  deps: libbz2.a, bzip2.o
+  outputs: %BLD_DIR%/bzip2
+  run: %CC% %CFLAGS% -o %BLD_DIR%/bzip2 %BLD_DIR%/bzip2.o -L%BLD_DIR% -lbz2
+
+[bzip2recover]
+  deps: libbz2.a, bzip2recover.o
+  outputs: %BLD_DIR%/bzip2recover
+  run: %CC% %CFLAGS% -o %BLD_DIR%/bzip2recover %BLD_DIR%/bzip2recover.o -L%BLD_DIR% -lbz2
+
+[test]
+  deps: bzip2
+  run: echo "hello" | %BLD_DIR%/bzip2 | %BLD_DIR%/bzip2 -d | grep hello
+
+[clean]
+  run: rm -f %BLD_DIR%/*.o %BLD_DIR%/bzip2 %BLD_DIR%/bzip2recover %BLD_DIR%/libbz2.a
