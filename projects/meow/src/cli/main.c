@@ -211,14 +211,15 @@ main(int argc, char **argv)
 	}
 	/* Zero-argument build: `meow build` with no package builds the current
 	 * directory's recipe (auto-detect mode). */
-	data = malloc(RECIPE_MAX);
-	if (!data) {
-		meow_msg(MSG_ERROR, "out of memory");
-		return 1;
-	}
 	if (count == 1 && strcmp(arguments[0], "build") == 0) {
+		data = malloc(RECIPE_MAX);
+		if (!data) {
+			meow_msg(MSG_ERROR, "out of memory");
+			return 1;
+		}
 		if (load_recipe(".", path, sizeof(path), data) < 0) {
 			meow_msg(MSG_ERROR, "no build recipe in current directory; specify a package");
+			free(data);
 			return 1;
 		}
 		/* Dispatch parser by extension */
@@ -230,12 +231,14 @@ main(int argc, char **argv)
 			rc = parse_recipe(data);
 		if (rc != 0) {
 			meow_msg(MSG_ERROR, "invalid recipe in current directory");
+			free(data);
 			return 1;
 		}
 		set_arch_env();
 		{	char *build_dir = getenv("BLD_DIR");
 			if (probe_run(build_dir ? build_dir : ".") != 0) {
 				meow_msg(MSG_ERROR, "probe failed for current directory");
+				free(data);
 				return 1;
 			}
 		}
@@ -245,9 +248,11 @@ main(int argc, char **argv)
 		expand_uses();
 		if (run_target(find_target(requested)) != 0) {
 			meow_msg(MSG_ERROR, "target failed: %s (%s)", requested, path);
+			free(data);
 			return 1;
 		}
 		meow_msg(MSG_SUCCESS, "built %s", path);
+		free(data);
 		return 0;
 	}
 	if ((count != 2 && count != 3) ||

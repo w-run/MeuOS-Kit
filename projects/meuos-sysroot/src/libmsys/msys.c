@@ -598,7 +598,7 @@ int msys_verify_all(struct msys *m)
 	int v2 = (m->format_version == MSYS_FORMAT_V2);
 	for (uint32_t i = 0; i < cnt; i++) {
 		unsigned char *p = m->entries[i];
-		uint8_t nlen = v2 ? p[30] : (uint8_t)(read16(p + 14));
+		size_t nlen = v2 ? p[30] : read16(p + 14);
 		const char *name = v2 ? (const char *)(p + 32) : (const char *)(p + 16);
 
 		/* Skip metadata entries */
