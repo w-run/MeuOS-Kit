@@ -1560,7 +1560,7 @@ build_symbols(struct as_file *as, const int *section_map, struct string_table *s
 		shndx = as->symbols[i].defined && as->symbols[i].section >= 0 ?
 		        (uint16_t)section_map[as->symbols[i].section] :
 		        as->symbols[i].section == -2 ? MT_SHN_COMMON :
-		        as->symbols[i].section == -1 ? MT_SHN_ABS : 0;
+		        as->symbols[i].defined && as->symbols[i].section == -1 ? MT_SHN_ABS : 0;
 		symbols[count] = (struct elf_sym_out){
 			.name = name_offset,
 			.info = MT_ST_INFO(as->symbols[i].bind, as->symbols[i].type),
@@ -1580,7 +1580,7 @@ build_symbols(struct as_file *as, const int *section_map, struct string_table *s
 		shndx = as->symbols[i].defined && as->symbols[i].section >= 0 ?
 		        (uint16_t)section_map[as->symbols[i].section] :
 		        as->symbols[i].section == -2 ? MT_SHN_COMMON :
-		        as->symbols[i].section == -1 ? MT_SHN_ABS : 0;
+		        as->symbols[i].defined && as->symbols[i].section == -1 ? MT_SHN_ABS : 0;
 		symbols[count] = (struct elf_sym_out){
 			.name = name_offset,
 			.info = MT_ST_INFO(as->symbols[i].bind, as->symbols[i].type),
