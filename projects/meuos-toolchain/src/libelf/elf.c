@@ -211,13 +211,16 @@ mt_elf64_get_symbol(const void *bytes, size_t size,
 	p += offset;
 	memset(symbol, 0, sizeof(*symbol));
 	symbol->name = read32(p + 0);
-	symbol->info = p[4];
-	symbol->other = p[5];
-	symbol->section = read16(p + 6);
 	if (is_elf32) {
-		symbol->value = read32(p + 8);
-		symbol->size = read32(p + 12);
+		symbol->value = read32(p + 4);
+		symbol->size = read32(p + 8);
+		symbol->info = p[12];
+		symbol->other = p[13];
+		symbol->section = read16(p + 14);
 	} else {
+		symbol->info = p[4];
+		symbol->other = p[5];
+		symbol->section = read16(p + 6);
 		symbol->value = read64(p + 8);
 		symbol->size = read64(p + 16);
 	}

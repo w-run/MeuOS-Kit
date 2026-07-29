@@ -625,7 +625,7 @@ dump_symbol_table(const unsigned char *bytes, size_t size,
 
 	if (symtab->entry_size == 0 || symtab->size == 0)
 		return;
-	if (symtab->entry_size < MT_ELF64_SYM_SIZE)
+	if (symtab->entry_size < 16)
 		return;
 	count = symtab->size / symtab->entry_size;
 

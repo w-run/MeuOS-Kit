@@ -105,9 +105,9 @@ $(RANLIB_BIN): $(RANLIB_OBJS) $(LIBELF_LIB)
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(LDFLAGS) -o $@ $(RANLIB_OBJS) $(LIBELF_LIB) $(LDLIBS)
 
-$(NM_BIN): $(NM_OBJS) $(LIBELF_LIB)
+$(NM_BIN): $(NM_OBJS) $(BUILD)/src/ar/archive.o $(LIBELF_LIB)
 	@mkdir -p $(dir $@)
-	$(HOST_CC) $(LDFLAGS) -o $@ $(NM_OBJS) $(LIBELF_LIB) $(LDLIBS)
+	$(HOST_CC) $(LDFLAGS) -o $@ $(NM_OBJS) $(BUILD)/src/ar/archive.o $(LIBELF_LIB) $(LDLIBS)
 
 $(READELF_BIN): $(READELF_OBJS) $(LIBELF_LIB)
 	@mkdir -p $(dir $@)

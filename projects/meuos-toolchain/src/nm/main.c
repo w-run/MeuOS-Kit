@@ -3,8 +3,9 @@
  * GNU nm 兼容子集：默认输出 "<value> <type> <name>"，每行一个符号。
  * 选项：-a/-g/-u/--defined-only/-n/-p/-r/--size-sort/-S/-D/-f posix/-h/-V。
  *
- * 仅支持 ELF64 little-endian（与 mt 一致）。零宿主依赖：只用 libelf + libc。
+ * 支持裸 ELF 文件和 ar 归档。零宿主依赖：只用 libelf + libc + archive。
  * locale 无关，输出 ASCII。 */
+#include "mt/archive.h"
 #include "mt/elf.h"
 
 #include <ctype.h>
@@ -317,13 +318,14 @@ find_symtab(const struct mt_elf64_section *secs, uint16_t n,
 	return 0;
 }
 
-/* ---- 单文件处理 ---- */
+/* ---- 核心 ELF 处理（内存中） ---- */
 
+/* 处理内存中的 ELF 数据并打印符号。
+ * bytes 由调用者管理（本函数不释放）。返回 0 表示成功。 */
 static int
-process_file(const char *path, const struct nm_opts *opts)
+process_elf_data(const unsigned char *bytes, size_t size,
+                 const struct nm_opts *opts)
 {
-	unsigned char *bytes;
-	size_t size;
 	struct mt_elf64_view view;
 	struct mt_elf64_section *secs = NULL;
 	const char **secnames = NULL;
@@ -333,40 +335,21 @@ process_file(const char *path, const struct nm_opts *opts)
 	enum mt_elf_status st;
 	uint16_t n, j;
 	int rc = 1;
-	int multi;
 
-	multi = 0; /* 单文件时不打印头 */
-
-	bytes = read_file(path, &size);
-	if (!bytes) {
-		fprintf(stderr, "nm: %s: cannot read\n", path);
-		return 1;
-	}
 	st = mt_elf64_parse(bytes, size, &view);
-	if (st != MT_ELF_OK) {
-		fprintf(stderr, "nm: %s: %s\n", path, mt_elf_status_string(st));
-		free(bytes);
+	if (st != MT_ELF_OK)
 		return 1;
-	}
 	n = view.section_count;
-	if (n == 0) {
-		fprintf(stderr, "nm: %s: no sections\n", path);
-		free(bytes);
+	if (n == 0)
 		return 1;
-	}
 	secs = calloc(n, sizeof(*secs));
 	secnames = calloc(n, sizeof(*secnames));
-	if (!secs || !secnames) {
-		fprintf(stderr, "nm: out of memory\n");
+	if (!secs || !secnames)
 		goto done;
-	}
 	for (j = 0; j < n; ++j) {
 		st = mt_elf64_get_section(bytes, size, &view, j, &secs[j]);
-		if (st != MT_ELF_OK) {
-			fprintf(stderr, "nm: %s: %s\n", path,
-			        mt_elf_status_string(st));
+		if (st != MT_ELF_OK)
 			goto done;
-		}
 	}
 	/* 读取节区名 */
 	{
@@ -384,38 +367,26 @@ process_file(const char *path, const struct nm_opts *opts)
 	}
 
 	if (find_symtab(secs, n, opts->dynamic, &symtab, &strtab) != 0) {
-		if (multi)
-			printf("\n%s:\n", path);
-		if (opts->dynamic)
-			fprintf(stderr, "nm: %s: no dynamic symbol table\n",
-			        path);
-		else
-			fprintf(stderr, "nm: %s: no symbols\n", path);
+		/* 没有符号表：静默跳过（归档成员中常见无符号的特殊段） */
 		rc = 0;
 		goto done;
 	}
 
 	if (symtab.entry_size == 0 ||
 	    symtab.size / symtab.entry_size > 100000000ULL) {
-		fprintf(stderr, "nm: %s: bad symtab entry size\n", path);
 		goto done;
 	}
 	sym_count = symtab.size / symtab.entry_size;
 	entries = calloc(sym_count, sizeof(*entries));
-	if (!entries) {
-		fprintf(stderr, "nm: out of memory\n");
+	if (!entries)
 		goto done;
-	}
 	{
 		uint64_t k = 0;
 		for (i = 0; i < sym_count; ++i) {
 			struct mt_elf64_symbol sym;
 			st = mt_elf64_get_symbol(bytes, size, &symtab, i, &sym);
-			if (st != MT_ELF_OK) {
-				fprintf(stderr, "nm: %s: %s\n", path,
-				        mt_elf_status_string(st));
+			if (st != MT_ELF_OK)
 				goto done;
-			}
 			/* 跳过 symtab[0] 的 NULL 符号（STN_UNDEF） */
 			if (i == 0 && sym.name == 0 && sym.info == 0 &&
 			    sym.section == MT_SHN_UNDEF && sym.value == 0)
@@ -449,9 +420,6 @@ process_file(const char *path, const struct nm_opts *opts)
 		qsort(entries, sym_count, sizeof(*entries), cmp);
 	}
 
-	if (multi)
-		printf("\n%s:\n", path);
-
 	for (i = 0; i < sym_count; ++i) {
 		if (filter_symbol(&entries[i], opts))
 			print_entry(&entries[i], opts);
@@ -462,6 +430,86 @@ done:
 	free(entries);
 	free(secs);
 	free(secnames);
+	return rc;
+}
+
+/* ---- 归档处理 ---- */
+
+struct archive_ctx {
+	const struct nm_opts *opts;
+	const char *archive_path;
+	int first_member;
+};
+
+static int
+ar_member_callback_with_header(const struct mt_ar_member *member,
+                               const unsigned char *data, void *context)
+{
+	struct archive_ctx *ctx = (struct archive_ctx *)context;
+
+	/* 先快速检测是否为 ELF（避免对非 ELF 成员打印头） */
+	{
+		struct mt_elf64_view probe;
+		if (member->size < 16 ||
+		    mt_elf64_parse(data, (size_t)member->size, &probe) != MT_ELF_OK)
+			return 0; /* 非 ELF / 不可解析，跳过 */
+	}
+
+	/* 打印成员头：archive.a(member.o): */
+	if (!ctx->first_member)
+		printf("\n");
+	ctx->first_member = 0;
+	printf("%s(%s):\n", ctx->archive_path, member->name);
+
+	/* 处理符号 */
+	process_elf_data(data, (size_t)member->size, ctx->opts);
+	return 0;
+}
+
+static int
+process_archive(const char *path, const unsigned char *bytes, size_t size,
+                const struct nm_opts *opts)
+{
+	struct archive_ctx ctx;
+
+	ctx.opts = opts;
+	ctx.archive_path = path;
+	ctx.first_member = 1;
+
+	return mt_ar_foreach_mem(bytes, size, ar_member_callback_with_header,
+	                         &ctx);
+}
+
+/* ---- 单文件处理 ---- */
+
+static int
+process_file(const char *path, const struct nm_opts *opts)
+{
+	unsigned char *bytes;
+	size_t size;
+	int rc = 1;
+
+	bytes = read_file(path, &size);
+	if (!bytes) {
+		fprintf(stderr, "nm: %s: cannot read\n", path);
+		return 1;
+	}
+
+	/* 检查是否为 ar 归档 */
+	if (size >= MT_AR_MAGIC_SIZE &&
+	    memcmp(bytes, MT_AR_MAGIC, MT_AR_MAGIC_SIZE) == 0) {
+		rc = process_archive(path, bytes, size, opts);
+		free(bytes);
+		return rc;
+	}
+
+	/* 裸 ELF 文件 */
+	rc = process_elf_data(bytes, size, opts);
+	if (rc != 0) {
+		struct mt_elf64_view view;
+		enum mt_elf_status st = mt_elf64_parse(bytes, size, &view);
+		fprintf(stderr, "nm: %s: %s\n", path, mt_elf_status_string(st));
+	}
 	free(bytes);
 	return rc;
 }

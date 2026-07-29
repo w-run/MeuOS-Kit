@@ -156,11 +156,11 @@ mt_elf32_get_symbol(const void *bytes, size_t size,
 	p += (uint64_t)offset;
 	memset(symbol, 0, sizeof(*symbol));
 	symbol->name = read32(p + 0);
-	symbol->info = p[4];
-	symbol->other = p[5];
-	symbol->section = read16(p + 6);
-	symbol->value = read32(p + 8);
-	symbol->size = read32(p + 12);
+	symbol->value = read32(p + 4);
+	symbol->size = read32(p + 8);
+	symbol->info = p[12];
+	symbol->other = p[13];
+	symbol->section = read16(p + 14);
 	return MT_ELF_OK;
 }
 

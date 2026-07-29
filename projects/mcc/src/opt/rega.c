@@ -747,7 +747,7 @@ rega(Fn *fn)
 	blist = 0;
 	for (b=fn->start;; b=b->link) {
 		ps = (Blk**[]){&b->s1, &b->s2, NULL};
-		for (; (s=**ps); ps++) {
+		for (; *ps && (s = **ps); ps++) {
 			npm = 0;
 			for (p=s->phi; p; p=p->link) {
 				dst = p->to;
