@@ -657,7 +657,8 @@ int main(int argc, char *argv[]) {
 			char tmpfile[64]; snprintf(tmpfile, sizeof(tmpfile), "/tmp/msys-diff-XXXXXX");
 			int fd = mkstemp(tmpfile);
 			if (fd < 0) { free(data); ret = -1; }
-			write(fd, data, dsize); close(fd);
+			else if (write(fd, data, dsize) != (ssize_t)dsize) { close(fd); free(data); ret = -1; }
+			else close(fd);
 			if (lfile) {
 				char cmdline[8192];
 				snprintf(cmdline, sizeof(cmdline), "diff -u %s %s 2>/dev/null || true", lfile, tmpfile);
