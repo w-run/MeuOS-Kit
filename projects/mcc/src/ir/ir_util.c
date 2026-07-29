@@ -451,7 +451,7 @@ phiargn(Phi *p, Blk *b)
 		for (n=0; n<p->narg; n++)
 			if (p->blk[n] == b)
 				return n;
-	return -1;
+	return -1;  /* returns UINT_MAX as uint sentinel (no matching block) */
 }
 
 Ref

@@ -1,5 +1,6 @@
 #include <stdbool.h>
 #include <stddef.h>
+#include <assert.h>
 #include "util.h"
 #include "mcc.h"
 
@@ -19,6 +20,7 @@ cast(struct expr *expr)
 		if (t->size == 4)
 			expr->u.constant.f = (float)expr->u.constant.f;
 	} else if (t->prop & PROPINT) {
+		assert(t->u.arith.width > 0);
 		m = 1ull << t->u.arith.width - 1;
 		expr->u.constant.u &= m | m - 1;
 		if (t->u.arith.issigned)

@@ -2,7 +2,7 @@
 
 #ifdef TEST_PMOV
 	#undef assert
-	#define assert(x) assert_test(#x, x)
+	#define assert(x) do { assert_test(#x, x); } while(0)
 #endif
 
 typedef struct RMap RMap;

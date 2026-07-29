@@ -475,9 +475,12 @@ bool
 typehasint(struct type *t, unsigned long long i, bool sign)
 {
 	assert(t->prop & PROPINT);
+	/* -1ull << 63 = 0x8000...0 = -2^63 in signed interpretation.
+	 * Comparison is unsigned; if i >= this value it may overflow
+	 * the signed range and needs a signed-type check below. */
 	if (sign && i >= -1ull << 63)
 		return t->u.arith.issigned && i >= -1ull << (t->size << 3) - 1;
-	return i <= 0xffffffffffffffffull >> (8 - t->size << 3) + t->u.arith.issigned;
+	return i <= 0xffffffffffffffffull >> (((8 - t->size) << 3) + t->u.arith.issigned);
 }
 
 struct type *

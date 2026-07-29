@@ -20,7 +20,8 @@ blit(Ref sd[2], int sz, Fn *fn)
 	 * emitted as a single 32-bit `movl`, so an 8-byte Kl chunk would
 	 * silently drop the high half. Skip the 8-byte entry there so that
 	 * struct copies decompose into 4-byte Kw moves (two per 8 bytes).
-	 * LP64 targets (amd64/arm64/rv64) keep the 8-byte fast path. */
+	 * LP64 targets (amd64/arm64/rv64) keep the 8-byte fast path.
+	 * TODO: replace strcmp with a proper T.target_is_i386 flag. */
 	p = strcmp(T.name, "i386") == 0 ? tbl + 1 : tbl;
 	for (; sz; p++)
 		for (n=p->size; sz>=n; sz-=n) {

@@ -119,6 +119,7 @@ struct func {
 static inline int
 ptrclass(void)
 {
+	/* ILP32 → 'w' (4-byte word), LP64 → 'l' (8-byte quad) */
 	return typelong.size == 4 ? 'w' : 'l';
 }
 

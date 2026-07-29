@@ -73,7 +73,8 @@ Again:
 		for (t=0; bsiter(b->in, &t); t++)
 			nlv[KBASE(f->tmp[t].cls)]++;
 		if (rtype(b->jmp.arg) == RCall) {
-			assert((int)bscount(b->in) == T.nrglob &&
+			int nglob = (int)bscount(b->in);
+			assert(nglob == T.nrglob &&
 				b->in->t[0] == T.rglob);
 			b->in->t[0] |= T.retregs(b->jmp.arg, nlv);
 		} else

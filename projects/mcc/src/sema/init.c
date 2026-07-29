@@ -231,7 +231,8 @@ parseinit(struct scope *s, struct type *t)
 			if (p.cur == p.sub) {
 				if (p.cur->type->prop & PROPSCALAR)
 					error(&tok.loc, "nested braces around scalar initializer");
-				assert(p.cur->type->kind == TYPEARRAY);
+				else
+					assert(p.cur->type->kind == TYPEARRAY);
 				focus(&p);
 			}
 			p.cur = p.sub;
