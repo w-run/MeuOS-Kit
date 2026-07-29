@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 /* 当前解析状态 */
 
@@ -26,6 +27,9 @@ static int in_runblock;    /* 收集 run: 块的行 */
 static char runblock_buf[32768];
 static size_t runblock_len;
 
+/* Forward declarations */
+static void interpolate(const char *in, char *out, size_t outsz);
+
 static void
 flush_runblock(void)
 {
@@ -33,9 +37,12 @@ flush_runblock(void)
 		return;
 	if (current_target->ncommands >= TARGET_COMMANDS_MAX)
 		return;
+	/* Interpolate %VAR% in run block before storing */
+	char interpolated[sizeof(runblock_buf)];
+	interpolate(runblock_buf, interpolated, sizeof(interpolated));
 	/* 整个 run 块作为一条命令存入（执行时写入 temp sh 脚本） */
 	current_target->commands[current_target->ncommands] =
-		strdup(runblock_buf);
+		strdup(interpolated);
 	if (current_target->commands[current_target->ncommands])
 		current_target->ncommands++;
 	runblock_len = 0;
@@ -82,6 +89,18 @@ interpolate(const char *in, char *out, size_t outsz)
 		out[o++] = *p++;
 	}
 	out[o] = '\0';
+}
+
+/* 将 key:value 同时存入 recipe_environment（shell exec 用）和 setenv（%VAR% 用） */
+static void
+set_env(const char *key, const char *value)
+{
+	char envbuf[512];
+	size_t len = strlen(recipe_environment);
+	snprintf(envbuf, sizeof(envbuf), "export %s='%s'; ", key, value);
+	if (len + strlen(envbuf) < sizeof(recipe_environment))
+		memcpy(recipe_environment + len, envbuf, strlen(envbuf) + 1);
+	setenv(key, value, 1);
 }
 
 /* 去除首尾空白 */
@@ -195,18 +214,37 @@ parse_meow(char *data)
 			else if (strcmp(key, "default") == 0) {
 				default_target = strdup(val);
 			}
-			/* name: / version: — 元数据，存入环境变量 */
+			/* name: / version: — 元数据，同时导出 %NAME%/%VERSION% 和 %PKG_NAME%/%PKG_VERSION% */
 			else if (strcmp(key, "name") == 0 || strcmp(key, "version") == 0) {
-				char envbuf[256];
-				char varname[64];
-				snprintf(varname, sizeof(varname), "PKG_%s", key);
-				/* 存入 recipe_environment */
-				size_t len = strlen(recipe_environment);
-				snprintf(envbuf, sizeof(envbuf), "export %s='%s'; ",
-				         varname, val);
-				if (len + strlen(envbuf) < sizeof(recipe_environment))
-					memcpy(recipe_environment + len, envbuf,
-					       strlen(envbuf) + 1);
+				char interp[1024];
+				interpolate(val, interp, sizeof(interp));
+				/* 导出大写形式 */
+				char upper[64];
+				size_t kl = strlen(key);
+				for (size_t ki = 0; ki < kl && ki < sizeof(upper)-1; ki++)
+					upper[ki] = (key[ki] >= 'a' && key[ki] <= 'z')
+					            ? key[ki] - 'a' + 'A' : key[ki];
+				upper[kl] = '\0';
+				set_env(upper, interp);
+				/* 也导出带 PKG_ 前缀的版本 */
+				char pkgvar[64];
+				snprintf(pkgvar, sizeof(pkgvar), "PKG_%s", upper);
+				set_env(pkgvar, interp);
+			}
+			/* target: — 设置构建三元组 */
+			else if (strcmp(key, "target") == 0 && current_target == NULL) {
+				char interp[1024];
+				interpolate(val, interp, sizeof(interp));
+				struct mt_triple tri;
+				char tri_str[128];
+				if (infer_triple(interp, &tri) == 0) {
+					triple_to_string(&tri, tri_str, sizeof(tri_str));
+					set_env("TARGET_TRIPLE", tri_str);
+					set_env("ARCH", tri.arch);
+					set_env("ABI", tri.abi);
+					if (tri.subarch[0] && strcmp(tri.subarch, "baseline") != 0)
+						set_env("SUBARCH", tri.subarch);
+				}
 			}
 			/* key: + 值空 = 多行块开始 */
 			else if (!*val && current_target) {
@@ -216,20 +254,11 @@ parse_meow(char *data)
 					runblock_buf[0] = '\0';
 				}
 			}
-			/* 其他 key: value — 存入环境变量 */
+			/* 其他 key: value — 同时存入 recipe_environment 和 setenv */
 			else {
-				char envbuf[256];
-				char varname[64];
-				/* 大写 key 作为可导出的环境变量 */
-				snprintf(varname, sizeof(varname), "%s", key);
 				char interp[1024];
 				interpolate(val, interp, sizeof(interp));
-				size_t len = strlen(recipe_environment);
-				snprintf(envbuf, sizeof(envbuf), "export %s='%s'; ",
-				         varname, interp);
-				if (len + strlen(envbuf) < sizeof(recipe_environment))
-					memcpy(recipe_environment + len, envbuf,
-					       strlen(envbuf) + 1);
+				set_env(key, interp);
 			}
 		}
 

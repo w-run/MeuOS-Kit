@@ -120,4 +120,7 @@ int probe_run(const char *build_dir);
 /* parse_meow.c */
 int parse_meow(char *data);
 
+/* show.c */
+int cmd_show(int argc, char **argv);
+
 #endif /* MEOW_H */

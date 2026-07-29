@@ -150,6 +150,8 @@ main(int argc, char **argv)
 		return cmd_lint(0, NULL);
 	if (count >= 2 && strcmp(arguments[0], "lint") == 0)
 		return cmd_lint(count - 1, arguments + 1);
+	if (count == 2 && strcmp(arguments[0], "show") == 0)
+		return cmd_show(count - 1, arguments + 1);
 	if (count == 1 && strcmp(arguments[0], "--bootstrap") == 0) {
 		if (run("CC=\"${CC:-cc}\" make -C meow clean all") != 0)
 			return 1;
@@ -264,6 +266,29 @@ main(int argc, char **argv)
 	}
 	/* Inject ARCH into recipe environment after parse. */
 	set_arch_env();
+
+	/* Inject path variables (%PKGDIR%, %BUILDDIR%, %WORKDIR%) */
+	{
+		char pwd[1024];
+		if (getcwd(pwd, sizeof(pwd))) {
+			char envbuf[2048];
+			size_t len = strlen(recipe_environment);
+			const char *bld = getenv("BLD_DIR");
+			const char *wrk = getenv("WORK_DIR");
+			snprintf(envbuf, sizeof(envbuf),
+			         "export PKGDIR='%s/pkgs/%s'; "
+			         "export BUILDDIR='%s'; "
+			         "export WORKDIR='%s'; "
+			         "export SRCDIR='%s/pkgs/%s'; ",
+			         pwd, arguments[1],
+			         bld ? bld : pwd,
+			         wrk ? wrk : "/tmp/meow-build",
+			         pwd, arguments[1]);
+			if (len + strlen(envbuf) < sizeof(recipe_environment))
+				memcpy(recipe_environment + len, envbuf,
+				       strlen(envbuf) + 1);
+		}
+	}
 
 	/* Run inline feature detection (probe section) if any probes are
 	 * registered.  The generated config.h is placed in the current
