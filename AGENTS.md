@@ -366,7 +366,6 @@ MeuOS-Kit/
 │   ├── meuos-sysroot/      .msys 单文件 sysroot 系统（libmsys + mkmsys + msysctl CLI + Python 绑定，已集成到 mcc）
 │   ├── meuos-utils/        核心工具集（待启动）
 │   ├── meuos-shell/        Shell 终端（待启动）
-│   ├── pkgs -> ../pkgs     meow 构建配方软链接
 │   └── sysroot{-<arch>}/   安装目标根文件系统（多架构）
 ├── env/                    QEMU 多架构测试环境（6.6.142 内核 + 9p 共享）
 │   ├── bin/qvm             VM 管理器
