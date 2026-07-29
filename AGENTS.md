@@ -953,6 +953,15 @@ for item in data:
 - **Phase 4 自举验证通过** — sysroot 内 mcc + meow 自重建全套工具
 - **Phase 5 零宿主依赖验证通过** — mcc driver 集成 `MT_AS`/`MT_LD`，`check-mt-integration` 通过
 - **.msys v2 完整实现** — v2 格式（64B header + 32B index + dir block）、SHA-256 去重/校验、ed25519 签名、Overlay 分层、流式消费、扩展块机制、xattr 扩展属性、msysctl 统一 CLI（22+ 命令）、Python ctypes 绑定。`msysctl fzf` 交互式浏览器支持。
+- **稳定增强 worktree 完成（2026-07-29）** — 64 次提交全面完善全套工具链：
+  - **meow `.meow` 自定义格式** — 替代 YAML，`run:` shell 脚本块 + `%VAR%` 插值 + 三元组推断 + `meow init/show/lint` 子命令
+  - **ld TLS 动态模型完整实现** — link.c TLSGD/TLSLD/DTPMOD/DTPOFF 重定位 + ld.so PT_TLS/模块ID/连续布局/`__tls_get_addr` + bug-mt-so-undef 修复（shared UNDEF → JUMP_SLOT）
+  - **mt-info 统一 ELF 分析工具** — 7 子命令（info/headers/deps/strings/which/diff/inspect）+ `--json` 跨工具输出
+  - **mcc `--warn=` 语义警告体系** + 彩色诊断 + `--error-json` + triple 统一解析
+  - **march-generic / cpu_detect** — `-march=native`/`x86-64-vN` + `/proc/cpuinfo` 跨架构回退
+  - **as-isa-gating** — 两层指令门控（VEX 前缀快速检查 + required_features 精确门控）+ `--march=x86-64-vN`
+  - **riscv-extensions / arm-multiver / i386-variants / aarch64-ext** — 全架构 `-march` 解析 + 特性位映射
+  - **ci-pipeline / community-tests** — GitHub Actions 工作流 + chibicc 测试套件修复
 
 ### 10.2 待启动/进行中工作
 
@@ -962,13 +971,12 @@ for item in data:
 | meuos-buildtools（m4/bison/flex/gperf） | ⏳ 待启动 | Phase 6；替换 GNU 构建工具依赖                                    |
 | meuos-utils（coreutils 等）             | ⏳ 待启动 | Phase 7；coreutils/diffutils/findutils 替代                       |
 | meuos-shell (msh)                       | ⏳ 待启动 | Phase 7；POSIX sh + 可选 bash/zsh 兼容                            |
-| mt 动态链接（P6）                       | ⏳ 待启动 | 共享库 / PIE / ld.so / dlopen                                     |
-| mt TLS 动态模型（P7）                   | ⏳ 待启动 | GD / LD 模型实现                                                   |
-| mt DWARF 调试信息（P8）                 | ⏳ 待启动 | 调试信息生成                                                      |
-| mt/ld ARM full e2e                      | 🔄 进行中 | 当前 bootstrap 用 cross-gcc，待 mt/ld ELF32 全链路                  |
+| meow `meowctl` 配置界面                | ⏳ 待设计 | `.meow` 格式已可用，配置/查询 CLI 待设计                           |
 | meow DAG 去重                          | 🔄 进行中 | 解决 -jN 并行构建的间接依赖重复执行问题                             |
 | meow 原生 shell 替代                   | 🔄 进行中 | 用 msh 替代 /bin/sh                                                |
 | i386 TLS 端到端验证                     | ⏳ 阻塞中 | 被 mcc i386 后端缺口阻塞                                           |
+| mt DWARF 调试信息（P8）                 | ⏳ 待启动 | 调试信息生成                                                       |
+| arm-multiver emit 多版本分支            | 🟡 待补 | ARM emit 层 `g_arm_arch_ver` 已就绪，v6/v7+/v8 指令分支待落地        |
 
 ### 10.3 各架构支持矩阵
 
