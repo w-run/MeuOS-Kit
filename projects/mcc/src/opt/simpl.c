@@ -50,15 +50,16 @@ ulog2_tab64[64] = {
 };
 
 static int
-ulog2(uint64_t pow2)
-{
-	return ulog2_tab64[(pow2 * 0x5b31ab928877a7e) >> 58];
-}
-
-static int
 ispow2(uint64_t v)
 {
 	return v && (v & (v - 1)) == 0;
+}
+
+static int
+ulog2(uint64_t pow2)
+{
+	assert(ispow2(pow2));
+	return ulog2_tab64[(pow2 * 0x5b31ab928877a7e) >> 58];
 }
 
 static void
