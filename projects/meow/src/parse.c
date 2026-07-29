@@ -321,6 +321,8 @@ parse_recipe(char *data)
 	nrecipe_deps = 0;
 	ntargets = 0;
 	nuses = 0;
+	nhas_tools_stack = 0;
+	nlib_deps_stack = 0;
 	default_target = 0;
 	probe_reset();
 	while (*line) {

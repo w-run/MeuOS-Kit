@@ -1,0 +1,13 @@
+name: meow-macros
+version: 1.0
+env: CC=mcc, CFLAGS=-O2
+
+[clean]
+  phony: true
+  run: rm -f /tmp/meow-macro-test.txt
+
+[build]
+  run(!): %CC% --version
+  run(?): false
+  run(?): echo "continue after false" > /tmp/meow-macro-test.txt
+  run(q): echo "quiet command" > /dev/null

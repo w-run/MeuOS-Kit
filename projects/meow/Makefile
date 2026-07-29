@@ -99,6 +99,7 @@ check: $(BUILD)/meow
 	cd .. && CC=cc ./meow/$(BUILD)/meow --bootstrap
 	sh test/pkg_config.sh "$(abspath $(BUILD)/meow)"
 	sh test/pkg_config_integration.sh "$(abspath $(BUILD)/meow)"
+	sh test/macros_test.sh "$(abspath $(BUILD)/meow)"
 	cd .. && $(MAKE) -C meow clean all
 
 # Verify --arch flag injection by creating a minimal recipe that echoes

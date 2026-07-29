@@ -49,10 +49,22 @@ struct target {
 	size_t noutputs;
 	int phony;
 	char *when;           /* condition expression (NULL = always) */
+	int run_abort_on_fail; /* 1 = abort on failure (default), 0 = continue */
+	int run_quiet;        /* 1 = suppress command output */
+	char *download_url;   /* download source URL */
+	char *download_sha256;/* optional SHA-256 */
+	char *log_file;       /* build log file path */
 	int visiting;
 	int done;
 	char *stem;
 };
+
+#define HAS_TOOLS_MAX 16
+#define LIB_DEPS_MAX 16
+extern char *has_tools_stack[HAS_TOOLS_MAX];
+extern size_t nhas_tools_stack;
+extern char *lib_deps_stack[LIB_DEPS_MAX];
+extern size_t nlib_deps_stack;
 
 /* Global build state (defined in state.c). */
 extern char recipe_environment[RECIPE_ENV_MAX];
