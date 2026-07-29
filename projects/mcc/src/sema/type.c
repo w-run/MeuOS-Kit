@@ -172,9 +172,9 @@ mkdecimaltype(int kind)
 
 /*
 We define type rank using the number of bits in the type shifted
-left by 4. The least significant 4 bits are used to establish a
+left by 7. The least significant 4 bits are used to establish a
 ranking between integer types with the same width (such as long and
-long long on 64-bit platforms).
+long long on 64-bit platforms, or int and long on 32-bit platforms).
 */
 static int
 typerank(struct type *t)
@@ -187,7 +187,7 @@ typerank(struct type *t)
 	case TYPECHAR:   return 0x081;
 	case TYPESHORT:  return 0x101;
 	case TYPEINT:    return 0x201;
-	case TYPELONG:   return t->size << 3 + 4 | 0x1;
+	case TYPELONG:   return (t->size << 7) | 0x1;
 	case TYPELLONG:  return 0x402;
 	case TYPEBITINT: return t->u.arith.width << 4;
 	}
