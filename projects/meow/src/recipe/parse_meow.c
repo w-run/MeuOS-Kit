@@ -256,7 +256,34 @@ parse_meow(char *data)
 			continue;
 		}
 
-		/* key: value 或 key: block */
+		/* key: value 或 key: block — 或 [probe] 列表项 */
+		if (current_section == SEC_PROBE && text[0] == '-' && in_probe_list) {
+			char *item = trim(text + 1);
+			if (strcmp(probe_list_type, "headers") == 0)
+				probe_add_header(item);
+			else if (strcmp(probe_list_type, "functions") == 0)
+				probe_add_function(item);
+			else if (strcmp(probe_list_type, "decls") == 0)
+				probe_add_decl(item);
+			else if (strcmp(probe_list_type, "libraries") == 0)
+				probe_add_library(item);
+			else if (strcmp(probe_list_type, "codes") == 0) {
+				char *code_body = strchr(item, ':');
+				if (code_body) {
+					*code_body++ = '\0';
+					probe_add_code(trim(item), trim(code_body));
+				}
+			} else if (strcmp(probe_list_type, "typesizes") == 0) {
+				char *eq = strchr(item, '=');
+				if (eq) {
+					*eq++ = '\0';
+					probe_add_typesize(trim(item), trim(eq));
+				}
+			}
+			line = end;
+			continue;
+		}
+
 		char *colon = strchr(text, ':');
 		if (colon) {
 			*colon++ = '\0';
@@ -265,35 +292,8 @@ parse_meow(char *data)
 
 			/* ———— 特殊节区内部的 key/value ———— */
 
-			/* [probe] 子项处理 */
+			/* [probe] key: value 定义（列表项已在上方处理）*/
 			if (current_section == SEC_PROBE) {
-				/* YAML 列表项: - item */
-				if (text[0] == '-' && in_probe_list) {
-					char *item = trim(text + 1);
-					if (strcmp(probe_list_type, "headers") == 0)
-						probe_add_header(item);
-					else if (strcmp(probe_list_type, "functions") == 0)
-						probe_add_function(item);
-					else if (strcmp(probe_list_type, "decls") == 0)
-						probe_add_decl(item);
-					else if (strcmp(probe_list_type, "libraries") == 0)
-						probe_add_library(item);
-					else if (strcmp(probe_list_type, "codes") == 0) {
-						char *code_body = strchr(item, ':');
-						if (code_body) {
-							*code_body++ = '\0';
-							probe_add_code(trim(item), trim(code_body));
-						}
-					} else if (strcmp(probe_list_type, "typesizes") == 0) {
-						char *type_name = strchr(item, ':');
-						if (type_name) {
-							*type_name++ = '\0';
-							probe_add_typesize(trim(item), trim(type_name));
-						}
-					}
-					line = end;
-					continue;
-				}
 				/* 探测节区 key: value */
 				in_probe_list = 0;
 				if (strcmp(key, "cc") == 0) { probe_set_cc(val); }
