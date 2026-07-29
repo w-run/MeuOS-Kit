@@ -288,6 +288,61 @@ run_target(struct target *target)
 			}
 		}
 	}
+	/* ———— 宏执行（构建前） ———— */
+	/* sha256: 下载文件校验 */
+	if (target->download_sha256 && target->download_url) {
+		const char *fname = strrchr(target->download_url, '/');
+		fname = fname ? fname + 1 : target->download_url;
+		char cmd[1024];
+		snprintf(cmd, sizeof(cmd), "echo '%s  /tmp/%s' | sha256sum -c - >/dev/null 2>&1",
+		         target->download_sha256, fname);
+		if (run(cmd) != 0) {
+			meow_msg(MSG_ERROR, "SHA-256 mismatch for %s", fname);
+			return -1;
+		}
+	}
+	/* unpack: 自动解压 */
+	if (target->run_quiet == 2 && target->download_url) {
+		const char *fname = strrchr(target->download_url, '/');
+		fname = fname ? fname + 1 : target->download_url;
+		char tar_path[512];
+		snprintf(tar_path, sizeof(tar_path), "/tmp/%s", fname);
+		size_t tlen = strlen(tar_path);
+		char cmd[1024];
+		if (tlen > 7 && strcmp(tar_path + tlen - 7, ".tar.gz") == 0)
+			snprintf(cmd, sizeof(cmd), "mkdir -p /tmp/meow-build && tar xzf %s -C /tmp/meow-build", tar_path);
+		else if (tlen > 8 && strcmp(tar_path + tlen - 8, ".tar.xz") == 0)
+			snprintf(cmd, sizeof(cmd), "mkdir -p /tmp/meow-build && tar xJf %s -C /tmp/meow-build", tar_path);
+		else if (tlen > 7 && strcmp(tar_path + tlen - 7, ".tar.bz2") == 0)
+			snprintf(cmd, sizeof(cmd), "mkdir -p /tmp/meow-build && tar xjf %s -C /tmp/meow-build", tar_path);
+		else if (tlen > 4 && strcmp(tar_path + tlen - 4, ".zip") == 0)
+			snprintf(cmd, sizeof(cmd), "mkdir -p /tmp/meow-build && unzip -o %s -d /tmp/meow-build", tar_path);
+		else
+			snprintf(cmd, sizeof(cmd), "echo 'unpack: unknown format: %s'", tar_path);
+		if (run(cmd) != 0) return -1;
+		target->run_quiet = 0;
+	}
+	/* patch: 应用补丁 */
+	for (size_t pi = 0; pi < target->npatch; pi++) {
+		char cmd[1024];
+		snprintf(cmd, sizeof(cmd), "patch -p1 -i '%s' 2>/dev/null || true", target->patches[pi]);
+		run(cmd);
+	}
+	/* srcdir / builddir: 确保目录存在 */
+	if (target->src_dir) {
+		char cmd[512];
+		snprintf(cmd, sizeof(cmd), "mkdir -p '%s'", target->src_dir);
+		run(cmd);
+	}
+	if (target->build_dir) {
+		char cmd[512];
+		snprintf(cmd, sizeof(cmd), "mkdir -p '%s'", target->build_dir);
+		run(cmd);
+	}
+	/* parallel: 覆盖并行度 */
+	int saved_parallel = parallel_jobs;
+	if (target->parallel_jobs > 0)
+		parallel_jobs = target->parallel_jobs;
 	if (target->log_file) {
 		/* Open log file for writing */
 		FILE *lf = fopen(target->log_file, "w");
@@ -323,6 +378,37 @@ run_target(struct target *target)
 		/* Target is up-to-date, still count for progress. */
 		completed_commands += target->ncommands;
 	}
+	/* ———— 宏执行（构建后） ———— */
+	/* test: 运行测试（遇错继续） */
+	if (target->test_cmd) {
+		char cmd[RECIPE_MAX];
+		expand_command(target, target->test_cmd, cmd, sizeof(cmd));
+		if (run(cmd) != 0)
+			meow_msg(MSG_WARN, "test failed for target '%s'", target->name);
+	}
+	/* install: 声明式安装 */
+	if (target->install_src && target->install_dest) {
+		char cmd[1024];
+		snprintf(cmd, sizeof(cmd), "mkdir -p $(dirname '%s') && cp '%s' '%s'",
+		         target->install_dest, target->install_src, target->install_dest);
+		if (run(cmd) != 0) return -1;
+		if (target->install_mode) {
+			snprintf(cmd, sizeof(cmd), "chmod %o '%s'", target->install_mode, target->install_dest);
+			run(cmd);
+		}
+	}
+	/* strip: 去除调试符号（独立于 copy:，或自动使用 copy: 目标路径） */
+	const char *strip_target = target->install_dest;
+	if (target->strip && !strip_target)
+		strip_target = target->install_src;  /* fallback to src */
+	if (target->strip && strip_target) {
+		char cmd[1024];
+		snprintf(cmd, sizeof(cmd), "strip '%s' 2>/dev/null || true", strip_target);
+		run(cmd);
+	}
+	/* 恢复全局并行度 */
+	if (target->parallel_jobs > 0)
+		parallel_jobs = saved_parallel;
 	target->visiting = 0;
 	target->done = 1;
 	return 0;
