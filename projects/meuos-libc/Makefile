@@ -302,6 +302,7 @@ check: $(ATOMIC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib --static -o /tmp/meuos-libc-check/setjmp test/setjmp.c -l:libc-meuos.a
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib --static -o /tmp/meuos-libc-check/pthread test/pthread.c -l:libc-meuos.a
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib --static -o /tmp/meuos-libc-check/bare-process test/process.c -l:libc-meuos.a
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib --static -o /tmp/meuos-libc-check/netdb test/netdb.c -l:libc-meuos.a
 	@for bin in atomic fence; do \
 		if nm -u /tmp/meuos-libc-check/$$bin | grep -Eq '__atomic_|atomic_(thread|signal)_fence'; then \
 			echo "unexpected unresolved atomic runtime symbol in $$bin" >&2; exit 1; \
@@ -338,6 +339,7 @@ check: $(ATOMIC_LIB)
 	/tmp/meuos-libc-check/setjmp
 	/tmp/meuos-libc-check/pthread
 	/tmp/meuos-libc-check/bare-process
+	/tmp/meuos-libc-check/netdb
 	@$(MAKE) -C src/compat check MCC=$(abspath $(MCC)) SYSROOT=$(abspath $(SYSROOT)) HOST_CC=$(HOST_CC) ARCH=$(ARCH)
 
 # Verify the full C library links through MeuOS's native linker (mt/ld)
