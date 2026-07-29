@@ -146,17 +146,20 @@ atoi(const char *text)
 int
 abs(int value)
 {
-	return value < 0 ? -value : value;
+	unsigned int u = (unsigned int)value;
+	return (int)(value < 0 ? -u : u);
 }
 
 long
 labs(long value)
 {
-	return value < 0 ? -value : value;
+	unsigned long u = (unsigned long)value;
+	return (long)(value < 0 ? -u : u);
 }
 
 long long
 llabs(long long value)
 {
-	return value < 0 ? -value : value;
+	unsigned long long u = (unsigned long long)value;
+	return (long long)(value < 0 ? -u : u);
 }
