@@ -494,7 +494,7 @@ archive_member_needed_impl(struct ld_context *ctx, const unsigned char *data,
 			    mt_elf32_get_section(data, size, &view.v32,
 			                         (uint16_t)s32.link, &strtab.v32) != MT_ELF_OK)
 				return -1;
-			for (j = 0; j < s32.size / s32.entry_size; ++j) {
+			for (j = 0; s32.entry_size > 0 && j < s32.size / s32.entry_size; ++j) {
 				struct mt_elf32_symbol sym32;
 				struct ld_global *global;
 				if (mt_elf32_get_symbol(data, size, &symtab.v32, j,
@@ -521,7 +521,7 @@ archive_member_needed_impl(struct ld_context *ctx, const unsigned char *data,
 			    mt_elf64_get_section(data, size, &view.v64,
 			                         (uint16_t)s64.link, &strtab.v64) != MT_ELF_OK)
 				return -1;
-			for (j = 0; j < s64.size / s64.entry_size; ++j) {
+			for (j = 0; s64.entry_size > 0 && j < s64.size / s64.entry_size; ++j) {
 				struct ld_global *global;
 				if (mt_elf64_get_symbol(data, size, &symtab.v64, j,
 				                        &symbol) != MT_ELF_OK)
