@@ -52,6 +52,8 @@ struct string_table {
 static void *
 mt_malloc(size_t size)
 {
+	/* malloc(0) is implementation-defined (may return NULL or a unique ptr).
+	 * We guarantee a minimum 1-byte allocation to avoid ambiguity. */
 	void *p = malloc(size == 0 ? 1 : size);
 	return p;
 }
