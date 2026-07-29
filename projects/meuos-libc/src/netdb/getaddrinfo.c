@@ -213,11 +213,11 @@ getaddrinfo(const char *node, const char *service,
 			sin6->sin6_port = port;
 			if (he && he->h_addr_list && he->h_addr_list[addr_idx])
 				memcpy(&sin6->sin6_addr, he->h_addr_list[addr_idx], 16);
-			else if (!node)
+			else if (!node) {
 				memset(&sin6->sin6_addr, 0, 16); /* in6addr_any */
 				if (!(flags & AI_PASSIVE))
 					sin6->sin6_addr.s6_addr[15] = 1; /* ::1 loopback */
-			else
+		} else
 				inet_pton(AF_INET6, node, &sin6->sin6_addr);
 			ai->ai_addr = (struct sockaddr *)sin6;
 			ai->ai_addrlen = sizeof(struct sockaddr_in6);
