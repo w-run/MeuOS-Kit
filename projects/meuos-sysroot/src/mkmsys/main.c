@@ -405,10 +405,15 @@ static void write_msys(const char *output, struct collector *c, uint32_t flags)
 				if (!compressed[i]) die("malloc");
 				int level = 3; /* default compression level */
 				size_t ret = (*zstd_compress)(compressed[i], bound + 8, e->data, e->data_size, level);
-				if (zstd_handle) { /* check for errors using via NULL check — ZSTD_isError not loaded on writer side */
-					/* ZSTD_compress returns error code if ret > bound: treat as failure */
+				/* ZSTD_compress returns error code > bound on failure;
+				 * also fall back to uncompressed if compression expands data. */
+				if (ret >= e->data_size) {
+					free(compressed[i]);
+					compressed[i] = NULL;
+					comp_sizes[i] = e->data_size;
+				} else {
+					comp_sizes[i] = ret;
 				}
-				comp_sizes[i] = ret;
 			}
 			if (comp_sizes[i] >= e->data_size) {
 				free(compressed[i]);
