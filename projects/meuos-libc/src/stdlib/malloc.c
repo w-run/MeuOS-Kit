@@ -136,7 +136,11 @@ realloc(void *pointer, size_t size)
 	replacement = malloc(size);
 	if (!replacement)
 		return 0;
+	lock_allocator();
 	memcpy(replacement, pointer, old_size);
-	free(pointer);
+	/* Mark old block as available (manual free — free() would deadlock) */
+	block = (struct allocation *)pointer - 1;
+	block->available = 1;
+	unlock_allocator();
 	return replacement;
 }
