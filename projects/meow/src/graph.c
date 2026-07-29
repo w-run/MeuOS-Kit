@@ -259,6 +259,47 @@ run_target(struct target *target)
 				return -1;
 		}
 	}
+	/* ———— 架构过滤 ———— */
+	/* only: x86_64, aarch64 — 架构白名单 */
+	if (target->only_arch) {
+		char buf[256];
+		strncpy(buf, target->only_arch, sizeof(buf) - 1);
+		buf[sizeof(buf) - 1] = '\0';
+		int matched = 0;
+		char *p = buf;
+		while (*p) {
+			while (*p == ' ' || *p == ',') { *p = '\0'; p++; }
+			if (!*p) break;
+			char *start = p;
+			while (*p && *p != ',') p++;
+			if (*p == ',') { *p = '\0'; p++; }
+			if (build_arch && strcmp(start, build_arch) == 0) { matched = 1; break; }
+		}
+		if (!matched) {
+			meow_msg(MSG_DEBUG, "target '%s' skipped (only: %s)", target->name, target->only_arch);
+			target->visiting = 0; target->done = 1; return 0;
+		}
+	}
+	/* except: arm — 架构黑名单 */
+	if (target->except_arch) {
+		char buf[256];
+		strncpy(buf, target->except_arch, sizeof(buf) - 1);
+		buf[sizeof(buf) - 1] = '\0';
+		int matched = 0;
+		char *p = buf;
+		while (*p) {
+			while (*p == ' ' || *p == ',') { *p = '\0'; p++; }
+			if (!*p) break;
+			char *start = p;
+			while (*p && *p != ',') p++;
+			if (*p == ',') { *p = '\0'; p++; }
+			if (build_arch && strcmp(start, build_arch) == 0) { matched = 1; break; }
+		}
+		if (matched) {
+			meow_msg(MSG_DEBUG, "target '%s' skipped (except: %s)", target->name, target->except_arch);
+			target->visiting = 0; target->done = 1; return 0;
+		}
+	}
 	/* ———— 语义节执行 ———— */
 	/* has: tool1, tool2 — 检测构建工具 */
 	if (nhas_tools_stack > 0) {
@@ -351,34 +392,74 @@ run_target(struct target *target)
 			fclose(lf);
 		}
 	}
-	if (target_out_of_date(target))
+	if (target_out_of_date(target)) {
+		/* pre: 前置钩子 */
+		if (target->pre_cmd) {
+			char cmd[RECIPE_MAX];
+			expand_command(target, target->pre_cmd, cmd, sizeof(cmd));
+			if (run(cmd) != 0) return -1;
+		}
 		for (size_t i = 0; i < target->ncommands; ++i)
 			{
 				char command[RECIPE_MAX];
 				if (expand_command(target, target->commands[i], command,
 					sizeof(command)) != 0)
 					return -1;
+				/* workdir: 前置 cd 命令 */
+				char full_cmd[RECIPE_MAX + 128];
+				const char *exec_cmd;
+				if (target->work_dir) {
+					snprintf(full_cmd, sizeof(full_cmd), "mkdir -p '%s' && cd '%s' && %s",
+					         target->work_dir, target->work_dir, command);
+					exec_cmd = full_cmd;
+				} else {
+					exec_cmd = command;
+				}
 				if (target->run_quiet) {
-					char *buf = malloc(strlen(command) + 32);
-					sprintf(buf, "%s >/dev/null 2>&1", command);
+					char *buf = malloc(strlen(exec_cmd) + 32);
+					sprintf(buf, "%s >/dev/null 2>&1", exec_cmd);
 					int rc = run(buf);
 					free(buf);
-					if (rc != 0 && target->run_abort_on_fail)
+					if (rc != 0 && target->run_abort_on_fail) {
+						if (target->error_cmd) {
+							char ec[RECIPE_MAX];
+							setenv("CMD", exec_cmd, 1);
+							setenv("EXITCODE", "1", 1);
+							expand_command(target, target->error_cmd, ec, sizeof(ec));
+							run(ec);
+						}
 						return -1;
+					}
 				} else {
-					int rc = run(command);
-					if (rc != 0 && target->run_abort_on_fail)
+					int rc = run(exec_cmd);
+					if (rc != 0 && target->run_abort_on_fail) {
+						if (target->error_cmd) {
+							char ec[RECIPE_MAX];
+							setenv("CMD", exec_cmd, 1);
+							setenv("EXITCODE", "1", 1);
+							expand_command(target, target->error_cmd, ec, sizeof(ec));
+							run(ec);
+						}
 						return -1;
+					}
 				}
 				completed_commands++;
 				if (parallel_jobs > 1)
 					show_progress(target->name);
 			}
+	}
 	else {
 		/* Target is up-to-date, still count for progress. */
 		completed_commands += target->ncommands;
 	}
 	/* ———— 宏执行（构建后） ———— */
+	/* post: 后置钩子 */
+	if (target->post_cmd) {
+		char cmd[RECIPE_MAX];
+		expand_command(target, target->post_cmd, cmd, sizeof(cmd));
+		if (run(cmd) != 0)
+			meow_msg(MSG_WARN, "post-hook failed: %s", target->post_cmd);
+	}
 	/* test: 运行测试（遇错继续） */
 	if (target->test_cmd) {
 		char cmd[RECIPE_MAX];

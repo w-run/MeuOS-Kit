@@ -1,0 +1,14 @@
+name: meow-macros-v3
+version: 1.0
+meta: description=A test package for v3 macros, license=MIT
+
+[build]
+  only: x86_64
+  workdir: /tmp
+  pre: echo "pre-hook runs" > /tmp/meow-v3-pre.txt
+  run(!): echo "main command" > /tmp/meow-v3-main.txt
+  post: echo "post-hook runs" > /tmp/meow-v3-post.txt
+
+[skip-on-arm]
+  except: aarch64
+  run(!): echo "not arm" > /tmp/meow-v3-skip.txt

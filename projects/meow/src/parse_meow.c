@@ -517,6 +517,30 @@ parse_meow(char *data)
 			else if (strcmp(key, "strip") == 0 && current_target) {
 				current_target->strip = (strcmp(val, "true") == 0 || strcmp(val, "yes") == 0);
 			}
+			/* only: x86_64, aarch64 — 架构白名单 */
+			else if (strcmp(key, "only") == 0 && current_target) {
+				current_target->only_arch = strdup(val);
+			}
+			/* except: arm — 架构黑名单 */
+			else if (strcmp(key, "except") == 0 && current_target) {
+				current_target->except_arch = strdup(val);
+			}
+			/* workdir: /path — 工作目录 */
+			else if (strcmp(key, "workdir") == 0 && current_target) {
+				current_target->work_dir = strdup(val);
+			}
+			/* pre: <command> — 前置钩子 */
+			else if (strcmp(key, "pre") == 0 && current_target) {
+				current_target->pre_cmd = strdup(val);
+			}
+			/* post: <command> — 后置钩子 */
+			else if (strcmp(key, "post") == 0 && current_target) {
+				current_target->post_cmd = strdup(val);
+			}
+			/* error: <command> — 错误回调 */
+			else if (strcmp(key, "error") == 0 && current_target) {
+				current_target->error_cmd = strdup(val);
+			}
 			else if (strcmp(key, "default") == 0) {
 				default_target = strdup(val);
 			}
@@ -585,6 +609,23 @@ parse_meow(char *data)
 						nrecipe_deps++;
 					}
 					*p = saved;
+				}
+			}
+			/* meta: key=value, key2=value2 — 包元数据 */
+			else if (strcmp(key, "meta") == 0) {
+				char *p = val;
+				while (*p) {
+					while (*p == ' ' || *p == ',') p++;
+					if (!*p) break;
+					char *eq = strchr(p, '=');
+					if (eq) {
+						char *eq_save = eq;
+						*eq = '\0';
+						set_env(trim(p), trim(eq + 1));
+						*eq_save = '=';
+						p = eq + 1;
+					} else break;
+					while (*p && *p != ',') p++;
 				}
 			}
 			/* env: KEY=VALUE — 环境变量注入（每行一个，支持 ''/"" 引号） */
