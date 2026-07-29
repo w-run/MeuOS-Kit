@@ -181,6 +181,10 @@ SUPPORT_OBJS   := $(BUILD)/ctype/ctype.o $(BUILD)/signal/signal.o \
 # (loongarch64 previously used non-TLS errno_la64.c as a BFD 2.41 assertion
 # workaround; that is no longer needed with mt/ld linking.)
 SUPPORT_OBJS   += $(BUILD)/errno/errno.o
+SUPPORT_OBJS   += $(BUILD)/netdb/gethost.o $(BUILD)/netdb/getserv.o \
+                  $(BUILD)/netdb/getproto.o $(BUILD)/netdb/getnet.o \
+                  $(BUILD)/netdb/getaddrinfo.o \
+                  $(BUILD)/netdb/herror.o $(BUILD)/netdb/h_errno.o
 SYSCALL_GATE_OBJ := $(BUILD)/internal/arch/$(ARCH)/syscall.o
 CRT1_OBJ := $(BUILD)/crt1.o
 DL_OBJS := $(BUILD)/dlfcn.o
