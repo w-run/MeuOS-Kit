@@ -12,21 +12,24 @@
 >   - 阶段性成果应合并到 `main` 后再继续下一阶段
 >   - 提交时仍需遵守单组件粒度（`<组件>: <描述>`）
 >   - 合并到 `main` 前应做全量回归（对应组件 `make check`）
-> - 仅在以下情况可提交到 `main`：一次性修复（如 typo、编译报错修正）、文档同步、`.todo` 状态更新、纯重构不涉及功能变更。
+> - 仅在以下情况可提交到 `main`：一次性修复（如 typo、编译报错修正）、文档同步、`.issues/` 状态更新、纯重构不涉及功能变更。
 > - 每次提交前必须跑对应组件的 `make check`，确保不引入回归。
 > - 提交信息格式：`<组件>: <描述>`，例如 `mcc: fix va_list alignment on i386`。
+> - **完成即推送**：每次提交后直接 `git push`，不积压本地提交。
+> - **合后清理**：分支合并到 `main` 后，若无特殊要求，删除本地分支（`git branch -d`），保留远程分支。
 >
 > **会话恢复流程**（强制要求：新 agent 启动时**必须**按顺序执行以下步骤）：
 > 1. **读取 IMA 知识库规划文档** — Agent 启动后**必须主动**查询 IMA 知识库中的 MeuOS 规划文档
 >    （`search_knowledge_base` → `get_knowledge_list`），阅读所有标题含"规划"/"计划"/"路线图"/
 >    "需求"/"设计"的文档。这些文档包含当前阶段的需求、设计方案和任务计划，是理解"接下来做什么"
 >    的第一信息来源。详见 §9.4。
-> 2. **子项目上下文加载** — 读目标子项目的 `ARCHITECTURE.md`（结构/模块/状态/路线图）与 `.todo/`
+> 2. **子项目上下文加载** — 读目标子项目的 `ARCHITECTURE.md`（结构/模块/状态/路线图）与 `.issues/`
 >    （待实现项），了解项目当前进度。
 > 3. **AGENTS.md 规约确认** — 重新确认项目规约（§4 禁止事项、§7 任务编排策略）和当前状态速查（§10）。
 > 4. **环境检查** — 确认 `MEUOS_SYSROOT` 已设置，宿主编译器和交叉工具链可用。
 >
-> 各子项目独立维护状态，无全局 STATE 文件。.todo 和 ARCHITECTURE.md 是状态权威来源。
+> 各子项目独立维护状态，无全局 STATE 文件。`.issues/` 和 ARCHITECTURE.md 是状态权威来源。
+> **待办任务约定**：所有待办任务统一存放在 `.issues/` 下，以日期编号命名（如 `0729.md`、`0730.md`）。禁止在项目目录下创建 `.todo/` 子目录或散落的待办文件。
 
 **项目名称**：MeuOS Kit
 **项目定位**：MeuOS Next 的完整自举开发工具集。提供从零自举所需的全部工具：C/C++ 编译器、标准 C 库、构建系统、底层工具链、核心工具集与 Shell。
@@ -377,7 +380,7 @@ MeuOS-Kit/
 └── reference/              cproc/QBE/musl 只读参考源（gitignored）
 ```
 
-每个组件目录含 `ARCHITECTURE.md`（结构/模块/状态/路线图）与 `.todo/`（待实现项）。
+每个组件目录含 `ARCHITECTURE.md`（结构/模块/状态/路线图）。待办事项统一存放在 `.issues/` 下。
 
 ### 5.2 构建约定
 
@@ -569,7 +572,7 @@ Phase A: riscv64-syscall（基础，必须串行先做）
 每个阶段完成后**必须归档**，然后才能进入下一阶段。归档是提交的前置条件：
 
 1. **运行 `make check`**（必须通过）。跨架构变更还需运行对应 `check-<arch>-bootstrap` 或 `check-<arch>-runtime`。如有回归**必须修复后才能提交**。
-2. **更新 `.todo` 文件**，将完成项标记为 `[x]`。
+2. **更新 `.issues/` 文件**，将完成项标记为 `[x]`。
 3. **更新 `ARCHITECTURE.md` / `PORTING.md`** 中的状态表和路线图。
 4. **Git 提交**，提交信息格式：`<组件>: <阶段描述>（<文件清单>）`
    - 示例：`meuos-libc: riscv64 runtime 完成 (crt1/syscall/atomic/setjmp/sigreturn/thread_clone/tls)`
@@ -779,7 +782,7 @@ make -C projects/meuos-sysroot clean
 - **缺少 sysroot**：确认 `MEUOS_SYSROOT` 已设置，`$MEUOS_SYSROOT/usr/include` 存在
 - **mcc 自身编译失败**：先用 `make -C projects/mcc && make -C projects/mcc check` 确认基础门禁通过
 - **交叉工具链缺失**：检查对应架构的 gcc 交叉编译器是否存在（`aarch64-linux-gnu-gcc --version` 等）
-- **引用未实现符号**：检查 `.todo/` 排查是否依赖了未实现的功能
+- **引用未实现符号**：检查 `.issues/` 排查是否依赖了未实现的功能
 
 **链接错误 → 常见原因：**
 - **-l\<lib\> 顺序错误**：mcc 的链接器要求库按依赖顺序排列（引用者在被引用者之前）
@@ -857,7 +860,7 @@ export IMA_OPENAPI_APIKEY="your_api_key"
 
 **这是项目的第一规约：任何 agent 会话启动后，必须主动读取 IMA 知识库中的规划文档。**
 
-规划文档是"接下来做什么"的权威来源，优先级高于代码仓库中的任何 .todo 文件。
+规划文档是"接下来做什么"的权威来源，优先级高于代码仓库中的任何 .issues 文件。
 规划设计可能先于代码存在，只有主动读取才能理解当前阶段的目标。
 
 #### 执行步骤（在 §0 会话恢复流程的第 1 步执行）
@@ -885,7 +888,7 @@ export IMA_OPENAPI_APIKEY="your_api_key"
 #    - 与其他组件的依赖关系
 
 # 4. 将规划内容与 AGENTS.md §10（项目状态速查）交叉对比
-#    - 规划中提到的待办项是否已在仓库 .todo 中记录
+#    - 规划中提到的待办项是否已在仓库 .issues/ 中记录
 #    - 规划中的设计决策是否需要更新 ARCHITECTURE.md
 ```
 
@@ -920,7 +923,7 @@ for item in data:
 读取规划文档后，agent 应：
 
 1. **更新对当前阶段的理解**：规划文档中描述的目标是什么，当前进展到哪里
-2. **确认 .todo 的同步状态**：规划中提到的待办是否已在 .todo 中有对应条目
+2. **确认 `.issues/` 的同步状态**：规划中提到的待办是否已在 `.issues/` 中有对应条目
 3. **确定本次会话的工作范围**：从规划中选取一个具体的、可独立完成的任务
 4. **如有模糊之处**：在 IMA 知识库搜索相关设计笔记补充上下文，或向用户确认
 
@@ -1008,10 +1011,5 @@ for item in data:
 | `projects/meuos-toolchain/ARCHITECTURE.md`         | 工具链架构、P0-P11 分阶段任务           |
 | `projects/meuos-sysroot/ARCHITECTURE.md`           | .msys 格式设计与依赖关系               |
 | `env/README.md`                                    | QEMU 测试环境使用说明                  |
-| `projects/mcc/.todo/cpp-shared-backend.md`         | mcc/m++ 共享后端架构计划               |
-| `projects/mcc/.todo/gd-tls.md`                     | i386 TLS 模型选择设计笔记              |
-| `projects/mcc/.todo/arm.md`                        | ARM 后端状态与待启动项                 |
-| `projects/meow/.todo/dag-dedup.md`                 | DAG 去重待实现项                       |
-| `projects/meow/.todo/native-shell.md`              | 原生 shell 替代待实现                  |
-| `projects/meuos-sysroot/.todo/msys.md`             | .msys 实现任务清单                     |
-| IMA 知识库（通过 `ima-skill` 访问）                 | 设计笔记、移植记录、调试踩坑           |
+| `.issues/`                                        | 待办任务跟踪（日期编号，如 0728.md）   |
+| 规划文档（通过 `ima-skill` 访问 IMA 知识库）        | 设计笔记、移植记录、调试踩坑           |
