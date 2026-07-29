@@ -121,7 +121,7 @@ src/compat/
 | ld-start-group | mt/ld | `--start-group`/`--end-group` | `00d9e22` |
 | ld-whole-archive | mt/ld | `--whole-archive`/`--no-whole-archive` | `c2bb03f` |
 
-### P2 — 工具链生态完善（24 项 🟢，2 项需修正）
+### P2 — 工具链生态完善（24 项 🟢，4 项需修正）
 
 | ID | 组件 | 描述 | commit |
 |----|------|------|--------|
@@ -162,7 +162,7 @@ src/compat/
 | libc-wchar | `<wchar.h>` | wcs*/isw*/tow*/mbstowcs/wcstombs/fgetwc/fputwc | `6a0cd83` |
 | libc-locale | `<locale.h>` | setlocale/localeconv + struct lconv | `926a76e` |
 | libc-complex | `<complex.h>` | complex.h + creal/cimag/conj | `2b745b7` |
-| libc-socket | POSIX 网络 | socket/bind/listen/accept/connect/inet | `0ea7849` |
+| libc-socket | POSIX 网络 | socket/bind/listen/accept/connect/inet（⚠️ 缺 netdb.h: getaddrinfo/getnameinfo） | `0ea7849` |
 | libc-regex | POSIX 正则 | Thompson NFA 引擎（ERE: \| * + ? [] . ^ $） | `9581069` |
 | libc-termios | POSIX 终端 | termios.h + ioctl + tcgetattr/tcsetattr/cfmakeraw | `f31fa79` |
 | libc-glob | POSIX glob | fnmatch + glob 完整实现 | `f2dcb3e` |
@@ -248,6 +248,8 @@ src/compat/
 
 | ID | 组件 | 项目 | 实际状态 | 说明 |
 |----|------|------|---------|------|
+| as-equ | mt/as | `.equ`/`.set` 汇编符号定义 | ❌ 未实现 | 旧 INDEX 标记为 🟢 但无 `.equ`/`.set` handler |
+| as-diag | mt/as | `.abort`/`.error`/`.warning` 汇编诊断 | ❌ 未实现 | 仅 `as_error()` 内部错误函数存在，无伪指令 handler |
 | ld-cref | mt/ld | `--cref` 交叉引用表输出 | ❌ 未实现 | 旧 INDEX 标记为 🟢 但无源码、无 git commit |
 | ld-compress-debug | mt/ld | `--compress-debug-sections` DWARF 节区压缩 | ❌ 未实现 | 旧 INDEX 标记为 🟢 但无源码（zlib/zstd）、无 git commit |
 
