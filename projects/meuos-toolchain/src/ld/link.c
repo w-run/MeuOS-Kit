@@ -2581,7 +2581,7 @@ write_executable(struct ld_context *ctx, const char *path,
 			.info = 0,
 			.entry_size = es
 		};
-		if (strings_add(&shstr, sections[i + 1].name, &name_offsets[i + 1]) != 0)
+		if (gn && strings_add(&shstr, sections[i + 1].name, &name_offsets[i + 1]) != 0)
 			goto out_strings;
 	}
 	/* Set sh_link / sh_info for dynamic symbol table */
