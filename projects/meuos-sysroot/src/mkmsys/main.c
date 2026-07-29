@@ -651,6 +651,17 @@ static int extract_msys(const char *msys_path, const char *outdir)
 		/* Skip @mt/ metadata entries */
 		if (nlen > 4 && memcmp(name, "@mt/", 4) == 0) continue;
 
+		/* Sanitize entry name: reject path traversal */
+		if (nlen == 0 || name[0] == '/') continue;
+		int traversal = 0;
+		for (size_t j = 1; j < nlen; j++)
+			if (name[j] == '.' && name[j-1] == '.' && (j == 1 || name[j-2] == '/'))
+				{ traversal = 1; break; }
+		if (traversal) {
+			fprintf(stderr, "extract: rejecting path traversal '%.*s'\n", (int)nlen, name);
+			continue;
+		}
+
 		/* Build output path: outdir/name */
 		size_t odlen = strlen(outdir);
 		char *path = malloc(odlen + 1 + nlen + 1);
@@ -720,9 +731,10 @@ static void write_msys_v2(const char *output, struct collector *c, uint32_t flag
 		zlib_handle = dlopen("libz.so.1", RTLD_LAZY | RTLD_LOCAL);
 		if (!zlib_handle) zlib_handle = dlopen("libz.so", RTLD_LAZY | RTLD_LOCAL);
 		if (!zlib_handle) {
-			fprintf(stderr, "mkmsys: --compress=zlib but libz.so not found\n");
-			exit(1);
-		}
+			fprintf(stderr, "mkmsys: --compress=zlib but libz.so not found, "
+			        "falling back to uncompressed\n");
+			flags &= ~MSYS_F_ZLIB;
+		} else {
 #ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
@@ -737,13 +749,15 @@ static void write_msys_v2(const char *output, struct collector *c, uint32_t flag
 		if (!zlib_deflateInit || !zlib_deflate || !zlib_deflateEnd || !zlib_compressBound)
 			die("missing zlib symbols");
 	}
+	}
 	if (flags & MSYS_F_ZSTD) {
 		zstd_handle = dlopen("libzstd.so.1", RTLD_LAZY | RTLD_LOCAL);
 		if (!zstd_handle) zstd_handle = dlopen("libzstd.so", RTLD_LAZY | RTLD_LOCAL);
 		if (!zstd_handle) {
-			fprintf(stderr, "mkmsys: --compress=zstd but libzstd.so not found\n");
-			exit(1);
-		}
+			fprintf(stderr, "mkmsys: --compress=zstd but libzstd.so not found, "
+			        "falling back to uncompressed\n");
+			flags &= ~MSYS_F_ZSTD;
+		} else {
 #ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
@@ -755,6 +769,7 @@ static void write_msys_v2(const char *output, struct collector *c, uint32_t flag
 #endif
 		if (!zstd_compress || !zstd_compressBound)
 			die("missing zstd symbols");
+	}
 	}
 
 	/* Add @mt/<name> metadata entries for incremental support */
