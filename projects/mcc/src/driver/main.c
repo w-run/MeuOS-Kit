@@ -254,7 +254,7 @@ main(int argc, char *argv[])
 				g_target_features |= MT_FEATURE_I386_FPU;
 			if (strncmp(march_val, "i68", 3) == 0)
 				g_target_features |= MT_FEATURE_I386_CMPXCHG8B;
-			arm_march = march_val;
+			/* i386 march — arm_march intentionally not set */
 		} else if (strncmp(march_val, "armv8.", 6) == 0) {
 			arm_march = march_val;
 			if (strstr(march_val, "8.2") || strstr(march_val, "8.3") ||
