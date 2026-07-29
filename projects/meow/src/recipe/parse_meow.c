@@ -102,11 +102,36 @@ interpolate(const char *in, char *out, size_t outsz)
 static void
 set_env(const char *key, const char *value)
 {
-	char envbuf[512];
+	char envbuf[2048];
 	size_t len = strlen(recipe_environment);
-	snprintf(envbuf, sizeof(envbuf), "export %s='%s'; ", key, value);
-	if (len + strlen(envbuf) < sizeof(recipe_environment))
-		memcpy(recipe_environment + len, envbuf, strlen(envbuf) + 1);
+	size_t pos = 0;
+	/* "export key='" = 7 + strlen(key) + 2 = 9 + strlen(key) */
+	if (pos + 9 + strlen(key) + 1 >= sizeof(envbuf)) return;
+	memcpy(envbuf + pos, "export ", 7); pos += 7;
+	memcpy(envbuf + pos, key, strlen(key)); pos += strlen(key);
+	envbuf[pos++] = '=';
+	envbuf[pos++] = '\'';
+	/* Escape single quotes */
+	for (const char *p = value; *p; p++) {
+		if (*p == '\'') {
+			/* close-quote + backslash + quote + reopen-quote = 4 bytes */
+			if (pos + 4 >= sizeof(envbuf)) return;
+			envbuf[pos++] = '\'';
+			envbuf[pos++] = '\\';
+			envbuf[pos++] = '\'';
+			envbuf[pos++] = '\'';
+		} else {
+			if (pos + 1 >= sizeof(envbuf)) return;
+			envbuf[pos++] = *p;
+		}
+	}
+	if (pos + 3 >= sizeof(envbuf)) return;
+	envbuf[pos++] = '\'';
+	envbuf[pos++] = ';';
+	envbuf[pos++] = ' ';
+	envbuf[pos] = '\0';
+	if (len + pos < sizeof(recipe_environment))
+		memcpy(recipe_environment + len, envbuf, pos + 1);
 	setenv(key, value, 1);
 }
 

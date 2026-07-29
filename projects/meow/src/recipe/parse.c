@@ -236,23 +236,22 @@ append_environment(char *key, char *value)
 		      (key[i] >= 'a' && key[i] <= 'z') || key[i] == '_' ||
 		      (i && key[i] >= '0' && key[i] <= '9')))
 			return -1;
-	if (length + 8 + key_length + 2 * strlen(val) + 4 >= sizeof(recipe_environment))
+	if (length + 13 + key_length + 4UL * strlen(val) >= sizeof(recipe_environment))
 		return -1;
 	memcpy(recipe_environment + length, "export ", 7);
 	length += 7;
 	memcpy(recipe_environment + length, key, key_length);
 	length += key_length;
 	recipe_environment[length++] = '=';
-	/* use single quotes; if value contains ', use '\\'' escape trick */
+	/* use single quotes; if value contains ', close quote, add \',
+	 * then reopen quote — producing e.g. 'a'\''b' for a'b */
 	recipe_environment[length++] = '\'';
 	while (*val) {
 		if (*val == '\'') {
-			recipe_environment[length++] = '\\';
-			recipe_environment[length++] = '\'';
-			recipe_environment[length++] = '\'';
-			if (val[1]) {
-				recipe_environment[length++] = '\'';
-			}
+			recipe_environment[length++] = '\'';  /* close */
+			recipe_environment[length++] = '\\';  /* backslash */
+			recipe_environment[length++] = '\'';  /* literal quote */
+			recipe_environment[length++] = '\'';  /* reopen */
 		} else {
 			recipe_environment[length++] = *val;
 		}
