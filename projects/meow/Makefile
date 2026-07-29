@@ -20,7 +20,9 @@ SYSROOT ?= ../sysroot
 BUILD ?= build
 
 SRCS := $(sort $(shell find src -name '*.c'))
-OBJS := $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS))
+# Filter out libm4 objects — they use host cc, not mcc
+OBJS := $(filter-out $(BUILD)/libm4/m4_engine.o,$(patsubst src/%.c,$(BUILD)/%.o,$(SRCS)))
+LIBM4_OBJS := $(BUILD)/libm4/m4_engine.o
 
 # color.c and env.c are picked up automatically via the wildcard above.
 
@@ -41,13 +43,18 @@ $(MSYS_LIB):
 
 all: $(BUILD)/meow
 
-$(BUILD)/meow: $(OBJS) $(MSYS_LIB)
+$(BUILD)/meow: $(OBJS) $(LIBM4_OBJS) $(MSYS_LIB)
 	@mkdir -p $(BUILD)
 	$(CC) $(MEOW_CFLAGS) -o $@ $^ $(MEOW_LDLIBS)
 
 $(BUILD)/%.o: src/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(MEOW_CFLAGS) -c -o $@ $<
+
+# m4_engine.o: must be compiled with host cc (not mcc) for C library access
+$(BUILD)/libm4/m4_engine.o: src/libm4/m4_engine.c
+	@mkdir -p $(dir $@)
+	cc -I../meuos-sysroot/include -Isrc/include -Isrc -Isrc/util -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -c -o $@ $<
 
 check: $(BUILD)/meow
 	cd .. && ./meow/$(BUILD)/meow build meow-smoke

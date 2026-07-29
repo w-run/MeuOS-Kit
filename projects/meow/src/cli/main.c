@@ -106,7 +106,9 @@ main(int argc, char **argv)
 			    strcmp(arguments[1], "lint") == 0 ||
 			    strcmp(arguments[1], "show") == 0 ||
 			    strcmp(arguments[1], "init") == 0 ||
-			    strcmp(arguments[1], "pkg-config") == 0 ||
+			    strcmp(arguments[1], "init") == 0 ||
+		    strcmp(arguments[1], "pkg-config") == 0 ||
+		    strcmp(arguments[1], "import") == 0 ||
 			    strcmp(arguments[1], "--bootstrap") == 0)
 				return 2;
 			build_arch = arguments[1];
@@ -163,6 +165,12 @@ main(int argc, char **argv)
 		return cmd_lint(0, NULL);
 	if (count >= 2 && strcmp(arguments[0], "lint") == 0)
 		return cmd_lint(count - 1, arguments + 1);
+	if (count >= 1 && strcmp(arguments[0], "template") == 0)
+		return cmd_template(count - 1, arguments + 1);
+	if (count >= 1 && strcmp(arguments[0], "import") == 0) {
+		arguments++; count--;
+		return cmd_import(count, arguments);
+	}
 	if (count == 2 && strcmp(arguments[0], "show") == 0)
 		return cmd_show(count - 1, arguments + 1);
 	if (count >= 1 && strcmp(arguments[0], "init") == 0)

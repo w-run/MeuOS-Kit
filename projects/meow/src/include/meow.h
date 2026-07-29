@@ -124,6 +124,12 @@ int cmd_env(void);
 /* lint.c */
 int cmd_lint(int argc, char **argv);
 
+/* template.c */
+int cmd_template(int argc, char **argv);
+
+/* import.c */
+int cmd_import(int argc, char **argv);
+
 /* exec.c */
 int list_packages(void);
 int run(const char *command);
