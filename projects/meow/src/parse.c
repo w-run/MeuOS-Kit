@@ -442,14 +442,16 @@ parse_recipe(char *data)
 					while (1) {
 						if (*p == ' ' || *p == '\0') {
 							char saved = *p; *p = '\0';
-							if (*start) add_dependencies(current, start);
+							if (*start) {
+								char *dup = strdup(start);
+								if (dup) add_dependencies(current, dup);
+							}
 							if (!saved) break;
 							start = p + 1;
 							*p = saved;
 						}
 						p++;
 					}
-					free(exp);
 				} else {
 					if (add_dependencies(current, val) != 0) return -1;
 				}
@@ -462,16 +464,18 @@ parse_recipe(char *data)
 					while (1) {
 						if (*p == ' ' || *p == '\0') {
 							char saved = *p; *p = '\0';
-							if (*start)
-								add_list(current->inputs, &current->ninputs,
-									TARGET_DEPS_MAX, start);
+							if (*start) {
+								char *dup = strdup(start);
+								if (dup)
+									add_list(current->inputs, &current->ninputs,
+										TARGET_DEPS_MAX, dup);
+							}
 							if (!saved) break;
 							start = p + 1;
 							*p = saved;
 						}
 						p++;
 					}
-					free(exp);
 				} else {
 					if (add_list(current->inputs, &current->ninputs,
 						TARGET_DEPS_MAX, val) != 0) return -1;
@@ -485,16 +489,18 @@ parse_recipe(char *data)
 					while (1) {
 						if (*p == ' ' || *p == '\0') {
 							char saved = *p; *p = '\0';
-							if (*start)
-								add_list(current->outputs, &current->noutputs,
-									TARGET_DEPS_MAX, start);
+							if (*start) {
+								char *dup = strdup(start);
+								if (dup)
+									add_list(current->outputs, &current->noutputs,
+										TARGET_DEPS_MAX, dup);
+							}
 							if (!saved) break;
 							start = p + 1;
 							*p = saved;
 						}
 						p++;
 					}
-					free(exp);
 				} else {
 					if (add_list(current->outputs, &current->noutputs,
 						TARGET_DEPS_MAX, val) != 0) return -1;
