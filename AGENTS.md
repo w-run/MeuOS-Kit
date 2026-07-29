@@ -307,8 +307,8 @@ const char *mz_strerror(int e);
 
 **构建**：
 ```sh
-make -C projects/mz              # 构建 libmz.a
-make -C projects/mz check        # 压缩/解压缩轮转测试
+make -C projects/meuos-compress              # 构建 libmz.a
+make -C projects/meuos-compress check        # 压缩/解压缩轮转测试
 ```
 
 **实现原则**：纯 C11 实现，零外部依赖。当前仅实现 LZ77 编码器（`MZ_CODEC_LZ77`），后续可扩展其他编解码器。
@@ -417,7 +417,7 @@ MeuOS-Kit/
 │   ├── meuos-utils/        核心工具集（待启动）
 │   ├── meuos-shell/        Shell 终端（待启动）
 │   ├── meuos-buildtools/   构建工具（m4/gperf/flex/bison）
-│   └── mz/                 压缩库（libmz.a，LZ77）
+│   └── meuos-compress/       压缩库（libmz.a，LZ77）
 ├── env/                    QEMU 多架构测试环境（6.6.142 内核 + 9p 共享）
 │   ├── bin/qvm             VM 管理器
 │   ├── qemu/               静态 qemu-user 二进制（aarch64/riscv64/loongarch64）
@@ -720,8 +720,8 @@ make -C projects/meuos-sysroot                # 构建 libmsys.a + mkmsys + msys
 make -C projects/meuos-sysroot so             # 构建 libmsys.so（Python 绑定用）
 
 # mz - 压缩库
-make -C projects/mz                           # 构建 libmz.a
-make -C projects/mz check                     # 压缩/解压缩轮转测试
+make -C projects/meuos-compress                           # 构建 libmz.a
+make -C projects/meuos-compress check                     # 压缩/解压缩轮转测试
 
 # meuos-buildtools（Phase 6）
 make -C projects/meuos-buildtools             # 构建 m4/gperf/flex
