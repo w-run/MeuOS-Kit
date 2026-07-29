@@ -1,17 +1,18 @@
 /* strip - remove symbols and debug info from ELF64 files.
  *
  * 写入策略（混合）：
- *   - ET_REL（.o）：用 mt_elf64_writer 全量重写，输出紧凑、无 dead bytes。
+ *   - ET_REL（.o）：用 mt_elfNN_writer 全量重写，输出紧凑、无 dead bytes。
  *   - ET_EXEC/ET_DYN（可执行文件/共享库）：就地改写节区头表，完整保留
  *     原始文件字节（含程序头与所有 PT_LOAD 数据），仅修补 ehdr 的
  *     e_shnum/e_shstrndx 并重写 shdr 表区域。writer 不输出程序头，故
  *     可执行文件必须走就地路径以保证剥离后仍可运行。
  *
  * 默认行为等同 --strip-all。就地修改时先写临时文件再 rename 原子替换。
- * 输出可复现：无时间戳、固定节区顺序、locale 无关。仅支持 ELF64 LE。 */
+ * 输出可复现：无时间戳、固定节区顺序、locale 无关。支持 ELF64 LE 和 ELF32 LE。 */
 #define _POSIX_C_SOURCE 200809L
 
 #include "mt/elf.h"
+#include "mt/elf32.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -193,7 +194,6 @@ write_via_writer(const unsigned char *bytes, size_t size,
                  uint16_t n, const char *tmppath,
                  const struct strip_opts *opts)
 {
-	struct mt_elf64_writer w;
 	FILE *out;
 	uint16_t i;
 	int rc = 1;
@@ -201,6 +201,8 @@ write_via_writer(const unsigned char *bytes, size_t size,
 	uint32_t next_idx = 1;
 	uint32_t shstrtab_new;
 	int shstrtab_orig = -1;
+
+	int elf32 = (bytes[4] == 1);  /* ELFCLASS32 */
 
 	(void)size;
 	new_idx = calloc(n, sizeof(uint32_t));
@@ -223,70 +225,139 @@ write_via_writer(const unsigned char *bytes, size_t size,
 	}
 	shstrtab_new = next_idx;
 
-	mt_elf64_writer_init(&w, view->machine, view->type);
-	mt_elf64_writer_set_entry(&w, view->entry);
-	mt_elf64_writer_set_flags(&w, view->flags);
+	if (elf32) {
+		struct mt_elf32_writer w32;
+		mt_elf32_writer_init(&w32, view->machine, view->type);
+		mt_elf32_writer_set_entry(&w32, (uint32_t)view->entry);
+		mt_elf32_writer_set_flags(&w32, (uint32_t)view->flags);
 
-	for (i = 1; i < n; ++i) {
-		struct mt_elf64_writer_section ws;
-		if (!keep[i]) {
-			if (opts->verbose)
-				fprintf(stderr, "strip: removing %s\n",
-				        names[i][0] ? names[i] : "(noname)");
-			continue;
-		}
-		if ((int)i == shstrtab_orig)
-			continue;  /* writer 自动生成 .shstrtab */
-		ws.name = names[i];
-		ws.type = secs[i].type;
-		ws.flags = secs[i].flags;
-		ws.address = secs[i].address;
-		ws.size = secs[i].size;
-		ws.alignment = secs[i].alignment;
-		ws.entry_size = secs[i].entry_size;
-		if ((int)secs[i].link == shstrtab_orig)
-			ws.link = shstrtab_new;
-		else if (secs[i].link < n)
-			ws.link = new_idx[secs[i].link];
-		else
-			ws.link = 0;
-		if (secs[i].type == MT_SHT_REL || secs[i].type == MT_SHT_RELA) {
-			if ((int)secs[i].info == shstrtab_orig)
-				ws.info = shstrtab_new;
-			else if (secs[i].info < n)
-				ws.info = new_idx[secs[i].info];
+		for (i = 1; i < n; ++i) {
+			struct mt_elf32_writer_section ws;
+			if (!keep[i]) {
+				if (opts->verbose)
+					fprintf(stderr, "strip: removing %s\n",
+					        names[i][0] ? names[i] : "(noname)");
+				continue;
+			}
+			if ((int)i == shstrtab_orig)
+				continue;
+			ws.name = names[i];
+			ws.type = secs[i].type;
+			ws.flags = (uint32_t)secs[i].flags;
+			ws.address = (uint32_t)secs[i].address;
+			ws.size = (uint32_t)secs[i].size;
+			ws.alignment = (uint32_t)secs[i].alignment;
+			ws.entry_size = (uint32_t)secs[i].entry_size;
+			if ((int)secs[i].link == shstrtab_orig)
+				ws.link = shstrtab_new;
+			else if (secs[i].link < n)
+				ws.link = new_idx[secs[i].link];
 			else
-				ws.info = 0;
-		} else {
-			ws.info = secs[i].info;
+				ws.link = 0;
+			if (secs[i].type == MT_SHT_REL || secs[i].type == MT_SHT_RELA) {
+				if ((int)secs[i].info == shstrtab_orig)
+					ws.info = shstrtab_new;
+				else if (secs[i].info < n)
+					ws.info = new_idx[secs[i].info];
+				else
+					ws.info = 0;
+			} else {
+				ws.info = secs[i].info;
+			}
+			if (secs[i].type == MT_SHT_NOBITS || secs[i].size == 0)
+				ws.data = NULL;
+			else
+				ws.data = bytes + secs[i].offset;
+			if (mt_elf32_writer_add_section(&w32, &ws) != 0) {
+				fprintf(stderr, "strip: out of memory\n");
+				mt_elf32_writer_free(&w32);
+				free(new_idx);
+				return 1;
+			}
 		}
-		if (secs[i].type == MT_SHT_NOBITS || secs[i].size == 0)
-			ws.data = NULL;
+		(void)map;
+
+		out = fopen(tmppath, "wb");
+		if (!out) {
+			fprintf(stderr, "strip: %s: cannot create\n", tmppath);
+			mt_elf32_writer_free(&w32);
+			free(new_idx);
+			return 1;
+		}
+		if (mt_elf32_writer_finalize(&w32, out) != 0)
+			fprintf(stderr, "strip: %s: write failed\n", tmppath);
 		else
-			ws.data = bytes + secs[i].offset;
-		if (mt_elf64_writer_add_section(&w, &ws) != 0) {
-			fprintf(stderr, "strip: out of memory\n");
+			rc = 0;
+		if (fclose(out) != 0)
+			rc = 1;
+		mt_elf32_writer_free(&w32);
+	} else {
+		struct mt_elf64_writer w;
+		mt_elf64_writer_init(&w, view->machine, view->type);
+		mt_elf64_writer_set_entry(&w, view->entry);
+		mt_elf64_writer_set_flags(&w, view->flags);
+
+		for (i = 1; i < n; ++i) {
+			struct mt_elf64_writer_section ws;
+			if (!keep[i]) {
+				if (opts->verbose)
+					fprintf(stderr, "strip: removing %s\n",
+					        names[i][0] ? names[i] : "(noname)");
+				continue;
+			}
+			if ((int)i == shstrtab_orig)
+				continue;
+			ws.name = names[i];
+			ws.type = secs[i].type;
+			ws.flags = secs[i].flags;
+			ws.address = secs[i].address;
+			ws.size = secs[i].size;
+			ws.alignment = secs[i].alignment;
+			ws.entry_size = secs[i].entry_size;
+			if ((int)secs[i].link == shstrtab_orig)
+				ws.link = shstrtab_new;
+			else if (secs[i].link < n)
+				ws.link = new_idx[secs[i].link];
+			else
+				ws.link = 0;
+			if (secs[i].type == MT_SHT_REL || secs[i].type == MT_SHT_RELA) {
+				if ((int)secs[i].info == shstrtab_orig)
+					ws.info = shstrtab_new;
+				else if (secs[i].info < n)
+					ws.info = new_idx[secs[i].info];
+				else
+					ws.info = 0;
+			} else {
+				ws.info = secs[i].info;
+			}
+			if (secs[i].type == MT_SHT_NOBITS || secs[i].size == 0)
+				ws.data = NULL;
+			else
+				ws.data = bytes + secs[i].offset;
+			if (mt_elf64_writer_add_section(&w, &ws) != 0) {
+				fprintf(stderr, "strip: out of memory\n");
+				mt_elf64_writer_free(&w);
+				free(new_idx);
+				return 1;
+			}
+		}
+		(void)map;
+
+		out = fopen(tmppath, "wb");
+		if (!out) {
+			fprintf(stderr, "strip: %s: cannot create\n", tmppath);
 			mt_elf64_writer_free(&w);
 			free(new_idx);
 			return 1;
 		}
-	}
-	(void)map;
-
-	out = fopen(tmppath, "wb");
-	if (!out) {
-		fprintf(stderr, "strip: %s: cannot create\n", tmppath);
+		if (mt_elf64_writer_finalize(&w, out) != 0)
+			fprintf(stderr, "strip: %s: write failed\n", tmppath);
+		else
+			rc = 0;
+		if (fclose(out) != 0)
+			rc = 1;
 		mt_elf64_writer_free(&w);
-		free(new_idx);
-		return 1;
 	}
-	if (mt_elf64_writer_finalize(&w, out) != 0)
-		fprintf(stderr, "strip: %s: write failed\n", tmppath);
-	else
-		rc = 0;
-	if (fclose(out) != 0)
-		rc = 1;
-	mt_elf64_writer_free(&w);
 	free(new_idx);
 	return rc;
 }
@@ -311,6 +382,8 @@ write_inplace(const unsigned char *bytes, size_t size,
 	uint16_t i;
 	uint32_t idx;
 	int rc = 1;
+	int elf32 = (bytes[4] == 1);  /* ELFCLASS32 */
+	uint16_t shdr_size = elf32 ? MT_ELF32_SHDR_SIZE : MT_ELF64_SHDR_SIZE;
 
 	(void)opts;
 	if (e_shoff == 0 || n == 0)
@@ -329,19 +402,23 @@ write_inplace(const unsigned char *bytes, size_t size,
 	}
 	memcpy(buf, bytes, size);
 
-	/* 修补 ehdr: e_shnum@60, e_shstrndx@62 */
-	put16(buf + 60, (uint16_t)new_shnum);
-	put16(buf + 62, (uint16_t)map[view->section_name_index]);
+	/* 修补 ehdr: e_shnum, e_shstrndx (ELF32 offset 48/50, ELF64 60/62) */
+	if (elf32) {
+		put16(buf + 48, (uint16_t)new_shnum);
+		put16(buf + 50, (uint16_t)map[view->section_name_index]);
+	} else {
+		put16(buf + 60, (uint16_t)new_shnum);
+		put16(buf + 62, (uint16_t)map[view->section_name_index]);
+	}
 
 	/* 清零旧 shdr 表区域后重写保留项 */
 	shdr_region = e_shoff;
-	if (shdr_region + (uint64_t)old_shnum * MT_ELF64_SHDR_SIZE > size) {
+	if (shdr_region + (uint64_t)old_shnum * shdr_size > size) {
 		fprintf(stderr, "strip: corrupt section header table\n");
 		free(buf);
 		return 1;
 	}
-	memset(buf + shdr_region, 0,
-	       (size_t)old_shnum * MT_ELF64_SHDR_SIZE);
+	memset(buf + shdr_region, 0, (size_t)old_shnum * shdr_size);
 	idx = 1;
 	for (i = 1; i < n; ++i) {
 		unsigned char *e;
@@ -351,20 +428,36 @@ write_inplace(const unsigned char *bytes, size_t size,
 				        names[i][0] ? names[i] : "(noname)");
 			continue;
 		}
-		e = buf + shdr_region + (uint64_t)idx * MT_ELF64_SHDR_SIZE;
-		put32(e + 0, secs[i].name);
-		put32(e + 4, secs[i].type);
-		put64(e + 8, secs[i].flags);
-		put64(e + 16, secs[i].address);
-		put64(e + 24, secs[i].offset);
-		put64(e + 32, secs[i].size);
-		put32(e + 40, (secs[i].link < n) ? map[secs[i].link] : 0);
-		if (secs[i].type == MT_SHT_REL || secs[i].type == MT_SHT_RELA)
-			put32(e + 44, (secs[i].info < n) ? map[secs[i].info] : 0);
-		else
-			put32(e + 44, secs[i].info);
-		put64(e + 48, secs[i].alignment);
-		put64(e + 56, secs[i].entry_size);
+		e = buf + shdr_region + (uint64_t)idx * shdr_size;
+		if (elf32) {
+			put32(e + 0, secs[i].name);
+			put32(e + 4, secs[i].type);
+			put32(e + 8, (uint32_t)secs[i].flags);
+			put32(e + 12, (uint32_t)secs[i].address);
+			put32(e + 16, (uint32_t)secs[i].offset);
+			put32(e + 20, (uint32_t)secs[i].size);
+			put32(e + 24, (secs[i].link < n) ? map[secs[i].link] : 0);
+			if (secs[i].type == MT_SHT_REL || secs[i].type == MT_SHT_RELA)
+				put32(e + 28, (secs[i].info < n) ? map[secs[i].info] : 0);
+			else
+				put32(e + 28, secs[i].info);
+			put32(e + 32, (uint32_t)secs[i].alignment);
+			put32(e + 36, (uint32_t)secs[i].entry_size);
+		} else {
+			put32(e + 0, secs[i].name);
+			put32(e + 4, secs[i].type);
+			put64(e + 8, secs[i].flags);
+			put64(e + 16, secs[i].address);
+			put64(e + 24, secs[i].offset);
+			put64(e + 32, secs[i].size);
+			put32(e + 40, (secs[i].link < n) ? map[secs[i].link] : 0);
+			if (secs[i].type == MT_SHT_REL || secs[i].type == MT_SHT_RELA)
+				put32(e + 44, (secs[i].info < n) ? map[secs[i].info] : 0);
+			else
+				put32(e + 44, secs[i].info);
+			put64(e + 48, secs[i].alignment);
+			put64(e + 56, secs[i].entry_size);
+		}
 		++idx;
 	}
 
