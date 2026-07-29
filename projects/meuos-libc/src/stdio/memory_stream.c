@@ -96,5 +96,5 @@ funopen(const void *cookie,
 	funcs.write = funopen_write;
 	funcs.seek = NULL;
 	funcs.close = funopen_close;
-	return fopencookie(fc, readfn ? "r" : "w", funcs);
+	return fopencookie(fc, readfn && writefn ? "r+" : readfn ? "r" : "w", funcs);
 }

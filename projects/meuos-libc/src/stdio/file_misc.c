@@ -45,6 +45,10 @@ tmpfile(void)
 		return NULL;
 	unlink(name);
 	f = fdopen(fd, "w+");
+	if (!f) {
+		close(fd);
+		return NULL;
+	}
 	return f;
 }
 

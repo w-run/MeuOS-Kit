@@ -18,7 +18,8 @@ system(const char *command)
 	if (child < 0)
 		return -1;
 	if (!child) {
-		execve("/bin/sh", arguments, environ);
+		char *envp[] = {NULL};
+		execve("/bin/sh", arguments, environ ? environ : envp);
 		_exit(127);
 	}
 	while (waitpid(child, &status, 0) < 0) {

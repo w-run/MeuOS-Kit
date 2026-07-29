@@ -15,8 +15,13 @@ setlocale(int category, const char *locale)
 		return current_locale;
 	}
 	if (locale[0] == '\0') {
-		/* "" → use environment (default to "C") */
-		const char *env = getenv("LANG");
+		/* "" → use environment with POSIX priority: LC_ALL > LC_* > LANG */
+		const char *env = getenv("LC_ALL");
+		if (!env || !env[0]) {
+			env = getenv("LC_CTYPE");
+			if (!env || !env[0])
+				env = getenv("LANG");
+		}
 		if (env && env[0]) {
 			size_t n = strlen(env);
 			if (n >= sizeof(current_locale))

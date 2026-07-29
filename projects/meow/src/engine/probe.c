@@ -8,11 +8,95 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/wait.h>
+#include <fcntl.h>
 
 #include "meow.h"
 
 /* Temporary file helpers */
 static char tmpdir[] = "/tmp/meow-probe.XXXXXX";
+
+/* Maximum argument count for compiler command. */
+#define PROBE_ARGS_MAX 64
+
+/* Reject strings containing shell metacharacters. */
+static int
+is_safe_arg(const char *s)
+{
+	if (!s || !*s) return 1;
+	for (; *s; s++) {
+		if (*s <= ' ' || *s == '|' || *s == ';' || *s == '&' ||
+		    *s == '$' || *s == '`' || *s == '\'' || *s == '"' ||
+		    *s == '(' || *s == ')' || *s == '<' || *s == '>' ||
+		    *s == '\\' || *s == '\n' || *s == '\t')
+			return 0;
+	}
+	return 1;
+}
+
+/* Split a string by spaces into an argv array (max PROBE_ARGS_MAX entries).
+ * The string is modified in-place. Returns argc on success, -1 on overflow. */
+static int
+split_args(char *buf, const char *argv[], int max_args)
+{
+	int argc = 0;
+	char *p = buf;
+	while (*p) {
+		while (*p == ' ') *p++ = '\0';
+		if (!*p) break;
+		if (argc >= max_args - 1) return -1;
+		argv[argc++] = p;
+		while (*p && *p != ' ') p++;
+	}
+	argv[argc] = NULL;
+	return argc;
+}
+
+/* Build argv and fork/exec a compiler.  Returns 0 on success, -1 on failure.
+ * stderr is redirected to /dev/null (probes are silent). */
+static int
+exec_compiler(const char *cc, const char *cflags,
+              const char *suffix, const char *src, const char *obj_or_exe)
+{
+	char cc_copy[256], cflags_copy[2048];
+	const char *cc_argv[PROBE_ARGS_MAX], *cflags_argv[PROBE_ARGS_MAX];
+	const char *argv[PROBE_ARGS_MAX];
+	int argc = 0;
+	pid_t pid;
+	int status;
+
+	if (!is_safe_arg(cc ? cc : "") || !is_safe_arg(cflags ? cflags : ""))
+		return -1;
+
+	snprintf(cc_copy, sizeof cc_copy, "%s", cc && cc[0] ? cc : "mcc");
+	snprintf(cflags_copy, sizeof cflags_copy, "%s", cflags ? cflags : "");
+
+	int cc_argc = split_args(cc_copy, cc_argv, PROBE_ARGS_MAX);
+	if (cc_argc <= 0) return -1;
+	for (int i = 0; i < cc_argc; i++) argv[argc++] = cc_argv[i];
+
+	int cflags_argc = split_args(cflags_copy, cflags_argv, PROBE_ARGS_MAX);
+	for (int i = 0; i < cflags_argc; i++) argv[argc++] = cflags_argv[i];
+
+	argv[argc++] = suffix; /* "-c" for compile, (empty) for link */
+	if (obj_or_exe[0]) {
+		argv[argc++] = "-o";
+		argv[argc++] = obj_or_exe;
+	}
+	argv[argc++] = src;
+	argv[argc] = NULL;
+
+	pid = fork();
+	if (pid < 0) return -1;
+	if (pid == 0) {
+		int fd = open("/dev/null", O_WRONLY);
+		if (fd >= 0) { dup2(fd, 2); close(fd); }
+		execvp(argv[0], (char *const *)argv);
+		_exit(127);
+	}
+	waitpid(pid, &status, 0);
+	return WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : -1;
+}
 
 static int
 probe_init(void)
@@ -51,16 +135,10 @@ probe_compile(const char *code, const char *cflags, const char *cc)
 	fprintf(f, "%s\n", code);
 	fclose(f);
 
-	char cmd[2048];
-	int n = snprintf(cmd, sizeof cmd, "%s %s -c -o %s %s 2>/dev/null",
-	         cc ? cc : "mcc",
-	         cflags ? cflags : "",
-	         obj, src);
-	if (n < 0 || (size_t)n >= sizeof(cmd)) { unlink(src); return -1; }
-	rc = system(cmd);
+	rc = exec_compiler(cc, cflags, "-c", src, obj);
 	unlink(obj);
 	unlink(src);
-	return rc == 0 ? 0 : -1;
+	return rc;
 }
 
 /* Compile and link a minimal C program to test library availability.
@@ -80,16 +158,10 @@ probe_link(const char *code, const char *cflags, const char *cc)
 	fprintf(f, "%s\n", code);
 	fclose(f);
 
-	char cmd[2048];
-	int n = snprintf(cmd, sizeof cmd, "%s %s -o %s %s 2>/dev/null",
-	         cc ? cc : "mcc",
-	         cflags ? cflags : "",
-	         exe, src);
-	if (n < 0 || (size_t)n >= sizeof(cmd)) { unlink(src); return -1; }
-	rc = system(cmd);
+	rc = exec_compiler(cc, cflags, "", src, exe);
 	unlink(exe);
 	unlink(src);
-	return rc == 0 ? 0 : -1;
+	return rc;
 }
 
 /* Name normalisation: convert any name to HAVE_<UPPERCASE_SAFE>.
@@ -163,7 +235,7 @@ probe_reset(void)
 	nprobe_typesizes = 0;
 	probe_cc[0] = 0;
 	probe_cflags[0] = 0;
-	strcpy(probe_config, "config.h");
+	snprintf(probe_config, sizeof probe_config, "%s", "config.h");
 }
 
 int
@@ -449,11 +521,9 @@ probe_run(const char *build_dir)
 		if (sf) {
 			fprintf(sf, "%s", code);
 			fclose(sf);
-			char cmd[1024];
-			snprintf(cmd, sizeof cmd, "%s %s -o %s %s 2>/dev/null",
-			         probe_cc[0] ? probe_cc : "cc",
-			         probe_cflags, exe, src);
-			if (system(cmd) == 0) {
+			if (exec_compiler(
+			         probe_cc[0] ? probe_cc : NULL,
+			         probe_cflags, "", src, exe) == 0) {
 				/* Run the compiled binary and capture output */
 				char runcmd[1024];
 				snprintf(runcmd, sizeof runcmd, "%s 2>/dev/null", exe);

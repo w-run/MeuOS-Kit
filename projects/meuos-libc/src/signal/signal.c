@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <signal.h>
+#include <string.h>
 #include <unistd.h>
 #include "../internal/syscall.h"
 
@@ -195,7 +196,7 @@ sigemptyset(sigset_t *set)
 int
 sigfillset(sigset_t *set)
 {
-	*set = (unsigned long)-1;
+	memset(set, 0xff, sizeof(*set));
 	return 0;
 }
 

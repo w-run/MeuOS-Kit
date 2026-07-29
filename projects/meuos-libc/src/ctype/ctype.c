@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <stdio.h>
 
 int islower(int c) { return c >= 'a' && c <= 'z'; }
 int isupper(int c) { return c >= 'A' && c <= 'Z'; }
@@ -13,6 +14,6 @@ int tolower(int c) { return isupper(c) ? c - 'A' + 'a' : c; }
 int toupper(int c) { return islower(c) ? c - 'a' + 'A' : c; }
 
 int isblank(int c) { return c == ' ' || c == '\t'; }
-int iscntrl(int c) { return (unsigned)c < 0x20 || c == 0x7f; }
-int isgraph(int c) { return c > 0x20 && c < 0x7f; }
-int ispunct(int c) { return isgraph(c) && !isalnum(c); }
+int iscntrl(int c) { if (c == EOF) return 0; return (unsigned)c < 0x20 || c == 0x7f; }
+int isgraph(int c) { if (c == EOF) return 0; return c > 0x20 && c < 0x7f; }
+int ispunct(int c) { if (c == EOF) return 0; return isgraph(c) && !isalnum(c); }

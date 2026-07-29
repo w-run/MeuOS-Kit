@@ -82,10 +82,6 @@ struct mt_elf32_rela {
 #define MT_ELF32_R_TYPE(i) ((uint8_t)((i) & 0xff))
 #define MT_ELF32_R_INFO(s, t) (((s) << 8) | (uint8_t)(t))
 
-#define MT_ELF32_ST_BIND(i)  ((i) >> 4)
-#define MT_ELF32_ST_TYPE(i)  ((i) & 0xf)
-#define MT_ELF32_ST_INFO(b, t) (((b) << 4) | ((t) & 0xf))
-
 /* ---- ELF32 parser API ---- */
 
 enum mt_elf_status mt_elf32_parse(const void *bytes, size_t size,

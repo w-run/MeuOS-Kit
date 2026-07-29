@@ -120,7 +120,7 @@ struct msys *msys_open(const char *path)
 
 	if (m->format_version == MSYS_FORMAT_V1) {
 		index_off = m->hdr->index_offset;
-		count = m->hdr->index_count;
+		count = msys_index_count(m);
 	} else {
 		index_off = m->hdr_v2->index_offset;
 		count = m->hdr_v2->index_count;
@@ -231,16 +231,31 @@ static inline uint64_t entry_doff(const unsigned char *e, int v2)
 
 /* ---- enumerate / count ---- */
 
+/* Helpers that access the right union member based on format version.
+ * index_count and index_offset are at the same byte offset in both
+ * v1 (struct msys_header) and v2 (struct msys_header_v2), but accessing
+ * via the inactive union member is formally undefined behaviour. */
+static inline uint32_t msys_index_count(struct msys *m)
+{
+	return (m->format_version == MSYS_FORMAT_V2)
+		? m->hdr_v2->index_count : msys_index_count(m);
+}
+static inline uint64_t msys_index_offset(struct msys *m)
+{
+	return (m->format_version == MSYS_FORMAT_V2)
+		? m->hdr_v2->index_offset : m->hdr->index_offset;
+}
+
 uint32_t msys_count(struct msys *m)
 {
-	return m ? m->hdr->index_count : 0;
+	return m ? msys_index_count(m) : 0;
 }
 
 int msys_enumerate(struct msys *m, uint32_t idx,
                    const char **name, size_t *nlen, size_t *size)
 {
 	if (!m || !name || !nlen || !size) { errno = EINVAL; return -1; }
-	if (idx >= m->hdr->index_count) { errno = ERANGE; return -1; }
+	if (idx >= msys_index_count(m)) { errno = ERANGE; return -1; }
 
 	int v2 = (m->format_version == MSYS_FORMAT_V2);
 	unsigned char *entry = m->entries[idx];
@@ -289,7 +304,7 @@ int msys_readdir(struct msys *m, const char *dir, msys_dir_cb cb, void *arg)
 	}
 
 	/* Fallback: v1 or v2 without dir block — O(N) prefix scan */
-	uint32_t cnt = m->hdr->index_count;
+	uint32_t cnt = msys_index_count(m);
 
 	/* Simple linear dedup: track unique children seen so far.
 	 * Typically few children per dir — O(N * seen) is fine. */
@@ -394,7 +409,7 @@ int msys_stat(struct msys *m, const char *name, struct msys_stat *st)
 	if (m->format_version == MSYS_FORMAT_V2) {
 		/* Search again to find the index entry for metadata */
 		uint32_t target = st->name_hash;
-		uint32_t lo = 0, hi = m->hdr->index_count;
+		uint32_t lo = 0, hi = msys_index_count(m);
 		while (lo < hi) {
 			uint32_t mid = lo + (hi - lo) / 2;
 			unsigned char *e = m->entries[mid];
@@ -407,7 +422,7 @@ int msys_stat(struct msys *m, const char *name, struct msys_stat *st)
 				if (read32(m->entries[scan - 1]) != target) break;
 				scan--;
 			}
-			while (scan < m->hdr->index_count) {
+			while (scan < msys_index_count(m)) {
 				unsigned char *p = m->entries[scan];
 				if (read32(p) != target) break;
 				size_t nl = entry_nlen(p, 1);
@@ -438,7 +453,7 @@ int msys_readlink(struct msys *m, const char *name, char *buf, size_t bufsize)
 	if (m->format_version == MSYS_FORMAT_V2) {
 		/* Check file_type in index entry */
 		uint32_t target = msys_fnv1a((const unsigned char *)name, strlen(name));
-		uint32_t lo = 0, hi = m->hdr->index_count;
+		uint32_t lo = 0, hi = msys_index_count(m);
 		while (lo < hi) {
 			uint32_t mid = lo + (hi - lo) / 2;
 			unsigned char *e = m->entries[mid];
@@ -450,7 +465,7 @@ int msys_readlink(struct msys *m, const char *name, char *buf, size_t bufsize)
 				if (read32(m->entries[scan - 1]) != target) break;
 				scan--;
 			}
-			while (scan < m->hdr->index_count) {
+			while (scan < msys_index_count(m)) {
 				unsigned char *p = m->entries[scan];
 				if (read32(p) != target) break;
 				size_t nl = entry_nlen(p, 1);
@@ -547,7 +562,7 @@ int msys_verify(struct msys *m, const char *name)
 	/* For v2 entries with content_hash_present, verify SHA-256 */
 	if (m->format_version == MSYS_FORMAT_V2) {
 		uint32_t target = msys_fnv1a((const unsigned char *)name, strlen(name));
-		uint32_t lo = 0, hi = m->hdr->index_count;
+		uint32_t lo = 0, hi = msys_index_count(m);
 		while (lo < hi) {
 			uint32_t mid = lo + (hi - lo) / 2;
 			unsigned char *e = m->entries[mid];
@@ -559,7 +574,7 @@ int msys_verify(struct msys *m, const char *name)
 				if (read32(m->entries[scan - 1]) != target) break;
 				scan--;
 			}
-			while (scan < m->hdr->index_count) {
+			while (scan < msys_index_count(m)) {
 				unsigned char *p = m->entries[scan];
 				if (read32(p) != target) break;
 				uint8_t nlen = p[30];
@@ -594,7 +609,7 @@ int msys_verify(struct msys *m, const char *name)
 int msys_verify_all(struct msys *m)
 {
 	if (!m) { errno = EINVAL; return -1; }
-	uint32_t cnt = m->hdr->index_count;
+	uint32_t cnt = msys_index_count(m);
 	int v2 = (m->format_version == MSYS_FORMAT_V2);
 	for (uint32_t i = 0; i < cnt; i++) {
 		unsigned char *p = m->entries[i];
@@ -687,7 +702,7 @@ int msys_verify_signature(struct msys *m, const uint8_t pk[32])
 	{
 		uint64_t idx_off = (m->format_version == MSYS_FORMAT_V2)
 			? m->hdr_v2->index_offset : m->hdr->index_offset;
-		uint32_t idx_count = m->hdr->index_count;
+		uint32_t idx_count = msys_index_count(m);
 
 		/* Compute index block size from entry-at-end parsing */
 		/* Walk entries to find end of index */
@@ -742,7 +757,7 @@ const void *msys_search(struct msys *m, const char *name, size_t *size)
 	target_hash = msys_fnv1a((const unsigned char *)name, name_len);
 
 	lo = 0;
-	hi = m->hdr->index_count;
+	hi = msys_index_count(m);
 
 	while (lo < hi) {
 		uint32_t mid = lo + (hi - lo) / 2;
@@ -763,7 +778,7 @@ const void *msys_search(struct msys *m, const char *name, size_t *size)
 				scan--;
 			}
 			/* scan now points to first entry with matching hash */
-			while (scan < m->hdr->index_count) {
+			while (scan < msys_index_count(m)) {
 				unsigned char *p = m->entries[scan];
 				if (read32(p) != target_hash) break;
 
@@ -1000,7 +1015,7 @@ msys_load_depth(struct msys *m, const char *path, void **buf, size_t *size,
 	if (depth > 0 && m->format_version == MSYS_FORMAT_V2) {
 		/* Find the index entry to check file_type */
 		uint32_t target = msys_fnv1a((const unsigned char *)path, strlen(path));
-		uint32_t lo = 0, hi = m->hdr->index_count;
+		uint32_t lo = 0, hi = msys_index_count(m);
 		while (lo < hi) {
 			uint32_t mid = lo + (hi - lo) / 2;
 			unsigned char *e = m->entries[mid];
@@ -1012,7 +1027,7 @@ msys_load_depth(struct msys *m, const char *path, void **buf, size_t *size,
 				if (read32(m->entries[scan - 1]) != target) break;
 				scan--;
 			}
-			while (scan < m->hdr->index_count) {
+			while (scan < msys_index_count(m)) {
 				unsigned char *p = m->entries[scan];
 				if (read32(p) != target) break;
 				size_t nl = entry_nlen(p, 1);

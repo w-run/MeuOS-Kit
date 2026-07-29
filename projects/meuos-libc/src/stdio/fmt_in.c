@@ -8,6 +8,7 @@
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <limits.h>
 #include <string.h>
 #include <unistd.h>
 #include "internal.h"
