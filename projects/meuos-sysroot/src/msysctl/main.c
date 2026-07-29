@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 #include <dirent.h>
@@ -309,9 +310,22 @@ static int cmd_hist_diff(const char *archive, const char *path, const char *rev1
 	snprintf(f1, sizeof(f1), "%s/%s/%s", hist_dir(archive), path, rev1);
 	snprintf(f2, sizeof(f2), "%s/%s/%s", hist_dir(archive), path, rev2);
 
-	char cmd[16384];
-	snprintf(cmd, sizeof(cmd), "diff -u %s %s 2>/dev/null || true", f1, f2);
-	return system(cmd);
+	/* Use fork+exec instead of system() to avoid command injection */
+	pid_t pid = fork();
+	if (pid == 0) {
+		/* Child: execute diff directly — no shell involved */
+		execlp("diff", "diff", "-u", f1, f2, (char *)NULL);
+		_exit(127);
+	} else if (pid < 0) {
+		perror("fork");
+		return -1;
+	}
+	int status;
+	if (waitpid(pid, &status, 0) < 0)
+		return -1;
+	if (WIFEXITED(status))
+		return WEXITSTATUS(status);
+	return -1;
 }
 
 /* ── overlay wrappers ── */

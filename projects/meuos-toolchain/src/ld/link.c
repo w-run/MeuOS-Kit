@@ -2603,18 +2603,6 @@ write_executable(struct ld_context *ctx, const char *path,
 	}
 	/* ---- .note.gnu.build-id section (if --build-id) ---- */
 	if (ctx->build_id) {
-		uint64_t hash = 0xcbf29ce484222325ULL;
-		const uint64_t prime = 0x100000001b3ULL;
-		uint64_t j;
-		for (j = 0; j < ctx->group_count; ++j) {
-			struct ld_group *g = &ctx->groups[j];
-			if (g->type == MT_SHT_NOBITS || g->size == 0) continue;
-			uint64_t k;
-			for (k = 0; k < g->size; ++k) {
-				hash ^= g->data[k];
-				hash *= prime;
-			}
-		}
 		unsigned char note_data[24];
 		memset(note_data, 0, sizeof(note_data));
 		write32(note_data + 0, 4);
