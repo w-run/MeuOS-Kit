@@ -8,6 +8,7 @@
  *     or comments it out (undef commented) if not
  *   - Leaves unrecognised @VAR@ untouched
  */
+#define _POSIX_C_SOURCE 200809L
 #include "meow.h"
 
 #include <stdio.h>
