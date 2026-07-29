@@ -143,7 +143,7 @@ mt_elf64_get_section(const void *bytes, size_t size,
 		return MT_ELF_E_ARGUMENT;
 	if (index >= view->section_count)
 		return MT_ELF_E_LAYOUT;
-	is_elf32 = (view->section_entry_size == MT_ELF32_SHDR_SIZE);
+	is_elf32 = (view->section_entry_size <= MT_ELF32_SHDR_SIZE);
 	if (!is_elf32 && view->section_entry_size < MT_ELF64_SHDR_SIZE)
 		return MT_ELF_E_LAYOUT;
 	if ((uint64_t)index > UINT64_MAX / view->section_entry_size)
@@ -196,7 +196,7 @@ mt_elf64_get_symbol(const void *bytes, size_t size,
 		return MT_ELF_E_ARGUMENT;
 	if (table->type != MT_SHT_SYMTAB && table->type != MT_SHT_DYNSYM)
 		return MT_ELF_E_ARGUMENT;
-	is_elf32 = (table->entry_size == MT_ELF32_SYM_SIZE);
+	is_elf32 = (table->entry_size <= MT_ELF32_SYM_SIZE);
 	if (!is_elf32 && (table->entry_size < MT_ELF64_SYM_SIZE ||
 	    table->size % table->entry_size != 0 ||
 	    index >= table->size / table->entry_size))
