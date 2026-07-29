@@ -1,0 +1,12 @@
+name: meow-auto
+version: 1
+default: report
+
+[report]
+  deps: /tmp/meow-auto.input
+  outputs: /tmp/meow-auto.output
+  run: printf 'report:/tmp/meow-auto.input:/tmp/meow-auto.input' > /tmp/meow-auto.output
+
+[clean]
+  phony: true
+  run: rm -f /tmp/meow-auto.input /tmp/meow-auto.output

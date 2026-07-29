@@ -1,0 +1,13 @@
+name: meow-probe-test
+version: 1
+
+[probe]
+  headers: stdlib.h, stdio.h, sys/stat.h, inttypes.h
+  functions: strdup
+  decls: isblank
+
+[show]
+  run: cat config.h
+
+[clean]
+  run: rm -f config.h

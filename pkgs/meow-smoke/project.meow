@@ -1,0 +1,15 @@
+name: meow-smoke
+version: 1
+
+[all]
+  deps: verify
+
+[prepare]
+  run: :
+
+[verify]
+  deps: prepare
+  run: :
+
+[clean]
+  run: :

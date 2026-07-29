@@ -1,0 +1,14 @@
+name: meow-env
+version: 1
+
+[variables]
+  MEOW_RECIPE_VALUE: enabled
+
+[verify]
+  run: test "%MEOW_RECIPE_VALUE%" = "enabled"
+
+[all]
+  deps: verify
+
+[clean]
+  run: :
