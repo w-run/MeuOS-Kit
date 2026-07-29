@@ -35,7 +35,7 @@ MeuOS-Kit/
 |------|------|---------|
 | `meuos-libc` | ISO C11 + POSIX 标准实现；compat 层独立归档 | x86_64 完整；aarch64/arm qemu 端到端验证；i386 整数 ABI bootstrap；riscv64/loongarch64 代码落地 |
 | `mcc` / `m++` | C99+C11 完整，C23 稳定；后续 C++ 共享后端 | C11 核心 + 6 架构后端（x86_64/aarch64/riscv64/i386/loongarch64/arm） |
-| `meow` | 取代 make + autoconf | 原生 YAML + Makefile 兼容 |
+| `meow` | 取代 make + autoconf | `.meow` 配方格式 + 25+ 语义宏 + DAG 增量构建 + `-jN` 并行 + probe 检测 + pkg-config 内置替代 |
 | `meuos-toolchain` | 取缔 binutils（as/ld/ar/ranlib/nm/objdump/readelf/strip/objcopy） | P0-P4+P9-P11 完成（6 架构 as+ld + .msys Phase 3）；P6-P8 规划中 |
 | `meuos-sysroot` | 单文件 sysroot 系统（.msys 格式，mcc/mt/meow 原生读取） | v2 格式完整：SHA-256 去重/校验、ed25519 签名、Overlay 分层、流式消费、xattr、msysctl CLI（22+ 命令）、Python 绑定；已集成到 mcc/mt/ld |
 | `meuos-utils` | coreutils/diffutils/findutils 完整替代 | 待启动 |
@@ -104,6 +104,40 @@ Phase 7  用户空间      构建 meuos-utils + meuos-shell
 | 5 | meuos-toolchain + mcc driver 集成 mt | `make -C meuos-toolchain check` |
 | 6 | meuos-buildtools (m4/bison/flex/gperf) | 已规划，待启动 |
 | 7 | meuos-utils + meuos-shell | 待启动 |
+
+## meow 构建系统
+
+meow 使用 `.meow` 配方格式（也兼容 `meow.yaml`），支持 25+ 语义宏：
+
+```
+name: myapp
+version: 1.0
+env: CC=mcc
+cflags: -O2
+meta: desc=My App, license=MIT
+
+[build]
+  download: https://example.com/pkg.tar.gz
+  sha256: a2bae...
+  unpack: true
+  has: cmake, make
+  workdir: /tmp/build
+  run(!): cmake -B build
+  run(?): make -j4
+  run(q): make install
+  copy: src=a.out, dest=/usr/bin, mode=755
+  strip: true
+```
+
+```sh
+meow build <pkg>              # 构建包
+meow list                     # 列出可用包
+meow pkg-config --libs zlib   # 查询库参数
+meow init                     # 生成 project.meow
+meow lint                     # 配方语法检查
+```
+
+详见 [AGENTS.md §2.3](AGENTS.md) 和 `projects/meow/ARCHITECTURE.md`。
 
 ## 测试环境（env/）
 

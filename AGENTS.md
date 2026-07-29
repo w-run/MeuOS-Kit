@@ -962,6 +962,15 @@ for item in data:
   - **as-isa-gating** — 两层指令门控（VEX 前缀快速检查 + required_features 精确门控）+ `--march=x86-64-vN`
   - **riscv-extensions / arm-multiver / i386-variants / aarch64-ext** — 全架构 `-march` 解析 + 特性位映射
   - **ci-pipeline / community-tests** — GitHub Actions 工作流 + chibicc 测试套件修复
+- **`.meow` 宏系统完整实现（2026-07-29）** — 25+ 语义宏：
+  - **run 修饰符** — `run(!)` 遇错中断 / `run(?)` 遇错继续 / `run(q)` 安静执行
+  - **语义节** — `env:` 环境变量 / `download:` 下载 / `has:` 工具检测 / `lib:` 库检测 / `log:` 构建日志
+  - **构建参数** — `toolchain:` 交叉前缀 / `cflags:` / `ldflags:` / `srcdir:` / `builddir:` / `parallel:` 并行度
+  - **构建流水线** — `sha256:` 校验 / `unpack:` 解包 / `patch:` 补丁 / `test:` 测试 / `copy:` 复制 / `strip:` 去调试符号
+  - **流程控制** — `only:` / `except:` 架构过滤 / `workdir:` 工作目录 / `pre:` / `post:` 钩子 / `error:` 回调 / `meta:` 元数据
+- **pkgs/* 全面迁移至 `project.meow`** — 18 个构建包全部使用 `.meow` 配方格式，兼容保留 `meow.yaml`
+- **pkg-config 内置替代** — `meow pkg-config` 子命令 + 27 库内置参数表 + recipe `uses:` 字段集成 + 构建时 `%LIBS%`/`%CFLAGS%` 自动展开
+- **netdb.h 完整 POSIX 实现** — host/serv/proto/net 解析 + getaddrinfo/getnameinfo + reentrant `_r` 变体 + 7 项回归测试
 
 ### 10.2 待启动/进行中工作
 
@@ -972,9 +981,7 @@ for item in data:
 | meuos-utils（coreutils 等）             | ⏳ 待启动 | Phase 7；coreutils/diffutils/findutils 替代                       |
 | meuos-shell (msh)                       | ⏳ 待启动 | Phase 7；POSIX sh + 可选 bash/zsh 兼容                            |
 | meow `meowctl` 配置界面                | ⏳ 待设计 | `.meow` 格式已可用，配置/查询 CLI 待设计                           |
-| meow DAG 去重                          | 🔄 进行中 | 解决 -jN 并行构建的间接依赖重复执行问题                             |
-| meow 原生 shell 替代                   | 🔄 进行中 | 用 msh 替代 /bin/sh                                                |
-| i386 TLS 端到端验证                     | ⏳ 阻塞中 | 被 mcc i386 后端缺口阻塞                                           |
+| meow 原生 shell 替代                   | 🔄 进行中 | 用 msh 替代 /bin/sh（阻塞于 msh 可用性）                          |
 | mt DWARF 调试信息（P8）                 | ⏳ 待启动 | 调试信息生成                                                       |
 | arm-multiver emit 多版本分支            | 🟡 待补 | ARM emit 层 `g_arm_arch_ver` 已就绪，v6/v7+/v8 指令分支待落地        |
 
