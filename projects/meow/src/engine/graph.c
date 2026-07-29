@@ -17,6 +17,9 @@
 int total_commands = 0;
 int completed_commands = 0;
 
+/* Log file handle, kept open across run_target() for real-time logging. */
+static FILE *g_log_fp = NULL;
+
 /* Expand ${VAR} in path, using a stack buffer for the result.
  * Returns the original path if no expansion is needed, or a pointer
  * to a static buffer with the expanded result. */
@@ -385,12 +388,11 @@ run_target(struct target *target)
 	if (target->parallel_jobs > 0)
 		parallel_jobs = target->parallel_jobs;
 	if (target->log_file) {
-		/* Open log file for writing */
-		FILE *lf = fopen(target->log_file, "w");
-		if (lf) {
-			setvbuf(stdout, NULL, _IONBF, 0);
-			fclose(lf);
-		}
+		/* Open log file for writing and keep it open for the duration
+		 * of the build so setvbuf takes effect. */
+		g_log_fp = fopen(target->log_file, "w");
+		if (g_log_fp)
+			setvbuf(g_log_fp, NULL, _IONBF, 0);
 	}
 	if (target_out_of_date(target)) {
 		/* pre: 前置钩子 */
@@ -490,6 +492,7 @@ run_target(struct target *target)
 	/* 恢复全局并行度 */
 	if (target->parallel_jobs > 0)
 		parallel_jobs = saved_parallel;
+	if (g_log_fp) { fclose(g_log_fp); g_log_fp = NULL; }
 	target->visiting = 0;
 	target->done = 1;
 	return 0;

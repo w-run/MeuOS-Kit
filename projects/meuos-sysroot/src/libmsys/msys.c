@@ -433,6 +433,7 @@ int msys_readlink(struct msys *m, const char *name, char *buf, size_t bufsize)
 {
 	(void)buf; (void)bufsize;
 	if (!m || !name || !buf) { errno = EINVAL; return -1; }
+	if (bufsize == 0) { errno = EINVAL; return -1; }
 
 	if (m->format_version == MSYS_FORMAT_V2) {
 		/* Check file_type in index entry */
