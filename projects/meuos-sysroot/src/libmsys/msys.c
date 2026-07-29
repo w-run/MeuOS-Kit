@@ -702,8 +702,10 @@ int msys_verify_signature(struct msys *m, const uint8_t pk[32])
 				if (avail < 32) break;
 				nlen = p[30];
 				uint8_t chp = p[31];
-				p += 32 + nlen + (chp ? 32 : 0);
-				avail -= 32 + nlen + (chp ? 32 : 0);
+				uint32_t ent = 32 + nlen + (chp ? 32 : 0);
+				if (avail < ent) break;
+				p += ent;
+				avail -= ent;
 			} else {
 				if (avail < 16) break;
 				nlen = (uint16_t)p[14] | ((uint16_t)p[15] << 8);
