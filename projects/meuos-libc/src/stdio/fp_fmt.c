@@ -57,9 +57,7 @@ scale10(double v, int n)
 static int
 sign_bit(double v)
 {
-	union { double d; unsigned u[2]; } u;
-	u.d = v;
-	return (int)u.u[1] < 0;
+	return signbit(v);
 }
 
 static int

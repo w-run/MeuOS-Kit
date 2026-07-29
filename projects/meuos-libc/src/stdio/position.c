@@ -60,7 +60,7 @@ ftell(FILE *stream)
 	{
 		off_t pos = lseek(stream->fd, 0, SEEK_CUR);
 
-		if (stream->ungot != EOF)
+		if (stream->ungot != EOF && pos > 0)
 			--pos;
 		return (long)pos;
 	}

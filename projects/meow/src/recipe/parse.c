@@ -135,36 +135,51 @@ expand_files(const char *input)
 	int ret = glob(pattern, GLOB_NOCHECK | GLOB_MARK | GLOB_BRACE, NULL, &g);
 	if (ret != 0) { globfree(&g); return strdup(input); }
 
-	char result[4096] = {0};
+	size_t cap = 4096;
+	char *result = malloc(cap);
+	if (!result) { globfree(&g); return NULL; }
 	size_t pos = 0;
+	result[0] = '\0';
+
+	/* Reallocate to ensure at least `need` bytes of space. */
+#define EXPAND_ENSURE(need) do { \
+	while (pos + (need) + 1 > cap) { \
+		size_t new_cap = cap * 2; \
+		if (new_cap < (need) + pos + 1) new_cap = (need) + pos + 1; \
+		char *new_r = realloc(result, new_cap); \
+		if (!new_r) { free(result); globfree(&g); return NULL; } \
+		result = new_r; \
+		cap = new_cap; \
+	} } while (0)
+
 	/* Copy text before files() call */
 	size_t prefix_len = (size_t)(files_call - input);
 	if (prefix_len > 0) {
+		EXPAND_ENSURE(prefix_len);
 		memcpy(result, input, prefix_len);
 		pos += prefix_len;
 	}
 	/* Expand glob matches */
 	for (size_t i = 0; i < g.gl_pathc; i++) {
 		if (pos > 0 && result[pos-1] != ' ') { result[pos++] = ' '; }
-		size_t remaining = sizeof(result) - pos - 1;
-		size_t to_copy = strlen(g.gl_pathv[i]);
-		if (to_copy > remaining) to_copy = remaining;
-		memcpy(result + pos, g.gl_pathv[i], to_copy);
-		pos += to_copy;
+		size_t n = strlen(g.gl_pathv[i]);
+		EXPAND_ENSURE(n);
+		memcpy(result + pos, g.gl_pathv[i], n);
+		pos += n;
 	}
 	globfree(&g);
 	/* Copy text after files() call */
 	const char *after = pattern_end + 2;
 	if (*after) {
 		if (pos > 0 && result[pos-1] != ' ') { result[pos++] = ' '; }
-		size_t remaining = sizeof(result) - pos - 1;
-		size_t to_copy = strlen(after);
-		if (to_copy > remaining) to_copy = remaining;
-		memcpy(result + pos, after, to_copy);
-		pos += to_copy;
+		size_t n = strlen(after);
+		EXPAND_ENSURE(n);
+		memcpy(result + pos, after, n);
+		pos += n;
 	}
 	result[pos] = '\0';
-	return strdup(result);
+#undef EXPAND_ENSURE
+	return result;
 }
 
 /* Check if a string contains files('...') pattern that needs expansion. */

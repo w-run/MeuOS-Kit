@@ -113,7 +113,7 @@ filluse(Fn *fn)
 				}
 		}
 		if (rtype(b->jmp.arg) == RTmp)
-			adduse(&tmp[b->jmp.arg.val], UJmp, b);
+			adduse(&tmp[b->jmp.arg.val], UJmp, b, 0);
 	}
 }
 

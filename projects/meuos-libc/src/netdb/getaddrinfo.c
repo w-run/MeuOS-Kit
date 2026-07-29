@@ -80,8 +80,8 @@ __resolve_host(const char *name, int family)
 
 	/* Try numeric first */
 	if (name) {
-		struct in_addr addr4;
-		struct in6_addr addr6;
+		static _Thread_local struct in_addr addr4;
+		static _Thread_local struct in6_addr addr6;
 		if (family != AF_INET6 && inet_pton(AF_INET, name, &addr4) == 1) {
 			he.h_name = (char *)name;
 			he.h_aliases = NULL;

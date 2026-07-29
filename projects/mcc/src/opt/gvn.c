@@ -98,7 +98,7 @@ replaceuse(Fn *fn, Use *u, Ref r1, Ref r2)
 		if (req(b->jmp.arg, r1))
 			b->jmp.arg = r2;
 		if (t2)
-			adduse(t2, UJmp, b, (void)0);
+			adduse(t2, UJmp, b, 0);
 		break;
 	case UXXX:
 		die("unreachable");

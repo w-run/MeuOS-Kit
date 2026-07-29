@@ -1769,7 +1769,8 @@ layout_output(struct ld_context *ctx)
 			/* No .tdata: allocate beyond non-TLS sections */
 			g->file_offset = offset;
 			g->address = base + offset;
-			offset += g->size;
+			if (g->type != MT_SHT_NOBITS)
+				offset += g->size;
 			}
 		}
 		return 0;

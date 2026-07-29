@@ -1,6 +1,6 @@
 #include <string.h>
 
-static char *token_state;
+static _Thread_local char *token_state;
 
 static int
 separator(int character, const char *delimiters)

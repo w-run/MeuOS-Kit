@@ -70,7 +70,17 @@ vsscanf(const char *input, const char *format, va_list arguments)
 				++input;
 			}
 			if (!digits) break;
-			*out = negative ? -(int)value : (int)value;
+			if (negative) {
+				if (value > (unsigned)INT_MAX + 1u)
+					*out = INT_MIN;
+				else
+					*out = -(int)value;
+			} else {
+				if (value > (unsigned)INT_MAX)
+					*out = INT_MAX;
+				else
+					*out = (int)value;
+			}
 			++assigned;
 			++format;
 			continue;
