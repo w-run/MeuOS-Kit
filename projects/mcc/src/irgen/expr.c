@@ -37,7 +37,7 @@ static struct value *
 atomicrmw(struct func *f, enum builtinkind kind, struct type *t,
           struct lvalue lval, struct value *arg)
 {
-	static struct decl callee[6];
+	static struct decl callee[6] = {0};
 	struct decl *d;
 	char *name;
 	struct value *v;
