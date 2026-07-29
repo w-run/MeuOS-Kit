@@ -312,7 +312,7 @@ add_command(struct target *target, char *command)
 int
 parse_recipe(char *data)
 {
-	enum { ROOT, PROBE, PROBE_HEADERS, PROBE_FUNCS, PROBE_CODES, PROBE_DECLS, PROBE_LIBS, PROBE_TYPESIZES, VARIABLES, TARGETS, COMMANDS, DEPENDS } section = ROOT;
+	enum { ROOT, PROBE, PROBE_HEADERS, PROBE_FUNCS, PROBE_CODES, PROBE_DECLS, PROBE_LIBS, PROBE_TYPESIZES, VARIABLES, TARGETS, COMMANDS, DEPENDS, USESECT } section = ROOT;
 	struct target *current = 0;
 	int probe_section = 0;  /* 0=none, 1=keyval, 2=list */
 	char *line = data;
@@ -320,6 +320,7 @@ parse_recipe(char *data)
 	recipe_environment[0] = 0;
 	nrecipe_deps = 0;
 	ntargets = 0;
+	nuses = 0;
 	default_target = 0;
 	probe_reset();
 	while (*line) {
@@ -346,9 +347,11 @@ parse_recipe(char *data)
 				section = VARIABLES;
 			else if (strcmp(text, "targets:") == 0 || strcmp(text, "steps:") == 0)
 				section = TARGETS;
-			else if (strcmp(text, "depends:") == 0)
-				section = DEPENDS;
-			else if (strncmp(text, "default:", 8) == 0)
+		else if (strcmp(text, "depends:") == 0)
+			section = DEPENDS;
+		else if (strcmp(text, "uses:") == 0)
+			section = USESECT;
+		else if (strncmp(text, "default:", 8) == 0)
 				default_target = trim(text + 8);
 		} else if ((section == PROBE || section == PROBE_HEADERS || section == PROBE_FUNCS || section == PROBE_CODES || section == PROBE_DECLS || section == PROBE_LIBS || section == PROBE_TYPESIZES) && indent == 2) {
 			section = PROBE;
@@ -423,6 +426,12 @@ parse_recipe(char *data)
 			snprintf(recipe_deps[nrecipe_deps], sizeof recipe_deps[0],
 			         "%s", trim(text + 1));
 			++nrecipe_deps;
+		} else if (section == USESECT && indent == 2 && text[0] == '-') {
+			/* uses: list of library names */
+			if (nuses >= USES_MAX) return -1;
+			uses[nuses] = strdup(trim(text + 1));
+			if (!uses[nuses]) return -1;
+			++nuses;
 		} else if ((section == TARGETS || section == COMMANDS) && indent == 2) {
 			char *colon = strchr(text, ':');
 			if (!colon || colon[1])

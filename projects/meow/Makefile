@@ -98,6 +98,7 @@ check: $(BUILD)/meow
 	cd .. && ./meow/$(BUILD)/meow clean meow-conditional
 	cd .. && CC=cc ./meow/$(BUILD)/meow --bootstrap
 	sh test/pkg_config.sh "$(abspath $(BUILD)/meow)"
+	sh test/pkg_config_integration.sh "$(abspath $(BUILD)/meow)"
 	cd .. && $(MAKE) -C meow clean all
 
 # Verify --arch flag injection by creating a minimal recipe that echoes
@@ -171,6 +172,7 @@ check-msys: $(MSYS_LIB)
 install: $(BUILD)/meow
 	@mkdir -p $(DESTDIR)/usr/bin
 	cp $(BUILD)/meow $(DESTDIR)/usr/bin/meow
+	ln -sf meow $(DESTDIR)/usr/bin/pkg-config
 
 clean:
 	rm -rf $(BUILD)

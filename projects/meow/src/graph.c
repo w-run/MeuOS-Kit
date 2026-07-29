@@ -63,6 +63,7 @@ eval_condition(const char *when_expr)
 /* File-local helpers (defined below; run_target() calls them). */
 static int target_out_of_date(struct target *);
 static int expand_command(struct target *, const char *, char *, size_t);
+void expand_uses(void);  /* called from main.c */
 
 /* Draw a progress bar to stdout. Called after each command completes
  * during parallel builds. */
@@ -95,6 +96,72 @@ count_total_commands(void)
 		return;
 	for (size_t i = 0; i < ntargets; i++)
 		total_commands += targets[i].ncommands;
+}
+
+/* Expand uses: entries from recipe into environment variables.
+ * Called once per build, before any target executes. */
+void
+expand_uses(void)
+{
+	if (nuses == 0)
+		return;
+
+	char libs_buf[1024] = {0};
+	char cflags_buf[1024] = {0};
+	size_t libs_pos = 0, cflags_pos = 0;
+
+	for (size_t i = 0; i < nuses; i++) {
+		const struct pkg_lib *lib = find_lib(uses[i]);
+		if (!lib) {
+			meow_msg(MSG_WARN, "uses: unknown library '%s', skipping", uses[i]);
+			continue;
+		}
+
+		/* Append to aggregate LIBS / CFLAGS */
+		if (lib->libs[0]) {
+			if (libs_pos > 0 && libs_pos < sizeof(libs_buf) - 1)
+				libs_buf[libs_pos++] = ' ';
+			size_t len = strlen(lib->libs);
+			if (libs_pos + len < sizeof(libs_buf)) {
+				memcpy(libs_buf + libs_pos, lib->libs, len);
+				libs_pos += len;
+			}
+		}
+		if (lib->cflags[0]) {
+			if (cflags_pos > 0 && cflags_pos < sizeof(cflags_buf) - 1)
+				cflags_buf[cflags_pos++] = ' ';
+			size_t len = strlen(lib->cflags);
+			if (cflags_pos + len < sizeof(cflags_buf)) {
+				memcpy(cflags_buf + cflags_pos, lib->cflags, len);
+				cflags_pos += len;
+			}
+		}
+
+		/* Export individual PKG_<NAME>_LIBS and PKG_<NAME>_CFLAGS */
+		char varname[128], envbuf[512];
+		snprintf(varname, sizeof(varname), "PKG_%s_LIBS", uses[i]);
+		for (char *p = varname + 4; *p; p++)
+			if (*p >= 'a' && *p <= 'z') *p &= ~0x20;
+		snprintf(envbuf, sizeof(envbuf), "export %s='%s'; ", varname, lib->libs);
+		if (strlen(recipe_environment) + strlen(envbuf) < RECIPE_ENV_MAX)
+			strcat(recipe_environment, envbuf);
+
+		snprintf(varname, sizeof(varname), "PKG_%s_CFLAGS", uses[i]);
+		for (char *p = varname + 4; *p; p++)
+			if (*p >= 'a' && *p <= 'z') *p &= ~0x20;
+		snprintf(envbuf, sizeof(envbuf), "export %s='%s'; ", varname, lib->cflags);
+		if (strlen(recipe_environment) + strlen(envbuf) < RECIPE_ENV_MAX)
+			strcat(recipe_environment, envbuf);
+	}
+
+	/* Aggregate LIBS and CFLAGS for %LIBS% / %CFLAGS% interpolation */
+	libs_buf[libs_pos] = '\0';
+	cflags_buf[cflags_pos] = '\0';
+	char agg[2048];
+	snprintf(agg, sizeof(agg), "export LIBS='%s'; export CFLAGS='%s'; ",
+	         libs_buf, cflags_buf);
+	if (strlen(recipe_environment) + strlen(agg) < RECIPE_ENV_MAX)
+		strcat(recipe_environment, agg);
 }
 
 int

@@ -6,6 +6,7 @@
  * 此表会随实际构建经验不断扩充。新增条目只需在此处添加一行。 */
 
 #include "meow.h"
+#include <string.h>
 
 const struct pkg_lib known_libs[] = {
 	/* 压缩库 */
@@ -51,3 +52,12 @@ const struct pkg_lib known_libs[] = {
 
 	{NULL, NULL, NULL}  /* sentinel */
 };
+
+const struct pkg_lib *
+find_lib(const char *name)
+{
+	for (int i = 0; known_libs[i].name; i++)
+		if (strcmp(known_libs[i].name, name) == 0)
+			return &known_libs[i];
+	return NULL;
+}
