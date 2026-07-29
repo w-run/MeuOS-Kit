@@ -1,13 +1,13 @@
 # meow - MeuOS build system
 #
-# Originally a single meow.c; now split by function under src/:
-#   meow.h       shared declarations & global state
-#   state.c      global state definitions
-#   exec.c       run() command executor + list_packages()
-#   recipe.c     load_recipe() + root-level include + text helpers
-#   parse.c      parse_recipe() + target-table/list helpers
-#   graph.c      run_target() + out-of-date + command expansion
-#   main.c       main() entry point, arg dispatch, Makefile/bootstrap compat
+# Source layout:
+#   src/include/    shared declarations (meow.h)
+#   src/cli/        entry point & command dispatch (main.c)
+#   src/recipe/     recipe parsing & loading (parse.c, parse_meow.c, recipe.c, lint.c)
+#   src/engine/     build engine (graph.c, exec.c, probe.c)
+#   src/pkg/        package management (pkg_config.c, pkglib.c)
+#   src/info/       information commands (show.c, init.c, env.c)
+#   src/util/       utilities (triple.c, color.c, state.c)
 #
 # Two compile paths are preserved:
 #   * host CC (default for `make check`): -D_GNU_SOURCE for environ.
@@ -19,16 +19,16 @@ endif
 SYSROOT ?= ../sysroot
 BUILD ?= build
 
-SRCS := $(sort $(wildcard src/*.c))
+SRCS := $(sort $(shell find src -name '*.c'))
 OBJS := $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS))
 
 # color.c and env.c are picked up automatically via the wildcard above.
 
 ifeq ($(CC),../mcc/mcc)
-  MEOW_CFLAGS := --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib -I../meuos-sysroot/include
+  MEOW_CFLAGS := --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib -I../meuos-sysroot/include -Isrc/include -Isrc -Isrc/util
   MEOW_LDLIBS := -l:libc-meuos.a -L$(abspath ../meuos-sysroot/build) -lmsys
 else
-  MEOW_CFLAGS := -D_GNU_SOURCE -I../meuos-sysroot/include
+  MEOW_CFLAGS := -D_GNU_SOURCE -I../meuos-sysroot/include -Isrc/include -Isrc -Isrc/util
   MEOW_LDLIBS := -L$(abspath ../meuos-sysroot/build) -lmsys
 endif
 
@@ -46,7 +46,7 @@ $(BUILD)/meow: $(OBJS) $(MSYS_LIB)
 	$(CC) $(MEOW_CFLAGS) -o $@ $^ $(MEOW_LDLIBS)
 
 $(BUILD)/%.o: src/%.c
-	@mkdir -p $(BUILD)
+	@mkdir -p $(dir $@)
 	$(CC) $(MEOW_CFLAGS) -c -o $@ $<
 
 check: $(BUILD)/meow
