@@ -61,6 +61,10 @@ extern int msys_vfs_load(const char *path, void **buf, size_t *size);
 #define LD_R_X86_64_DTPOFF  21  /* DTP-relative offset: sym@dtpoff */
 #define LD_R_X86_64_DTPMOD  22  /* Module id: sym@dtpmod */
 
+/* i386 TLS relocation types (used by the i386 dispatch) */
+#define LD_R_386_TLS_GD   18  /* General Dynamic */
+#define LD_R_386_TLS_LDM  19  /* Local Dynamic */
+
 struct ld_group {
 	char *name;
 	uint32_t type;
@@ -1919,6 +1923,25 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 		return ld_errorf(ctx, "unsupported relocation type", name);
 	}
 	if (strcmp(ctx->target->name, "i386") == 0) {
+		if (type == LD_R_386_TLS_GD || type == LD_R_386_TLS_LDM) {
+			/* Dynamic TLS model (GD/LD).  For a static executable
+			 * the linker knows the final TP-relative offset.  For a
+			 * shared library the relocation is preserved for ld.so. */
+			if (!ctx->shared && !ctx->pie) {
+				uint64_t tls_off;
+				if (symbol_tls_offset(ctx, object, symbol_index, &tls_off) != 0)
+					return -1;
+				/* Relax to Local-Exec TPOFF32: value = sym_tpoff */
+				uint32_t val = (uint32_t)((int64_t)tls_off - (int64_t)ctx->tls_size);
+				target->data[target_offset + 0] = (unsigned char)val;
+				target->data[target_offset + 1] = (unsigned char)(val >> 8);
+				target->data[target_offset + 2] = (unsigned char)(val >> 16);
+				target->data[target_offset + 3] = (unsigned char)(val >> 24);
+				return 0;
+			}
+			/* Shared library or PIE: leave for ld.so via GOT */
+			return 0;
+		}
 		if (i386_apply_reloc(type, target->data + target_offset,
 		                     resolved_value, addend, place) == 0)
 			return 0;
