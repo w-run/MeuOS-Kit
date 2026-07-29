@@ -55,12 +55,19 @@ funcalloc(struct func *f, struct decl *d)
 	case 2:
 	case 4:  op = IALLOC4; break;
 	case 8:  op = IALLOC8; break;
-	default: v = funcinst(f, IADD, ptrclass(), v, mkintconst(align - 16));  /* fallthrough */
+	default:
+		/* Pre-pad so IALLOC16's allocation plus post-alignment
+		 * IADD+IAND yields a correctly aligned result.
+		 * Both additions are needed: the first ensures a non-zero
+		 * allocation from salloc(); the second prevents the IAND
+		 * from rounding backward. Wasteful but correct.
+		 * TODO: implement alloc32 in IR and use that instead. */
+		v = funcinst(f, IADD, ptrclass(), v, mkintconst(align - 16));
+		/* fallthrough */
 	case 16: op = IALLOC16; break;
 	}
 	v = funcinst(f, op, ptrclass(), v, NULL);
 	if (align > 16) {
-		/* TODO: implement alloc32 in IR and use that instead */
 		v = funcinst(f, IADD, ptrclass(), v, mkintconst(align - 16));
 		v = funcinst(f, IAND, ptrclass(), v, mkintconst(-align));
 	}
