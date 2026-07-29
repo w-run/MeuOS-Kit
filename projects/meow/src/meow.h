@@ -127,4 +127,13 @@ int cmd_show(int argc, char **argv);
 /* init.c */
 int cmd_init(int argc, char **argv);
 
+/* pkg_config.c - built-in pkg-config replacement */
+struct pkg_lib {
+	const char *name;
+	const char *cflags;
+	const char *libs;
+};
+extern const struct pkg_lib known_libs[];
+int cmd_pkg_config(int argc, char **argv);
+
 #endif /* MEOW_H */

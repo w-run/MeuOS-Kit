@@ -155,6 +155,8 @@ main(int argc, char **argv)
 		return cmd_show(count - 1, arguments + 1);
 	if (count >= 1 && strcmp(arguments[0], "init") == 0)
 		return cmd_init(count - 1, arguments + 1);
+	if (count >= 1 && strcmp(arguments[0], "pkg-config") == 0)
+		return cmd_pkg_config(count - 1, arguments + 1);
 	if (count == 1 && strcmp(arguments[0], "--bootstrap") == 0) {
 		if (run("CC=\"${CC:-cc}\" make -C meow clean all") != 0)
 			return 1;
@@ -171,6 +173,7 @@ main(int argc, char **argv)
 		printf("       meow init [<pkg>]       # 生成 .meow 配方\n");
 		printf("       meow lint [<package>]   # 配方语法检查\n");
 		printf("       meow show <package>     # 配方信息预览\n");
+		printf("       meow pkg-config <lib> [--cflags|--libs]  # 已知库 flags 查询\n");
 		printf("       meow --bootstrap\n");
 		printf("       meow --help\n");
 		printf("\n选项:\n");
