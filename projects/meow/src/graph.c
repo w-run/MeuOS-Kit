@@ -145,6 +145,7 @@ expand_uses(void)
 		snprintf(envbuf, sizeof(envbuf), "export %s='%s'; ", varname, lib->libs);
 		if (strlen(recipe_environment) + strlen(envbuf) < RECIPE_ENV_MAX)
 			strcat(recipe_environment, envbuf);
+		setenv(varname, lib->libs, 1);
 
 		snprintf(varname, sizeof(varname), "PKG_%s_CFLAGS", uses[i]);
 		for (char *p = varname + 4; *p; p++)
@@ -152,6 +153,7 @@ expand_uses(void)
 		snprintf(envbuf, sizeof(envbuf), "export %s='%s'; ", varname, lib->cflags);
 		if (strlen(recipe_environment) + strlen(envbuf) < RECIPE_ENV_MAX)
 			strcat(recipe_environment, envbuf);
+		setenv(varname, lib->cflags, 1);
 	}
 
 	/* Aggregate LIBS and CFLAGS for %LIBS% / %CFLAGS% interpolation */
@@ -162,6 +164,8 @@ expand_uses(void)
 	         libs_buf, cflags_buf);
 	if (strlen(recipe_environment) + strlen(agg) < RECIPE_ENV_MAX)
 		strcat(recipe_environment, agg);
+	setenv("LIBS", libs_buf, 1);
+	setenv("CFLAGS", cflags_buf, 1);
 }
 
 int

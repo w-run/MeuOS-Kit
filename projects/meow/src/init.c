@@ -1,7 +1,7 @@
 /* meow init — 自动生成 .meow 配方
  *
- * meow init           扫描当前目录，生成 meow.meow
- * meow init <pkg>     为 pkgs/<pkg> 生成 meow.meow
+ * meow init           扫描当前目录，生成 project.meow
+ * meow init <pkg>     为 pkgs/<pkg> 生成 project.meow
  *
  * 自动检测：
  *   - 是否有 Makefile/configure → 推导构建方式
@@ -132,17 +132,17 @@ cmd_init(int argc, char **argv)
 		pkgname = last_slash ? last_slash + 1 : cwd;
 		snprintf(target_dir, sizeof(target_dir), ".");
 
-		/* 检查是否已有 meow.meow */
+		/* 检查是否已有 project.meow */
 		char existing[1024];
-		snprintf(existing, sizeof(existing), "%s/meow.meow", target_dir);
+		snprintf(existing, sizeof(existing), "%s/project.meow", target_dir);
 		if (file_exists(existing)) {
-			meow_msg(MSG_ERROR, "meow.meow already exists");
+			meow_msg(MSG_ERROR, "project.meow already exists");
 			return 1;
 		}
 	}
 
 	char outpath[1024];
-	snprintf(outpath, sizeof(outpath), "%s/meow.meow", target_dir);
+	snprintf(outpath, sizeof(outpath), "%s/project.meow", target_dir);
 
 	/* 检测构建系统 */
 	const char *build_system = "simple";

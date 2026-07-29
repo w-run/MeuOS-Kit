@@ -236,9 +236,41 @@ parse_meow(char *data)
 					if (nuses < USES_MAX && *libname) {
 						uses[nuses] = strdup(libname);
 						if (uses[nuses]) nuses++;
+						/* 立即 setenv 以便后续 %VAR% 插值 */
+						const struct pkg_lib *lib = find_lib(libname);
+						if (lib) {
+							char vn[128];
+							snprintf(vn, sizeof(vn), "PKG_%s_LIBS", libname);
+							for (char *c = vn + 4; *c; c++)
+								if (*c >= 'a' && *c <= 'z') *c &= ~0x20;
+							setenv(vn, lib->libs, 1);
+							snprintf(vn, sizeof(vn), "PKG_%s_CFLAGS", libname);
+							for (char *c = vn + 4; *c; c++)
+								if (*c >= 'a' && *c <= 'z') *c &= ~0x20;
+							setenv(vn, lib->cflags, 1);
+						}
 					}
 					*p = saved;
 				}
+				/* 聚合 LIBS/CFLAGS */
+				char agg[2048] = {0};
+				for (size_t i = 0; i < nuses; i++) {
+					const struct pkg_lib *lib = find_lib(uses[i]);
+					if (lib && lib->libs[0]) {
+						if (agg[0]) strcat(agg, " ");
+						strcat(agg, lib->libs);
+					}
+				}
+				setenv("LIBS", agg, 1);
+				agg[0] = '\0';
+				for (size_t i = 0; i < nuses; i++) {
+					const struct pkg_lib *lib = find_lib(uses[i]);
+					if (lib && lib->cflags[0]) {
+						if (agg[0]) strcat(agg, " ");
+						strcat(agg, lib->cflags);
+					}
+				}
+				setenv("CFLAGS", agg, 1);
 			}
 			/* name: / version: — 元数据，同时导出 %NAME%/%VERSION% 和 %PKG_NAME%/%PKG_VERSION% */
 			else if (strcmp(key, "name") == 0 || strcmp(key, "version") == 0) {
@@ -280,6 +312,13 @@ parse_meow(char *data)
 					runblock_buf[0] = '\0';
 				}
 			}
+			/* run: command 同行情景 */
+			else if (*val && strcmp(key, "run") == 0 && current_target) {
+				in_runblock = 0;
+				flush_runblock();
+				add_to_runblock(trim(val));
+				flush_runblock();
+			}
 			/* 其他 key: value — 同时存入 recipe_environment 和 setenv */
 			else {
 				char interp[1024];
@@ -291,6 +330,10 @@ parse_meow(char *data)
 		line = end;
 	}
 	flush_runblock();
+
+	/* 展开 uses: 库依赖的环境变量 */
+	if (nuses > 0)
+		expand_uses();
 
 	return 0;
 }

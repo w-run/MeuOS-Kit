@@ -13,23 +13,27 @@ int
 load_recipe(const char *package, char *path, size_t path_size, char *data)
 {
 	const char prefix[] = "pkgs/";
-	const char suffix[] = "/meow.meow";
 	int descriptor;
 	ssize_t count;
 
 	/* If package starts with '/', treat as a direct path.
-	 * If package is '.' (current directory), use ./meow.yaml. */
+	 * If package is '.' (current directory), use ./project.meow. */
 	if (package[0] == '/') {
 		if (strlen(package) + 1 > path_size)
 			return -1;
 		strcpy(path, package);
 	} else if (strcmp(package, ".") == 0) {
-		/* Try .meow first, then .yaml */
-		const char *local = "./meow.meow";
+		/* Try project.meow first, then meow.meow (legacy), then .yaml */
+		const char *local = "./project.meow";
 		if (strlen(local) + 1 > path_size)
 			return -1;
 		strcpy(path, local);
 		descriptor = open(path, O_RDONLY);
+		if (descriptor < 0) {
+			local = "./meow.meow";
+			strcpy(path, local);
+			descriptor = open(path, O_RDONLY);
+		}
 		if (descriptor < 0) {
 			local = "./meow.yaml";
 			strcpy(path, local);
@@ -43,9 +47,13 @@ load_recipe(const char *package, char *path, size_t path_size, char *data)
 		if (descriptor < 0)
 			return -1;
 	} else {
-		/* pkgs/<pkg>/meow.meow or meow.yaml */
-		snprintf(path, path_size, "%s%s%s", prefix, package, suffix);
+		/* pkgs/<pkg>/project.meow or meow.meow or meow.yaml */
+		snprintf(path, path_size, "%s%s%s", prefix, package, "/project.meow");
 		descriptor = open(path, O_RDONLY);
+		if (descriptor < 0) {
+			snprintf(path, path_size, "%s%s%s", prefix, package, "/meow.meow");
+			descriptor = open(path, O_RDONLY);
+		}
 		if (descriptor < 0) {
 			snprintf(path, path_size, "%s%s/meow.yaml", prefix, package);
 			descriptor = open(path, O_RDONLY);
