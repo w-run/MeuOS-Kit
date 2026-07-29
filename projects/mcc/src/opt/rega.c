@@ -746,7 +746,7 @@ rega(Fn *fn)
 	/* 4. emit remaining copies in new blocks */
 	blist = 0;
 	for (b=fn->start;; b=b->link) {
-		ps = (Blk**[3]){&b->s1, &b->s2, (Blk*[1]){0}};
+		ps = (Blk**[]){&b->s1, &b->s2, NULL};
 		for (; (s=**ps); ps++) {
 			npm = 0;
 			for (p=s->phi; p; p=p->link) {
