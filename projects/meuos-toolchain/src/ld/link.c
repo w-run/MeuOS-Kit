@@ -2609,7 +2609,7 @@ write_executable(struct ld_context *ctx, const char *path,
 		write32(note_data + 4, 8);
 		write32(note_data + 8, 3);
 		memcpy(note_data + 12, "GNU", 4);
-		write64(note_data + 16, hash);
+		write64(note_data + 16, 0); /* placeholder; recomputed at write time */
 		uint32_t bid_sec_idx = (uint32_t)(ctx->group_count + 1);
 		sections[bid_sec_idx].name = ".note.gnu.build-id";
 		sections[bid_sec_idx].type = MT_SHT_NOTE;
@@ -2836,7 +2836,7 @@ write_executable(struct ld_context *ctx, const char *path,
 	if (ctx->build_id) {
 		unsigned char note_data[24];
 		memset(note_data, 0, sizeof(note_data));
-		/* Recompute hash (same as above, no clean way to save across the section setup) */
+		/* Compute FNV-1a hash over output data for build-id */
 		uint64_t hash = 0xcbf29ce484222325ULL;
 		const uint64_t prime = 0x100000001b3ULL;
 		uint64_t j;

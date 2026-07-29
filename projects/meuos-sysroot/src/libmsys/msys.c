@@ -1035,6 +1035,14 @@ msys_load_depth(struct msys *m, const char *path, void **buf, size_t *size,
 
 load_data:
 	if (m->hdr->flags & (MSYS_F_ZLIB | MSYS_F_ZSTD)) {
+		if (dsize == 0) {
+			/* Empty file — return empty allocation */
+			*buf = malloc(1);
+			if (!*buf) return -1;
+			*(char *)*buf = '\0';
+			if (size) *size = 0;
+			return 0;
+		}
 		void *decomp = decompress(m, data, dsize, &dsize);
 		if (!decomp) return -1;
 		*buf = decomp;
