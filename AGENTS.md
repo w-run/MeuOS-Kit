@@ -293,7 +293,51 @@ Kit 组件是构建其他软件的基础设施，必须由 Kit 自己实现，�
 
 ---
 
+### 2.9 mz - 压缩库
+
+**目标**：提供轻量 LZ77 压缩/解压缩 API，作为构建工具（如 .msys 的压缩模式）的基础依赖。
+
+**接口**：
+```c
+int mz_compress(const void *in, size_t il, void **r, size_t *rl, int c, int lv);
+int mz_decompress(const void *in, size_t il, void **r, size_t *rl, int c);
+size_t mz_max_compressed_size(size_t il, int c);
+const char *mz_strerror(int e);
+```
+
+**构建**：
+```sh
+make -C projects/mz              # 构建 libmz.a
+make -C projects/mz check        # 压缩/解压缩轮转测试
+```
+
+**实现原则**：纯 C11 实现，零外部依赖。当前仅实现 LZ77 编码器（`MZ_CODEC_LZ77`），后续可扩展其他编解码器。
+
+---
 ## 3. 自举流程
+
+### 3.1 组件间构建依赖
+
+组件之间的构建依赖关系（从下往上依赖，下层必须先构建）：
+
+```
+meuos-buildtools (m4/bison/flex/gperf)
+  ↑ 依赖 mcc + meuos-libc
+meuos-utils / meuos-shell
+  ↑ 依赖 mcc + meuos-libc + meow
+meow（构建系统）
+  ↑ 依赖 mcc + meuos-libc + meuos-toolchain（mt/as, mt/ld）
+meuos-toolchain (as/ld/ar/ranlib/nm/objdump/readelf/strip/objcopy)
+  ↑ 依赖 mcc + meuos-libc + meuos-sysroot（libmsys）
+meuos-sysroot（.msys 格式：libmsys + mkmsys + msysctl）
+  ↑ 依赖宿主 cc（Phase 0-1）或 mcc（Phase 4+）
+meuos-libc（标准 C 库）
+  ↑ 依赖 mcc 编译（Phase 2+）
+mcc（编译器）
+  ↑ 依赖宿主 cc（Phase 1）或自身（Phase 4 自举）
+```
+
+### 3.2 自举阶段
 
 Agent 必须严格遵循以下阶段，每步都要验证：
 
@@ -361,6 +405,9 @@ MeuOS-Kit/
 ├── AGENTS.md               项目规约（本文件，harness 自动加载）
 ├── README.md               项目说明与构建方法
 ├── bootstrap.sh            Phase 0–5 全流程自举脚本
+├── cron.md                 循环任务定义（session 级，随会话结束清理）
+├── issue/                  全局 issue 追踪（按日期命名的详细待实现/缺陷分析清单）
+├── .issues/                当前 worktree 的任务队列与入口文档（worktree 活跃期间有效）
 ├── projects/
 │   ├── mcc/                C/C++ 编译器（C99+C11+C23；m++ 待启动）
 │   ├── meuos-libc/         标准 C 库（ISO C11 + POSIX；含 compat 兼容层）
@@ -369,7 +416,8 @@ MeuOS-Kit/
 │   ├── meuos-sysroot/      .msys 单文件 sysroot 系统（libmsys + mkmsys + msysctl CLI + Python 绑定，已集成到 mcc）
 │   ├── meuos-utils/        核心工具集（待启动）
 │   ├── meuos-shell/        Shell 终端（待启动）
-│   └── sysroot{-<arch>}/   安装目标根文件系统（多架构）
+│   ├── meuos-buildtools/   构建工具（m4/gperf/flex/bison）
+│   └── mz/                 压缩库（libmz.a，LZ77）
 ├── env/                    QEMU 多架构测试环境（6.6.142 内核 + 9p 共享）
 │   ├── bin/qvm             VM 管理器
 │   ├── qemu/               静态 qemu-user 二进制（aarch64/riscv64/loongarch64）
@@ -381,6 +429,20 @@ MeuOS-Kit/
 ```
 
 每个组件目录含 `ARCHITECTURE.md`（结构/模块/状态/路线图）。待办事项统一存放在 `.issues/` 下。
+
+**配方包（pkgs/）**：`pkgs/` 存放 `.meow` 格式构建配方，涵盖基础依赖库（dash/bzip2/binutils）、meow 自测试配方（`meow-smoke`、`meow-incremental` 等）和 Kit 组件配方（`mcc`、`meow`、`meuos-libc`）。通过 `meow build <pkg>` 使用，详见 `pkgs/<pkg>/project.meow`。
+
+**sysroot 多架构布局**：`sysroot/` 下按架构分目录，支持多架构同时安装：
+```
+sysroot/
+├── x86_64/        # 默认架构（ARCH= 缺省值）
+├── aarch64/
+├── arm/
+├── i386/
+├── loongarch64/
+└── riscv64/
+```
+跨架构安装时指定 `ARCH=<arch>`，如 `make -C projects/meuos-libc ARCH=aarch64 install`。
 
 ### 5.2 构建约定
 
@@ -599,6 +661,16 @@ Phase Final: 公共层清理 + 生成报告
 
 ---
 
+### 7.8 循环任务模式
+
+`cron.md` 定义基于 Cron 的循环任务（当前：`worktree-stable-enhance`，每 10 分钟一次）。
+- 每个循环点启动独立 agent，不与前序任务共享上下文
+- 多个 agent 并行编辑可能存在冲突风险
+- 取消方式：`CronDelete("<作业 ID>")`，作业 ID 在 `cron.md` 中声明
+- `cron.md` 随会话结束自动清理（session 级）
+
+---
+
 ## 8. 构建与测试命令参考
 
 > 本节提供操作该仓库时最常用的命令速查。所有组件均位于 `projects/<name>/` 下，
@@ -646,6 +718,13 @@ make -C projects/meuos-toolchain              # 构建 as/ld/ar/ranlib/nm/readel
 # meuos-sysroot（libmsys + mkmsys + msysctl）
 make -C projects/meuos-sysroot                # 构建 libmsys.a + mkmsys + msysctl
 make -C projects/meuos-sysroot so             # 构建 libmsys.so（Python 绑定用）
+
+# mz - 压缩库
+make -C projects/mz                           # 构建 libmz.a
+make -C projects/mz check                     # 压缩/解压缩轮转测试
+
+# meuos-buildtools（Phase 6）
+make -C projects/meuos-buildtools             # 构建 m4/gperf/flex
 ```
 
 ### 8.3 测试
@@ -938,6 +1017,21 @@ for item in data:
 5. **定期清理**：过时文档标记为「已归档」或在笔记标题中添加 `[存档]` 前缀
 6. **与仓库同步**：当某个设计决策最终被编码实现后，在知识库中标记对应记录为「已实现」
 
+### 9.6 Codebuddy 技能清单
+
+本项目配置了以下 Codebuddy 技能（位于 `.codebuddy/skills/`，软链接到 `.agents/skills/`）：
+
+| 技能 | 用途 |
+|------|------|
+| `cross-test` | 跨架构测试编排 |
+| `ima-skill` | IMA 知识库/笔记管理（§9.1-9.5） |
+| `mkit-bootstrap` | Phase 0-5 自举流程编排（调用 bootstrap.sh） |
+| `mkit-c11-check` | mcc C11 符合性检查（`_Atomic`/`_Generic`/`_Thread_local` 等） |
+| `mkit-doc-sync` | 代码变更后文档同步收尾，确保文档不落后于代码 |
+| `mkit-syscall-gen` | 生成单文件 syscall 封装（meuos-libc syscall 目录） |
+
+技能通过 `Skill` 工具或对应的 slash command 调用。
+
 ---
 
 ## 10. 项目状态速查
@@ -1012,4 +1106,86 @@ for item in data:
 | `projects/meuos-sysroot/ARCHITECTURE.md`           | .msys 格式设计与依赖关系               |
 | `env/README.md`                                    | QEMU 测试环境使用说明                  |
 | `.issues/`                                        | 待办任务跟踪（日期编号，如 0728.md）   |
-| 规划文档（通过 `ima-skill` 访问 IMA 知识库）        | 设计笔记、移植记录、调试踩坑           |
+| IMA 知识库（通过 `ima-skill` 访问）                 | 设计笔记、移植记录、调试踩坑           |
+| `.github/workflows/ci.yml`                            | CI 管道定义                            |
+
+### 10.5 CI 管道
+
+`.github/workflows/ci.yml` 定义 GitHub Actions 工作流，push/PR 到 `main` 和 `worktree-*` 分支时触发：
+
+| 步骤 | 说明 |
+|------|------|
+| 安装依赖 | build-essential + qemu-user |
+| 构建 meuos-sysroot | libmsys.a + mkmsys + msysctl |
+| 构建 meuos-toolchain | 9 个工具的完整构建 |
+| 工具链回归测试 | `make -C projects/meuos-toolchain check` |
+| 构建 mcc | C99+C11+C23 编译器 |
+| mcc 回归测试 | check + check-c99 + check-c11 + check-c23 |
+| chibicc 社区测试 | check-chibicc（社区功能测试套件） |
+| 构建 meow | 使用宿主 cc（CI 环境初始阶段） |
+| 跨架构运行时 | riscv64 / aarch64 / i386 qemu-user（条件性） |
+| 多目标汇编测试 | `meuos-toolchain` 多架构汇编验证 |
+| 失败处理 | 自动上传测试日志到 artifacts |
+
+---
+
+## 11. Issue/TODO 导航系统
+
+> 当前项目 issue/todo 分布在多个位置，各司其职。本节是统一的导航入口，
+> 帮助 agent 快速定位到正确的追踪文件。
+
+### 11.1 职责分工
+
+| 层级 | 位置 | 内容 | 何时更新 |
+|------|------|------|----------|
+| **全局-高层** | `AGENTS.md §10` | 各组件总体完成状态、里程碑、支持矩阵 | 阶段归档/里程碑完成时 |
+| **全局-详细** | `issue/` 目录（如 `issue/0729.md`） | 跨组件详细待实现清单、缺陷分析、代码审查报告 | 审查/分析完成后追加 |
+| **子项目-结构** | `projects/<name>/ARCHITECTURE.md` | 目录结构、模块职责、路线图、阶段状态 | 实现新功能/架构变更时同步 |
+| **子项目-待办** | `projects/<name>/.todo/` | 每个 `.todo` 文件一个主题的详细设计、实现计划和验收条件 | 该主题开始工作时创建，完成后归档 |
+| **子项目-移植** | `projects/<name>/PORTING.md` | 多架构移植说明、ABI 契约、特定架构边界 | 跨架构变更时同步 |
+| **工作树-队列** | `.issues/INDEX.md` | worktree 中按优先级分组的任务队列（P0→P7 和设计原则） | worktree 活跃期间持续更新 |
+| **工作树-入口** | `.issues/AGENT.md` | worktree 特定代理上下文、工作纪律、执行策略 | worktree 创建/变更时更新 |
+| **循环任务** | `cron.md` | Chron 循环作业定义（当前 `worktree-stable-enhance` 每 10 分钟） | 添加/取消 cron 时更新 |
+| **组件规格** | IMA 知识库 | 设计文档、会议记录、架构决策、移植笔记 | 设计讨论后立即追加，落地后同步到代码仓库 |
+
+### 11.2 信息流与优先级
+
+```
+IMA 知识库 (规划/设计/需求)
+    │  Agent 启动时主动读取 (§9.4)
+    ▼
+AGENTS.md §10 (全局完成状态速查)
+    │
+    ├──→ projects/<name>/ARCHITECTURE.md (组件结构 + 路线图)
+    │         │
+    │         └──→ projects/<name>/.todo/ (子任务详细设计 + 验收)
+    │
+    ├──→ issue/ (跨组件待实现 + 代码审查结果)
+    │
+    └──→ .issues/INDEX.md + .issues/AGENT.md (worktree 任务队列)
+              │
+              └──→ cron.md (循环执行)
+```
+
+**读取优先级**（从高到低）：
+1. **IMA 知识库规划文档** — 权威来源，Agent 启动后必须优先读取（§9.4）
+2. `.issues/AGENT.md` + `.issues/INDEX.md` — 当前 worktree 上下文（仅 worktree 中有效）
+3. `AGENTS.md §10` — 全局状态速查
+4. `issue/` — 详细待实现/缺陷清单
+5. `projects/<name>/ARCHITECTURE.md` + `.todo/` — 组件级详细计划
+
+### 11.3 Issue 文件命名约定
+
+`issue/` 目录下的文件按日期命名：
+
+- 文件名格式：`<MMDD>.md`（如 `0729.md` 表示 7 月 29 日创建/更新）
+- 内容包含：验证日期、逐项确认状态、汇总优先级
+- 过期文件：标记 `[存档]` 前缀或移入 `issue/archive/`
+
+### 11.4 .todo 文件生命周期
+
+1. **创建** — 当某个主题（新架构移植、新功能、重构）需要详细计划时，在对应组件下创建 `.todo/<topic>.md`
+2. **内容** — 任务范围、参考来源、验收标准、依赖关系（参考 §7.2 任务卡片五要素）
+3. **归档** — 实现完成后，`.todo` 文件内容合并到 `ARCHITECTURE.md` 或 `PORTING.md`，`.todo` 文件标记 `[x]` 或删除
+
+>>>>>>> Stashed changes

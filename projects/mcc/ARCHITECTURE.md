@@ -2,8 +2,8 @@
 
 > Scope of this document: navigation aid for AI agents (and humans)
 > working in `mcc/`. For the bootstrap pipeline context see
-> `../../AGENTS.md` §3 and `../../STATE.md`. For per-file design notes
-> see `../.trae/skills/mkit-bootstrap/SKILL.md`.
+> `../../AGENTS.md` §3. For skill-based bootstrap orchestration see
+> `.codebuddy/skills/mkit-bootstrap/SKILL.md`.
 
 ## 1. Overview
 

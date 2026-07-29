@@ -24,7 +24,7 @@ mkdir -p "$RUN" "$SHARE"
 
 # Locate the QEMU binary. Prefer the self-built multi-target set (has 9p);
 # fall back to the host qemu-kvm for x86_64/i386 (no 9p, no aarch64).
-QEMU_PREFIX="$ENV/build/qemu-install"
+QEMU_PREFIX="/usr/local/qemu"
 qemu_bin() {
   local arch="$1"
   case "$arch" in

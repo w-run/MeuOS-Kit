@@ -3,7 +3,7 @@
 # 供 MeuOS 2026 集成用：  QEMU_BIN=$(./qemu-path) /workspace/MeuOS/builder/scripts/run-vm.sh
 # 支持参数指定架构： qemu-path [x86_64|i386|aarch64]（默认 x86_64）
 ARCH="${1:-x86_64}"
-DIR="$(cd "$(dirname "$0")/.." && pwd)/build/qemu-install/bin"
+DIR="/usr/local/qemu/qemu-${ARCH}/bin"
 BIN="$DIR/qemu-system-$ARCH"
 if [ ! -x "$BIN" ]; then
   echo "qemu-system-$ARCH 未构建：运行 env/build/build-qemu.sh" >&2
