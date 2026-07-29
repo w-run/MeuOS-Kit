@@ -86,7 +86,15 @@ msys_stream_open(const char *path)
 
 	/* Free the msys handle but keep the mmap alive */
 	free(m->entries);
-	free(m->chunks);
+	{
+		struct msys_chunk *c = m->chunks;
+		while (c) {
+			struct msys_chunk *next = c->next;
+			free(c->ptr);
+			free(c);
+			c = next;
+		}
+	}
 	free(m);
 
 	return s;
