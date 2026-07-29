@@ -742,8 +742,8 @@ emitintegerdata(Dat *dat, unsigned long long size, unsigned long long value)
 	case 2: dat->type = DH; break;
 	case 4: dat->type = DW; break;
 	case 8: dat->type = DL; break;
-	default:
-		die("mcc: unsupported bit-field storage size %llu", size);
+		default:
+		err("unsupported bit-field storage size %llu", size);
 	}
 }
 
@@ -854,6 +854,7 @@ emitdata(struct decl *d, struct init *init)
 			dat.u.str = escape_string(
 				(unsigned char *)cur->expr->u.string.data, actual);
 			emitdat(&dat, stdout);
+			free(dat.u.str);
 			/* Zero-fill the remainder of the init range when the
 			 * literal is shorter than its declared slot. */
 			if (actual < slen) {
