@@ -1,0 +1,10 @@
+name: meow-macros-v2
+version: 1.0
+cflags: -O2
+ldflags: -lm
+
+[build]
+  srcdir: /tmp/meow-src
+  builddir: /tmp/meow-build-dir
+  parallel: 2
+  run(!): echo "CFLAGS=%CFLAGS%" > /tmp/macros_v2_test.txt

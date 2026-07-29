@@ -174,9 +174,14 @@ parse_meow(char *data)
 		}
 
 		if (in_runblock) {
-			/* 收集 run: 块的后续缩进行 */
+			/* 收集 run: 块的后续缩进行 — 空行也保持不中断块 */
 			if (indent >= 2) {
 				add_to_runblock(text);
+				line = end;
+				continue;
+			} else if (!*text) {
+				/* 空行：加入 runblock 保留换行，不中断 */
+				add_to_runblock("");
 				line = end;
 				continue;
 			} else {
@@ -422,6 +427,96 @@ parse_meow(char *data)
 			else if (strcmp(key, "log") == 0 && current_target) {
 				current_target->log_file = strdup(val);
 			}
+			/* toolchain: <prefix> — 交叉编译工具链前缀 */
+			else if (strcmp(key, "toolchain") == 0 && current_target) {
+				current_target->toolchain_prefix = strdup(val);
+				char eb[256];
+				snprintf(eb, sizeof(eb), "%sgcc", trim(val));
+				set_env("CC", eb);
+				snprintf(eb, sizeof(eb), "%sar", trim(val));
+				set_env("AR", eb);
+				snprintf(eb, sizeof(eb), "%sstrip", trim(val));
+				set_env("STRIP", eb);
+			}
+			/* cflags: <flags> — CFLAGS 快捷声明 */
+			else if (strcmp(key, "cflags") == 0) {
+				size_t clen = strlen(cflags_global);
+				if (clen) strncat(cflags_global, " ", sizeof(cflags_global) - clen - 1);
+				strncat(cflags_global, val, sizeof(cflags_global) - strlen(cflags_global) - 1);
+				set_env("CFLAGS", cflags_global);
+			}
+			/* ldflags: <flags> — LDFLAGS 快捷声明 */
+			else if (strcmp(key, "ldflags") == 0) {
+				size_t llen = strlen(ldflags_global);
+				if (llen) strncat(ldflags_global, " ", sizeof(ldflags_global) - llen - 1);
+				strncat(ldflags_global, val, sizeof(ldflags_global) - strlen(ldflags_global) - 1);
+				set_env("LDFLAGS", ldflags_global);
+			}
+			/* srcdir: <path> — 源码目录 */
+			else if (strcmp(key, "srcdir") == 0 && current_target) {
+				current_target->src_dir = strdup(val);
+				set_env("srcdir", val);
+			}
+			/* builddir: <path> — 构建输出目录 */
+			else if (strcmp(key, "builddir") == 0 && current_target) {
+				current_target->build_dir = strdup(val);
+				set_env("builddir", val);
+			}
+			/* sha256: <hash> — 下载文件 SHA-256 校验 */
+			else if (strcmp(key, "sha256") == 0 && current_target) {
+				current_target->download_sha256 = strdup(val);
+			}
+			/* parallel: <N> — 每目标并行度 */
+			else if (strcmp(key, "parallel") == 0 && current_target) {
+				int n = atoi(val);
+				if (n > 0) current_target->parallel_jobs = n;
+			}
+			/* unpack: true — 自动解压下载的压缩包 */
+			else if (strcmp(key, "unpack") == 0 && current_target) {
+				if (strcmp(val, "true") == 0 || strcmp(val, "yes") == 0)
+					current_target->run_quiet = 2;  /* flag: unpack requested */
+			}
+			/* patch: file1, file2 — 补丁文件列表 */
+			else if (strcmp(key, "patch") == 0 && current_target) {
+				char *p = val;
+				while (*p) {
+					while (*p == ' ' || *p == ',') p++;
+					if (!*p) break;
+					char *start = p;
+					while (*p && *p != ',') p++;
+					char saved = *p; *p = '\0';
+					if (current_target->npatch < TARGET_DEPS_MAX)
+						current_target->patches[current_target->npatch++] = strdup(trim(start));
+					*p = saved;
+				}
+			}
+			/* test: <command> — 测试命令 */
+			else if (strcmp(key, "test") == 0 && current_target) {
+				current_target->test_cmd = strdup(val);
+			}
+			/* copy: src=path, dest=path, mode=755 — 声明式文件复制 */
+			else if (strcmp(key, "copy") == 0 && current_target) {
+				char *p = val;
+				while (*p) {
+					while (*p == ' ' || *p == ',') p++;
+					if (!*p) break;
+					if (strncmp(p, "src=", 4) == 0) {
+						p += 4; char *end = strchr(p, ',');
+						if (end) { *end = '\0'; current_target->install_src = strdup(trim(p)); *end = ','; p = end + 1; }
+						else { current_target->install_src = strdup(trim(p)); break; }
+					} else if (strncmp(p, "dest=", 5) == 0) {
+						p += 5; char *end = strchr(p, ',');
+						if (end) { *end = '\0'; current_target->install_dest = strdup(trim(p)); *end = ','; p = end + 1; }
+						else { current_target->install_dest = strdup(trim(p)); break; }
+					} else if (strncmp(p, "mode=", 5) == 0) {
+						p += 5; current_target->install_mode = strtol(p, NULL, 8); break;
+					} else break;
+				}
+			}
+			/* strip: true — 安装后 strip 调试符号 */
+			else if (strcmp(key, "strip") == 0 && current_target) {
+				current_target->strip = (strcmp(val, "true") == 0 || strcmp(val, "yes") == 0);
+			}
 			else if (strcmp(key, "default") == 0) {
 				default_target = strdup(val);
 			}
@@ -492,22 +587,22 @@ parse_meow(char *data)
 					*p = saved;
 				}
 			}
-			/* env: KEY=VALUE — 环境变量注入（支持逗号分隔多个） */
+			/* env: KEY=VALUE — 环境变量注入（每行一个，支持 ''/"" 引号） */
 			else if (strcmp(key, "env") == 0) {
-				char *p = val;
-				while (*p) {
-					while (*p == ' ' || *p == ',') p++;
-					if (!*p) break;
-					char *eq = strchr(p, '=');
-					if (eq) {
-						char *eq_save = eq;
-						*eq = '\0';
-						set_env(trim(p), trim(eq + 1));
-						*eq_save = '=';
-						p = eq + 1;
-					} else {
-						while (*p && *p != ',') p++;
+				char *eq = strchr(val, '=');
+				if (eq) {
+					char *eq_save = eq;
+					*eq = '\0';
+					char *k = trim(val);
+					char *v = trim(eq + 1);
+					size_t vlen = strlen(v);
+					if (vlen >= 2 && ((v[0] == '"' && v[vlen-1] == '"') ||
+					                  (v[0] == '\'' && v[vlen-1] == '\''))) {
+						v[vlen-1] = '\0';
+						v++;
 					}
+					set_env(k, v);
+					*eq_save = '=';
 				}
 			}
 			/* name: / version: — 元数据，同时导出 %NAME%/%VERSION% 和 %PKG_NAME%/%PKG_VERSION% */

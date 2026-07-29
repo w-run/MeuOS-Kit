@@ -17,3 +17,5 @@ char *has_tools_stack[HAS_TOOLS_MAX];
 size_t nhas_tools_stack;
 char *lib_deps_stack[LIB_DEPS_MAX];
 size_t nlib_deps_stack;
+char cflags_global[1024] = {0};
+char ldflags_global[1024] = {0};

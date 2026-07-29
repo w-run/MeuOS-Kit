@@ -54,6 +54,17 @@ struct target {
 	char *download_url;   /* download source URL */
 	char *download_sha256;/* optional SHA-256 */
 	char *log_file;       /* build log file path */
+	char *toolchain_prefix; /* cross-compilation prefix */
+	char *src_dir;        /* source directory */
+	char *build_dir;      /* build output directory */
+	char **patches;       /* patch file list */
+	size_t npatch;
+	char *test_cmd;       /* test command */
+	char *install_src;    /* install: src path */
+	char *install_dest;   /* install: dest path */
+	int  install_mode;    /* install: file mode */
+	int  strip;           /* 1 = strip after install */
+	int  parallel_jobs;   /* per-target parallel jobs */
 	int visiting;
 	int done;
 	char *stem;
@@ -78,6 +89,8 @@ extern char recipe_deps[RECIPE_DEPS_MAX][128];
 extern size_t nrecipe_deps;
 extern char *uses[USES_MAX];
 extern size_t nuses;
+extern char cflags_global[1024];
+extern char ldflags_global[1024];
 
 /* Global output state (defined in color.c). */
 extern enum output_mode g_output_mode;
