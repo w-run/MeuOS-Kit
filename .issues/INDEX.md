@@ -248,10 +248,11 @@ src/compat/
 
 | ID | 组件 | 项目 | 实际状态 | 说明 |
 |----|------|------|---------|------|
-| as-equ | mt/as | `.equ`/`.set` 汇编符号定义 | ❌ 未实现 | 旧 INDEX 标记为 🟢 但无 `.equ`/`.set` handler |
-| as-diag | mt/as | `.abort`/`.error`/`.warning` 汇编诊断 | ❌ 未实现 | 仅 `as_error()` 内部错误函数存在，无伪指令 handler |
-| ld-cref | mt/ld | `--cref` 交叉引用表输出 | ❌ 未实现 | 旧 INDEX 标记为 🟢 但无源码、无 git commit |
-| ld-compress-debug | mt/ld | `--compress-debug-sections` DWARF 节区压缩 | ❌ 未实现 | 旧 INDEX 标记为 🟢 但无源码（zlib/zstd）、无 git commit |
+| as-equ | mt/as | `.equ`/`.set` 汇编符号定义 | ✅ 已修复 (`40e1a37` 父提交) | 实现 `.equ NAME, VALUE` +
+ `MT_SHN_ABS` 符号输出 |
+| as-diag | mt/as | `.abort`/`.error`/`.warning` 汇编诊断 | ✅ 已修复 (`40e1a37` 父提交) | `.abort` 终止、`.error` 报错、`.warning` 警告继续 |
+| ld-cref | mt/ld | `--cref` 交叉引用表输出 | ✅ 已修复 (`40e1a37`) | 输出符号定义位置+地址 + 测试脚本 |
+| ld-compress-debug | mt/ld | `--compress-debug-sections` DWARF 节区压缩 | ⏳ 待自有压缩 | 需 zlib 外部依赖，MeuOS 自有压缩实现后再引入 |
 
 ---
 
