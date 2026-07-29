@@ -47,6 +47,7 @@ struct target {
 	char *outputs[TARGET_DEPS_MAX];
 	size_t noutputs;
 	int phony;
+	char *when;           /* condition expression (NULL = always) */
 	int visiting;
 	int done;
 	char *stem;

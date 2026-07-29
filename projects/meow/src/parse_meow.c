@@ -210,6 +210,13 @@ parse_meow(char *data)
 					*p = saved;
 				}
 			}
+			/* when: condition — 条件表达式 */
+			else if (strcmp(key, "when") == 0 && current_target) {
+				char *trimmed = val;
+				while (*trimmed == ' ' || *trimmed == '\t') trimmed++;
+				if (*trimmed)
+					current_target->when = strdup(trimmed);
+			}
 			/* default: target — 设置默认 target */
 			else if (strcmp(key, "default") == 0) {
 				default_target = strdup(val);

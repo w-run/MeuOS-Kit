@@ -92,6 +92,10 @@ check: $(BUILD)/meow
 	cd .. && ./meow/$(BUILD)/meow list | grep -qx meow-smoke
 	cd .. && ./meow/$(BUILD)/meow list | grep -qx dash
 	cd test/make-compat && env -u MAKEFLAGS -u MFLAGS MEUOS_SYSROOT=./test-sysroot ../../$(BUILD)/meow build .
+	@rm -f /tmp/meow-conditional.result
+	cd .. && ./meow/$(BUILD)/meow build meow-conditional
+	@test "$$(cat /tmp/meow-conditional.result)" = "native"
+	cd .. && ./meow/$(BUILD)/meow clean meow-conditional
 	cd .. && CC=cc ./meow/$(BUILD)/meow --bootstrap
 	cd .. && $(MAKE) -C meow clean all
 

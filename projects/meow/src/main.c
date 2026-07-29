@@ -35,6 +35,7 @@ set_arch_env(void)
 			         strcmp(m, "i586") == 0 ||
 			         strcmp(m, "i686") == 0) arch = "i386";
 		}
+		build_arch = (char *)arch;
 	}
 	if (!arch)
 		arch = "x86_64";

@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <glob.h>
 
 #include "meow.h"
 
@@ -108,6 +109,69 @@ add_target(char *name)
 		return 0;
 	targets[ntargets].name = name;
 	return &targets[ntargets++];
+}
+
+/* Expand files('glob_pattern') in a string.  Returns a malloc'd string
+ * with the glob expanded to space-separated matches, or a strdup of the
+ * input if no files() call is present.  Caller must free the result. */
+static char *
+expand_files(const char *input)
+{
+	if (!input) return NULL;
+	const char *files_call = strstr(input, "files('");
+	if (!files_call) return strdup(input);
+
+	const char *pattern_start = files_call + 7; /* skip "files('" */
+	const char *pattern_end = strstr(pattern_start, "')");
+	if (!pattern_end) return strdup(input);
+
+	char pattern[256];
+	size_t plen = (size_t)(pattern_end - pattern_start);
+	if (plen >= sizeof(pattern)) return strdup(input);
+	memcpy(pattern, pattern_start, plen);
+	pattern[plen] = '\0';
+
+	glob_t g;
+	int ret = glob(pattern, GLOB_NOCHECK | GLOB_MARK | GLOB_BRACE, NULL, &g);
+	if (ret != 0) { globfree(&g); return strdup(input); }
+
+	char result[4096] = {0};
+	size_t pos = 0;
+	/* Copy text before files() call */
+	size_t prefix_len = (size_t)(files_call - input);
+	if (prefix_len > 0) {
+		memcpy(result, input, prefix_len);
+		pos += prefix_len;
+	}
+	/* Expand glob matches */
+	for (size_t i = 0; i < g.gl_pathc; i++) {
+		if (pos > 0 && result[pos-1] != ' ') { result[pos++] = ' '; }
+		size_t remaining = sizeof(result) - pos - 1;
+		size_t to_copy = strlen(g.gl_pathv[i]);
+		if (to_copy > remaining) to_copy = remaining;
+		memcpy(result + pos, g.gl_pathv[i], to_copy);
+		pos += to_copy;
+	}
+	globfree(&g);
+	/* Copy text after files() call */
+	const char *after = pattern_end + 2;
+	if (*after) {
+		if (pos > 0 && result[pos-1] != ' ') { result[pos++] = ' '; }
+		size_t remaining = sizeof(result) - pos - 1;
+		size_t to_copy = strlen(after);
+		if (to_copy > remaining) to_copy = remaining;
+		memcpy(result + pos, after, to_copy);
+		pos += to_copy;
+	}
+	result[pos] = '\0';
+	return strdup(result);
+}
+
+/* Check if a string contains files('...') pattern that needs expansion. */
+static int
+has_files_call(const char *s)
+{
+	return s && strstr(s, "files('") != NULL;
 }
 
 /* Expand ${VAR_NAME} references in input string using the current
@@ -370,18 +434,85 @@ parse_recipe(char *data)
 			section = TARGETS;
 		} else if (section == TARGETS && indent == 4 && current) {
 			if (strncmp(text, "deps:", 5) == 0) {
-				if (add_dependencies(current, trim(text + 5)) != 0)
-					return -1;
+				char *val = trim(text + 5);
+				if (has_files_call(val)) {
+					char *exp = expand_files(val);
+					if (!exp) return -1;
+					char *p = exp, *start = exp;
+					while (1) {
+						if (*p == ' ' || *p == '\0') {
+							char saved = *p; *p = '\0';
+							if (*start) {
+								char *dup = strdup(start);
+								if (dup) add_dependencies(current, dup);
+							}
+							if (!saved) break;
+							start = p + 1;
+							*p = saved;
+						}
+						p++;
+					}
+				} else {
+					if (add_dependencies(current, val) != 0) return -1;
+				}
 			} else if (strncmp(text, "inputs:", 7) == 0) {
-				if (add_list(current->inputs, &current->ninputs,
-					TARGET_DEPS_MAX, trim(text + 7)) != 0)
-					return -1;
+				char *val = trim(text + 7);
+				if (has_files_call(val)) {
+					char *exp = expand_files(val);
+					if (!exp) return -1;
+					char *p = exp, *start = exp;
+					while (1) {
+						if (*p == ' ' || *p == '\0') {
+							char saved = *p; *p = '\0';
+							if (*start) {
+								char *dup = strdup(start);
+								if (dup)
+									add_list(current->inputs, &current->ninputs,
+										TARGET_DEPS_MAX, dup);
+							}
+							if (!saved) break;
+							start = p + 1;
+							*p = saved;
+						}
+						p++;
+					}
+				} else {
+					if (add_list(current->inputs, &current->ninputs,
+						TARGET_DEPS_MAX, val) != 0) return -1;
+				}
 			} else if (strncmp(text, "outputs:", 8) == 0) {
-				if (add_list(current->outputs, &current->noutputs,
-					TARGET_DEPS_MAX, trim(text + 8)) != 0)
-					return -1;
+				char *val = trim(text + 8);
+				if (has_files_call(val)) {
+					char *exp = expand_files(val);
+					if (!exp) return -1;
+					char *p = exp, *start = exp;
+					while (1) {
+						if (*p == ' ' || *p == '\0') {
+							char saved = *p; *p = '\0';
+							if (*start) {
+								char *dup = strdup(start);
+								if (dup)
+									add_list(current->outputs, &current->noutputs,
+										TARGET_DEPS_MAX, dup);
+							}
+							if (!saved) break;
+							start = p + 1;
+							*p = saved;
+						}
+						p++;
+					}
+				} else {
+					if (add_list(current->outputs, &current->noutputs,
+						TARGET_DEPS_MAX, val) != 0) return -1;
+				}
 			} else if (strcmp(text, "phony: true") == 0) {
 				current->phony = 1;
+			} else if (strncmp(text, "when:", 5) == 0) {
+				const char *expr = trim(text + 5);
+				if (*expr) {
+					current->when = strdup(expr);
+					if (!current->when) return -1;
+				}
 			} else if (strcmp(text, "commands:") == 0) {
 				section = COMMANDS;
 			} else if (strncmp(text, "run:", 4) == 0) {

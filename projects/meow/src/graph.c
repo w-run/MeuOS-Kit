@@ -31,6 +31,35 @@ expand_path(const char *path)
 	return path;
 }
 
+/* Evaluate a "when:" condition expression.
+ * Returns 1 if condition is met (or no condition), 0 if skipped. */
+static int
+eval_condition(const char *when_expr)
+{
+	if (!when_expr || !*when_expr)
+		return 1;
+
+	/* Parse: EXPR OP "VALUE" */
+	char expr[64], op[8], value[128];
+	if (sscanf(when_expr, "%63[^ ] %7[^ ] \"%127[^\"]\"", expr, op, value) < 3)
+		return 1;  /* unparseable = true (graceful fallback) */
+
+	const char *actual = NULL;
+	if (strcmp(expr, "ARCH") == 0)
+		actual = build_arch;
+	else if (strcmp(expr, "TARGET") == 0)
+		actual = build_target;
+
+	if (!actual)
+		return 1;  /* unknown variable = true (graceful fallback) */
+
+	if (strcmp(op, "==") == 0)
+		return strcmp(actual, value) == 0;
+	if (strcmp(op, "!=") == 0)
+		return strcmp(actual, value) != 0;
+	return 1;  /* unknown op = true */
+}
+
 /* File-local helpers (defined below; run_target() calls them). */
 static int target_out_of_date(struct target *);
 static int expand_command(struct target *, const char *, char *, size_t);
@@ -75,6 +104,11 @@ run_target(struct target *target)
 		return -1;
 	if (target->done)
 		return 0;
+	/* Skip if condition not met */
+	if (target->when && !eval_condition(target->when)) {
+		target->done = 1;
+		return 0;
+	}
 	target->visiting = 1;
 	if (parallel_jobs > 1) {
 		pid_t children[TARGET_DEPS_MAX];
