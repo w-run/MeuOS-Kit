@@ -242,6 +242,7 @@ main(int argc, char **argv)
 		requested = default_target;
 		if (!requested)
 			requested = find_target("all") ? "all" : "build";
+		expand_uses();
 		if (run_target(find_target(requested)) != 0) {
 			meow_msg(MSG_ERROR, "target failed: %s (%s)", requested, path);
 			return 1;
@@ -335,6 +336,7 @@ main(int argc, char **argv)
 	requested = strcmp(arguments[0], "clean") == 0 ? "clean" : count == 3 ? arguments[2] : default_target;
 	if (!requested)
 		requested = find_target("all") ? "all" : "build";
+	expand_uses();
 	if (run_target(find_target(requested)) != 0) {
 		meow_msg(MSG_ERROR, "target failed: %s (%s)", requested, path);
 		return 1;

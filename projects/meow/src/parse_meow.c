@@ -144,6 +144,7 @@ parse_meow(char *data)
 	runblock_buf[0] = '\0';
 	current_target = NULL;
 	ntargets = 0;
+	nuses = 0;
 	default_target = NULL;
 
 	while (*line) {
@@ -220,6 +221,24 @@ parse_meow(char *data)
 			/* default: target — 设置默认 target */
 			else if (strcmp(key, "default") == 0) {
 				default_target = strdup(val);
+			}
+			/* uses: lib1, lib2 — 库依赖 */
+			else if (strcmp(key, "uses") == 0) {
+				char *p = val;
+				while (*p) {
+					while (*p == ' ' || *p == ',') p++;
+					if (!*p) break;
+					char *start = p;
+					while (*p && *p != ',') p++;
+					char saved = *p;
+					*p = '\0';
+					char *libname = trim(start);
+					if (nuses < USES_MAX && *libname) {
+						uses[nuses] = strdup(libname);
+						if (uses[nuses]) nuses++;
+					}
+					*p = saved;
+				}
 			}
 			/* name: / version: — 元数据，同时导出 %NAME%/%VERSION% 和 %PKG_NAME%/%PKG_VERSION% */
 			else if (strcmp(key, "name") == 0 || strcmp(key, "version") == 0) {

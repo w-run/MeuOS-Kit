@@ -25,6 +25,7 @@
 #define TARGET_DEPS_MAX 64
 #define TARGET_COMMANDS_MAX 64
 #define RECIPE_DEPS_MAX 64
+#define USES_MAX 32
 
 /* Message levels for meow_msg(). */
 #define MSG_ERROR   0
@@ -63,6 +64,8 @@ extern char *build_arch;  /* NULL = auto-detect from uname */
 extern const char *build_target;  /* full triple from --target=, or NULL */
 extern char recipe_deps[RECIPE_DEPS_MAX][128];
 extern size_t nrecipe_deps;
+extern char *uses[USES_MAX];
+extern size_t nuses;
 
 /* Global output state (defined in color.c). */
 extern enum output_mode g_output_mode;
@@ -104,6 +107,7 @@ int expand_env_vars(const char *input, char *output, size_t output_size);
 
 /* graph.c */
 int run_target(struct target *target);
+void expand_uses(void);
 
 /* probe.c — inline feature detection (autoconf replacement) */
 void probe_reset(void);
@@ -134,6 +138,9 @@ struct pkg_lib {
 	const char *libs;
 };
 extern const struct pkg_lib known_libs[];
+const struct pkg_lib *find_lib(const char *name);
+const char *lookup_lib_cflags(const char *name);
+const char *lookup_lib_libs(const char *name);
 int cmd_pkg_config(int argc, char **argv);
 
 #endif /* MEOW_H */

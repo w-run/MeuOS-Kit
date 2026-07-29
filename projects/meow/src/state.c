@@ -11,3 +11,5 @@ char *build_arch;  /* NULL = auto-detect */
 const char *build_target;  /* full triple from --target=, or NULL */
 char recipe_deps[RECIPE_DEPS_MAX][128];
 size_t nrecipe_deps;
+char *uses[USES_MAX];
+size_t nuses;

@@ -1,0 +1,12 @@
+name: meow-uses-test
+version: 1.0
+default: show-vars
+uses:
+  - zlib
+targets:
+  show-vars:
+    phony: true
+    commands:
+      - echo "LIBS=${LIBS:-}"
+      - echo "CFLAGS=${CFLAGS:-}"
+      - echo "PKG_ZLIB_LIBS=${PKG_ZLIB_LIBS:-}"
