@@ -174,9 +174,14 @@ parse_meow(char *data)
 		}
 
 		if (in_runblock) {
-			/* 收集 run: 块的后续缩进行 */
+			/* 收集 run: 块的后续缩进行 — 空行也保持不中断块 */
 			if (indent >= 2) {
 				add_to_runblock(text);
+				line = end;
+				continue;
+			} else if (!*text) {
+				/* 空行：加入 runblock 保留换行，不中断 */
+				add_to_runblock("");
 				line = end;
 				continue;
 			} else {
@@ -492,22 +497,22 @@ parse_meow(char *data)
 					*p = saved;
 				}
 			}
-			/* env: KEY=VALUE — 环境变量注入（支持逗号分隔多个） */
+			/* env: KEY=VALUE — 环境变量注入（每行一个，支持 ''/"" 引号） */
 			else if (strcmp(key, "env") == 0) {
-				char *p = val;
-				while (*p) {
-					while (*p == ' ' || *p == ',') p++;
-					if (!*p) break;
-					char *eq = strchr(p, '=');
-					if (eq) {
-						char *eq_save = eq;
-						*eq = '\0';
-						set_env(trim(p), trim(eq + 1));
-						*eq_save = '=';
-						p = eq + 1;
-					} else {
-						while (*p && *p != ',') p++;
+				char *eq = strchr(val, '=');
+				if (eq) {
+					char *eq_save = eq;
+					*eq = '\0';
+					char *k = trim(val);
+					char *v = trim(eq + 1);
+					size_t vlen = strlen(v);
+					if (vlen >= 2 && ((v[0] == '"' && v[vlen-1] == '"') ||
+					                  (v[0] == '\'' && v[vlen-1] == '\''))) {
+						v[vlen-1] = '\0';
+						v++;
 					}
+					set_env(k, v);
+					*eq_save = '=';
 				}
 			}
 			/* name: / version: — 元数据，同时导出 %NAME%/%VERSION% 和 %PKG_NAME%/%PKG_VERSION% */
