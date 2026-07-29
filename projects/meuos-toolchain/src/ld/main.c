@@ -191,6 +191,7 @@ main(int argc, char **argv)
 	int no_undefined = 0;
 	int gc_sections = 0;
 	int print_map = 0;
+	int cref = 0;
 	const char *link_script = NULL;
 	const char *version_script = NULL;
 	const char *defsym_list[64];
@@ -296,6 +297,10 @@ main(int argc, char **argv)
 		}
 		if (strcmp(argv[i], "--print-map") == 0 || strcmp(argv[i], "-Map") == 0) {
 			print_map = 1;
+			continue;
+		}
+		if (strcmp(argv[i], "--cref") == 0) {
+			cref = 1;
 			continue;
 		}
 		if (strncmp(argv[i], "--defsym=", 9) == 0) {
@@ -502,6 +507,7 @@ main(int argc, char **argv)
 	opts.no_undefined = no_undefined;
 	opts.gc_sections = gc_sections;
 	opts.print_map = print_map;
+	opts.cref = cref;
 	opts.link_script = link_script;
 	opts.version_script = version_script;
 	opts.defsym = defsym_count ? defsym_list : NULL;

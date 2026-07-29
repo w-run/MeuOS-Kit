@@ -187,6 +187,7 @@ struct ld_context {
 	int no_undefined;    /* 1 = error on undefined symbols */
 	int gc_sections;     /* 1 = garbage-collect unused sections */
 	int print_map;       /* 1 = output link map */
+	int cref;            /* 1 = output cross-reference table */
 	const char *link_script; /* path to section layout script */
 	const char *soname;  /* DT_SONAME for shared lib (may be NULL) */
 	/* Dynamic symbol table bookkeeping (shared libs only) */
@@ -3632,6 +3633,7 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 		ctx.no_undefined = opts->no_undefined;
 		ctx.gc_sections = opts->gc_sections;
 		ctx.print_map = opts->print_map;
+		ctx.cref = opts->cref;
 		ctx.link_script = opts->link_script;
 		ctx.add_needed = opts->add_needed;
 		ctx.add_needed_count = opts->add_needed_count;
@@ -3804,6 +3806,26 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 				fprintf(stderr, "Entry: %s = 0x%llx\n", opts->entry,
 				        (unsigned long long)ea);
 			}
+		}
+	}
+	/* --cref: output cross-reference table */
+	if (ctx.cref) {
+		fprintf(stderr, "\nCross-reference table:\n");
+		fprintf(stderr, "%-30s %-20s %-10s %s\n", "Symbol", "Defined in", "Section", "Value");
+		size_t gi;
+		for (gi = 0; gi < ctx.globals.count; gi++) {
+			struct ld_global *g = &ctx.globals.items[gi];
+			if (!g->defined) continue;
+			const char *obj_name = g->object ? g->object->name : "(builtin)";
+			const char *sec_name = "";
+			uint64_t val = g->offset;
+			if (g->group >= 0 && (size_t)g->group < ctx.group_count) {
+				sec_name = ctx.groups[g->group].name;
+				val = ctx.groups[g->group].address + g->offset;
+			}
+			fprintf(stderr, "%-30s %-20s %-10s 0x%08llx\n",
+			        g->name, obj_name, sec_name,
+			        (unsigned long long)val);
 		}
 	}
 	result = 0;

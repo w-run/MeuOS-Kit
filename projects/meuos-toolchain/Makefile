@@ -165,7 +165,7 @@ build/%.o: %.c
 
 -include $(DEPS)
 
-check: check-as-x86_64 check-as-sse-x86_64 check-as-libc-x86_64 check-ld-x86_64 check-ar-bsd check-ld-libpath check-ranlib check-libelf check-nm check-readelf check-strip check-objcopy check-objdump $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(STRIP_BIN) $(OBJCOPY_BIN) $(OBJDUMP_BIN) $(ELF_PROBE) $(TEST_ARCHIVE)
+check: check-as-x86_64 check-as-sse-x86_64 check-as-libc-x86_64 check-ld-x86_64 check-ld-cref check-ar-bsd check-ld-libpath check-ranlib check-libelf check-nm check-readelf check-strip check-objcopy check-objdump $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(STRIP_BIN) $(OBJCOPY_BIN) $(OBJDUMP_BIN) $(ELF_PROBE) $(TEST_ARCHIVE)
 	@set -eu; \
 	test "$$($(AR_BIN) --version)" = "meuos-toolchain ar 0.2.0 (x86_64 bootstrap)"; \
 	test "$$($(AR_BIN) t $(TEST_ARCHIVE))" = hello.o; \
@@ -206,6 +206,7 @@ check-as-x86_64: $(AS_BIN)
 	LANG=C readelf -s "$$tmp/main.o" | grep -Eq '[[:space:]]main$$'; \
 	printf 'mt as x86_64 check: PASS\n'
 	sh test/as_rept.sh "$(abspath $(AS_BIN))"
+	sh test/as_check_equ.sh "$(abspath $(AS_BIN))"
 
 check-target-dispatch: $(AS_BIN) $(LD_BIN)
 	@set -eu; \
@@ -255,6 +256,9 @@ check-ld-x86_64: $(AS_BIN) $(AR_BIN) $(LD_BIN)
 	sh test/ld_counter_e2e.sh "$(abspath $(AS_BIN))" "$(abspath $(LD_BIN))" "$(abspath $(MCC))" "$(SYSROOT)"
 	sh test/ld_defsym.sh "$(abspath $(LD_BIN))"
 	sh test/ld_wrap.sh "$(abspath $(LD_BIN))"
+
+check-ld-cref: $(AS_BIN) $(LD_BIN)
+	sh test/ld_cref.sh "$(abspath $(LD_BIN))" "$(abspath $(AS_BIN))"
 
 
 check-ar-bsd: $(AS_BIN) $(AR_BIN) $(LD_BIN)
