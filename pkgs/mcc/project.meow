@@ -1,0 +1,28 @@
+name: mcc
+version: 1.0
+default: mcc
+
+[variables]
+  MCCC: /workspace/MeuOS-Kit/projects/mcc
+  MSYS: /workspace/MeuOS-Kit/projects/meuos-sysroot
+  BLD: /workspace/MeuOS-Kit/projects/mcc/build
+  CC: cc
+  CFLAGS: -O2 -g -std=gnu11 -I%MCCC%/include -I%MSYS%/include -Wno-all
+  AR: ar
+
+[mcc]
+  outputs: %MCCC%/mcc, %BLD%/libmcc.a
+  run: |
+    mkdir -p %BLD%/src/target %BLD%/src/ir %BLD%/src/opt %BLD%/src/abi %BLD%/src/emit %BLD%/src/util %BLD%/src/driver %BLD%/src/lex %BLD%/src/parse %BLD%/src/sema %BLD%/src/irgen
+    cd %MCCC% && find src -name '*.c' | while read f; do dir=$(dirname "%BLD%/$f"); mkdir -p "$dir"; %CC% %CFLAGS% -DMCC_DEFAULT_TARGET=\"x86_64\" -c "$f" -o "%BLD%/${f%.c}.o"; done
+    find %BLD%/src/target %BLD%/src/ir %BLD%/src/opt %BLD%/src/abi %BLD%/src/emit %BLD%/src/util -name '*.o' 2>/dev/null | sort | xargs %AR% rcs %BLD%/libmcc.a
+    FE_OBJS=$(find %BLD%/src/driver %BLD%/src/lex %BLD%/src/parse %BLD%/src/sema %BLD%/src/irgen -name '*.o' 2>/dev/null | sort | tr '\n' ' '); %CC% %CFLAGS% -o %MCCC%/mcc $FE_OBJS %BLD%/libmcc.a -L%MSYS%/build -lmsys
+
+[install]
+  deps: mcc
+  run: |
+    mkdir -p /workspace/MeuOS-Kit/projects/sysroot/usr/bin
+    cp %MCCC%/mcc /workspace/MeuOS-Kit/projects/sysroot/usr/bin/
+
+[clean]
+  run: rm -rf %BLD% %MCCC%/mcc
