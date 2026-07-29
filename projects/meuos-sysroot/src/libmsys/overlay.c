@@ -243,14 +243,19 @@ msys_overlay_readdir(struct msys_overlay *ol, const char *dir,
 			/* Add to global set */
 			if (name_count >= name_cap) {
 				size_t nc = name_cap ? name_cap * 2 : 64;
+
 				const char **nn = realloc(names, nc * sizeof(const char *));
+				if (!nn) goto oom;
+				names = nn;
+
 				size_t *ns = realloc(sizes, nc * sizeof(size_t));
+				if (!ns) goto oom;
+				sizes = ns;
+
 				int *nd = realloc(is_dirs, nc * sizeof(int));
-				if (!nn || !ns || !nd) {
-					free(nn); free(ns); free(nd);
-					goto oom;
-				}
-				names = nn; sizes = ns; is_dirs = nd;
+				if (!nd) goto oom;
+				is_dirs = nd;
+
 				name_cap = nc;
 			}
 			char *copy = malloc(child_len + 1);
