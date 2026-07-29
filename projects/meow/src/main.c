@@ -152,6 +152,8 @@ main(int argc, char **argv)
 		return cmd_lint(count - 1, arguments + 1);
 	if (count == 2 && strcmp(arguments[0], "show") == 0)
 		return cmd_show(count - 1, arguments + 1);
+	if (count >= 1 && strcmp(arguments[0], "init") == 0)
+		return cmd_init(count - 1, arguments + 1);
 	if (count == 1 && strcmp(arguments[0], "--bootstrap") == 0) {
 		if (run("CC=\"${CC:-cc}\" make -C meow clean all") != 0)
 			return 1;
@@ -164,8 +166,10 @@ main(int argc, char **argv)
 		printf("       meow [-jN] [--arch <arch>] [--target <triple>] build all\n");
 		printf("       meow [-jN] [--arch <arch>] [--target <triple>] clean <package>\n");
 		printf("       meow [-jN] [--arch <arch>] env        # 打印构建环境\n");
-		printf("       meow list\n");
-		printf("       meow lint [<package>]  # 配方语法检查\n");
+		printf("       meow list               # 列出可用包\n");
+		printf("       meow init [<pkg>]       # 生成 .meow 配方\n");
+		printf("       meow lint [<package>]   # 配方语法检查\n");
+		printf("       meow show <package>     # 配方信息预览\n");
 		printf("       meow --bootstrap\n");
 		printf("       meow --help\n");
 		printf("\n选项:\n");
@@ -202,35 +206,48 @@ main(int argc, char **argv)
 		return failures ? 1 : 0;
 	}
 	/* Zero-argument build: `meow build` with no package builds the current
-	 * directory's meow.yaml (auto-detect mode). This is the "zero-config"
-	 * experience — no need to name the package. */
+	 * directory's recipe (auto-detect mode). */
+	data = malloc(RECIPE_MAX);
+	if (!data) {
+		meow_msg(MSG_ERROR, "out of memory");
+		return 1;
+	}
 	if (count == 1 && strcmp(arguments[0], "build") == 0) {
-		if (load_recipe(".", path, sizeof(path), data) == 0 &&
-		    parse_recipe(data) == 0) {
-			set_arch_env();
-			{	char *build_dir = getenv("BLD_DIR");
-				if (probe_run(build_dir ? build_dir : ".") != 0) {
-					meow_msg(MSG_ERROR, "probe failed for current directory");
-					return 1;
-				}
-			}
-			requested = default_target;
-			if (!requested)
-				requested = find_target("all") ? "all" : "build";
-			if (run_target(find_target(requested)) != 0) {
-				meow_msg(MSG_ERROR, "target failed: %s (%s)", requested, path);
+		if (load_recipe(".", path, sizeof(path), data) < 0) {
+			meow_msg(MSG_ERROR, "no build recipe in current directory; specify a package");
+			return 1;
+		}
+		/* Dispatch parser by extension */
+		int rc;
+		size_t plen = strlen(path);
+		if (plen >= 5 && strcmp(path + plen - 5, ".meow") == 0)
+			rc = parse_meow(data);
+		else
+			rc = parse_recipe(data);
+		if (rc != 0) {
+			meow_msg(MSG_ERROR, "invalid recipe in current directory");
+			return 1;
+		}
+		set_arch_env();
+		{	char *build_dir = getenv("BLD_DIR");
+			if (probe_run(build_dir ? build_dir : ".") != 0) {
+				meow_msg(MSG_ERROR, "probe failed for current directory");
 				return 1;
 			}
-			meow_msg(MSG_SUCCESS, "built %s", path);
-			return 0;
 		}
-		/* No meow.yaml here: fall through to usage error. */
-		meow_msg(MSG_ERROR, "no meow.yaml in current directory; specify a package");
-		return 1;
+		requested = default_target;
+		if (!requested)
+			requested = find_target("all") ? "all" : "build";
+		if (run_target(find_target(requested)) != 0) {
+			meow_msg(MSG_ERROR, "target failed: %s (%s)", requested, path);
+			return 1;
+		}
+		meow_msg(MSG_SUCCESS, "built %s", path);
+		return 0;
 	}
 	if ((count != 2 && count != 3) ||
 	    (strcmp(arguments[0], "build") != 0 && strcmp(arguments[0], "clean") != 0)) {
-		printf("usage: meow [-jN] [--arch <arch>] [--target <triple>] build <package> [target] | meow [-jN] [--arch <arch>] build | meow [-jN] [--arch <arch>] clean <package> | meow list | meow lint [<package>] | meow --bootstrap\n");
+		printf("usage: meow [-jN] [--arch <arch>] [--target <triple>] build <package> [target] | meow [-jN] [--arch <arch>] build | meow [-jN] [--arch <arch>] clean <package> | meow list | meow init [<pkg>] | meow lint [<package>] | meow show <package> | meow --bootstrap\n");
 		return 2;
 	}
 	data = malloc(RECIPE_MAX);

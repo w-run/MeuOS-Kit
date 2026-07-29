@@ -123,4 +123,7 @@ int parse_meow(char *data);
 /* show.c */
 int cmd_show(int argc, char **argv);
 
+/* init.c */
+int cmd_init(int argc, char **argv);
+
 #endif /* MEOW_H */
