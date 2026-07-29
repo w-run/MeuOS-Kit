@@ -70,7 +70,7 @@ mt_elf32_parse(const void *bytes, size_t size, struct mt_elf32_view *view)
 	    (phnum && phentsize < MT_ELF32_PHDR_SIZE) ||
 	    (shnum && shentsize < MT_ELF32_SHDR_SIZE) ||
 	    !table_valid(read32(p + 28), phentsize, phnum, size) ||
-	    !table_valid(read32(p + 36), shentsize, shnum, size))
+	    !table_valid(read32(p + 32), shentsize, shnum, size))
 		return MT_ELF_E_LAYOUT;
 
 	memset(view, 0, sizeof(*view));
