@@ -1981,6 +1981,14 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 	} else if (type == LD_R_X86_64_32 || type == LD_R_X86_64_32S) {
 		value = resolved_value + addend;
 		width = 4;
+	} else if (type == LD_R_X86_64_TPOFF32) {
+		/* Local-Exec TLS: resolve to negative TP offset.
+		 * Used by static _Thread_local variables like errno_value. */
+		uint64_t tls_off;
+		if (symbol_tls_offset(ctx, object, symbol_index, &tls_off) != 0)
+			return -1;
+		value = (uint64_t)((int64_t)tls_off - (int64_t)ctx->tls_size) + addend;
+		width = 4;
 	} else {
 		return ld_errorf(ctx, "unsupported relocation type", name);
 	}
