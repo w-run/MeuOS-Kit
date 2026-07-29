@@ -1599,7 +1599,7 @@ collect_got_relocations(struct ld_context *ctx)
 				    section.size % section.entry_size != 0)
 					continue;
 				for (n = 0; n < section.size / section.entry_size; ++n) {
-					const unsigned char *p = object->data + section.offset + n * 12;
+					const unsigned char *p = object->data + section.offset + n * section.entry_size;
 					info32 = read32(p + 4);
 					if ((unsigned)info32 == LD_R_X86_64_GOTPCREL ||
 					    (unsigned)info32 == LD_R_X86_64_REX_GOTPCRELX ||
