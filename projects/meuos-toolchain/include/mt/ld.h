@@ -18,6 +18,7 @@ struct mt_ld_options {
 	int         no_undefined;  /* 1 = error on undefined symbols */
 	int         gc_sections;   /* 1 = garbage-collect unused sections */
 	int         print_map;     /* 1 = output link map to stderr */
+	int         cref;          /* 1 = output cross-reference table */
 	const char *link_script;   /* path to section layout script (NULL = none) */
 	const char *const *defsym; /* --defsym=SYM=VAL list (NULL = none).
 	                           Each entry is a SYM=VAL pair; VAL may use a 0x

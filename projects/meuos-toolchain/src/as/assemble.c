@@ -1100,6 +1100,58 @@ parse_directive(struct as_file *as, char *directive, char *rest)
 	}
 	if (strcmp(directive, ".ident") == 0 || strcmp(directive, ".version") == 0)
 		return 0;
+	if (strcmp(directive, ".equ") == 0 || strcmp(directive, ".set") == 0) {
+		/* .equ SYM, VALUE — define absolute symbol constant */
+		char *name = rest;
+		char *p = rest;
+		while (*p && *p != ',' && *p != ' ' && *p != '\t') p++;
+		if (*p) {
+			if (*p == ',') *p++ = '\0';
+			else { *p++ = '\0'; while (*p == ' ' || *p == '\t') p++; }
+		}
+		while (*p == ' ' || *p == '\t') p++;
+		if (!*p || !*name)
+			return as_error(as, ".equ requires SYM, VALUE");
+		int64_t value;
+		if (parse_integer(p, &value) != 0)
+			return as_error(as, ".equ: invalid value for '%s'", name);
+		struct as_symbol *sym = get_symbol(as, name);
+		if (!sym)
+			return as_error(as, ".equ: cannot create symbol '%s'", name);
+		if (sym->defined)
+			return as_error(as, ".equ: symbol '%s' already defined", name);
+		sym->defined = 1;
+		sym->value = (uint64_t)value;
+		sym->section = (int)-1;  /* absolute symbol */
+		return 0;
+	}
+	if (strcmp(directive, ".abort") == 0) {
+		/* .abort — unconditionally stop assembly */
+		return as_error(as, "assembly aborted by .abort directive");
+	}
+	if (strcmp(directive, ".error") == 0) {
+		/* .error "message" — emit error */
+		char *msg = rest;
+		while (*msg == ' ' || *msg == '\t') msg++;
+		if (*msg == '"') {
+			msg++;
+			char *end = strchr(msg, '"');
+			if (end) *end = '\0';
+		}
+		return as_error(as, "%s", msg);
+	}
+	if (strcmp(directive, ".warning") == 0) {
+		/* .warning "message" — emit warning, continue */
+		char *msg = rest;
+		while (*msg == ' ' || *msg == '\t') msg++;
+		if (*msg == '"') {
+			msg++;
+			char *end = strchr(msg, '"');
+			if (end) *end = '\0';
+		}
+		fprintf(stderr, "%s:%u: warning: %s\n", as->filename, as->line, msg);
+		return 0;
+	}
 	return as_error(as, "unsupported directive: %s", directive);
 }
 
@@ -1507,7 +1559,8 @@ build_symbols(struct as_file *as, const int *section_map, struct string_table *s
 			goto fail;
 		shndx = as->symbols[i].defined && as->symbols[i].section >= 0 ?
 		        (uint16_t)section_map[as->symbols[i].section] :
-		        as->symbols[i].section == -2 ? MT_SHN_COMMON : 0;
+		        as->symbols[i].section == -2 ? MT_SHN_COMMON :
+		        as->symbols[i].defined && as->symbols[i].section == -1 ? MT_SHN_ABS : 0;
 		symbols[count] = (struct elf_sym_out){
 			.name = name_offset,
 			.info = MT_ST_INFO(as->symbols[i].bind, as->symbols[i].type),
@@ -1526,7 +1579,8 @@ build_symbols(struct as_file *as, const int *section_map, struct string_table *s
 			goto fail;
 		shndx = as->symbols[i].defined && as->symbols[i].section >= 0 ?
 		        (uint16_t)section_map[as->symbols[i].section] :
-		        as->symbols[i].section == -2 ? MT_SHN_COMMON : 0;
+		        as->symbols[i].section == -2 ? MT_SHN_COMMON :
+		        as->symbols[i].defined && as->symbols[i].section == -1 ? MT_SHN_ABS : 0;
 		symbols[count] = (struct elf_sym_out){
 			.name = name_offset,
 			.info = MT_ST_INFO(as->symbols[i].bind, as->symbols[i].type),
