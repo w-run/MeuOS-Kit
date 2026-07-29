@@ -53,6 +53,19 @@ cmd_show(int argc, char **argv)
 			printf("  %s: %s\n", vars[i], val);
 	}
 
+	/* Show meta info */
+	const char *meta_desc = getenv("description");
+	const char *meta_license = getenv("license");
+	const char *meta_author = getenv("author");
+	const char *meta_homepage = getenv("homepage");
+	if (meta_desc || meta_license || meta_author || meta_homepage) {
+		printf("\n--- 元数据 ---\n");
+		if (meta_desc)    printf("  description: %s\n", meta_desc);
+		if (meta_license) printf("  license: %s\n", meta_license);
+		if (meta_author)  printf("  author: %s\n", meta_author);
+		if (meta_homepage) printf("  homepage: %s\n", meta_homepage);
+	}
+
 	/* Show targets */
 	printf("\n--- 构建目标 ---\n");
 	if (ntargets == 0) {

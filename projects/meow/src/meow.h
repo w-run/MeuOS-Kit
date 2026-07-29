@@ -65,6 +65,12 @@ struct target {
 	int  install_mode;    /* install: file mode */
 	int  strip;           /* 1 = strip after install */
 	int  parallel_jobs;   /* per-target parallel jobs */
+	char *only_arch;      /* architecture allowlist (comma-sep) */
+	char *except_arch;    /* architecture denylist (comma-sep) */
+	char *work_dir;       /* working directory for commands */
+	char *pre_cmd;        /* pre-hook command */
+	char *post_cmd;       /* post-hook command */
+	char *error_cmd;      /* error callback command */
 	int visiting;
 	int done;
 	char *stem;
