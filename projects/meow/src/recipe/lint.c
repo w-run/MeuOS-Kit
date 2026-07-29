@@ -14,6 +14,8 @@
 static int
 lint_recipe(const char *path)
 {
+	cflags_global[0] = '\0';
+	ldflags_global[0] = '\0';
 	char data[RECIPE_MAX];
 	char abs_path[512];
 	if (load_recipe(path, abs_path, sizeof(abs_path), data) < 0) {
@@ -64,6 +66,8 @@ cmd_lint(int argc, char **argv)
 					int rc;
 					size_t lplen = strlen(path);
 					int lmeow = (lplen >= 5 && strcmp(path + lplen - 5, ".meow") == 0);
+					cflags_global[0] = '\0';
+					ldflags_global[0] = '\0';
 					if (lmeow)
 						rc = parse_meow(data);
 					else

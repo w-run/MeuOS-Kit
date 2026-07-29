@@ -97,6 +97,18 @@ main(int argc, char **argv)
 			++arguments;
 			--count;
 		} else if (strcmp(arguments[0], "--arch") == 0 && count >= 2) {
+			/* Don't consume a subcommand or another flag as arch value */
+			if (arguments[1][0] == '-' ||
+			    strcmp(arguments[1], "build") == 0 ||
+			    strcmp(arguments[1], "clean") == 0 ||
+			    strcmp(arguments[1], "list") == 0 ||
+			    strcmp(arguments[1], "env") == 0 ||
+			    strcmp(arguments[1], "lint") == 0 ||
+			    strcmp(arguments[1], "show") == 0 ||
+			    strcmp(arguments[1], "init") == 0 ||
+			    strcmp(arguments[1], "pkg-config") == 0 ||
+			    strcmp(arguments[1], "--bootstrap") == 0)
+				return 2;
 			build_arch = arguments[1];
 			arguments += 2;
 			count -= 2;

@@ -1668,7 +1668,7 @@ apply_link_script(struct ld_context *ctx, const char *path)
 		name[n] = '\0';
 		while (*p && (*p == ' ' || *p == '\t' || *p == '=')) p++;
 		if (*p) {
-			int rank = atoi(p);
+			int rank = (int)strtol(p, NULL, 10);
 			int g = find_group(ctx, name);
 			if (g >= 0)
 				ctx->groups[g].rank = rank;
