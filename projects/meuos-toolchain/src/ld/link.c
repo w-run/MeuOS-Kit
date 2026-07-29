@@ -2507,6 +2507,8 @@ write_executable(struct ld_context *ctx, const char *path,
 	uint64_t base_addr = ctx->shared ? 0 : LD_BASE;
 	/* Program header count: PT_LOAD + optional PT_TLS + (shared) PT_PHDR/PT_DYNAMIC. */
 	int phnum;
+	uint16_t phentsize = (ctx->target->elf_class == 1)
+	                       ? MT_ELF32_PHDR_SIZE : MT_ELF64_PHDR_SIZE;
 
 	entry_symbol = NULL;
 	entry_address = 0;
@@ -2679,9 +2681,34 @@ write_executable(struct ld_context *ctx, const char *path,
 	if (!file)
 		goto out_strings;
 	/* ELF header — set fields from target descriptor. */
-	{
-	unsigned char h[64] = {0x7f, 'E', 'L', 'F',
-	                       target->elf_class, target->elf_endian, 1, 0};
+	if (target->elf_class == 1) {
+		unsigned char h[52] = {0x7f, 'E', 'L', 'F',
+		                       target->elf_class, target->elf_endian, 1, 0};
+		uint16_t e_type = (ctx->shared || ctx->pie) ? MT_ET_DYN : MT_ET_EXEC;
+		write16(h + 16, e_type);
+		write16(h + 18, target->emachine);
+		write32(h + 20, 1);
+		write32(h + 24, (uint32_t)entry_address);
+		write32(h + 28, target->ehdr_size);     /* e_phoff after fixed header */
+		write32(h + 32, (uint32_t)section_offset);
+		write32(h + 36, target->e_flags);
+		write16(h + 40, target->ehdr_size);
+		write16(h + 42, MT_ELF32_PHDR_SIZE);
+		phnum = 1; /* PT_LOAD */
+		if (ctx->tls_size) phnum++;
+		if (ctx->shared || ctx->pie) phnum += 2;
+		if (ctx->pie) phnum += 1;
+		if (find_group(ctx, ".dynamic") >= 0 || find_group(ctx, ".got") >= 0)
+			phnum++;
+		write16(h + 44, (uint16_t)phnum);
+		write16(h + 46, target->shdr_size);
+		write16(h + 48, (uint16_t)output_count);
+		write16(h + 50, (uint16_t)shstr_index);
+		if (fwrite(h, 1, sizeof(h), file) != sizeof(h))
+			goto out_file;
+	} else {
+		unsigned char h[64] = {0x7f, 'E', 'L', 'F',
+		                       target->elf_class, target->elf_endian, 1, 0};
 		uint16_t e_type = (ctx->shared || ctx->pie) ? MT_ET_DYN : MT_ET_EXEC;
 		write16(h + 16, e_type);
 		write16(h + 18, target->emachine);
@@ -2691,15 +2718,14 @@ write_executable(struct ld_context *ctx, const char *path,
 		write64(h + 40, section_offset);
 		write32(h + 48, target->e_flags);
 		write16(h + 52, target->ehdr_size);
-		write16(h + 54, 56);
+		write16(h + 54, MT_ELF64_PHDR_SIZE);
 		phnum = 1; /* PT_LOAD */
 		if (ctx->tls_size) phnum++;
 		if (ctx->shared || ctx->pie) phnum += 2; /* PT_PHDR + PT_DYNAMIC */
 		if (ctx->pie) phnum += 1;    /* PT_INTERP */
-		/* PT_GNU_RELRO if .dynamic or .got exists */
 		if (find_group(ctx, ".dynamic") >= 0 || find_group(ctx, ".got") >= 0)
 			phnum++;
-		write16(h + 56, phnum);
+		write16(h + 56, (uint16_t)phnum);
 		write16(h + 58, target->shdr_size);
 		write16(h + 60, (uint16_t)output_count);
 		write16(h + 62, (uint16_t)shstr_index);
@@ -2718,8 +2744,8 @@ write_executable(struct ld_context *ctx, const char *path,
 		uint64_t phoff = target->ehdr_size;
 		if (write_program_header_type(file, MT_PT_PHDR, LD_PF_R,
 		                             phoff, base_addr + phoff,
-		                             (uint64_t)phnum * 56,
-		                             (uint64_t)phnum * 56, 8) != 0)
+		                             (uint64_t)phnum * phentsize,
+		                             (uint64_t)phnum * phentsize, 8) != 0)
 			goto out_file;
 	}
 	{
