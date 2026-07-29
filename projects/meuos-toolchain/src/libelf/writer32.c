@@ -120,9 +120,11 @@ mt_elf32_writer_finalize(struct mt_elf32_writer *w, FILE *out)
 	size_t i;
 
 	name_offsets = calloc(total_sections, sizeof(uint32_t));
+	if (!name_offsets)
+		return -1;
 	shstrtab = build_shstrtab32(w, name_offsets, &shstrtab_size);
 	data_offsets = calloc(total_sections, sizeof(uint32_t));
-	if (!name_offsets || !shstrtab || !data_offsets) {
+	if (!shstrtab || !data_offsets) {
 		free(name_offsets); free(shstrtab); free(data_offsets);
 		return -1;
 	}
