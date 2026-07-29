@@ -16,5 +16,6 @@
 
 void *mmap(void *, size_t, int, int, int, off_t);
 int munmap(void *, size_t);
+int mprotect(const void *, size_t, int);
 
 #endif

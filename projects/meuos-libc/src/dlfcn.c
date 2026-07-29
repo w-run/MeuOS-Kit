@@ -239,8 +239,7 @@ load_lib(const char *path)
 		if (filesz > 0)
 			memcpy((void *)dest, data + offset, (size_t)filesz);
 
-		/* Set memory protection (skip if mprotect not available) */
-#if 0
+		/* Set memory protection per PT_LOAD flags */
 		int prot = 0;
 		if (flags & 4) prot |= PROT_READ;
 		if (flags & 2) prot |= PROT_WRITE;
@@ -250,7 +249,6 @@ load_lib(const char *path)
 		uintptr_t seg_start = (uintptr_t)map_base +
 		                      (vaddr & ~(size_t)0xFFF) - min_vaddr;
 		mprotect((void *)seg_start, seg_size, prot);
-#endif
 	}
 
 	uintptr_t load_base = (uintptr_t)map_base - min_vaddr;
