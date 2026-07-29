@@ -1951,12 +1951,7 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 		}
 		width = 4;
 	} else if (type == LD_R_X86_64_PC32) {
-		/* x86_64 variant II TLS: %fs points at the end of the static
-		 * TLS block. tpoff = symbol_offset_in_tls_block - tls_size. */
-		uint64_t tls_off;
-		if (symbol_tls_offset(ctx, object, symbol_index, &tls_off) != 0)
-			return -1;
-		value = (uint64_t)((int64_t)tls_off - (int64_t)ctx->tls_size) + addend;
+		value = resolved_value + addend - place;
 		width = 4;
 	} else if (type == LD_R_X86_64_TLSGD || type == LD_R_X86_64_TLSLD ||
 	           type == LD_R_X86_64_DTPOFF || type == LD_R_X86_64_DTPMOD) {
