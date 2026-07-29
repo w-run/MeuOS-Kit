@@ -194,6 +194,8 @@ static int cmd_hist_add(const char *archive, const char *path, const char *msg) 
 	void *data; size_t dsize;
 	if (msys_load(m, path, &data, &dsize) < 0) { perror("load"); msys_close(m); return -1; }
 
+	time_t now = time(NULL);
+
 	/* Create history dir: .msys.hist/<basename>/<path>/ */
 	char dir[16384];
 	snprintf(dir, sizeof(dir), "%s/%s", hist_dir(archive), path);
@@ -204,21 +206,21 @@ static int cmd_hist_add(const char *archive, const char *path, const char *msg) 
 
 	/* Save as <timestamp> */
 	char file[16384];
-	snprintf(file, sizeof(file), "%s/%lu", dir, (unsigned long)time(NULL));
+	snprintf(file, sizeof(file), "%s/%lu", dir, (unsigned long)now);
 	FILE *fp = fopen(file, "wb");
 	if (!fp) { perror("fopen"); free(data); msys_close(m); return -1; }
-	fwrite(data, 1, dsize, fp);
+	if (fwrite(data, 1, dsize, fp) != dsize) { perror("fwrite"); fclose(fp); free(data); msys_close(m); return -1; }
 	fclose(fp);
 
 	/* Save message if provided */
 	if (msg && *msg) {
 		char msgfile[16384];
-		snprintf(msgfile, sizeof(msgfile), "%s/%lu.msg", dir, (unsigned long)time(NULL));
+		snprintf(msgfile, sizeof(msgfile), "%s/%lu.msg", dir, (unsigned long)now);
 		fp = fopen(msgfile, "wb");
 		if (fp) { fwrite(msg, 1, strlen(msg), fp); fclose(fp); }
 	}
 
-	printf("saved %s v%lu (%zu bytes)%s%s\n", path, (unsigned long)time(NULL), dsize,
+	printf("saved %s v%lu (%zu bytes)%s%s\n", path, (unsigned long)now, dsize,
 	       msg ? " — " : "", msg ? msg : "");
 	free(data);
 	msys_close(m);

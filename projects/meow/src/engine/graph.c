@@ -20,13 +20,13 @@ int completed_commands = 0;
 /* Log file handle, kept open across run_target() for real-time logging. */
 static FILE *g_log_fp = NULL;
 
-/* Expand ${VAR} in path, using a stack buffer for the result.
+/* Expand ${VAR} in path, using a thread-local buffer for the result.
  * Returns the original path if no expansion is needed, or a pointer
- * to a static buffer with the expanded result. */
+ * to a TLS buffer with the expanded result. */
 static const char *
 expand_path(const char *path)
 {
-	static char buffer[RECIPE_MAX];
+	static _Thread_local char buffer[RECIPE_MAX];
 	if (strchr(path, '$') && strchr(path, '{')) {
 		if (expand_env_vars(path, buffer, sizeof(buffer)) == 0)
 			return buffer;
@@ -499,7 +499,7 @@ run_target(struct target *target)
 }
 
 static int
-file_mtime(const char *path, long *seconds, long *nanoseconds)
+file_mtime(const char *path, time_t *seconds, long *nanoseconds)
 {
 	struct stat status;
 
@@ -511,7 +511,7 @@ file_mtime(const char *path, long *seconds, long *nanoseconds)
 }
 
 static void
-newer(long seconds, long nanoseconds, long *latest_seconds, long *latest_nanoseconds)
+newer(time_t seconds, long nanoseconds, time_t *latest_seconds, long *latest_nanoseconds)
 {
 	if (seconds > *latest_seconds ||
 	 (seconds == *latest_seconds && nanoseconds > *latest_nanoseconds)) {
@@ -523,16 +523,17 @@ newer(long seconds, long nanoseconds, long *latest_seconds, long *latest_nanosec
 static int
 target_out_of_date(struct target *target)
 {
-	long newest_seconds = 0;
+	time_t newest_seconds = 0;
 	long newest_nanoseconds = 0;
-	long oldest_seconds = 0;
+	time_t oldest_seconds = 0;
 	long oldest_nanoseconds = 0;
 	size_t i;
 
 	if (target->phony || !target->noutputs)
 		return 1;
 	for (i = 0; i < target->ninputs; ++i) {
-		long seconds, nanoseconds;
+		time_t seconds;
+		long nanoseconds;
 		if (file_mtime(expand_path(target->inputs[i]), &seconds, &nanoseconds) < 0)
 			return 1;
 		newer(seconds, nanoseconds, &newest_seconds, &newest_nanoseconds);
@@ -547,14 +548,16 @@ target_out_of_date(struct target *target)
 				newer(seconds, nanoseconds, &newest_seconds, &newest_nanoseconds);
 			}
 		} else {
-			long seconds, nanoseconds;
+			time_t seconds;
+			long nanoseconds;
 			if (file_mtime(expand_path(target->deps[i]), &seconds, &nanoseconds) < 0)
 				return 1;
 			newer(seconds, nanoseconds, &newest_seconds, &newest_nanoseconds);
 		}
 	}
 	for (i = 0; i < target->noutputs; ++i) {
-		long seconds, nanoseconds;
+		time_t seconds;
+		long nanoseconds;
 		if (file_mtime(expand_path(target->outputs[i]), &seconds, &nanoseconds) < 0)
 			return 1;
 		if (!i || seconds < oldest_seconds ||

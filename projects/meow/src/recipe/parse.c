@@ -363,11 +363,11 @@ parse_recipe(char *data)
 				section = VARIABLES;
 			else if (strcmp(text, "targets:") == 0 || strcmp(text, "steps:") == 0)
 				section = TARGETS;
-		else if (strcmp(text, "depends:") == 0)
-			section = DEPENDS;
-		else if (strcmp(text, "uses:") == 0)
-			section = USESECT;
-		else if (strncmp(text, "default:", 8) == 0)
+			else if (strcmp(text, "depends:") == 0)
+				section = DEPENDS;
+			else if (strcmp(text, "uses:") == 0)
+				section = USESECT;
+			else if (strncmp(text, "default:", 8) == 0)
 				default_target = trim(text + 8);
 		} else if ((section == PROBE || section == PROBE_HEADERS || section == PROBE_FUNCS || section == PROBE_CODES || section == PROBE_DECLS || section == PROBE_LIBS || section == PROBE_TYPESIZES) && indent == 2) {
 			section = PROBE;

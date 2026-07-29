@@ -163,8 +163,6 @@ mt_elf32_writer_finalize(struct mt_elf32_writer *w, FILE *out)
 	put32(ehdr + 32, shdr_offset);
 	put32(ehdr + 36, w->flags);
 	put16(ehdr + 40, MT_ELF32_EHDR_SIZE);
-	put32(ehdr + 36, w->flags);
-	put16(ehdr + 40, MT_ELF32_EHDR_SIZE);
 	put16(ehdr + 42, 0);      /* phentsize */
 	put16(ehdr + 44, 0);      /* phnum */
 	put16(ehdr + 46, MT_ELF32_SHDR_SIZE);

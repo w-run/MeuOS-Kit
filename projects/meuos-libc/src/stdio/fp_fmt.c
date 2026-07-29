@@ -54,10 +54,14 @@ scale10(double v, int n)
 /* Sign bit via IEEE-754 bit pattern.  Little-endian: the high 32 bits
  * of the double (sign | exponent | mantissa_hi) live at u[1].  All
  * currently supported targets (i386, x86_64, aarch64) are LE. */
+/* Sign bit via IEEE-754 high bit (endian-agnostic when using uint64_t).
+ * Replaces a previous union-based hack that assumed little-endian u[1]. */
 static int
 sign_bit(double v)
 {
-	return signbit(v);
+	union { double d; unsigned long long u; } u;
+	u.d = v;
+	return (int)(u.u >> 63) < 0;
 }
 
 static int
