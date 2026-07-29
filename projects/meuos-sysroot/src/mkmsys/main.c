@@ -1343,7 +1343,10 @@ int main(int argc, char *argv[])
 		fclose(kf);
 		if (klen == 32) {
 			/* Seed: generate key pair */
-			ed25519_keypair(key_buf, sign_sk, sign_pk);
+			if (ed25519_keypair(key_buf, sign_sk, sign_pk) < 0) {
+				fprintf(stderr, "mkmsys: failed to generate key pair\n");
+				return 1;
+			}
 			sign_sk_ptr = sign_sk;
 			sign_pk_ptr = sign_pk;
 		} else if (klen == 64) {

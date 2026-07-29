@@ -7,6 +7,7 @@
 
 #include "ed25519.h"
 #include <dlfcn.h>
+#include <errno.h>
 #include <string.h>
 
 /* Function pointers loaded lazily from libsodium */
@@ -53,19 +54,25 @@ static int ensure_sodium(void)
 		return 0;
 	}
 
-	/* Initialize sodium (idempotent) */
-	(*sodium_init_fn)();
+	/* Initialize sodium (idempotent) — returns 0 on success */
+	if ((*sodium_init_fn)() != 0) {
+		dlclose(sodium_handle);
+		sodium_handle = NULL;
+		return 0;
+	}
 	return 1;
 }
 
-void ed25519_keypair(const uint8_t seed[32], uint8_t sk[64], uint8_t pk[32])
+int ed25519_keypair(const uint8_t seed[32], uint8_t sk[64], uint8_t pk[32])
 {
 	if (!ensure_sodium()) {
+		errno = ENOPKG;
 		memset(sk, 0, 64);
 		memset(pk, 0, 32);
-		return; /* libsodium unavailable */
+		return -1;
 	}
 	(*crypto_sign_seed_keypair)(pk, sk, seed);
+	return 0;
 }
 
 void ed25519_sign(const uint8_t sk[64], const uint8_t *msg, size_t msglen,

@@ -12,8 +12,9 @@
 /* Generate a key pair from a 32-byte seed.
  *   seed:  32 bytes of key material
  *   sk:    output, 64 bytes (seed || public key)
- *   pk:    output, 32 bytes public key (may be NULL to compute in-place in sk[32..63]) */
-void ed25519_keypair(const uint8_t seed[32],
+ *   pk:    output, 32 bytes public key (may be NULL to compute in-place in sk[32..63])
+ *   Returns 0 on success, -1 on error (errno set, outputs zeroed). */
+int ed25519_keypair(const uint8_t seed[32],
                      uint8_t sk[64], uint8_t pk[32]);
 
 /* Sign a message.
