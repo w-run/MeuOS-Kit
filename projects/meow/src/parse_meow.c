@@ -155,6 +155,8 @@ parse_meow(char *data)
 	probe_list_type[0] = '\0';
 	ntargets = 0;
 	nuses = 0;
+	nhas_tools_stack = 0;
+	nlib_deps_stack = 0;
 	default_target = NULL;
 
 	while (*line) {
@@ -382,6 +384,44 @@ parse_meow(char *data)
 				if (strcmp(val, "true") == 0 || strcmp(val, "yes") == 0 || strcmp(val, "1") == 0)
 					current_target->phony = 1;
 			}
+			/* download: URL — 下载源文件 */
+			else if (strcmp(key, "download") == 0 && current_target) {
+				current_target->download_url = strdup(val);
+			}
+			/* has: tool1, tool2 — 检测构建工具 */
+			else if (strcmp(key, "has") == 0 && current_target) {
+				char *p = val;
+				while (*p) {
+					while (*p == ' ' || *p == ',') p++;
+					if (!*p) break;
+					char *start = p;
+					while (*p && *p != ',') p++;
+					char saved = *p; *p = '\0';
+					if (nhas_tools_stack < HAS_TOOLS_MAX)
+						has_tools_stack[nhas_tools_stack++] = strdup(trim(start));
+					*p = saved;
+				}
+			}
+			/* lib: lib1, lib2 — 检测库依赖（自动调用 probe） */
+			else if (strcmp(key, "lib") == 0 && current_target) {
+				char *p = val;
+				while (*p) {
+					while (*p == ' ' || *p == ',') p++;
+					if (!*p) break;
+					char *start = p;
+					while (*p && *p != ',') p++;
+					char saved = *p; *p = '\0';
+					char *libname = trim(start);
+					if (nlib_deps_stack < LIB_DEPS_MAX)
+						lib_deps_stack[nlib_deps_stack++] = strdup(libname);
+					probe_add_library(libname);
+					*p = saved;
+				}
+			}
+			/* log: filename — 构建日志输出文件 */
+			else if (strcmp(key, "log") == 0 && current_target) {
+				current_target->log_file = strdup(val);
+			}
 			else if (strcmp(key, "default") == 0) {
 				default_target = strdup(val);
 			}
@@ -452,6 +492,24 @@ parse_meow(char *data)
 					*p = saved;
 				}
 			}
+			/* env: KEY=VALUE — 环境变量注入（支持逗号分隔多个） */
+			else if (strcmp(key, "env") == 0) {
+				char *p = val;
+				while (*p) {
+					while (*p == ' ' || *p == ',') p++;
+					if (!*p) break;
+					char *eq = strchr(p, '=');
+					if (eq) {
+						char *eq_save = eq;
+						*eq = '\0';
+						set_env(trim(p), trim(eq + 1));
+						*eq_save = '=';
+						p = eq + 1;
+					} else {
+						while (*p && *p != ',') p++;
+					}
+				}
+			}
 			/* name: / version: — 元数据，同时导出 %NAME%/%VERSION% 和 %PKG_NAME%/%PKG_VERSION% */
 			else if (strcmp(key, "name") == 0 || strcmp(key, "version") == 0) {
 				char interp[1024];
@@ -486,14 +544,42 @@ parse_meow(char *data)
 			}
 			/* key: + 值空 = 多行块开始 */
 			else if (!*val && current_target) {
-				if (strcmp(key, "run") == 0) {
+				if (strncmp(key, "run", 3) == 0) {
+					/* 解析修饰符 run(!): / run(?): / run(q): */
+					const char *mod = key + 3;
+					if (*mod == '(') {
+						mod++;
+						while (*mod && *mod != ')') {
+							switch (*mod) {
+								case '!': current_target->run_abort_on_fail = 1; break;
+								case '?': current_target->run_abort_on_fail = 0; break;
+								case 'q': current_target->run_quiet = 1; break;
+							}
+							mod++;
+						}
+					}
 					in_runblock = 1;
 					runblock_len = 0;
 					runblock_buf[0] = '\0';
 				}
 			}
-			/* run: command 同行情景 */
-			else if (*val && strcmp(key, "run") == 0 && current_target) {
+			/* run(X): command 同行情景（支持修饰符） */
+			else if (*val && strncmp(key, "run", 3) == 0 && current_target) {
+				const char *mod = key + 3;
+				int mod_abort = 1, mod_quiet = 0;
+				if (*mod == '(') {
+					mod++;
+					while (*mod && *mod != ')') {
+						switch (*mod) {
+							case '!': mod_abort = 1; break;
+							case '?': mod_abort = 0; break;
+							case 'q': mod_quiet = 1; break;
+						}
+						mod++;
+					}
+				}
+				current_target->run_abort_on_fail = mod_abort;
+				current_target->run_quiet = mod_quiet;
 				in_runblock = 0;
 				flush_runblock();
 				add_to_runblock(trim(val));

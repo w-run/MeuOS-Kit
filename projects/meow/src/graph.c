@@ -259,13 +259,62 @@ run_target(struct target *target)
 				return -1;
 		}
 	}
+	/* ———— 语义节执行 ———— */
+	/* has: tool1, tool2 — 检测构建工具 */
+	if (nhas_tools_stack > 0) {
+		for (size_t hi = 0; hi < nhas_tools_stack; hi++) {
+			char cmd[256];
+			snprintf(cmd, sizeof(cmd), "command -v '%s' >/dev/null 2>&1", has_tools_stack[hi]);
+			if (run(cmd) != 0) {
+				meow_msg(MSG_ERROR, "required tool not found: %s", has_tools_stack[hi]);
+				return -1;
+			}
+			meow_msg(MSG_DEBUG, "tool found: %s", has_tools_stack[hi]);
+		}
+	}
+	/* download: URL — 下载源文件 */
+	if (target->download_url) {
+		char cmd[1024];
+		/* Check if file is already downloaded */
+		const char *fname = strrchr(target->download_url, '/');
+		fname = fname ? fname + 1 : target->download_url;
+		struct stat st;
+		if (stat(fname, &st) != 0) {
+			snprintf(cmd, sizeof(cmd), "curl -sSL -o '%s' '%s' 2>/dev/null || wget -q '%s' -O '%s'",
+			         fname, target->download_url, target->download_url, fname);
+			if (run(cmd) != 0) {
+				meow_msg(MSG_ERROR, "download failed: %s", target->download_url);
+				return -1;
+			}
+		}
+	}
+	if (target->log_file) {
+		/* Open log file for writing */
+		FILE *lf = fopen(target->log_file, "w");
+		if (lf) {
+			setvbuf(stdout, NULL, _IONBF, 0);
+			fclose(lf);
+		}
+	}
 	if (target_out_of_date(target))
 		for (size_t i = 0; i < target->ncommands; ++i)
 			{
 				char command[RECIPE_MAX];
 				if (expand_command(target, target->commands[i], command,
-					sizeof(command)) != 0 || run(command) != 0)
-				return -1;
+					sizeof(command)) != 0)
+					return -1;
+				if (target->run_quiet) {
+					char *buf = malloc(strlen(command) + 32);
+					sprintf(buf, "%s >/dev/null 2>&1", command);
+					int rc = run(buf);
+					free(buf);
+					if (rc != 0 && target->run_abort_on_fail)
+						return -1;
+				} else {
+					int rc = run(command);
+					if (rc != 0 && target->run_abort_on_fail)
+						return -1;
+				}
 				completed_commands++;
 				if (parallel_jobs > 1)
 					show_progress(target->name);
