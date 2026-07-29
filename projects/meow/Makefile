@@ -97,6 +97,7 @@ check: $(BUILD)/meow
 	@test "$$(cat /tmp/meow-conditional.result)" = "native"
 	cd .. && ./meow/$(BUILD)/meow clean meow-conditional
 	cd .. && CC=cc ./meow/$(BUILD)/meow --bootstrap
+	sh test/pkg_config.sh "$(abspath $(BUILD)/meow)"
 	cd .. && $(MAKE) -C meow clean all
 
 # Verify --arch flag injection by creating a minimal recipe that echoes
