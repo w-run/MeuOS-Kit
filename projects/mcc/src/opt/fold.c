@@ -168,7 +168,7 @@ foldflt(Con *res, int op, int w, Con *cl, Con *cr)
 		case Oadd: xd = ld + rd; break;
 		case Osub: xd = ld - rd; break;
 		case Oneg: xd = -ld; break;
-		case Odiv: xd = ld / rd; break;
+		case Odiv: if (rd == 0.0) return; xd = ld / rd; break;
 		case Omul: xd = ld * rd; break;
 		case Oswtof: xd = (int32_t)cl->bits.i; break;
 		case Ouwtof: xd = (uint32_t)cl->bits.i; break;
@@ -187,7 +187,7 @@ foldflt(Con *res, int op, int w, Con *cl, Con *cr)
 		case Oadd: xs = ls + rs; break;
 		case Osub: xs = ls - rs; break;
 		case Oneg: xs = -ls; break;
-		case Odiv: xs = ls / rs; break;
+		case Odiv: if (rs == 0.0f) return; xs = ls / rs; break;
 		case Omul: xs = ls * rs; break;
 		case Oswtof: xs = (int32_t)cl->bits.i; break;
 		case Ouwtof: xs = (uint32_t)cl->bits.i; break;
