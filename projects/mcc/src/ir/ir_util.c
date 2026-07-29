@@ -5,6 +5,9 @@ typedef struct Bitset Bitset;
 typedef struct Vec Vec;
 typedef struct Bucket Bucket;
 
+/* temp name sequence counter, reset per function */
+static int tmpseq;
+
 struct Vec {
 	ulong mag;
 	Pool pool;
@@ -125,6 +128,7 @@ freeall()
 		nptr = NPtr;
 	}
 	nptr = 1;
+	tmpseq = 0;
 }
 
 void *
@@ -463,14 +467,13 @@ phiarg(Phi *p, Blk *b)
 Ref
 newtmp(char *prfx, int k,  Fn *fn)
 {
-	static int n;
 	int t;
 
 	t = fn->ntmp++;
 	vgrow(&fn->tmp, fn->ntmp);
 	memset(&fn->tmp[t], 0, sizeof(Tmp));
 	if (prfx)
-		fn->tmp[t].name = strf(PFn, "%s.%d", prfx, ++n);
+		fn->tmp[t].name = strf(PFn, "%s.%d", prfx, ++tmpseq);
 	fn->tmp[t].cls = k;
 	fn->tmp[t].slot = -1;
 	fn->tmp[t].nuse = +1;
