@@ -109,6 +109,17 @@ Phase 7  用户空间      构建 meuos-utils + meuos-shell
 
 meow 使用 `.meow` 配方格式（也兼容 `meow.yaml`），支持 25+ 语义宏：
 
+### 宏速查
+
+| 分类 | 宏 | 说明 |
+|------|----|------|
+| 环境 | `env:` `cflags:` `ldflags:` `toolchain:` `srcdir:` `builddir:` `meta:` | 构建参数与元数据 |
+| 依赖 | `uses:` `depends:` `has:` `lib:` | 库与工具检测 |
+| 资源 | `download:` `sha256:` `unpack:` `patch:` | 源码获取与处理 |
+| 执行 | `run(!/?)` `workdir:` `parallel:` `log:` `pre:` `post:` `error:` | 命令控制与编排 |
+| 后处理 | `test:` `copy:` `strip:` | 测试与安装 |
+| 过滤 | `only:` `except:` | 架构平台控制 |
+
 ```
 name: myapp
 version: 1.0

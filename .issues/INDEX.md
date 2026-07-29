@@ -196,6 +196,9 @@ src/compat/
 | meow-probe-cache | autoconf | DJB2 指纹缓存 probe 结果 | `dc11c6e` |
 | meow-subdirs | make | 跨目录包依赖（depends: YAML） | `d6fe740` |
 | meow-lint | meow | 配方语法检查器 | `5f34bb6` |
+| meow-conditional | meow | `when:` 条件语句（`when: ARCH == "x86_64"`） | `2e12ce3` |
+| meow-wildcard | meow | `files('*.c')` 通配符扩展 | `2e12ce3` |
+| meow-pkg-config | meow | 内置 pkg-config 替代（27 库 + `uses:` 配方集成） | `1b3d37a` + `2b1a00d` |
 
 ### P6 — C23 标准边缘情况（全 5 项 🟢）
 
@@ -248,10 +251,9 @@ src/compat/
 
 | ID | 组件 | 项目 | 实际状态 | 说明 |
 |----|------|------|---------|------|
-| as-equ | mt/as | `.equ`/`.set` 汇编符号定义 | ✅ 已修复 (`40e1a37` 父提交) | 实现 `.equ NAME, VALUE` +
- `MT_SHN_ABS` 符号输出 |
-| as-diag | mt/as | `.abort`/`.error`/`.warning` 汇编诊断 | ✅ 已修复 (`40e1a37` 父提交) | `.abort` 终止、`.error` 报错、`.warning` 警告继续 |
-| ld-cref | mt/ld | `--cref` 交叉引用表输出 | ✅ 已修复 (`40e1a37`) | 输出符号定义位置+地址 + 测试脚本 |
+| as-equ | mt/as | `.equ`/`.set` 汇编符号定义 | ✅ 已修复（PR #1） | 已实现 `.equ NAME, VALUE` + `MT_SHN_ABS` 符号输出 |
+| as-diag | mt/as | `.abort`/`.error`/`.warning` 汇编诊断 | ✅ 已修复（PR #1） | `.abort` 终止、`.error` 报错、`.warning` 警告继续 |
+| ld-cref | mt/ld | `--cref` 交叉引用表输出 | ✅ 已修复（PR #1） | 输出符号定义位置+地址 + 测试脚本 |
 | ld-compress-debug | mt/ld | `--compress-debug-sections` DWARF 节区压缩 | ⏳ 待自有压缩 | 需 zlib 外部依赖，MeuOS 自有压缩实现后再引入 |
 
 ---
@@ -272,16 +274,13 @@ src/compat/
 | post-check-hooks | meow | meow.yaml post_check 钩子 + mt-info 集成 | 🟢 低 | 待设计 |
 | json-pipeline | 跨组件 | 统一 JSON lines 管道协议 | 🟢 低 | 待设计 |
 
-### P5-meow — 重设计项（不照搬 autoconf/make 语法）
+### P5-meow — 待设计项
 
 | ID | 类别 | 描述 | 状态 | 说明 |
 |----|------|------|------|------|
-| meow-template-subst | autoconf | 模板替换 | 🔄 重设计 | 不做 `@VAR@`（autoconf 遗留），用 YAML 原生表达式 |
-| meow-wildcard | make | 文件列表通配 | 🔄 重设计 | 不做 `$(wildcard)`，用 `files('src/*.c')` |
-| meow-conditional | make | 条件语句 | 🔄 重设计 | 不做 `ifeq`/`ifdef`，用 `when: ARCH == "aarch64"` |
-| meow-vpath | make | 出源码构建 | 🔄 重设计 | meow 默认出源码构建（`build/<pkg>/`），不用额外抽象 |
-| meow-pkg-config | pkg-config | `.pc` 文件查询 | 🔄 重设计 | 不做 `.pc` 解析，meow YAML 原生元数据或 `meow install` 数据库查询 |
-| meowctl | meow | 配置界面 | 🔄 重设计 | 不做 `./configure` 克隆，meow 原生 `meow config` 查看检测结果 |
+| meow-template-subst | autoconf | 模板替换 | 🔄 待设计 | 不做 `@VAR@`（autoconf 遗留），用 YAML 原生表达式 |
+| meowctl | meow | 配置界面 | 🔄 待设计 | 不做 `./configure` 克隆，meow 原生 `meow config` 查看检测结果 |
+| meow-vpath | make | 出源码构建 | 🔄 待设计 | meow 默认出源码构建（`build/<pkg>/`），不用额外抽象 |
 
 ### 明确不做的项
 

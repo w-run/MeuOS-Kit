@@ -1009,8 +1009,9 @@ for item in data:
 | `projects/meuos-toolchain/ARCHITECTURE.md`         | 工具链架构、P0-P11 分阶段任务           |
 | `projects/meuos-sysroot/ARCHITECTURE.md`           | .msys 格式设计与依赖关系               |
 | `env/README.md`                                    | QEMU 测试环境使用说明                  |
-| `.todo`（根目录）                                    | 全局待办清单                           |
 | `projects/mcc/.todo/cpp-shared-backend.md`         | mcc/m++ 共享后端架构计划               |
+| `projects/mcc/.todo/gd-tls.md`                     | i386 TLS 模型选择设计笔记              |
+| `projects/mcc/.todo/arm.md`                        | ARM 后端状态与待启动项                 |
 | `projects/meow/.todo/dag-dedup.md`                 | DAG 去重待实现项                       |
 | `projects/meow/.todo/native-shell.md`              | 原生 shell 替代待实现                  |
 | `projects/meuos-sysroot/.todo/msys.md`             | .msys 实现任务清单                     |
