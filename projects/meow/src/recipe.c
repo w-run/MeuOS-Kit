@@ -3,6 +3,7 @@
  * The only cross-file entry point is load_recipe(); indent_of() and trim()
  * are file-local helpers reused only within this translation unit. */
 #include <fcntl.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -12,7 +13,7 @@ int
 load_recipe(const char *package, char *path, size_t path_size, char *data)
 {
 	const char prefix[] = "pkgs/";
-	const char suffix[] = "/meow.yaml";
+	const char suffix[] = "/meow.meow";
 	int descriptor;
 	ssize_t count;
 
@@ -23,18 +24,37 @@ load_recipe(const char *package, char *path, size_t path_size, char *data)
 			return -1;
 		strcpy(path, package);
 	} else if (strcmp(package, ".") == 0) {
-		const char *local = "./meow.yaml";
+		/* Try .meow first, then .yaml */
+		const char *local = "./meow.meow";
 		if (strlen(local) + 1 > path_size)
 			return -1;
 		strcpy(path, local);
-	} else {
-		if (strlen(prefix) + strlen(package) + strlen(suffix) + 1 > path_size)
+		descriptor = open(path, O_RDONLY);
+		if (descriptor < 0) {
+			local = "./meow.yaml";
+			strcpy(path, local);
+			descriptor = open(path, O_RDONLY);
+			if (descriptor < 0) {
+				local = "./meow.yml";
+				strcpy(path, local);
+				descriptor = open(path, O_RDONLY);
+			}
+		}
+		if (descriptor < 0)
 			return -1;
-		strcpy(path, prefix);
-		strcpy(path + strlen(path), package);
-		strcpy(path + strlen(path), suffix);
+	} else {
+		/* pkgs/<pkg>/meow.meow or meow.yaml */
+		snprintf(path, path_size, "%s%s%s", prefix, package, suffix);
+		descriptor = open(path, O_RDONLY);
+		if (descriptor < 0) {
+			snprintf(path, path_size, "%s%s/meow.yaml", prefix, package);
+			descriptor = open(path, O_RDONLY);
+		}
+		if (descriptor < 0) {
+			snprintf(path, path_size, "%s%s/meow.yml", prefix, package);
+			descriptor = open(path, O_RDONLY);
+		}
 	}
-	descriptor = open(path, O_RDONLY);
 	if (descriptor < 0)
 		return -1;
 	count = read(descriptor, data, RECIPE_MAX - 1);

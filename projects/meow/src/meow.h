@@ -117,4 +117,7 @@ int probe_set_cflags(const char *cflags);
 int probe_set_config(const char *name);
 int probe_run(const char *build_dir);
 
+/* parse_meow.c */
+int parse_meow(char *data);
+
 #endif /* MEOW_H */

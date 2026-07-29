@@ -20,7 +20,15 @@ lint_recipe(const char *path)
 		meow_msg(MSG_ERROR, "%s: 无法加载配方", path);
 		return -1;
 	}
-	if (parse_recipe(data) != 0) {
+	/* 检测文件扩展名分派解析器 */
+	size_t plen = strlen(abs_path);
+	int is_meow = (plen >= 5 && strcmp(abs_path + plen - 5, ".meow") == 0);
+	int rc;
+	if (is_meow)
+		rc = parse_meow(data);
+	else
+		rc = parse_recipe(data);
+	if (rc != 0) {
 		meow_msg(MSG_ERROR, "%s: 语法错误", path);
 		return -1;
 	}
@@ -53,7 +61,14 @@ cmd_lint(int argc, char **argv)
 				char path[512];
 				char data[RECIPE_MAX];
 				if (load_recipe(pkgpath, path, sizeof(path), data) == 0) {
-					if (parse_recipe(data) == 0) {
+					int rc;
+					size_t lplen = strlen(path);
+					int lmeow = (lplen >= 5 && strcmp(path + lplen - 5, ".meow") == 0);
+					if (lmeow)
+						rc = parse_meow(data);
+					else
+						rc = parse_recipe(data);
+					if (rc == 0) {
 						meow_msg(MSG_SUCCESS, "✓ %s", pkgpath);
 						npass++;
 					} else {

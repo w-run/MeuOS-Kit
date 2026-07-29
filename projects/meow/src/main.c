@@ -244,9 +244,23 @@ main(int argc, char **argv)
 		meow_msg(MSG_SUCCESS, "built current Makefile (compatibility mode)");
 		return 0;
 	}
-	if (load_recipe(arguments[1], path, sizeof(path), data) < 0 || parse_recipe(data) != 0) {
+	if (load_recipe(arguments[1], path, sizeof(path), data) < 0) {
 		meow_msg(MSG_ERROR, "invalid or unreadable build file for %s", arguments[1]);
 		return 1;
+	}
+	/* Dispatch to the right parser based on file extension */
+	size_t plen = strlen(path);
+	int is_meow = (plen >= 5 && strcmp(path + plen - 5, ".meow") == 0);
+	if (is_meow) {
+		if (parse_meow(data) != 0) {
+			meow_msg(MSG_ERROR, "invalid .meow recipe: %s", path);
+			return 1;
+		}
+	} else {
+		if (parse_recipe(data) != 0) {
+			meow_msg(MSG_ERROR, "invalid recipe: %s", path);
+			return 1;
+		}
 	}
 	/* Inject ARCH into recipe environment after parse. */
 	set_arch_env();
