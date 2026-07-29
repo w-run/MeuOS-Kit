@@ -328,7 +328,7 @@ emit_code(unsigned int table_size, const unsigned int *lookup)
 
 /* ---------- main ---------- */
 int
-main(void)
+gperf_main(void)
 {
     if (parse_input() <= 0) {
         if (kw_count == 0)

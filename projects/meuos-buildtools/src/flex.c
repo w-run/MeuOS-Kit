@@ -930,7 +930,7 @@ static void generate_code(FILE *out, LexFile *lf, Dfa *dfa) {
 
 /* ======================== Main ======================== */
 
-int main(int argc, char **argv) {
+int flex_main(int argc, char **argv) {
     const char *input_path = NULL;
 
     if (argc > 2) {

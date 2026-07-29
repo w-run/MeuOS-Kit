@@ -1720,7 +1720,7 @@ static void init_builtins(void)
  * main
  * ================================================================ */
 
-int main(int argc, char **argv)
+int m4_main(int argc, char **argv)
 {
     /* Init pushback buffer */
     pb_buf = NULL;
