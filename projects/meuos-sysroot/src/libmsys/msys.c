@@ -63,6 +63,10 @@ uint32_t msys_fnv1a(const unsigned char *name, size_t len)
 	return h;
 }
 
+/* Forward declarations for union-safe header access */
+static inline uint32_t msys_index_count(struct msys *m);
+static inline uint64_t msys_index_offset(struct msys *m);
+
 /* ---- open / close ---- */
 
 struct msys *msys_open(const char *path)
@@ -238,7 +242,7 @@ static inline uint64_t entry_doff(const unsigned char *e, int v2)
 static inline uint32_t msys_index_count(struct msys *m)
 {
 	return (m->format_version == MSYS_FORMAT_V2)
-		? m->hdr_v2->index_count : msys_index_count(m);
+		? m->hdr_v2->index_count : m->hdr->index_count;
 }
 static inline uint64_t msys_index_offset(struct msys *m)
 {
