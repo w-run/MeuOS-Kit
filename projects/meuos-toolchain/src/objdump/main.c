@@ -304,10 +304,26 @@ is_disasm_section(const struct mt_elf64_section *sec, const char *name,
 	       strncmp(name, ".text.", 6) == 0;
 }
 
+/* EM_* -> arch name string */
+static const char *
+machine_to_arch(uint16_t machine)
+{
+	switch (machine) {
+	case MT_EM_X86_64:   return "x86_64";
+	case MT_EM_AARCH64:  return "aarch64";
+	case MT_EM_ARM:      return "arm";
+	case MT_EM_386:      return "i386";
+	case MT_EM_LOONGARCH: return "loongarch64";
+	case MT_EM_RISCV:    return "riscv64";
+	default:             return NULL;
+	}
+}
+
 static void
 disasm_section(const unsigned char *bytes, size_t size,
                const struct mt_elf64_section *sec, const char *name,
-               uint64_t base_addr, const struct od_symtab *st)
+               uint64_t base_addr, const struct od_symtab *st,
+               const char *arch)
 {
 	uint64_t off;
 	const unsigned char *data;
@@ -335,7 +351,7 @@ disasm_section(const unsigned char *bytes, size_t size,
 		if (sym) {
 			printf("\n%016" PRIx64 " <%s>:\n", addr, sym);
 		}
-		rc = mt_disasm_one("x86_64", data, sec->size, off, addr, &insn);
+		rc = mt_disasm_one(arch, data, sec->size, off, addr, &insn);
 		if (rc != 0 && insn.length == 0)
 			insn.length = 1;
 		/* GNU objdump 格式: "  addr:  bytes  mnemonic  operands" */
@@ -395,6 +411,7 @@ process_file(const char *path, const struct od_opts *opts)
 	enum mt_elf_status st;
 	int rc = 1;
 	struct od_symtab symtab = {0};
+	const char *arch;
 	struct mt_elf64_section shstrtab;
 
 	bytes = read_file(path, &size);
@@ -410,6 +427,12 @@ process_file(const char *path, const struct od_opts *opts)
 		return 1;
 	}
 	n = view.section_count;
+	arch = machine_to_arch(view.machine);
+	if (!arch) {
+		fprintf(stderr, "objdump: %s: unsupported ELF machine %u", path, view.machine);
+		free(bytes);
+		return 1;
+	}
 	if (n == 0) {
 		fprintf(stderr, "objdump: %s: no sections\n", path);
 		free(bytes);
@@ -473,7 +496,8 @@ process_file(const char *path, const struct od_opts *opts)
 			if (is_disasm_section(&secs[i],
 			    names[i] ? names[i] : "", opts))
 				disasm_section(bytes, size, &secs[i],
-				    names[i] ? names[i] : "", 0, &symtab);
+				    names[i] ? names[i] : "", 0, &symtab,
+				    arch);
 		}
 	}
 

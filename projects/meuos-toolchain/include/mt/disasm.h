@@ -4,8 +4,8 @@
 /*
  * MeuOS Toolchain 反汇编器接口。
  *
- * 支持按架构名分派到对应后端。当前后端：
- *   - "x86_64"  ATT 语法（源在前，目的在后）
+ * 支持按架构名分派到对应后端。
+ * 当前后端: x86_64, aarch64, arm, i386, loongarch64, riscv64
  *
  * objdump 调用 mt_disasm_one() 反汇编节区，传入架构名即可。
  * 调用方循环推进 offset。输出助记符 + 操作数 + 字节十六进制。
@@ -55,6 +55,22 @@ int mt_disasm_one(const char *arch, const unsigned char *bytes, size_t size,
  * 失败时 out->length 至少为 1，mnemonic 为 "(bad)"。
  */
 int mt_disasm_x86_64_one(const unsigned char *bytes, size_t size,
+                          size_t offset, uint64_t addr,
+                          struct mt_disasm_insn *out);
+
+int mt_disasm_aarch64_one(const unsigned char *bytes, size_t size,
+                          size_t offset, uint64_t addr,
+                          struct mt_disasm_insn *out);
+int mt_disasm_arm_one(const unsigned char *bytes, size_t size,
+                          size_t offset, uint64_t addr,
+                          struct mt_disasm_insn *out);
+int mt_disasm_i386_one(const unsigned char *bytes, size_t size,
+                          size_t offset, uint64_t addr,
+                          struct mt_disasm_insn *out);
+int mt_disasm_loongarch64_one(const unsigned char *bytes, size_t size,
+                          size_t offset, uint64_t addr,
+                          struct mt_disasm_insn *out);
+int mt_disasm_riscv64_one(const unsigned char *bytes, size_t size,
                           size_t offset, uint64_t addr,
                           struct mt_disasm_insn *out);
 
