@@ -306,8 +306,22 @@ check-qemu-arm: $(AS_BIN) $(LD_BIN)
 		fi; \
 	fi
 
-check-qemu-all: check-qemu-aarch64 check-qemu-riscv64 check-qemu-loongarch64 check-qemu-arm
+check-qemu-all: check-qemu-x86_64 check-qemu-i386 check-qemu-aarch64 check-qemu-riscv64 check-qemu-loongarch64 check-qemu-arm
 	@echo "check-qemu-all: DONE"
+
+check-qemu-x86_64: $(AS_BIN) $(LD_BIN)
+	@arch=x86_64; qemu="$(abspath ../../env/qemu/qemu-$$arch-static)"; \
+	sysroot="$(abspath ../../sysroot/$$arch)"; \
+	if [ ! -x "$$qemu" ]; then echo "check-qemu-$$arch: SKIP (no QEMU)"; exit 0; fi; \
+	if [ ! -d "$$sysroot" ]; then echo "check-qemu-$$arch: SKIP (no sysroot)"; exit 0; fi; \
+	sh test/qemu_c_hello.sh "$(abspath $(MCC))" "$(abspath $(AS_BIN))" "$(abspath $(LD_BIN))" "$$qemu" "$$sysroot" "$$arch"
+
+check-qemu-i386: $(AS_BIN) $(LD_BIN)
+	@arch=i386; qemu="$(abspath ../../env/qemu/qemu-$$arch-static)"; \
+	sysroot="$(abspath ../../sysroot/$$arch)"; \
+	if [ ! -x "$$qemu" ]; then echo "check-qemu-$$arch: SKIP (no QEMU)"; exit 0; fi; \
+	if [ ! -d "$$sysroot" ]; then echo "check-qemu-$$arch: SKIP (no sysroot)"; exit 0; fi; \
+	sh test/qemu_c_hello.sh "$(abspath $(MCC))" "$(abspath $(AS_BIN))" "$(abspath $(LD_BIN))" "$$qemu" "$$sysroot" "$$arch"
 
 check-as-sse-x86_64: $(AS_BIN)
 	sh test/as_sse_x86_64.sh "$(abspath $(AS_BIN))"
@@ -371,4 +385,4 @@ install: $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all check check-elf check-ar check-as-x86_64 check-target-dispatch check-as-sse-x86_64 check-as-libc-x86_64 check-ld-x86_64 check-ar-bsd check-ld-libpath check-ranlib check-libelf check-nm check-readelf check-strip check-objcopy check-objdump check-qemu-aarch64 check-qemu-riscv64 check-qemu-loongarch64 check-qemu-arm check-qemu-all install clean
+.PHONY: all check check-elf check-ar check-as-x86_64 check-target-dispatch check-as-sse-x86_64 check-as-libc-x86_64 check-ld-x86_64 check-ar-bsd check-ld-libpath check-ranlib check-libelf check-nm check-readelf check-strip check-objcopy check-objdump check-qemu-x86_64 check-qemu-i386 check-qemu-aarch64 check-qemu-riscv64 check-qemu-loongarch64 check-qemu-arm check-qemu-all install clean
