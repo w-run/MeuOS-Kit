@@ -49,3 +49,10 @@ $(TEST_MXA): test/test_mxa.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude -o $@ test/test_mxa.c $(LIB) -ldl
 clean:
 	rm -rf $(BUILD)
+
+bench_mxa: $(BUILD)/bench_mxa
+	./$(BUILD)/bench_mxa
+
+$(BUILD)/bench_mxa: test/bench_mxa.c $(LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -Iinclude -o $@ test/bench_mxa.c -L$(BUILD) -lmz $(LDLIBS)
