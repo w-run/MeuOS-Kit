@@ -6,18 +6,23 @@
 #   - daily-<MMDD> ：每日结果分支，基于 main，仅含 `.issues/<MMDD>.md` 与修复；
 #                     直接 PR 到 main（报告+修复同支，修复工作复用该分支）。
 #
-# 触发（UTC 每天 00:00 ≈ 北京时间 08:00；亦支持手动 workflow_dispatch）：
-#   1. 从 daily-audit 工作目录运行 scripts/daily-audit.sh（脚本在 daily-audit 上）
-#   2. 把生成的报告搬到「基于 main」的 daily-<MMDD> 分支并提交
-#   3. 自动开 PR 到 main（PR 仅含报告，修复由 Agent 直接推到该分支）
+# 触发（每天 4 次，UTC：02:00 / 08:00 / 14:00 / 20:00；亦支持手动 workflow_dispatch）：
+#   每次运行都是「查缺补漏式追加」，不会覆盖已有报告：
+#   1. 首跑（结果分支不存在）：从 daily-audit 跑脚本生成基础报告（含 Agent 复核占位）
+#   2. 后续运行：先同步远端最新报告，再 `--append` 刷新缺陷扫描/git 区间并追加修订记录
+#   3. 提交到 daily-<MMDD>（基于 origin/daily-<MMDD>，缺失则基于 main），自动开 PR 到 main
+#   注：脚本只做数据驱动核查；AI 深度复核由 CodeBuddy `/loop`（见 scripts/audit-loop-prompt.md）
+#       在任意一次运行后补充，二者都先同步远端，互不覆盖。
 #
-# 注：GitHub Actions 的 cron 只认默认分支（main）上的 workflow 文件，故本文件置于
-#     main；它通过 `ref: daily-audit` 取用工作目录中的脚本。CodeBuddy `/loop` 亦可驱动。
+# 注：GitHub Actions 的 cron 为 UTC。若需「本地时间」的 2/8/14/20，请按时区换算。
 name: Daily Code Audit
 
 on:
   schedule:
-    - cron: '0 0 * * *'        # UTC 每天 00:00
+    - cron: '0 2 * * *'        # UTC 02:00
+    - cron: '0 8 * * *'        # UTC 08:00
+    - cron: '0 14 * * *'       # UTC 14:00
+    - cron: '0 20 * * *'       # UTC 20:00
   workflow_dispatch:           # 允许手动触发
 
 permissions:
@@ -26,14 +31,14 @@ permissions:
 
 concurrency:
   group: daily-audit
-  cancel-in-progress: false
+  cancel-in-progress: false    # 串行执行，避免多次运行并发互相覆盖
 
 jobs:
   audit:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      # 取用 daily-audit 工作目录（含审计脚本）；完整历史供 git 区间统计
+      # 取用 daily-audit 工作目录（含审计脚本）
       - name: Checkout（daily-audit 工作目录）
         uses: actions/checkout@v4
         with:
@@ -54,39 +59,49 @@ jobs:
           echo "date=$DATE"          >> "$GITHUB_OUTPUT"
           echo "branch=daily/$DATE"  >> "$GITHUB_OUTPUT"
 
-      # 幂等：结果分支已存在则跳过
-      - name: 若今日结果分支已存在则跳过
-        id: skip
+      # 判断今日结果分支是否已存在（决定首跑全量 / 后续追加）
+      - name: 检查结果分支状态
+        id: state
         run: |
           if git ls-remote --heads origin "refs/heads/daily/${{ steps.meta.outputs.date }}" | grep -q .; then
-            echo "今日结果分支已存在，跳过。"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "has_branch=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "has_branch=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # 在 daily-audit 上运行脚本，生成报告（未跟踪文件，留在工作树）
+      # 后续运行：先把远端最新报告同步到工作树，避免覆盖 Agent 已填内容
+      - name: 同步远端最新报告（仅后续运行）
+        if: ${{ steps.state.outputs.has_branch == 'true' }}
+        run: |
+          git fetch origin "daily/${{ steps.meta.outputs.date }}" 2>/dev/null || true
+          git show "origin/daily/${{ steps.meta.outputs.date }}:.issues/${{ steps.meta.outputs.date }}.md" \
+            > ".issues/${{ steps.meta.outputs.date }}.md" 2>/dev/null || true
+
+      # 在 daily-audit 上运行脚本：首跑 --agent（留 Agent 占位），后续 --append（查缺补漏）
       - name: 运行每日审计（脚本位于 daily-audit）
-        if: ${{ steps.skip.outputs.skip != 'true' }}
         env:
           MEUOS_SYSROOT: ${{ github.workspace }}/sysroot
+          HAS_BRANCH: ${{ steps.state.outputs.has_branch }}
+          DATE: ${{ steps.meta.outputs.date }}
         run: |
           git config user.name  "meuos-audit[bot]"
           git config user.email "meuos-audit[bot]@users.noreply.github.com"
-          bash scripts/daily-audit.sh --date "$DATE" --sysroot "$MEUOS_SYSROOT"
+          if [ "$HAS_BRANCH" = "true" ]; then MODE=--append; else MODE=--agent; fi
+          bash scripts/daily-audit.sh --date "$DATE" $MODE --sysroot "$MEUOS_SYSROOT"
         continue-on-error: true   # 检查失败也是“发现”，仍要落盘报告
 
-      # 把报告搬到「基于 main」的结果分支，仅提交报告（保持 PR 干净）
-      - name: 把报告提交到 daily-<MMDD>（基于 main）
-        if: ${{ steps.skip.outputs.skip != 'true' }}
+      # 把报告提交到 daily-<MMDD>（基于 origin/daily-<MMDD>，缺失则基于 main）
+      - name: 把报告提交到 daily-<MMDD>
         env:
           DATE: ${{ steps.meta.outputs.date }}
           BRANCH: ${{ steps.meta.outputs.branch }}
         run: |
-          git fetch origin main
-          git checkout -B "$BRANCH" origin/main
+          git fetch origin "$BRANCH" 2>/dev/null || true
+          git checkout -B "$BRANCH" "origin/$BRANCH" 2>/dev/null || git checkout -B "$BRANCH" origin/main
           mkdir -p .issues
           git add .issues/"$DATE".md
           if git diff --cached --quiet; then
-            echo "无报告可提交，跳过。"
+            echo "无报告变更，跳过提交。"
             exit 0
           fi
           git commit -m "audit: 每日代码校验与缺陷检查 $DATE"
@@ -94,7 +109,6 @@ jobs:
         continue-on-error: true
 
       - name: 自动开 PR 到 main
-        if: ${{ steps.skip.outputs.skip != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DATE: ${{ steps.meta.outputs.date }}
@@ -108,4 +122,4 @@ jobs:
             --head "$BRANCH" \
             --base main \
             --title "audit: 每日代码校验与缺陷检查 $DATE" \
-            --body "每日定时审计自动生成。结果分支基于 main，仅含报告 .issues/$DATE.md。本 PR 由 GitHub Actions 在 UTC 凌晨自动开启；修复请直接推送到本分支（daily/$DATE），报告与修复同支，复核通过后合并到 main。深度语义审查由 CodeBuddy /loop 或人工复核。" || echo "PR 创建跳过（可能已存在或权限受限）。"
+            --body "每日定时审计自动生成（每天 4 次查缺补漏：UTC 02/08/14/20）。结果分支基于 main，仅含报告 .issues/$DATE.md。本 PR 由 GitHub Actions 开启；修复请直接推送到本分支（daily/$DATE），报告与修复同支，复核通过后合并到 main。深度语义审查由 CodeBuddy /loop 或人工复核，可在任意一次运行后补充。" || echo "PR 创建跳过（可能已存在或权限受限）。"
