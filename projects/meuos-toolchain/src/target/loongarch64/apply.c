@@ -83,6 +83,15 @@ la64_apply_reloc(unsigned reloc_type, unsigned char *place,
 		write64(place, S + (uint64_t)A);
 		return 0;
 
+	/* ==== PC-relative 32-bit: R_LARCH_32_PCREL (99) ====
+	 * S + A - P, 32-bit.  Used in .eh_frame for FDE PC-relative
+	 * references (DW_EH_PE_pcrel | DW_EH_PE_sdata4).
+	 * Standard GAS/LLVM output for loongarch64 .eh_frame. */
+	case 99: /* R_LARCH_32_PCREL */
+		delta = (int64_t)(S + (uint64_t)A - P);
+		write32(place, (uint32_t)(uint64_t)(int64_t)delta);
+		return 0;
+
 	/* ==== PC-relative branch: R_LARCH_B16 (64) ====
 	 * LA64 B16 format: 16-bit signed word-offset in bits [25:10].
 	 * Used by conditional branches (beq/bne/blt/bge/bltu/bgeu):

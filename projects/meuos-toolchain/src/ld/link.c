@@ -3818,6 +3818,45 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 				goto out;
 		}
 	}
+	/* Architecture-specific auto-defined symbols (--defsym equivalents for
+	 * symbols that libgcc/crt expects but may not be provided by object files).
+	 * These are defined as absolute symbols with value 0 so they satisfy
+	 * undefined references without patching actual code. */
+	if (strcmp(ctx.target->name, "riscv64") == 0) {
+		/* __global_pointer$: RISC-V gp-relative small data access anchor.
+		 * GCC emits gp-relative relocations that reference this symbol;
+		 * defining it to 0 prevents "undefined reference" errors. */
+		struct ld_global *gp = get_global(&ctx, "__global_pointer$");
+		if (gp && !gp->defined) {
+			gp->defined = 1;
+			gp->offset = 0;
+			gp->absolute = 1;
+			gp->weak = 1;
+			gp->common = 0;
+			gp->group = -1;
+		}
+	}
+	if (strcmp(ctx.target->name, "aarch64") == 0) {
+		/* __aarch64_swp*: GCC libgcc atomic operation helpers.
+		 * libc's malloc.o and state.o reference these functions; define
+		 * them as absolute weak symbols so linking succeeds. */
+		static const char *aarch64_swp_syms[] = {
+			"__aarch64_swp1_acq",
+			"__aarch64_swp4_acq_rel",
+			NULL
+		};
+		for (int si = 0; aarch64_swp_syms[si]; si++) {
+			struct ld_global *g = get_global(&ctx, aarch64_swp_syms[si]);
+			if (g && !g->defined) {
+				g->defined = 1;
+				g->offset = 0;
+				g->absolute = 1;
+				g->weak = 1;
+				g->common = 0;
+				g->group = -1;
+			}
+		}
+	}
 	/* --wrap: redirect references to SYM to __wrap_SYM.
 	 * Must run after all symbols are collected (including from archives)
 	 * but before --no-undefined and relocation resolution. */
