@@ -3,7 +3,7 @@
 本文件供 **CodeBuddy（当前 agent）的 `/loop`** 使用：脚本 `scripts/daily-audit.sh`
 负责数据驱动的基础核查（构建/测试、文档对照、桩扫描、git 记录），而 **Agent 自身**
 负责「全量 AI 复核」——即智能缺陷检查与实现偏差分析。两者配合：脚本采数，
-Agent 读数与代码后补全深度结论。
+Agent 读数与代码后补全深度结论。同一日报告可**查缺补漏式多次追加**，并在文末「修订记录」中留痕。
 
 ## 分支模型（B：严格隔离）
 
@@ -30,30 +30,28 @@ Agent 读数与代码后补全深度结论。
 ## LOOP_PROMPT
 
 ```
-每日代码校验与缺陷检查（由 CodeBuddy loop 驱动，分支模型 B）：
+每日代码校验与缺陷检查（由 CodeBuddy loop 驱动；分支模型 B；支持查缺补漏 + 修订记录）：
 0. 确认当前在 daily-audit 分支；若不在，`git checkout daily-audit && git pull --ff-only origin daily-audit`。
-1. 运行 `date -u +%m%d` 得到今日四位数日期，记为 DATE。若 `origin/daily-<DATE>` 分支已存在，或本地 `.issues/<DATE>.md` 已存在，输出"今日已审计"并结束本次循环。
-2. 在 daily-audit 上运行 `bash scripts/daily-audit.sh --date <DATE> --agent` 生成数据驱动的基础报告（含构建/测试、文档对照、桩扫描、git 记录），末尾留 `<!--AGENT-REVIEW-->` 占位。
-3. 基于以下资料做「全量 AI 复核」，只新增发现、不改动其他文件：
-   - 刚生成的 `.issues/<DATE>.md`
-   - `.issues/` 下历史审计（重点看 P0/P1/P2 状态与进度结论）
-   - 各子项目 `ARCHITECTURE.md`（设计意图）
-   - `git log`（自上一期审计以来的提交）
-   重点发现（不止桩标记）：
-   - 真实缺陷：越界/空指针/未初始化/并发/资源泄漏/错误码未处理/UB 等；
-   - 实现与文档或预期意图的偏差（对照 .issues 中的目标与 ARCHITECTURE 设计）；
-   - 自上一期以来新引入的回归或风险点。
-   每条发现给出 `file:line` 证据、严重度（P0/P1/P2）、建议修复。
-4. 用 Edit 工具把报告中的 `<!--AGENT-REVIEW-->` 占位替换为「## 六、Agent 深度复核」章节（含发现表格 + 综合结论），并补上页脚说明。
-5. 把报告搬到「基于 main」的结果分支：
+1. 运行 `date -u +%m%d` 得到今日四位数日期，记为 DATE。
+2. 若 `.issues/<DATE>.md` 不存在（首次生成）：
+   a. 在 daily-audit 跑 `bash scripts/daily-audit.sh --date <DATE> --agent` 生成基础报告（含构建/测试、文档对照、桩扫描、git 记录），并预留 `<!--AGENT-REVIEW-->` 占位与「七、补充发现」「修订记录」空表。
+   b. 读报告 + 历史 .issues + 各子项目 ARCHITECTURE.md + `git log`，用 Edit 把 `<!--AGENT-REVIEW-->` 替换为「## 六、Agent 深度复核」（发现表格：file:line、P0/P1/P2、建议修复 + 综合结论）。
+   c. 在「## 七、补充发现（查缺补漏）」追加初始要点；在「## 修订记录」追加一行：`| <时间> | Agent | 初始复核：<摘要> |`。
+   d. 执行第 4 步的「搬到 daily-<DATE> 并提交推送」，再开 PR（见第 5 步）。
+3. 若 `.issues/<DATE>.md` 已存在（查缺补漏式追加，可多次）：
+   a. 跑 `bash scripts/daily-audit.sh --date <DATE> --append [--agent]`：脚本轻量刷新缺陷扫描/git 区间，在「七、补充发现」追加一段并自动加修订记录行（不重跑构建）。
+   b. 读现有报告与新数据，用 Edit 在「六、Agent 深度复核」或「七、补充发现」追加新发现（file:line、P0/P1/P2、建议修复）；未填的 `<!--AGENT-REVIEW-->` 占位也在此补上。
+   c. 在「## 修订记录」追加一行：`| <时间> | Agent 查缺补漏 | <本次补充摘要> |`。
+   d. 将更新后的 `.issues/<DATE>.md` 提交到已存在的 daily-<DATE> 分支并推送（PR 已开则仅更新内容）。
+4. 提交与推送（daily-<DATE> 基于 main）：
    - `cp .issues/<DATE>.md /tmp/daily-report-<DATE>.md`
    - `git checkout -B daily-<DATE> origin/main`
    - `mkdir -p .issues && cp /tmp/daily-report-<DATE>.md .issues/<DATE>.md`
    - `git add .issues/<DATE>.md`
-6. 修复：基于第 3 步发现，直接在 daily-<DATE> 上修改对应源码文件，并 `git add` 这些文件。
-7. 提交并推送：`git commit -m "audit: 每日代码校验与缺陷检查 <DATE>" && git push -u origin daily-<DATE>`。
-8. 若 `gh` 可用且同分支 PR 不存在，用 `gh pr create` 开 PR 到 `main`（标题 `audit: 每日代码校验与缺陷检查 <DATE>`，正文指向本报告与修复说明）。
-全程使用简体中文；不要改动 daily-audit 分支本身（保持其永不合并 main）；除报告与修复外不要提交无关文件。
+   - `git commit -m "audit: 每日代码校验与缺陷检查 <DATE>" && git push -u origin daily-<DATE>`
+5. 若 `gh` 可用且 PR 不存在，开 PR 到 main（标题 `audit: 每日代码校验与缺陷检查 <DATE>`，正文指向报告与修复说明）。
+重点发现（不止桩标记）：真实缺陷（越界/空指针/未初始化/并发/资源泄漏/错误码未处理/UB）、实现与文档或预期意图的偏差、自上一期以来新引入的回归或风险点。
+全程使用简体中文；不要改动 daily-audit 分支本身（永不合并 main）；除报告与修复外不要提交无关文件。
 ```
 
 ## 与 GitHub Action 的关系
