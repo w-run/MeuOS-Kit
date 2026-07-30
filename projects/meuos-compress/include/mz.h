@@ -89,4 +89,18 @@ int mz_huf_decompress(const unsigned char *in, size_t inlen,
                       unsigned char *out, size_t *outlen);
 
 int mz2_level_supported(int level);
+
+/* tANS codec */
+int mz_tans_compress(const unsigned char *in, size_t inlen,
+                     unsigned char *out, size_t *outlen);
+int mz_tans_decompress(const unsigned char *in, size_t inlen,
+                       unsigned char *out, size_t *outlen);
+
+
+/* Solid compression */
+struct mz_solid_ctx;
+int mz_solid_start(struct mz_solid_ctx **ctx, int level);
+int mz_solid_add(struct mz_solid_ctx *ctx, const void *data, size_t len,
+                 void *output, size_t *out_len);
+void mz_solid_finish(struct mz_solid_ctx *ctx);
 #endif

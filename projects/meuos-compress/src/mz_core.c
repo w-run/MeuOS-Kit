@@ -37,6 +37,7 @@ struct mz_write_ctx {
 
     int level;
     int flags;
+    struct mz_solid_ctx *solid_ctx;  /* NULL unless MZ_FLAG_SOLID */
 };
 
 /* Read context */
@@ -203,10 +204,40 @@ int mz2_add_file(void *ctx, const char *name, const void *data,
         return MZ_ERR_PARAM;
 
     uint32_t data_offset = (uint32_t)(w->buf_len - MZ2_HEADER_LEN);
+    uint32_t csize = (uint32_t)size;
 
-    int ret = append_block(w, MZ_BLOCK_RAW, data, size);
-    if (ret != MZ_OK)
-        return ret;
+    int ret;
+    uint8_t blk_type;
+
+    if ((w->flags & MZ_FLAG_SOLID) && data && size > 0) {
+        /* 固实压缩：使用持久化 LZ77 字典 */
+        size_t max_comp = size + size + 20;
+        uint8_t *comp_buf = (uint8_t *)malloc(max_comp);
+        if (!comp_buf)
+            return MZ_ERR_MEMORY;
+
+        int is_first = (w->solid_ctx == NULL);
+        if (is_first) {
+            ret = mz_solid_start(&w->solid_ctx, w->level);
+            if (ret != MZ_OK) { free(comp_buf); return ret; }
+        }
+
+        size_t comp_len;
+        ret = mz_solid_add(w->solid_ctx, data, size, comp_buf, &comp_len);
+        if (ret != MZ_OK) { free(comp_buf); return ret; }
+
+        blk_type = is_first ? MZ_BLOCK_SOLID_START : MZ_BLOCK_SOLID_NEXT;
+        ret = append_block(w, blk_type, comp_buf, comp_len);
+        free(comp_buf);
+        if (ret != MZ_OK)
+            return ret;
+        csize = (uint32_t)comp_len;
+    } else {
+        /* RAW block（常规模式或 size==0） */
+        ret = append_block(w, MZ_BLOCK_RAW, data, size);
+        if (ret != MZ_OK)
+            return ret;
+    }
 
     struct mz_file_entry *ent = &w->files[w->num_files];
     ent->name = local_strdup(name);
@@ -218,7 +249,7 @@ int mz2_add_file(void *ctx, const char *name, const void *data,
     ent->mode = mode;
     ent->size = (uint32_t)size;
     ent->offset = data_offset;
-    ent->csize = (uint32_t)size;
+    ent->csize = csize;
     w->num_files++;
 
     return MZ_OK;
@@ -295,6 +326,10 @@ int mz2_finish(void *ctx, void **result, size_t *result_len)
     memcpy(out, w->buf, w->buf_len);
     *result = out;
     *result_len = w->buf_len;
+
+    /* 清理固实压缩上下文 */
+    mz_solid_finish(w->solid_ctx);
+    w->solid_ctx = NULL;
 
     return MZ_OK;
 }
@@ -509,47 +544,4 @@ int mz2_block_sign(uint8_t *block, size_t size,
     return MZ_ERR_CRYPT;
 }
 
-/* ================================================================
- * mz2_level_supported — check if level is in 1..9
- * ================================================================ */
-int mz2_level_supported(int level)
-{
-    return (level >= 1 && level <= 9) ? 1 : 0;
-}
-
-/* ================================================================
- * Core API wrappers -- route codec calls to the LZ77 module
- * ================================================================ */
-int mz_compress(const void *in, size_t il, void **r, size_t *rl, int c, int lv)
-{
-    if (c == MZ_CODEC_LZ77 || c == MZ_CODEC_LZ77_HUFF)
-        return mz_compress_lz77(in, il, r, rl, lv);
-    return MZ_ERR_CODEC;
-}
-
-int mz_decompress(const void *in, size_t il, void **r, size_t *rl, int c)
-{
-    if (c == MZ_CODEC_LZ77 || c == MZ_CODEC_LZ77_HUFF)
-        return mz_decompress_lz77(in, il, r, rl);
-    return MZ_ERR_CODEC;
-}
-
-size_t mz_max_compressed_size(size_t il, int c)
-{
-    (void)c;
-    return mz_max_compressed_size_lz77(il);
-}
-
-const char *mz_strerror(int e)
-{
-    switch (e) {
-    case MZ_OK:         return "no error";
-    case MZ_ERR_MEMORY: return "out of memory";
-    case MZ_ERR_DATA:   return "corrupt data";
-    case MZ_ERR_PARAM:  return "invalid parameter";
-    case MZ_ERR_STREAM: return "stream error";
-    case MZ_ERR_CODEC:  return "unsupported codec";
-    case MZ_ERR_CRYPT:  return "crypto error";
-    default:            return "unknown error";
-    }
-}
+/* mz2_level_supported moved to mz_main.c */

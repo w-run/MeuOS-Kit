@@ -390,6 +390,13 @@ mz_huf_compress(const unsigned char *in, size_t inlen,
     }
 
     *outlen = op + bw_bytes_used(&bw);
+
+    /* If compressed (with table overhead) >= original, return raw data */
+    if (*outlen >= inlen) {
+        memmove(out, in, inlen);
+        *outlen = inlen;
+        return MZ_ERR_DATA;  /* -2: signals no compression */
+    }
     return MZ_OK;
 }
 
