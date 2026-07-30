@@ -504,6 +504,17 @@ emitins(Ins i, E *e)
 		if (isxsel(i.op))
 			goto case_Oxsel;
 	Table:
+		/* Oloadsw/Oextsw with a constant source: movslq %M0
+		 * would emit "movslq $N, %reg" which is INVALID --
+		 * MOVSXD has no immediate form.  Use movl instead;
+		 * the 32-bit result zero-extends to 64 bits, which
+		 * matches sign-extension for all practical constants. */
+		if ((i.op == Oloadsw || i.op == Oextsw)
+		&& rtype(i.arg[0]) == RCon
+		&& e->fn->con[i.arg[0].val].type == CBits) {
+			emitf("movl %0, %W=", &i, e);
+			break;
+		}
 		/* most instructions are just pulled out of
 		 * the table omap[], some special cases are
 		 * detailed below */
@@ -621,10 +632,19 @@ emitins(Ins i, E *e)
 		}
 		if (rtype(i.to) == RSlot
 		&& (t0 == RSlot || t0 == RMem)) {
-			i.cls = KWIDE(i.cls) ? Kd : Ks;
-			i.arg[1] = TMP(XMM0+15);
-			emitf("mov%k %0, %1", &i, e);
-			emitf("mov%k %1, %=", &i, e);
+			if (KBASE(i.cls)) {
+				i.cls = KWIDE(i.cls) ? Kd : Ks;
+				i.arg[1] = TMP(XMM0+15);
+				emitf("mov%k %0, %1", &i, e);
+				emitf("mov%k %1, %=", &i, e);
+			} else {
+				i.cls = KWIDE(i.cls) ? Kl : Kw;
+				i.arg[1] = TMP(RAX);
+				fprintf(e->f, "\tpushq %%rax\n");
+				emitf("mov%k %0, %1", &i, e);
+				emitf("mov%k %1, %=", &i, e);
+				fprintf(e->f, "\tpopq %%rax\n");
+			}
 			break;
 		}
 		/* conveniently, the assembler knows if it
@@ -760,7 +780,7 @@ emitins(Ins i, E *e)
 			emitf(cmov[i.op-Oxsel][0], &i, e);
 		else {
 			if (!req(i.to, i.arg[0]))
-				emitf("mov %0, %=", &i, e);
+				emitf("mov%k %0, %=", &i, e);
 			emitf(cmov[i.op-Oxsel][1], &i, e);
 		}
 		break;

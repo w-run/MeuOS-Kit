@@ -14,6 +14,7 @@ mcc=${3:?mcc path required}
 sysroot=${4:?sysroot path required}
 qvm=${5:-}
 arch=${6:-x86_64}
+sysroot_arch="$sysroot/$arch"
 
 work=$(mktemp -d /tmp/mt-counter-e2e.XXXXXX)
 trap 'rm -rf "$work"' EXIT HUP INT TERM
@@ -42,13 +43,13 @@ int main() {
 CFILE
 
 # Compile with mcc, assemble with mt/as, link with mt/ld
-"$mcc" --specs=meuos --sysroot="$sysroot" -S -o "$work/counter.s" "$work/counter.c"
+"$mcc" --specs=meuos --sysroot="$sysroot_arch" -S -o "$work/counter.s" "$work/counter.c"
 "$as" -o "$work/counter.o" "$work/counter.s"
 "$ld" -o "$work/counter" \
-    "$sysroot/usr/lib/crt1.o" \
+    "$sysroot_arch/usr/lib/crt1.o" \
     "$work/counter.o" \
-    "$sysroot/usr/lib/libc-meuos.a" \
-    "$sysroot/usr/lib/libatomic-meuos.a"
+    "$sysroot_arch/usr/lib/libc-meuos.a" \
+    "$sysroot_arch/usr/lib/libatomic-meuos.a"
 
 # Verify ELF type
 file "$work/counter" | grep -Eq 'ELF 64-bit.*executable' || {

@@ -3,9 +3,12 @@ version: 1.0.8
 default: all
 
 [variables]
-  CC: /workspace/MeuOS-Kit/projects/mcc/mcc
-  AR: ar
-  CFLAGS: -O2 --specs=meuos --sysroot=/workspace/MeuOS-Kit/sysroot -D_FILE_OFFSET_BITS=64 -I%SRC_DIR%
+  CC: /workspace/MeuOS-Kit/.agents/worktrees/mcc-toolchain/projects/mcc/mcc
+  AR: /workspace/MeuOS-Kit/.agents/worktrees/mcc-toolchain/projects/meuos-toolchain/build/bin/ar
+  CFLAGS: -O2 --specs=meuos --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/mcc-toolchain/sysroot/x86_64 --nostdlib --static -D_FILE_OFFSET_BITS=64 -I%SRC_DIR%
+  LDLIBS: -l:libc-meuos.a
+  MT_AS: /workspace/MeuOS-Kit/.agents/worktrees/mcc-toolchain/projects/meuos-toolchain/build/bin/as
+  MT_LD: /workspace/MeuOS-Kit/.agents/worktrees/mcc-toolchain/projects/meuos-toolchain/build/bin/ld
   SRC_DIR: /tmp/meow-build/bzip2-1.0.8
   BLD_DIR: /tmp/meow-build/bzip2-1.0.8
   TARBALL: /tmp/bzip2-1.0.8.tar.gz
@@ -71,14 +74,14 @@ default: all
   run: %AR% rcs %BLD_DIR%/libbz2.a %BLD_DIR%/blocksort.o %BLD_DIR%/huffman.o %BLD_DIR%/crctable.o %BLD_DIR%/randtable.o %BLD_DIR%/compress.o %BLD_DIR%/decompress.o %BLD_DIR%/bzlib.o
 
 [bzip2]
-  deps: libbz2.a, bzip2.o
+  deps: bzip2.o, blocksort.o, huffman.o, crctable.o, randtable.o, compress.o, decompress.o, bzlib.o
   outputs: %BLD_DIR%/bzip2
-  run: %CC% %CFLAGS% -o %BLD_DIR%/bzip2 %BLD_DIR%/bzip2.o -L%BLD_DIR% -lbz2
+  run: %CC% %CFLAGS% -o %BLD_DIR%/bzip2 %BLD_DIR%/bzip2.o %BLD_DIR%/blocksort.o %BLD_DIR%/huffman.o %BLD_DIR%/crctable.o %BLD_DIR%/randtable.o %BLD_DIR%/compress.o %BLD_DIR%/decompress.o %BLD_DIR%/bzlib.o %LDLIBS%
 
 [bzip2recover]
-  deps: libbz2.a, bzip2recover.o
+  deps: bzip2recover.o, blocksort.o, huffman.o, crctable.o, randtable.o, compress.o, decompress.o, bzlib.o
   outputs: %BLD_DIR%/bzip2recover
-  run: %CC% %CFLAGS% -o %BLD_DIR%/bzip2recover %BLD_DIR%/bzip2recover.o -L%BLD_DIR% -lbz2
+  run: %CC% %CFLAGS% -o %BLD_DIR%/bzip2recover %BLD_DIR%/bzip2recover.o %BLD_DIR%/blocksort.o %BLD_DIR%/huffman.o %BLD_DIR%/crctable.o %BLD_DIR%/randtable.o %BLD_DIR%/compress.o %BLD_DIR%/decompress.o %BLD_DIR%/bzlib.o %LDLIBS%
 
 [test]
   deps: bzip2

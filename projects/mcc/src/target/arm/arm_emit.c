@@ -40,11 +40,14 @@ static struct {
 	char *fmt;
 } omap[] = {
 	{ Oadd,    Ki, "add %=, %0, %1" },
-	{ Oadd,    Ka, "vadd.f64 %=, %0, %1" }, /* FIXME for 32-bit floats, would be vadd.f32 */
+	{ Oadd,    Ks, "vadd.f32 %=, %0, %1" },
+	{ Oadd,    Kd, "vadd.f64 %=, %0, %1" },
 	{ Osub,    Ki, "sub %=, %0, %1" },
-	{ Osub,    Ka, "vsub.f64 %=, %0, %1" },
+	{ Osub,    Ks, "vsub.f32 %=, %0, %1" },
+	{ Osub,    Kd, "vsub.f64 %=, %0, %1" },
 	{ Oneg,    Ki, "neg %=, %0" },
-	{ Oneg,    Ka, "vneg.f64 %=, %0" },
+	{ Oneg,    Ks, "vneg.f32 %=, %0" },
+	{ Oneg,    Kd, "vneg.f64 %=, %0" },
 	{ Oand,    Ki, "and %=, %0, %1" },
 	{ Oor,     Ki, "orr %=, %0, %1" },
 	{ Oxor,    Ki, "eor %=, %0, %1" },
@@ -52,9 +55,11 @@ static struct {
 	{ Oshr,    Ki, "lsr %=, %0, %1" },
 	{ Oshl,    Ki, "lsl %=, %0, %1" },
 	{ Omul,    Ki, "mul %=, %0, %1" },
-	{ Omul,    Ka, "vmul.f64 %=, %0, %1" },
+	{ Omul,    Ks, "vmul.f32 %=, %0, %1" },
+	{ Omul,    Kd, "vmul.f64 %=, %0, %1" },
 	{ Odiv,    Ki, "sdiv %=, %0, %1" },
-	{ Odiv,    Ka, "vdiv.f64 %=, %0, %1" },
+	{ Odiv,    Ks, "vdiv.f32 %=, %0, %1" },
+	{ Odiv,    Kd, "vdiv.f64 %=, %0, %1" },
 	{ Oudiv,   Ki, "udiv %=, %0, %1" },
 	{ Orem,    Ki, "sdiv %?, %0, %1\n\tmsub\t%=, %?, %1, %0" },
 	{ Ourem,   Ki, "udiv %?, %0, %1\n\tmsub\t%=, %?, %1, %0" },
@@ -94,7 +99,8 @@ static struct {
 	{ Odtoui,  Ka, "vcvt.u32.f64 %=, %D0" },
 	{ Oswtof,  Ka, "vcvt.f64.s32 %=, %W0" },
 	{ Ouwtof,  Ka, "vcvt.f64.u32 %=, %W0" },
-	{ Osltof,  Ka, "vcvt.f64.s32 %=, %W0" }, /* FIXME: 64-bit int → float: use __aeabi */
+	{ Osltof,  Kd, "bl __aeabi_l2d\n\tvmov\t%=, r0, r1" },
+	{ Osltof,  Ks, "bl __aeabi_l2f\n\tvmov\t%=, r0" },
 	{ Oultof,  Ka, "vcvt.f64.u32 %=, %W0" },
 	{ Ocall,   Kw, "blx %L0" },
 	{ Oacmp,   Ki, "cmp %0, %1" },
@@ -192,13 +198,11 @@ emitf(char *s, Ins *i, Fn *fn, FILE *f)
 			break;
 		case '=':
 		case '0':
-			r = c == '=' ? i->to : i->arg[0];
-			if (rtype(r) == RSlot) {
-				fprintf(f, "[r11, #%" PRIu64 "]", slot(r, fn, 0));
-				/* BUG: data processing ops can't use [r11,#off] directly.
-				 * fixarg should load into IP before emitf is called. */
-				break;
-			}
+		r = c == '=' ? i->to : i->arg[0];
+		if (rtype(r) == RSlot) {
+			fprintf(f, "[r11, #%" PRIu64 "]", slot(r, fn, 0));
+			break;
+		}
 			assert(isreg(r));
 			fputs(rname(r.val, k), f);
 			break;
@@ -264,8 +268,8 @@ loadaddr(Con *c, char *rn, FILE *f)
 		break;
 	case SThr:
 		fprintf(f, "\tmrc\tp15, 0, %s, c13, c0, 3\n", rn);
-		fprintf(f, "\tadd\t%s, %s, #:tprel_lo12_nc:%s\n", rn, rn, str(c->sym.id));
-		fprintf(f, "\tadd\t%s, %s, #:tprel_lo12_nc:%s\n", rn, rn, str(c->sym.id)); /* FIXME: use hi12/lo12 pair */
+		fprintf(f, "\tadd\t%s, %s, #:tprel_hi12:%s\n", rn, rn, str(c->sym.id));
+		fprintf(f, "\tadd\t%s, %s, #:tprel_lo12:%s\n", rn, rn, str(c->sym.id));
 		break;
 	case SExt:
 		if (g_arm_arch_ver >= 7) {
@@ -386,6 +390,8 @@ emitins(Ins *i, Fn *fn, FILE *f)
 		fprintf(f, "\tbl\t%s%s\n", p, l);
 		break;
 	case Osalloc:
+		if (rtype(i->arg[0]) == RSlot)
+			fixarg(&i->arg[0], 0, IP, fn, f);
 		emitf("sub sp, sp, #%0", i, fn, f);
 		if (!req(i->to, R))
 			emitf("mov %=, sp", i, fn, f);

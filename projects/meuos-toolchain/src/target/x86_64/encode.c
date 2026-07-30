@@ -287,6 +287,12 @@ parse_operand(char *text, struct x86_op *op)
 	text = trim(text);
 	if (!*text)
 		return -1;
+	/* AT&T indirect marker '*': skip it and try again as register/memory */
+	if (text[0] == '*') {
+		text = trim(text + 1);
+		if (!*text)
+			return -1;
+	}
 	if (text[0] == '$') {
 		if (parse_reference(text + 1, &symbol, op->modifier,
 		                    sizeof(op->modifier), &op->addend,

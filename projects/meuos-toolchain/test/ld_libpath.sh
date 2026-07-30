@@ -5,6 +5,8 @@ as=${1:?as path required}
 ld=${2:?ld path required}
 mcc=${3:?mcc path required}
 sysroot=${4:?sysroot path required}
+arch=${5:-x86_64}
+sysroot_arch="$sysroot/$arch"
 work=$(mktemp -d /tmp/mt-libpath-test.XXXXXX)
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 
@@ -24,24 +26,24 @@ int main() {
 }
 CFILE
 
-"$mcc" --specs=meuos --sysroot="$sysroot" -S -o "$work/counter.s" "$work/counter.c"
+"$mcc" --specs=meuos --sysroot="$sysroot_arch" -S -o "$work/counter.s" "$work/counter.c"
 "$as" -o "$work/counter.o" "$work/counter.s"
 
 # Test 1: -L + -l
-"$ld" -o "$work/app1" "$sysroot/usr/lib/crt1.o" "$work/counter.o" \
-    -L"$sysroot/usr/lib" -lc-meuos -latomic-meuos
+"$ld" -o "$work/app1" "$sysroot_arch/usr/lib/crt1.o" "$work/counter.o" \
+    -L"$sysroot_arch/usr/lib" -lc-meuos -latomic-meuos
 timeout 5 "$work/app1" | grep -q "counter = 2000" || {
     echo "mt ld libpath (-L/-l): FAIL"; exit 1; }
 
 # Test 2: --sysroot auto-search (no -L)
-"$ld" -o "$work/app2" --sysroot="$sysroot" \
-    "$sysroot/usr/lib/crt1.o" "$work/counter.o" -lc-meuos -latomic-meuos
+"$ld" -o "$work/app2" --sysroot="$sysroot_arch" \
+    "$sysroot_arch/usr/lib/crt1.o" "$work/counter.o" -lc-meuos -latomic-meuos
 timeout 5 "$work/app2" | grep -q "counter = 2000" || {
     echo "mt ld libpath (--sysroot): FAIL"; exit 1; }
 
 # Test 3: -l: full filename syntax
-"$ld" -o "$work/app3" --sysroot="$sysroot" \
-    "$sysroot/usr/lib/crt1.o" "$work/counter.o" \
+"$ld" -o "$work/app3" --sysroot="$sysroot_arch" \
+    "$sysroot_arch/usr/lib/crt1.o" "$work/counter.o" \
     -l:libc-meuos.a -l:libatomic-meuos.a
 timeout 5 "$work/app3" | grep -q "counter = 2000" || {
     echo "mt ld libpath (-l:): FAIL"; exit 1; }

@@ -170,6 +170,8 @@ slot(Ref r, E *e)
 		return 16 + e->padding + 4 * s;
 }
 
+static void loadaddr(Con *, char *, E *);
+
 static void
 emitf(char *s, Ins *i, E *e)
 {
@@ -258,6 +260,12 @@ emitf(char *s, Ins *i, E *e)
 			case RTmp:
 				assert(isreg(r));
 				fprintf(e->f, "[%s]", rname(r.val, Kl));
+				break;
+			case RCon:
+				pc = &e->fn->con[r.val];
+				assert(pc->type == CAddr);
+				loadaddr(pc, rname(IP1, Kl), e);
+				fprintf(e->f, "[%s]", rname(IP1, Kl));
 				break;
 			case RSlot:
 				fprintf(e->f, "[x29, %"PRIu64"]", slot(r, e));
