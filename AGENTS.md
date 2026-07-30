@@ -313,8 +313,13 @@ const char *mz_strerror(int e);
 
 **构建**：
 ```sh
+<<<<<<< Updated upstream
 make -C projects/meuos-compress              # 构建 libmz.a
 make -C projects/meuos-compress check        # 压缩/解压缩轮转测试
+=======
+make -C projects/mz              # 构建 libmz.a
+make -C projects/mz check        # 压缩/解压缩轮转测试
+>>>>>>> Stashed changes
 ```
 
 **实现原则**：纯 C11 实现，零外部依赖。当前仅实现 LZ77 编码器（`MZ_CODEC_LZ77`），后续可扩展其他编解码器。
@@ -423,7 +428,11 @@ MeuOS-Kit/
 │   ├── meuos-utils/        核心工具集（待启动）
 │   ├── meuos-shell/        Shell 终端（待启动）
 │   ├── meuos-buildtools/   构建工具（m4/gperf/flex/bison）
+<<<<<<< Updated upstream
 │   └── meuos-compress/       压缩库（libmz.a，LZ77）
+=======
+│   └── mz/                 压缩库（libmz.a，LZ77）
+>>>>>>> Stashed changes
 ├── env/                    QEMU 多架构测试环境（6.6.142 内核 + 9p 共享）
 │   ├── bin/qvm             VM 管理器
 │   ├── qemu/               静态 qemu-user 二进制（aarch64/riscv64/loongarch64）
@@ -435,6 +444,20 @@ MeuOS-Kit/
 ```
 
 每个组件目录含 `ARCHITECTURE.md`（结构/模块/状态/路线图）。待办事项统一存放在 `.issues/` 下。
+
+**配方包（pkgs/）**：`pkgs/` 存放 `.meow` 格式构建配方，涵盖基础依赖库（dash/bzip2/binutils）、meow 自测试配方（`meow-smoke`、`meow-incremental` 等）和 Kit 组件配方（`mcc`、`meow`、`meuos-libc`）。通过 `meow build <pkg>` 使用，详见 `pkgs/<pkg>/project.meow`。
+
+**sysroot 多架构布局**：`sysroot/` 下按架构分目录，支持多架构同时安装：
+```
+sysroot/
+├── x86_64/        # 默认架构（ARCH= 缺省值）
+├── aarch64/
+├── arm/
+├── i386/
+├── loongarch64/
+└── riscv64/
+```
+跨架构安装时指定 `ARCH=<arch>`，如 `make -C projects/meuos-libc ARCH=aarch64 install`。
 
 **配方包（pkgs/）**：`pkgs/` 存放 `.meow` 格式构建配方，涵盖基础依赖库（dash/bzip2/binutils）、meow 自测试配方（`meow-smoke`、`meow-incremental` 等）和 Kit 组件配方（`mcc`、`meow`、`meuos-libc`）。通过 `meow build <pkg>` 使用，详见 `pkgs/<pkg>/project.meow`。
 
@@ -726,8 +749,13 @@ make -C projects/meuos-sysroot                # 构建 libmsys.a + mkmsys + msys
 make -C projects/meuos-sysroot so             # 构建 libmsys.so（Python 绑定用）
 
 # mz - 压缩库
+<<<<<<< Updated upstream
 make -C projects/meuos-compress                           # 构建 libmz.a
 make -C projects/meuos-compress check                     # 压缩/解压缩轮转测试
+=======
+make -C projects/mz                           # 构建 libmz.a
+make -C projects/mz check                     # 压缩/解压缩轮转测试
+>>>>>>> Stashed changes
 
 # meuos-buildtools（Phase 6）
 make -C projects/meuos-buildtools             # 构建 m4/gperf/flex
@@ -1025,7 +1053,11 @@ for item in data:
 
 ### 9.6 Codebuddy 技能清单
 
+<<<<<<< Updated upstream
 本项目配置了以下 Codebuddy 技能（统一存放于 `.agents/skills/`，`.codebuddy` 与 `.trae` 均为指向 `.agents` 的软链接别名）：
+=======
+本项目配置了以下 Codebuddy 技能（位于 `.codebuddy/skills/`，软链接到 `.agents/skills/`）：
+>>>>>>> Stashed changes
 
 | 技能 | 用途 |
 |------|------|
@@ -1111,7 +1143,19 @@ for item in data:
 | `projects/meuos-toolchain/ARCHITECTURE.md`         | 工具链架构、P0-P11 分阶段任务           |
 | `projects/meuos-sysroot/ARCHITECTURE.md`           | .msys 格式设计与依赖关系               |
 | `env/README.md`                                    | QEMU 测试环境使用说明                  |
+<<<<<<< Updated upstream
 | `.issues/`                                        | 待办任务跟踪（日期编号，如 0728.md）   |
+=======
+| `projects/mcc/.todo/cpp-shared-backend.md`         | mcc/m++ 共享后端架构计划               |
+| `projects/mcc/.todo/gd-tls.md`                     | i386 TLS 模型选择设计笔记              |
+| `projects/mcc/.todo/arm.md`                        | ARM 后端状态与待启动项                 |
+| `projects/meow/.todo/dag-dedup.md`                 | DAG 去重待实现项                       |
+| `projects/meow/.todo/native-shell.md`              | 原生 shell 替代待实现                  |
+| `projects/meuos-sysroot/.todo/msys.md`             | .msys 实现任务清单                     |
+| `issue/0729.md`                                   | 跨组件待实现清单 + 102 项深度代码审查结果（mcc/libc/toolchain/meow/sysroot） |
+| `.issues/INDEX.md`                                | worktree-stable-enhance 完整任务队列与设计原则 |
+| `.issues/AGENT.md`                                | worktree-stable-enhance agent 入口上下文与工作纪律 |
+>>>>>>> Stashed changes
 | IMA 知识库（通过 `ima-skill` 访问）                 | 设计笔记、移植记录、调试踩坑           |
 | `.github/workflows/ci.yml`                            | CI 管道定义                            |
 
@@ -1194,4 +1238,7 @@ AGENTS.md §10 (全局完成状态速查)
 2. **内容** — 任务范围、参考来源、验收标准、依赖关系（参考 §7.2 任务卡片五要素）
 3. **归档** — 实现完成后，`.todo` 文件内容合并到 `ARCHITECTURE.md` 或 `PORTING.md`，`.todo` 文件标记 `[x]` 或删除
 
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes

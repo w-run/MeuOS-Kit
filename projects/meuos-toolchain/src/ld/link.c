@@ -2983,7 +2983,12 @@ write_executable(struct ld_context *ctx, const char *path,
 		goto out_file;
 	if (fseek(file, (long)section_offset, SEEK_SET) != 0)
 		goto out_file;
-	if (fwrite((unsigned char[64]){0}, 1, 64, file) != 64)
+	/* NULL section header: write one zeroed header of the correct size.
+	 * ELF32 = 40 bytes, ELF64 = 64 bytes.  All zeros is correct for the
+	 * NULL section (sh_type=0, sh_flags=0, sh_addr=0, etc.). */
+	unsigned char null_sh[64] = {0};
+	size_t sh_size = (size_t)(target->elf_class == 1 ? 40 : 64);
+	if (fwrite(null_sh, 1, sh_size, file) != sh_size)
 		goto out_file;
 	for (i = 1; i < (size_t)output_count; ++i) {
 		if (target->elf_class == 1) {
