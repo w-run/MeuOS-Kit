@@ -57,34 +57,6 @@ postra(Fn *fn)
 		fprintf(stderr, "postra: function %s, %d slots\n",
 			fn->name, nslots);
 
-	/* Count and log slot-to-slot Ocopy instructions */
-	if (debug['P']) {
-		int slot_copy_count = 0;
-		int slot_copy_blocks = 0;
-		for (b = fn->start; b; b = b->link) {
-			int block_count = 0;
-			for (n = 0; n < b->nins; n++) {
-				i = &b->ins[n];
-				if (i->op == Ocopy
-				&& rtype(i->to) == RSlot
-				&& (rtype(i->arg[0]) == RSlot
-				 || rtype(i->arg[0]) == RMem)) {
-					block_count++;
-				}
-			}
-			if (block_count > 0) {
-				slot_copy_blocks++;
-				slot_copy_count += block_count;
-				fprintf(stderr, "postra: block %s has %d "
-					"slot-to-slot copies\n",
-					b->name, block_count);
-			}
-		}
-		fprintf(stderr, "postra: total %d slot-to-slot copies "
-			"in %d blocks\n",
-			slot_copy_count, slot_copy_blocks);
-	}
-
 	for (b = fn->start; b; b = b->link) {
 		/* last_def[slot] = index of last Ocopy writing this slot,
 		 * or -1 if unknown. */
