@@ -14,18 +14,22 @@ Agent 读数与代码后补全深度结论。同一日报告可**查缺补漏式
 
 ## 用法
 
-在本仓库、且位于 `daily-audit` 分支的 CodeBuddy Code 会话中执行（推荐在「本地凌晨」启动，
-使每日循环对齐到凌晨）：
+在本仓库、且位于 `daily-audit` 分支的 CodeBuddy Code 会话中执行。触发时点为**北京时间
+02:00 / 08:00 / 14:00 / 20:00（每天 4 次）**，与 GitHub Action 对齐。
+
+**方式 A — 本地会话用 CronCreate / `/loop` 锚定到本地时刻（推荐，带 AI 深度复核）：**
 
 ```
-/loop 24h 见 scripts/audit-loop-prompt.md 中的 LOOP_PROMPT
+/loop 见 scripts/audit-loop-prompt.md 中的 LOOP_PROMPT
 ```
 
-或直接把下方 `LOOP_PROMPT` 的内容作为 `/loop 24h` 的参数粘贴。
+`/loop` 只能按本地时区触发；把会话启动在本地凌晨、或直接用 `CronCreate` 锚定到
+`0 2,8,14,20 * * *`（本地时区，对应北京时间 2/8/14/20）即可每天跑 4 次。
 
-> 说明：`/loop` 的间隔为「自启动起」的相对间隔（如 `24h`）。要锚定到「每天凌晨」，
-> 请在你的本地凌晨时刻启动该 loop；若需严格 00:00 UTC 定点，可用
-> `.github/workflows/daily-audit.yml`（GitHub Actions，已在 main 上）作为备用触发器。
+> 注：`CronCreate` 任务是**会话级**的，会话退出即失效，且 3 天后自动过期 —— 重启 CodeBuddy
+> 会话后需用 `/loop` 或 `CronCreate` 重新建立该循环（见下方「与 GitHub Action 的关系」）。
+
+**方式 B — 直接粘贴 `LOOP_PROMPT`** 作为 `/loop` 的参数，二者等价。
 
 ## LOOP_PROMPT
 
@@ -56,9 +60,11 @@ Agent 读数与代码后补全深度结论。同一日报告可**查缺补漏式
 
 ## 与 GitHub Action 的关系
 
-- `.github/workflows/daily-audit.yml`（UTC 00:00 定点，已置于 main）与 `/loop` 二者**幂等兼容**：
+- `.github/workflows/daily-audit.yml`（已置于 main，cron 为 UTC，已换算为北京时间 2/8/14/20
+  对应的 `0 18/0/6/12 * * *`）与 `/loop` 二者**幂等兼容**：
   `daily-<DATE>` 分支或报告一旦存在，另一方自动跳过，不会互相覆盖。
 - 该 workflow 通过 `ref: daily-audit` 取用工作目录中的脚本，并把报告搬到基于 main 的
   `daily-<DATE>` 分支提交（PR 仅含报告）；Agent 驱动的修复则直接落到同一 `daily-<DATE>` 分支。
-- 推荐：以 `/loop` 为主驱动（带 AI 深度复核）；workflow 作为「严格定点凌晨」的备用触发器。
-  若希望每日必带 AI 复核，可禁用该 workflow（Settings → Actions）。
+- 推荐：以 `/loop`（本地会话）为主驱动（带 AI 深度复核），每天 4 次查缺补漏；workflow 作为
+  「严格定点」的备用触发器（CI 环境、或无本地会话时也能跑）。两者都先同步远端报告再追加，
+  互不覆盖。若希望每日必带 AI 复核，可禁用该 workflow（Settings → Actions）。

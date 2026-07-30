@@ -483,30 +483,38 @@ doblk(Blk *b, RMap *cur)
 				break;
 			rf = rfree(cur, r);
 			if (rf == -1) {
-				/* No prior register assignment for this
-				 * temporary. For most temps this only
-				 * happens when the temp is dead (never
-				 * re-used), so we just drop the instruction.
-				 *
-				 * But on targets where Kl never lives in
-				 * registers (kl_in_reg==0), Kl temps have
-				 * no register to free - they live in slots.
-				 * We still need to rewrite the instruction's
-				 * arguments to their slots, so fall through
-				 * to the argument-processing loop below
-				 * (with i->to left as the temp; emit's Kl
-				 * dispatch resolves it via tmp[t].slot). */
-				assert(!isreg(i->to));
-			if ((!T.kl_in_reg && r >= Tmp0
-			&& tmp[r].cls == Kl)
-			|| (T.nfpr == 0 && r >= Tmp0
-			&& KBASE(tmp[r].cls) == 1)) {
-				assert(tmp[r].slot != -1);
-				break;
+				if (r < Tmp0) {
+					/* Physical register from ABI lowering
+					 * (e.g. Ocopy TMP(R1), $2).  Not in the
+					 * register map yet; add it directly. */
+					radd(cur, r, r);
+					rf = r;
+				} else {
+					/* No prior register assignment for this
+					 * temporary. For most temps this only
+					 * happens when the temp is dead (never
+					 * re-used), so we just drop the instruction.
+					 *
+					 * But on targets where Kl never lives in
+					 * registers (kl_in_reg==0), Kl temps have
+					 * no register to free - they live in slots.
+					 * We still need to rewrite the instruction's
+					 * arguments to their slots, so fall through
+					 * to the argument-processing loop below
+					 * (with i->to left as the temp; emit's Kl
+					 * dispatch resolves it via tmp[t].slot). */
+					assert(!isreg(i->to));
+				if ((!T.kl_in_reg && r >= Tmp0
+				&& tmp[r].cls == Kl)
+				|| (T.nfpr == 0 && r >= Tmp0
+				&& KBASE(tmp[r].cls) == 1)) {
+					assert(tmp[r].slot != -1);
+					break;
+				}
+				curi++;
+				continue;
+				}
 			}
-			curi++;
-			continue;
-		}
 		i->to = TMP(rf);
 	}
 	break;

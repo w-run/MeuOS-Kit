@@ -6,7 +6,8 @@
 #   - daily-<MMDD> ：每日结果分支，基于 main，仅含 `.issues/<MMDD>.md` 与修复；
 #                     直接 PR 到 main（报告+修复同支，修复工作复用该分支）。
 #
-# 触发（每天 4 次，UTC：02:00 / 08:00 / 14:00 / 20:00；亦支持手动 workflow_dispatch）：
+# 触发（每天 4 次，北京时间：02:00 / 08:00 / 14:00 / 20:00；GitHub Actions 的 cron 为 UTC，
+#        故换算为 18:00 / 00:00 / 06:00 / 12:00 UTC；亦支持手动 workflow_dispatch）：
 #   每次运行都是「查缺补漏式追加」，不会覆盖已有报告：
 #   1. 首跑（结果分支不存在）：从 daily-audit 跑脚本生成基础报告（含 Agent 复核占位）
 #   2. 后续运行：先同步远端最新报告，再 `--append` 刷新缺陷扫描/git 区间并追加修订记录
@@ -19,10 +20,11 @@ name: Daily Code Audit
 
 on:
   schedule:
-    - cron: '0 2 * * *'        # UTC 02:00
-    - cron: '0 8 * * *'        # UTC 08:00
-    - cron: '0 14 * * *'       # UTC 14:00
-    - cron: '0 20 * * *'       # UTC 20:00
+    # 以下为北京时间 02:00 / 08:00 / 14:00 / 20:00 对应的 UTC 等价时刻
+    - cron: '0 18 * * *'       # 北京时间 02:00（UTC 18:00）
+    - cron: '0 0 * * *'        # 北京时间 08:00（UTC 00:00）
+    - cron: '0 6 * * *'        # 北京时间 14:00（UTC 06:00）
+    - cron: '0 12 * * *'       # 北京时间 20:00（UTC 12:00）
   workflow_dispatch:           # 允许手动触发
 
 permissions:
@@ -122,4 +124,4 @@ jobs:
             --head "$BRANCH" \
             --base main \
             --title "audit: 每日代码校验与缺陷检查 $DATE" \
-            --body "每日定时审计自动生成（每天 4 次查缺补漏：UTC 02/08/14/20）。结果分支基于 main，仅含报告 .issues/$DATE.md。本 PR 由 GitHub Actions 开启；修复请直接推送到本分支（daily/$DATE），报告与修复同支，复核通过后合并到 main。深度语义审查由 CodeBuddy /loop 或人工复核，可在任意一次运行后补充。" || echo "PR 创建跳过（可能已存在或权限受限）。"
+            --body "每日定时审计自动生成（每天 4 次查缺补漏：北京时间 02/08/14/20，即 UTC 18/0/6/12）。结果分支基于 main，仅含报告 .issues/$DATE.md。本 PR 由 GitHub Actions 开启；修复请直接推送到本分支（daily/$DATE），报告与修复同支，复核通过后合并到 main。深度语义审查由 CodeBuddy /loop 或人工复核，可在任意一次运行后补充。" || echo "PR 创建跳过（可能已存在或权限受限）。"

@@ -102,6 +102,16 @@ void arm32_abi(Fn *fn) {
 					break;
 				}
 				lower_args(i, nargs, fn);
+				/* Re-emit the call with updated arg metadata.
+				 * emit() uses *--curi, so emit order (call then
+				 * result copy) places them AFTER arg copies in
+				 * forward order: arg copies -> call -> result. */
+				if (!req(i->to, R)) {
+					int ck = i->cls;
+					Ref rreg = KBASE(ck) == 0 ? TMP(R0) : TMP(D0);
+					emit(Ocopy, ck, i->to, rreg, R);
+				}
+				emiti(*i);
 				break;
 			}
 			case Oarg: case Oargc: case Oargv:
