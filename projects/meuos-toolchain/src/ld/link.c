@@ -2766,6 +2766,7 @@ write_executable(struct ld_context *ctx, const char *path,
 		write16(h + 42, MT_ELF32_PHDR_SIZE);
 		phnum = 1; /* PT_LOAD */
 		if (ctx->tls_size) phnum++;
+	phnum++; /* PT_GNU_STACK */
 		if (ctx->shared || ctx->pie) phnum += 2;
 		if (ctx->pie) phnum += 1;
 		if (find_group(ctx, ".dynamic") >= 0 || find_group(ctx, ".got") >= 0)
@@ -2791,6 +2792,7 @@ write_executable(struct ld_context *ctx, const char *path,
 		write16(h + 54, MT_ELF64_PHDR_SIZE);
 		phnum = 1; /* PT_LOAD */
 		if (ctx->tls_size) phnum++;
+	phnum++; /* PT_GNU_STACK */
 		if (ctx->shared || ctx->pie) phnum += 2; /* PT_PHDR + PT_DYNAMIC */
 		if (ctx->pie) phnum += 1;    /* PT_INTERP */
 		if (find_group(ctx, ".dynamic") >= 0 || find_group(ctx, ".got") >= 0)
@@ -2881,6 +2883,15 @@ write_executable(struct ld_context *ctx, const char *path,
 		if (write_program_header_type(file, LD_PT_TLS, LD_PF_R, tls_off,
 		                               tls_addr, tls_filesz, ctx->tls_size,
 		                               ctx->tls_align,
+		                               target->elf_class == 1) != 0)
+			goto out_file;
+	}
+	/* PT_GNU_STACK: mark stack as non-executable (QEMU and some kernels
+	 * require this program header for ELF binaries). */
+	{
+		int stack_flags = LD_PF_R | LD_PF_W;
+		if (write_program_header_type(file, MT_PT_GNU_STACK, stack_flags,
+		                               0, 0, 0, 0, 16,
 		                               target->elf_class == 1) != 0)
 			goto out_file;
 	}
