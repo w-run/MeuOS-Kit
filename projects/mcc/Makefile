@@ -220,7 +220,7 @@ check-sysroot-static: $(BIN)
 	cp -a . "$$work/mcc"; \
 	$(MAKE) -C "$$work/mcc" clean; \
 	env -u MT_AS -u MT_LD -u MT_AR MCC_HOST_CC=cc $(MAKE) -C "$$work/mcc" HOST_CC="$(abspath $(BIN))" \
-		CFLAGS="-O2 -g -std=gnu11 -Iinclude -I$(abspath ../meuos-libc/include) -I$(abspath ../meuos-sysroot/include) -Wno-all --specs=meuos --sysroot=$(abspath ../sysroot) --nostdlib --static" \
+		CFLAGS="-O2 -g -std=gnu11 -Iinclude -I$(abspath ../meuos-libc/include) -I$(abspath ../meuos-sysroot/include) -I$(abspath ../meuos-toolchain/include) -Wno-all --specs=meuos --sysroot=$(abspath ../sysroot) --nostdlib --static" \
 		LDLIBS="-L$(abspath ../meuos-sysroot/build) -lmsys -ldl"; \
 	"$$work/mcc/mcc" --version; \
 	printf '%s\n' 'int main(void) { return 0; }' > "$$work/hello.c"; \

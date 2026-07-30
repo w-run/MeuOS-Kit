@@ -24,6 +24,7 @@ __syscall_number(long number)
 	case 5:  return 108; /* fstat */
 	case 6:  return 107; /* lstat */
 	case 8:  return 19; /* lseek */
+	case 10: return 125; /* mprotect */
 	case 11: return 91; /* munmap */
 	case 12: return 45; /* brk */
 	case 21: return 33; /* access */
