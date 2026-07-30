@@ -132,7 +132,7 @@ static int demo_content(int fd, const tui_rect_t *area, void *udata)
 int main(void)
 {
     tui_raw_mode(0, 1);
-    tui_alt_screen(0, 1);
+    tui_clear_screen(0);
     tui_cursor_show(0, 0);
 
     tui_size_t size;
@@ -152,7 +152,6 @@ int main(void)
 
     if (app) {
         tui_rect_t area = { 1, 1, size.rows, size.cols - 1 };
-        tui_clear_screen(0);
         tui_layout_render(0, app, area);
         tui_layout_free(app);
     }
@@ -162,9 +161,8 @@ int main(void)
     while (ev.key != (tui_key_t)'q' && ev.key != TUI_KEY_ESC);
 
     tui_cursor_show(0, 1);
-    tui_alt_screen(0, 0);
-    tui_raw_mode(0, 0);
     tui_clear_screen(0);
+    tui_raw_mode(0, 0);
 
     return 0;
 }

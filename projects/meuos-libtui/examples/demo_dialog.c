@@ -65,7 +65,7 @@ static int blocking_dlg(tui_size_t scr, const char *title, const char *msg,
 int main(void)
 {
     tui_raw_mode(0, 1);
-    tui_alt_screen(0, 1);
+    tui_clear_screen(0);
     tui_cursor_show(0, 0);
 
     tui_size_t scr;
@@ -156,9 +156,8 @@ cleanup:
     sleep(1);
 
     tui_cursor_show(0, 1);
-    tui_alt_screen(0, 0);
-    tui_raw_mode(0, 0);
     tui_clear_screen(0);
+    tui_raw_mode(0, 0);
 
     return 0;
 }

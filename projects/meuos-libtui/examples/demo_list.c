@@ -121,7 +121,7 @@ int main(void)
     tui_list_t *list = tui_list_new(list_items, (int)NPACKAGES);
 
     tui_raw_mode(0, 1);
-    tui_alt_screen(0, 1);
+    tui_clear_screen(0);
     tui_cursor_show(0, 0);
 
     tui_size_t size;
@@ -184,9 +184,8 @@ int main(void)
 
     tui_list_free(list);
     tui_cursor_show(0, 1);
-    tui_alt_screen(0, 0);
-    tui_raw_mode(0, 0);
     tui_clear_screen(0);
+    tui_raw_mode(0, 0);
 
     return 0;
 }
