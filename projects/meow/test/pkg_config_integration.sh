@@ -5,9 +5,12 @@ set -eu
 meow=${1:?meow path required}
 fail=0
 
+# Derive repo root from the meow binary path:
+# $meow = <repo>/projects/meow/build/meow -> repo = $(dirname $(dirname $(dirname $meow)))
+repo=$(cd "$(dirname "$meow")/../../.." && pwd)
 # Test: uses: zlib expands LIBS=-lz
 # Run with verbose to capture command output via stderr
-result=$(cd .. && "$meow" build meow-uses-test 2>&1) || true
+result=$(cd "$repo" && "$meow" build meow-uses-test 2>&1) || true
 # meow only shows command stdout on error or in debug mode
 # Check the build succeeded
 echo "$result" | grep -q "built" || {
@@ -16,7 +19,7 @@ echo "$result" | grep -q "built" || {
     fail=1
 }
 
-cd .. && "$meow" clean meow-uses-test >/dev/null 2>&1 || true
+cd "$repo" && "$meow" clean meow-uses-test >/dev/null 2>&1 || true
 
 if [ "$fail" -eq 0 ]; then
     echo "meow pkg-config integration: all checks PASS"

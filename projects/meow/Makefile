@@ -18,6 +18,7 @@ CC := ../mcc/mcc
 endif
 SYSROOT ?= ../sysroot
 BUILD ?= build
+REPO_ROOT := $(abspath $(CURDIR)/../..)
 
 SRCS := $(sort $(shell find src -name '*.c'))
 # Filter out libm4 objects — they use host cc, not mcc
@@ -57,58 +58,58 @@ $(BUILD)/libm4/m4_engine.o: src/libm4/m4_engine.c
 	cc -I../meuos-sysroot/include -Isrc/include -Isrc -Isrc/util -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -c -o $@ $<
 
 check: $(BUILD)/meow
-	cd .. && ./projects/meow/$(BUILD)/meow build meow-smoke
-	cd .. && ./projects/meow/$(BUILD)/meow clean meow-smoke
-	cd .. && ./projects/meow/$(BUILD)/meow build meow-env
-	cd .. && ./projects/meow/$(BUILD)/meow clean meow-env
+	cd $(REPO_ROOT) && ./projects/meow/$(BUILD)/meow build meow-smoke
+	cd $(REPO_ROOT) && ./projects/meow/$(BUILD)/meow clean meow-smoke
+	cd $(REPO_ROOT) && ./projects/meow/$(BUILD)/meow build meow-env
+	cd $(REPO_ROOT) && ./projects/meow/$(BUILD)/meow clean meow-env
 	@rm -f /tmp/meow-incremental.input /tmp/meow-incremental.output /tmp/meow-incremental.log
 	@printf '%s\n' first > /tmp/meow-incremental.input
-	cd .. && ./projects/meow/$(BUILD)/meow build meow-incremental
+	cd $(REPO_ROOT) && ./projects/meow/$(BUILD)/meow build meow-incremental
 	@test "$$(cat /tmp/meow-incremental.log)" = hit
-	cd .. && ./projects/meow/$(BUILD)/meow build meow-incremental
+	cd $(REPO_ROOT) && ./projects/meow/$(BUILD)/meow build meow-incremental
 	@test "$$(cat /tmp/meow-incremental.log)" = hit
 	@printf '%s\n' second > /tmp/meow-incremental.input
-	cd .. && ./projects/meow/$(BUILD)/meow build meow-incremental
+	cd $(REPO_ROOT) && ./projects/meow/$(BUILD)/meow build meow-incremental
 	@test "$$(cat /tmp/meow-incremental.log)" = hithit
-	cd .. && ./projects/meow/$(BUILD)/meow clean meow-incremental
+	cd $(REPO_ROOT) && ./projects/meow/$(BUILD)/meow clean meow-incremental
 	@rm -f /tmp/meow-auto.input /tmp/meow-auto.output
 	@printf '%s\n' input > /tmp/meow-auto.input
-	cd .. && ./projects/meow/$(BUILD)/meow build meow-auto
+	cd $(REPO_ROOT) && ./projects/meow/$(BUILD)/meow build meow-auto
 	@test "$$(cat /tmp/meow-auto.output)" = "report:/tmp/meow-auto.input:/tmp/meow-auto.input"
-	cd .. && ./projects/meow/$(BUILD)/meow clean meow-auto
-	@rm -f alpha.out /tmp/meow-pattern-alpha.in
+	cd $(REPO_ROOT) && ./projects/meow/$(BUILD)/meow clean meow-auto
+	@rm -f /tmp/meow-pattern-alpha.in
 	@printf '%s\n' input > /tmp/meow-pattern-alpha.in
-	cd .. && ./projects/meow/$(BUILD)/meow build meow-pattern alpha.out
-	@test "$$(cat ../alpha.out)" = "alpha:/tmp/meow-pattern-alpha.in"
-	cd .. && ./projects/meow/$(BUILD)/meow build meow-pattern alpha.out
-	@test "$$(cat ../alpha.out)" = "alpha:/tmp/meow-pattern-alpha.in"
-	cd .. && ./projects/meow/$(BUILD)/meow clean meow-pattern
+	cd $(REPO_ROOT) && ./projects/meow/$(BUILD)/meow build meow-pattern alpha.out
+	@test "$$(cat $(REPO_ROOT)/alpha.out)" = "alpha:/tmp/meow-pattern-alpha.in"
+	cd $(REPO_ROOT) && ./projects/meow/$(BUILD)/meow build meow-pattern alpha.out
+	@test "$$(cat $(REPO_ROOT)/alpha.out)" = "alpha:/tmp/meow-pattern-alpha.in"
+	cd $(REPO_ROOT) && ./projects/meow/$(BUILD)/meow clean meow-pattern
 	@rm -f /tmp/meow-include.result
-	cd .. && ./projects/meow/$(BUILD)/meow build meow-include
+	cd $(REPO_ROOT) && ./projects/meow/$(BUILD)/meow build meow-include
 	@test "$$(cat /tmp/meow-include.result)" = included
-	cd .. && ./projects/meow/$(BUILD)/meow clean meow-include
+	cd $(REPO_ROOT) && ./projects/meow/$(BUILD)/meow clean meow-include
 	@rm -f /tmp/meow-parallel-left /tmp/meow-parallel-right
-	cd .. && ./projects/meow/$(BUILD)/meow -j2 build meow-parallel
+	cd $(REPO_ROOT) && ./projects/meow/$(BUILD)/meow -j2 build meow-parallel
 	@test -f /tmp/meow-parallel-left -a -f /tmp/meow-parallel-right
-	cd .. && ./projects/meow/$(BUILD)/meow -j 2 clean meow-parallel
+	cd $(REPO_ROOT) && ./projects/meow/$(BUILD)/meow -j 2 clean meow-parallel
 	@rm -f /tmp/meow-parallel-fail-downstream /tmp/meow-parallel-fail-other
-	@cd .. && ! ./projects/meow/$(BUILD)/meow -j2 build meow-parallel-fail
+	cd $(REPO_ROOT) && ! ./projects/meow/$(BUILD)/meow -j2 build meow-parallel-fail
 	@test ! -e /tmp/meow-parallel-fail-downstream
 	@test -f /tmp/meow-parallel-fail-other
-	cd .. && ./projects/meow/$(BUILD)/meow clean meow-parallel-fail
-	cd .. && ./projects/meow/$(BUILD)/meow list | grep -qx meow-smoke
-	cd .. && ./projects/meow/$(BUILD)/meow list | grep -qx dash
+	cd $(REPO_ROOT) && ./projects/meow/$(BUILD)/meow clean meow-parallel-fail
+	cd $(REPO_ROOT) && ./projects/meow/$(BUILD)/meow list | grep -qx meow-smoke
+	cd $(REPO_ROOT) && ./projects/meow/$(BUILD)/meow list | grep -qx dash
 	cd test/make-compat && env -u MAKEFLAGS -u MFLAGS MEUOS_SYSROOT=./test-sysroot ../../$(BUILD)/meow build .
 	@rm -f /tmp/meow-conditional.result
-	cd .. && ./projects/meow/$(BUILD)/meow build meow-conditional
+	cd $(REPO_ROOT) && ./projects/meow/$(BUILD)/meow build meow-conditional
 	@test "$$(cat /tmp/meow-conditional.result)" = "native"
-	cd .. && ./projects/meow/$(BUILD)/meow clean meow-conditional
-	cd .. && CC=cc ./projects/meow/$(BUILD)/meow --bootstrap
+	cd $(REPO_ROOT) && ./projects/meow/$(BUILD)/meow clean meow-conditional
+	cd $(REPO_ROOT) && CC=cc ./projects/meow/$(BUILD)/meow --bootstrap
 	sh test/pkg_config.sh "$(abspath $(BUILD)/meow)"
 	sh test/pkg_config_integration.sh "$(abspath $(BUILD)/meow)"
 	sh test/macros_test.sh "$(abspath $(BUILD)/meow)"
 	sh test/macros_v3_test.sh "$(abspath $(BUILD)/meow)"
-	cd .. && $(MAKE) -C projects/meow clean all
+	cd $(REPO_ROOT) && $(MAKE) -C projects/meow clean all
 
 # Verify --arch flag injection by creating a minimal recipe that echoes
 # ARCH, then checking the output contains the expected value.

@@ -178,7 +178,7 @@ main(int argc, char **argv)
 	if (count >= 1 && strcmp(arguments[0], "pkg-config") == 0)
 		return cmd_pkg_config(count - 1, arguments + 1);
 	if (count == 1 && strcmp(arguments[0], "--bootstrap") == 0) {
-		if (run("CC=\"${CC:-cc}\" make -C meow clean all") != 0)
+		if (run("CC=\"${CC:-cc}\" make -C projects/meow clean all") != 0)
 			return 1;
 		meow_msg(MSG_SUCCESS, "bootstrap build complete");
 		return 0;

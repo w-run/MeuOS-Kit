@@ -357,7 +357,12 @@ emitins(Ins *i, Fn *fn, FILE *f)
 	case Ocopy:
 		if (req(i->to, i->arg[0])) break;
 		if (rtype(i->to) == RSlot) {
-			if (!isreg(i->arg[0])) die("unimplemented slot copy");
+			if (!isreg(i->arg[0])) {
+				i->to = TMP(T8);
+				emitins(i, fn, f);
+				i->arg[0] = i->to;
+			}
+			i->arg[1] = i->to;
 			i->arg[1] = i->to;
 			i->to = R;
 			i->op = Ostorew + i->cls;

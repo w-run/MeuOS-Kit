@@ -366,10 +366,32 @@ emitins(Ins *i, Fn *fn, FILE *f)
 			break;
 		if (rtype(i->to) == RSlot) {
 			switch (rtype(i->arg[0])) {
-			case RSlot:
-			case RCon:
-				die("unimplemented");
-				break;
+			case RSlot: {
+				/* Load source slot into T6, then store to target slot */
+				Ref dst = i->to;
+				i->to = TMP(T6);
+				i->op = Oload;
+				emitins(i, fn, f);
+				i->arg[0] = TMP(T6);
+				i->arg[1] = dst;
+				i->to = R;
+				i->op = Ostorew + i->cls;
+				fixmem(&i->arg[1], fn, f);
+				goto Table;
+			}
+			case RCon: {
+				/* Load constant into T6, then store to target slot */
+				Ref dst = i->to;
+				i->to = TMP(T6);
+				i->cls = Kw;
+				loadcon(&fn->con[i->arg[0].val], T6, Kw, f);
+				i->arg[0] = TMP(T6);
+				i->arg[1] = dst;
+				i->to = R;
+				i->op = Ostorew + i->cls;
+				fixmem(&i->arg[1], fn, f);
+				goto Table;
+			}
 			default:
 				assert(isreg(i->arg[0]));
 				i->arg[1] = i->to;
