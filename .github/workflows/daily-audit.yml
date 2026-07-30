@@ -15,7 +15,6 @@
 #   注：脚本只做数据驱动核查；AI 深度复核由 CodeBuddy `/loop`（见 scripts/audit-loop-prompt.md）
 #       在任意一次运行后补充，二者都先同步远端，互不覆盖。
 #
-# 注：GitHub Actions 的 cron 为 UTC。若需「本地时间」的 2/8/14/20，请按时区换算。
 name: Daily Code Audit
 
 on:
