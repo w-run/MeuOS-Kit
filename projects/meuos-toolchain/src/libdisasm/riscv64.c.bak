@@ -478,55 +478,6 @@ mt_disasm_riscv64_one(const unsigned char *bytes, size_t size,
 		}
 
 	/* ============================================================== */
-	/* OP-32 (0x3B) — RV64I 32-bit register-register operations        */
-	/* (ADDW, SUBW, SLLW, SRLW, SRAW)                                 */
-	/* ============================================================== */
-	case 0x3B:
-		switch (f3) {
-		case 0: /* ADDW / SUBW */
-			if (f7 == 0x00) {
-				snprintf(ops, sizeof ops, "%s, %s, %s",
-				         riscv_reg[r3], riscv_reg[r1],
-				         riscv_reg[r2]);
-				return success(out, addr, offset, 4,
-				               bytes, size, "addw", ops);
-			} else if (f7 == 0x20) {
-				snprintf(ops, sizeof ops, "%s, %s, %s",
-				         riscv_reg[r3], riscv_reg[r1],
-				         riscv_reg[r2]);
-				return success(out, addr, offset, 4,
-				               bytes, size, "subw", ops);
-			}
-			return fail(out, addr, offset, 4, bytes, size);
-		case 1: /* SLLW */
-			if (f7 == 0x00) {
-				snprintf(ops, sizeof ops, "%s, %s, %s",
-				         riscv_reg[r3], riscv_reg[r1],
-				         riscv_reg[r2]);
-				return success(out, addr, offset, 4,
-				               bytes, size, "sllw", ops);
-			}
-			return fail(out, addr, offset, 4, bytes, size);
-		case 5: /* SRLW / SRAW */
-			if (f7 == 0x00) {
-				snprintf(ops, sizeof ops, "%s, %s, %s",
-				         riscv_reg[r3], riscv_reg[r1],
-				         riscv_reg[r2]);
-				return success(out, addr, offset, 4,
-				               bytes, size, "srlw", ops);
-			} else if (f7 == 0x20) {
-				snprintf(ops, sizeof ops, "%s, %s, %s",
-				         riscv_reg[r3], riscv_reg[r1],
-				         riscv_reg[r2]);
-				return success(out, addr, offset, 4,
-				               bytes, size, "sraw", ops);
-			}
-			return fail(out, addr, offset, 4, bytes, size);
-		default:
-			return fail(out, addr, offset, 4, bytes, size);
-		}
-
-	/* ============================================================== */
 	/* LOAD (0x03)                                                     */
 	/* ============================================================== */
 	case 0x03:
