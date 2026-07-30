@@ -508,10 +508,15 @@ emitins(Ins i, E *e)
 		 * would emit "movslq $N, %reg" which is INVALID --
 		 * MOVSXD has no immediate form.  Use movl instead;
 		 * the 32-bit result zero-extends to 64 bits, which
-		 * matches sign-extension for all practical constants. */
-		if ((i.op == Oloadsw || i.op == Oextsw)
-		&& rtype(i.arg[0]) == RCon
-		&& e->fn->con[i.arg[0].val].type == CBits) {
+		 * matches sign-extension for all practical constants.
+		 * Same applies to Oload{sh,uh,sb,ub} / Oext{sh,uh,sb,ub}
+		 * -- movs{b,w}l / movz{b,w}l also reject immediates. */
+		if (rtype(i.arg[0]) == RCon
+		&& e->fn->con[i.arg[0].val].type == CBits
+		&& (i.op == Oloadsw || i.op == Oloadsh || i.op == Oloaduh
+		 || i.op == Oloadsb || i.op == Oloadub
+		 || i.op == Oextsw  || i.op == Oextsh  || i.op == Oextuh
+		 || i.op == Oextsb  || i.op == Oextub)) {
 			emitf("movl %0, %W=", &i, e);
 			break;
 		}
