@@ -41,6 +41,7 @@ static void emit32(struct mt_insn *out, size_t *off, uint32_t val)
 #define WREG 1  /* w0-w30, wzr */
 #define SREG 2  /* s0-s31 (float) */
 #define DREG 3  /* d0-d31 (double) */
+#define QREG 4  /* q0-q31 (128-bit NEON) */
 #define REG_ZR 31
 #define REG_SP 31
 #define REG_FP 29
@@ -120,6 +121,20 @@ static int parse_reg(const char *s, int *wreg)
 		}
 	}
 
+	/* q0-q31 */
+	if (s[0] == 'q' && s[1] >= '0' && s[1] <= '9') {
+		int n = 0;
+		int i = 1;
+		while (s[i] >= '0' && s[i] <= '9') {
+			n = n * 10 + (s[i] - '0');
+			i++;
+		}
+		if (s[i] == '\0' && n >= 0 && n <= 31) {
+			*wreg = QREG;
+			return n;
+		}
+	}
+
 	/* sp */
 	if (strcmp(s, "sp") == 0) { *wreg = XREG; return REG_SP; }
 	/* fp / x29 */
@@ -163,7 +178,7 @@ static int is_symbol(const char *s)
 	s = trim_start(s);
 	if (!*s) return 0;
 	/* Register? */
-	if ((s[0] == 'x' || s[0] == 'w' || s[0] == 's' || s[0] == 'd') &&
+	if ((s[0] == 'x' || s[0] == 'w' || s[0] == 's' || s[0] == 'd' || s[0] == 'q') &&
 	    s[1] >= '0' && s[1] <= '9') return 0;
 	if (strncmp(s, "sp", 2) == 0 && (s[2] == '\0' || s[2] == ',' || s[2] == ' ')) return 0;
 	if (strncmp(s, "fp", 2) == 0 && (s[2] == '\0' || s[2] == ',' || s[2] == ' ')) return 0;
@@ -380,50 +395,78 @@ aarch64_encode_insn(const struct mt_target *target,
 	    ops[0].kind == 'r' && ops[1].kind == 'i') {
 		int rd = ops[0].reg;
 		uint64_t val = (uint64_t)ops[1].imm;
+		int is64 = (ops[0].wreg == XREG);
 
-		if (val <= 0xFFFF) {
-			/* Use MOVZ: 1 10 1 0 0 hw imm16 Rd
-			 * MOVZ: sf=1, opc=10, hw=00, imm16=val, Rd=rd */
-			uint32_t enc = 0xD2800000 |
-				((unsigned)(val & 0xFFFF) << 5) |
-				((unsigned)rd & 0x1F);
-			emit32(out, &off, enc);
-			return 0;
+		/* For w-registers, zero-extend to 32-bit */
+		if (!is64) val &= 0xFFFFFFFFULL;
+
+		/* Try single MOVZ/MOVN first */
+		int max_hw = is64 ? 4 : 2;
+		for (int hw = 0; hw < max_hw; hw++) {
+			uint64_t mask = (uint64_t)0xFFFF << (hw * 16);
+			if ((val & ~mask) == 0) {
+				uint32_t enc = 0xD2800000 |
+					((unsigned)hw << 21) |
+					((unsigned)((val >> (hw * 16)) & 0xFFFF) << 5) |
+					((unsigned)rd & 0x1F);
+				emit32(out, &off, enc);
+				return 0;
+			}
 		}
-		if ((val & 0xFFFFFFFFFFFF0000ULL) == 0) {
-			/* MOVZ with lsl #16 */
-			uint32_t enc = 0xD2A00000 |
-				((unsigned)((val >> 16) & 0xFFFF) << 5) |
-				((unsigned)rd & 0x1F);
-			emit32(out, &off, enc);
-			return 0;
-		}
-		/* Negative immediate: use MOVN (move NOT) */
 		{
-			int64_t sval = ops[1].imm;
-			if (sval < 0) {
-				uint64_t inv = ~val;
-				if (inv <= 0xFFFF) {
-					/* MOVN with hw=0 */
-					int is64 = (ops[0].wreg == XREG);
+			uint64_t inv = ~val;
+			if (!is64) inv &= 0xFFFFFFFFULL;
+			for (int hw = 0; hw < max_hw; hw++) {
+				uint64_t mask = (uint64_t)0xFFFF << (hw * 16);
+				if ((inv & ~mask) == 0) {
 					uint32_t enc = (is64 ? 0x92800000 : 0x12800000) |
-						((unsigned)(inv & 0xFFFF) << 5) |
-						((unsigned)rd & 0x1F);
-					emit32(out, &off, enc);
-					return 0;
-				}
-				if ((inv & 0xFFFFFFFFFFFF0000ULL) == 0) {
-					/* MOVN with lsl #16 */
-					int is64 = (ops[0].wreg == XREG);
-					uint32_t enc = (is64 ? 0x92A00000 : 0x12A00000) |
-						((unsigned)((inv >> 16) & 0xFFFF) << 5) |
+						((unsigned)hw << 21) |
+						((unsigned)((inv >> (hw * 16)) & 0xFFFF) << 5) |
 						((unsigned)rd & 0x1F);
 					emit32(out, &off, enc);
 					return 0;
 				}
 			}
 		}
-		return -1; /* imm too large for now */
+
+		/* Fallback: MOVZ + MOVK expansion (up to 4 instructions).
+		 * Use MOVZ for the most significant non-zero 16-bit chunk,
+		 * and MOVK for the remaining chunks. */
+		{
+			int chunks[max_hw];
+			int nchunks = 0;
+			/* Build list of non-zero chunks from MSB to LSB */
+			for (int hw = max_hw - 1; hw >= 0; hw--) {
+				uint16_t chunk = (uint16_t)((val >> (hw * 16)) & 0xFFFF);
+				if (chunk != 0 || (nchunks == 0 && hw == 0)) {
+					chunks[nchunks++] = hw;
+				}
+			}
+			if (nchunks == 0) {
+				/* value is 0 — mov rd, #0 should use movz rd, #0 */
+				emit32(out, &off, 0xD2800000 | ((unsigned)rd & 0x1F));
+				out->size = off;
+				return 0;
+			}
+			/* First chunk → MOVZ */
+			int first_hw = chunks[0];
+			uint16_t first_val = (uint16_t)((val >> (first_hw * 16)) & 0xFFFF);
+			emit32(out, &off, 0xD2800000 |
+			       ((unsigned)first_hw << 21) |
+			       ((unsigned)first_val << 5) |
+			       ((unsigned)rd & 0x1F));
+			/* Remaining chunks → MOVK */
+			for (int ci = 1; ci < nchunks; ci++) {
+				int hw = chunks[ci];
+				uint16_t chunk_val = (uint16_t)((val >> (hw * 16)) & 0xFFFF);
+				emit32(out, &off, 0xF2800000 |
+				       ((unsigned)hw << 21) |
+				       ((unsigned)chunk_val << 5) |
+				       ((unsigned)rd & 0x1F));
+			}
+			out->size = off;
+			return 0;
+		}
 	}
 
 	/* movz rd, #imm{, lsl #N} */
@@ -478,6 +521,21 @@ aarch64_encode_insn(const struct mt_target *target,
 			(((unsigned)rn & 0x1F) << 5) |
 			((unsigned)rd & 0x1F);
 		emit32(out, &off, enc);
+		return 0;
+	}
+
+	/* add rd, rn, #:lo12:symbol — R_AARCH64_ADD_ABS_LO12_NC */
+	if (strcmp(mnemonic, "add") == 0 && nops == 3 &&
+	    ops[0].kind == 'r' && ops[1].kind == 'r' &&
+	    ops[2].kind == 'l' && ops[2].modifier[0] != '\0' &&
+	    strcmp(ops[2].modifier, "lo12") == 0) {
+		int rd = ops[0].reg, rn = ops[1].reg;
+		int is64 = (ops[0].wreg == XREG);
+		emit32(out, &off, (is64 ? 0x91000000 : 0x11000000) |
+		       (((unsigned)rn & 0x1F) << 5) |
+		       ((unsigned)rd & 0x1F));
+		const char *sym = ops[2].sym_start;
+		set_fixup(out, 0, 4, 277, sym, 0); /* R_AARCH64_ADD_ABS_LO12_NC */
 		return 0;
 	}
 
@@ -537,8 +595,40 @@ aarch64_encode_insn(const struct mt_target *target,
 		return 0;
 	}
 
-	/* cmp rn, #imm */
-	if (strcmp(mnemonic, "cmp") == 0 && nops == 2 &&
+	/* cmp rn, #imm{, lsl #12} */
+	if (strcmp(mnemonic, "cmp") == 0 && nops >= 2 &&
+	    ops[0].kind == 'r' && ops[1].kind == 'i') {
+		int rn = ops[0].reg;
+		uint64_t imm = (uint64_t)ops[1].imm;
+		int shift = 0;
+		/* Check for shift modifier like "lsl #12" in extra operands */
+		for (int si = 2; si < nops; si++) {
+			const char *s = opbuf[si];
+			while (*s == ' ' || *s == '\t') s++;
+			if (strncmp(s, "lsl", 3) == 0) {
+				s += 3;
+				while (*s == ' ' || *s == '\t') s++;
+				if (*s == '#') s++;
+				long sv = strtol(s, NULL, 0);
+				shift = (sv == 12) ? 12 : 0;
+			}
+		}
+		uint64_t adj_imm = (shift == 12) ? (imm << 12) : imm;
+		if (adj_imm <= 0xFFF) {
+			/* fits in 12 bits unshifted */
+		} else if ((adj_imm & ~0xFFF000ULL) == 0 && (adj_imm >> 12) <= 0xFFF) {
+			shift = 12;
+			adj_imm >>= 12;
+		} else return -1;
+		int s_bit = (shift == 12) ? 1 : 0;
+		emit32(out, &off, 0xF100001F | ((unsigned)s_bit << 22) |
+		       ((unsigned)(adj_imm & 0xFFF) << 10) |
+		       (((unsigned)rn & 0x1F) << 5));
+		return 0;
+	}
+
+	/* cmn rn, #imm — compare negative with immediate (alias: adds xzr, rn, #imm) */
+	if (strcmp(mnemonic, "cmn") == 0 && nops == 2 &&
 	    ops[0].kind == 'r' && ops[1].kind == 'i') {
 		int rn = ops[0].reg;
 		uint64_t imm = (uint64_t)ops[1].imm;
@@ -546,13 +636,15 @@ aarch64_encode_insn(const struct mt_target *target,
 		if (imm > 0xFFF) {
 			if ((imm & ~0xFFF000ULL) == 0) { shift = 12; imm >>= 12; } else return -1;
 		}
-		emit32(out, &off, 0xF100001F | ((unsigned)shift << 22) |
+		int is64 = (ops[0].wreg == XREG);
+		emit32(out, &off, (is64 ? 0xB100001F : 0x3100001F) |
+		       ((unsigned)shift << 22) |
 		       ((unsigned)(imm & 0xFFF) << 10) |
 		       (((unsigned)rn & 0x1F) << 5));
 		return 0;
 	}
 
-	/* cmn rn, rm â compare negative (alias: adds xzr, rn, rm) */
+	/* cmn rn, rm — compare negative with register (alias: adds xzr, rn, rm) */
 	if (strcmp(mnemonic, "cmn") == 0 && nops == 2 &&
 	    ops[0].kind == 'r' && ops[1].kind == 'r') {
 		int rn = ops[0].reg, rm = ops[1].reg;
@@ -563,7 +655,7 @@ aarch64_encode_insn(const struct mt_target *target,
 		return 0;
 	}
 
-	/* ldr xt, [base] — or with immediate offset */
+	/* ldr xt, [base] — or with immediate offset (general & float) */
 	if ((strcmp(mnemonic, "ldr") == 0 || strcmp(mnemonic, "ldrb") == 0 ||
 	     strcmp(mnemonic, "ldrh") == 0 || strcmp(mnemonic, "ldrsw") == 0 ||
 	     strcmp(mnemonic, "ldrsb") == 0 || strcmp(mnemonic, "ldrsh") == 0) &&
@@ -577,9 +669,14 @@ aarch64_encode_insn(const struct mt_target *target,
 			/* Symbol offset (e.g. #:got_lo12:symbol) */
 			unsigned base_op;
 			unsigned reloc;
-			if (strcmp(mnemonic, "ldr") == 0 && is64) {
+			if (strcmp(mnemonic, "ldr") == 0 && (is64 || wreg == DREG || wreg == QREG)) {
 				if (strcmp(ops[1].modifier, "got_lo12") == 0) {
-					base_op = 0xF9400000; /* LDR xd, [xn, #imm12] */
+					if (wreg == DREG)
+						base_op = 0xFD400000;
+					else if (wreg == QREG)
+						base_op = 0x3DC00000;
+					else
+						base_op = 0xF9400000;
 					reloc = 312; /* R_AARCH64_LD64_GOT_LO12_NC */
 				} else return -1;
 			} else return -1;
@@ -592,15 +689,27 @@ aarch64_encode_insn(const struct mt_target *target,
 			unsigned size = 0;
 			uint32_t base_op = 0;
 			if (strcmp(mnemonic, "ldr") == 0) {
-				size = is64 ? 3 : 2;
-				base_op = is64 ? 0xF9400000 : 0xB9400000;
+				if (wreg == QREG) {
+					size = 4; base_op = 0x3DC00000;
+				} else if (wreg == DREG) {
+					size = 3; base_op = 0xFD400000;
+				} else if (wreg == SREG) {
+					size = 2; base_op = 0xBD400000;
+				} else {
+					size = is64 ? 3 : 2;
+					base_op = is64 ? 0xF9400000 : 0xB9400000;
+				}
 			} else if (strcmp(mnemonic, "ldrb") == 0) {
 				size = 0; base_op = 0x39400000;
 			} else if (strcmp(mnemonic, "ldrh") == 0) {
-				size = 1; base_op = 0x39400000; /* actually 0x79400000 for LDRH */
-				base_op = 0x79400000;
+				size = 1; base_op = 0x79400000;
 			} else if (strcmp(mnemonic, "ldrsw") == 0) {
 				size = 2; base_op = 0xB9800000;
+			} else if (strcmp(mnemonic, "ldrsb") == 0) {
+				size = 0; base_op = 0x39800000;
+			} else if (strcmp(mnemonic, "ldrsh") == 0) {
+				int is64_out = (wreg == XREG);
+				size = 1; base_op = is64_out ? 0x79800000 : 0x78800000;
 			} else return -1;
 
 			uint64_t imm = (uint64_t)ops[1].imm;
@@ -613,9 +722,16 @@ aarch64_encode_insn(const struct mt_target *target,
 			/* Register offset */
 			unsigned rm = (unsigned)ops[1].reg;
 			uint32_t base_op;
-			if (strcmp(mnemonic, "ldr") == 0)
-				base_op = is64 ? 0xF8606800 : 0xB8606800;
-			else if (strcmp(mnemonic, "ldrb") == 0)
+			if (strcmp(mnemonic, "ldr") == 0) {
+				if (wreg == QREG)
+					base_op = 0x3CE06800;
+				else if (wreg == DREG)
+					base_op = 0xFC606800;
+				else if (wreg == SREG)
+					base_op = 0xBC606800;
+				else
+					base_op = is64 ? 0xF8606800 : 0xB8606800;
+			} else if (strcmp(mnemonic, "ldrb") == 0)
 				base_op = 0x38606800;
 			else
 				return -1;
@@ -624,33 +740,99 @@ aarch64_encode_insn(const struct mt_target *target,
 		}
 	}
 
-	/* str xt, [base, #imm] */
+	/* str xt, [base, #imm] — general register and float (unsigned offset) */
 	if ((strcmp(mnemonic, "str") == 0 || strcmp(mnemonic, "strb") == 0 ||
 	     strcmp(mnemonic, "strh") == 0) &&
-	    nops == 2 && ops[0].kind == 'r' && ops[1].kind == 'm') {
+	    nops >= 2 && nops <= 3 && ops[0].kind == 'r' && ops[1].kind == 'm') {
 		unsigned rt = (unsigned)ops[0].reg;
 		unsigned rn = (unsigned)ops[1].reg;
-		int is64 = (ops[0].wreg == XREG);
+		int wreg = ops[0].wreg;
+		int is_float = (wreg == DREG || wreg == SREG || wreg == QREG);
+
+		/* Post-indexed: str xt, [base], #imm  (nops==3) */
+		if (nops == 3 && ops[2].kind == 'i') {
+			int64_t imm = ops[2].imm;
+			if (imm < -256 || imm > 255) return -1;
+			if (is_float) {
+				uint32_t base;
+				if (wreg == DREG) base = 0xFC000400;
+				else if (wreg == SREG) base = 0xBC000400;
+				else if (wreg == QREG) base = 0x3CC00400;
+				else return -1;
+				emit32(out, &off, base |
+				       ((unsigned)(imm & 0x1FF) << 12) |
+				       (rn << 5) | rt);
+				return 0;
+			} else {
+				/* General register post-indexed */
+				uint32_t base;
+				if (strcmp(mnemonic, "str") == 0)
+					base = (wreg == XREG) ? 0xF8000400 : 0xB8000400;
+				else if (strcmp(mnemonic, "strb") == 0)
+					base = 0x38000400;
+				else if (strcmp(mnemonic, "strh") == 0)
+					base = 0x78000400;
+				else return -1;
+				emit32(out, &off, base |
+				       ((unsigned)(imm & 0x1FF) << 12) |
+				       (rn << 5) | rt);
+				return 0;
+			}
+		}
+
+		/* Pre-indexed: str xt, [base, #imm]!  (ops[1].writeback == 1) */
+		if (ops[1].writeback) {
+			int64_t imm = ops[1].imm;
+			uint32_t base;
+			if (is_float) {
+				if (wreg == DREG) base = 0xFC000C00;
+				else if (wreg == SREG) base = 0xBC000C00;
+				else if (wreg == QREG) base = 0x3C800C00;
+				else return -1;
+			} else {
+				if (strcmp(mnemonic, "str") == 0) {
+					base = (wreg == XREG) ? 0xF8000C00 : 0xB8000C00;
+				} else if (strcmp(mnemonic, "strb") == 0) {
+					base = 0x38000C00;
+				} else if (strcmp(mnemonic, "strh") == 0) {
+					base = 0x78000C00;
+				} else return -1;
+			}
+			if (imm < -256 || imm > 255) return -1;
+			emit32(out, &off, base |
+			       ((unsigned)(imm & 0x1FF) << 12) |
+			       (rn << 5) | rt);
+			return 0;
+		}
+
+		/* Unsigned offset: str xt, [base, #imm] (or [base] → imm=0) */
 		unsigned size = 0;
 		uint32_t base_op;
 		if (strcmp(mnemonic, "str") == 0) {
-			size = is64 ? 3 : 2;
-			base_op = is64 ? 0xF9000000 : 0xB9000000;
+			if (wreg == QREG) {
+				size = 4; base_op = 0x3D800000;
+			} else if (wreg == DREG) {
+				size = 3; base_op = 0xFD000000;
+			} else if (wreg == SREG) {
+				size = 2; base_op = 0xBD000000;
+			} else {
+				int is64 = (wreg == XREG);
+				size = is64 ? 3 : 2;
+				base_op = is64 ? 0xF9000000 : 0xB9000000;
+			}
 		} else if (strcmp(mnemonic, "strb") == 0) {
 			size = 0; base_op = 0x39000000;
 		} else if (strcmp(mnemonic, "strh") == 0) {
 			size = 1; base_op = 0x79000000;
 		} else return -1;
 
-		if (ops[1].imm >= 0) {
-			uint64_t imm = (uint64_t)ops[1].imm;
-			uint64_t scaled = imm >> size;
-			if (scaled > 0xFFF || (imm & ((1ULL << size) - 1)) != 0) return -1;
-			emit32(out, &off, base_op | ((unsigned)scaled << 10) |
-			       (rn << 5) | rt);
-			return 0;
-		}
-		return -1;
+		int64_t imm = ops[1].imm;
+		if (imm < 0) return -1; /* negative offset needs pre-indexed or STUR */
+		uint64_t scaled = (uint64_t)imm >> size;
+		if (scaled > 0xFFF || (imm & ((1ULL << size) - 1)) != 0) return -1;
+		emit32(out, &off, base_op | ((unsigned)scaled << 10) |
+		       (rn << 5) | rt);
+		return 0;
 	}
 
 	/* stp/ldp — store/load pair (register pair with base+offset).
@@ -812,7 +994,8 @@ aarch64_encode_insn(const struct mt_target *target,
 	if (strcmp(mnemonic, "sdiv") == 0 && nops == 3 &&
 	    ops[0].kind == 'r' && ops[1].kind == 'r' && ops[2].kind == 'r') {
 		int rd = ops[0].reg, rn = ops[1].reg, rm = ops[2].reg;
-		emit32(out, &off, 0x9AC00C00 |
+		int is64 = (ops[0].wreg == XREG);
+		emit32(out, &off, (is64 ? 0x9AC00C00 : 0x1AC00C00) |
 		       ((unsigned)rm & 0x1F) |
 		       (((unsigned)rn & 0x1F) << 5) |
 		       (((unsigned)rd & 0x1F) << 16));
@@ -823,7 +1006,8 @@ aarch64_encode_insn(const struct mt_target *target,
 	if (strcmp(mnemonic, "udiv") == 0 && nops == 3 &&
 	    ops[0].kind == 'r' && ops[1].kind == 'r' && ops[2].kind == 'r') {
 		int rd = ops[0].reg, rn = ops[1].reg, rm = ops[2].reg;
-		emit32(out, &off, 0x9AC00800 |
+		int is64 = (ops[0].wreg == XREG);
+		emit32(out, &off, (is64 ? 0x9AC00800 : 0x1AC00800) |
 		       ((unsigned)rm & 0x1F) |
 		       (((unsigned)rn & 0x1F) << 5) |
 		       (((unsigned)rd & 0x1F) << 16));
@@ -1285,7 +1469,10 @@ aarch64_encode_insn(const struct mt_target *target,
 	/* bne/beq/blt/bgt/ble/bge label (no-dot form) */
 	if (nops == 1 && ops[0].kind == 'l') {
 		static const struct { const char *name; unsigned cond; } nodot_conds[] = {
-			{"beq", 0}, {"bne", 1}, {"bge", 10}, {"blt", 11},
+			{"beq", 0}, {"bne", 1}, {"bhs", 2}, {"bcs", 2},
+			{"blo", 3}, {"bcc", 3},
+			{"bhi", 8}, {"bls", 9},
+			{"bge", 10}, {"blt", 11},
 			{"bgt", 12}, {"ble", 13},
 			{NULL, 0}
 		};
