@@ -188,6 +188,9 @@ riscv64_apply_reloc(unsigned reloc_type, unsigned char *place,
 	/* R_RISCV_32_PCREL (53): 32-bit PC-relative offset */
 	/* R_RISCV_ADD32 (31): 32-bit addition for relaxation */
 	/* R_RISCV_SUB8 (34), SUB16 (35), SUB32 (36): subtraction for relaxation */
+	case 29: /* GCC: TPREL_HI20 (alt numbering) */
+	case 30: /* GCC: TPREL_LO12_I (alt numbering) */
+	case 32: /* GCC: TPREL_ADD (alt numbering) */
 	case 31: /* R_RISCV_ADD32 */
 	case 34: /* R_RISCV_SUB8 */
 	case 35: /* R_RISCV_SUB16 */

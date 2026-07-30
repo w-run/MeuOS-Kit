@@ -62,7 +62,24 @@ i386_apply_reloc(unsigned reloc_type, unsigned char *place,
 		place[3] = (unsigned char)(value >> 24);
 		return 0;
 
+	/* R_386_TLS_LE: Local Exec TLS — store (S + A - tp) for static exe.
+	 * In a static executable, tp = 0 (thread pointer base = 0), so
+	 * the value is simply S + A written as a 32-bit absolute. */
+	case 12: /* R_386_TLS_LE_DEFAULT */
+	case 17: /* R_386_TLS_LE — assumes tp = 0 for static link */
+		value = (uint32_t)(S + (uint64_t)A);
+		goto write32;
+	case 13: /* R_386_TLS_LE_32 — same as TLS_LE but explicitly 32-bit */
+		value = (uint32_t)(S + (uint64_t)A);
+		goto write32;
+
 	default:
 		return -1; /* unsupported */
 	}
+write32:	/* Common 32-bit write for TLS_LE variants */
+	place[0] = (unsigned char)value;
+	place[1] = (unsigned char)(value >> 8);
+	place[2] = (unsigned char)(value >> 16);
+	place[3] = (unsigned char)(value >> 24);
+	return 0;
 }

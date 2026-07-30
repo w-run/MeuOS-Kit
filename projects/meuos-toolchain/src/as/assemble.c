@@ -1808,16 +1808,20 @@ build_symbol_data(unsigned char *data, const struct elf_sym_out *symbols,
 	size_t i;
 	for (i = 0; i < count; ++i) {
 		mem_u32(&cursor, symbols[i].name);
-		*cursor++ = symbols[i].info;
-		*cursor++ = symbols[i].other;
-		*cursor++ = (unsigned char)symbols[i].section;
-		*cursor++ = (unsigned char)(symbols[i].section >> 8);
 		if (elf_class == 1) {
-			/* ELF32 symbol: 16 bytes */
+			/* ELF32 symbol (16 bytes): name, value, size, info, other, shndx */
 			mem_u32(&cursor, (uint32_t)symbols[i].value);
 			mem_u32(&cursor, (uint32_t)symbols[i].size);
+			*cursor++ = symbols[i].info;
+			*cursor++ = symbols[i].other;
+			*cursor++ = (unsigned char)symbols[i].section;
+			*cursor++ = (unsigned char)(symbols[i].section >> 8);
 		} else {
-			/* ELF64 symbol: 24 bytes */
+			/* ELF64 symbol (24 bytes): name, info, other, shndx, value, size */
+			*cursor++ = symbols[i].info;
+			*cursor++ = symbols[i].other;
+			*cursor++ = (unsigned char)symbols[i].section;
+			*cursor++ = (unsigned char)(symbols[i].section >> 8);
 			mem_u64(&cursor, symbols[i].value);
 			mem_u64(&cursor, symbols[i].size);
 		}
