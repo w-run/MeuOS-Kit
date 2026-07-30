@@ -108,14 +108,4 @@ jobs:
             --head "$BRANCH" \
             --base main \
             --title "audit: 每日代码校验与缺陷检查 $DATE" \
-            --body "每日定时审计自动生成。结果分支基于 main，仅含报告 \`.issues/$DATE.md\`。
-
-本 PR 由 GitHub Actions 在 UTC 凌晨自动开启。修复请直接推送到本分支（daily/$DATE），
-报告与修复同支，复核通过后合并到 main。
-
-- 各子项目构建与测试结果（实现情况校验）
-- 预期文档声明 vs 实际代码对照
-- 桩标记/未实现占位扫描（缺陷检查）
-- 自上一期审计以来的 git 提交记录对照
-
-深度语义审查由 CodeBuddy \`/loop\` 或人工复核。" || echo "PR 创建跳过（可能已存在或权限受限）。"
+            --body "每日定时审计自动生成。结果分支基于 main，仅含报告 .issues/$DATE.md。本 PR 由 GitHub Actions 在 UTC 凌晨自动开启；修复请直接推送到本分支（daily/$DATE），报告与修复同支，复核通过后合并到 main。深度语义审查由 CodeBuddy /loop 或人工复核。" || echo "PR 创建跳过（可能已存在或权限受限）。"
