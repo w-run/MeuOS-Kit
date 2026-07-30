@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 /* Codecs — 对外统一使用 MZ_CODEC_MEUOS */
+#define MZ_CODEC_AUTO      0   /* 解压时自动嗅探格式 */
 #define MZ_CODEC_LZ77      1
 #define MZ_CODEC_LZ77_HUFF 2
 #define MZ_CODEC_MEUOS     3   /* meuos-compress 统一算法引擎 */
