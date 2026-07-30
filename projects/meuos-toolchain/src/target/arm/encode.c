@@ -50,6 +50,35 @@ static int reg_num(const char *s, int *r) {
 	return -1;
 }
 
+/* ---- Helper: parse condition suffix from mnemonic like "addgt" -> ("add", 11) ---- */
+static int parse_op_cond(const char *mnemonic, const char **base_out, int *cond_out) {
+	static const struct { const char *s; int c; } conds[] = {
+		{"eq",0},{"ne",1},{"cs",2},{"cc",3},{"mi",4},{"pl",5},
+		{"vs",6},{"vc",7},{"hi",8},{"ls",9},{"ge",10},{"lt",11},
+		{"gt",12},{"le",13},{"al",14},{0,0}
+	};
+	size_t len = strlen(mnemonic);
+	if (len <= 3) { *base_out = mnemonic; *cond_out = 14; return 0; }
+	/* Try last 2 chars as condition suffix */
+	const char *suffix = mnemonic + len - 2;
+	for (int i = 0; conds[i].s; i++) {
+		if (suffix[0] == conds[i].s[0] && suffix[1] == conds[i].s[1]) {
+			/* Need a static buffer for the base name */
+			static char base_buf[16];
+			size_t blen = len - 2;
+			if (blen >= 16) return -1;
+			memcpy(base_buf, mnemonic, blen);
+			base_buf[blen] = '\0';
+			*base_out = base_buf;
+			*cond_out = conds[i].c;
+			return 0;
+		}
+	}
+	*base_out = mnemonic;
+	*cond_out = 14; /* AL */
+	return 0;
+}
+
 /* ---- Main encode function ---- */
 int arm_encode_insn(const struct mt_target *target,
                       const char *mnemonic, const char *operand_text,
@@ -81,13 +110,17 @@ int arm_encode_insn(const struct mt_target *target,
 		return 0;
 	}
 
-	/* Parse operands: split by ',' and strip spaces */
+	/* Parse operands: split by ',' and strip spaces.
+	 * Respect matching brackets: commas inside [...] are not splitters. */
 	char ops[4][64]; int nops = 0;
 	const char *p = operand_text ? operand_text : "";
 	while (*p && nops < 4) {
 		while (*p == ' ' || *p == '\t') p++;
 		int i = 0;
-		while (*p && *p != ',') {
+		int bracket_depth = 0;
+		while (*p && (bracket_depth > 0 || *p != ',')) {
+			if (*p == '[') bracket_depth++;
+			if (*p == ']' && bracket_depth > 0) bracket_depth--;
 			if (i < 63) ops[nops][i++] = *p;
 			p++;
 		}
@@ -162,10 +195,16 @@ int arm_encode_insn(const struct mt_target *target,
 		{0, 0}
 	};
 
+	/* Parse condition suffix (e.g., "addgt" → "add", cond=12) */
+	const char *dp_base = mnemonic;
+	int cond_code = 14; /* AL */
+	(void)parse_op_cond(mnemonic, &dp_base, &cond_code);
+
 	if (nops >= 2) {
 		for (int d = 0; dp_ops[d].name; d++) {
-			if (strcmp(mnemonic, dp_ops[d].name) != 0) continue;
+			if (strcmp(dp_base, dp_ops[d].name) != 0) continue;
 			uint32_t opc = dp_ops[d].opcode;
+			uint32_t cond = (uint32_t)cond_code << 28;
 
 			if (nops == 2 && (opc == 13 || opc == 15)) {
 				/* mov/mvn rd, rm  or  mov/mvn rd, #imm */
@@ -181,11 +220,11 @@ int arm_encode_insn(const struct mt_target *target,
 							if (rv < 256) { imm8 = rv; rot = r; break; }
 						}
 					}
-					emit32(out->bytes, 0xE3A00000 | (opc==15?0x600000:0) | (rd<<12) | (rot<<8) | imm8);
+					emit32(out->bytes, cond | 0x3A00000 | (opc==15?0x600000:0) | (rd<<12) | (rot<<8) | imm8);
 					return 0;
 				}
 				int rm; if (reg_num(ops[1], &rm) < 0) return -1;
-				emit32(out->bytes, 0xE1A00000 | (opc==15?0x600000:0) | (rd<<12) | rm);
+				emit32(out->bytes, cond | 0x1A00000 | (opc==15?0x600000:0) | (rd<<12) | rm);
 				return 0;
 			}
 
@@ -201,11 +240,11 @@ int arm_encode_insn(const struct mt_target *target,
 						uint32_t rv = (v >> (r*2)) | (v << (32 - r*2));
 						if (rv < 256) { imm8 = rv; rot = r; break; }
 					}}
-					emit32(out->bytes, 0xE3500000 | (opc<<21) | (rn<<16) | (rot<<8) | imm8);
+					emit32(out->bytes, cond | 0x3500000 | (opc<<21) | (rn<<16) | (rot<<8) | imm8);
 					return 0;
 				}
 				int rm; if (reg_num(ops[1], &rm) < 0) return -1;
-				emit32(out->bytes, 0xE1500000 | (opc<<21) | (rn<<16) | rm);
+				emit32(out->bytes, cond | 0x1500000 | (opc<<21) | (rn<<16) | rm);
 				return 0;
 			}
 
@@ -225,7 +264,7 @@ int arm_encode_insn(const struct mt_target *target,
 						uint32_t rv = (v >> (r*2)) | (v << (32 - r*2));
 						if (rv < 256) { imm8 = rv; rot = r; break; }
 					}}
-					emit32(out->bytes, 0xE2000000 | (opc<<21) | (1<<25) | (rn<<16) | (rd<<12) | (rot<<8) | imm8);
+					emit32(out->bytes, cond | 0x2000000 | (opc<<21) | (1<<25) | (rn<<16) | (rd<<12) | (rot<<8) | imm8);
 					return 0;
 				}
 
@@ -244,12 +283,12 @@ int arm_encode_insn(const struct mt_target *target,
 					const char *sv = sh + 3;
 					while (*sv == ' ' || *sv == '\t' || *sv == '#') sv++;
 					int shift_amt = 0; sscanf(sv, "%i", &shift_amt);
-					emit32(out->bytes, 0xE0000000 | (opc<<21) | (rn<<16) | (rd<<12)
-					       | (shift_amt<<7) | (shift_type<<5) | rm);
-					return 0;
-				}
+				emit32(out->bytes, cond | 0xE0000000 | (opc<<21) | (rn<<16) | (rd<<12)
+				       | (shift_amt<<7) | (shift_type<<5) | rm);
+				return 0;
+			}
 
-				emit32(out->bytes, 0xE0000000 | (opc<<21) | (rn<<16) | (rd<<12) | rm);
+			emit32(out->bytes, cond | 0xE0000000 | (opc<<21) | (rn<<16) | (rd<<12) | rm);
 				return 0;
 			}
 
@@ -257,7 +296,7 @@ int arm_encode_insn(const struct mt_target *target,
 				/* Two-address: {add,sub,and,...} rd, rm */
 				int rd; if (reg_num(ops[0], &rd) < 0) return -1;
 				int rm; if (reg_num(ops[1], &rm) < 0) return -1;
-				emit32(out->bytes, 0xE0000000 | (opc<<21) | (rd<<16) | (rd<<12) | rm);
+				emit32(out->bytes, cond | 0xE0000000 | (opc<<21) | (rd<<16) | (rd<<12) | rm);
 				return 0;
 			}
 		}
@@ -284,21 +323,40 @@ int arm_encode_insn(const struct mt_target *target,
 	{
 		const char *shift_mn[] = {"asr", "lsr", "lsl", "ror", 0};
 		int shift_type = -1;
+		const char *shift_base = mnemonic;
+		int shift_cond = 14;
+		(void)parse_op_cond(mnemonic, &shift_base, &shift_cond);
 		for (int i = 0; shift_mn[i]; i++)
-			if (strcmp(mnemonic, shift_mn[i]) == 0) { shift_type = i; break; }
+			if (strcmp(shift_base, shift_mn[i]) == 0) { shift_type = i; break; }
 		if (shift_type >= 0 && nops >= 3) {
 			int rd; if (reg_num(ops[0], &rd) < 0) return -1;
 			int rm; if (reg_num(ops[1], &rm) < 0) return -1;
 			int amt = 0; const char *sv = ops[2];
 			while (*sv == '#' || *sv == ' ') sv++;
 			sscanf(sv, "%i", &amt);
-			emit32(out->bytes, 0xE1A00000 | (rd<<12) | (amt<<7) | (shift_type<<5) | rm);
+			emit32(out->bytes, ((uint32_t)shift_cond<<28) | 0x1A00000 | (rd<<12) | (amt<<7) | (shift_type<<5) | rm);
 			return 0;
+		}
+		/* Two-operand: asr/lsr/lsl/ror rd, rm (shift by rN instead of #N) */
+		/* Actually, these are encoded as MOV rd, rm, SHIFT rs. */
+		/* But GCC rarely emits these as standalone; handle register shifts
+		 * if the third operand is a register name. */
+		if (shift_type >= 0 && nops >= 2) {
+			/* Shift by register: asr rd, rm, rs */
+			if (nops >= 3 && ops[2][0] != '#') {
+				int rd; if (reg_num(ops[0], &rd) < 0) return -1;
+				int rm; if (reg_num(ops[1], &rm) < 0) return -1;
+				int rs; if (reg_num(ops[2], &rs) < 0) return -1;
+				emit32(out->bytes, ((uint32_t)shift_cond<<28) | 0x1A00010 | (rd<<12) | (rs<<8) | (shift_type<<5) | rm);
+				return 0;
+			}
+			/* Two operand: asr rd, rm (shift by r0 implicitly) */
+			/* This is mostly used as alias, fall through to below */
 		}
 	}
 
 	/* ---- Conditional branching (b<cond> label) ---- */
-	if (mnemonic[0] == 'b' && mnemonic[1] != 'l' && mnemonic[1] != 'x') {
+	if (mnemonic[0] == 'b' && strcmp(mnemonic, "bl") != 0 && strcmp(mnemonic, "bx") != 0 && strcmp(mnemonic, "blx") != 0) {
 		static const struct { const char *s; int c; } conds[] = {
 			{"eq",0}, {"ne",1}, {"cs",2}, {"cc",3}, {"mi",4}, {"pl",5},
 			{"vs",6}, {"vc",7}, {"hi",8}, {"ls",9}, {"ge",10}, {"lt",11},
@@ -409,11 +467,13 @@ ldr_mem:
 				rn_str[i++] = *mem++;
 			rn_str[i] = '\0';
 			if (reg_num(rn_str, &rn) < 0) return -1;
-			uint32_t off = 0;
+			int32_t signed_off = 0;
 			if (*mem == ',' || *mem == '#') {
 				while (*mem && (*mem == ',' || *mem == ' ' || *mem == '#')) mem++;
-				sscanf(mem, "%u", &off);
+				sscanf(mem, "%i", &signed_off);
 			}
+			int U = (signed_off >= 0) ? 1 : 0;
+			uint32_t off = (uint32_t)(signed_off >= 0 ? signed_off : -signed_off);
 			if (is_half) {
 				uint32_t hi = (off & 0xF0) << 4;
 				uint32_t lo = off & 0xF;
@@ -426,35 +486,14 @@ ldr_mem:
 				else
 					emit32(out->bytes, 0xE1C000B0 | (rn<<16) | (rd<<12) | hi | lo);
 			} else if (is_byte) {
-				if (is_load)
-					emit32(out->bytes, 0xE5D00000 | (rn<<16) | (rd<<12) | off);
-				else
-					emit32(out->bytes, 0xE5C00000 | (rn<<16) | (rd<<12) | off);
+				uint32_t mem_base = 0xE5000000 | ((uint32_t)U << 23) | (1<<22) | ((uint32_t)is_load << 20);
+				emit32(out->bytes, mem_base | (rn<<16) | (rd<<12) | off);
 			} else {
-				emit32(out->bytes, 0xE5100000 | (is_load?1<<20:0) | (rn<<16) | (rd<<12) | off);
+				uint32_t mem_base = 0xE5000000 | ((uint32_t)U << 23) | ((uint32_t)is_load << 20);
+				emit32(out->bytes, mem_base | (rn<<16) | (rd<<12) | off);
 			}
 			return 0;
 		}
-	}
-
-	/* ---- Conditional move: mov<cond> r0, #N ---- */
-	if (strncmp(mnemonic, "mov", 3) == 0 && nops >= 2) {
-		static const struct { const char *s; int c; } conds[] = {
-			{"eq",0},{"ne",1},{"cs",2},{"cc",3},{"mi",4},{"pl",5},
-			{"vs",6},{"vc",7},{"hi",8},{"ls",9},{"ge",10},{"lt",11},
-			{"gt",12},{"le",13},{"al",14},{0,0}
-		};
-		const char *cs = mnemonic + 3;
-		int cond = 14; /* AL */
-		for (int i = 0; conds[i].s; i++) {
-			if (strcmp(cs, conds[i].s) == 0) { cond = conds[i].c; break; }
-		}
-		int rd; if (reg_num(ops[0], &rd) < 0) return -1;
-		int imm = 0;
-		if (ops[1][0] == '#') sscanf(ops[1]+1, "%i", &imm);
-		else return -1;
-		emit32(out->bytes, (cond<<28) | 0x3A00000 | (rd<<12) | (imm & 0xFF));
-		return 0;
 	}
 
 	/* ---- VFP load/store: flds/fsts/fldd/fstd rd, [rn, #off] ---- */
@@ -901,6 +940,22 @@ ldr_mem:
 		return 0;
 	}
 
+	/* ---- VMRS/VMSR: move between VFP status register and core register ---- */
+	if (nops >= 2 && (strcmp(mnemonic, "vmrs") == 0 || strcmp(mnemonic, "vmsr") == 0)) {
+		if (strcmp(mnemonic, "vmrs") == 0 && nops >= 2) {
+			/* vmrs Rd, fpscr */
+			int rd; if (reg_num(ops[0], &rd) < 0) return -1;
+			emit32(out->bytes, 0xEF00A100 | (rd<<12));
+			return 0;
+		}
+		if (strcmp(mnemonic, "vmsr") == 0 && nops >= 2) {
+			/* vmsr fpscr, Rm */
+			int rm; if (reg_num(ops[1], &rm) < 0) return -1;
+			emit32(out->bytes, 0xEE000A10 | (rm<<12));
+			return 0;
+		}
+	}
+
 	/* ---- VFP vcmpe: compare with NaN check ---- */
 	if (nops >= 2 && (strcmp(mnemonic, "vcmpe") == 0 || strcmp(mnemonic, "vcmpes") == 0 || strcmp(mnemonic, "vcmped") == 0)) {
 		int rd, rm;
@@ -996,6 +1051,14 @@ ldr_mem:
 			int rd, rm, rn; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rm)<0||reg_num(ops[2],&rn)<0) return -1;
 			emit32(out->bytes, 0xE1200050|(rd<<16)|(rm<<0)|(rn<<8)); return 0;
 		}
+		if (strcmp(mnemonic, "qdadd") == 0) {
+			int rd, rm, rn; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rm)<0||reg_num(ops[2],&rn)<0) return -1;
+			emit32(out->bytes, 0xE1400050|(rd<<16)|(rm<<0)|(rn<<8)); return 0;
+		}
+		if (strcmp(mnemonic, "qdsub") == 0) {
+			int rd, rm, rn; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rm)<0||reg_num(ops[2],&rn)<0) return -1;
+			emit32(out->bytes, 0xE1600050|(rd<<16)|(rm<<0)|(rn<<8)); return 0;
+		}
 	}
 
 	/* ---- LDRD/STRD: doubleword load/store ---- */
@@ -1069,6 +1132,10 @@ ldr_mem:
 	if (nops >= 3 && strcmp(mnemonic,"smmul")==0) {
 		int rd,rn,rm; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rn)<0||reg_num(ops[2],&rm)<0) return -1;
 		emit32(out->bytes, 0xE7500F10|(rd<<16)|(rn<<0)|(rm<<8)); return 0;
+	}
+	if (nops >= 4 && strcmp(mnemonic,"smmla")==0) {
+		int rd,rn,rm,ra; if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rn)<0||reg_num(ops[2],&rm)<0||reg_num(ops[3],&ra)<0) return -1;
+		emit32(out->bytes, 0xE7500010|(rd<<16)|(rn<<0)|(rm<<8)|(ra<<12)); return 0;
 	}
 
 	/* ---- NEON vmul/vmla/vmls: floating-point SIMD ---- */
