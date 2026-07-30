@@ -2,7 +2,7 @@
 #include <unistd.h>
 #include "../internal/syscall.h"
 
-#if defined(__aarch64__) || defined(__riscv) || defined(__loongarch64)
+#if defined(__aarch64__) || defined(__riscv) || defined(__loongarch64) || defined(__arm__)
 /* aarch64 没有 rmdir(2)，改用 unlinkat(AT_FDCWD, path, AT_REMOVEDIR)。 */
 #define AT_FDCWD (-100)
 #define AT_REMOVEDIR 0x200

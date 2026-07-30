@@ -2,7 +2,7 @@
 #include <unistd.h>
 #include "../internal/syscall.h"
 
-#if defined(__aarch64__) || defined(__riscv) || defined(__loongarch64)
+#if defined(__aarch64__) || defined(__riscv) || defined(__loongarch64) || defined(__arm__)
 /* aarch64 没有 mkdir(2)，改用 mkdirat(AT_FDCWD, path, mode)。 */
 #define AT_FDCWD (-100)
 #define LINUX_SYS_MKDIRAT 258

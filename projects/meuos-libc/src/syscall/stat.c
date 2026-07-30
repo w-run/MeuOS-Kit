@@ -16,7 +16,7 @@ stat(const char *path, struct stat *result)
 	}
 	return meuos_statx_to_stat(&sx, result);
 }
-#elif defined(__aarch64__) || defined(__riscv) || defined(__loongarch64)
+#elif defined(__aarch64__) || defined(__riscv) || defined(__loongarch64) || defined(__arm__)
 /* aarch64 kernel stat 布局与 struct stat 不同，改用 statx 取跨架构一致的
  * 布局后转换。statx 内部号用 x86_64 的 332，由翻译表转 aarch64 291。 */
 #include "../internal/arch/i386/statx.h"

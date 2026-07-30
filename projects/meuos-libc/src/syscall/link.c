@@ -1,7 +1,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include "../internal/syscall.h"
-#if defined(__aarch64__) || defined(__riscv) || defined(__loongarch64)
+#if defined(__aarch64__) || defined(__riscv) || defined(__loongarch64) || defined(__arm__)
 /* aarch64 没有 link(2)，改用 linkat(AT_FDCWD, old, AT_FDCWD, new, 0)。
  * linkat 有 5 个参数，syscall ABI 忽略多余的第 6 个参数，故用 __syscall6。 */
 #define AT_FDCWD (-100)

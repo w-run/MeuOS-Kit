@@ -3,7 +3,7 @@
 #include <sys/types.h>
 #include "../internal/syscall.h"
 
-#if defined(__aarch64__) || defined(__riscv) || defined(__loongarch64)
+#if defined(__aarch64__) || defined(__riscv) || defined(__loongarch64) || defined(__arm__)
 /* aarch64 没有 chown(92)，改用 fchownat(dirfd, path, owner, group, flag)。
  * 用 AT_FDCWD + 0 flags 复刻 chown() 语义。需要 5 个参数，用 __syscall6
  * 多传一个 0，第 6 个参数被 aarch64 syscall ABI 忽略。 */

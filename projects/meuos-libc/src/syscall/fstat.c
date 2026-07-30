@@ -17,7 +17,7 @@ fstat(int descriptor, struct stat *result)
 	}
 	return meuos_statx_to_stat(&sx, result);
 }
-#elif defined(__aarch64__) || defined(__riscv) || defined(__loongarch64)
+#elif defined(__aarch64__) || defined(__riscv) || defined(__loongarch64) || defined(__arm__)
 /* aarch64 用 statx + AT_EMPTY_PATH 复刻 fstat() 语义。AT_EMPTY_PATH 需要
  * descriptor 指向打开的文件；空路径 "" 是 statx 的约定。 */
 #include "../internal/arch/i386/statx.h"

@@ -17,7 +17,7 @@ lstat(const char *path, struct stat *result)
 	}
 	return meuos_statx_to_stat(&sx, result);
 }
-#elif defined(__aarch64__) || defined(__riscv) || defined(__loongarch64)
+#elif defined(__aarch64__) || defined(__riscv) || defined(__loongarch64) || defined(__arm__)
 /* aarch64 没有 lstat，用 statx + AT_SYMLINK_NOFOLLOW 复刻 lstat() 语义。 */
 #include "../internal/arch/i386/statx.h"
 int

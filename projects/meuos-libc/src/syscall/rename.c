@@ -2,7 +2,7 @@
 #include <unistd.h>
 #include "../internal/syscall.h"
 
-#if defined(__aarch64__) || defined(__riscv) || defined(__loongarch64)
+#if defined(__aarch64__) || defined(__riscv) || defined(__loongarch64) || defined(__arm__)
 /* aarch64 没有 rename(82)，改用 renameat(olddirfd, oldpath, newdirfd, newpath)。
  * 两端都用 AT_FDCWD 复刻 rename() 语义。 */
 #define MEUOS_AT_FDCWD (-100)
