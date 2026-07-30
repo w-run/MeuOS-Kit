@@ -191,18 +191,43 @@ mz_compress_lz77(const void *input, size_t inlen, void **result, size_t *result_
     struct mz_state state;
     mz_init(&state, level < 1 ? 1 : (level > 9 ? 9 : level));
 
+    int use_lazy = (state.level >= 4);
+
     size_t ip = 0;
     while (ip < inlen) {
         int match_len;
         size_t match_off;
 
         if (mz_find(&state, ip, in, inlen, &match_len, &match_off, 1)) {
+            /* Lazy matching: for levels >= 4, check if the NEXT position
+             * has a longer match.  If yes, emit current byte as literal
+             * and let the next iteration handle the better match. */
+            if (use_lazy && ip + 1 < inlen && ip + 2 < inlen) {
+                /* Insert current position into the hash chain so that
+                 * the lookahead at ip+1 can match against it. */
+                uint16_t h3 = MZ_HASH3(in + ip);
+                uint16_t idx = (uint16_t)(ip & MZ_WMASK);
+                state.chain[idx] = state.head[h3];
+                state.head[h3] = (uint16_t)ip;
+
+                int next_len;
+                size_t next_off;
+                if (mz_find(&state, ip + 1, in, inlen, &next_len, &next_off, 1) &&
+                    next_len > match_len + 1) {
+                    /* Next position has a longer match — emit current byte as
+                     * literal, slide+insert it, and continue (will re-find
+                     * the better match on the next iteration). */
+                    goto emit_literal;
+                }
+            }
+
             /* v2 match encode */
             if (op + 3 > max_out) { free(out); return MZ_ERR_STREAM; }
             int len = match_len > MZ_MAX_MATCH_V2 ? MZ_MAX_MATCH_V2 : match_len;
             write_match_v2(out, &op, match_off, len);
             slide_and_insert(&state, in, &ip, inlen, (size_t)len);
         } else {
+emit_literal:
             /* Literal */
             if (op + (in[ip] >= 0x80 ? 2 : 1) > max_out) { free(out); return MZ_ERR_STREAM; }
             write_literal(out, &op, in[ip]);

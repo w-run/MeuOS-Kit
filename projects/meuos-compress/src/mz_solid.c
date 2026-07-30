@@ -164,12 +164,30 @@ int mz_solid_add(struct mz_solid_ctx *ctx, const void *data, size_t len,
     out[op++] = (uint8_t)((len >> 16) & 0xFF);
     out[op++] = (uint8_t)((len >> 24) & 0xFF);
 
+    int use_lazy = (ctx->level >= 4);
+
     size_t ip = 0;
     while (ip < len) {
         int match_len;
         size_t match_off;
 
         if (find_match(ctx, ip, in, len, &match_len, &match_off)) {
+            /* Lazy matching: for levels >= 4, check if the NEXT position
+             * has a longer match. */
+            if (use_lazy && ip + 1 < len && ip + 2 < len) {
+                uint16_t h3 = SOLID_HASH3(in + ip);
+                uint16_t idx = (uint16_t)(ip & SOLID_WMASK);
+                ctx->chain[idx] = ctx->head[h3];
+                ctx->head[h3] = (uint16_t)ip;
+
+                int next_len;
+                size_t next_off;
+                if (find_match(ctx, ip + 1, in, len, &next_len, &next_off) &&
+                    next_len > match_len + 1) {
+                    goto emit_literal;
+                }
+            }
+
             /* v2 match token: 3 字节，16 位偏移，7 位长度 */
             if (match_len > SOLID_MAX_MATCH)
                 match_len = SOLID_MAX_MATCH;
@@ -179,6 +197,7 @@ int mz_solid_add(struct mz_solid_ctx *ctx, const void *data, size_t len,
                                   | ((match_len - SOLID_MIN_MATCH) & 0x7F));
             slide_and_insert(ctx, in, &ip, len, (size_t)match_len);
         } else {
+emit_literal:
             /* Literal: 值 < 0x80 直接写入，否则用 0x81 转义 */
             if (in[ip] >= 0x80) {
                 out[op++] = 0x81;

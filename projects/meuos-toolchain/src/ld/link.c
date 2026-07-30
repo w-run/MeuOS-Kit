@@ -2226,26 +2226,40 @@ static int
 write_program_header_type(FILE *file, uint32_t type, uint32_t flags,
                           uint64_t offset, uint64_t address,
                           uint64_t file_size, uint64_t memory_size,
-                          uint64_t align)
+                          uint64_t align, int is_elf32)
 {
-	unsigned char p[56] = {0};
-	write32(p + 0, type);
-	write32(p + 4, flags);
-	write64(p + 8, offset);
-	write64(p + 16, address);
-	write64(p + 24, address);
-	write64(p + 32, file_size);
-	write64(p + 40, memory_size);
-	write64(p + 48, align);
-	return fwrite(p, 1, sizeof(p), file) == sizeof(p) ? 0 : -1;
+	if (is_elf32) {
+		unsigned char p[32] = {0};
+		write32(p + 0, type);
+		write32(p + 4, (uint32_t)offset);
+		write32(p + 8, (uint32_t)address);
+		write32(p + 12, (uint32_t)address);
+		write32(p + 16, (uint32_t)file_size);
+		write32(p + 20, (uint32_t)memory_size);
+		write32(p + 24, flags);
+		write32(p + 28, (uint32_t)align);
+		return fwrite(p, 1, sizeof(p), file) == sizeof(p) ? 0 : -1;
+	} else {
+		unsigned char p[56] = {0};
+		write32(p + 0, type);
+		write32(p + 4, flags);
+		write64(p + 8, offset);
+		write64(p + 16, address);
+		write64(p + 24, address);
+		write64(p + 32, file_size);
+		write64(p + 40, memory_size);
+		write64(p + 48, align);
+		return fwrite(p, 1, sizeof(p), file) == sizeof(p) ? 0 : -1;
+	}
 }
 
 static int
 write_program_header(FILE *file, uint32_t flags, uint64_t offset,
-                     uint64_t address, uint64_t file_size, uint64_t memory_size)
+                     uint64_t address, uint64_t file_size, uint64_t memory_size,
+                     int is_elf32)
 {
 	return write_program_header_type(file, LD_PT_LOAD, flags, offset, address,
-	                                file_size, memory_size, LD_PAGE);
+	                                file_size, memory_size, LD_PAGE, is_elf32);
 }
 
 /* ---- .eh_frame_hdr support (--eh-frame-hdr) ----
@@ -2761,7 +2775,8 @@ write_executable(struct ld_context *ctx, const char *path,
 		if (write_program_header_type(file, MT_PT_PHDR, LD_PF_R,
 		                             phoff, base_addr + phoff,
 		                             (uint64_t)phnum * phentsize,
-		                             (uint64_t)phnum * phentsize, 8) != 0)
+		                             (uint64_t)phnum * phentsize, 8,
+		                             target->elf_class == 1) != 0)
 			goto out_file;
 	}
 	{
@@ -2777,7 +2792,8 @@ write_executable(struct ld_context *ctx, const char *path,
 			if (tde > memsz) memsz = tde;
 		}
 		if (write_program_header(file, LD_PF_R | LD_PF_W | LD_PF_X,
-		                         0, base_addr, filesz, memsz) != 0)
+		                         0, base_addr, filesz, memsz,
+		                         target->elf_class == 1) != 0)
 			goto out_file;
 	}
 	/* PT_DYNAMIC for shared libraries and PIE executables (ET_DYN) */
@@ -2788,7 +2804,8 @@ write_executable(struct ld_context *ctx, const char *path,
 			if (write_program_header_type(file, MT_PT_DYNAMIC,
 			                             LD_PF_R | LD_PF_W,
 			                             dyn->file_offset, dyn->address,
-			                             dyn->size, dyn->size, 8) != 0)
+			                             dyn->size, dyn->size, 8,
+			                             target->elf_class == 1) != 0)
 				goto out_file;
 		}
 	}
@@ -2799,7 +2816,8 @@ write_executable(struct ld_context *ctx, const char *path,
 			struct ld_group *interp = &ctx->groups[ig];
 			if (write_program_header_type(file, MT_PT_INTERP, LD_PF_R,
 			                             interp->file_offset, interp->address,
-			                             interp->size, interp->size, 1) != 0)
+			                             interp->size, interp->size, 1,
+			                             target->elf_class == 1) != 0)
 				goto out_file;
 		}
 	}
@@ -2822,7 +2840,8 @@ write_executable(struct ld_context *ctx, const char *path,
 		}
 		if (write_program_header_type(file, LD_PT_TLS, LD_PF_R, tls_off,
 		                               tls_addr, tls_filesz, ctx->tls_size,
-		                               ctx->tls_align > 0x1000 ? ctx->tls_align : 0x1000) != 0)
+		                               ctx->tls_align > 0x1000 ? ctx->tls_align : 0x1000,
+		                               target->elf_class == 1) != 0)
 			goto out_file;
 	}
 	/* PT_GNU_RELRO: mark .dynamic and .got as read-only after relocations.
@@ -2849,7 +2868,8 @@ write_executable(struct ld_context *ctx, const char *path,
 			uint64_t roff = rstart - base_va;
 			if (write_program_header_type(file, MT_PT_GNU_RELRO, LD_PF_R,
 			                             roff, rstart, rend - rstart,
-			                             rend - rstart, 1) != 0)
+			                             rend - rstart, 1,
+			                             target->elf_class == 1) != 0)
 				goto out_file;
 		}
 	}
@@ -2903,19 +2923,35 @@ write_executable(struct ld_context *ctx, const char *path,
 	if (fwrite((unsigned char[64]){0}, 1, 64, file) != 64)
 		goto out_file;
 	for (i = 1; i < (size_t)output_count; ++i) {
-		unsigned char sh[64] = {0};
-		write32(sh + 0, name_offsets[i]);
-		write32(sh + 4, sections[i].type);
-		write64(sh + 8, sections[i].flags);
-		write64(sh + 16, sections[i].address);
-		write64(sh + 24, sections[i].offset);
-		write64(sh + 32, sections[i].size);
-		write32(sh + 40, sections[i].link);
-		write32(sh + 44, sections[i].info);
-		write64(sh + 48, sections[i].align ? sections[i].align : 1);
-		write64(sh + 56, sections[i].entry_size);
-		if (fwrite(sh, 1, sizeof(sh), file) != sizeof(sh))
-			goto out_file;
+		if (target->elf_class == 1) {
+			unsigned char sh[40] = {0};
+			write32(sh + 0, name_offsets[i]);
+			write32(sh + 4, sections[i].type);
+			write32(sh + 8, (uint32_t)sections[i].flags);
+			write32(sh + 12, (uint32_t)sections[i].address);
+			write32(sh + 16, (uint32_t)sections[i].offset);
+			write32(sh + 20, (uint32_t)sections[i].size);
+			write32(sh + 24, sections[i].link);
+			write32(sh + 28, sections[i].info);
+			write32(sh + 32, (uint32_t)(sections[i].align ? sections[i].align : 1));
+			write32(sh + 36, (uint32_t)sections[i].entry_size);
+			if (fwrite(sh, 1, sizeof(sh), file) != sizeof(sh))
+				goto out_file;
+		} else {
+			unsigned char sh[64] = {0};
+			write32(sh + 0, name_offsets[i]);
+			write32(sh + 4, sections[i].type);
+			write64(sh + 8, sections[i].flags);
+			write64(sh + 16, sections[i].address);
+			write64(sh + 24, sections[i].offset);
+			write64(sh + 32, sections[i].size);
+			write32(sh + 40, sections[i].link);
+			write32(sh + 44, sections[i].info);
+			write64(sh + 48, sections[i].align ? sections[i].align : 1);
+			write64(sh + 56, sections[i].entry_size);
+			if (fwrite(sh, 1, sizeof(sh), file) != sizeof(sh))
+				goto out_file;
+		}
 	}
 	if (fclose(file) != 0) {
 		file = NULL;
