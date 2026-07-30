@@ -52,7 +52,7 @@ mkdir -p "$(dirname "$OUT")"
 ISO="$(date -u +%Y-%m-%d)"
 NOW="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 HEAD="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-BRANCH="audit/$DATE"
+BRANCH="daily/$DATE"
 
 # ---------------------------------------------------------------------------
 # 工具函数
