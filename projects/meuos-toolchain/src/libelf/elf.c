@@ -276,6 +276,7 @@ mt_elf_machine_name(uint16_t machine)
 	case MT_EM_AARCH64: return "aarch64";
 	case MT_EM_RISCV: return "riscv";
 	case MT_EM_LOONGARCH: return "loongarch";
+	case MT_EM_ARM: return "arm";
 	default: return "unknown";
 	}
 }

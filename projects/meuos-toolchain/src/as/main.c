@@ -15,7 +15,7 @@ usage(FILE *out)
 	        "usage: as [-o output] [--target=<arch>] input.s\n"
 	        "       as --help\n"
 	        "       as --version\n"
-	        "supported targets: x86_64, i386, aarch64, riscv64, loongarch64\n");
+	        "supported targets: x86_64, i386, aarch64, riscv64, loongarch64, arm\n");
 }
 
 int
