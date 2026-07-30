@@ -468,17 +468,37 @@ int mz2_read_file(void *ctx, const char *name, void **data, size_t *size)
         return MZ_ERR_DATA;
     if (blk_sz != e->csize)
         return MZ_ERR_DATA;
-    if (blk_type != MZ_BLOCK_RAW)
-        return MZ_ERR_CODEC;
 
-    void *out = malloc(e->size);
-    if (!out)
-        return MZ_ERR_MEMORY;
-    memcpy(out, p + MZ2_BLOCK_HDR_LEN, e->size);
+    if (blk_type == MZ_BLOCK_RAW) {
+        void *out = malloc(e->size ? e->size : 1);
+        if (!out)
+            return MZ_ERR_MEMORY;
+        if (e->size)
+            memcpy(out, p + MZ2_BLOCK_HDR_LEN, e->size);
+        *data = out;
+        *size = e->size;
+        return MZ_OK;
+    }
 
-    *data = out;
-    *size = e->size;
-    return MZ_OK;
+    if (blk_type == MZ_BLOCK_SOLID_START || blk_type == MZ_BLOCK_SOLID_NEXT) {
+        /* 固实压缩块：mZ v2 流格式，由 mz_solid_add 写入 */
+        void *raw = NULL; size_t raw_len = 0;
+        int r2 = mz_decompress_lz77(p + MZ2_BLOCK_HDR_LEN, blk_sz,
+                                    &raw, &raw_len);
+        if (r2 <= 0) {
+            free(raw);
+            return (r2 < 0) ? r2 : MZ_ERR_DATA;
+        }
+        if (raw_len != e->size) {
+            free(raw);
+            return MZ_ERR_DATA;
+        }
+        *data = raw;
+        *size = raw_len;
+        return MZ_OK;
+    }
+
+    return MZ_ERR_CODEC;
 }
 
 /* ================================================================

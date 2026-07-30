@@ -501,6 +501,8 @@ spill(Fn *fn)
 			if (!bshas(v, t))
 				slot(t);
 		bscopy(b->out, v);
+		if (rtype(b->jmp.arg) == RCall)
+			b->out->t[0] |= T.retregs(b->jmp.arg, 0);
 
 		/* 2. process the block instructions */
 		curi = &insb[NIns];
@@ -528,6 +530,12 @@ spill(Fn *fn)
 					 * before they reach spill, but be
 					 * defensive. */
 					slot(t);
+				} else if (t < Tmp0) {
+					/* Physical register write (e.g. R0/D0 from
+					 * ABI lowering).  Must be in the live set
+					 * so rega can find it in the register map. */
+					bsset(v, t);
+					bsset(w, t);
 				} else {
 					/* make sure we have a reg
 					 * for the result */
@@ -579,11 +587,14 @@ spill(Fn *fn)
 			reloads(u, v);
 		if (!req(i->to, R)) {
 			t = i->to.val;
-			store(i->to, tmp[t].slot);
-			if (t >= Tmp0)
+			if (t >= Tmp0) {
+				store(i->to, tmp[t].slot);
 				/* in case i->to was a
 				 * dead temporary */
 				bsclr(v, t);
+			} else {
+				bsclr(v, t);
+			}
 		}
 		emiti(*i);
 			r = v->t[0]; /* Tmp0 is NBit */

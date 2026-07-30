@@ -76,12 +76,92 @@ int main(void)
     }
     
     
-    /* Test 5: Error handling */
+    /* Test 4: Solid compression (SOLID_START + SOLID_NEXT) */
+    {
+        struct mz_params params = { .level = 6, .flags = MZ_FLAG_SOLID };
+        void *out_buf = NULL; size_t out_len = 0;
+
+        int r = mz2_create(&out_buf, &out_len, &params);
+        TEST("solid create", r == MZ_OK);
+
+        if (r == MZ_OK) {
+            const char *f1 = "hello world";
+            const char *f2 = "hello meuos";
+            r = mz2_add_file(out_buf, "a.txt", f1, strlen(f1), 0644);
+            TEST("solid add a", r == MZ_OK);
+            r = mz2_add_file(out_buf, "b.txt", f2, strlen(f2), 0644);
+            TEST("solid add b", r == MZ_OK);
+
+            void *result; size_t result_len;
+            r = mz2_finish(out_buf, &result, &result_len);
+            TEST("solid finish", r == MZ_OK);
+
+            if (r == MZ_OK) {
+                void *ctx;
+                r = mz2_open(result, result_len, &ctx);
+                TEST("solid open", r == MZ_OK);
+
+                void *d1; size_t d1_len;
+                r = mz2_read_file(ctx, "a.txt", &d1, &d1_len);
+                TEST("solid read a", r == MZ_OK && d1_len == strlen(f1)
+                     && memcmp(d1, f1, d1_len) == 0);
+                free(d1);
+
+                void *d2; size_t d2_len;
+                r = mz2_read_file(ctx, "b.txt", &d2, &d2_len);
+                TEST("solid read b", r == MZ_OK && d2_len == strlen(f2)
+                     && memcmp(d2, f2, d2_len) == 0);
+                free(d2);
+
+                mz2_close(ctx);
+                free(result);
+            }
+            free(out_buf);
+        }
+    }
+
+    /* Test 5: Benchmark — level 1/3/5/7/9 on 100KB random and periodic data */
+    {
+        size_t sz = 100000;
+        uint8_t *data = malloc(sz);
+        srand(42);
+        for (size_t i = 0; i < sz; i++)
+            data[i] = (uint8_t)(rand() & 0xFF);
+
+        printf("=== benchmark (100KB random data) ===\n");
+        for (int lv = 1; lv <= 9; lv += 2) {
+            void *c; size_t cl;
+            int r = mz_compress(data, sz, &c, &cl, MZ_CODEC_MEUOS, lv);
+            if (r > 0) {
+                printf("  level %d: %zu -> %zu (%.1f%%)\n",
+                       lv, sz, cl, 100.0 * cl / sz);
+                free(c);
+            }
+        }
+        free(data);
+
+        char *text = malloc(sz);
+        for (size_t i = 0; i < sz; i++)
+            text[i] = "abcdefghij"[i % 10];
+        printf("=== benchmark (100KB periodic text) ===\n");
+        for (int lv = 1; lv <= 9; lv += 2) {
+            void *c; size_t cl;
+            int r = mz_compress(text, sz, &c, &cl, MZ_CODEC_MEUOS, lv);
+            if (r > 0) {
+                printf("  level %d: %zu -> %zu (%.1f%%)\n",
+                       lv, sz, cl, 100.0 * cl / sz);
+                free(c);
+            }
+        }
+        free(text);
+    }
+
+    /* Test 6: Error handling */
     uint8_t bad_data[4] = {0, 0, 0, 0};
     ret = mz_decompress(bad_data, 4, &decompressed, &decomp_len,
                         MZ_CODEC_LZ77);
     TEST("bad data returns error", ret < 0);
-    
+
     ret = mz_compress(text, text_len, &compressed, &comp_len, 999, 1);
     TEST("bad codec returns error", ret == MZ_ERR_CODEC);
     
