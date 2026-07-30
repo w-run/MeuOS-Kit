@@ -1798,6 +1798,7 @@ layout_output(struct ld_context *ctx)
 			g->address = td->address + td->size;
 		} else {
 			/* No .tdata: allocate beyond non-TLS sections */
+			offset = align_up(offset, g->align ? g->align : 1);
 			g->file_offset = offset;
 			g->address = base + offset;
 			if (g->type != MT_SHT_NOBITS)

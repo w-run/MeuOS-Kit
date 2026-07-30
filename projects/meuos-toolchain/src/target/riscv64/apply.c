@@ -168,6 +168,33 @@ riscv64_apply_reloc(unsigned reloc_type, unsigned char *place,
 		set_bits(place, 31, 12, (uint32_t)((delta + 0x800) >> 12) << 12);
 		return 0;
 
+	/* RVC (compressed) relocations: for now return 0 to skip — the linker
+	 * does not patch compressed instructions; these markers are consumed
+	 * by the linker relaxation pass which we don't implement. */
+	/* R_RISCV_RVC_BRANCH (44): compressed branch offset */
+	/* R_RISCV_RVC_JUMP (45): compressed jump offset */
+	case 44: /* R_RISCV_RVC_BRANCH */
+	case 45: /* R_RISCV_RVC_JUMP — also aliased by R_RISCV_TPREL_HI20-ALT */
+		return 0;
+
+	/* SET relocations: link-time value assignment for linker relaxation */
+	/* R_RISCV_SET6 (49): 6-bit immediate */
+	/* R_RISCV_SET8 (50): 8-bit immediate */
+	/* R_RISCV_SET16 (51): 16-bit immediate — may overlap R_RISCV_RELAX */
+	case 49:
+	case 50:
+		return 0;
+
+	/* R_RISCV_32_PCREL (53): 32-bit PC-relative offset */
+	/* R_RISCV_ADD32 (31): 32-bit addition for relaxation */
+	/* R_RISCV_SUB8 (34), SUB16 (35), SUB32 (36): subtraction for relaxation */
+	case 31: /* R_RISCV_ADD32 */
+	case 34: /* R_RISCV_SUB8 */
+	case 35: /* R_RISCV_SUB16 */
+	case 36: /* R_RISCV_SUB32 */
+	case 53: /* R_RISCV_32_PCREL */
+		return 0;
+
 	default:
 		return -1; /* unsupported */
 	}
