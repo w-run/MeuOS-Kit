@@ -545,6 +545,32 @@ la64_encode_insn(const struct mt_target *target,
 		return 0;
 	}
 
+	/* === Atomic LL/SC (3-operand forms: rd, rj, imm12 or rd, rj, rk).
+	 * Must come before the branch / ALU / shift blocks which would
+	 * otherwise intercept the same operand pattern (nops==3, reg, reg). */
+	if (nops == 3 && ops[0].kind == 1 && ops[1].kind == 1) {
+		rd = (unsigned)ops[0].reg;
+		rj = (unsigned)ops[1].reg;
+		if (ops[2].kind == 2 &&
+		    (strcmp(mnemonic, "ll.w") == 0 || strcmp(mnemonic, "ll.d") == 0)) {
+			int32_t imm_a = (int32_t)ops[2].imm;
+			if (strcmp(mnemonic, "ll.w") == 0)
+				emit32(out->bytes, (0x0A0<<24) | rd | (rj<<5) | ((imm_a&0xFFF)<<10));
+			else
+				emit32(out->bytes, (0x0AA<<24) | rd | (rj<<5) | ((imm_a&0xFFF)<<10));
+			return 0;
+		}
+		if ((ops[2].kind == 1 || (ops[2].kind == 2 && ops[2].imm == 0)) &&
+		    (strcmp(mnemonic, "sc.w") == 0 || strcmp(mnemonic, "sc.d") == 0)) {
+			rk = (ops[2].kind == 1) ? (unsigned)ops[2].reg : 0;
+			if (strcmp(mnemonic, "sc.w") == 0)
+				emit32(out->bytes, (0x0A1<<24) | rd | (rj<<5) | (rk<<10));
+			else
+				emit32(out->bytes, (0x0AB<<24) | rd | (rj<<5) | (rk<<10));
+			return 0;
+		}
+	}
+
 	/* === 2-register conditional branches: beq/bne/blt/bge/bltu/bgeu ===
 	 * Must come BEFORE the 2RI12 ALU block (which also matches
 	 * nops==3 with two registers but expects ALU mnemonics, not
@@ -585,6 +611,28 @@ la64_encode_insn(const struct mt_target *target,
 	}
 alu_or_shift:
 
+	/* === 2RI14 shifts: slli.w/d, srli.w/d, srai.w/d ===
+	 * Must come BEFORE 2RI12 ALU because both match the same operand
+	 * pattern (nops==3, reg, reg, imm) and shifts are not ALU mnemonics.
+	 * base already includes the size flag (bit15 .w, bit16 .d); shift
+	 * amount goes into bits 10..14 (.w) or 10..15 (.d). */
+	if (nops == 3 && ops[0].kind == 1 && ops[1].kind == 1 && ops[2].kind == 2) {
+		rd = (unsigned)ops[0].reg;
+		rj = (unsigned)ops[1].reg;
+		uint32_t shamt = (uint32_t)ops[2].imm;
+		uint32_t base = 0; uint32_t mask = 0x1F;
+		if      (strcmp(mnemonic, "slli.w") == 0) { base = 0x00408000; mask = 0x1F; }
+		else if (strcmp(mnemonic, "slli.d") == 0) { base = 0x00410000; mask = 0x3F; }
+		else if (strcmp(mnemonic, "srli.w") == 0) { base = 0x00448000; mask = 0x1F; }
+		else if (strcmp(mnemonic, "srli.d") == 0) { base = 0x00450000; mask = 0x3F; }
+		else if (strcmp(mnemonic, "srai.w") == 0) { base = 0x00488000; mask = 0x1F; }
+		else if (strcmp(mnemonic, "srai.d") == 0) { base = 0x00490000; mask = 0x3F; }
+		else goto alu2ri12;
+		emit32(out->bytes, base | rd | (rj << 5) | ((shamt & mask) << 10));
+		return 0;
+	}
+alu2ri12:
+
 	/* === 2RI12 ALU: addi.w/d, slti, sltui, andi, ori, xori ===
 	 * Imm can be kind==2 (plain immediate) or kind==4 (relocation
 	 * expression like %pc_lo12(sym) or %le_lo12(sym)).
@@ -612,25 +660,6 @@ alu_or_shift:
 		} else {
 			emit32(out->bytes, ri12(op, rd, rj, (int32_t)imm));
 		}
-		return 0;
-	}
-
-	/* === 2RI14 shifts: slli.w/d, srli.w/d, srai.w/d ===
-	 * base already includes the size flag (bit15 .w, bit16 .d); shift amount
-	 * goes into bits 10..14 (.w) or 10..15 (.d). */
-	if (nops == 3 && ops[0].kind == 1 && ops[1].kind == 1 && ops[2].kind == 2) {
-		rd = (unsigned)ops[0].reg;
-		rj = (unsigned)ops[1].reg;
-		uint32_t shamt = (uint32_t)ops[2].imm;
-		uint32_t base = 0; uint32_t mask = 0x1F;
-		if      (strcmp(mnemonic, "slli.w") == 0) { base = 0x00408000; mask = 0x1F; }
-		else if (strcmp(mnemonic, "slli.d") == 0) { base = 0x00410000; mask = 0x3F; }
-		else if (strcmp(mnemonic, "srli.w") == 0) { base = 0x00448000; mask = 0x1F; }
-		else if (strcmp(mnemonic, "srli.d") == 0) { base = 0x00450000; mask = 0x3F; }
-		else if (strcmp(mnemonic, "srai.w") == 0) { base = 0x00488000; mask = 0x1F; }
-		else if (strcmp(mnemonic, "srai.d") == 0) { base = 0x00490000; mask = 0x3F; }
-		else return -1;
-		emit32(out->bytes, base | rd | (rj << 5) | ((shamt & mask) << 10));
 		return 0;
 	}
 
@@ -754,6 +783,26 @@ branch2:
 		return 0;
 	}
 
+	/* === la rd, sym (pseudo-instruction — PC-relative address).
+	 * Expands to pcalau12i rd, %pc_hi20(sym) + addi.d rd, rd, %pc_lo12(sym)
+	 * (two real instructions with two fixups). */
+	if (strcmp(mnemonic, "la") == 0 && nops == 2 && ops[0].kind == 1 && ops[1].kind == 4) {
+		rd = (unsigned)ops[0].reg;
+		const char *lsym = ops[1].sym;
+		emit32(out->bytes,      0x1A << 24 | rd);                    /* pcalau12i rd */
+		emit32(out->bytes + 4,  ri12(0x0B << 22, rd, rd, 0));        /* addi.d rd, rd, 0 */
+		out->size = 8;
+		out->fixed = 0;
+		set_fixup(out, 0, 4, RLA_PCALA_HI20, lsym, 0);
+		out->fixup2_present = 1;
+		out->fixup2_offset  = 4;
+		out->fixup2_width   = 4;
+		out->reloc_type2    = RLA_PCALA_LO12;
+		out->fixup2_symbol  = lsym;
+		out->fixup2_addend  = 0;
+		return 0;
+	}
+
 	/* === move rd, rj  ->  or rd, rj, $zero === */
 	if (strcmp(mnemonic, "move") == 0 && nops == 2 && ops[0].kind == 1 && ops[1].kind == 1) {
 		emit32(out->bytes, r3(0x150000, (unsigned)ops[0].reg, (unsigned)ops[1].reg, 0));
@@ -766,20 +815,39 @@ branch2:
 		return 0;
 	}
 
-	/* === li.w / li.d rd, imm  (single-instruction expansions) === */
+	/* === li.w / li.d rd, imm  (single- and dual-instruction expansions) ===
+	 * Expands to:
+	 *   or rd,$zero,$zero         when v == 0
+	 *   ori rd,$zero,v            when 0 < v <= 0xFFF
+	 *   addi.w/d rd,$zero,v      when -2048 <= v < 0
+	 *   lu12i.w rd,hi             when hi = (v>>12), 0 < v <= 0xFFFFF000, lo12=0
+	 *   lu12i.w + ori             when 0 < v <= 0xFFFFFFF (any lower 12 bits)
+	 *   lu12i.w (sign-extended)   when -524288 <= v <= -0x1000, lo12=0 */
 	if ((strcmp(mnemonic, "li.w") == 0 || strcmp(mnemonic, "li.d") == 0) && nops == 2 &&
 	    ops[0].kind == 1 && ops[1].kind == 2) {
 		rd = (unsigned)ops[0].reg;
 		int64_t v = ops[1].imm;
+		int is_d = (mnemonic[3] == 'd');
 		if (v == 0) {
 			emit32(out->bytes, r3(0x150000, rd, 0, 0));      /* or rd,$zero,$zero */
 		} else if (v > 0 && v <= 0xFFF) {
 			emit32(out->bytes, ri12(0x0E << 22, rd, 0, (int32_t)v));  /* ori */
 		} else if (v >= -2048 && v < 0) {
-			int is_d = (mnemonic[3] == 'd');
 			emit32(out->bytes, ri12((is_d ? 0x0B : 0x0A) << 22, rd, 0, (int32_t)v));
-		} else if (v >= -524288 && v <= 524287) {
-			uint32_t imm20 = (uint32_t)(v & 0xFFFFF);     /* lu12i.w (sign-extended) */
+		} else if (v > 0 && (v & 0xFFF) == 0 && v <= 0xFFFFF000) {
+			/* single lu12i.w: value must be 12-bit-aligned */
+			uint32_t imm20 = (uint32_t)(v >> 12) & 0xFFFFF;
+			emit32(out->bytes, 0x14 << 24 | rd | (imm20 << 5));
+		} else if (v > 0 && v <= 0xFFFFFFF) {
+			/* lu12i.w rd, hi  +  ori rd, rd, lo */
+			uint32_t hi = ((uint32_t)(v >> 12)) & 0xFFFFF;
+			uint32_t lo = ((uint32_t)(v & 0xFFF));
+			emit32(out->bytes, 0x14 << 24 | rd | (hi << 5));
+			emit32(out->bytes + 4, ri12(0x0E << 22, rd, rd, (int32_t)lo));
+			out->size = 8;
+		} else if ((v & 0xFFF) == 0 && v >= -524288 && v <= 524287) {
+			/* signed lu12i.w: negative values where lower 12 bits = 0 */
+			uint32_t imm20 = (uint32_t)(v & 0xFFFFF);
 			emit32(out->bytes, 0x14 << 24 | rd | (imm20 << 5));
 		} else {
 			return -1;  /* would need multi-instruction expansion */
@@ -787,21 +855,37 @@ branch2:
 		return 0;
 	}
 
-	/* === Atomic: ll.w, ll.d, sc.w, sc.d === */
+	/* === Atomic: ll.w, ll.d, sc.w, sc.d ===
+	 * ll.w/d rd, imm(rj)     (mem syntax, 2 ops)
+	 * ll.w/d rd, rj, imm12   (reg+imm syntax, 3 ops)
+	 * sc.w/d rd, rj, rk      (3-register, ISA-native)
+	 * sc.w/d rd, rj, 0       (rk = $zero shorthand) */
 	if (nops == 2 && ops[0].kind == 1 && ops[1].kind == 3) {
 		rd = (unsigned)ops[0].reg;
 		rj = (unsigned)ops[1].mem_reg;
 		int32_t im = (int32_t)ops[1].imm;
 		if (strcmp(mnemonic, "ll.w") == 0) { emit32(out->bytes, (0x0A0<<24) | rd | (rj<<5) | ((im&0xFFF)<<10)); return 0; }
 		if (strcmp(mnemonic, "ll.d") == 0) { emit32(out->bytes, (0x0AA<<24) | rd | (rj<<5) | ((im&0xFFF)<<10)); return 0; }
+		/* sc.w/sc.d with mem syntax: rd, rj (base address in second operand) */
+		if (strcmp(mnemonic, "sc.w") == 0) { emit32(out->bytes, (0x0A1<<24) | rd | (rj<<5) | (0<<10)); return 0; }
+		if (strcmp(mnemonic, "sc.d") == 0) { emit32(out->bytes, (0x0AB<<24) | rd | (rj<<5) | (0<<10)); return 0; }
 	}
-	if (nops == 3 && ops[0].kind == 1 && ops[1].kind == 1 && ops[2].kind == 3) {
+	/* ll.w/d rd, rj, imm12 (3-operand with immediate) */
+	if (nops == 3 && ops[0].kind == 1 && ops[1].kind == 1 && ops[2].kind == 2) {
 		rd = (unsigned)ops[0].reg;
 		rj = (unsigned)ops[1].reg;
-		rk = (unsigned)ops[2].mem_reg;
-		int32_t im = (int32_t)ops[2].imm;
-		if (strcmp(mnemonic, "sc.w") == 0) { emit32(out->bytes, (0x0A1<<24) | rd | (rj<<5) | (rk<<10) | ((im&0xFFF)<<10)); return 0; }
-		if (strcmp(mnemonic, "sc.d") == 0) { emit32(out->bytes, (0x0AB<<24) | rd | (rj<<5) | (rk<<10) | ((im&0xFFF)<<10)); return 0; }
+		if (strcmp(mnemonic, "ll.w") == 0) { emit32(out->bytes, (0x0A0<<24) | rd | (rj<<5) | (((int32_t)ops[2].imm & 0xFFF)<<10)); return 0; }
+		if (strcmp(mnemonic, "ll.d") == 0) { emit32(out->bytes, (0x0AA<<24) | rd | (rj<<5) | (((int32_t)ops[2].imm & 0xFFF)<<10)); return 0; }
+	}
+	/* sc.w/d rd, rj, rk (3-register, ISA-native).  An immediate 0 in the
+	 * third slot is accepted as shorthand for $zero (rk=0). */
+	if (nops == 3 && ops[0].kind == 1 && ops[1].kind == 1 &&
+	    (ops[2].kind == 1 || (ops[2].kind == 2 && ops[2].imm == 0))) {
+		rd = (unsigned)ops[0].reg;
+		rj = (unsigned)ops[1].reg;
+		rk = (ops[2].kind == 1) ? (unsigned)ops[2].reg : 0;
+		if (strcmp(mnemonic, "sc.w") == 0) { emit32(out->bytes, (0x0A1<<24) | rd | (rj<<5) | (rk<<10)); return 0; }
+		if (strcmp(mnemonic, "sc.d") == 0) { emit32(out->bytes, (0x0AB<<24) | rd | (rj<<5) | (rk<<10)); return 0; }
 	}
 
 	/* === Extension: ext.w.b, ext.w.h === */

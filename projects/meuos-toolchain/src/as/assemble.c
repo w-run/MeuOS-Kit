@@ -499,10 +499,13 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 		 * VEX), we need to distinguish "missing CPU feature" from
 		 * "encoder doesn't support this yet".  The heuristic is simple:
 		 * mnemonic starts with 'v' → AVX required.  Future improvements
-		 * should use a proper VEX/EVEX opcode table. */
+		 * should use a proper VEX/EVEX opcode table.
+		 * Only apply on x86/x86_64 targets (non-x86 targets like ARM
+		 * have 'v'-prefixed VFP/NEON instructions). */
 		const char *mn = mnemonic;
 		while (*mn == '_' || *mn == '.') mn++;  /* skip decorators */
-		if (mn[0] == 'v' && mn[1] != '\0') {
+		if (mn[0] == 'v' && mn[1] != '\0' &&
+		    (as->target->emachine == MT_EM_X86_64 || as->target->emachine == MT_EM_386)) {
 			if ((as->target->features & MT_FEATURE_AVX) == 0)
 				return as_error(as,
 					"instruction %s requires AVX (use -march=x86-64-v3 or higher)",

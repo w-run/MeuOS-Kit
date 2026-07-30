@@ -18,6 +18,13 @@ struct E {
 	int fp;
 	uint64_t fsz;
 	int nclob;
+	/* Redundant copy elimination tracking.
+	 * Records the last slot-to-slot Ocopy so we can detect
+	 * and skip reverse copies (swap pattern). */
+	int prev_src;   /* source slot of last Ocopy */
+	int prev_dst;   /* destination slot of last Ocopy */
+	int prev_cls;   /* class of last Ocopy */
+	int prev_used;  /* nonzero if prev_* fields are valid */
 };
 
 #define CMP(X) \
@@ -499,6 +506,10 @@ emitins(Ins i, E *e)
 	Con *con;
 	char *sym;
 
+	/* Invalidate redundant-copy tracking for every instruction;
+	 * only consecutive integer slot-to-slot Ocopy re-enables it. */
+	e->prev_used = 0;
+
 	switch (i.op) {
 	default:
 		if (isxsel(i.op))
@@ -643,15 +654,57 @@ emitins(Ins i, E *e)
 				emitf("mov%k %0, %1", &i, e);
 				emitf("mov%k %1, %=", &i, e);
 			} else {
-				i.cls = KWIDE(i.cls) ? Kl : Kw;
-				i.arg[1] = TMP(RAX);
-				fprintf(e->f, "\tpushq %%rax\n");
-				emitf("mov%k %0, %1", &i, e);
-				emitf("mov%k %1, %=", &i, e);
-				fprintf(e->f, "\tpopq %%rax\n");
+				int src_s, dst_s;
+				int wide = KWIDE(i.cls);
+				i.cls = wide ? Kl : Kw;
+				/* Redundant reverse-copy elimination:
+				 * if the previous Ocopy wrote SLOT(M) from SLOT(N),
+				 * and this one writes SLOT(N) from SLOT(M),
+				 * the pair is a no-op: skip both. */
+				src_s = rsval(i.arg[0]);
+				dst_s = rsval(i.to);
+				if (e->prev_used
+				&& e->prev_src == dst_s
+				&& e->prev_dst == src_s
+				&& e->prev_cls == i.cls) {
+					e->prev_used = 0;
+					break;
+				}
+				if (t0 == RMem) {
+					/* RMem source: use RAX with
+					 * push/pop since emitf handles
+					 * the complex RMem addressing. */
+					i.arg[1] = TMP(RAX);
+					fprintf(e->f, "\tpushq %%rax\n");
+					emitf("mov%k %0, %1", &i, e);
+					emitf("mov%k %1, %=", &i, e);
+					fprintf(e->f, "\tpopq %%rax\n");
+				} else {
+					/* Use XMM15 as scratch register
+					 * to avoid push/pop around RAX.
+					 * XMM15 is reserved by the target
+					 * (NFPR = XMM14 - XMM0 + 1) and
+					 * never used by the register
+					 * allocator for integer values,
+					 * so it is always free as a temp
+					 * for slot-to-slot copies. */
+					int soff_src = slot(i.arg[0], e);
+					int soff_dst = slot(i.to, e);
+					const char *fp = regtoa(e->fp, SLong);
+					const char *mov = wide ? "movq" : "movd";
+					fprintf(e->f, "\t%s %d(%%%s), %%xmm15\n",
+						mov, soff_src, fp);
+					fprintf(e->f, "\t%s %%xmm15, %d(%%%s)\n",
+						mov, soff_dst, fp);
+				}
+				e->prev_src = src_s;
+				e->prev_dst = dst_s;
+				e->prev_cls = i.cls;
+				e->prev_used = 1;
 			}
 			break;
 		}
+		e->prev_used = 0;  /* non-slot copy, invalidate tracking */
 		/* conveniently, the assembler knows if it
 		 * should use movabsq when reading movq */
 		emitf("mov%k %0, %=", &i, e);

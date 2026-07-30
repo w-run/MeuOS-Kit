@@ -49,7 +49,7 @@ _start:
 	b exit
 
 .bss
-.align 3
+.balign 8
 .globl environ
 .type environ,@object
 .size environ,8
