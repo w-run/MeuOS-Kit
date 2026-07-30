@@ -10,6 +10,7 @@
 /* Relocation type constants (from reloc.c header) */
 #define R_AARCH64_ABS64       257
 #define R_AARCH64_ABS32       258
+#define R_AARCH64_PREL32      261
 #define R_AARCH64_CALL26      283
 #define R_AARCH64_JUMP26      282
 #define R_AARCH64_ADR_PREL_PG_HI21  275
@@ -51,6 +52,17 @@ mt_apply_aarch64_reloc(unsigned type, unsigned char *loc,
 		loc[2] = (uint8_t)((S + A) >> 16);
 		loc[3] = (uint8_t)((S + A) >> 24);
 		return 0;
+
+	case R_AARCH64_PREL32: {
+		/* (S + A - P) → 32-bit signed relative offset */
+		int64_t delta = (int64_t)(S + A - P);
+		uint32_t v = (uint32_t)(delta);
+		loc[0] = (uint8_t)(v);
+		loc[1] = (uint8_t)(v >> 8);
+		loc[2] = (uint8_t)(v >> 16);
+		loc[3] = (uint8_t)(v >> 24);
+		return 0;
+	}
 
 	case R_AARCH64_CALL26:
 	case R_AARCH64_JUMP26: {
@@ -227,4 +239,17 @@ mt_apply_aarch64_reloc(unsigned type, unsigned char *loc,
 	default:
 		return -1;
 	}
+}
+
+/* Write a 32-bit relative value at the given location.
+ * Used for R_AARCH64_PREL32 in .eh_frame sections. */
+int
+mt_apply_aarch64_prel32(unsigned char *loc, uint64_t value)
+{
+	uint32_t v = (uint32_t)(int32_t)(int64_t)value;
+	loc[0] = (uint8_t)(v);
+	loc[1] = (uint8_t)(v >> 8);
+	loc[2] = (uint8_t)(v >> 16);
+	loc[3] = (uint8_t)(v >> 24);
+	return 0;
 }
