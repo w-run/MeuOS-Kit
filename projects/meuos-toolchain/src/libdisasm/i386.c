@@ -821,7 +821,7 @@ op_pushpop_reg(struct dec *d, int op, int dir)
 	int reg = (op - (dir ? 0x58 : 0x50));
 
 	snprintf(d->ops, sizeof d->ops, "%%%s",
-	         reg_name(reg, 8));
+	         reg_name(reg, d->osz));
 	set_mnem(d, dir ? "pop" : "push");
 	return 0;
 }
@@ -1438,22 +1438,22 @@ decode_1byte(struct dec *d, int op)
 		return op_pushpop_reg(d, op, 1);
 
 	/* inc/dec reg (short form, 0x40-0x4F) */
-	case 0x40: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(0, 4)); set_mnem(d, "inc"); return 0;
-	case 0x41: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(1, 4)); set_mnem(d, "inc"); return 0;
-	case 0x42: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(2, 4)); set_mnem(d, "inc"); return 0;
-	case 0x43: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(3, 4)); set_mnem(d, "inc"); return 0;
-	case 0x44: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(4, 4)); set_mnem(d, "inc"); return 0;
-	case 0x45: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(5, 4)); set_mnem(d, "inc"); return 0;
-	case 0x46: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(6, 4)); set_mnem(d, "inc"); return 0;
-	case 0x47: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(7, 4)); set_mnem(d, "inc"); return 0;
-	case 0x48: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(0, 4)); set_mnem(d, "dec"); return 0;
-	case 0x49: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(1, 4)); set_mnem(d, "dec"); return 0;
-	case 0x4A: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(2, 4)); set_mnem(d, "dec"); return 0;
-	case 0x4B: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(3, 4)); set_mnem(d, "dec"); return 0;
-	case 0x4C: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(4, 4)); set_mnem(d, "dec"); return 0;
-	case 0x4D: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(5, 4)); set_mnem(d, "dec"); return 0;
-	case 0x4E: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(6, 4)); set_mnem(d, "dec"); return 0;
-	case 0x4F: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(7, 4)); set_mnem(d, "dec"); return 0;
+	case 0x40: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(0, d->osz)); set_mnem(d, "inc"); return 0;
+	case 0x41: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(1, d->osz)); set_mnem(d, "inc"); return 0;
+	case 0x42: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(2, d->osz)); set_mnem(d, "inc"); return 0;
+	case 0x43: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(3, d->osz)); set_mnem(d, "inc"); return 0;
+	case 0x44: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(4, d->osz)); set_mnem(d, "inc"); return 0;
+	case 0x45: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(5, d->osz)); set_mnem(d, "inc"); return 0;
+	case 0x46: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(6, d->osz)); set_mnem(d, "inc"); return 0;
+	case 0x47: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(7, d->osz)); set_mnem(d, "inc"); return 0;
+	case 0x48: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(0, d->osz)); set_mnem(d, "dec"); return 0;
+	case 0x49: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(1, d->osz)); set_mnem(d, "dec"); return 0;
+	case 0x4A: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(2, d->osz)); set_mnem(d, "dec"); return 0;
+	case 0x4B: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(3, d->osz)); set_mnem(d, "dec"); return 0;
+	case 0x4C: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(4, d->osz)); set_mnem(d, "dec"); return 0;
+	case 0x4D: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(5, d->osz)); set_mnem(d, "dec"); return 0;
+	case 0x4E: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(6, d->osz)); set_mnem(d, "dec"); return 0;
+	case 0x4F: snprintf(d->ops, sizeof d->ops, "%%%%%s", reg_name(7, d->osz)); set_mnem(d, "dec"); return 0;
 
 	/* push imm */
 	case 0x68: {

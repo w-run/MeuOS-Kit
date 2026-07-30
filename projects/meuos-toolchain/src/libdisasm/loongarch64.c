@@ -38,7 +38,7 @@ static const char *const la_reg[32] = {
 	"$t4", "$t5", "$t6", "$t7",
 	"$t8", "$fp", "$s0", "$s1",
 	"$s2", "$s3", "$s4", "$s5",
-	"$s6", "$s7", "$s8", "$r31"
+	"$s6", "$s7", "$s8", "$r"
 };
 
 /* ------------------------------------------------------------------ */
@@ -310,7 +310,7 @@ decode_one(const unsigned char *bytes, size_t size, size_t offset,
 
 		imm = sext_u(imm12(inst), 12);
 		if (idx >= 4 && idx <= 7)
-			snprintf(rs, sizeof rs, "%s", la_reg[rkk]);
+			snprintf(rs, sizeof rs, "%s", la_reg[rdd]);
 		else
 			snprintf(rs, sizeof rs, "%s", la_reg[rdd]);
 		snprintf(rt, sizeof rt, "%s", la_reg[rjj]);

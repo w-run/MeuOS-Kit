@@ -222,16 +222,14 @@ decode_ldst_uimm(uint32_t insn, char *mnem, size_t mnem_cap,
 	uint32_t op29_24 = bf(insn, 29, 24);
 	if (V != 0)
 		return -1;
-	if ((op29_24 & 0x3B) != 0x38 || (op29_24 & 0x04) != 0)
+	if ((op29_24 & 0x3B) != 0x39 || (op29_24 & 0x04) != 0)
 		return -1;
 
-	/* Check: this is unsigned immediate encoding when bit[24]=0 and bits[11:10]=00 */
-	if (bf(insn, 24, 24) != 0)
+	/* bit[24] must be 1 for load/store unsigned immediate encoding */
+	if (bf(insn, 24, 24) != 1)
 		return -1;
-	if (bf(insn, 11, 10) != 0)
-		return -1;
-	/* bit[21] must be 1 for unsigned offset immediate encoding */
-	if (bf(insn, 21, 21) != 1)
+	/* bit[21]=0 with bits[11:10]=00 means register offset or unscaled — skip */
+	if (bf(insn, 21, 21) == 0 && bf(insn, 11, 10) == 0)
 		return -1;
 
 	if (size_f == 2 || size_f == 3)
@@ -285,9 +283,9 @@ decode_ldst_reg(uint32_t insn, char *mnem, size_t mnem_cap,
 		return -1;
 	/* Check bits[29:24] = 111001 (V=0) */
 	uint32_t op29_24 = bf(insn, 29, 24);
-	if ((op29_24 & 0x3B) != 0x38 || (op29_24 & 0x04) != 0)
+	if ((op29_24 & 0x3B) != 0x39 || (op29_24 & 0x04) != 0)
 		return -1;
-	if (bf(insn, 24, 24) != 0)
+	if (bf(insn, 24, 24) != 1)
 		return -1;
 	/* Register offset: bit[21]=0, bit[12]=1, bits[11:10]=00 */
 	if (bf(insn, 21, 21) != 0)
@@ -347,9 +345,9 @@ decode_ldst_unscaled(uint32_t insn, char *mnem, size_t mnem_cap,
 	/* Actually unscaled offset has bits[29:24] = 111001 (same base) but
 	 * with opc field bits[23:22] indicating load/store */
 	uint32_t op29_24 = bf(insn, 29, 24);
-	if ((op29_24 & 0x3B) != 0x38 || (op29_24 & 0x04) != 0)
+	if ((op29_24 & 0x3B) != 0x39 || (op29_24 & 0x04) != 0)
 		return -1;
-	if (bf(insn, 24, 24) != 0)
+	if (bf(insn, 24, 24) != 1)
 		return -1;
 	/* Unscaled offset: bit[21]=0, bits[11:10]=00 */
 	if (bf(insn, 21, 21) != 0)
@@ -404,16 +402,18 @@ decode_ldp_stp(uint32_t insn, char *mnem, size_t mnem_cap,
 
 	(void)mnem_cap;
 
-	/* Check bits[29:24] = 100101 for STP/LDP, bit[23]=1, bit[24]=V=0 */
+	/* Check bits[29:27] = 101, V=0 for STP/LDP GP register variants */
 	uint32_t op29_24 = bf(insn, 29, 24);
-	if ((op29_24 & 0x3F) != 0x25)
+	if ((op29_24 & 0x3C) != 0x28)
 		return -1;
-	if (bf(insn, 24, 24) != 0)
+	if (bf(insn, 26, 26) != 0)
 		return -1;
+	/* bit[23] must be 1 for all LDP/STP */
 	if (bf(insn, 23, 23) != 1)
 		return -1;
-	/* bits[15:14] = 10 for scaled signed offset variant */
-	if (bf(insn, 15, 14) != 2)
+	/* Addressing mode from bits[25:24]: 01=offset, 11=pre-index, 00=post-index */
+	int addr_mode = bf(insn, 25, 24);
+	if (addr_mode == 2)
 		return -1;
 
 	if (size_f != 1 && size_f != 2)
@@ -429,9 +429,20 @@ decode_ldp_stp(uint32_t insn, char *mnem, size_t mnem_cap,
 	sb_s(&sb, xreg[rt2]);
 	sb_s(&sb, ", [");
 	sb_s(&sb, rn_sp(rn_reg, 1));
-	if (imm7 != 0)
-		sb_f(&sb, ", #%" PRId64, imm7);
-	sb_s(&sb, "]");
+	if (addr_mode == 0) {
+		/* Post-index: offset after brackets */
+		if (imm7 != 0)
+			sb_f(&sb, "], #%" PRId64, imm7);
+		else
+			sb_s(&sb, "], #0");
+	} else {
+		/* Offset or pre-index: offset inside brackets */
+		if (imm7 != 0)
+			sb_f(&sb, ", #%" PRId64, imm7);
+		sb_s(&sb, "]");
+		if (addr_mode == 3)
+			sb_s(&sb, "!"); /* pre-index */
+	}
 	finish(out, bytes, size, offset, addr, mnem, ops);
 	return 0;
 }
@@ -496,7 +507,8 @@ mt_disasm_aarch64_one(const unsigned char *bytes, size_t size,
 	bad:
 		out->address = addr;
 		out->offset = offset;
-		out->length = 1;
+		if (out->length == 0)
+			out->length = 1;
 		out->operands[0] = '\0';
 		out->bytes_hex[0] = '\0';
 		snprintf(out->mnemonic, sizeof out->mnemonic, "(bad)");
@@ -513,6 +525,18 @@ mt_disasm_aarch64_one(const unsigned char *bytes, size_t size,
 	/* ============================================================== */
 	if (insn == 0xD503201F) {
 		finish(out, bytes, size, offset, addr, "nop", "");
+		return 0;
+	}
+
+	/* ============================================================== */
+	/* HINT (system hint): bits[31:12]=0xD5032, Rt=31, imm=bits[11:5] */
+	/*   NOP (imm=0) is handled above.                                */
+	/* ============================================================== */
+	if ((insn & 0xFFFFF000) == 0xD5032000 && bf(insn, 4, 0) == 0x1F) {
+		unsigned imm = bf(insn, 11, 5);
+		sb_init(&sb, ops, sizeof ops);
+		sb_f(&sb, "#%u", imm);
+		finish(out, bytes, size, offset, addr, "hint", ops);
 		return 0;
 	}
 
@@ -608,7 +632,7 @@ mt_disasm_aarch64_one(const unsigned char *bytes, size_t size,
 	/*   bits[15:10] = 000000, bits[4:0] = 00000                       */
 	/*   opc = bits[22:21] -> 00=BR, 01=BLR, 10=RET                    */
 	/* ============================================================== */
-	if ((insn & 0xFFE00000) == 0xD6000000 &&
+	if ((insn & 0xFF800000) == 0xD6000000 &&
 	    bf(insn, 20, 16) == 0x1F &&
 	    (insn & 0x0000FC1F) == 0) {
 		int opc = bf(insn, 22, 21);
@@ -639,21 +663,22 @@ mt_disasm_aarch64_one(const unsigned char *bytes, size_t size,
 	                       bytes, size, offset, addr, out) == 0)
 		return 0;
 
-	/* Try unscaled offset (LDUR/STUR). Must check before unsigned imm
-	 * since they share similar bit patterns. Unscaled has bit[21]=0
-	 * while unsigned immediate has bit[21]=1 in the load/store group. */
+	/* Try register offset (LDR/STR register). Must check before
+	 * unsigned immediate since register offset has more specific constraints
+	 * (bit[21]=0, bit[12]=1, bits[11:10]=00). */
+	if (decode_ldst_reg(insn, mnem, sizeof mnem, ops, sizeof ops,
+	                     bytes, size, offset, addr, out) == 0)
+		return 0;
+
+	/* Try unscaled offset (LDUR/STUR). */
 	if (decode_ldst_unscaled(insn, mnem, sizeof mnem, ops, sizeof ops,
 	                         bytes, size, offset, addr, out) == 0)
 		return 0;
 
-	/* Try unsigned immediate offset (LDR/STR with imm12). */
+	/* Try unsigned immediate offset (LDR/STR with imm12). Last resort
+	 * for the load/store group: catches all remaining 111001 patterns. */
 	if (decode_ldst_uimm(insn, mnem, sizeof mnem, ops, sizeof ops,
 	                     bytes, size, offset, addr, out) == 0)
-		return 0;
-
-	/* Try register offset. */
-	if (decode_ldst_reg(insn, mnem, sizeof mnem, ops, sizeof ops,
-	                    bytes, size, offset, addr, out) == 0)
 		return 0;
 
 	/* ============================================================== */
@@ -987,7 +1012,7 @@ mt_disasm_aarch64_one(const unsigned char *bytes, size_t size,
 		};
 		const char *name;
 
-		if (opc >= 2)
+		if (opc > 2)
 			goto not_movw;
 		name = mv_names[opc];
 
@@ -1165,5 +1190,6 @@ mt_disasm_aarch64_one(const unsigned char *bytes, size_t size,
 	/* ============================================================== */
 	/* Unknown instruction -> (bad)                                     */
 	/* ============================================================== */
+	out->length = 4;
 	goto bad;
 }
