@@ -322,6 +322,7 @@ int mxa_add_file(void *ctx, const char *name,
         }
     } else {
         csize = 0;
+        codec = MXA_CODEC_STORED;
     }
 
     ret = buf_align(w);
