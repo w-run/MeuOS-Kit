@@ -104,7 +104,7 @@ clean:
 # Quick sanity check: build mcc, then compile+run hello-world.
 check: $(BIN)
 	@echo 'int main(void){return 0;}' > /tmp/mcc-hello.c \
-	  && ./$(BIN) -o /tmp/mcc-hello /tmp/mcc-hello.c \
+	  && ./$(BIN) --specs=host -o /tmp/mcc-hello /tmp/mcc-hello.c \
 	  && /tmp/mcc-hello; echo "exit=$$?"
 
 check-loongarch64: $(BIN)
