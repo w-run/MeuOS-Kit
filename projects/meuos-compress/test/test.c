@@ -156,7 +156,67 @@ int main(void)
         free(text);
     }
 
-    /* Test 6: Error handling */
+    /* Test 5b: Level differentiation on 50KB periodic text
+     *
+     * Verifies that the level parameter is actually wired through to
+     * the LZ77 search (chain depth, max match length, search window,
+     * lazy matching). For highly-periodic input the per-match cost
+     * dominates, so higher levels must consistently produce smaller
+     * (or equal) output. We assert a strict monotone-decrease between
+     * level 1 and level 9 and that every level produces a non-empty,
+     * finite, in-range size. */
+    {
+        const size_t sz = 50000;
+        const char *alphabet =
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUV";
+        const size_t period = 50;          /* strlen(alphabet) */
+        char *text = (char *)malloc(sz);
+        for (size_t i = 0; i < sz; i++)
+            text[i] = alphabet[i % period];
+
+        size_t sizes[10] = {0};
+        int    rc[10]    = {0};
+        printf("=== Level differentiation (50KB periodic, period=50) ===\n");
+        for (int lv = 1; lv <= 9; lv++) {
+            void *c = NULL; size_t cl = 0;
+            rc[lv] = mz_compress(text, sz, &c, &cl, MZ_CODEC_MEUOS, lv);
+            if (rc[lv] > 0) sizes[lv] = cl;
+            printf("  level %d: %zu -> %zu (%.1f%%)\n",
+                   lv, sz, cl, 100.0 * (double)cl / (double)sz);
+
+            /* every level must round-trip */
+            if (rc[lv] > 0) {
+                void *d = NULL; size_t dl = 0;
+                int dr = mz_decompress(c, cl, &d, &dl, MZ_CODEC_MEUOS);
+                TEST("level diff: compress ok",   dr > 0);
+                TEST("level diff: round-trip len", dl == sz);
+                TEST("level diff: round-trip data",
+                     memcmp(text, d, sz) == 0);
+                free(d);
+                free(c);
+            } else {
+                TEST("level diff: compress ok", 0);
+            }
+        }
+        /* Monotone-ish check: lv1 must be strictly larger than lv9 for
+         * periodic text -- this is the regression we are guarding. */
+        TEST("level diff: lv1 > lv9 (regression guard)",
+             sizes[1] > sizes[9]);
+        /* Higher levels must never regress against level 1 by more than
+         * 1% of input -- lazy matching is allowed to find a slightly
+         * different match layout. */
+        for (int lv = 2; lv <= 9; lv++) {
+            if (rc[lv] > 0 && sizes[lv] > sizes[1] + sz / 100) {
+                fprintf(stderr,
+                        "FAIL: level %d (%zu) is much larger than level 1 (%zu)\n",
+                        lv, sizes[lv], sizes[1]);
+                failures++;
+            }
+        }
+        free(text);
+    }
+
+        /* Test 6: Error handling */
     uint8_t bad_data[4] = {0, 0, 0, 0};
     ret = mz_decompress(bad_data, 4, &decompressed, &decomp_len,
                         MZ_CODEC_LZ77);

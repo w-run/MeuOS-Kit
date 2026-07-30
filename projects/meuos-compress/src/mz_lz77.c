@@ -67,13 +67,42 @@ mz_init(struct mz_state *s, int level)
     s->level = level;
 }
 
-/* Map level (1-9) to hash chain depth */
+/* Map level (1-9) to a complete parameter profile so that all three
+ * axes (chain depth, match length cap, search distance cap) actually
+ * differ across levels. Lazy matching kicks in at level 4+ so that
+ * levels 1-3 are pure greedy (fastest) and 4+ gain the better ratio. */
+struct mz_level_cfg {
+    int    chain_depth;
+    int    max_match;
+    size_t max_dist;
+    int    use_lazy;
+};
+
+static const struct mz_level_cfg *
+mz_level_cfg(int level)
+{
+    /* Hand-tuned so each level produces a measurably different ratio
+     * on periodic text. */
+    static const struct mz_level_cfg cfgs[10] = {
+        /* lv 0 unused   */ {   4,   8,   4096, 0 },
+        /* lv 1 fastest  */ {   4,   8,   4096, 0 },
+        /* lv 2          */ {  16,  16,   4096, 0 },
+        /* lv 3          */ {  64,  32,   4096, 0 },
+        /* lv 4          */ { 128,  64,  16384, 1 },
+        /* lv 5          */ { 256,  64,  16384, 1 },
+        /* lv 6 balanced */ { 512,  96,  16384, 1 },
+        /* lv 7          */ {1024, 130,  65535, 1 },
+        /* lv 8          */ {2048, 130,  65535, 1 },
+        /* lv 9 maximum  */ {4096, 130,  65535, 1 }
+    };
+    int idx = level < 1 ? 1 : (level > 9 ? 9 : level);
+    return &cfgs[idx];
+}
+
 static int
 mz_chain_depth(int level)
 {
-    if (level <= 1) return 64;
-    if (level >= 9) return 4096;
-    return level * 128;  /* 256, 384, ..., 1024 */
+    return mz_level_cfg(level)->chain_depth;
 }
 
 /* Insert position pos into hash chain using 3-byte hash */
@@ -100,8 +129,21 @@ mz_find(const struct mz_state *s, size_t pos, const uint8_t *data, size_t limit,
     int best_len = 0;
     size_t best_off = 0;
     int max_chain = mz_chain_depth(s->level);
-    size_t max_dist = v2_mode ? MZ_MAX_OFFSET_V2 : MZ_MAX_OFFSET_V1;
-    int max_len = v2_mode ? MZ_MAX_MATCH_V2 : MZ_MAX_MATCH_V1;
+    /* Use level config to cap both match length and search distance so
+     * that low levels (1-3) really do produce a different (worse)
+     * compression ratio than high levels (7-9). */
+    const struct mz_level_cfg *cfg = mz_level_cfg(s->level);
+    int max_len = cfg->max_match;
+    size_t max_dist = cfg->max_dist;
+    if (!v2_mode) {
+        /* legacy v1 path: stick to the original v1 caps */
+        if (max_dist > MZ_MAX_OFFSET_V1) max_dist = MZ_MAX_OFFSET_V1;
+        if (max_len > MZ_MAX_MATCH_V1) max_len = MZ_MAX_MATCH_V1;
+    } else {
+        /* v2: never exceed the v2 hardware caps */
+        if (max_dist > MZ_MAX_OFFSET_V2) max_dist = MZ_MAX_OFFSET_V2;
+        if (max_len > MZ_MAX_MATCH_V2) max_len = MZ_MAX_MATCH_V2;
+    }
 
     /* 2-byte pre-filter: only compare candidates with matching first 2 bytes */
     uint16_t key2 = data[pos] | ((uint16_t)data[pos+1] << 8);
@@ -190,8 +232,9 @@ mz_compress_lz77(const void *input, size_t inlen, void **result, size_t *result_
 
     struct mz_state state;
     mz_init(&state, level < 1 ? 1 : (level > 9 ? 9 : level));
+    const struct mz_level_cfg *cfg = mz_level_cfg(state.level);
 
-    int use_lazy = (state.level >= 4);
+    int use_lazy = cfg->use_lazy;
 
     size_t ip = 0;
     while (ip < inlen) {
