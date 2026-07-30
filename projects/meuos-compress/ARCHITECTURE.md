@@ -1,12 +1,14 @@
-# mz v2 — MeuOS Compress 架构文档
+# mz — MeuOS Compress 架构文档
+
+算法代号：**meuos-compress**，产物名：**mz**（libmz.a）。
 
 ## 目录
 
-1. [项目概述](#1-项目概述)
+1. [设计哲学](#1-设计哲学)
 2. [目录结构](#2-目录结构)
 3. [容器格式规范](#3-容器格式规范)
-4. [模块职责](#4-模块职责)
-5. [压缩级别](#5-压缩级别)
+4. [meuos-compress 统一算法](#4-meuos-compress-统一算法)
+5. [模块职责](#5-模块职责)
 6. [固实压缩（Solid）](#6-固实压缩solid)
 7. [加密方案](#7-加密方案)
 8. [msys 集成](#8-msys-集成)
@@ -14,21 +16,29 @@
 
 ---
 
-## 1. 项目概述
+## 1. 设计哲学
 
-**mz v2** 是 MeuOS 自研的高压缩率压缩库，对标 zstd/7z 级别压缩能力。纯 C11 实现，零外部依赖，支持多文件固实压缩、非对称加密签名和可变压缩等级（1~9）。
+**mz** 不是 "又一个压缩库"。它的定位是一个**融合社区算法精华、按 MeuOS 场景演进的自有算法引擎**。就像 mcc 融合 cproc 前端 + QBE 后端后演进出独有特性一样，meuos-compress 也走这条路：
 
-### 设计目标
+- **Layer 1 — 取经**：精读社区最佳实现的精简核心，提取算法思想
+- **Layer 2 — 融合**：将不同策略整合到一个引擎中，按 level / 数据特征自动切换
+- **Layer 3 — 演进**：根据 MeuOS 实际场景（msys/kernel/initramfs/backup）持续添加自有特性
 
-| 目标 | 说明 |
-|------|------|
-| 高压缩率 | Level 9 应接近 zstd -22 / 7z 极限模式 |
-| 固实压缩 | 多个文件共享 LZ77 字典上下文 |
-| 压缩级别 1~9 | 1=最快，9=最大压缩，渐进算法替换 |
-| 零外部依赖 | 纯 C11，不引入 zlib/libzstd/openssl |
-| 非对称加密 | Ed25519 签名 + ChaCha20 对称加密 |
-| 自有容器格式 | 自有 MZv2 容器，非 tar 格式 |
-| msys 联动 | 可作为 .msys 文件的 codec 层 |
+### 社区参考图
+
+| 策略 | 参考来源 | 吸收什么 | MeuOS 独有 |
+|------|---------|---------|-----------|
+| 快速匹配 (level 1-3) | LZ4 的 byte-level hash + token 格式 | 极简匹配管线和格式设计 | + 内置 ChaCha20 |
+| 深度匹配 (level 4-6) | zstd 的 hash chain + lazy matching | 三级 hash + 链深度渐进 | + 自有容器/文件表 |
+| 极限压缩 (level 7-9) | zstd 的 optimal parse + tANS | 最优解析 + tANS 熵编码 | + Ed25519 签名 |
+| 固实压缩 | zstd --train 字典思想 | 共享 history buffer | + 自有容器固实文件表 |
+
+### 核心原则
+
+- **一个算法代号**：对外统一叫 `meuos-compress`（`MZ_CODEC_MEUOS`），社区痕迹不暴露在 API 中
+- **渐进式，非替换式**：level 1→9 不是换算法，而是**同一个引擎内部逐步叠加**更深的匹配、更强的熵编码、更优的解析
+- **零外部依赖**：纯 C11，kernel 可直接编译使用
+- **产物名 mz**：二进制/库名保持 `libmz.a`，兼容现有构建
 
 ---
 
@@ -396,9 +406,63 @@ mz_compress() 入口
 
 ---
 
-## 5. 压缩级别
+## 4. meuos-compress 统一算法
 
-| 级别 | LZ77 窗口 | 匹配算法 | 熵编码 | 特点 |
+### 4.1 设计思想
+
+meuos-compress 是一个**渐进式融合算法引擎**，不是 "LZ77 + 可选熵编码" 的拼凑。
+
+```
+Level 1-3:   快速模式
+             字节级 hash 匹配 + 简单位流打包
+             参考 LZ4 的极简管线
+
+Level 4-6:   均衡模式  
+             hash chain 深度匹配 + Huffman 熵编码
+             参考 zstd 的 lazy matching 策略
+
+Level 7-9:   极限模式
+             最优解析 + tANS 熵编码 + 自动模式切换
+             引擎内部根据数据特征选择策略
+```
+
+### 4.2 引擎内部决策
+
+同一份代码在内部根据 level 和实时数据特征做渐进叠加：
+
+```c
+// 统一算法引擎伪代码
+int meuos_compress_block(int level, ...) {
+    // Layer 1: 匹配查找 (共用入口，深度不同)
+    int depth = level * 512;
+    if (level <= 3)  find_matches_fast(depth);
+    else             find_matches_deep(depth);
+    
+    // Layer 2: 熵编码 (引擎自动选择)
+    if (level <= 3 || bits_per_byte < 1.1)
+        pack_literals();        // 简单位打包
+    else if (level <= 6)
+        huffman_encode();       // 经典 Huffman
+    else
+        tans_encode();          // tANS，更高压缩比
+    
+    // Layer 3: 增值特性
+    if (flags & ENCRYPT) chacha20_encrypt();
+    if (flags & SIGNED)  ed25519_sign();
+}
+```
+
+### 4.3 演进路径
+
+| 阶段 | 内容 | 参考 | 收益 |
+|------|------|------|------|
+| Phase A | LZ77 + Huffman + ChaCha20 | LZ4 + zstd | 基线已实现 |
+| Phase B | tANS + 深度匹配 | zstd FSE | +20% |
+| Phase C | 固实压缩 + 字典 | zstd --train | -30% |
+| Phase D | LZ4 快速路径 | LZ4 format | 100x 速度 |
+| Phase E | BCJ 预处理器 | 7z BCJ2 | +30% ELF |
+
+## 5. 压缩级别
 |------|-----------|----------|--------|------|
 | 1    | 64KB      | hash 链 (128) | 位打包 | 最快，适合实时 |
 | 2    | 64KB      | hash 链 (256) | 位打包 | 快速 |

@@ -3,9 +3,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Codecs */
+/* Codecs — 对外统一使用 MZ_CODEC_MEUOS */
 #define MZ_CODEC_LZ77      1
 #define MZ_CODEC_LZ77_HUFF 2
+#define MZ_CODEC_MEUOS     3   /* meuos-compress 统一算法引擎 */
 
 /* Compression levels */
 #define MZ_LEVEL_FASTEST   1
