@@ -45,16 +45,17 @@ static int demo_content(int fd, const tui_rect_t *area, void *udata)
 
     if (w < 10) return TUI_OK;
 
-    /* ── 标题区 ── */
-    tui_layout_t *heading = tui_heading("  Welcome to MeuOS TUI  ",
-                                        tui_meuos_theme.accent);
-    tui_rect_t hr = { y, x, 1, w };
-    tui_layout_render(fd, heading, hr);
-    tui_layout_free(heading);
-    y += 2;
+    /* ── 装饰 Banner 标题 ── */
+    tui_layout_t *banner = tui_banner_new("  MeuOS TUI  ",
+                                           "Terminal UI Framework",
+                                           tui_meuos_theme.accent);
+    tui_rect_t br0 = { y, x, 3, w };
+    tui_layout_render(fd, banner, br0);
+    tui_layout_free(banner);
+    y += 4;
 
     /* ── 分隔线 ── */
-    tui_layout_t *sep = tui_hr_label("Project Overview", tui_meuos_theme.info);
+    tui_layout_t *sep = tui_hr_label("Overview", tui_meuos_theme.info);
     tui_rect_t sr = { y, x, 1, w };
     tui_layout_render(fd, sep, sr);
     tui_layout_free(sep);
@@ -68,7 +69,7 @@ static int demo_content(int fd, const tui_rect_t *area, void *udata)
     };
     int bx = x, gap = 2;
     for (int i = 0; i < 3; i++) {
-        tui_rect_t br = { y, bx, 1, (int)strlen(" meuos-libtui ") + 2 };
+        tui_rect_t br = { y, bx, 1, 24 };
         if (b[i]) {
             tui_layout_render(fd, b[i], br);
             tui_layout_free(b[i]);

@@ -386,11 +386,16 @@ void tui_panel_set_style(tui_panel_t *panel, const tui_panel_t *cfg)
 }
 
 /* ══════════════════════════════════════════════════════
- *  进度条
+ *  进度条 ████░░░░
  * ══════════════════════════════════════════════════════ */
 
-#define PROGRESS_FULL "█"   /* U+2588, 3 bytes UTF-8 */
-#define PROGRESS_EMPT "░"   /* U+2591, 3 bytes UTF-8 */
+#define PROGRESS_FULL "█"   /* U+2588 */
+#define PROGRESS_EMPT "░"   /* U+2591 */
+
+#define PROGRESS_GRAD_1 "░"   /* 0-25% */
+#define PROGRESS_GRAD_2 "▒"   /* 25-50% */
+#define PROGRESS_GRAD_3 "▓"   /* 50-75% */
+#define PROGRESS_GRAD_4 "█"   /* 75-100% */
 
 int tui_progress_render(int fd, const tui_rect_t *area, void *userdata)
 {
@@ -398,9 +403,8 @@ int tui_progress_render(int fd, const tui_rect_t *area, void *userdata)
     if (!p || !area) return TUI_ERR_PARAM;
 
     int label_w = p->label[0] ? tui_strwidth(p->label) + 1 : 0;
-    int pct_w   = p->show_percent ? 6 : 0;   /* " 100%" */
-    int bracket = 2;                          /* "[]" */
-    int avail   = area->cols - label_w - pct_w - bracket;
+    int pct_w   = p->show_percent ? 6 : 0;
+    int avail   = area->cols - label_w - pct_w;
     if (avail < 4) avail = 4;
 
     int bar_w = p->bar_width > 0 ? (p->bar_width < avail ? p->bar_width : avail) : avail;
@@ -420,17 +424,23 @@ int tui_progress_render(int fd, const tui_rect_t *area, void *userdata)
         tui_reset_style(fd);
     }
 
-    /* 进度条: [██████░░░░] */
-    tui_set_fg(fd, TUI_COLOR_DEFAULT);
-    tui_write(fd, "[");
-
+    /* 进度条: ████░░░░  (无括号，区块自说明) */
     tui_color_t fc = p->fill_color ? p->fill_color : tui_meuos_theme.accent;
-    tui_set_fg(fd, fc);
-    tui_set_attr(fd, TUI_ATTR_BOLD);
 
     int i;
-    for (i = 0; i < filled; i++)
-        write(fd, PROGRESS_FULL, 3);
+    for (i = 0; i < filled; i++) {
+        /* 梯度着色：让进度条更有质感 */
+        double ratio = (double)i / (double)(bar_w > 0 ? bar_w : 1);
+        tui_set_fg(fd, fc);
+        if (ratio < 0.25)
+            write(fd, PROGRESS_GRAD_1, 3);
+        else if (ratio < 0.5)
+            write(fd, PROGRESS_GRAD_2, 3);
+        else if (ratio < 0.75)
+            write(fd, PROGRESS_GRAD_3, 3);
+        else
+            write(fd, PROGRESS_GRAD_4, 3);
+    }
 
     tui_reset_style(fd);
     tui_set_attr(fd, TUI_ATTR_DIM);
@@ -438,7 +448,6 @@ int tui_progress_render(int fd, const tui_rect_t *area, void *userdata)
         write(fd, PROGRESS_EMPT, 3);
 
     tui_reset_style(fd);
-    tui_write(fd, "]");
 
     /* 百分比 */
     if (p->show_percent) {
@@ -525,6 +534,102 @@ int tui_statusbar_render(int fd, const tui_rect_t *area, void *userdata)
 
     tui_reset_style(fd);
     return TUI_OK;
+}
+
+/* ══════════════════════════════════════════════════════
+ *  Banner / 装饰标题
+ * ══════════════════════════════════════════════════════ */
+
+int tui_banner_render(int fd, const tui_rect_t *area, void *userdata)
+{
+    tui_banner_t *b = (tui_banner_t *)userdata;
+    if (!b || !area) return TUI_ERR_PARAM;
+    if (!tui_rect_valid(area)) return TUI_OK;
+
+    int y = area->row;
+    int x = area->col + 1;
+    int w = area->cols - 2;
+    if (w < 8) return TUI_OK;
+
+    int text_w = tui_strwidth(b->text);
+    if (text_w > w - 4) text_w = w - 4;
+
+    tui_color_t c = b->color ? b->color : tui_meuos_theme.accent;
+    const char *tl = b->double_line ? "╔" : "┌";
+    const char *tr = b->double_line ? "╗" : "┐";
+    const char *bl = b->double_line ? "╚" : "└";
+    const char *br = b->double_line ? "╝" : "┘";
+    const char *hz = b->double_line ? "═" : "─";
+    const char *vt = b->double_line ? "║" : "│";
+
+    /* ── 上框 ── */
+    tui_cursor_goto(fd, y, x);
+    tui_set_fg(fd, c);
+    tui_set_attr(fd, TUI_ATTR_BOLD);
+    write(fd, tl, 3);
+    write(fd, " ", 1);
+    tui_set_fg(fd, c);
+    write(fd, hz, 3);
+    write(fd, hz, 3);
+    write(fd, hz, 3);
+    tui_reset_style(fd);
+    tui_set_fg(fd, TUI_COLOR_WHITE);
+    tui_set_attr(fd, TUI_ATTR_BOLD);
+    int bytes = tui_truncate(b->text, w - 6);
+    write(fd, b->text, (size_t)bytes);
+    tui_reset_style(fd);
+    tui_set_fg(fd, c);
+    tui_set_attr(fd, TUI_ATTR_BOLD);
+    write(fd, hz, 3);
+    write(fd, hz, 3);
+    write(fd, hz, 3);
+    write(fd, " ", 1);
+    write(fd, tr, 3);
+    tui_reset_style(fd);
+
+    /* ── 副标题行 ── */
+    if (b->sub[0] && y + 2 < area->row + area->rows) {
+        y++;
+        tui_cursor_goto(fd, y, x);
+        write(fd, vt, 3);
+        int sub_w = tui_strwidth(b->sub);
+        int sub_x = (w - sub_w) / 2;
+        tui_spaces(fd, sub_x + 1);
+        tui_set_fg(fd, tui_meuos_theme.dim);
+        tui_set_attr(fd, TUI_ATTR_ITALIC);
+        int sbytes = tui_truncate(b->sub, w - 4);
+        write(fd, b->sub, (size_t)sbytes);
+        tui_reset_style(fd);
+        int rem = w - sub_x - sub_w - 2;
+        if (rem > 0) tui_spaces(fd, rem);
+        write(fd, vt, 3);
+        tui_reset_style(fd);
+    }
+
+    /* ── 下框 ── */
+    y++;
+    tui_cursor_goto(fd, y, x);
+    tui_set_fg(fd, c);
+    tui_set_attr(fd, TUI_ATTR_BOLD);
+    write(fd, bl, 3);
+    int i;
+    for (i = 0; i < w - 2; i++)
+        write(fd, hz, 3);
+    write(fd, br, 3);
+    tui_reset_style(fd);
+
+    return TUI_OK;
+}
+
+tui_layout_t *tui_banner_new(const char *text, const char *sub,
+                             tui_color_t color)
+{
+    tui_banner_t *b = (tui_banner_t *)calloc(1, sizeof(tui_banner_t));
+    if (!b) return NULL;
+    if (text) strncpy(b->text, text, sizeof(b->text) - 1);
+    if (sub)  strncpy(b->sub,  sub,  sizeof(b->sub) - 1);
+    b->color = color;
+    return tui_layout_leaf(tui_banner_render, b);
 }
 
 /* ══════════════════════════════════════════════════════

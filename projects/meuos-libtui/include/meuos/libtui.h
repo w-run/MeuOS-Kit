@@ -342,6 +342,20 @@ tui_layout_t *tui_split_layout(int sidebar_width,
                                tui_render_fn side_fn, void *side_data,
                                tui_render_fn content_fn, void *content_data);
 
+/* ── Banner / 装饰字符 ──────────────────────────── */
+
+/* 渲染一个装饰性标题横幅（花括号 + 下划线包围） */
+typedef struct {
+    char text[128];    /* 标题文本 */
+    char sub[128];     /* 副标题（可为空） */
+    tui_color_t color; /* 主色调 */
+    int  double_line;  /* 是否用双线框 */
+} tui_banner_t;
+
+int  tui_banner_render(int fd, const tui_rect_t *area, void *userdata);
+tui_layout_t *tui_banner_new(const char *text, const char *sub,
+                             tui_color_t color);
+
 /* ── 辅助输出 ─────────────────────────────────────── */
 
 /* 写入指定数量的空格 */
