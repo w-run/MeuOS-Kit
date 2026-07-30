@@ -1513,6 +1513,12 @@ symbol_value(struct ld_context *ctx, struct ld_object *object,
 		return -1;
 	if (name_out)
 		*name_out = name;
+	/* Skip nameless undefined symbols (symbol index 0 in RISCV,
+	 * relaxation markers with no associated symbol name). */
+	if (symbol.section == MT_SHN_UNDEF && (!name || !name[0])) {
+		if (value) *value = 0;
+		return 0;
+	}
 	if (symbol.section == MT_SHN_UNDEF) {
 		global = find_global(ctx, name);
 		if (!global)
@@ -1611,7 +1617,7 @@ collect_got_relocations(struct ld_context *ctx)
 		for (j = 0; j < object_section_count(object); ++j) {
 			if (object_get_section(object, (uint16_t)j, &section) != 0)
 				return -1;
-			if (section.type != MT_SHT_RELA)
+			if (section.type != MT_SHT_RELA && section.type != MT_SHT_REL)
 				continue;
 			if (object->elf_class == 1) {
 				/* ELF32 RELA: 12 bytes per entry */
@@ -1853,12 +1859,24 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 	int64_t addend;
 	int type;
 	if (object->elf_class == 1) {
-		/* ELF32 RELA: 12-byte entry */
-		offset = read32(p + 0);
-		info = read32(p + 4);
-		type = (int)(info & 0xff);
-		symbol_index = info >> 8;
-		addend = (int32_t)read32(p + 8);
+		if (reloc_section->type == MT_SHT_RELA) {
+			/* ELF32 RELA: 12-byte entry */
+			offset = read32(p + 0);
+			info = read32(p + 4);
+			type = (int)(info & 0xff);
+			symbol_index = info >> 8;
+			addend = (int32_t)read32(p + 8);
+		} else {
+			/* ELF32 REL: 8-byte entry (ARM, i386).
+			 * Addend is implicit in the place being relocated.
+			 * Set addend=0; arch-specific apply function extracts
+			 * the value from the instruction/data location. */
+			offset = read32(p + 0);
+			info = read32(p + 4);
+			type = (int)(info & 0xff);
+			symbol_index = info >> 8;
+			addend = 0;
+		}
 	} else {
 		offset = read64(p + 0);
 		info = read64(p + 8);
@@ -1866,7 +1884,7 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 		symbol_index = info >> 32;
 		addend = (int64_t)read64(p + 16);
 	}
-	uint64_t resolved_value;
+	uint64_t resolved_value = 0;
 	const char *name;
 	uint64_t place;
 	uint64_t value;
@@ -2060,7 +2078,7 @@ apply_relocations(struct ld_context *ctx)
 		for (j = 0; j < object_section_count(object); ++j) {
 			if (object_get_section(object, j, &section) != 0)
 				return ld_errorf(ctx, "invalid relocation section", object->name);
-			if (section.type != MT_SHT_RELA)
+			if (section.type != MT_SHT_RELA && section.type != MT_SHT_REL)
 				continue;
 			if (section.info >= object_section_count(object) ||
 			    object->maps[section.info].group < 0)
@@ -2861,7 +2879,7 @@ write_executable(struct ld_context *ctx, const char *path,
 		}
 		if (write_program_header_type(file, LD_PT_TLS, LD_PF_R, tls_off,
 		                               tls_addr, tls_filesz, ctx->tls_size,
-		                               ctx->tls_align > 0x1000 ? ctx->tls_align : 0x1000,
+		                               ctx->tls_align,
 		                               target->elf_class == 1) != 0)
 			goto out_file;
 	}

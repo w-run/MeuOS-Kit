@@ -40,7 +40,10 @@ mt_apply_arm_reloc(unsigned type, unsigned char *loc,
 	case 28:/* R_ARM_CALL */
 	case 29:/* R_ARM_JUMP24 */
 		insn = read32(loc);
-		offset = (int64_t)(S + A - P);
+		/* ARM pipeline: PC = instruction_addr + 8.
+		 * The encoded offset is ((target) - (PC)) >> 2.
+		 * With P = instruction_addr: ((S + A) - (P + 8)) >> 2 */
+		offset = (int64_t)(S + A - (P + 8));
 		if ((offset & 3) != 0)
 			return -1; /* misaligned */
 		offset >>= 2;
@@ -87,6 +90,7 @@ mt_apply_arm_reloc(unsigned type, unsigned char *loc,
 		return 0;
 
 	case 107: /* R_ARM_TLS_LE32: S + A - tp (TLS local exec) */
+	case 108: /* R_ARM_TLS_LE32 alt numbering (GNU as uses 108) */
 		/* For static TLS, the linker computes the final offset
 		 * from the thread pointer.  S is the TLS symbol address,
 		 * tp is known at link time for static binaries. */
@@ -275,8 +279,11 @@ mt_apply_arm_reloc(unsigned type, unsigned char *loc,
 			lower = (lower & 0xF8F0) | ((lower >> 8) & 0x7) << 8 | (imm3 << 5) | imm8;
 			write16(loc, upper);
 			write16(loc + 2, lower);
-			return 0;
-		}
+		return 0;
+	}
+
+	case 40: /* R_ARM_V4BX: ARMv4 interworking.  Keep bx as-is. */
+		return 0;
 
 	default:
 		return -1;

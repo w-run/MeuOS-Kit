@@ -55,6 +55,7 @@ riscv64_apply_reloc(unsigned reloc_type, unsigned char *place,
 
 	switch (reloc_type) {
 	case 0: /* R_RISCV_NONE */
+	case 51: /* R_RISCV_RELAX — linker relaxation marker, skip */
 		return 0;
 
 	case 2: /* R_RISCV_64: S + A (64-bit write) */
