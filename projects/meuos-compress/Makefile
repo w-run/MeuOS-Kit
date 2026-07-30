@@ -35,7 +35,7 @@ libmz.so: $(OBJS) $(MSYS_OBJ)
 	$(CC) $(SO_FLAGS) -o $(SO_LIB) $(OBJS) $(MSYS_OBJ) $(SO_LDFLAGS)
 
 $(MZ_BIN): src/mxa_cli.c $(LIB)
-	$(CC) $(CFLAGS) -Iinclude -o $@ src/mxa_cli.c $(LIB)
+	$(CC) $(CFLAGS) -Iinclude -o $@ src/mxa_cli.c $(LIB) -ldl
 
 check: $(TEST_MX) $(TEST_MXA) $(MZ_BIN)
 	./$(TEST_MX)

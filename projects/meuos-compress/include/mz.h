@@ -97,6 +97,14 @@ int mz_tans_decompress(const unsigned char *in, size_t inlen,
                        unsigned char *out, size_t *outlen);
 
 
+/* Combo pipeline: LZ77 + entropy */
+int mz_compress_meuos(const void *in, size_t il, void **r, size_t *rl, int lv);
+int mz_decompress_meuos(const void *in, size_t il, void **r, size_t *rl);
+
+/* Combo pipeline: LZ77 + entropy coding */
+int mz_compress_meuos(const void *in, size_t il, void **r, size_t *rl, int lv);
+int mz_decompress_meuos(const void *in, size_t il, void **r, size_t *rl);
+
 /* Solid compression */
 struct mz_solid_ctx;
 int mz_solid_start(struct mz_solid_ctx **ctx, int level);

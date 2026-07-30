@@ -10,8 +10,9 @@ int
 mz_compress(const void *in, size_t il, void **r, size_t *rl, int c, int lv)
 {
     switch (c) {
-    case MZ_CODEC_LZ77:
     case MZ_CODEC_MEUOS:
+        return mz_compress_meuos(in, il, r, rl, lv);
+    case MZ_CODEC_LZ77:
     case MZ_CODEC_AUTO:
         return mz_compress_lz77(in, il, r, rl, lv);
     default:
@@ -23,8 +24,9 @@ int
 mz_decompress(const void *in, size_t il, void **r, size_t *rl, int c)
 {
     switch (c) {
-    case MZ_CODEC_LZ77:
     case MZ_CODEC_MEUOS:
+        return mz_decompress_meuos(in, il, r, rl);
+    case MZ_CODEC_LZ77:
     case MZ_CODEC_AUTO:
         return mz_decompress_lz77(in, il, r, rl);
     default:
