@@ -161,6 +161,7 @@ __syscall_number(long number)
 	case 3:   return 57;   /* close */
 	case 8:   return 62;   /* lseek */
 	case 9:   return 222;  /* mmap */
+	case 10:  return 226;  /* mprotect */
 	case 11:  return 215;  /* munmap */
 	case 12:  return 214;  /* brk */
 	case 13:  return 134;  /* rt_sigaction */
