@@ -752,6 +752,27 @@ load_input(struct ld_context *ctx, const char *path)
 			ctx->archive_mem_count++;
 			return remember_archive(ctx, path);
 		}
+		/* Non-VFS .a file: still need to align archive_mem_data index so that
+		 * extract_archives can use archive_mem_count to identify VFS archives.
+		 * Non-VFS archives get a NULL entry. */
+		if (ctx->archive_mem_count == ctx->archive_mem_capacity) {
+			size_t cap = ctx->archive_mem_capacity
+				? ctx->archive_mem_capacity * 2 : 8;
+			unsigned char **d = (unsigned char **)ld_realloc(
+				ctx->archive_mem_data, cap * sizeof(*d));
+			size_t *s = (size_t *)ld_realloc(
+				ctx->archive_mem_size, cap * sizeof(*s));
+			if (!d || !s) {
+				free(d); free(s);
+				return ld_error(ctx, "out of memory");
+			}
+			ctx->archive_mem_data = d;
+			ctx->archive_mem_size = s;
+			ctx->archive_mem_capacity = cap;
+		}
+		ctx->archive_mem_data[ctx->archive_mem_count] = NULL;
+		ctx->archive_mem_size[ctx->archive_mem_count] = 0;
+		ctx->archive_mem_count++;
 		return remember_archive(ctx, path);
 	}
 	if (read_file(path, &data, &size) != 0)
