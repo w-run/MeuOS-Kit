@@ -1,0 +1,115 @@
+# MeuOS Kit — 每日代码校验与缺陷检查
+#
+# 每天 UTC 凌晨 00:00 触发：
+#   1. 开启新工作分支  audit/<MMDD>
+#   2. 构建并测试各子项目（实现情况校验）
+#   3. 运行 scripts/daily-audit.sh：对照预期文档 / 缺陷扫描 / git 提交记录
+#   4. 将报告写入 .issues/<MMDD>.md 并提交到分支，自动开 PR 到 main
+#
+# 注：GitHub Actions 的 cron 为 UTC。如需「本地凌晨」，请按所在时区换算
+#     （如北京时间 08:00 = UTC 00:00，已是最接近的设置）。
+name: Daily Code Audit
+
+on:
+  schedule:
+    - cron: '0 0 * * *'        # UTC 每天 00:00 ≈ 北京时间 08:00
+  workflow_dispatch:           # 允许手动触发
+
+permissions:
+  contents: write              # 推送分支、提交报告
+  pull-requests: write         # 自动开 PR
+
+concurrency:
+  group: daily-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout（完整历史，供 git 区间统计）
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 安装系统依赖
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential qemu-user 2>/dev/null || true
+          # env/bin/ 内含交叉架构 qemu 静态二进制，供多架构回归
+
+      - name: 计算日期与分支
+        id: meta
+        run: |
+          DATE="$(date -u +%m%d)"
+          echo "date=$DATE"        >> "$GITHUB_OUTPUT"
+          echo "branch=audit/$DATE" >> "$GITHUB_OUTPUT"
+
+      - name: 若今日已审计则跳过（幂等）
+        id: skip
+        run: |
+          if git ls-remote --heads origin "refs/heads/audit/${{ steps.meta.outputs.date }}" | grep -q .; then
+            echo "今日分支已存在，跳过。"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 开新工作分支
+        if: ${{ steps.skip.outputs.skip != 'true' }}
+        run: |
+          git config user.name  "meuos-audit[bot]"
+          git config user.email "meuos-audit[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+        env:
+          BRANCH: ${{ steps.meta.outputs.branch }}
+
+      - name: 运行每日审计（构建 + 测试 + 文档/缺陷/git 对照）
+        if: ${{ steps.skip.outputs.skip != 'true' }}
+        env:
+          MEUOS_SYSROOT: ${{ github.workspace }}/sysroot
+        run: |
+          bash scripts/daily-audit.sh --date "$DATE" --sysroot "$MEUOS_SYSROOT"
+        working-directory: ${{ github.workspace }}
+        continue-on-error: true   # 检查失败也是“发现”，仍要落盘报告
+
+      - name: 提交报告到分支
+        if: ${{ steps.skip.outputs.skip != 'true' }}
+        run: |
+          git add .issues/"$DATE".md
+          if git diff --cached --quiet; then
+            echo "无报告变更，跳过提交。"
+            exit 0
+          fi
+          git commit -m "audit: 每日代码校验与缺陷检查 $DATE"
+          git push -u origin "$BRANCH"
+        env:
+          DATE: ${{ steps.meta.outputs.date }}
+          BRANCH: ${{ steps.meta.outputs.branch }}
+        continue-on-error: true
+
+      - name: 自动开 PR 到 main
+        if: ${{ steps.skip.outputs.skip != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DATE: ${{ steps.meta.outputs.date }}
+          BRANCH: ${{ steps.meta.outputs.branch }}
+        run: |
+          # 已存在则不再重复创建
+          if gh pr list --head "$BRANCH" --state open --json number | grep -q '\[{'; then
+            echo "PR 已存在，跳过。"
+            exit 0
+          fi
+          gh pr create \
+            --head "$BRANCH" \
+            --base main \
+            --title "audit: 每日代码校验与缺陷检查 $DATE" \
+            --body "每日定时审计自动生成。报告见 \`.issues/$DATE.md\`。
+
+本 PR 由 GitHub Actions 在 UTC 凌晨自动开启，包含：
+- 各子项目构建与测试结果（实现情况校验）
+- 预期文档声明 vs 实际代码对照
+- 桩标记/未实现占位扫描（缺陷检查）
+- 自上一期审计以来的 git 提交记录对照
+
+请人工/Agent 复核报告中的行动建议。" || echo "PR 创建跳过（可能已存在或权限受限）。"
