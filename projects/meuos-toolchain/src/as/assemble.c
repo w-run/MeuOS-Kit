@@ -582,7 +582,7 @@ parse_string_bytes(struct as_file *as, struct as_section *section,
 			case 'v': byte = '\v'; break;
 			case '\\': byte = '\\'; break;
 			case '"': byte = '"'; break;
-			case '0': byte = 0; break; /* octal or NUL escape */
+			/* \0 handled by default: octal parser (up to 3 digits) */
 			case 'x':
 				value = 0;
 				digits = 0;
