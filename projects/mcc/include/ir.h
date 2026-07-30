@@ -669,6 +669,9 @@ void spill(Fn *);
 /* rega.c */
 void rega(Fn *);
 
+/* postra.c */
+void postra(Fn *);
+
 /* emit.c */
 void emitfnlnk(char *, Lnk *, FILE *);
 void emitdat(Dat *, FILE *);

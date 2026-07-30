@@ -281,6 +281,7 @@ run_passes(Fn *fn)
 	P(fillcost);
 	P(spill);
 	P(rega);
+	if (ol >= 1) P(postra);
 	P(fillcfg);
 	P(simpljmp);
 	P(fillcfg);
