@@ -31,7 +31,7 @@ M4_ENGINE_O := $(MEOW_DIR)/$(BUILD)/libm4/m4_engine.o
 all: $(BIN) $(SYMLINKS)
 
 # Compile each module
-$(BUILD)/m4.o: $(SRC)/m4.c
+$(BUILD)/m4.o: $(SRC)/m4/m4.c
 	@mkdir -p $(@D)
 	$(HOST_CC) -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -c -o $@ $<
 
@@ -40,15 +40,15 @@ $(M4_ENGINE_O): $(MEOW_DIR)/src/libm4/m4_engine.c $(MEOW_DIR)/src/libm4/m4_engin
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -I$(MEOW_DIR)/src -I$(MEOW_DIR)/src/include -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -c -o $@ $<
 
-$(BUILD)/gperf.o: $(SRC)/gperf.c
+$(BUILD)/gperf.o: $(SRC)/gperf/gperf.c
 	@mkdir -p $(@D)
 	$(HOST_CC) -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -c -o $@ $<
 
-$(BUILD)/flex.o: $(SRC)/flex.c
+$(BUILD)/flex.o: $(SRC)/flex/flex.c
 	@mkdir -p $(@D)
 	$(HOST_CC) -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -c -o $@ $<
 
-$(BUILD)/buildtools.o: $(SRC)/buildtools.c
+$(BUILD)/buildtools.o: $(SRC)/buildtools/buildtools.c
 	@mkdir -p $(@D)
 	$(HOST_CC) -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -c -o $@ $<
 
@@ -77,7 +77,7 @@ check: $(BIN)
 	done
 
 # Static linking target for sysroot
-$(BUILD)/%-static: $(SRC)/%.c
+$(BUILD)/%-static: $(SRC)/%/%.c
 	@mkdir -p $(@D)
 	$(MCC) --specs=meuos --sysroot=../../sysroot --nostdlib \
 		-static -O2 -o $@ $< -l:libc-meuos.a

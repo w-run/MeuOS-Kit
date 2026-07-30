@@ -15,7 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../../meow/src/libm4/m4_engine.h"
+#include "../../../meow/src/libm4/m4_engine.h"
 
 /* ================================================================
  * Read all of a FILE* into a heap buffer
