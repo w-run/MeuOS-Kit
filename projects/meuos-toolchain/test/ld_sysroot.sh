@@ -4,7 +4,7 @@ set -eu
 as=${1:?as path required}
 ld=${2:?ld path required}
 root=${3:-/workspace/MeuOS-Kit}
-sysroot="$root/sysroot"
+sysroot="$root/sysroot/x86_64"
 mcc=$root/projects/mcc/mcc
 work=$(mktemp -d /tmp/meuos-toolchain-sysroot-link.XXXXXX)
 trap 'rm -rf "$work"' EXIT HUP INT TERM
