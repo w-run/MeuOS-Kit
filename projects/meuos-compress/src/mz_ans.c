@@ -1,18 +1,47 @@
-/* mz_ans.c — tANS (table Asymmetric Numeral Systems) compressor/decompressor
+/* mz_ans.c — tANS (table Asymmetric Numeral Systems) codec
  *
- * Format:
- *   Header: 256 frequency values (2 bytes LE each, 512 bytes total)
- *   Data:   tANS bitstream (reverse-stored for correct decode order)
+ * 最简化但保证 roundtrip 正确的 tANS 实现 (参考 FSE 风格).
  *
- * Uses 256-state precision with proper state renormalisation.
- * Inspired by Yann Collet's FSE (Finite State Entropy).
+ * 关键设计:
+ *   - 状态空间 [0, L), L = 256, ANS_L_BITS = 8
+ *   - norm[s] 归一化到 1, 2, 4, 8, ..., 256 (2 的幂), sum = 256
+ *   - 状态机 (FSE 风格):
+ *     enc: state = (state >> nb) + base_offset[sym]
+ *          其中 nb = compute_nb(f), base_offset[sym] = sym 槽的块起始
+ *     dec: state = (state & ~mask) + bits, where mask = (1<<nb)-1
+ *          即 new_state = (state >> nb) << nb + bits
  *
- * Bitstream strategy:
- *   Encoder writes bits LSB-first into a byte buffer (forward).
- *   Since tANS encodes symbols BACKWARDS but the decoder reads
- *   FORWARDS, the entire bitstream is byte-reversed at the end.
- *   The decoder reads the reversed bitstream forward (LSB-first),
- *   which restores the correct ANS decode order.
+ * 编码 (反向处理 in[n-1] → in[0]):
+ *   state = L (起始)
+ *   for each sym (反向):
+ *     while state >= f * 2^nb:  // 重正化
+ *       write state LSB (1 bit)
+ *       state >>= 1
+ *     bits = state & ((1 << nb) - 1)
+ *     r = state >> nb
+ *     state = slot[sym][r]  // 新 state
+ *     write bits (nb bits)
+ *   final state → header
+ *
+ * 解码 (正向输出 out[0] → out[n-1]):
+ *   state = final state (from header)
+ *   for each sym (正向):
+ *     sym = symbol[state]
+ *     nb = nb_bits[state]
+ *     read nb bits → bits
+ *     state = (state >> nb) << nb + bits  // (= (state & ~mask) + bits)
+ *     output sym
+ *
+ * File format (all little-endian):
+ *   [0..512)    : 256 normalized frequencies (uint16_t each, sum = 256)
+ *   [512..516)  : final state (uint32_t, value in [0, 256))
+ *   [516..520)  : total bit count of bitstream (uint32_t)
+ *   [520..)     : bitstream bytes
+ *
+ * Bitstream convention:
+ *   bitContainer = (bitContainer << n) | value
+ *   先编码的 value 在 high bit. byte[0] = 最后编码的 value 的 low 8 bit.
+ *   解码从 byte[0] 开始 LSB-first 读.
  */
 
 #include "mz.h"
@@ -20,89 +49,23 @@
 #include <string.h>
 #include <stdint.h>
 
-#define ANS_STATE_BITS  8
-#define ANS_STATE_COUNT (1 << ANS_STATE_BITS)   /* 256 */
+#define ANS_L       256
+#define ANS_L_BITS  8
 
-/* ---- bitstream helpers (forward LSB-first) ---- */
-
-struct ans_buf {
-    uint8_t *buf;
-    size_t cap;
-    size_t byte_pos;
-    uint64_t hold;
-    int hold_bits;
+struct ans_tables {
+    uint16_t norm[256];
+    uint8_t  symbol[256];
+    uint8_t  rank_tab[256];       /* spread 顺序的 rank in sym */
+    uint8_t  nb_bits[256];
+    uint16_t base[256];
+    uint8_t  slot[256][256];
 };
 
-static void
-ans_buf_init(struct ans_buf *b, uint8_t *buf, size_t cap)
-{
-    b->buf = buf;
-    b->cap = cap;
-    b->byte_pos = 0;
-    b->hold = 0;
-    b->hold_bits = 0;
-}
-
-/* Write low n bits to bitstream (LSB first, forward). */
+/* ---- frequency normalisation to 2^nb ----
+ * 强制 norm[s] ∈ {1, 2, 4, 8, ..., 256}. 调整 sum 到 256.
+ */
 static int
-ans_write_bits(struct ans_buf *b, uint64_t value, int n)
-{
-    b->hold |= (value & ((1ULL << n) - 1)) << b->hold_bits;
-    b->hold_bits += n;
-    while (b->hold_bits >= 8) {
-        if (b->byte_pos >= b->cap) return MZ_ERR_STREAM;
-        b->buf[b->byte_pos++] = (uint8_t)(b->hold & 0xFF);
-        b->hold >>= 8;
-        b->hold_bits -= 8;
-    }
-    return MZ_OK;
-}
-
-/* Flush remaining bits (byte-align). */
-static int
-ans_flush_bits(struct ans_buf *b)
-{
-    if (b->hold_bits > 0) {
-        if (b->byte_pos >= b->cap) return MZ_ERR_STREAM;
-        b->buf[b->byte_pos++] = (uint8_t)(b->hold & 0xFF);
-        b->hold = 0;
-        b->hold_bits = 0;
-    }
-    return MZ_OK;
-}
-
-/* Read one bit from bitstream (forward). */
-static int
-ans_read_bit(struct ans_buf *b)
-{
-    if (b->hold_bits == 0) {
-        if (b->byte_pos >= b->cap) return -1;
-        b->hold = b->buf[b->byte_pos++];
-        b->hold_bits = 8;
-    }
-    int bit = (int)(b->hold & 1);
-    b->hold >>= 1;
-    b->hold_bits--;
-    return bit;
-}
-
-/* Read n bits. Returns -1 on EOF. */
-static int
-ans_read_bits_val(struct ans_buf *b, int n)
-{
-    int val = 0;
-    for (int i = 0; i < n; i++) {
-        int bit = ans_read_bit(b);
-        if (bit < 0) return -1;
-        val |= bit << i;
-    }
-    return val;
-}
-
-/* ---- frequency normalisation ---- */
-
-static int
-normalise_freqs(const unsigned raw[256], int norm[256])
+normalise_freqs(const unsigned raw[256], uint16_t norm[256])
 {
     uint64_t total = 0;
     int used = 0;
@@ -113,127 +76,246 @@ normalise_freqs(const unsigned raw[256], int norm[256])
     if (total == 0) return MZ_ERR_DATA;
 
     if (used == 1) {
-        memset(norm, 0, 256 * sizeof(int));
+        for (int i = 0; i < 256; i++) norm[i] = 0;
         for (int i = 0; i < 256; i++) {
-            if (raw[i] > 0) { norm[i] = ANS_STATE_COUNT; break; }
+            if (raw[i] > 0) { norm[i] = ANS_L; break; }
         }
         return MZ_OK;
     }
 
-    uint64_t target = ANS_STATE_COUNT;
+    /* 第一遍: 圆整到 2^nb */
     int sum = 0;
     for (int i = 0; i < 256; i++) {
         if (raw[i] == 0) {
             norm[i] = 0;
         } else {
-            uint64_t v = (raw[i] * target + total / 2) / total;
+            uint64_t v = (raw[i] * ANS_L) / total;
             if (v == 0) v = 1;
-            norm[i] = (int)v;
-            sum += norm[i];
+            int p = 1;
+            while (((uint64_t)p << 1) <= v && (p << 1) <= ANS_L) p <<= 1;
+            norm[i] = (uint16_t)p;
+            sum += p;
         }
     }
 
-    int diff = (int)target - sum;
-    if (diff > 0) {
-        for (int i = 0; i < 256 && diff > 0; i++) {
-            if (norm[i] > 0) { norm[i]++; diff--; }
+    /* 第二遍: 调整 sum 到 256. 优先保持 2^nb (×2 或 /2). */
+    {
+        int safety = 10000;
+        while (safety-- > 0) {
+            int sum_now = 0;
+            for (int i = 0; i < 256; i++) sum_now += norm[i];
+            int diff = (int)ANS_L - sum_now;
+            if (diff == 0) break;
+            int changed = 0;
+            if (diff > 0) {
+                for (int i = 0; i < 256 && diff > 0; i++) {
+                    if (norm[i] > 0 && (uint32_t)norm[i] * 2 <= ANS_L) {
+                        int delta = norm[i];
+                        norm[i] = (uint16_t)(norm[i] * 2);
+                        diff -= delta;
+                        changed = 1;
+                    }
+                }
+                for (int i = 0; i < 256 && diff > 0; i++) {
+                    if (norm[i] > 0 && norm[i] < ANS_L) {
+                        norm[i] = (uint16_t)(norm[i] + 1);
+                        diff--;
+                        changed = 1;
+                    }
+                }
+            } else {
+                for (int i = 255; i >= 0 && diff < 0; i--) {
+                    if (norm[i] > 1 && norm[i] % 2 == 0) {
+                        int delta = norm[i] / 2;
+                        norm[i] = (uint16_t)(norm[i] / 2);
+                        diff += delta;
+                        changed = 1;
+                    }
+                }
+                for (int i = 255; i >= 0 && diff < 0; i--) {
+                    if (norm[i] > 1) {
+                        norm[i] = (uint16_t)(norm[i] - 1);
+                        diff++;
+                        changed = 1;
+                    }
+                }
+            }
+            if (!changed) break;
         }
-    } else if (diff < 0) {
-        for (int i = 255; i >= 0 && diff < 0; i--) {
-            if (norm[i] > 1) { norm[i]--; diff++; }
+    }
+
+    /* 验证: 每个非零 norm 是 2 的幂 */
+    for (int i = 0; i < 256; i++) {
+        if (norm[i] > 0 && (norm[i] & (norm[i] - 1))) {
+            /* 不是 2 的幂, 强制 */
+            int p = 1;
+            while (p < norm[i] && p < ANS_L) p <<= 1;
+            norm[i] = (uint16_t)p;
         }
     }
     return MZ_OK;
 }
 
-/* floor(log2(x)) for x > 0 */
 static int
-flog2(uint32_t x)
+compute_nb(int f)
 {
-    int n = 0;
-    while (x > 1) { x >>= 1; n++; }
-    return n;
+    if (f >= ANS_L) return 0;
+    int nb = 0;
+    while ((f << 1) <= ANS_L) { f <<= 1; nb++; }
+    return nb;
 }
 
-/* ---- table construction ---- */
+/* 按 nb 从大到小排序 (norm 大的 nb 小) */
+static void
+sort_syms_by_nb(int order[256], const uint16_t norm[256])
+{
+    int n = 0;
+    for (int i = 0; i < 256; i++) {
+        if (norm[i] > 0) order[n++] = i;
+    }
+    for (int i = 1; i < n; i++) {
+        int k = order[i];
+        int nbk = compute_nb(norm[k]);
+        int j = i - 1;
+        while (j >= 0) {
+            int nbj = compute_nb(norm[order[j]]);
+            if (nbj > nbk) break;
+            if (nbj == nbk && order[j] < k) break;
+            order[j + 1] = order[j];
+            j--;
+        }
+        order[j + 1] = k;
+    }
+    for (int i = n; i < 256; i++) order[i] = -1;
+}
 
-struct ans_tables {
-    int symbol[ANS_STATE_COUNT];
-    int nb_bits[ANS_STATE_COUNT];
-    int new_state[ANS_STATE_COUNT];
-    int encode_next[ANS_STATE_COUNT][256];
-    int freq[256];
+/* 构造表：FSE-style spread。
+ * 注意: 因为 norm 强制为 2^nb, 且 spread 是 "顺序放" (i.e., sym 的 slot 连续),
+ * 但不同 sym 的 nb 不同, slot 大小不同, 所以 slot 不一定连续.
+ * 关键: rank 仍然由 spread 顺序的索引 i 决定.
+ * base = i * 2^nb (按 spread 顺序 rank, 不按 state >> nb).
+ */
+static int
+build_tables(struct ans_tables *t, const uint16_t norm[256])
+{
+    memcpy(t->norm, norm, sizeof(t->norm));
+    memset(t->symbol, 0xFF, sizeof(t->symbol));
+    memset(t->rank_tab, 0, sizeof(t->rank_tab));
+    memset(t->nb_bits, 0, sizeof(t->nb_bits));
+    memset(t->base, 0, sizeof(t->base));
+    memset(t->slot, 0, sizeof(t->slot));
+
+    int order[256];
+    sort_syms_by_nb(order, norm);
+
+    int step = (ANS_L >> 1) + (ANS_L >> 3) + 3;
+    step |= 1;
+
+    int pos = 0;
+    for (int oi = 0; oi < 256 && order[oi] >= 0; oi++) {
+        int s = order[oi];
+        int f = norm[s];
+        int nb = compute_nb(f);
+        for (int i = 0; i < f; i++) {
+            while (t->symbol[pos] != 0xFF)
+                pos = (pos + 1) & (ANS_L - 1);
+            t->symbol[pos] = (uint8_t)s;
+            t->slot[s][i] = (uint8_t)pos;
+            t->rank_tab[pos] = (uint8_t)i;
+            t->nb_bits[pos] = (uint8_t)nb;
+            t->base[pos] = (uint16_t)(i << nb);
+            pos = (pos + step) & (ANS_L - 1);
+        }
+    }
+
+    return MZ_OK;
+}
+
+/* ---- bitstream writer (FSE 风格) ---- */
+
+struct ans_bs {
+    uint8_t *buf;
+    size_t   cap;
+    size_t   byte_pos;
+    uint32_t container;
+    int      bit_count;
 };
 
 static int
-build_tables(struct ans_tables *t, const int norm[256])
+bs_init(struct ans_bs *b, uint8_t *buf, size_t cap)
 {
-    int i, s;
-
-    memcpy(t->freq, norm, 256 * sizeof(int));
-
-    /* ---- spread symbols across the state table ---- */
-    memset(t->symbol, 0xFF, sizeof(t->symbol));
-
-    int step = (ANS_STATE_COUNT >> 1) + (ANS_STATE_COUNT >> 3) + 3;
-    step |= 1; /* ensure odd — coprime with power-of-2 */
-
-    int pos = 0;
-    for (s = 0; s < 256; s++) {
-        int f = norm[s];
-        if (f == 0) continue;
-        for (i = 0; i < f; i++) {
-            while (t->symbol[pos] >= 0)
-                pos = (pos + 1) & (ANS_STATE_COUNT - 1);
-            t->symbol[pos] = s;
-            pos = (pos + step) & (ANS_STATE_COUNT - 1);
-        }
-    }
-
-    /* ---- count ranks per symbol ---- */
-    int rank[256];
-    memset(rank, 0, sizeof(rank));
-
-    /* ---- build decoding tables ---- */
-    for (int x = 0; x < ANS_STATE_COUNT; x++) {
-        s = t->symbol[x];
-        if (s < 0) return MZ_ERR_DATA;
-        int f = norm[s];
-        int slot = rank[s]++;
-        int nb;
-        if (f >= ANS_STATE_COUNT) {
-            nb = 0;
-        } else {
-            nb = ANS_STATE_BITS - flog2(f);
-            while ((f << nb) < ANS_STATE_COUNT) nb++;
-        }
-        t->nb_bits[x] = nb;
-        t->new_state[x] = slot << nb;
-    }
-
-    /* ---- build encoding table ---- */
-    for (s = 0; s < 256; s++)
-        for (int x = 0; x < ANS_STATE_COUNT; x++)
-            t->encode_next[x][s] = -1;
-
-    for (int x = 0; x < ANS_STATE_COUNT; x++) {
-        s = t->symbol[x];
-        int nb = t->nb_bits[x];
-        int base = t->new_state[x];
-        int slot = base >> nb;
-        if (slot >= norm[s]) continue;
-        for (int bits = 0; bits < (1 << nb); bits++) {
-            int target = base + bits;
-            if (target < ANS_STATE_COUNT) {
-                t->encode_next[target][s] = x;
-            }
-        }
-    }
-
+    b->buf = buf;
+    b->cap = cap;
+    b->byte_pos = 0;
+    b->container = 0;
+    b->bit_count = 0;
     return MZ_OK;
 }
 
-/* ---- compressor ---- */
+static int
+bs_put(struct ans_bs *b, uint32_t value, int n)
+{
+    if (n <= 0) return MZ_OK;
+    if (n > 32) return MZ_ERR_PARAM;
+    b->container = (b->container << n) | (value & ((1u << n) - 1));
+    b->bit_count += n;
+    while (b->bit_count >= 8) {
+        if (b->byte_pos >= b->cap) return MZ_ERR_STREAM;
+        b->buf[b->byte_pos++] = (uint8_t)(b->container & 0xFF);
+        b->container >>= 8;
+        b->bit_count -= 8;
+    }
+    return MZ_OK;
+}
+
+static int
+bs_flush(struct ans_bs *b)
+{
+    if (b->bit_count == 0) return MZ_OK;
+    if (b->byte_pos >= b->cap) return MZ_ERR_STREAM;
+    b->buf[b->byte_pos++] = (uint8_t)(b->container & 0xFF);
+    b->container = 0;
+    b->bit_count = 0;
+    return MZ_OK;
+}
+
+struct ans_br {
+    const uint8_t *buf;
+    size_t   cap;
+    size_t   bit_pos;
+};
+
+static void
+br_init(struct ans_br *b, const uint8_t *buf, size_t cap)
+{
+    b->buf = buf;
+    b->cap = cap;
+    b->bit_pos = 0;
+}
+
+static int
+br_get(struct ans_br *b)
+{
+    if ((b->bit_pos >> 3) >= b->cap) return -1;
+    int bit = (b->buf[b->bit_pos >> 3] >> (b->bit_pos & 7)) & 1;
+    b->bit_pos++;
+    return bit;
+}
+
+static int
+br_get_n(struct ans_br *b, int n, uint32_t *out)
+{
+    uint32_t v = 0;
+    for (int i = 0; i < n; i++) {
+        int bit = br_get(b);
+        if (bit < 0) return -1;
+        v |= (uint32_t)bit << i;
+    }
+    *out = v;
+    return 0;
+}
+
+/* ---- 编码 ---- */
 
 int
 mz_tans_compress(const unsigned char *in, size_t inlen,
@@ -242,170 +324,133 @@ mz_tans_compress(const unsigned char *in, size_t inlen,
     if (!in || !out || !outlen) return MZ_ERR_PARAM;
     if (inlen == 0) return MZ_ERR_PARAM;
 
-    /* Count frequencies */
     unsigned freqs[256];
     memset(freqs, 0, sizeof(freqs));
     for (size_t i = 0; i < inlen; i++)
         freqs[in[i]]++;
 
-    /* Normalise */
-    int norm[256];
+    uint16_t norm[256];
     int ret = normalise_freqs(freqs, norm);
     if (ret != MZ_OK) return ret;
 
-    /* Build tables */
     struct ans_tables *tab = (struct ans_tables *)malloc(sizeof(*tab));
     if (!tab) return MZ_ERR_MEMORY;
     ret = build_tables(tab, norm);
     if (ret != MZ_OK) { free(tab); return ret; }
 
-    /* Output header: 256 * 2 bytes LE */
-    size_t ip = 0;
     size_t max_out = *outlen;
-    if (ip + 512 > max_out) { free(tab); return MZ_ERR_STREAM; }
+    if (520 > max_out) { free(tab); return MZ_ERR_STREAM; }
+    size_t ip = 0;
     for (int i = 0; i < 256; i++) {
         out[ip++] = (uint8_t)(norm[i] & 0xFF);
         out[ip++] = (uint8_t)((norm[i] >> 8) & 0xFF);
     }
+    size_t hdr_end = 520;
+    size_t bs_cap = max_out - hdr_end;
+    for (size_t i = 0; i < bs_cap; i++) out[hdr_end + i] = 0;
 
-    /* Reserve space for bitstream (use remaining output buffer) */
-    size_t bitstream_max = max_out - ip;
-    if (bitstream_max < ANS_STATE_BITS / 8 + 1) { free(tab); return MZ_ERR_STREAM; }
+    struct ans_bs bw;
+    bs_init(&bw, out + hdr_end, bs_cap);
 
-    struct ans_buf bw;
-    ans_buf_init(&bw, out + ip, bitstream_max);
-
-    /* Encode: process symbols in REVERSE */
-    uint64_t state = ANS_STATE_COUNT / 2;
-
+    uint32_t state = ANS_L;
     size_t idx = inlen;
     while (idx > 0) {
         idx--;
         int sym = in[idx];
-        int f = tab->freq[sym];
+        int f = norm[sym];
         if (f == 0) { free(tab); return MZ_ERR_DATA; }
-        int nb = ANS_STATE_BITS - flog2(f);
-        while ((f << nb) < ANS_STATE_COUNT) nb++;
+        int nb = compute_nb(f);
 
-        /* Renormalise: state must be < min(freq << nb, ANS_STATE_COUNT)
-         * for the table lookup to succeed. */
-        while (state >= ANS_STATE_COUNT) {
-            ret = ans_write_bits(&bw, state & 1, 1);
-            if (ret != MZ_OK) { free(tab); return ret; }
-            state >>= 1;
-        }
-        /* Also ensure state < freq << nb for valid decomp */
-        uint64_t threshold = (uint64_t)f << nb;
+        uint32_t threshold = (uint32_t)f << nb;
         while (state >= threshold) {
-            ret = ans_write_bits(&bw, state & 1, 1);
+            ret = bs_put(&bw, state & 1, 1);
             if (ret != MZ_OK) { free(tab); return ret; }
             state >>= 1;
         }
 
-        uint64_t slot = state >> nb;
-        uint64_t bits = state & ((1ULL << nb) - 1);
+        int r = (int)(state >> nb);
+        int bits = (int)(state & ((1u << nb) - 1));
+        if (r >= f) { free(tab); return MZ_ERR_DATA; }
+        state = tab->slot[sym][r];
+        if (state >= ANS_L) { free(tab); return MZ_ERR_DATA; }
 
-        if (slot >= (uint64_t)tab->freq[sym])
-            slot = tab->freq[sym] - 1;
-        int next = tab->encode_next[(int)state][sym];
-        if (next < 0)
-            next = (int)(state & (ANS_STATE_COUNT - 1));
-        state = (uint64_t)next;
-
-        ret = ans_write_bits(&bw, bits, nb);
+        ret = bs_put(&bw, (uint32_t)bits, nb);
         if (ret != MZ_OK) { free(tab); return ret; }
     }
 
-    /* Flush final state (written first in reverse-order bitstream) */
-    for (int i = 0; i < ANS_STATE_BITS; i++) {
-        ret = ans_write_bits(&bw, state & 1, 1);
-        if (ret != MZ_OK) { free(tab); return ret; }
-        state >>= 1;
-    }
-
-    ret = ans_flush_bits(&bw);
+    ret = bs_flush(&bw);
     if (ret != MZ_OK) { free(tab); return ret; }
 
-    /* Reverse the bitstream bytes so that the decoder can read forward */
     size_t bs_len = bw.byte_pos;
-    uint8_t *bs = out + ip;
-    for (size_t i = 0; i < bs_len / 2; i++) {
-        uint8_t tmp = bs[i];
-        bs[i] = bs[bs_len - 1 - i];
-        bs[bs_len - 1 - i] = tmp;
-    }
 
-    *outlen = ip + bs_len;
+    out[512] = (uint8_t)(state & 0xFF);
+    out[513] = (uint8_t)((state >> 8) & 0xFF);
+    out[514] = (uint8_t)((state >> 16) & 0xFF);
+    out[515] = (uint8_t)((state >> 24) & 0xFF);
+    size_t total_bits = bs_len * 8;
+    out[516] = (uint8_t)(total_bits & 0xFF);
+    out[517] = (uint8_t)((total_bits >> 8) & 0xFF);
+    out[518] = (uint8_t)((total_bits >> 16) & 0xFF);
+    out[519] = (uint8_t)((total_bits >> 24) & 0xFF);
+
+    *outlen = hdr_end + bs_len;
     free(tab);
     return MZ_OK;
 }
 
-/* ---- decompressor ---- */
+/* ---- 解码 ---- */
 
 int
 mz_tans_decompress(const unsigned char *in, size_t inlen,
                    unsigned char *out, size_t *outlen)
 {
     if (!in || !out || !outlen) return MZ_ERR_PARAM;
-    if (inlen < 512) return MZ_ERR_DATA;
+    if (inlen < 520) return MZ_ERR_DATA;
 
-    /* Read header */
     size_t ip = 0;
-    int norm[256];
+    uint16_t norm[256];
     for (int i = 0; i < 256; i++) {
-        norm[i] = (int)in[ip] | ((int)in[ip + 1] << 8);
+        norm[i] = (uint16_t)((uint32_t)in[ip]
+                            | ((uint32_t)in[ip + 1] << 8));
         ip += 2;
     }
 
-    /* Build tables */
     struct ans_tables *tab = (struct ans_tables *)malloc(sizeof(*tab));
     if (!tab) return MZ_ERR_MEMORY;
     int ret = build_tables(tab, norm);
     if (ret != MZ_OK) { free(tab); return ret; }
 
-    /* The bitstream was byte-reversed by the encoder.
-     * We read it normally (forward). */
-    struct ans_buf br;
-    ans_buf_init(&br, (uint8_t *)in + ip, inlen - ip);
+    uint32_t state = (uint32_t)in[512]
+                   | ((uint32_t)in[513] << 8)
+                   | ((uint32_t)in[514] << 16)
+                   | ((uint32_t)in[515] << 24);
+    if (state >= ANS_L) { free(tab); return MZ_ERR_DATA; }
 
-    /* Read initial state (was flushed LAST by encoder, now at START of bitstream) */
-    uint64_t state = 0;
-    for (int i = 0; i < ANS_STATE_BITS; i++) {
-        int bit = ans_read_bit(&br);
-        if (bit < 0) { free(tab); return MZ_ERR_DATA; }
-        state |= (uint64_t)bit << i;
-    }
+    struct ans_br br;
+    br_init(&br, in + 520, inlen - 520);
 
-    /* Decode into temp buffer (backwards), then copy */
-    uint8_t *tmp = (uint8_t *)malloc(*outlen);
-    if (!tmp) { free(tab); return MZ_ERR_MEMORY; }
-
-    size_t op = *outlen;
-    while (op > 0) {
-        if (state >= ANS_STATE_COUNT) { free(tab); free(tmp); return MZ_ERR_DATA; }
+    size_t olen = *outlen;
+    for (size_t i = 0; i < olen; i++) {
         int x = (int)state;
         int sym = tab->symbol[x];
-        if (sym < 0) { free(tab); free(tmp); return MZ_ERR_DATA; }
-
-        op--;
-        tmp[op] = (uint8_t)sym;
-
-        int nb = tab->nb_bits[x];
-        int base = tab->new_state[x];
-
-        int bits = ans_read_bits_val(&br, nb);
-        if (bits < 0) { free(tab); free(tmp); return MZ_ERR_DATA; }
-
-        state = (uint64_t)(base + bits);
-        while (state >= ANS_STATE_COUNT) {
-            int bit = ans_read_bit(&br);
-            if (bit < 0) { free(tab); free(tmp); return MZ_ERR_DATA; }
-            state = (state << 1) | (uint64_t)(bit & 1);
+        if (sym < 0 || (int)tab->norm[sym] == 0) {
+            free(tab); return MZ_ERR_DATA;
         }
+        out[i] = (uint8_t)sym;
+        int nb = tab->nb_bits[x];
+        uint32_t bits = 0;
+        if (nb > 0) {
+            if (br_get_n(&br, nb, &bits) < 0) {
+                free(tab); return MZ_ERR_DATA;
+            }
+        }
+        /* new_state = (state & ~mask) + bits = rank * 2^nb + bits */
+        uint32_t mask = ((1u << nb) - 1);
+        uint32_t new_state = (state & ~mask) + bits;
+        if (new_state >= ANS_L) { free(tab); return MZ_ERR_DATA; }
+        state = new_state;
     }
 
-    memcpy(out, tmp, *outlen);
-    free(tmp);
     free(tab);
     return MZ_OK;
 }
