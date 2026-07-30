@@ -2578,8 +2578,8 @@ write_executable(struct ld_context *ctx, const char *path,
 	uint64_t rw_start = UINT64_MAX;
 	uint64_t file_end = LD_PAGE;
 	uint64_t memory_end = LD_PAGE;
-	uint64_t section_offset;
 	uint64_t alloc_file_end;
+	uint64_t section_offset;
 	uint32_t shstr_index;
 	size_t i;
 	int output_count;
@@ -2765,6 +2765,7 @@ write_executable(struct ld_context *ctx, const char *path,
 		write16(h + 40, target->ehdr_size);
 		write16(h + 42, MT_ELF32_PHDR_SIZE);
 		phnum = 1; /* PT_LOAD */
+		if (memory_end > rx_end) phnum++; /* second LOAD for RW */
 		if (ctx->tls_size) phnum++;
 	phnum++; /* PT_GNU_STACK */
 		if (ctx->shared || ctx->pie) phnum += 2;
@@ -2791,6 +2792,7 @@ write_executable(struct ld_context *ctx, const char *path,
 		write16(h + 52, target->ehdr_size);
 		write16(h + 54, MT_ELF64_PHDR_SIZE);
 		phnum = 1; /* PT_LOAD */
+		if (memory_end > rx_end) phnum++; /* second LOAD for RW */
 		if (ctx->tls_size) phnum++;
 	phnum++; /* PT_GNU_STACK */
 		if (ctx->shared || ctx->pie) phnum += 2; /* PT_PHDR + PT_DYNAMIC */
@@ -2822,21 +2824,31 @@ write_executable(struct ld_context *ctx, const char *path,
 			goto out_file;
 	}
 	{
-		uint64_t single_end = memory_end > rx_end ? memory_end : rx_end;
-		uint64_t filesz = alloc_file_end > LD_PAGE ? alloc_file_end : LD_PAGE;
-		uint64_t memsz = single_end > LD_PAGE ? single_end : LD_PAGE;
-		/* Extend LOAD FileSiz to cover .tdata so __meuos_tls_init
-		 * can read the TLS initial values via the LOAD mapping. */
-		if (ctx->tls_tdata_group >= 0) {
-			uint64_t tde = ctx->groups[ctx->tls_tdata_group].file_offset
-			  + ctx->groups[ctx->tls_tdata_group].size;
-			if (tde > filesz) filesz = tde;
-			if (tde > memsz) memsz = tde;
-		}
-		if (write_program_header(file, LD_PF_R | LD_PF_W | LD_PF_X,
-		                         0, base_addr, filesz, memsz,
+		/* ---- 1st LOAD: read-execute (code + rodata) ---- */
+		/* rx_end, memory_end 都跟踪 FILE OFFSETS。
+		 * LOAD 段将文件偏移 0 映射到 base_addr (0x400000)。
+		 * 所以文件偏移 F 的组，虚拟地址为 base_addr + F。 */
+		uint64_t seg1_fsz = rx_end > LD_PAGE ? rx_end : LD_PAGE;
+		uint64_t seg1_msz = seg1_fsz;
+		if (write_program_header(file, LD_PF_R | LD_PF_X,
+		                         0, base_addr, seg1_fsz, seg1_msz,
 		                         target->elf_class == 1) != 0)
 			goto out_file;
+		/* ---- 2nd LOAD: read-write (data + bss), when present ---- */
+		if (memory_end > rx_end) {
+			uint64_t rw_off = rx_end;
+			uint64_t rw_vaddr = base_addr + rx_end;
+			/* filesz = 只包含已初始化数据（非 NOBITS），到 alloc_file_end 为止 */
+			uint64_t rw_fsz = alloc_file_end > rx_end
+			                  ? alloc_file_end - rx_end : 0;
+			/* memsz = 包含 BSS 在内的整个 RW 区域 */
+			uint64_t rw_msz = memory_end - rx_end;
+			if (write_program_header(file, LD_PF_R | LD_PF_W,
+			                         rw_off, rw_vaddr,
+			                         rw_fsz, rw_msz,
+			                         target->elf_class == 1) != 0)
+				goto out_file;
+		}
 	}
 	/* PT_DYNAMIC for shared libraries and PIE executables (ET_DYN) */
 	if (ctx->shared || ctx->pie) {
