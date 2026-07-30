@@ -10,9 +10,14 @@ OBJS := $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS))
 MSYS_OBJ := $(BUILD)/mz_msys.o
 LIB := $(BUILD)/libmz.a
 SO_LIB := $(BUILD)/libmz.so
-TEST := $(BUILD)/test_mz
+
+# Test binaries
+TEST_MX := $(BUILD)/test_mz
+TEST_MXA := $(BUILD)/test_mxa
+
 all: $(LIB)
-$(BUILD)/%.o: src/%.c include/mz.h
+
+$(BUILD)/%.o: src/%.c include/mz.h include/mxa.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -Iinclude -c -o $@ $<
 $(MSYS_OBJ): src/mz_msys.c
@@ -23,9 +28,12 @@ $(LIB): $(OBJS)
 libmz.so: CFLAGS += -fPIC $(MSYS_INC)
 libmz.so: $(OBJS) $(MSYS_OBJ)
 	$(CC) $(SO_FLAGS) -o $(SO_LIB) $(OBJS) $(MSYS_OBJ) $(SO_LDFLAGS)
-check: $(TEST)
-	./$(TEST)
-$(TEST): test/test.c $(LIB)
+check: $(TEST_MX) $(TEST_MXA)
+	./$(TEST_MX)
+	./$(TEST_MXA)
+$(TEST_MX): test/test.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude -o $@ test/test.c $(LIB)
+$(TEST_MXA): test/test_mxa.c $(LIB)
+	$(CC) $(CFLAGS) -Iinclude -o $@ test/test_mxa.c $(LIB)
 clean:
 	rm -rf $(BUILD)
