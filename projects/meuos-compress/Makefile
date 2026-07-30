@@ -6,9 +6,13 @@ SO_LDFLAGS ?= -Wl,--allow-multiple-definition
 MSYS_INC ?= -I../meuos-sysroot/include
 BUILD := build
 
-# Library sources (exclude CLI and msys plugin)
-SRCS := $(filter-out src/mz_msys.c src/mxa_cli.c,$(sort $(wildcard src/*.c)))
-OBJS := $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS))
+# Sources organized by module subdirectory (filter out special-compile files)
+CODE_SRC := $(sort $(wildcard src/codec/*.c))
+CONT_SRC := $(filter-out src/container/mz_msys.c src/container/mxa_cli.c,$(sort $(wildcard src/container/*.c)))
+CRYPT_SRC := $(sort $(wildcard src/crypt/*.c))
+SRCS := $(CODE_SRC) $(CONT_SRC) $(CRYPT_SRC)
+# Flat object names (strip subdirectory prefix)
+OBJS := $(addprefix $(BUILD)/,$(notdir $(SRCS:.c=.o)))
 MSYS_OBJ := $(BUILD)/mz_msys.o
 LIB := $(BUILD)/libmz.a
 SO_LIB := $(BUILD)/libmz.so
@@ -22,10 +26,13 @@ TEST_MXA := $(BUILD)/test_mxa
 
 all: $(LIB) $(MZ_BIN)
 
-$(BUILD)/%.o: src/%.c include/mz.h include/mxa.h
+# vpath enables pattern rule to find .c in subdirectories
+vpath %.c src/codec:src/container:src/crypt
+
+$(BUILD)/%.o: %.c include/mz.h include/mxa.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -Iinclude -c -o $@ $<
-$(MSYS_OBJ): src/mz_msys.c
+$(MSYS_OBJ): src/container/mz_msys.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -fPIC -Iinclude $(MSYS_INC) -c -o $@ $<
 $(LIB): $(OBJS)
@@ -34,8 +41,8 @@ libmz.so: CFLAGS += -fPIC $(MSYS_INC)
 libmz.so: $(OBJS) $(MSYS_OBJ)
 	$(CC) $(SO_FLAGS) -o $(SO_LIB) $(OBJS) $(MSYS_OBJ) $(SO_LDFLAGS)
 
-$(MZ_BIN): src/mxa_cli.c $(LIB)
-	$(CC) $(CFLAGS) -Iinclude -o $@ src/mxa_cli.c $(LIB) -ldl
+$(MZ_BIN): src/container/mxa_cli.c $(LIB)
+	$(CC) $(CFLAGS) -Iinclude -o $@ src/container/mxa_cli.c $(LIB) -ldl
 
 check: $(TEST_MX) $(TEST_MXA) $(MZ_BIN)
 	./$(TEST_MX)
