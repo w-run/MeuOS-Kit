@@ -145,7 +145,7 @@ int main(void)
             detail_render, sel_pkg
         );
 
-        tui_rect_t full = { 3, 1, size.rows - 4, size.cols - 2 };
+        tui_rect_t full = { 3, 1, size.rows - 4, size.cols - 3 };
         tui_layout_render(0, dual, full);
         tui_layout_free(dual);
 
@@ -154,7 +154,7 @@ int main(void)
         tui_set_bg(0, tui_meuos_theme.accent);
         tui_set_attr(0, TUI_ATTR_BOLD);
         tui_set_fg(0, TUI_COLOR_WHITE);
-        tui_spaces(0, size.cols);
+        tui_spaces(0, size.cols - 1);
         tui_cursor_goto(0, 1, 3);
         tui_write(0, "Package Manager - libtui Demo");
         tui_reset_style(0);
@@ -164,11 +164,11 @@ int main(void)
         tui_set_bg(0, tui_meuos_theme.accent);
         tui_set_fg(0, TUI_COLOR_WHITE);
         tui_set_attr(0, TUI_ATTR_BOLD);
-        tui_spaces(0, size.cols);
+        tui_spaces(0, size.cols - 1);
         tui_cursor_goto(0, size.rows, 3);
         tui_printf(0, " %s  |  %d packages", sel_pkg ? sel_pkg->name : "", (int)NPACKAGES);
-        tui_cursor_goto(0, size.rows, size.cols - 20);
-        tui_printf(0, "  %-16s", "q=quit  arrows=nav");
+        tui_cursor_goto(0, size.rows, size.cols - 22);
+        tui_printf(0, " %-16s", "q=quit  arrows=nav");
         tui_reset_style(0);
 
         /* ── 等待按键 ── */

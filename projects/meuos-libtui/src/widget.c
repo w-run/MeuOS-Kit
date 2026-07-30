@@ -436,11 +436,15 @@ int tui_statusbar_render(int fd, const tui_rect_t *area, void *userdata)
         write(fd, sb->left, (size_t)show);
     }
 
-    int pad = area->cols - (left_len < max_left ? left_len : max_left) - right_len;
+    int pad = area->cols - 1 - (left_len < max_left ? left_len : max_left) - right_len;
     if (pad > 0) tui_spaces(fd, pad);
 
     if (right_len > 0)
         write(fd, sb->right, (size_t)right_len);
+
+    /* 末尾留一列安全边距 */
+    tui_reset_style(fd);
+    tui_spaces(fd, 1);
 
     tui_reset_style(fd);
     return TUI_OK;
@@ -463,7 +467,7 @@ static int header_render(int fd, const tui_rect_t *area, void *userdata)
 
     tui_set_bg(fd, tui_meuos_theme.accent);
     tui_set_attr(fd, TUI_ATTR_BOLD);
-    tui_spaces(fd, area->cols);
+    tui_spaces(fd, area->cols - 1);
 
     tui_cursor_goto(fd, area->row, area->col + 2);
     tui_set_fg(fd, TUI_COLOR_WHITE);

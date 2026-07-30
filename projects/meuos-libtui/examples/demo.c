@@ -151,7 +151,7 @@ int main(void)
     );
 
     if (app) {
-        tui_rect_t area = { 1, 1, size.rows, size.cols };
+        tui_rect_t area = { 1, 1, size.rows, size.cols - 1 };
         tui_clear_screen(0);
         tui_layout_render(0, app, area);
         tui_layout_free(app);

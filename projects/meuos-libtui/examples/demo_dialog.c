@@ -81,7 +81,7 @@ int main(void)
     tui_layout_t *wz = tui_layout_wizard(
         "  Install Wizard  ", step_content, "Initializing ...",
         "Step 1/5");
-    tui_rect_t full = { 1, 1, scr.rows, scr.cols };
+    tui_rect_t full = { 1, 1, scr.rows, scr.cols - 1 };
     tui_layout_render(0, wz, full);
 
     btn = blocking_dlg(scr, "Welcome",
