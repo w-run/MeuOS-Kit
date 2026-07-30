@@ -57,58 +57,58 @@ $(BUILD)/libm4/m4_engine.o: src/libm4/m4_engine.c
 	cc -I../meuos-sysroot/include -Isrc/include -Isrc -Isrc/util -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -c -o $@ $<
 
 check: $(BUILD)/meow
-	cd .. && ./meow/$(BUILD)/meow build meow-smoke
-	cd .. && ./meow/$(BUILD)/meow clean meow-smoke
-	cd .. && ./meow/$(BUILD)/meow build meow-env
-	cd .. && ./meow/$(BUILD)/meow clean meow-env
+	cd .. && ./projects/meow/$(BUILD)/meow build meow-smoke
+	cd .. && ./projects/meow/$(BUILD)/meow clean meow-smoke
+	cd .. && ./projects/meow/$(BUILD)/meow build meow-env
+	cd .. && ./projects/meow/$(BUILD)/meow clean meow-env
 	@rm -f /tmp/meow-incremental.input /tmp/meow-incremental.output /tmp/meow-incremental.log
 	@printf '%s\n' first > /tmp/meow-incremental.input
-	cd .. && ./meow/$(BUILD)/meow build meow-incremental
+	cd .. && ./projects/meow/$(BUILD)/meow build meow-incremental
 	@test "$$(cat /tmp/meow-incremental.log)" = hit
-	cd .. && ./meow/$(BUILD)/meow build meow-incremental
+	cd .. && ./projects/meow/$(BUILD)/meow build meow-incremental
 	@test "$$(cat /tmp/meow-incremental.log)" = hit
 	@printf '%s\n' second > /tmp/meow-incremental.input
-	cd .. && ./meow/$(BUILD)/meow build meow-incremental
+	cd .. && ./projects/meow/$(BUILD)/meow build meow-incremental
 	@test "$$(cat /tmp/meow-incremental.log)" = hithit
-	cd .. && ./meow/$(BUILD)/meow clean meow-incremental
+	cd .. && ./projects/meow/$(BUILD)/meow clean meow-incremental
 	@rm -f /tmp/meow-auto.input /tmp/meow-auto.output
 	@printf '%s\n' input > /tmp/meow-auto.input
-	cd .. && ./meow/$(BUILD)/meow build meow-auto
+	cd .. && ./projects/meow/$(BUILD)/meow build meow-auto
 	@test "$$(cat /tmp/meow-auto.output)" = "report:/tmp/meow-auto.input:/tmp/meow-auto.input"
-	cd .. && ./meow/$(BUILD)/meow clean meow-auto
+	cd .. && ./projects/meow/$(BUILD)/meow clean meow-auto
 	@rm -f alpha.out /tmp/meow-pattern-alpha.in
 	@printf '%s\n' input > /tmp/meow-pattern-alpha.in
-	cd .. && ./meow/$(BUILD)/meow build meow-pattern alpha.out
+	cd .. && ./projects/meow/$(BUILD)/meow build meow-pattern alpha.out
 	@test "$$(cat ../alpha.out)" = "alpha:/tmp/meow-pattern-alpha.in"
-	cd .. && ./meow/$(BUILD)/meow build meow-pattern alpha.out
+	cd .. && ./projects/meow/$(BUILD)/meow build meow-pattern alpha.out
 	@test "$$(cat ../alpha.out)" = "alpha:/tmp/meow-pattern-alpha.in"
-	cd .. && ./meow/$(BUILD)/meow clean meow-pattern
+	cd .. && ./projects/meow/$(BUILD)/meow clean meow-pattern
 	@rm -f /tmp/meow-include.result
-	cd .. && ./meow/$(BUILD)/meow build meow-include
+	cd .. && ./projects/meow/$(BUILD)/meow build meow-include
 	@test "$$(cat /tmp/meow-include.result)" = included
-	cd .. && ./meow/$(BUILD)/meow clean meow-include
+	cd .. && ./projects/meow/$(BUILD)/meow clean meow-include
 	@rm -f /tmp/meow-parallel-left /tmp/meow-parallel-right
-	cd .. && ./meow/$(BUILD)/meow -j2 build meow-parallel
+	cd .. && ./projects/meow/$(BUILD)/meow -j2 build meow-parallel
 	@test -f /tmp/meow-parallel-left -a -f /tmp/meow-parallel-right
-	cd .. && ./meow/$(BUILD)/meow -j 2 clean meow-parallel
+	cd .. && ./projects/meow/$(BUILD)/meow -j 2 clean meow-parallel
 	@rm -f /tmp/meow-parallel-fail-downstream /tmp/meow-parallel-fail-other
-	@cd .. && ! ./meow/$(BUILD)/meow -j2 build meow-parallel-fail
+	@cd .. && ! ./projects/meow/$(BUILD)/meow -j2 build meow-parallel-fail
 	@test ! -e /tmp/meow-parallel-fail-downstream
 	@test -f /tmp/meow-parallel-fail-other
-	cd .. && ./meow/$(BUILD)/meow clean meow-parallel-fail
-	cd .. && ./meow/$(BUILD)/meow list | grep -qx meow-smoke
-	cd .. && ./meow/$(BUILD)/meow list | grep -qx dash
+	cd .. && ./projects/meow/$(BUILD)/meow clean meow-parallel-fail
+	cd .. && ./projects/meow/$(BUILD)/meow list | grep -qx meow-smoke
+	cd .. && ./projects/meow/$(BUILD)/meow list | grep -qx dash
 	cd test/make-compat && env -u MAKEFLAGS -u MFLAGS MEUOS_SYSROOT=./test-sysroot ../../$(BUILD)/meow build .
 	@rm -f /tmp/meow-conditional.result
-	cd .. && ./meow/$(BUILD)/meow build meow-conditional
+	cd .. && ./projects/meow/$(BUILD)/meow build meow-conditional
 	@test "$$(cat /tmp/meow-conditional.result)" = "native"
-	cd .. && ./meow/$(BUILD)/meow clean meow-conditional
-	cd .. && CC=cc ./meow/$(BUILD)/meow --bootstrap
+	cd .. && ./projects/meow/$(BUILD)/meow clean meow-conditional
+	cd .. && CC=cc ./projects/meow/$(BUILD)/meow --bootstrap
 	sh test/pkg_config.sh "$(abspath $(BUILD)/meow)"
 	sh test/pkg_config_integration.sh "$(abspath $(BUILD)/meow)"
 	sh test/macros_test.sh "$(abspath $(BUILD)/meow)"
 	sh test/macros_v3_test.sh "$(abspath $(BUILD)/meow)"
-	cd .. && $(MAKE) -C meow clean all
+	cd .. && $(MAKE) -C projects/meow clean all
 
 # Verify --arch flag injection by creating a minimal recipe that echoes
 # ARCH, then checking the output contains the expected value.

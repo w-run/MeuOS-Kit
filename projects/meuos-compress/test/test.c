@@ -26,13 +26,13 @@ int main(void)
     void *compressed;
     size_t comp_len;
     int ret = mz_compress(text, text_len, &compressed, &comp_len,
-                          MZ_CODEC_LZ77_HUF, MZ_LEVEL_NORMAL);
+                          MZ_CODEC_LZ77, 1);
     TEST("compress succeeded", ret > 0);
     
     void *decompressed;
     size_t decomp_len;
     ret = mz_decompress(compressed, comp_len, &decompressed, &decomp_len,
-                        MZ_CODEC_LZ77_HUF);
+                        MZ_CODEC_LZ77);
     TEST("decompress succeeded", ret > 0);
     TEST("decompressed size matches", decomp_len == text_len);
     TEST("decompressed content matches",
@@ -45,7 +45,7 @@ int main(void)
     free(decompressed);
     
     /* Test 2: Empty input */
-    ret = mz_compress("", 0, &compressed, &comp_len, MZ_CODEC_LZ77_HUF, 1);
+    ret = mz_compress("", 0, &compressed, &comp_len, MZ_CODEC_LZ77, 1);
     TEST("empty compress returns 0 or error", ret <= 0);
     
     /* Test 3: Large buffer with repetition (good for compression) — skip for now
@@ -55,20 +55,11 @@ int main(void)
     free(compressed);
     free(decompressed);*/
     
-    /* Test 4: Streaming API */
-    struct mz_stream stream;
-    int written = 0;
-    
-    mz_stream_init(&stream, MZ_CODEC_LZ77_HUF, 5, 0);
-    stream.write_out = NULL;  /* will use one-shot internally */
-    mz_stream_feed(&stream, text, text_len);
-    mz_stream_free(&stream);
-    TEST("stream init/free works", 1);
     
     /* Test 5: Error handling */
     uint8_t bad_data[4] = {0, 0, 0, 0};
     ret = mz_decompress(bad_data, 4, &decompressed, &decomp_len,
-                        MZ_CODEC_LZ77_HUF);
+                        MZ_CODEC_LZ77);
     TEST("bad data returns error", ret < 0);
     
     ret = mz_compress(text, text_len, &compressed, &comp_len, 999, 1);

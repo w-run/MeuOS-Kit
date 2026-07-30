@@ -32,7 +32,7 @@
 > 2. **子项目上下文加载** — 读目标子项目的 `ARCHITECTURE.md`（结构/模块/状态/路线图）与 `.issues/`
 >    （待实现项），了解项目当前进度。
 > 3. **AGENTS.md 规约确认** — 重新确认项目规约（§4 禁止事项、§7 任务编排策略）和当前状态速查（§10）。
-> 4. **环境检查** — 确认 `MEUOS_SYSROOT` 已设置，宿主编译器和交叉工具链可用。
+> 4. **环境检查** — 确认 `MEUOS_SYSROOT` 已设置（须指向 `sysroot/<arch>`，如 `sysroot/x86_64`），宿主编译器和交叉工具链可用。
 >
 > 各子项目独立维护状态，无全局 STATE 文件。`.issues/` 和 ARCHITECTURE.md 是状态权威来源。
 > **待办任务约定**：所有待办任务统一存放在 `.issues/` 下，以日期编号命名（如 `0729.md`、`0730.md`）。禁止在项目目录下创建 `.todo/` 子目录或散落的待办文件。
@@ -864,7 +864,7 @@ make -C projects/meuos-sysroot clean
 当 `make check` 或回归测试失败时，按以下路径排查：
 
 **编译错误 → 常见原因：**
-- **缺少 sysroot**：确认 `MEUOS_SYSROOT` 已设置，`$MEUOS_SYSROOT/usr/include` 存在
+- **缺少 sysroot**：确认 `MEUOS_SYSROOT` 已设置（须指向 `sysroot/<arch>`，如 `sysroot/x86_64`），`$MEUOS_SYSROOT/usr/include` 存在
 - **mcc 自身编译失败**：先用 `make -C projects/mcc && make -C projects/mcc check` 确认基础门禁通过
 - **交叉工具链缺失**：检查对应架构的 gcc 交叉编译器是否存在（`aarch64-linux-gnu-gcc --version` 等）
 - **引用未实现符号**：检查 `.issues/` 排查是否依赖了未实现的功能
