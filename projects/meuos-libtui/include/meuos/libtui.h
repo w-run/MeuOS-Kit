@@ -28,12 +28,12 @@ typedef enum {
     TUI_KEY_CTRL_E   = 0x05,
     TUI_KEY_CTRL_F   = 0x06,
     TUI_KEY_BELL     = 0x07,
-    TUI_KEY_BS       = 0x08,  /* Backspace */
+    TUI_KEY_BS       = 0x08,
     TUI_KEY_TAB      = 0x09,
-    TUI_KEY_LF       = 0x0A,  /* Line Feed / Enter */
+    TUI_KEY_LF       = 0x0A,
     TUI_KEY_CTRL_K   = 0x0B,
     TUI_KEY_CTRL_L   = 0x0C,
-    TUI_KEY_CR       = 0x0D,  /* Carriage Return */
+    TUI_KEY_CR       = 0x0D,
     TUI_KEY_CTRL_N   = 0x0E,
     TUI_KEY_CTRL_O   = 0x0F,
     TUI_KEY_CTRL_P   = 0x10,
@@ -75,28 +75,28 @@ typedef enum {
     TUI_KEY_F12      = 0x110B,
 
     /* 修饰键组合 */
-    TUI_KEY_S_TAB     = 0x1200,  /* Shift+Tab */
+    TUI_KEY_S_TAB     = 0x1200,
 
     /* 特殊事件 */
-    TUI_KEY_TIMEOUT  = 0x1FFF,  /* 超时无输入 */
-    TUI_KEY_RESIZE   = 0x1FFE,  /* 窗口大小变化 */
-    TUI_KEY_MOUSE    = 0x1FFD,  /* 鼠标事件 */
-    TUI_KEY_ERR      = 0x1FFC,  /* 输入错误 */
+    TUI_KEY_TIMEOUT  = 0x1FFF,
+    TUI_KEY_RESIZE   = 0x1FFE,
+    TUI_KEY_MOUSE    = 0x1FFD,
+    TUI_KEY_ERR      = 0x1FFC,
 } tui_key_t;
 
 /* ── 鼠标事件 ─────────────────────────────────────── */
 
 typedef struct {
-    int x, y;       /* 列/行 (1-based) */
-    int button;     /* 0=左,1=中,2=右,64=移动 */
-    int pressed;    /* 1=按下, 0=释放 */
+    int x, y;
+    int button;
+    int pressed;
 } tui_mouse_t;
 
 /* ── 输入事件 ─────────────────────────────────────── */
 
 typedef struct {
-    tui_key_t   key;     /* 键盘码或 TUI_KEY_MOUSE */
-    tui_mouse_t mouse;   /* 鼠标详情 (仅 key==TUI_KEY_MOUSE) */
+    tui_key_t   key;
+    tui_mouse_t mouse;
 } tui_event_t;
 
 /* ── 颜色 ─────────────────────────────────────────── */
@@ -130,10 +130,10 @@ typedef enum {
 /* ── 终端尺寸 ─────────────────────────────────────── */
 
 typedef struct {
-    int rows;       /* 行数 */
-    int cols;       /* 列数 */
-    int xpixel;     /* 像素宽度 (可能为0) */
-    int ypixel;     /* 像素高度 (可能为0) */
+    int rows;
+    int cols;
+    int xpixel;
+    int ypixel;
 } tui_size_t;
 
 /* ── SIGWINCH 回调 ────────────────────────────────── */
@@ -144,73 +144,210 @@ typedef void (*tui_resize_cb)(tui_size_t size, void *userdata);
  *  terminal.c — 终端 I/O
  * ══════════════════════════════════════════════════════ */
 
-/* 进入/退出原始模式。返回 TUI_OK 或 TUI_ERR_* */
 int tui_raw_mode(int fd, int enable);
-
-/* 进入/退出备用屏幕缓冲区 */
 int tui_alt_screen(int fd, int enable);
-
-/* 启用/禁用 XTerm SGR 鼠标跟踪 */
 int tui_mouse(int fd, int enable);
-
-/* 注册 SIGWINCH 回调 (NULL 取消注册) */
 int tui_on_resize(tui_resize_cb cb, void *userdata);
 
 /* ══════════════════════════════════════════════════════
  *  screen.c — 屏幕操作
  * ══════════════════════════════════════════════════════ */
 
-/* 获取终端尺寸 (TIOCGWINSZ, 写入 size) */
 int tui_get_size(int fd, tui_size_t *size);
-
-/* 光标定位 (1-based row, col) */
 int tui_cursor_goto(int fd, int row, int col);
 int tui_cursor_up(int fd, int n);
 int tui_cursor_down(int fd, int n);
 int tui_cursor_left(int fd, int n);
 int tui_cursor_right(int fd, int n);
-
-/* 保存/恢复光标位置 */
 int tui_cursor_save(int fd);
 int tui_cursor_restore(int fd);
-
-/* 显示/隐藏光标 */
 int tui_cursor_show(int fd, int show);
-
-/* 清除屏幕 */
-int tui_clear_screen(int fd);      /* 全屏清空 */
-int tui_clear_line(int fd);        /* 整行清空 */
-int tui_clear_eol(int fd);         /* 行尾清空 */
-
-/* 设置颜色和样式 */
+int tui_clear_screen(int fd);
+int tui_clear_line(int fd);
+int tui_clear_eol(int fd);
 int tui_set_fg(int fd, tui_color_t c);
 int tui_set_bg(int fd, tui_color_t c);
 int tui_set_attr(int fd, tui_attr_t a);
-
-/* 重置所有颜色和样式为默认 */
 int tui_reset_style(int fd);
-
-/* 写入带样式的文本 (printf 风格) */
 int tui_printf(int fd, const char *fmt, ...);
 
 /* ══════════════════════════════════════════════════════
  *  input.c — 输入解析
  * ══════════════════════════════════════════════════════ */
 
-/* 阻塞读取一个按键事件 */
 int tui_getkey(int fd, tui_event_t *ev);
-
-/* 带超时读取 (timeout_ms: 毫秒, 0=立即返回) */
 int tui_getkey_timeout(int fd, tui_event_t *ev, int timeout_ms);
-
-/* 回显字符 (直接 write) */
 int tui_putchar(int fd, char c);
-
-/* 写入字符串 */
 int tui_write(int fd, const char *s);
-
-/* 刷新输出缓冲区 */
 int tui_flush(int fd);
+
+/* ══════════════════════════════════════════════════════
+ *  tui_rect_t — 矩形区域
+ * ══════════════════════════════════════════════════════ */
+
+typedef struct {
+    int row, col;       /* 左上角 (1-based) */
+    int rows, cols;     /* 尺寸 */
+} tui_rect_t;
+
+/* 判断矩形是否有效 (有内容) */
+int  tui_rect_valid(const tui_rect_t *r);
+
+/* ══════════════════════════════════════════════════════
+ *  主题/调色板
+ * ══════════════════════════════════════════════════════ */
+
+typedef struct {
+    tui_color_t accent;      /* MeuOS 主题绿 (主色调) */
+    tui_color_t bg;          /* 默认背景 */
+    tui_color_t fg;          /* 默认前景 */
+    tui_color_t border;      /* 边框颜色 */
+    tui_color_t highlight;   /* 高亮/选中 */
+    tui_color_t dim;         /* 弱化文本 */
+    tui_color_t success;     /* 成功/正向 (绿色) */
+    tui_color_t warning;     /* 警告 (黄色) */
+    tui_color_t error;       /* 错误 (红色) */
+    tui_color_t info;        /* 信息 (青色) */
+} tui_palette_t;
+
+/* MeuOS 默认主题：柔和绿底白字调色板 */
+extern const tui_palette_t tui_meuos_theme;
+
+/* ══════════════════════════════════════════════════════
+ *  布局系统 (layout.c)
+ * ══════════════════════════════════════════════════════ */
+
+/* 不透明类型 */
+typedef struct tui_layout tui_layout_t;
+
+/* 渲染回调：在给定区域内绘制内容 */
+typedef int (*tui_render_fn)(int fd, const tui_rect_t *area, void *userdata);
+
+/* 创建容器 */
+tui_layout_t *tui_layout_vbox(int spacing);  /* 垂直盒子 */
+tui_layout_t *tui_layout_hbox(int spacing);  /* 水平盒子 */
+tui_layout_t *tui_layout_leaf(tui_render_fn fn, void *userdata); /* 叶子节点 */
+
+/* 添加子节点。weight：尺寸权重（>=1），0 表示填满剩余空间 */
+int tui_layout_add(tui_layout_t *parent, tui_layout_t *child, int weight);
+
+/* 设置容器内边距 (上下左右，单位字符) */
+void tui_layout_pad(tui_layout_t *node, int top, int right, int bottom, int left);
+
+/* 渲染整棵布局树 */
+int tui_layout_render(int fd, tui_layout_t *root, tui_rect_t area);
+
+/* 释放整棵布局树 (递归释放所有子节点) */
+void tui_layout_free(tui_layout_t *layout);
+
+/* 递归检查布局树的有效性 */
+int tui_layout_valid(const tui_layout_t *layout);
+
+/* ══════════════════════════════════════════════════════
+ *  widget.c — 画板元素
+ * ══════════════════════════════════════════════════════ */
+
+/* ── 边框面板 ────────────────────────────────────── */
+
+typedef struct {
+    int     border_style;   /* 0: 单线, 1: 双线, 2: 圆角, 3: 粗 */
+    tui_color_t border_color;
+    tui_color_t title_color;
+    char    title[64];      /* 面板标题（可为空） */
+    tui_render_fn content_fn;
+    void   *content_data;
+} tui_panel_t;
+
+/* 创建面板 widget（返回叶子节点，持有 panel 所有权） */
+tui_layout_t *tui_panel_new(const char *title, tui_render_fn content_fn, void *data);
+tui_layout_t *tui_panel_new_styled(const tui_panel_t *cfg);
+
+/* 更新面板配置（不影响已创建的布局节点）—— 在渲染前调用 */
+void tui_panel_set_style(tui_panel_t *panel, const tui_panel_t *cfg);
+
+/* ── 填充矩形 ────────────────────────────────────── */
+
+typedef struct {
+    tui_color_t fg, bg;
+    tui_attr_t  attr;
+} tui_style_t;
+
+/* 在矩形区域内填充背景色 */
+int tui_fill_rect(int fd, tui_rect_t area, tui_color_t bg);
+
+/* 绘制带样式的 (可选中文字 + 填充) */
+int tui_styled_text(int fd, tui_rect_t area, const char *text, tui_style_t style);
+
+/* ── 进度条 ──────────────────────────────────────── */
+
+typedef struct {
+    double      value;         /* 0.0 ~ 1.0 */
+    int         bar_width;     /* 进度条视觉宽度 (0=自适应) */
+    tui_color_t fill_color;    /* 已填充颜色 (默认 theme.accent) */
+    tui_color_t empty_color;   /* 未填充颜色 (默认 dim) */
+    char        label[48];     /* 前置标签 */
+    int         show_percent;  /* 是否显示百分比文本 */
+} tui_progress_t;
+
+/* 进度条渲染回调（可用作 layout 叶子） */
+int  tui_progress_render(int fd, const tui_rect_t *area, void *userdata);
+
+/* ── 旋转器 ──────────────────────────────────────── */
+
+typedef struct {
+    int         frame;         /* 当前帧 (0-based) */
+    tui_color_t color;
+    char        frames[16];   /* 动画帧字符序列 (默认: "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ ") */
+} tui_spinner_t;
+
+#define TUI_SPINNER_FRAMES "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ "
+
+/* 旋转器渲染回调 */
+int  tui_spinner_render(int fd, const tui_rect_t *area, void *userdata);
+
+/* 前进一帧 */
+void tui_spinner_tick(tui_spinner_t *s);
+
+/* ── 状态栏 ──────────────────────────────────────── */
+
+typedef struct {
+    char        left[128];    /* 左对齐文本 */
+    char        right[128];   /* 右对齐文本 */
+    tui_color_t bg;
+    tui_color_t fg;
+} tui_statusbar_t;
+
+/* 状态栏渲染回调 */
+int  tui_statusbar_render(int fd, const tui_rect_t *area, void *userdata);
+
+/* ── 模板快捷函数 ─────────────────────────────────── */
+
+/* 快速创建一个完整布局模板：header + content + statusbar
+ * header: 标题字符串
+ * status_left / status_right: 状态栏文本
+ * content_fn / data: 内容区渲染回调
+ */
+tui_layout_t *tui_app_layout(const char *header,
+                             tui_render_fn content_fn, void *content_data,
+                             const char *status_left, const char *status_right);
+
+/* 创建一个分栏布局：sidebar + content
+ * sidebar_width: 侧栏宽度（字符数）
+ */
+tui_layout_t *tui_split_layout(int sidebar_width,
+                               tui_render_fn side_fn, void *side_data,
+                               tui_render_fn content_fn, void *content_data);
+
+/* ── 辅助输出 ─────────────────────────────────────── */
+
+/* 写入指定数量的空格 */
+int tui_spaces(int fd, int n);
+
+/* 绘制水平分隔线 (填充字符) */
+int tui_hline(int fd, int col, int width, char ch, tui_color_t color);
+
+/* 带颜色写入文本 */
+int tui_cprintf(int fd, tui_color_t fg, tui_color_t bg, const char *fmt, ...);
 
 #ifdef __cplusplus
 }
