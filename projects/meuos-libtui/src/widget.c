@@ -190,32 +190,49 @@ int tui_draw_border(int fd, tui_rect_t *inner,
 
     tui_set_attr(fd, TUI_ATTR_BOLD);
 
-    /* 上边框 */
+    /* ── 上边框 ── */
     tui_cursor_goto(fd, inner->row, inner->col);
-    write(fd, box[2], BCLEN);                  /* ┌ */
+    write(fd, box[2], BCLEN);                  /* ┌/╔/╭/┏ */
+
     if (title && title[0]) {
         write(fd, " ", 1);
         tui_set_attr(fd, TUI_ATTR_RESET);
-        tui_set_fg(fd, border_color);          /* 标题用普通亮度 */
+        tui_set_fg(fd, border_color);
         write(fd, title, strlen(title));
         tui_set_attr(fd, TUI_ATTR_BOLD);
-        left = 2 + (int)strlen(title);         /* 已占用: 空格 + 标题 */
+        left = 2 + (int)strlen(title);
     }
-    /* 剩余上边框 */
-    tui_hline(fd, inner->col + left,
-              inner->cols - left - 1, box[0][0], TUI_COLOR_DEFAULT);
-    /* 回到行尾画 ┐ */
+
+    /* 上边框水平线：手动写入 UTF-8 字符循环 */
+    {
+        int i, hw = inner->cols - left - 1;
+        tui_cursor_goto(fd, inner->row, inner->col + left);
+        snprintf(esc, sizeof(esc), "\033[%dm", 30 + (int)border_color);
+        write(fd, esc, strlen(esc));
+        tui_set_attr(fd, TUI_ATTR_BOLD);
+        for (i = 0; i < hw; i++)
+            write(fd, box[0], BCLEN);
+    }
+
+    /* 行尾 ┐/╗/╮/┓ */
     tui_cursor_goto(fd, inner->row, inner->col + inner->cols - 1);
     write(fd, box[3], BCLEN);
 
-    /* 下边框 */
+    /* ── 下边框 ── */
     tui_cursor_goto(fd, inner->row + inner->rows - 1, inner->col);
-    write(fd, box[4], BCLEN);                  /* └ */
-    tui_hline(fd, inner->col + 1, inner->cols - 2, box[0][0], TUI_COLOR_DEFAULT);
-    tui_cursor_goto(fd, inner->row + inner->rows - 1, inner->col + inner->cols - 1);
-    write(fd, box[5], BCLEN);                  /* ┘ */
+    write(fd, box[4], BCLEN);                  /* └/╚/╰/┗ */
 
-    /* 竖边框 */
+    {
+        int i, hw = inner->cols - 2;
+        tui_cursor_goto(fd, inner->row + inner->rows - 1, inner->col + 1);
+        for (i = 0; i < hw; i++)
+            write(fd, box[0], BCLEN);
+    }
+
+    tui_cursor_goto(fd, inner->row + inner->rows - 1, inner->col + inner->cols - 1);
+    write(fd, box[5], BCLEN);                  /* ┘/╝/╯/┛ */
+
+    /* ── 竖边框 ── */
     for (r = 1; r < inner->rows - 1; r++) {
         tui_cursor_goto(fd, inner->row + r, inner->col);
         write(fd, box[1], BCLEN);

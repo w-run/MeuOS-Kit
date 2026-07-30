@@ -169,7 +169,7 @@ static int render_container(int fd, tui_layout_t *node, tui_rect_t area)
     for (c = node->children; c; c = c->next) n++;
     if (n == 0) return TUI_OK;
 
-    /* 计算总权重和固定尺寸 */
+    /* 计算总权重 */
     int total_weight = 0;
     int fixed_count = 0;
     int spacing_total = (n - 1) * node->spacing;
@@ -186,8 +186,10 @@ static int render_container(int fd, tui_layout_t *node, tui_rect_t area)
     int total_size  = is_vertical ? inner.rows : inner.cols;
     int avail       = total_size - spacing_total;
 
-    /* 每个固定权重子节点至少 1 行/列 */
-    if (avail < fixed_count) avail = fixed_count;
+    /* weight=0 节点各得 1 单位，余下分配给 weight>0 的节点 */
+    int reserved    = fixed_count;
+    int weighted_avail = avail - reserved;
+    if (weighted_avail < 0) weighted_avail = 0;
 
     /* 分配位置 */
     int pos = is_vertical ? inner.row : inner.col;
@@ -197,15 +199,12 @@ static int render_container(int fd, tui_layout_t *node, tui_rect_t area)
         int child_size;
 
         if (c->weight > 0 && total_weight > 0) {
-            child_size = (avail * c->weight) / total_weight;
-        } else {
-            /* weight==0 的节点均分剩余空间 */
-            child_size = fixed_count > 0 ? avail / fixed_count : 0;
+            child_size = (weighted_avail * c->weight) / total_weight;
             if (child_size < 1) child_size = 1;
+        } else {
+            /* weight==0: 固定为 1 行/列 */
+            child_size = 1;
         }
-
-        /* 限制最小值 */
-        if (child_size < 1) child_size = 1;
 
         if (is_vertical) {
             child_area.row    = pos;

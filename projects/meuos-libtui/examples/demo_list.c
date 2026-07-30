@@ -125,7 +125,10 @@ int main(void)
     tui_cursor_show(0, 0);
 
     tui_size_t size;
-    tui_get_size(0, &size);
+    if (tui_get_size(0, &size) != TUI_OK) {
+        size.rows = 24;
+        size.cols = 80;
+    }
 
     tui_event_t ev;
     int running = 1;

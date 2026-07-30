@@ -197,40 +197,59 @@ int tui_dialog_render(int fd, const tui_rect_t *area, void *userdata)
     if (y < inner.row + inner.rows) {
         int nbtns = count_buttons(dlg->buttons);
         if (nbtns > 0) {
-            /* 计算按钮总宽度 */
-            int btn_w = 0;
-            for (int i = 0; all_buttons[i].label; i++) {
-                if (dlg->buttons & all_buttons[i].button)
-                    btn_w += (int)strlen(all_buttons[i].label) + 2;
-            }
-            btn_w -= 2;  /* 去掉最后一个后面的空格 */
-            if (btn_w < 0) btn_w = 0;
+            /* 计算每个按钮宽度和总宽度 */
+            int btn_ws[8], btn_idxs[8];
+            int n = 0, total_w = 0;
 
-            int start_x = inner.col + (inner.cols - btn_w) / 2;
+            for (int i = 0; all_buttons[i].label && n < 8; i++) {
+                if (!(dlg->buttons & all_buttons[i].button)) continue;
+                btn_idxs[n] = i;
+                btn_ws[n]   = (int)strlen(all_buttons[i].label) + 4; /* " [Label] " */
+                total_w += btn_ws[n];
+                n++;
+            }
+
+            int gap = 4;  /* 按钮间距 */
+            total_w += (n - 1) * gap;
+
+            int start_x = inner.col + (inner.cols - total_w) / 2;
             if (start_x < inner.col) start_x = inner.col;
 
             tui_cursor_goto(fd, y, start_x);
 
-            for (int i = 0; all_buttons[i].label; i++) {
-                if (!(dlg->buttons & all_buttons[i].button)) continue;
-
+            for (int b = 0; b < n; b++) {
+                int i   = btn_idxs[b];
                 int is_sel = (all_buttons[i].button == dlg->selected_btn);
 
                 if (is_sel) {
+                    /* 选中按钮：高亮背景 + 尖括号 */
                     tui_set_bg(fd, col);
                     tui_set_fg(fd, TUI_COLOR_WHITE);
                     tui_set_attr(fd, TUI_ATTR_BOLD);
+                    tui_write(fd, " ");
+                    tui_write(fd, "< ");
+                    tui_write(fd, all_buttons[i].label);
+                    tui_write(fd, " >");
+                    tui_write(fd, " ");
+                    tui_reset_style(fd);
+                } else {
+                    /* 非选中：普通方括号 */
+                    tui_set_fg(fd, col);
+                    tui_write(fd, " ");
+                    tui_write(fd, "[");
+                    tui_reset_style(fd);
+                    tui_set_fg(fd, TUI_COLOR_DEFAULT);
+                    tui_write(fd, all_buttons[i].label);
+                    tui_set_fg(fd, col);
+                    tui_write(fd, "]");
+                    tui_reset_style(fd);
+                    tui_write(fd, " ");
                 }
 
-                if (is_sel) tui_write(fd, "[");
-                else       tui_write(fd, " ");
-
-                tui_write(fd, all_buttons[i].label);
-
-                if (is_sel) tui_write(fd, "]");
-                else       tui_write(fd, " ");
-
-                if (is_sel) tui_reset_style(fd);
+                /* 按钮间距 */
+                if (b < n - 1) {
+                    tui_write(fd, "  ");
+                }
             }
         }
     }

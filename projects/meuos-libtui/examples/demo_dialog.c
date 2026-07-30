@@ -1,8 +1,7 @@
-/* demo_dialog.c — 对话框交互演示
+/* demo_dialog.c — 对话框交互演示（安装向导场景）
  *
- * 循环展示 Info / Warning / Error / Question / Input 五种对话框，
- * 配合居中布局模板，模拟安装器/配置工具场景。
- * 运行方式: make demo_dialog && ./build/demo_dialog
+ * 循环展示 Info / Warning / Error / Question / Input 五种对话框。
+ * 运行: make demo_dialog && ./build/demo_dialog
  */
 
 #define _XOPEN_SOURCE 700
@@ -13,7 +12,7 @@
 #include <unistd.h>
 
 /* ══════════════════════════════════════════════════════
- *  模拟内容区：显示当前步骤说明
+ *  步骤说明区回调
  * ══════════════════════════════════════════════════════ */
 
 static int step_content(int fd, const tui_rect_t *area, void *udata)
@@ -21,14 +20,11 @@ static int step_content(int fd, const tui_rect_t *area, void *udata)
     const char *msg = (const char *)udata;
     if (!msg) msg = "Loading...";
 
+    int y = area->row + 1;
     int x = area->col + 2;
-    int y = area->row;
 
-    tui_cursor_goto(fd, y, x);
-    tui_set_fg(fd, tui_meuos_theme.fg);
     tui_set_attr(fd, TUI_ATTR_DIM);
-    tui_write(fd, "Step status:");
-    tui_reset_style(fd);
+    tui_cprintf(fd, TUI_COLOR_DEFAULT, TUI_COLOR_DEFAULT, "  Step status:");
     y++;
 
     tui_cursor_goto(fd, y, x);
@@ -41,109 +37,124 @@ static int step_content(int fd, const tui_rect_t *area, void *udata)
 }
 
 /* ══════════════════════════════════════════════════════
+ *  阻塞对话框包装
+ * ══════════════════════════════════════════════════════ */
+
+static int blocking_dlg(tui_size_t scr, const char *title, const char *msg,
+                        tui_dlg_type_t type, int buttons)
+{
+    int dlg_w = 50;
+    int dlg_h = 10;
+    if (dlg_w > scr.cols - 4) dlg_w = scr.cols - 4;
+    if (dlg_h > scr.rows - 4) dlg_h = scr.rows - 4;
+
+    int dr = (scr.rows - dlg_h) / 2;
+    int dc = (scr.cols - dlg_w) / 2;
+    if (dr < 1) dr = 1;
+    if (dc < 1) dc = 1;
+
+    return tui_dialog_blocking(0,
+        (tui_rect_t){ dr, dc, dlg_h, dlg_w },
+        title, msg, type, buttons);
+}
+
+/* ══════════════════════════════════════════════════════
  *  main
  * ══════════════════════════════════════════════════════ */
 
 int main(void)
 {
-    /* 进入终端模式 */
     tui_raw_mode(0, 1);
     tui_alt_screen(0, 1);
     tui_cursor_show(0, 0);
 
-    tui_size_t size;
-    tui_get_size(0, &size);
+    tui_size_t scr;
+    if (tui_get_size(0, &scr) != TUI_OK) {
+        scr.rows = 24;
+        scr.cols = 80;
+    }
 
-    /* ── 步骤 1: Info 弹窗 ── */
+    int btn;
+
+    /* ── Step 1: Info ── */
     tui_clear_screen(0);
-    tui_layout_t *wz1 = tui_layout_wizard(
-        "  Setup Wizard  ", step_content, "Initializing...", "Step 1/5");
-    tui_rect_t full = { 1, 1, size.rows, size.cols };
-    tui_layout_render(0, wz1, full);
+    tui_layout_t *wz = tui_layout_wizard(
+        "  Install Wizard  ", step_content, "Initializing ...",
+        "Step 1/5");
+    tui_rect_t full = { 1, 1, scr.rows, scr.cols };
+    tui_layout_render(0, wz, full);
 
-    int btn = tui_dialog_blocking(0,
-        (tui_rect_t){ size.rows/2-5, size.cols/2-20, 12, 44 },
-        "Welcome",
-        "Welcome to MeuOS Kit setup!\nThis wizard will guide you\nthrough the installation.",
+    btn = blocking_dlg(scr, "Welcome",
+        "Welcome to MeuOS Kit setup.\nThis wizard will guide you\nthrough the installation.",
         TUI_DLG_INFO, TUI_DLG_OK);
 
-    tui_layout_free(wz1);
+    tui_layout_free(wz);
+    if (btn != TUI_DLG_OK) goto cleanup;
 
-    if (btn != TUI_DLG_OK && btn != TUI_DLG_YES) goto cleanup;
-
-    /* ── 步骤 2: 确认对话框 ── */
+    /* ── Step 2: Question ── */
     tui_clear_screen(0);
-    tui_layout_t *wz2 = tui_layout_wizard(
-        "  Setup Wizard  ", step_content, "Downloading packages...", "Step 2/5");
-    tui_layout_render(0, wz2, full);
+    wz = tui_layout_wizard(
+        "  Install Wizard  ", step_content,
+        "Downloading packages ...", "Step 2/5");
+    tui_layout_render(0, wz, full);
 
-    btn = tui_dialog_blocking(0,
-        (tui_rect_t){ size.rows/2-4, size.cols/2-18, 10, 40 },
-        "Confirm",
-        "Download 42 packages?\nTotal size: 256 MB",
+    btn = blocking_dlg(scr, "Confirm",
+        "Download 42 packages?\nTotal transfer: 256 MB",
         TUI_DLG_QUESTION, TUI_DLG_YES | TUI_DLG_NO);
 
-    tui_layout_free(wz2);
+    tui_layout_free(wz);
+    if (btn != TUI_DLG_YES) goto cleanup;
 
-    if (btn != TUI_DLG_OK && btn != TUI_DLG_YES) goto cleanup;
-
-    /* ── 步骤 3: 进度 + 警告 ── */
+    /* ── Step 3: Warning ── */
     tui_clear_screen(0);
-    tui_layout_t *wz3 = tui_layout_wizard(
-        "  Setup Wizard  ", step_content, "Installing... (67%)", "Step 3/5");
-    tui_layout_render(0, wz3, full);
+    wz = tui_layout_wizard(
+        "  Install Wizard  ", step_content,
+        "Installing ... (67 %)", "Step 3/5");
+    tui_layout_render(0, wz, full);
 
-    btn = tui_dialog_blocking(0,
-        (tui_rect_t){ size.rows/2-4, size.cols/2-20, 10, 44 },
-        "Warning",
+    btn = blocking_dlg(scr, "Warning",
         "Low disk space: only 1.2 GB left.\nContinue anyway?",
         TUI_DLG_WARNING, TUI_DLG_YES | TUI_DLG_NO);
 
-    tui_layout_free(wz3);
+    tui_layout_free(wz);
+    if (btn != TUI_DLG_YES) goto cleanup;
 
-    if (btn != TUI_DLG_OK && btn != TUI_DLG_YES) goto cleanup;
-
-    /* ── 步骤 4: 输入对话框 ── */
+    /* ── Step 4: Input ── */
     tui_clear_screen(0);
-    tui_layout_t *wz4 = tui_layout_wizard(
-        "  Setup Wizard  ", step_content, "Configuration...", "Step 4/5");
-    tui_layout_render(0, wz4, full);
+    wz = tui_layout_wizard(
+        "  Install Wizard  ", step_content,
+        "Configuration ...", "Step 4/5");
+    tui_layout_render(0, wz, full);
 
-    btn = tui_dialog_blocking(0,
-        (tui_rect_t){ size.rows/2-5, size.cols/2-20, 12, 44 },
-        "User Input",
+    btn = blocking_dlg(scr, "User Name",
         "Enter your username:",
         TUI_DLG_INPUT, TUI_DLG_OK | TUI_DLG_CANCEL);
 
-    tui_layout_free(wz4);
+    tui_layout_free(wz);
+    if (btn != TUI_DLG_OK) goto cleanup;
 
-    if (btn != TUI_DLG_OK && btn != TUI_DLG_YES) goto cleanup;
-
-    /* ── 步骤 5: 错误 + 完成 ── */
+    /* ── Step 5: Error ── */
     tui_clear_screen(0);
-    tui_layout_t *wz5 = tui_layout_wizard(
-        "  Setup Wizard  ", step_content, "Finalizing...", "Step 5/5");
-    tui_layout_render(0, wz5, full);
+    wz = tui_layout_wizard(
+        "  Install Wizard  ", step_content,
+        "Finalizing ...", "Step 5/5");
+    tui_layout_render(0, wz, full);
 
-    btn = tui_dialog_blocking(0,
-        (tui_rect_t){ size.rows/2-4, size.cols/2-20, 10, 44 },
-        "Error",
-        "Network error: connection timeout.\nPlease check your connection.",
+    btn = blocking_dlg(scr, "Network Error",
+        "Connection timeout.\nPlease check your network.",
         TUI_DLG_ERROR, TUI_DLG_RETRY | TUI_DLG_CANCEL);
 
-    tui_layout_free(wz5);
+    tui_layout_free(wz);
 
 cleanup:
-    /* 再见画面 */
     tui_clear_screen(0);
-    tui_layout_t *bye = tui_layout_centered(30, 5, step_content,
-        "  Thank you for using MeuOS Kit!  ");
-    tui_layout_render(0, bye, full);
-    tui_layout_free(bye);
-
+    tui_cursor_goto(0, scr.rows/2, scr.cols/2 - 10);
+    tui_set_fg(0, tui_meuos_theme.accent);
+    tui_set_attr(0, TUI_ATTR_BOLD);
+    tui_write(0, "Thanks for trying MeuOS Kit !");
+    tui_reset_style(0);
     sleep(1);
 
-    /* 清理 */
     tui_cursor_show(0, 1);
     tui_alt_screen(0, 0);
     tui_raw_mode(0, 0);
