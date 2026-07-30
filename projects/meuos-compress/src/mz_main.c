@@ -1,5 +1,8 @@
 /* mz_main.c — MeuOS MZ v2 主入口模块
  * 统一调度 compress/decompress 到各 codec 实现
+ *
+ * MZ_CODEC_MEUOS 和 MZ_CODEC_AUTO 按 level 分派到
+ * LZ77 引擎的不同级别路径（1-9）。
  */
 #include "mz.h"
 
@@ -8,6 +11,8 @@ mz_compress(const void *in, size_t il, void **r, size_t *rl, int c, int lv)
 {
     switch (c) {
     case MZ_CODEC_LZ77:
+    case MZ_CODEC_MEUOS:
+    case MZ_CODEC_AUTO:
         return mz_compress_lz77(in, il, r, rl, lv);
     default:
         return MZ_ERR_CODEC;
@@ -19,6 +24,8 @@ mz_decompress(const void *in, size_t il, void **r, size_t *rl, int c)
 {
     switch (c) {
     case MZ_CODEC_LZ77:
+    case MZ_CODEC_MEUOS:
+    case MZ_CODEC_AUTO:
         return mz_decompress_lz77(in, il, r, rl);
     default:
         return MZ_ERR_CODEC;

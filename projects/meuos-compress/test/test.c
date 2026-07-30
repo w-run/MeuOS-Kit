@@ -48,12 +48,32 @@ int main(void)
     ret = mz_compress("", 0, &compressed, &comp_len, MZ_CODEC_LZ77, 1);
     TEST("empty compress returns 0 or error", ret <= 0);
     
-    /* Test 3: Large buffer with repetition (good for compression) — skip for now
-    size_t large_sz = 100000;
-    ...
-    free(large);
-    free(compressed);
-    free(decompressed);*/
+    /* Test 3: Large buffer — compress with levels 1-9 */
+    {
+        size_t large_sz = 10000;
+        uint8_t *large = malloc(large_sz);
+        for (size_t i = 0; i < large_sz; i++)
+            large[i] = (uint8_t)(i * 73 + (i >> 3) * 13);
+        
+        for (int lv = 1; lv <= 9; lv++) {
+            void *c; size_t cl;
+            int r = mz_compress(large, large_sz, &c, &cl,
+                                MZ_CODEC_LZ77, lv);
+            TEST("compress level >0", r > 0);
+            
+            void *d; size_t dl;
+            r = mz_decompress(c, cl, &d, &dl, MZ_CODEC_LZ77);
+            TEST("decompress level >0", r > 0);
+            TEST("decompress size matches", dl == large_sz);
+            TEST("decompress content matches",
+                 memcmp(large, d, large_sz) == 0);
+            
+            printf("  level %d: %zu -> %zu (%.1f%%)\n",
+                   lv, large_sz, cl, 100.0 * cl / large_sz);
+            free(c); free(d);
+        }
+        free(large);
+    }
     
     
     /* Test 5: Error handling */
