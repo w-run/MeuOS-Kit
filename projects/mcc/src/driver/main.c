@@ -31,6 +31,10 @@
 extern int emit_debug;  /* from emit/emit.c */
 extern void emitdbgfile(char *, FILE *);  /* from emit/emit.c */
 
+/* Forward declaration: detect CPU features by arch name, returns
+ * MT_FEATURE_* bitmask. Defined in cpu_detect.c. */
+extern uint64_t detect_cpu_features(const char *arch);
+
 /* Global msys handle and path exposed to the preprocessor (pp.c) for
  * VFS-based include file reading (msys_fopen fallback). */
 struct msys *msys_sysroot_handle;
