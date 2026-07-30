@@ -1025,7 +1025,7 @@ for item in data:
 
 ### 9.6 Codebuddy 技能清单
 
-本项目配置了以下 Codebuddy 技能（位于 `.codebuddy/skills/`，软链接到 `.agents/skills/`）：
+本项目配置了以下 Codebuddy 技能（统一存放于 `.agents/skills/`，`.codebuddy` 与 `.trae` 均为指向 `.agents` 的软链接别名）：
 
 | 技能 | 用途 |
 |------|------|

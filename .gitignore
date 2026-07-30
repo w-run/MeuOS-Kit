@@ -1,7 +1,11 @@
 
 *~
 *.a
-# AI agent local data (codebuddy session db, etc.)
+# AI agent config: canonical home is .agents; .codebuddy/.trae are symlink aliases.
+# Local runtime data (moved out of the old .codebuddy/ dir) lives under .agents now.
+.agents/settings.json
+.agents/scheduled_tasks.lock
+.agents/worktrees/
 a.out
 # Auto-generated bootstrap run report
 bootstrap-report.md
