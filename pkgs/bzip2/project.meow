@@ -3,12 +3,12 @@ version: 1.0.8
 default: all
 
 [variables]
-  CC: /workspace/MeuOS-Kit/.agents/worktrees/mcc-toolchain/projects/mcc/mcc
-  AR: /workspace/MeuOS-Kit/.agents/worktrees/mcc-toolchain/projects/meuos-toolchain/build/bin/ar
-  CFLAGS: -O2 --specs=meuos --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/mcc-toolchain/sysroot/x86_64 --nostdlib --static -D_FILE_OFFSET_BITS=64 -I%SRC_DIR%
+  CC: /workspace/MeuOS-Kit/.codebuddy/worktrees/bug-audit/projects/mcc/mcc
+  AR: /workspace/MeuOS-Kit/.codebuddy/worktrees/bug-audit/projects/meuos-toolchain/build/bin/ar
+  CFLAGS: -O2 --specs=meuos --sysroot=/workspace/MeuOS-Kit/sysroot/x86_64 --nostdlib --static -D_FILE_OFFSET_BITS=64 -I%SRC_DIR%
   LDLIBS: -l:libc-meuos.a
-  MT_AS: /workspace/MeuOS-Kit/.agents/worktrees/mcc-toolchain/projects/meuos-toolchain/build/bin/as
-  MT_LD: /workspace/MeuOS-Kit/.agents/worktrees/mcc-toolchain/projects/meuos-toolchain/build/bin/ld
+  MT_AS: /workspace/MeuOS-Kit/.codebuddy/worktrees/bug-audit/projects/meuos-toolchain/build/bin/as
+  MT_LD: /workspace/MeuOS-Kit/.codebuddy/worktrees/bug-audit/projects/meuos-toolchain/build/bin/ld
   SRC_DIR: /tmp/meow-build/bzip2-1.0.8
   BLD_DIR: /tmp/meow-build/bzip2-1.0.8
   TARBALL: /tmp/bzip2-1.0.8.tar.gz
@@ -56,7 +56,7 @@ default: all
 [bzlib.o]
   deps: unpack
   outputs: %BLD_DIR%/bzlib.o
-  run: %CC% %CFLAGS% -c %SRC_DIR%/bzlib.c -o %BLD_DIR%/bzlib.o
+  run: %CC% -Os --specs=meuos --sysroot=/workspace/MeuOS-Kit/sysroot/x86_64 --nostdlib --static -D_FILE_OFFSET_BITS=64 -I%SRC_DIR% -c %SRC_DIR%/bzlib.c -o %BLD_DIR%/bzlib.o
 
 [bzip2.o]
   deps: unpack
