@@ -2836,13 +2836,18 @@ write_executable(struct ld_context *ctx, const char *path,
 			goto out_file;
 		/* ---- 2nd LOAD: read-write (data + bss), when present ---- */
 		if (memory_end > rx_end) {
-			uint64_t rw_off = rx_end;
-			uint64_t rw_vaddr = base_addr + rx_end;
-			/* filesz = 只包含已初始化数据（非 NOBITS），到 alloc_file_end 为止 */
-			uint64_t rw_fsz = alloc_file_end > rx_end
-			                  ? alloc_file_end - rx_end : 0;
-			/* memsz = 包含 BSS 在内的整个 RW 区域 */
-			uint64_t rw_msz = memory_end - rx_end;
+			/* Align RW segment start to page boundary for QEMU/kernel. */
+			uint64_t rw_page = align_up(rx_end, LD_PAGE);
+			uint64_t rw_off = rw_page;
+			uint64_t rw_vaddr = base_addr + rw_page;
+			/* file data covers from rw_page to max(rx_end, alloc_file_end) */
+			uint64_t alloc_end = rx_end > alloc_file_end ?
+			                     rx_end : alloc_file_end;
+			uint64_t rw_fsz = alloc_end > rw_page ?
+			                  alloc_end - rw_page : 0;
+			/* memory may extend further for BSS (.bss, .tbss) */
+			uint64_t rw_msz = memory_end > rw_page ?
+			                  memory_end - rw_page : 0;
 			if (write_program_header(file, LD_PF_R | LD_PF_W,
 			                         rw_off, rw_vaddr,
 			                         rw_fsz, rw_msz,
