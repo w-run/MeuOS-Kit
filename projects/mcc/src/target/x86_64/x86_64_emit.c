@@ -621,10 +621,19 @@ emitins(Ins i, E *e)
 		}
 		if (rtype(i.to) == RSlot
 		&& (t0 == RSlot || t0 == RMem)) {
-			i.cls = KWIDE(i.cls) ? Kd : Ks;
-			i.arg[1] = TMP(XMM0+15);
-			emitf("mov%k %0, %1", &i, e);
-			emitf("mov%k %1, %=", &i, e);
+			if (KBASE(i.cls)) {
+				i.cls = KWIDE(i.cls) ? Kd : Ks;
+				i.arg[1] = TMP(XMM0+15);
+				emitf("mov%k %0, %1", &i, e);
+				emitf("mov%k %1, %=", &i, e);
+			} else {
+				i.cls = KWIDE(i.cls) ? Kl : Kw;
+				i.arg[1] = TMP(RAX);
+				fprintf(e->f, "\tpushq %%rax\n");
+				emitf("mov%k %0, %1", &i, e);
+				emitf("mov%k %1, %=", &i, e);
+				fprintf(e->f, "\tpopq %%rax\n");
+			}
 			break;
 		}
 		/* conveniently, the assembler knows if it
