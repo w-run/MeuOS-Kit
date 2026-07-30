@@ -377,7 +377,15 @@ emitins(Ins *i, Fn *fn, FILE *f)
 		}
 		break;
 	case Oaddr:
-		emitf("add %=, r11, #%M0", i, fn, f);
+		/* %M0 outputs [r11, #offset] for RSlot (memory dereference),
+		 * but Oaddr needs the raw address (r11 + offset).  Handle
+		 * RSlot directly and delegate everything else to emitf. */
+		if (rtype(i->arg[0]) == RSlot) {
+			fprintf(f, "\tadd\t%s, r11, #%" PRIu64 "\n",
+				rname(i->to.val, Kl), slot(i->arg[0], fn, 0));
+		} else {
+			emitf("add %=, r11, %M0", i, fn, f);
+		}
 		break;
 	case Ocall:
 		if (rtype(i->arg[0]) != RCon)
@@ -392,9 +400,16 @@ emitins(Ins *i, Fn *fn, FILE *f)
 	case Osalloc:
 		if (rtype(i->arg[0]) == RSlot)
 			fixarg(&i->arg[0], 0, IP, fn, f);
-		emitf("sub sp, sp, #%0", i, fn, f);
+		/* salloc() sets arg[0] to a constant (the aligned allocation size).
+		 * Emit the sub directly rather than through emitf(), whose %0/%= 
+		 * handlers only support register operands. */
+		assert(rtype(i->arg[0]) == RCon);
+		{
+			int64_t sz = fn->con[i->arg[0].val].bits.i;
+			fprintf(f, "\tsub\tsp, sp, #%" PRIi64 "\n", sz);
+		}
 		if (!req(i->to, R))
-			emitf("mov %=, sp", i, fn, f);
+			fprintf(f, "\tmov\t%s, sp\n", rname(i->to.val, Kl));
 		break;
 	case Odbgloc:
 		emitdbgloc(i->arg[0].val, i->arg[1].val, f);
@@ -428,7 +443,7 @@ arm32_emitfn(Fn *fn, FILE *f)
 		lbl = 1;
 		switch (b->jmp.type) {
 		case Jhlt:
-			fprintf(f, "\tbrk\t#1000\n");
+			fprintf(f, "\tbkpt\t#1000\n");
 			break;
 		case Jret0:
 			if (fn->slot)

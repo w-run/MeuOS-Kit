@@ -601,6 +601,12 @@ spill(Fn *fn)
 			if (r)
 				sethint(v, r);
 		}
+		/* 清除从 filllive 传播来的 retregs 物理寄存器位，
+		 * 恢复被指令反处理误 kill 的 T.rglob 位（如 SP） */
+		if (b == fn->start)
+			v->t[0] = T.rglob | fn->reg;
+		else
+			v->t[0] = T.rglob;
 		if (b == fn->start)
 			assert(v->t[0] == (T.rglob | fn->reg));
 		else
