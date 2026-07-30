@@ -170,10 +170,10 @@ static const char *box_chars[4][6] = {
 /* UTF-8 字符串长度（字节数） */
 #define BCLEN 3  /* 所有框线字符均为 3 字节 UTF-8 */
 
-/* 绘制一个面板边框（内部辅助） */
-static int draw_border_frame(int fd, tui_rect_t *inner,
-                             const char *title, int style_idx,
-                             tui_color_t border_color)
+/* 绘制边框（公开 API，用于面板/对话框） */
+int tui_draw_border(int fd, tui_rect_t *inner,
+                    const char *title, int style_idx,
+                    tui_color_t border_color)
 {
     const char **box = box_chars[style_idx & 3];
     int r, left = 0;
@@ -243,8 +243,8 @@ static int panel_render_fn(int fd, const tui_rect_t *area, void *userdata)
 
     tui_rect_t r = *area;
 
-    draw_border_frame(fd, &r, panel->title,
-                      panel->border_style, panel->border_color);
+    tui_draw_border(fd, &r, panel->title,
+                    panel->border_style, panel->border_color);
 
     if (r.rows > 0 && r.cols > 0 && panel->content_fn)
         panel->content_fn(fd, &r, panel->content_data);
@@ -515,4 +515,304 @@ tui_layout_t *tui_split_layout(int sidebar_width,
 
     (void)sidebar_width;
     return root;
+}
+
+/* ══════════════════════════════════════════════════════
+ *  Label 标签
+ * ══════════════════════════════════════════════════════ */
+
+int tui_label_render(int fd, const tui_rect_t *area, void *userdata)
+{
+    tui_label_t *lb = (tui_label_t *)userdata;
+    if (!lb || !area) return TUI_ERR_PARAM;
+    if (!tui_rect_valid(area)) return TUI_OK;
+
+    int len = (int)strlen(lb->text);
+    int pad = area->cols - len;
+    if (pad < 0) pad = 0;
+
+    tui_cursor_goto(fd, area->row, area->col);
+
+    /* 对齐 */
+    if (lb->align == 0)        tui_spaces(fd, pad / 2);
+    else if (lb->align > 0)    tui_spaces(fd, pad);
+
+    tui_set_fg(fd, lb->fg);
+    tui_set_bg(fd, lb->bg);
+    if (lb->attr) tui_set_attr(fd, lb->attr);
+
+    int show = len < area->cols ? len : area->cols;
+    write(fd, lb->text, (size_t)show);
+
+    tui_reset_style(fd);
+    return TUI_OK;
+}
+
+tui_layout_t *tui_label_new(const char *text, tui_color_t fg)
+{
+    tui_label_t *lb = (tui_label_t *)calloc(1, sizeof(tui_label_t));
+    if (!lb) return NULL;
+    if (text) strncpy(lb->text, text, sizeof(lb->text) - 1);
+    lb->fg = fg;
+    lb->bg = TUI_COLOR_DEFAULT;
+    return tui_layout_leaf(tui_label_render, lb);
+}
+
+tui_layout_t *tui_heading(const char *text, tui_color_t fg)
+{
+    tui_label_t *lb = (tui_label_t *)calloc(1, sizeof(tui_label_t));
+    if (!lb) return NULL;
+    if (text) strncpy(lb->text, text, sizeof(lb->text) - 1);
+    lb->fg   = fg;
+    lb->bg   = TUI_COLOR_DEFAULT;
+    lb->attr = TUI_ATTR_BOLD;
+    return tui_layout_leaf(tui_label_render, lb);
+}
+
+/* ══════════════════════════════════════════════════════
+ *  Separator 分隔线
+ * ══════════════════════════════════════════════════════ */
+
+int tui_separator_render(int fd, const tui_rect_t *area, void *userdata)
+{
+    tui_separator_t *sep = (tui_separator_t *)userdata;
+    if (!sep || !area) return TUI_ERR_PARAM;
+    if (!tui_rect_valid(area)) return TUI_OK;
+
+    char ch = sep->line_char ? sep->line_char : '-';
+
+    if (sep->vertical) {
+        tui_cursor_goto(fd, area->row, area->col);
+        tui_set_fg(fd, sep->color);
+        int r;
+        for (r = 0; r < area->rows; r++) {
+            tui_cursor_goto(fd, area->row + r, area->col);
+            write(fd, &ch, 1);
+        }
+    } else {
+        int label_len = sep->label[0] ? (int)strlen(sep->label) + 2 : 0;
+        int left = (area->cols - label_len) / 2;
+        if (left < 0) left = 0;
+        int right = area->cols - left - label_len;
+        if (right < 0) right = 0;
+
+        tui_cursor_goto(fd, area->row, area->col);
+        tui_set_fg(fd, sep->color);
+        tui_set_attr(fd, TUI_ATTR_DIM);
+
+        int i;
+        for (i = 0; i < left; i++) write(fd, &ch, 1);
+        if (sep->label[0]) {
+            tui_reset_style(fd);
+            tui_set_fg(fd, sep->color);
+            tui_write(fd, " ");
+            tui_write(fd, sep->label);
+            tui_write(fd, " ");
+            tui_set_fg(fd, sep->color);
+            tui_set_attr(fd, TUI_ATTR_DIM);
+        }
+        for (i = 0; i < right; i++) write(fd, &ch, 1);
+
+        tui_reset_style(fd);
+    }
+
+    return TUI_OK;
+}
+
+tui_layout_t *tui_hr(tui_color_t color)
+{
+    return tui_hr_label(NULL, color);
+}
+
+tui_layout_t *tui_hr_label(const char *label, tui_color_t color)
+{
+    tui_separator_t *sep = (tui_separator_t *)calloc(1, sizeof(tui_separator_t));
+    if (!sep) return NULL;
+    sep->line_char = '-';
+    sep->color     = color ? color : tui_meuos_theme.dim;
+    if (label) strncpy(sep->label, label, sizeof(sep->label) - 1);
+    return tui_layout_leaf(tui_separator_render, sep);
+}
+
+/* ══════════════════════════════════════════════════════
+ *  Badge 徽章
+ * ══════════════════════════════════════════════════════ */
+
+int tui_badge_render(int fd, const tui_rect_t *area, void *userdata)
+{
+    tui_badge_t *b = (tui_badge_t *)userdata;
+    if (!b || !area) return TUI_ERR_PARAM;
+    if (!tui_rect_valid(area)) return TUI_OK;
+
+    int len = (int)strlen(b->text);
+    int pad_l = (area->cols - len) / 2;
+    int pad_r = area->cols - len - pad_l;
+    if (pad_l < 1) pad_l = 1;
+    if (pad_r < 1) pad_r = 1;
+
+    tui_cursor_goto(fd, area->row, area->col);
+    tui_set_fg(fd, b->fg ? b->fg : TUI_COLOR_WHITE);
+    tui_set_bg(fd, b->bg);
+    tui_set_attr(fd, TUI_ATTR_BOLD);
+
+    tui_spaces(fd, pad_l);
+    write(fd, b->text, (size_t)(len < area->cols ? len : area->cols));
+    tui_spaces(fd, pad_r);
+
+    tui_reset_style(fd);
+    return TUI_OK;
+}
+
+tui_layout_t *tui_badge_new(const char *text, tui_color_t bg)
+{
+    tui_badge_t *b = (tui_badge_t *)calloc(1, sizeof(tui_badge_t));
+    if (!b) return NULL;
+    if (text) strncpy(b->text, text, sizeof(b->text) - 1);
+    b->bg = bg;
+    b->fg = TUI_COLOR_WHITE;
+    return tui_layout_leaf(tui_badge_render, b);
+}
+
+/* ══════════════════════════════════════════════════════
+ *  Table 表格
+ * ══════════════════════════════════════════════════════ */
+
+int tui_table_render(int fd, const tui_rect_t *area, void *userdata)
+{
+    tui_table_t *t = (tui_table_t *)userdata;
+    if (!t || !area) return TUI_ERR_PARAM;
+    if (!tui_rect_valid(area)) return TUI_OK;
+
+    int y = area->row;
+    int ncols = t->ncols;
+    int nrows = t->nrows;
+
+    if (ncols <= 0) return TUI_OK;
+    if (ncols > TUI_TABLE_MAX_COLS) ncols = TUI_TABLE_MAX_COLS;
+    if (nrows > TUI_TABLE_MAX_ROWS) nrows = TUI_TABLE_MAX_ROWS;
+
+    /* 总行数不能超过可用行数 */
+    int max_rows = area->rows;
+    if (max_rows <= 0) return TUI_OK;
+
+    /* ── 表头 ── */
+    tui_cursor_goto(fd, y, area->col);
+    tui_color_t hbg = t->header_bg ? t->header_bg : tui_meuos_theme.accent;
+    tui_set_bg(fd, hbg);
+    tui_set_attr(fd, TUI_ATTR_BOLD);
+
+    int col_x[TUI_TABLE_MAX_COLS];
+    int x = area->col;
+    int c;
+    for (c = 0; c < ncols; c++) {
+        col_x[c] = x;
+        int w = t->columns[c].width;
+        tui_cursor_goto(fd, y, x);
+
+        const char *hdr = t->columns[c].header;
+        int hlen = (int)strlen(hdr);
+        int pad = (w - hlen) / 2;
+        if (pad < 0) pad = 0;
+
+        tui_spaces(fd, pad);
+        write(fd, hdr, (size_t)(hlen < w ? hlen : w));
+        if (w - pad - hlen > 0)
+            tui_spaces(fd, w - pad - hlen);
+
+        x += w + 1; /* +1 为列间距 */
+        if (x >= area->col + area->cols) break;
+    }
+    tui_reset_style(fd);
+
+    /* ── 分隔线 ── */
+    y++;
+    if (y >= area->row + max_rows) return TUI_OK;
+    tui_cursor_goto(fd, y, area->col);
+    tui_set_attr(fd, TUI_ATTR_DIM);
+    tui_set_fg(fd, tui_meuos_theme.dim);
+    int i;
+    for (i = 0; i < area->cols && area->col + i < x; i++)
+        write(fd, "─", 1);
+    tui_reset_style(fd);
+
+    /* ── 数据行 ── */
+    for (int ri = 0; ri < nrows && y + 1 < area->row + max_rows; ri++) {
+        y++;
+        int is_sel = (ri == t->selected);
+
+        for (c = 0; c < ncols; c++) {
+            if (col_x[c] >= area->col + area->cols) break;
+
+            tui_cursor_goto(fd, y, col_x[c]);
+            int w = t->columns[c].width;
+
+            if (is_sel) {
+                tui_set_bg(fd, t->select_bg ? t->select_bg : tui_meuos_theme.highlight);
+                tui_set_fg(fd, TUI_COLOR_WHITE);
+            }
+
+            const char *cell = t->cell_fn ? t->cell_fn(ri, c, t->userdata) : "";
+            if (!cell) cell = "";
+            int clen = (int)strlen(cell);
+            int align = t->columns[c].align;
+
+            int pad_l = 0;
+            if (align == 0)      pad_l = (w - clen) / 2;
+            else if (align > 0)  pad_l = w - clen;
+            if (pad_l < 0) pad_l = 0;
+
+            int show = clen < w ? clen : w;
+            tui_spaces(fd, pad_l);
+            write(fd, cell, (size_t)show);
+            if (w - pad_l - show > 0)
+                tui_spaces(fd, w - pad_l - show);
+
+            if (is_sel) tui_reset_style(fd);
+
+            /* 列间距 */
+            if (c < ncols - 1) {
+                if (is_sel) {
+                    tui_set_bg(fd, t->select_bg ? t->select_bg : tui_meuos_theme.highlight);
+                }
+                tui_spaces(fd, 1);
+                if (is_sel) tui_reset_style(fd);
+            }
+        }
+
+        if (is_sel) {
+            /* 填充行尾 */
+            int fill = area->col + area->cols - col_x[ncols - 1] -
+                       t->columns[ncols - 1].width;
+            if (fill > 0) {
+                tui_set_bg(fd, t->select_bg ? t->select_bg : tui_meuos_theme.highlight);
+                tui_spaces(fd, fill);
+                tui_reset_style(fd);
+            }
+        }
+    }
+
+    return TUI_OK;
+}
+
+int tui_table_handle(tui_table_t *t, tui_event_t *ev)
+{
+    if (!t || !ev) return TUI_ERR_PARAM;
+
+    switch (ev->key) {
+    case TUI_KEY_UP:
+        if (t->selected > 0) t->selected--;
+        break;
+    case TUI_KEY_DOWN:
+        if (t->selected < t->nrows - 1) t->selected++;
+        break;
+    case TUI_KEY_HOME:
+        t->selected = 0;
+        break;
+    case TUI_KEY_END:
+        t->selected = t->nrows - 1;
+        break;
+    default:
+        return 0;  /* 未处理 */
+    }
+    return 1;  /* 已处理 */
 }

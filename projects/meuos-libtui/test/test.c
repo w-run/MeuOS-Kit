@@ -515,6 +515,300 @@ static void test_pad_layout(void)
 }
 
 /* ══════════════════════════════════════════════════════
+ *  新 Widget 测试
+ * ══════════════════════════════════════════════════════ */
+
+static void test_label(void)
+{
+    int fd = test_write_to_pipe();
+    if (fd < 0) { TEST("pipe", 0); return; }
+
+    tui_rect_t r = { 1, 1, 1, 20 };
+
+    tui_layout_t *lbl = tui_label_new("Hello Label", TUI_COLOR_GREEN);
+    TEST("tui_label_new", lbl != NULL);
+    if (lbl) {
+        TEST("label render", tui_layout_render(fd, lbl, r) == TUI_OK);
+        tui_layout_free(lbl);
+    }
+
+    tui_layout_t *h = tui_heading("Section Title", TUI_COLOR_CYAN);
+    TEST("tui_heading", h != NULL);
+    if (h) {
+        TEST("heading render", tui_layout_render(fd, h, r) == TUI_OK);
+        tui_layout_free(h);
+    }
+
+    close(fd);
+}
+
+static void test_separator(void)
+{
+    int fd = test_write_to_pipe();
+    if (fd < 0) { TEST("pipe", 0); return; }
+
+    tui_rect_t r = { 1, 1, 1, 30 };
+
+    tui_layout_t *hr = tui_hr(TUI_COLOR_GREEN);
+    TEST("tui_hr", hr != NULL);
+    if (hr) {
+        TEST("hr render", tui_layout_render(fd, hr, r) == TUI_OK);
+        tui_layout_free(hr);
+    }
+
+    tui_layout_t *hrl = tui_hr_label("Section", TUI_COLOR_CYAN);
+    TEST("tui_hr_label", hrl != NULL);
+    if (hrl) {
+        TEST("hr_label render", tui_layout_render(fd, hrl, r) == TUI_OK);
+        tui_layout_free(hrl);
+    }
+
+    close(fd);
+}
+
+static void test_badge(void)
+{
+    int fd = test_write_to_pipe();
+    if (fd < 0) { TEST("pipe", 0); return; }
+
+    tui_rect_t r = { 1, 1, 1, 10 };
+
+    tui_layout_t *b = tui_badge_new("v1.0", TUI_COLOR_GREEN);
+    TEST("tui_badge_new", b != NULL);
+    if (b) {
+        TEST("badge render", tui_layout_render(fd, b, r) == TUI_OK);
+        tui_layout_free(b);
+    }
+
+    close(fd);
+}
+
+static const char *test_cell_fn(int row, int col, void *udata)
+{
+    (void)udata;
+    static char buf[32];
+    snprintf(buf, sizeof(buf), "R%dC%d", row + 1, col + 1);
+    return buf;
+}
+
+static void test_table(void)
+{
+    int fd = test_write_to_pipe();
+    if (fd < 0) { TEST("pipe", 0); return; }
+
+    tui_column_t cols[3] = {
+        { "Name",  12, -1 },
+        { "Value", 10,  0 },
+        { "Status", 8,  0 },
+    };
+
+    tui_table_t tbl;
+    memset(&tbl, 0, sizeof(tbl));
+    memcpy(tbl.columns, cols, sizeof(cols));
+    tbl.ncols   = 3;
+    tbl.nrows   = 5;
+    tbl.cell_fn = test_cell_fn;
+    tbl.header_bg = TUI_COLOR_GREEN;
+    tbl.select_bg = TUI_COLOR_GREEN;
+    tbl.selected  = 2;
+
+    tui_rect_t r = { 1, 1, 8, 40 };
+    TEST("tui_table_render", tui_table_render(fd, &r, &tbl) == TUI_OK);
+
+    /* handle */
+    tui_event_t ev;
+    ev.key = TUI_KEY_DOWN;
+    TEST("table handle down", tui_table_handle(&tbl, &ev) == 1);
+    TEST("table selected=3", tbl.selected == 3);
+
+    ev.key = TUI_KEY_UP;
+    tui_table_handle(&tbl, &ev);
+    TEST("table selected=2 after up", tbl.selected == 2);
+
+    close(fd);
+}
+
+static void test_draw_border(void)
+{
+    int fd = test_write_to_pipe();
+    if (fd < 0) { TEST("pipe", 0); return; }
+
+    tui_rect_t r = { 1, 1, 10, 40 };
+    TEST("tui_draw_border", tui_draw_border(fd, &r, "Test", 0, TUI_COLOR_GREEN) == TUI_OK);
+    TEST("border shrinks area", r.row == 2);
+    TEST("border shrinks cols", r.cols == 38);
+
+    close(fd);
+}
+
+static void test_list_widget(void)
+{
+    int fd = test_write_to_pipe();
+    if (fd < 0) { TEST("pipe", 0); return; }
+
+    tui_list_item_t items[] = {
+        { "Item One",   "details1", NULL, 0 },
+        { "Item Two",   "details2", NULL, 0 },
+        { "Item Three", "details3", NULL, 0 },
+    };
+
+    tui_list_t *list = tui_list_new(items, 3);
+    TEST("tui_list_new", list != NULL);
+    TEST("list selected=0", tui_list_selected(list) == 0);
+
+    tui_rect_t r = { 1, 1, 10, 40 };
+    TEST("list render", tui_list_render(fd, &r, list) == TUI_OK);
+
+    tui_event_t ev;
+    ev.key = TUI_KEY_DOWN;
+    tui_list_handle(list, &ev);
+    TEST("list handle down", tui_list_selected(list) == 1);
+
+    ev.key = TUI_KEY_UP;
+    tui_list_handle(list, &ev);
+    TEST("list handle up", tui_list_selected(list) == 0);
+
+    ev.key = TUI_KEY_END;
+    tui_list_handle(list, &ev);
+    TEST("list handle end", tui_list_selected(list) == 2);
+
+    tui_list_free(list);
+    close(fd);
+}
+
+static void test_list_layout(void)
+{
+    int fd = test_write_to_pipe();
+    if (fd < 0) { TEST("pipe", 0); return; }
+
+    tui_list_item_t items[] = {
+        { "Alpha", "", NULL, 0 },
+        { "Beta",  "", NULL, 0 },
+    };
+    tui_list_t *list = tui_list_new(items, 2);
+    TEST("tui_list_layout", list != NULL);
+
+    tui_layout_t *lay = tui_list_layout(list);
+    TEST("list_layout node", lay != NULL);
+    if (lay) {
+        tui_rect_t r = { 1, 1, 5, 30 };
+        TEST("list layout render", tui_layout_render(fd, lay, r) == TUI_OK);
+        tui_layout_free(lay);
+        /* list freed by layout */
+    }
+
+    close(fd);
+}
+
+static void test_dialog_render(void)
+{
+    int fd = test_write_to_pipe();
+    if (fd < 0) { TEST("pipe", 0); return; }
+
+    tui_layout_t *d = tui_dialog_layout("Confirm", "Are you sure?",
+                                        TUI_DLG_QUESTION, TUI_DLG_YES | TUI_DLG_NO);
+    TEST("tui_dialog_layout", d != NULL);
+    if (d) {
+        tui_rect_t r = { 1, 1, 10, 45 };
+        TEST("dialog render", tui_layout_render(fd, d, r) == TUI_OK);
+        tui_layout_free(d);
+    }
+
+    close(fd);
+}
+
+static void test_input_widget(void)
+{
+    int fd = test_write_to_pipe();
+    if (fd < 0) { TEST("pipe", 0); return; }
+
+    tui_input_t inp;
+    memset(&inp, 0, sizeof(inp));
+    inp.active = 1;
+    inp.cursor = 0;
+    strcpy(inp.prompt, ">");
+    strcpy(inp.buffer, "test input");
+
+    tui_event_t ev;
+
+    /* render */
+    tui_rect_t r = { 1, 1, 1, 30 };
+    TEST("input render", tui_input_render(fd, &r, &inp) == TUI_OK);
+
+    /* handle: type char */
+    ev.key = (tui_key_t)'X';
+    tui_input_handle(&inp, &ev);
+    TEST("input handle char", strcmp(inp.buffer, "Xtest input") == 0);
+
+    /* handle: backspace */
+    ev.key = TUI_KEY_BS;
+    tui_input_handle(&inp, &ev);
+    TEST("input handle bs", strcmp(inp.buffer, "test input") == 0);
+
+    /* handle: Enter */
+    ev.key = TUI_KEY_CR;
+    tui_input_handle(&inp, &ev);
+    TEST("input done", tui_input_done(&inp));
+
+    /* layout */
+    tui_input_reset(&inp);
+    TEST("input reset active", inp.active == 1);
+
+    tui_layout_t *lay = tui_input_layout(&inp);
+    TEST("input_layout", lay != NULL);
+    if (lay) {
+        TEST("input layout render", tui_layout_render(fd, lay, r) == TUI_OK);
+        tui_layout_free(lay);
+    }
+
+    close(fd);
+}
+
+static void test_display_modes(void)
+{
+    int fd = test_write_to_pipe();
+    if (fd < 0) { TEST("pipe", 0); return; }
+
+    tui_rect_t area = { 1, 1, 24, 80 };
+
+    /* fullscreen */
+    tui_layout_t *fs = tui_layout_fullscreen(dummy_leaf_render, NULL);
+    TEST("fullscreen", fs != NULL);
+    if (fs) {
+        TEST("fullscreen render", tui_layout_render(fd, fs, area) == TUI_OK);
+        tui_layout_free(fs);
+    }
+
+    /* centered */
+    tui_layout_t *ct = tui_layout_centered(40, 10, dummy_leaf_render, NULL);
+    TEST("centered", ct != NULL);
+    if (ct) {
+        TEST("centered render", tui_layout_render(fd, ct, area) == TUI_OK);
+        tui_layout_free(ct);
+    }
+
+    /* wizard */
+    tui_layout_t *wz = tui_layout_wizard("Setup Wizard", dummy_leaf_render, NULL, "Step 1/3");
+    TEST("wizard", wz != NULL);
+    if (wz) {
+        TEST("wizard render", tui_layout_render(fd, wz, area) == TUI_OK);
+        tui_layout_free(wz);
+    }
+
+    /* dual */
+    tui_layout_t *dl = tui_layout_dual(20, "Nav",
+                                        dummy_leaf_render, NULL,
+                                        dummy_leaf_render, NULL);
+    TEST("dual layout", dl != NULL);
+    if (dl) {
+        TEST("dual render", tui_layout_render(fd, dl, area) == TUI_OK);
+        tui_layout_free(dl);
+    }
+
+    close(fd);
+}
+
+/* ══════════════════════════════════════════════════════
  *  main
  * ══════════════════════════════════════════════════════ */
 
@@ -575,6 +869,36 @@ int main(void)
     test_app_layout();
     test_split_layout();
     test_pad_layout();
+    printf("\n");
+
+    /* 新 Widget */
+    printf("[new-widget]\n");
+    test_label();
+    test_separator();
+    test_badge();
+    test_table();
+    test_draw_border();
+    printf("\n");
+
+    /* 列表 */
+    printf("[list]\n");
+    test_list_widget();
+    test_list_layout();
+    printf("\n");
+
+    /* 对话框 */
+    printf("[dialog]\n");
+    test_dialog_render();
+    printf("\n");
+
+    /* 输入框 */
+    printf("[input-widget]\n");
+    test_input_widget();
+    printf("\n");
+
+    /* 显示模式 */
+    printf("[display-modes]\n");
+    test_display_modes();
     printf("\n");
 
     /* 汇总 */

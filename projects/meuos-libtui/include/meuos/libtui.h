@@ -278,6 +278,10 @@ int tui_fill_rect(int fd, tui_rect_t area, tui_color_t bg);
 /* 绘制带样式的 (可选中文字 + 填充) */
 int tui_styled_text(int fd, tui_rect_t area, const char *text, tui_style_t style);
 
+/* 绘制边框。inner 被修改为内容区域 */
+int tui_draw_border(int fd, tui_rect_t *inner, const char *title,
+                    int style, tui_color_t color);
+
 /* ── 进度条 ──────────────────────────────────────── */
 
 typedef struct {
@@ -348,6 +352,224 @@ int tui_hline(int fd, int col, int width, char ch, tui_color_t color);
 
 /* 带颜色写入文本 */
 int tui_cprintf(int fd, tui_color_t fg, tui_color_t bg, const char *fmt, ...);
+
+/* ══════════════════════════════════════════════════════
+ *  显示模式模板 (layout.c)
+ *  预定义布局模板，适用不同使用场景
+ * ══════════════════════════════════════════════════════ */
+
+/* ── 全屏模式 ────────────────────────────────── */
+/* 全屏内容，无 header/footer，适合编辑器/阅读器/调试工具 */
+tui_layout_t *tui_layout_fullscreen(tui_render_fn fn, void *data);
+
+/* ── 居中模式 ────────────────────────────────── */
+/* 在屏幕中央创建一个限定宽高的盒子，适合弹窗/安装器向导/对话框 */
+tui_layout_t *tui_layout_centered(int width, int height,
+                                  tui_render_fn fn, void *data);
+
+/* ── 向导模式 ────────────────────────────────── */
+/* header + 居中内容 + footer，适合安装器/setup/config 引导 */
+tui_layout_t *tui_layout_wizard(const char *title,
+                                tui_render_fn fn, void *data,
+                                const char *footer);
+
+/* ── 双栏模式 ────────────────────────────────── */
+/* 左侧导航 + 右侧内容，适合配置工具/包管理器 */
+tui_layout_t *tui_layout_dual(int sidebar_width, const char *sidebar_title,
+                              tui_render_fn side_fn, void *side_data,
+                              tui_render_fn content_fn, void *content_data);
+
+/* ══════════════════════════════════════════════════════
+ *  Label 标签 (widget.c)
+ *  带样式的文本/标题
+ * ══════════════════════════════════════════════════════ */
+
+typedef struct {
+    char        text[256];
+    tui_color_t fg, bg;
+    tui_attr_t  attr;
+    int         align;     /* -1=左, 0=中, 1=右 */
+} tui_label_t;
+
+/* 标签渲染回调 */
+int  tui_label_render(int fd, const tui_rect_t *area, void *userdata);
+
+/* 便捷标签创建函数 */
+tui_layout_t *tui_label_new(const char *text, tui_color_t fg);
+tui_layout_t *tui_heading(const char *text, tui_color_t fg);
+
+/* ══════════════════════════════════════════════════════
+ *  Separator 分隔线 (widget.c)
+ * ══════════════════════════════════════════════════════ */
+
+typedef struct {
+    int         vertical;
+    char        line_char;
+    char        label[64];
+    tui_color_t color;
+} tui_separator_t;
+
+int  tui_separator_render(int fd, const tui_rect_t *area, void *userdata);
+
+/* 快捷创建：水平分隔线（可选标签） */
+tui_layout_t *tui_hr(tui_color_t color);
+tui_layout_t *tui_hr_label(const char *label, tui_color_t color);
+
+/* ══════════════════════════════════════════════════════
+ *  Badge 徽章 (widget.c)
+ *  带色块的小标签，适合状态标记/版本号
+ * ══════════════════════════════════════════════════════ */
+
+typedef struct {
+    char        text[64];
+    tui_color_t fg, bg;
+} tui_badge_t;
+
+int  tui_badge_render(int fd, const tui_rect_t *area, void *userdata);
+tui_layout_t *tui_badge_new(const char *text, tui_color_t bg);
+
+/* ══════════════════════════════════════════════════════
+ *  Table 表格 (widget.c)
+ *  带表头的结构化数据展示
+ * ══════════════════════════════════════════════════════ */
+
+#define TUI_TABLE_MAX_COLS  16
+#define TUI_TABLE_MAX_ROWS  256
+
+/* 列定义 */
+typedef struct {
+    char        header[32];
+    int         width;         /* 列宽 (0=自适应) */
+    int         align;         /* -1=左, 0=中, 1=右 */
+} tui_column_t;
+
+/* 表格数据回调：返回第 row 行第 col 列的字符串 */
+typedef const char *(*tui_table_cell_fn)(int row, int col, void *userdata);
+
+/* 表格状态 */
+typedef struct {
+    tui_column_t      columns[TUI_TABLE_MAX_COLS];
+    int               ncols;
+    int               nrows;
+    int               selected;        /* 选中行 (-1=无) */
+    tui_table_cell_fn cell_fn;         /* 单元格内容回调 */
+    void             *userdata;
+    tui_color_t       header_bg;
+    tui_color_t       select_bg;
+} tui_table_t;
+
+int  tui_table_render(int fd, const tui_rect_t *area, void *userdata);
+int  tui_table_handle(tui_table_t *t, tui_event_t *ev);
+
+/* ══════════════════════════════════════════════════════
+ *  Selectable List 可选择列表 (list.c)
+ *  支持键盘导航、滚动、选择的列表组件
+ *  适合菜单/文件列表/包选择/命令历史
+ * ══════════════════════════════════════════════════════ */
+
+typedef struct tui_list tui_list_t;
+
+/* 列表项 */
+typedef struct {
+    char  label[128];
+    char  secondary[64];
+    void *userdata;
+    int   disabled;
+} tui_list_item_t;
+
+/* 创建和销毁 */
+tui_list_t *tui_list_new(tui_list_item_t *items, int nitems);
+void        tui_list_free(tui_list_t *list);
+
+/* 渲染和事件处理 */
+int         tui_list_render(int fd, const tui_rect_t *area, void *userdata);
+int         tui_list_handle(tui_list_t *list, tui_event_t *ev);
+
+/* 状态查询 */
+int         tui_list_selected(tui_list_t *list);
+void       *tui_list_selected_data(tui_list_t *list);
+
+/* 动态修改 */
+void        tui_list_select(tui_list_t *list, int idx);
+void        tui_list_set_items(tui_list_t *list, tui_list_item_t *items, int nitems);
+
+/* 将列表包装为 layout 叶子节点 */
+tui_layout_t *tui_list_layout(tui_list_t *list);
+
+/* ══════════════════════════════════════════════════════
+ *  Dialog 对话框 (dialog.c)
+ *  消息框/确认框/警告/错误/输入对话框
+ *  适合安装器/包管理器/设置工具/ai agent 交互
+ * ══════════════════════════════════════════════════════ */
+
+/* 按钮位掩码 */
+#define TUI_DLG_OK      0x01
+#define TUI_DLG_CANCEL  0x02
+#define TUI_DLG_YES     0x04
+#define TUI_DLG_NO      0x08
+#define TUI_DLG_RETRY   0x10
+#define TUI_DLG_ABORT   0x20
+#define TUI_DLG_IGNORE  0x40
+
+/* 对话框类型 */
+typedef enum {
+    TUI_DLG_INFO,
+    TUI_DLG_WARNING,
+    TUI_DLG_ERROR,
+    TUI_DLG_QUESTION,
+    TUI_DLG_INPUT,
+} tui_dlg_type_t;
+
+/* 对话框结构 */
+typedef struct {
+    tui_dlg_type_t type;          /* 类型 */
+    char            title[64];    /* 标题 */
+    char            message[384]; /* 消息正文 */
+    int             buttons;      /* 按钮位掩码 */
+    int             selected_btn; /* 当前选中按钮索引 */
+    char            input[256];   /* 输入框内容 */
+    int             input_cursor; /* 输入光标位置 */
+    int             input_active; /* 是否在输入状态 */
+} tui_dialog_t;
+
+/* 渲染和处理 */
+int tui_dialog_render(int fd, const tui_rect_t *area, void *userdata);
+int tui_dialog_handle(tui_dialog_t *dlg, tui_event_t *ev);
+
+/* 结果查询 */
+int  tui_dialog_result(tui_dialog_t *dlg);       /* 返回按下的按钮 (如 TUI_DLG_OK) */
+const char *tui_dialog_input(tui_dialog_t *dlg); /* 返回输入文本 */
+
+/* 包装为 layout 叶子 */
+tui_layout_t *tui_dialog_layout(const char *title, const char *message,
+                                tui_dlg_type_t type, int buttons);
+
+/* 阻塞式简便对话框（内部跑事件循环，仅用于全屏模式） */
+int tui_dialog_blocking(int fd, tui_rect_t area, const char *title,
+                        const char *message, tui_dlg_type_t type, int buttons);
+
+/* ══════════════════════════════════════════════════════
+ *  Text Input 文本输入框 (input.c)
+ *  单行文本输入，支持密码模式
+ *  适合登录/搜索/命令输入
+ * ══════════════════════════════════════════════════════ */
+
+typedef struct {
+    char   buffer[512];
+    int    cursor;
+    int    echo_char;      /* 0=正常, '*'=密码 */
+    char   prompt[64];
+    int    active;
+} tui_input_t;
+
+int  tui_input_render(int fd, const tui_rect_t *area, void *userdata);
+int  tui_input_handle(tui_input_t *in, tui_event_t *ev);
+void tui_input_reset(tui_input_t *in);
+int  tui_input_done(tui_input_t *in);   /* 是否提交 (回车) */
+int  tui_input_canceled(tui_input_t *in); /* 是否取消 (ESC) */
+
+/* 包装为 layout 叶子 */
+tui_layout_t *tui_input_layout(tui_input_t *in);
 
 #ifdef __cplusplus
 }

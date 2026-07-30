@@ -262,7 +262,177 @@ int tui_write(int fd, const char *s)
 
 int tui_flush(int fd)
 {
-    /* Linux 终端 write 是直接输出的，flush 即 fsync */
     (void)fd;
     return TUI_OK;
+}
+
+/* ══════════════════════════════════════════════════════
+ *  Text Input 文本输入框
+ * ══════════════════════════════════════════════════════ */
+
+int tui_input_render(int fd, const tui_rect_t *area, void *userdata)
+{
+    tui_input_t *in = (tui_input_t *)userdata;
+    if (!in || !area) return TUI_ERR_PARAM;
+    if (!tui_rect_valid(area)) return TUI_OK;
+
+    tui_cursor_goto(fd, area->row, area->col);
+
+    int input_w = area->cols - 2;  /* 留 1 字符边距 */
+    if (input_w < 4) input_w = 4;
+
+    /* 提示 */
+    tui_set_attr(fd, TUI_ATTR_DIM);
+    tui_write(fd, " ");
+    if (in->prompt[0]) {
+        tui_write(fd, in->prompt);
+        tui_write(fd, " ");
+        input_w -= (int)strlen(in->prompt) + 1;
+    }
+
+    /* 输入框框体 */
+    tui_set_fg(fd, TUI_COLOR_DEFAULT);
+    tui_set_bg(fd, TUI_COLOR_BLACK);
+    int i;
+    for (i = 0; i < input_w; i++) write(fd, " ", 1);
+    tui_reset_style(fd);
+
+    /* 输入内容 */
+    int len = (int)strlen(in->buffer);
+    int show_w = input_w - 2;
+    if (show_w < 1) show_w = 1;
+
+    int cur = in->cursor;
+    int offset = 0;
+    if (cur > show_w - 1) offset = cur - show_w + 1;
+
+    int show = len - offset;
+    if (show > show_w) show = show_w;
+
+    tui_cursor_goto(fd, area->row, area->col + 1 + (in->prompt[0] ? (int)strlen(in->prompt) + 1 : 0));
+
+    /* 显示字符（密码模式用 echo_char 替代） */
+    char echo = (char)in->echo_char;
+    for (i = 0; i < show; i++) {
+        char c = in->buffer[offset + i];
+
+        if (echo && c != '\0')
+            write(fd, &echo, 1);
+        else
+            write(fd, &c, 1);
+    }
+
+    /* 光标（闪烁效果用 reverse 区域模拟） */
+    if (in->active && cur >= offset && cur - offset < show_w) {
+        int cx = area->col + 1 + (cur - offset) + (in->prompt[0] ? (int)strlen(in->prompt) + 1 : 0);
+        tui_cursor_goto(fd, area->row, cx);
+        tui_set_attr(fd, TUI_ATTR_REVERSE);
+        char c = in->buffer[cur];
+        if (echo && c != '\0')
+            write(fd, &echo, 1);
+        else
+            write(fd, c ? &c : " ", 1);
+        tui_reset_style(fd);
+    }
+
+    tui_reset_style(fd);
+    return TUI_OK;
+}
+
+int tui_input_handle(tui_input_t *in, tui_event_t *ev)
+{
+    if (!in || !ev) return TUI_ERR_PARAM;
+
+    if (!in->active) {
+        if (ev->key == TUI_KEY_CR || ev->key == TUI_KEY_LF)
+            in->active = 1;
+        return 1;
+    }
+
+    switch (ev->key) {
+    case TUI_KEY_CR:
+    case TUI_KEY_LF:
+        in->active = 0;
+        return 1;
+
+    case TUI_KEY_ESC:
+        in->active = 0;
+        in->buffer[0] = '\0';
+        in->cursor = 0;
+        return 1;
+
+    case TUI_KEY_BS: {
+        int len = (int)strlen(in->buffer);
+        if (in->cursor > 0) {
+            in->cursor--;
+            memmove(in->buffer + in->cursor,
+                    in->buffer + in->cursor + 1,
+                    (size_t)(len - in->cursor));
+        }
+        return 1;
+    }
+
+    case TUI_KEY_DEL: {
+        int len = (int)strlen(in->buffer);
+        if (in->cursor < len) {
+            memmove(in->buffer + in->cursor,
+                    in->buffer + in->cursor + 1,
+                    (size_t)(len - in->cursor));
+        }
+        return 1;
+    }
+
+    case TUI_KEY_LEFT:
+        if (in->cursor > 0) in->cursor--;
+        return 1;
+
+    case TUI_KEY_RIGHT:
+        if (in->cursor < (int)strlen(in->buffer)) in->cursor++;
+        return 1;
+
+    case TUI_KEY_HOME:
+        in->cursor = 0;
+        return 1;
+
+    case TUI_KEY_END:
+        in->cursor = (int)strlen(in->buffer);
+        return 1;
+
+    default:
+        if (ev->key >= 0x20 && ev->key <= 0x7E) {
+            int len = (int)strlen(in->buffer);
+            if (len < (int)sizeof(in->buffer) - 1) {
+                memmove(in->buffer + in->cursor + 1,
+                        in->buffer + in->cursor,
+                        (size_t)(len - in->cursor + 1));
+                in->buffer[in->cursor] = (char)ev->key;
+                in->cursor++;
+            }
+            return 1;
+        }
+        return 0;
+    }
+}
+
+void tui_input_reset(tui_input_t *in)
+{
+    if (!in) return;
+    in->buffer[0] = '\0';
+    in->cursor = 0;
+    in->active = 1;
+}
+
+int tui_input_done(tui_input_t *in)
+{
+    return in ? (!in->active && in->buffer[0] != '\0') : 0;
+}
+
+int tui_input_canceled(tui_input_t *in)
+{
+    return in ? (!in->active && in->buffer[0] == '\0') : 0;
+}
+
+tui_layout_t *tui_input_layout(tui_input_t *in)
+{
+    return tui_layout_leaf(tui_input_render, in);
 }

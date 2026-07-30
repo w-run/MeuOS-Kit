@@ -10,6 +10,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* ── 布局节点类型 ─────────────────────────────────── */
 
@@ -245,4 +246,172 @@ int tui_layout_render(int fd, tui_layout_t *root, tui_rect_t area)
     }
 
     return render_container(fd, root, area);
+}
+
+/* ══════════════════════════════════════════════════════
+ *  显示模式模板
+ * ══════════════════════════════════════════════════════ */
+
+/* ── 全屏模式 ─────────────────────────────────────── */
+
+tui_layout_t *tui_layout_fullscreen(tui_render_fn fn, void *data)
+{
+    return tui_layout_leaf(fn, data);
+}
+
+/* ── 居中模式 ─────────────────────────────────────── */
+
+typedef struct {
+    int         width, height;
+    tui_render_fn content_fn;
+    void       *content_data;
+} centered_ctx_t;
+
+static int centered_render(int fd, const tui_rect_t *area, void *userdata)
+{
+    centered_ctx_t *ctx = (centered_ctx_t *)userdata;
+    if (!ctx || !area) return TUI_ERR_PARAM;
+
+    int w = ctx->width  > 0 ? ctx->width  : area->cols - 4;
+    int h = ctx->height > 0 ? ctx->height : area->rows - 4;
+
+    if (w > area->cols) w = area->cols;
+    if (h > area->rows) h = area->rows;
+    if (w < 4) w = 4;
+    if (h < 1) h = 1;
+
+    int row = area->row + (area->rows - h) / 2;
+    int col = area->col + (area->cols - w) / 2;
+
+    /* 用黑色填充背景遮罩 */
+    tui_set_bg(fd, TUI_COLOR_BLACK);
+    int r;
+    for (r = 0; r < h; r++) {
+        tui_cursor_goto(fd, row + r, col);
+        tui_spaces(fd, w);
+    }
+    tui_reset_style(fd);
+
+    tui_rect_t inner = { row, col, h, w };
+    if (ctx->content_fn)
+        ctx->content_fn(fd, &inner, ctx->content_data);
+
+    return TUI_OK;
+}
+
+tui_layout_t *tui_layout_centered(int width, int height,
+                                  tui_render_fn fn, void *data)
+{
+    centered_ctx_t *ctx = (centered_ctx_t *)calloc(1, sizeof(centered_ctx_t));
+    if (!ctx) return NULL;
+    ctx->width       = width;
+    ctx->height      = height;
+    ctx->content_fn  = fn;
+    ctx->content_data = data;
+    return tui_layout_leaf(centered_render, ctx);
+}
+
+/* ── 向导模式 ─────────────────────────────────────── */
+
+typedef struct {
+    char        title[64];
+    char        footer[64];
+    tui_render_fn content_fn;
+    void       *content_data;
+} wizard_ctx_t;
+
+static int wizard_render(int fd, const tui_rect_t *area, void *userdata)
+{
+    wizard_ctx_t *ctx = (wizard_ctx_t *)userdata;
+    if (!ctx || !area) return TUI_ERR_PARAM;
+
+    /* vbox: header spacer + content + spacer + footer */
+    tui_rect_t inner = *area;
+
+    /* 居中区域 */
+    int content_h = 0;
+    if (ctx->content_fn) content_h = 3;
+
+    int header_h = ctx->title[0] ? 1 : 0;
+    int footer_h = ctx->footer[0] ? 1 : 0;
+    int total_h  = header_h + footer_h + content_h;
+
+    int start_row = inner.row + (inner.rows - total_h) / 2;
+    if (start_row < inner.row) start_row = inner.row;
+
+    int y = start_row;
+
+    /* header */
+    if (header_h) {
+        tui_cursor_goto(fd, y, inner.col);
+        tui_set_bg(fd, tui_meuos_theme.accent);
+        int i;
+        for (i = 0; i < inner.cols; i++) write(fd, " ", 1);
+        tui_cursor_goto(fd, y, inner.col + 2);
+        tui_set_fg(fd, TUI_COLOR_WHITE);
+        tui_set_attr(fd, TUI_ATTR_BOLD);
+        tui_write(fd, ctx->title);
+        tui_reset_style(fd);
+        y++;
+    }
+
+    /* content */
+    if (ctx->content_fn) {
+        tui_rect_t cr = { y, inner.col + 2, content_h, inner.cols - 4 };
+        ctx->content_fn(fd, &cr, ctx->content_data);
+        y += content_h;
+    }
+
+    /* footer */
+    if (footer_h) {
+        tui_cursor_goto(fd, y, inner.col);
+        tui_set_attr(fd, TUI_ATTR_DIM);
+        tui_hline(fd, inner.col, inner.cols, '-', tui_meuos_theme.dim);
+        tui_reset_style(fd);
+        tui_cursor_goto(fd, y, inner.col + 2);
+        tui_set_fg(fd, tui_meuos_theme.dim);
+        tui_write(fd, ctx->footer);
+        tui_reset_style(fd);
+    }
+
+    return TUI_OK;
+}
+
+tui_layout_t *tui_layout_wizard(const char *title,
+                                tui_render_fn fn, void *data,
+                                const char *footer)
+{
+    wizard_ctx_t *ctx = (wizard_ctx_t *)calloc(1, sizeof(wizard_ctx_t));
+    if (!ctx) return NULL;
+    if (title)  strncpy(ctx->title,  title,  sizeof(ctx->title) - 1);
+    if (footer) strncpy(ctx->footer, footer, sizeof(ctx->footer) - 1);
+    ctx->content_fn  = fn;
+    ctx->content_data = data;
+    return tui_layout_leaf(wizard_render, ctx);
+}
+
+/* ── 双栏模式 ─────────────────────────────────────── */
+
+tui_layout_t *tui_layout_dual(int sidebar_width, const char *sidebar_title,
+                              tui_render_fn side_fn, void *side_data,
+                              tui_render_fn content_fn, void *content_data)
+{
+    tui_layout_t *root = tui_layout_hbox(0);
+    if (!root) return NULL;
+
+    /* sidebar panel */
+    tui_layout_t *side_panel = tui_panel_new(
+        sidebar_title ? sidebar_title : "",
+        side_fn, side_data);
+    if (!side_panel) { tui_layout_free(root); return NULL; }
+    tui_layout_add(root, side_panel, sidebar_width);
+
+    /* content panel */
+    tui_layout_t *content_panel = tui_panel_new(
+        "",
+        content_fn, content_data);
+    if (!content_panel) { tui_layout_free(root); return NULL; }
+    tui_layout_add(root, content_panel, 1);
+
+    return root;
 }
