@@ -17,6 +17,7 @@
 #   bash scripts/daily-audit.sh --no-build      # 跳过构建，仅做静态/文档/git 检查
 #   bash scripts/daily-audit.sh --date 0731     # 指定日期
 #   bash scripts/daily-audit.sh --force         # 允许覆盖已存在的报告
+#   bash scripts/daily-audit.sh --append        # 报告已存在时查缺补漏式追加（刷新缺陷扫描/git 区间 + 修订记录）
 #
 set -uo pipefail
 
@@ -29,6 +30,7 @@ SYSROOT="${MEUOS_SYSROOT:-$ROOT/sysroot}"
 NO_BUILD=0
 FORCE=0
 AGENT=0
+APPEND=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -38,14 +40,22 @@ while [[ $# -gt 0 ]]; do
     --no-build) NO_BUILD=1; shift;;
     --force)    FORCE=1; shift;;
     --agent)    AGENT=1; shift;;
+    --append)   APPEND=1; shift;;
     *) echo "未知参数: $1" >&2; exit 2;;
   esac
 done
 
 OUT="$ROOT/.issues/$DATE.md"
-if [[ -f "$OUT" ]] && [[ $FORCE -eq 0 ]]; then
-  echo "报告已存在，拒绝覆盖: $OUT （用 --force 强制）" >&2
+# 模式判定：--force 覆盖；--append 查缺补漏追加；已存在且两者皆非则提示后退出
+if [[ -f "$OUT" ]] && [[ $FORCE -eq 1 ]]; then
+  MODE=full
+elif [[ -f "$OUT" ]] && [[ $APPEND -eq 1 ]]; then
+  MODE=append
+elif [[ -f "$OUT" ]]; then
+  echo "报告已存在: $OUT ；查缺补漏追加用 --append，覆盖用 --force" >&2
   exit 3
+else
+  MODE=full
 fi
 mkdir -p "$(dirname "$OUT")"
 
@@ -62,6 +72,57 @@ emit() { printf '%s\n' "$*" >>"$OUT"; }
 # 安全计数：命令失败时返回 0，避免 set -u/pipefail 误伤
 count() { local n; n=$(eval "$1" 2>/dev/null | wc -l); echo "${n:-0}"; }
 
+# 查缺补漏式追加：报告已存在时，轻量刷新缺陷扫描 + git 区间，写入「七、补充发现」
+# 并在「修订记录」追加一行。不重跑构建（如需全量重校请用 --force 覆盖）。
+do_append() {
+  local NOW2="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+  local total=0 hits
+  for m in "${MARKERS[@]}"; do
+    hits=$(grep -rniF "$m" "$ROOT/projects" --include='*.c' --include='*.h' \
+           --exclude-dir=build 2>/dev/null | wc -l)
+    total=$((total + hits))
+  done
+  local all_loc
+  all_loc=$(find "$ROOT/projects" -name '*.c' 2>/dev/null -exec cat {} + | wc -l)
+  local density=0
+  [[ $all_loc -gt 0 ]] && density=$(awk "BEGIN{printf \"%.2f\", $total / $all_loc * 1000}")
+
+  local prev
+  prev="$(ls -1 "$ROOT"/.issues/[0-9][0-9][0-9][0-9].md 2>/dev/null \
+          | sed 's#.*/##; s#.md##' | grep -v "^$DATE$" | sort | tail -1)"
+  local since_iso="1 day ago" range="HEAD" pc=""
+  if [[ -n "$prev" ]]; then
+    pc=$(git -C "$ROOT" log -1 --format=%H -- ".issues/$prev.md" 2>/dev/null)
+    since_iso=$(git -C "$ROOT" show -s --format=%ci "$pc" 2>/dev/null)
+    range="$pc..HEAD"
+  fi
+  local commits ncommits changed
+  commits=$(git -C "$ROOT" log --since="$since_iso" --oneline 2>/dev/null)
+  ncommits=$(printf '%s\n' "$commits" | grep -c .)
+  changed=$(git -C "$ROOT" diff --name-only "$range" -- projects/ 2>/dev/null | wc -l)
+
+  local blk="/tmp/audit_append_$$.md" rev="/tmp/audit_rev_$$.md"
+  {
+    echo "### 补充发现（$NOW2 · 脚本自动查缺）"
+    echo
+    echo "轻量复查（未重跑构建/测试）：桩标记合计 **$total** 处，密度 **$density** 处/千行；覆盖代码 **$all_loc** 行。"
+    echo
+    echo "自上一期审计（\`${prev:-无}\`）以来：新增提交 **$ncommits** 个，projects/ 变更 **$changed** 个文件。"
+    echo
+    echo "Agent 可在此补充语义级发现，并继续追加修订记录。"
+    echo
+  } > "$blk"
+  echo "| $NOW2 | 脚本自动 | 查缺补漏：刷新缺陷扫描（密度 $density）+ git 区间（提交 $ncommits/变更 $changed） |" > "$rev"
+
+  awk -v blk="$blk" -v rev="$rev" '
+    /<!--APPEND-POINT-->/ { print; while ((getline l < blk) > 0) print l; next }
+    /^[|] 时间 [|] 来源 [|] 摘要 [|]/ { print; getline sep; print sep; while ((getline l < rev) > 0) print l; next }
+    { print }
+  ' "$OUT" > "$OUT.tmp" && mv "$OUT.tmp" "$OUT"
+  rm -f "$blk" "$rev"
+  echo "✅ 已追加查缺补漏内容到: $OUT"
+}
+
 # 各子项目构建顺序（sysroot 先，因其余组件依赖 MEUOS_SYSROOT）
 PROJECTS=(meuos-sysroot meuos-toolchain mcc meuos-libc meow meuos-buildtools meuos-compress)
 
@@ -71,6 +132,12 @@ MARKERS=(TODO FIXME 'unimplemented' 'not implemented' 'panic("unimpl' '空桩' '
 
 # 已知架构后端名（用于实测架构数量）
 ARCH_NAMES='x86_64|aarch64|riscv64|i386|loongarch64|arm'
+
+# 查缺补漏模式：仅追加，不重跑整份报告
+if [[ $MODE == append ]]; then
+  do_append
+  exit 0
+fi
 
 # ---------------------------------------------------------------------------
 # 报告头
@@ -317,15 +384,27 @@ if [[ $any -eq 0 ]]; then
 fi
 emit
 
-# --agent 模式：留出插入点，由 CodeBuddy loop 的 Agent 补全「深度复核」章节与页脚
+# 六、Agent 深度复核
 if [[ $AGENT -eq 1 ]]; then
   emit "<!--AGENT-REVIEW-->"
-  echo "✅ 已生成基础报告（待 Agent 深度复核）: $OUT"
-  exit 0
+else
+  emit "## 六、Agent 深度复核"
+  emit
+  emit "_（本次未执行 Agent 深度复核；可由 CodeBuddy \`/loop\` 以查缺补漏方式追加）_"
 fi
+emit
 
-emit "---"
-emit "_本报告由 \`scripts/daily-audit.sh\` 自动生成，属数据驱动的初步筛查，深度语义审查仍建议由人工/Agent 复核。_"
+# 七、补充发现（查缺补漏）
+emit "## 七、补充发现（查缺补漏）"
+emit "<!--APPEND-POINT-->"
+emit
+
+# 修订记录
+emit "## 修订记录"
+emit
+emit "| 时间 | 来源 | 摘要 |"
+emit "|------|------|------|"
+emit "| $NOW | 初始生成 | 基础报告（构建/测试、文档对照、缺陷扫描、git 对照）${AGENT:+ + Agent 复核} |"
 emit
 
 echo "✅ 已生成报告: $OUT"
