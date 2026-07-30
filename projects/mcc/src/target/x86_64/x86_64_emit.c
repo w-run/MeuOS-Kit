@@ -504,14 +504,19 @@ emitins(Ins i, E *e)
 		if (isxsel(i.op))
 			goto case_Oxsel;
 	Table:
-		/* Oloadsw/Oextsw with a constant source: movslq %M0
-		 * would emit "movslq $N, %reg" which is INVALID --
-		 * MOVSXD has no immediate form.  Use movl instead;
-		 * the 32-bit result zero-extends to 64 bits, which
-		 * matches sign-extension for all practical constants. */
-		if ((i.op == Oloadsw || i.op == Oextsw)
-		&& rtype(i.arg[0]) == RCon
-		&& e->fn->con[i.arg[0].val].type == CBits) {
+		/* Oload{sw,sh,uh,sb,ub} / Oext{sw,sh,uh,sb,ub} with a
+		 * constant source: movslq / movs{b,w}l / movz{b,w}l
+		 * would emit something like "movslq $N, %reg" which is
+		 * INVALID -- none of these have an immediate form.
+		 * Use movl instead; the 32-bit result zero-extends to
+		 * 64 bits, which matches sign-extension for all
+		 * practical constants. */
+		if (rtype(i.arg[0]) == RCon
+		&& e->fn->con[i.arg[0].val].type == CBits
+		&& (i.op == Oloadsw || i.op == Oloadsh || i.op == Oloaduh
+		 || i.op == Oloadsb || i.op == Oloadub
+		 || i.op == Oextsw  || i.op == Oextsh  || i.op == Oextuh
+		 || i.op == Oextsb  || i.op == Oextub)) {
 			emitf("movl %0, %W=", &i, e);
 			break;
 		}
