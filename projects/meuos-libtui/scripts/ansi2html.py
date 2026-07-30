@@ -81,6 +81,44 @@ ATTRS = {
 #  屏幕状态（用于定位）
 # ══════════════════════════════════════════════════════
 
+def _is_wide(ch):
+    """判断 ch 是否为宽字符（占 2 个终端格）。CJK/全角/emoji 通常为宽。"""
+    if not ch:
+        return False
+    if ch == " ":
+        return False
+    # 优先用 unicodedata.east_asian_width（"W"/"F" = 宽）
+    try:
+        import unicodedata
+        w = unicodedata.east_asian_width(ch)
+        if w in ("W", "F"):
+            return True
+        if w in ("H", "Na", "N"):
+            return False
+    except Exception:
+        pass
+    # 回退：码点范围粗略判断
+    cp = ord(ch[0])
+    return (
+        0x1100 <= cp <= 0x115F or
+        0x2E80 <= cp <= 0x303E or
+        0x3040 <= cp <= 0x309F or
+        0x30A0 <= cp <= 0x30FF or
+        0x3100 <= cp <= 0x31FF or
+        0x3200 <= cp <= 0x33FF or
+        0x3400 <= cp <= 0x4DBF or
+        0x4E00 <= cp <= 0x9FFF or
+        0xA000 <= cp <= 0xA4CF or
+        0xAC00 <= cp <= 0xD7A3 or
+        0xF900 <= cp <= 0xFAFF or
+        0xFE30 <= cp <= 0xFE4F or
+        0xFF00 <= cp <= 0xFF60 or
+        0xFFE0 <= cp <= 0xFFE6 or
+        0x1F300 <= cp <= 0x1FAFF or  # emoji 范围
+        0x20000 <= cp <= 0x2FFFF
+    )
+
+
 class Screen:
     """简单的屏幕模型：二维字符数组 + 样式。"""
 
@@ -111,12 +149,25 @@ class Screen:
         # 跳过 NUL
         if ch == "\x00":
             return
-        # 跳过孤立的高位字节（UTF-8 截断）
-        if ch and ord(ch[0]) >= 0x80 and len(ch) == 1:
-            return
+        # 注：不要再"跳过孤立高位字节"——ch 已经是 Python str，CJK/全角字符
+        # ord(ch[0])>=0x80 且 len(ch)==1 是正常状态，这会把中文/日文/韩文全过滤掉。
+        # UTF-8 截断在 parse_ansi 之前已用 errors='replace' 处理。
+
+        wide = _is_wide(ch)
+
         self.cells[i] = [ch]
         self.styles[i] = style
-        self.col += 1
+
+        if wide and self.col < self.w:
+            # 标记第二格为占位（避免后续字符覆盖 CJK 的右半边）
+            ni = self.idx(self.row, self.col + 1)
+            if ni >= 0:
+                self.cells[ni] = [""]
+                self.styles[ni] = style
+            self.col += 2
+        else:
+            self.col += 1
+
         if self.col > self.w:
             self.col = 1
             self.row += 1
@@ -316,12 +367,19 @@ def screen_to_html(screen, title="TUI Capture"):
 <meta charset="utf-8">
 <title>{html_escape(title)}</title>
 <style>
+/* ── 字体栈 ──────────────────────────────────────────
+ * 标题 / 页眉：Mona Sans (GitHub 比例字体)
+ * 终端网格：MonaSpace (GitHub Next 等宽字体超级家族)
+ * CJK 兜底：Noto Sans CJK
+ * ────────────────────────────────────────────────── */
 body {{
     background: #0d0d1a;
     color: #e4e4e7;
-    font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+    font-family: 'Mona Sans', 'Mona Sans VF', -apple-system, BlinkMacSystemFont,
+                 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
     font-size: 14px;
-    line-height: 1.2;
+    line-height: 1.5;
+    font-weight: 400;
     padding: 20px;
     margin: 0;
 }}
@@ -329,7 +387,9 @@ body {{
     color: #4ade80;
     font-size: 18px;
     margin-bottom: 12px;
-    font-weight: bold;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    font-family: 'Mona Sans', 'Mona Sans VF', -apple-system, BlinkMacSystemFont, sans-serif;
 }}
 .terminal {{
     background: #000;
@@ -339,6 +399,17 @@ body {{
     display: inline-block;
     min-width: 80ch;
     box-shadow: 0 0 24px rgba(74, 222, 128, 0.15);
+    /* TUI 网格用 MonaSpace：等宽 + Texture Healing 提升可读性 */
+    font-family: 'Monaspace Neon', 'Monaspace Neon Var', 'Mona Sans Mono',
+                 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas,
+                 'Noto Sans Mono CJK SC', 'PingFang SC', 'Microsoft YaHei',
+                 monospace;
+    font-size: 14px;
+    line-height: 1.2;
+    font-weight: 400;
+    font-variation-settings: 'wght' 400, 'wdth' 100;
+    font-variant-ligatures: contextual;
+    font-feature-settings: 'calt' 1;
 }}
 </style>
 </head>

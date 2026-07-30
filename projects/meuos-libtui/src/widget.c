@@ -900,10 +900,29 @@ int tui_table_render(int fd, const tui_rect_t *area, void *userdata)
     int max_rows = area->rows;
     if (max_rows <= 0) return TUI_OK;
 
+    /* ── 24-bit 背景色：默认从主题推断 ──
+     * 自动背景 = surface + 6（与 dashboard 中其他卡片一致，
+     * 否则表行不设置 bg 会露出终端默认黑色 (13,13,26)）。
+     * 若调用方显式设置了 tbl.bg (非 (0,0,0)) 则覆盖。 */
+    const tui_theme_t *th = tui_theme_current();
+    tui_rgb_t surf_bg = th ? th->surface_bg : (tui_rgb_t){13,13,23};
+    tui_rgb_t auto_bg = {
+        (uint8_t)(surf_bg.r + 6),
+        (uint8_t)(surf_bg.g + 6),
+        (uint8_t)(surf_bg.b + 6)
+    };
+    tui_rgb_t row_bg = (t->bg.r || t->bg.g || t->bg.b) ? t->bg : auto_bg;
+    tui_rgb_t hdr_bg = (t->header_bg_rgb.r || t->header_bg_rgb.g || t->header_bg_rgb.b)
+                        ? t->header_bg_rgb
+                        : (th ? th->gradient[4] : (tui_rgb_t){74,222,128});
+    tui_rgb_t sel_bg = (t->select_bg_rgb.r || t->select_bg_rgb.g || t->select_bg_rgb.b)
+                        ? t->select_bg_rgb
+                        : (th ? th->selection_bg : (tui_rgb_t){74,222,128});
+
     /* ── 表头 ── */
     tui_cursor_goto(fd, y, area->col);
-    tui_color_t hbg = t->header_bg ? t->header_bg : tui_meuos_theme.accent;
-    tui_set_bg(fd, hbg);
+    tui_set_bg_rgb(fd, hdr_bg);
+    tui_set_fg_rgb(fd, th ? th->surface_fg : (tui_rgb_t){13,13,13});
     tui_set_attr(fd, TUI_ATTR_BOLD);
 
     int col_x[TUI_TABLE_MAX_COLS];
@@ -929,22 +948,30 @@ int tui_table_render(int fd, const tui_rect_t *area, void *userdata)
         if (x >= area->col + area->cols) break;
     }
     tui_reset_style(fd);
+    tui_set_bg_rgb(fd, row_bg);
 
     /* ── 分隔线 ── */
     y++;
     if (y >= area->row + max_rows) return TUI_OK;
     tui_cursor_goto(fd, y, area->col);
+    tui_set_bg_rgb(fd, row_bg);
+    tui_set_fg_rgb(fd, th ? tui_color_to_rgb_xterm(th->palette.border) : (tui_rgb_t){60,60,72});
     tui_set_attr(fd, TUI_ATTR_DIM);
-    tui_set_fg(fd, tui_meuos_theme.dim);
     int i;
     for (i = 0; i < area->cols && area->col + i < x; i++)
         write(fd, "─", 3);
     tui_reset_style(fd);
+    tui_set_bg_rgb(fd, row_bg);
 
     /* ── 数据行 ── */
     for (int ri = 0; ri < nrows && y + 1 < area->row + max_rows; ri++) {
         y++;
         int is_sel = (ri == t->selected);
+        tui_rgb_t this_bg = is_sel ? sel_bg : row_bg;
+
+        /* 行背景：先 reset 再 set 24-bit bg，避免继承前一行错误样式 */
+        tui_reset_style(fd);
+        tui_set_bg_rgb(fd, this_bg);
 
         for (c = 0; c < ncols; c++) {
             if (col_x[c] >= area->col + area->cols) break;
@@ -953,8 +980,12 @@ int tui_table_render(int fd, const tui_rect_t *area, void *userdata)
             int w = t->columns[c].width;
 
             if (is_sel) {
-                tui_set_bg(fd, t->select_bg ? t->select_bg : tui_meuos_theme.highlight);
-                tui_set_fg(fd, TUI_COLOR_WHITE);
+                tui_set_bg_rgb(fd, sel_bg);
+                tui_set_fg_rgb(fd, th ? th->selection_fg : (tui_rgb_t){13,13,23});
+                tui_set_attr(fd, TUI_ATTR_BOLD);
+            } else {
+                tui_set_bg_rgb(fd, row_bg);
+                tui_set_fg_rgb(fd, th ? th->surface_fg : (tui_rgb_t){229,229,229});
             }
 
             const char *cell = t->cell_fn ? t->cell_fn(ri, c, t->userdata) : "";
@@ -973,29 +1004,21 @@ int tui_table_render(int fd, const tui_rect_t *area, void *userdata)
             if (w - pad_l - cw > 0)
                 tui_spaces(fd, w - pad_l - cw);
 
-            if (is_sel) tui_reset_style(fd);
-
             /* 列间距 */
             if (c < ncols - 1) {
-                if (is_sel) {
-                    tui_set_bg(fd, t->select_bg ? t->select_bg : tui_meuos_theme.highlight);
-                }
+                tui_set_bg_rgb(fd, this_bg);
                 tui_spaces(fd, 1);
-                if (is_sel) tui_reset_style(fd);
             }
         }
 
-        if (is_sel) {
-            /* 填充行尾 */
-            int fill = area->col + area->cols - col_x[ncols - 1] -
-                       t->columns[ncols - 1].width;
-            if (fill > 0) {
-                tui_set_bg(fd, t->select_bg ? t->select_bg : tui_meuos_theme.highlight);
-                tui_spaces(fd, fill);
-                tui_reset_style(fd);
-            }
+        /* 填充行尾 */
+        int fill = area->col + area->cols - x;
+        if (fill > 0) {
+            tui_set_bg_rgb(fd, this_bg);
+            tui_spaces(fd, fill);
         }
     }
+    tui_reset_style(fd);
 
     return TUI_OK;
 }

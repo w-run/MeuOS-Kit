@@ -7,7 +7,7 @@ OBJS := $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS))
 LIB := $(BUILD)/libtui.a
 TEST := $(BUILD)/test_tui
 
-EXAMPLES := demo demo_dialog demo_list
+EXAMPLES := demo demo_dialog demo_list demo_dashboard demo_showcase
 EXE := $(addprefix $(BUILD)/,$(EXAMPLES))
 
 .PHONY: all check clean examples $(EXAMPLES)
@@ -42,10 +42,18 @@ $(BUILD)/demo_dialog: examples/demo_dialog.c $(LIB) | $(BUILD)
 $(BUILD)/demo_list: examples/demo_list.c $(LIB) | $(BUILD)
 	$(CC) $(CFLAGS) -Iinclude -o $@ examples/demo_list.c $(LIB)
 
+$(BUILD)/demo_dashboard: examples/demo_dashboard.c $(LIB) | $(BUILD)
+	$(CC) $(CFLAGS) -Iinclude -o $@ examples/demo_dashboard.c $(LIB)
+
+$(BUILD)/demo_showcase: examples/demo_showcase.c $(LIB) | $(BUILD)
+	$(CC) $(CFLAGS) -Iinclude -o $@ examples/demo_showcase.c $(LIB)
+
 # 单个示例快捷构建
 demo: $(BUILD)/demo
 demo_dialog: $(BUILD)/demo_dialog
 demo_list: $(BUILD)/demo_list
+demo_dashboard: $(BUILD)/demo_dashboard
+demo_showcase: $(BUILD)/demo_showcase
 
 clean:
 	rm -rf $(BUILD)

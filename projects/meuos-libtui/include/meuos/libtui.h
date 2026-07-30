@@ -214,6 +214,60 @@ typedef struct {
 extern const tui_palette_t tui_meuos_theme;
 
 /* ══════════════════════════════════════════════════════
+ *  24-bit 真彩色支持 (xterm-256color / iTerm2 / Windows Terminal)
+ * ══════════════════════════════════════════════════════ */
+
+typedef struct { uint8_t r, g, b; } tui_rgb_t;
+
+#define TUI_RGB(r,g,b) ((tui_rgb_t){(r),(g),(b)})
+
+/* 直接以 RGB 写入前景/背景 ANSI 转义（24-bit color） */
+int tui_set_fg_rgb(int fd, tui_rgb_t c);
+int tui_set_bg_rgb(int fd, tui_rgb_t c);
+
+/* 16 色 → 近似 RGB（用于主题渲染/PNG 截图） */
+tui_rgb_t tui_color_to_rgb(tui_color_t c);
+tui_rgb_t tui_color_to_rgb_xterm(tui_color_t c);  /* 更准确 xterm-256 调色板 */
+
+/* ══════════════════════════════════════════════════════
+ *  主题系统 (themes.c)
+ * ══════════════════════════════════════════════════════ */
+
+/* 完整主题定义：包含 16 色调色板 + 装饰色 + 24-bit 渐变 */
+typedef struct {
+    const char   *name;            /* 主题名 */
+    tui_palette_t palette;         /* 基础 16 色 */
+    tui_rgb_t     surface_bg;      /* 内容区背景 */
+    tui_rgb_t     surface_fg;      /* 内容区前景 */
+    tui_rgb_t     header_bg;       /* 顶栏背景 */
+    tui_rgb_t     header_fg;       /* 顶栏前景 */
+    tui_rgb_t     statusbar_bg;    /* 底栏背景 */
+    tui_rgb_t     statusbar_fg;    /* 底栏前景 */
+    tui_rgb_t     gradient[6];     /* 标题渐变色 (0..5 渐变到主色) */
+    tui_rgb_t     selection_bg;    /* 选中行背景 */
+    tui_rgb_t     selection_fg;    /* 选中行前景 */
+    tui_rgb_t     zebra_bg;        /* 表格斑马纹背景 */
+    int           use_24bit;       /* 是否启用 24-bit (xterm-256color 模拟为 16) */
+} tui_theme_t;
+
+/* 预设主题 */
+extern const tui_theme_t tui_theme_meuos;         /* 默认 MeuOS 绿调 */
+extern const tui_theme_t tui_theme_solarized;     /* Solarized Dark */
+extern const tui_theme_t tui_theme_nord;          /* Nord */
+extern const tui_theme_t tui_theme_catppuccin;    /* Catppuccin Mocha */
+extern const tui_theme_t tui_theme_cyberpunk;     /* Cyberpunk 2077 风格 */
+extern const tui_theme_t tui_theme_mono;          /* 极简单色 */
+
+/* 主题列表（用于选择器） */
+extern const tui_theme_t * const tui_themes[];
+extern const int tui_themes_count;
+
+/* 切换主题；返回当前主题 */
+const tui_theme_t *tui_set_theme(const tui_theme_t *t);
+const tui_theme_t *tui_theme_current(void);
+const tui_theme_t *tui_theme_by_name(const char *name);
+
+/* ══════════════════════════════════════════════════════
  *  布局系统 (layout.c)
  * ══════════════════════════════════════════════════════ */
 
@@ -223,16 +277,56 @@ typedef struct tui_layout tui_layout_t;
 /* 渲染回调：在给定区域内绘制内容 */
 typedef int (*tui_render_fn)(int fd, const tui_rect_t *area, void *userdata);
 
+/* ── Flex 布局枚举（CSS-like） ──────────────────────── */
+
+typedef enum {
+    TUI_FLEX_DIR_ROW,        /* 水平排列（默认 HBox） */
+    TUI_FLEX_DIR_COLUMN,     /* 垂直排列（默认 VBox） */
+} tui_flex_dir_t;
+
+typedef enum {
+    TUI_JUSTIFY_START,       /* 起始对齐（默认） */
+    TUI_JUSTIFY_CENTER,      /* 居中 */
+    TUI_JUSTIFY_END,         /* 末端对齐 */
+    TUI_JUSTIFY_BETWEEN,     /* 两端对齐（首尾贴边，间隙均分） */
+    TUI_JUSTIFY_AROUND,      /* 环绕（首尾 1/2 gap） */
+    TUI_JUSTIFY_EVENLY,      /* 完全均分 */
+} tui_justify_t;
+
+typedef enum {
+    TUI_ALIGN_START,         /* 起始对齐（默认） */
+    TUI_ALIGN_CENTER,        /* 居中 */
+    TUI_ALIGN_END,           /* 末端对齐 */
+    TUI_ALIGN_STRETCH,       /* 拉伸填满 */
+} tui_align_t;
+
 /* 创建容器 */
 tui_layout_t *tui_layout_vbox(int spacing);  /* 垂直盒子 */
 tui_layout_t *tui_layout_hbox(int spacing);  /* 水平盒子 */
 tui_layout_t *tui_layout_leaf(tui_render_fn fn, void *userdata); /* 叶子节点 */
+tui_layout_t *tui_layout_leaf_with_free(tui_render_fn fn, void *userdata,
+                                         void (*free_fn)(void *));  /* 带自动释放 userdata */
 
-/* 添加子节点。weight：尺寸权重（>=1），0 表示填满剩余空间 */
+/* 创建 Flex 容器（direction=行/列，gap=子项间距） */
+tui_layout_t *tui_layout_flex(tui_flex_dir_t dir, int gap);
+
+/* 设置容器主轴对齐 (justify-content) 与交叉轴对齐 (align-items) */
+void tui_layout_justify(tui_layout_t *node, tui_justify_t j);
+void tui_layout_align(tui_layout_t *node, tui_align_t a);
+
+/* 添加子节点。
+ *   weight/grow: 主轴上的 grow factor（0=按 content/basis 算，>0=按比例瓜分剩余）
+ *   basis     : 主轴上的固定尺寸（0=自适应，>0=精确像素）
+ *   align     : 单项交叉轴对齐（覆盖容器默认） */
 int tui_layout_add(tui_layout_t *parent, tui_layout_t *child, int weight);
+int tui_layout_add_flex(tui_layout_t *parent, tui_layout_t *child,
+                        double grow, int basis);
 
 /* 设置容器内边距 (上下左右，单位字符) */
 void tui_layout_pad(tui_layout_t *node, int top, int right, int bottom, int left);
+
+/* 设置子节点的交叉轴对齐（per-child override） */
+void tui_layout_child_align(tui_layout_t *parent, int index, tui_align_t a);
 
 /* 渲染整棵布局树 */
 int tui_layout_render(int fd, tui_layout_t *root, tui_rect_t area);
@@ -478,10 +572,212 @@ typedef struct {
     void             *userdata;
     tui_color_t       header_bg;
     tui_color_t       select_bg;
+    /* v2 扩展：24-bit 表格背景。
+     * 设为 (0,0,0) 表示使用 theme 自动推断的 card_bg（推荐）；
+     * 显式赋值则覆盖 theme。 */
+    tui_rgb_t         bg;              /* 24-bit 行背景（默认=自动） */
+    tui_rgb_t         header_bg_rgb;   /* 24-bit 表头背景（默认=accent） */
+    tui_rgb_t         select_bg_rgb;   /* 24-bit 选中行背景（默认=theme.selection_bg） */
 } tui_table_t;
 
 int  tui_table_render(int fd, const tui_rect_t *area, void *userdata);
 int  tui_table_handle(tui_table_t *t, tui_event_t *ev);
+
+/* ══════════════════════════════════════════════════════
+ *  Tab 标签栏 (widget.c)
+ *  顶部水平标签栏，支持 active/inactive 状态
+ * ══════════════════════════════════════════════════════ */
+
+typedef struct {
+    const char *label;
+    const char *badge;      /* 角标文本，可为 NULL */
+    int         active;
+    int         disabled;
+} tui_tab_t;
+
+typedef struct {
+    tui_tab_t *tabs;
+    int        ntabs;
+    int        selected;     /* 当前选中 */
+    tui_color_t accent;      /* active 颜色 (默认 theme.accent) */
+} tui_tabbar_t;
+
+int  tui_tabbar_render(int fd, const tui_rect_t *area, void *userdata);
+tui_layout_t *tui_tabbar_new(tui_tab_t *tabs, int ntabs, int selected);
+
+/* ══════════════════════════════════════════════════════
+ *  KeyHint 快捷键提示 (widget.c)
+ *  底部 [Q]uit [?] Help [Enter] Select 风格横条
+ * ══════════════════════════════════════════════════════ */
+
+typedef struct {
+    const char *key;         /* "Q", "Enter", "?" */
+    const char *label;       /* "quit", "help", "select" */
+    tui_color_t color;       /* 0 = 默认主色 */
+} tui_keyhint_t;
+
+typedef struct {
+    tui_keyhint_t *hints;
+    int            nhints;
+} tui_keyhints_t;
+
+int  tui_keyhints_render(int fd, const tui_rect_t *area, void *userdata);
+tui_layout_t *tui_keyhints_new(tui_keyhint_t *hints, int nhints);
+
+/* ══════════════════════════════════════════════════════
+ *  Stat 数据卡 (widget.c)
+ *  大数字 + 标签 + 趋势箭头 (e.g. CPU 67% ↑)
+ * ══════════════════════════════════════════════════════ */
+
+typedef enum {
+    TUI_TREND_UP    = 1,
+    TUI_TREND_DOWN  = -1,
+    TUI_TREND_FLAT  = 0,
+} tui_trend_t;
+
+typedef struct {
+    char        label[32];
+    char        value[16];     /* "67%" "256 MB" "1.2K" */
+    tui_color_t fg;            /* 数值颜色 */
+    int         trend;         /* tui_trend_t */
+    char        delta[16];     /* "+3.2%" */
+    tui_color_t trend_color;   /* 趋势色 */
+} tui_stat_t;
+
+int  tui_stat_render(int fd, const tui_rect_t *area, void *userdata);
+tui_layout_t *tui_stat_new(const char *label, const char *value,
+                           tui_color_t fg, int trend, const char *delta);
+
+/* ══════════════════════════════════════════════════════
+ *  Sparkline 迷你折线 (widget.c)
+ *  用 ▁▂▃▄▅▆▇█ 渲染一段数据序列
+ * ══════════════════════════════════════════════════════ */
+
+typedef struct {
+    const int   *data;         /* 数据序列 (0-100 建议范围) */
+    int          npoints;      /* 数据点数量 */
+    int          max_val;      /* 归一化最大值 (默认 100) */
+    tui_color_t  fg;           /* 折线颜色 */
+    int          filled;       /* 1=在折线下方填充色块 */
+    tui_color_t  fill_color;   /* 填充颜色 */
+} tui_sparkline_t;
+
+int  tui_sparkline_render(int fd, const tui_rect_t *area, void *userdata);
+tui_layout_t *tui_sparkline_new(const int *data, int npoints, tui_color_t fg);
+
+/* ══════════════════════════════════════════════════════
+ *  Card 卡片 (widget.c)
+ *  带标题栏的圆角容器（含内容回调）
+ * ══════════════════════════════════════════════════════ */
+
+typedef struct {
+    char         title[64];
+    char         subtitle[64];    /* 可选副标题 */
+    tui_color_t  title_fg;
+    tui_color_t  bg;              /* 0=透明 */
+    tui_render_fn content_fn;
+    void        *content_data;
+} tui_card_t;
+
+int  tui_card_render(int fd, const tui_rect_t *area, void *userdata);
+tui_layout_t *tui_card_new(const char *title, tui_render_fn content_fn, void *data);
+
+/* ══════════════════════════════════════════════════════
+ *  Style 预设 (widget.c)
+ *  Banner / Progress / Spinner / Badge 可选样式
+ * ══════════════════════════════════════════════════════ */
+
+/* Banner 风格 */
+typedef enum {
+    TUI_BANNER_SIMPLE = 0,    /* 单线，简洁 */
+    TUI_BANNER_DOUBLE = 1,    /* 双线，醒目 */
+    TUI_BANNER_HEAVY  = 2,    /* 粗框 + 加粗标题 */
+    TUI_BANNER_ANGLED = 3,    /* 斜角装饰 `『 』` */
+} tui_banner_style_t;
+
+typedef struct {
+    char        text[128];
+    char        sub[128];
+    tui_color_t color;
+    int         style;          /* tui_banner_style_t */
+    int         gradient;       /* 标题使用渐变色（要求 24-bit） */
+    const char *tag;            /* 顶部小标签，如 "v1.0" */
+} tui_banner_v2_t;
+
+tui_layout_t *tui_banner_v2(const tui_banner_v2_t *cfg);
+
+/* 公开的 v2 渲染函数（可用作 layout 叶子或直接调用） */
+int tui_banner_render_v2(int fd, const tui_rect_t *area, void *userdata);
+
+/* Progress 风格 */
+typedef enum {
+    TUI_PROGRESS_BLOCK     = 0,  /* ████░░░░ (默认) */
+    TUI_PROGRESS_SEGMENT   = 1,  /* ▰▰▰▱▱▱ */
+    TUI_PROGRESS_DOT       = 2,  /* ●●●○○○ */
+    TUI_PROGRESS_PIPE      = 3,  /* ━━━━━ */
+    TUI_PROGRESS_SHADE     = 4,  /* ░▒▓█  渐变 */
+} tui_progress_style_t;
+
+typedef struct {
+    double      value;
+    int         bar_width;
+    tui_color_t fill_color;
+    tui_color_t empty_color;
+    char        label[48];
+    int         show_percent;
+    int         style;          /* tui_progress_style_t */
+    tui_color_t label_color;    /* 标签颜色 */
+} tui_progress_v2_t;
+
+tui_layout_t *tui_progress_v2(const tui_progress_v2_t *cfg);
+
+/* Spinner 预设帧 */
+#define TUI_SPINNER_DOTS   "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ "   /* 默认（点状旋转） */
+#define TUI_SPINNER_CLOCK  "🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚🕛"
+#define TUI_SPINNER_WAVE   "⠁⠂⠄⠂"
+#define TUI_SPINNER_BOUNCE "⠁⠃⠇⠧⠷⠿⠿⠷⠧⠇⠃⠁"
+#define TUI_SPINNER_ARROW  "←↖↑↗→↘↓↙"
+#define TUI_SPINNER_PIPE   "┤┘┴└├┌┬┐"
+#define TUI_SPINNER_BAR    "▁▂▃▄▅▆▇█▇▆▅▄▃▂▁"
+
+typedef struct {
+    int         frame;
+    tui_color_t color;
+    const char *frames;          /* 帧序列 */
+    char        label[32];       /* 后置文本 */
+} tui_spinner_v2_t;
+
+tui_layout_t *tui_spinner_v2(const tui_spinner_v2_t *cfg);
+
+/* Badge 风格 */
+typedef enum {
+    TUI_BADGE_FILL   = 0,        /* [ TEXT ] 色块背景 */
+    TUI_BADGE_PILL   = 1,        /* ● TEXT ●  圆点 */
+    TUI_BADGE_OUTLN  = 2,        /* ▸ TEXT ▸ 边框（用方括号） */
+    TUI_BADGE_DOT    = 3,        /* ● TEXT    前缀圆点 */
+    TUI_BADGE_TAG    = 4,        /* #tag       hash 风格 */
+} tui_badge_style_t;
+
+typedef struct {
+    char        text[64];
+    tui_color_t fg, bg;
+    int         style;           /* tui_badge_style_t */
+} tui_badge_v2_t;
+
+tui_layout_t *tui_badge_v2(const tui_badge_v2_t *cfg);
+
+/* Table 增强 */
+typedef struct {
+    int         zebra;           /* 0/1 */
+    tui_color_t zebra_bg;        /* 0=主题默认 */
+    tui_color_t zebra_fg;        /* 0=默认前景 */
+    int         rounded;         /* 0/1 圆角 */
+    int         header_align;    /* -1, 0, 1 */
+} tui_table_style_t;
+
+tui_table_t *tui_table_new_v2(tui_column_t *cols, int ncols,
+                              tui_table_cell_fn cell_fn, int nrows,
+                              const tui_table_style_t *style);
 
 /* ══════════════════════════════════════════════════════
  *  Selectable List 可选择列表 (list.c)
@@ -592,6 +888,161 @@ int  tui_input_canceled(tui_input_t *in); /* 是否取消 (ESC) */
 
 /* 包装为 layout 叶子 */
 tui_layout_t *tui_input_layout(tui_input_t *in);
+
+/* ══════════════════════════════════════════════════════
+ *  V3 高级可视化组件 (widgets_v3.c)
+ *
+ *  Gauge 仪表盘 / Heatmap 热力图 / BarChart 条形图
+ *  Marquee 跑马灯 / Tree 文件树 / ActivityLog 活动日志
+ *  Pulse 脉动指示器 / Box 装饰盒
+ * ══════════════════════════════════════════════════════ */
+
+/* Gauge 风格 */
+typedef enum {
+    TUI_GAUGE_LINEAR = 0,    /* 线性进度 + 刻度 */
+    TUI_GAUGE_RING   = 1,    /* 圆环 */
+    TUI_GAUGE_BAR    = 2,    /* 块状条 */
+    TUI_GAUGE_BULLET = 3,    /* ●○○○ 块状指示 */
+} tui_gauge_style_t;
+
+typedef struct {
+    char        label[32];
+    double      value;        /* 0.0 - 1.0 */
+    tui_rgb_t   color;
+    tui_rgb_t   bg;
+    int         style;
+    int         ticks;        /* 刻度数 (0=无) */
+    int         show_value;   /* 是否显示百分比 */
+} tui_gauge_t;
+
+int tui_gauge_render(int fd, const tui_rect_t *area, void *userdata);
+tui_layout_t *tui_gauge_new(const char *label, double value,
+                            tui_rgb_t color, int style);
+
+/* BigNum 大数字（数字时钟 / LCD 字体风格）
+ *
+ * 经典数字时钟字体：每个数字 3 列 × 5 行 = 15 个像素位，
+ * 用全块字符 █ (U+2588) 渲染高对比度像素，空像素用空格。
+ * 用于强调大数字（CPU%、内存用量等）。 */
+int tui_bignum_render_at(int fd, int row, int col, tui_rgb_t fg, tui_rgb_t bg,
+                         const char *num_str);
+int tui_bignum_width(const char *num_str);
+
+/* Heatmap 热力图（Git 贡献墙风格） */
+typedef struct {
+    const double *data;
+    int            rows;
+    int            cols;
+    int            cell_h;     /* 1=单行，2=双行 */
+    tui_rgb_t      bg;
+    int            show_row_labels;
+    const char   **row_labels;
+} tui_heatmap_t;
+
+int tui_heatmap_render(int fd, const tui_rect_t *area, void *userdata);
+tui_layout_t *tui_heatmap_new(const double *data, int rows, int cols,
+                              const char **row_labels);
+
+/* BarChart 条形图（横向/纵向） */
+typedef struct {
+    const char **labels;
+    const double *values;
+    int           n;
+    int           vertical;
+    tui_rgb_t     fg;
+    tui_rgb_t     bg;
+} tui_barchart_t;
+
+int tui_barchart_render(int fd, const tui_rect_t *area, void *userdata);
+tui_layout_t *tui_barchart_new(const char **labels, const double *values,
+                               int n, int vertical, tui_rgb_t fg);
+
+/* Marquee 跑马灯（自动循环） */
+typedef struct {
+    const char *text;
+    int         frame;
+    tui_rgb_t   fg;
+    tui_rgb_t   bg;
+    int         speed;
+} tui_marquee_t;
+
+int  tui_marquee_render(int fd, const tui_rect_t *area, void *userdata);
+void tui_marquee_tick(tui_marquee_t *m);
+tui_layout_t *tui_marquee_new(const char *text, tui_rgb_t fg);
+
+/* Tree 文件树 */
+typedef struct {
+    const char *label;
+    int         is_leaf;
+    int         depth;
+    int         expanded;
+    int         selected;
+} tui_tree_node_t;
+
+typedef struct {
+    tui_tree_node_t *nodes;
+    int              n;
+    int              selected;
+    tui_rgb_t        fg;
+    tui_rgb_t        bg;
+} tui_tree_t;
+
+int tui_tree_render(int fd, const tui_rect_t *area, void *userdata);
+tui_layout_t *tui_tree_new(tui_tree_node_t *nodes, int n, int selected,
+                           tui_rgb_t fg);
+
+/* ActivityLog 活动日志流 */
+typedef struct {
+    const char *time;
+    const char *level;
+    tui_rgb_t   level_fg;
+    const char *message;
+} tui_log_entry_t;
+
+typedef struct {
+    const tui_log_entry_t *entries;
+    int                    n;
+    int                    scroll;
+    tui_rgb_t              bg;
+} tui_log_t;
+
+int tui_activitylog_render(int fd, const tui_rect_t *area, void *userdata);
+tui_layout_t *tui_activitylog_new(const tui_log_entry_t *entries, int n);
+
+/* Pulse 脉动指示器（◐◓◑◒ 旋转） */
+typedef struct {
+    int         frame;
+    tui_rgb_t   fg;
+    tui_rgb_t   bg;
+    const char *label;
+} tui_pulse_t;
+
+int  tui_pulse_render(int fd, const tui_rect_t *area, void *userdata);
+void tui_pulse_tick(tui_pulse_t *p);
+tui_layout_t *tui_pulse_new(tui_rgb_t fg, const char *label);
+
+/* Box 装饰盒（带标题、5 种风格） */
+typedef enum {
+    TUI_BOX_THIN   = 0,
+    TUI_BOX_BOLD   = 1,
+    TUI_BOX_DOUBLE = 2,
+    TUI_BOX_ROUND  = 3,
+    TUI_BOX_ASCII  = 4,
+} tui_box_style_t;
+
+typedef struct {
+    char            title[64];
+    tui_rgb_t       title_fg;
+    tui_rgb_t       border;
+    tui_rgb_t       bg;
+    int             style;
+    tui_render_fn   content_fn;
+    void           *content_data;
+} tui_box_t;
+
+int tui_box_render(int fd, const tui_rect_t *area, void *userdata);
+tui_layout_t *tui_box_new(const char *title, int style, tui_render_fn fn,
+                          void *data);
 
 #ifdef __cplusplus
 }

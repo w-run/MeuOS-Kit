@@ -26,9 +26,15 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_DIR/build"
+# 截图输出目录（与 build 隔离）
+SCREENSHOT_DIR="${SCREENSHOT_DIR:-$PROJECT_DIR/docs/screenshots}"
+mkdir -p "$SCREENSHOT_DIR"
 
-DEMO_NAME="${1:?用法: $0 <demo名称> [输出基础名]}"
+DEMO_NAME="${1:?用法: $0 <demo名称> [输出基础名] [主题名] [宽] [高]}"
 OUTPUT_BASE="${2:-${DEMO_NAME}-capture}"
+THEME_NAME="${3:-}"
+WIDTH="${4:-80}"
+HEIGHT="${5:-30}"
 
 EXE="$BUILD_DIR/$DEMO_NAME"
 if [ ! -x "$EXE" ]; then
@@ -40,12 +46,13 @@ fi
 RAW="$BUILD_DIR/${OUTPUT_BASE}.raw"
 HTML="$BUILD_DIR/${OUTPUT_BASE}.html"
 TXT="$BUILD_DIR/${OUTPUT_BASE}.txt"
-PNG="$BUILD_DIR/${OUTPUT_BASE}.png"
+PNG="$SCREENSHOT_DIR/${OUTPUT_BASE}.png"
 
 echo "🎬 TUI 捕获工具"
 echo "==============================="
-echo "程序: $EXE"
-echo "输出: $HTML"
+echo "程序:   $EXE"
+echo "主题:   ${THEME_NAME:-默认}"
+echo "输出:   $PNG"
 echo ""
 
 # ── 1. 在伪终端中运行 demo ──
@@ -58,12 +65,13 @@ rm -f "$RAW"
 
 # 强制使用 80x30 终端尺寸，便于稳定截图
 # 注意：不要用 2>&1 把 stderr 推到文件，会污染 ANSI 输出
-TERMINAL_COLS=80 \
-TERMINAL_LINES=30 \
-LINES=30 \
-COLUMNS=80 \
+TERMINAL_COLS=$WIDTH \
+TERMINAL_LINES=$HEIGHT \
+LINES=$HEIGHT \
+COLUMNS=$WIDTH \
 TERM=xterm-256color \
 TUI_DEMO_CAPTURE=1 \
+TUI_DEMO_THEME="$THEME_NAME" \
 script -q -f -c "$EXE" "$RAW" || true
 
 # ── 2. 校验输出 ──
@@ -98,8 +106,8 @@ python3 "$SCRIPT_DIR/ansi2html.py" \
     --input "$RAW" \
     --output "$HTML" \
     --title "$DEMO_NAME TUI Capture" \
-    --width 80 \
-    --height 30
+    --width $WIDTH \
+    --height $HEIGHT
 
 HTML_SIZE=$(wc -c < "$HTML")
 echo "✅ HTML 输出: $HTML ($HTML_SIZE bytes)"
@@ -109,8 +117,8 @@ python3 "$SCRIPT_DIR/ansi2html.py" \
     --input "$RAW" \
     --output "$TXT" \
     --text-only \
-    --width 80 \
-    --height 30
+    --width $WIDTH \
+    --height $HEIGHT
 
 echo "✅ 文本预览: $TXT"
 
@@ -119,8 +127,8 @@ if python3 -c "from PIL import Image" 2>/dev/null; then
     python3 "$SCRIPT_DIR/ansi2png.py" \
         --input "$RAW" \
         --output "$PNG" \
-        --width 80 \
-        --height 30 \
+        --width $WIDTH \
+        --height $HEIGHT \
         --font-size 14 \
         --scale 1 || echo "⚠️  PNG 生成失败"
 else
@@ -132,10 +140,10 @@ fi
 echo ""
 echo "🎉 捕获完成！"
 echo "==================="
-echo "  PNG  (直接看):   $PNG"
-echo "  HTML (浏览器):   $HTML"
-echo "  Raw  (ANSI):     $RAW"
-echo "  Text (无ANSI):   $TXT"
+echo "  PNG  (直接看):   $PNG  ← 唯一持久化位置"
+echo "  HTML (浏览器):   $HTML  (build/)"
+echo "  Raw  (ANSI):     $RAW   (build/)"
+echo "  Text (无ANSI):   $TXT   (build/)"
 echo ""
 echo "下一步:"
 echo "  1. 浏览器打开 $HTML 查看彩色渲染"
