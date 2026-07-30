@@ -324,6 +324,10 @@ main(int argc, char *argv[])
 			meuos_specs_host = true;
 		continue;
 	}
+	if (strcmp(a, "--meuos") == 0) {
+		meuos_specs = true;
+		continue;
+	}
 	/* p9-ui 诊断输出模式：--error-json 结构化错误，--explain 附加修复建议 */
 	if (strcmp(a, "--error-json") == 0) {
 		g_error_json = 1;

@@ -36,6 +36,8 @@ usage_long(void)
 "  -U<name>           undefine macro\n"
 "  -I<dir>            add to header search path\n"
 "  --sysroot=<dir>    use <dir>/include and <dir>/lib as MeuOS sysroot\n"
+"  --specs=meuos      (default) MeuOS specs: -nostdlib -static + meuos crt/libc\n"
+"  --meuos            short for --specs=meuos\n"
 "  -nostdinc          do not search standard header paths\n"
 "  -M                 generate make dependencies to stdout\n"
 "  -MM                like -M but ignore system headers\n"
