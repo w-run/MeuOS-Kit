@@ -166,18 +166,18 @@ int tui_list_render(int fd, const tui_rect_t *area, void *userdata)
 
         /* 标签 */
         const char *label = list->items[i].label;
-        int llen = (int)strlen(label);
+        int llen = tui_strwidth(label);
         int max_txt = area->cols - 4;
         if (max_txt < 0) max_txt = 0;
 
-        int show = llen < max_txt ? llen : max_txt;
-        write(fd, label, (size_t)show);
+        int show_w = llen < max_txt ? llen : max_txt;
+        int bytes = tui_truncate(label, show_w);
+        write(fd, label, (size_t)bytes);
 
-        /* 副文本 */
-        if (show > 0 && list->items[i].secondary[0]) {
-            int remaining = area->cols - show - 4;
-            int slen = (int)strlen(list->items[i].secondary);
-            int ss = slen < remaining ? slen : remaining;
+        if (show_w > 0 && list->items[i].secondary[0]) {
+            int remaining = area->cols - show_w - 4;
+            int sw = tui_strwidth(list->items[i].secondary);
+            int ss = sw < remaining ? sw : remaining;
             if (ss > 0) {
                 tui_reset_style(fd);
                 tui_set_attr(fd, TUI_ATTR_DIM);

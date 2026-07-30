@@ -147,7 +147,7 @@ int tui_dialog_render(int fd, const tui_rect_t *area, void *userdata)
     if (y >= inner.row + inner.rows) { tui_reset_style(fd); return TUI_OK; }
 
     const char *msg = dlg->message;
-    int msg_len = (int)strlen(msg);
+    int msg_len = tui_strwidth(msg);
     int line_w = inner.cols - 4;
     if (line_w < 1) line_w = 1;
 
@@ -204,7 +204,7 @@ int tui_dialog_render(int fd, const tui_rect_t *area, void *userdata)
             for (int i = 0; all_buttons[i].label && n < 8; i++) {
                 if (!(dlg->buttons & all_buttons[i].button)) continue;
                 btn_idxs[n] = i;
-                btn_ws[n]   = (int)strlen(all_buttons[i].label) + 4; /* " [Label] " */
+                btn_ws[n]   = tui_strwidth(all_buttons[i].label) + 4; /* " [Label] " */
                 total_w += btn_ws[n];
                 n++;
             }

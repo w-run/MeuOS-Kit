@@ -353,6 +353,14 @@ int tui_hline(int fd, int col, int width, char ch, tui_color_t color);
 /* 带颜色写入文本 */
 int tui_cprintf(int fd, tui_color_t fg, tui_color_t bg, const char *fmt, ...);
 
+/* ── CJK / Unicode 宽度 ──────────────────────────── */
+
+/* 返回 UTF-8 字符串的终端显示宽度：ASCII=1，CJK=2 */
+int tui_strwidth(const char *s);
+
+/* 返回前 max 列能容纳的最大字节数（截断用） */
+int tui_truncate(const char *s, int max_cols);
+
 /* ══════════════════════════════════════════════════════
  *  显示模式模板 (layout.c)
  *  预定义布局模板，适用不同使用场景

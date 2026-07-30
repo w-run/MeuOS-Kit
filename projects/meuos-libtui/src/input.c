@@ -287,7 +287,7 @@ int tui_input_render(int fd, const tui_rect_t *area, void *userdata)
     if (in->prompt[0]) {
         tui_write(fd, in->prompt);
         tui_write(fd, " ");
-        input_w -= (int)strlen(in->prompt) + 1;
+        input_w -= tui_strwidth(in->prompt) + 1;
     }
 
     /* 输入框框体 */
@@ -309,7 +309,7 @@ int tui_input_render(int fd, const tui_rect_t *area, void *userdata)
     int show = len - offset;
     if (show > show_w) show = show_w;
 
-    tui_cursor_goto(fd, area->row, area->col + 1 + (in->prompt[0] ? (int)strlen(in->prompt) + 1 : 0));
+    tui_cursor_goto(fd, area->row, area->col + 1 + (in->prompt[0] ? tui_strwidth(in->prompt) + 1 : 0));
 
     /* 显示字符（密码模式用 echo_char 替代） */
     char echo = (char)in->echo_char;
@@ -324,7 +324,7 @@ int tui_input_render(int fd, const tui_rect_t *area, void *userdata)
 
     /* 光标（闪烁效果用 reverse 区域模拟） */
     if (in->active && cur >= offset && cur - offset < show_w) {
-        int cx = area->col + 1 + (cur - offset) + (in->prompt[0] ? (int)strlen(in->prompt) + 1 : 0);
+        int cx = area->col + 1 + (cur - offset) + (in->prompt[0] ? tui_strwidth(in->prompt) + 1 : 0);
         tui_cursor_goto(fd, area->row, cx);
         tui_set_attr(fd, TUI_ATTR_REVERSE);
         char c = in->buffer[cur];

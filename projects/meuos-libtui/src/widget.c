@@ -41,6 +41,85 @@ int tui_rect_valid(const tui_rect_t *r)
 }
 
 /* ══════════════════════════════════════════════════════
+ *  CJK / Unicode 宽度
+ * ══════════════════════════════════════════════════════ */
+
+/* 从 UTF-8 解码一个 codepoint，返回字节数 */
+static int utf8_decode(const char *s, unsigned *cp)
+{
+    unsigned char c = (unsigned char)s[0];
+    if (c < 0x80) {
+        *cp = c;
+        return 1;
+    } else if (c < 0xE0) {
+        *cp = c & 0x1F;
+        *cp = (*cp << 6) | ((unsigned char)s[1] & 0x3F);
+        return 2;
+    } else if (c < 0xF0) {
+        *cp = c & 0x0F;
+        *cp = (*cp << 6) | ((unsigned char)s[1] & 0x3F);
+        *cp = (*cp << 6) | ((unsigned char)s[2] & 0x3F);
+        return 3;
+    } else {
+        *cp = c & 0x07;
+        *cp = (*cp << 6) | ((unsigned char)s[1] & 0x3F);
+        *cp = (*cp << 6) | ((unsigned char)s[2] & 0x3F);
+        *cp = (*cp << 6) | ((unsigned char)s[3] & 0x3F);
+        return 4;
+    }
+}
+
+/* 判断 codepoint 是否为 CJK 双宽字符 */
+static int is_wide(unsigned cp)
+{
+    return (cp == 0x3000) ||                      /* 表意空格 */
+           (cp >= 0x1100 && cp <= 0x115F) ||      /* 谚文 Jamo */
+           (cp >= 0x2E80 && cp <= 0x303E) ||      /* 部首/康熙/符号 */
+           (cp >= 0x3040 && cp <= 0x309F) ||      /* 平假名 */
+           (cp >= 0x30A0 && cp <= 0x30FF) ||      /* 片假名 */
+           (cp >= 0x3100 && cp <= 0x312F) ||      /* 注音 */
+           (cp >= 0x3130 && cp <= 0x318F) ||      /* 谚文兼容 */
+           (cp >= 0x3190 && cp <= 0x31FF) ||      /* 谚文/注音扩展 */
+           (cp >= 0x3200 && cp <= 0x33FF) ||      /* 中日韩兼容 */
+           (cp >= 0x3400 && cp <= 0x4DBF) ||      /* 扩展A */
+           (cp >= 0x4E00 && cp <= 0x9FFF) ||      /* 统一表意 */
+           (cp >= 0xAC00 && cp <= 0xD7AF) ||      /* 谚文音节 */
+           (cp >= 0xF900 && cp <= 0xFAFF) ||      /* 兼容表意 */
+           (cp >= 0xFE30 && cp <= 0xFE6F) ||      /* 兼容形式 */
+           (cp >= 0xFF01 && cp <= 0xFF60) ||      /* 全角形式 */
+           (cp >= 0xFFE0 && cp <= 0xFFE6) ||      /* 全角符号 */
+           (cp >= 0x1F200 && cp <= 0x1F2FF) ||    /* 补充表意 */
+           (cp >= 0x20000 && cp <= 0x2FFFF) ||    /* 扩展B~F */
+           (cp >= 0x30000 && cp <= 0x3FFFF);      /* 扩展G~H */
+}
+
+int tui_strwidth(const char *s)
+{
+    int w = 0;
+    while (*s) {
+        unsigned cp;
+        int bytes = utf8_decode(s, &cp);
+        w += is_wide(cp) ? 2 : 1;
+        s += bytes;
+    }
+    return w;
+}
+
+int tui_truncate(const char *s, int max_cols)
+{
+    int w = 0, i = 0;
+    while (s[i]) {
+        unsigned cp;
+        int bytes = utf8_decode(s + i, &cp);
+        int cw = is_wide(cp) ? 2 : 1;
+        if (w + cw > max_cols) break;
+        w += cw;
+        i += bytes;
+    }
+    return i;  /* 返回可安全写入的字节数 */
+}
+
+/* ══════════════════════════════════════════════════════
  *  辅助输出
  * ══════════════════════════════════════════════════════ */
 
@@ -135,21 +214,22 @@ int tui_fill_rect(int fd, tui_rect_t area, tui_color_t bg)
 
 int tui_styled_text(int fd, tui_rect_t area, const char *text, tui_style_t style)
 {
-    int len = (int)strlen(text);
-    if (len > area.cols) len = area.cols;
+    int tw = tui_strwidth(text);
+    if (tw > area.cols) tw = area.cols;
+    int bytes = tui_truncate(text, area.cols);
 
-    if (len <= 0) return TUI_OK;
+    if (bytes <= 0) return TUI_OK;
 
     tui_cursor_goto(fd, area.row, area.col);
     tui_set_fg(fd, style.fg);
     tui_set_bg(fd, style.bg);
     if (style.attr) tui_set_attr(fd, style.attr);
 
-    if (write(fd, text, (size_t)len) != len) return TUI_ERR_IO;
+    if (write(fd, text, (size_t)bytes) != bytes) return TUI_ERR_IO;
 
     /* 填充剩余空间 */
-    if (len < area.cols)
-        tui_spaces(fd, area.cols - len);
+    if (tw < area.cols)
+        tui_spaces(fd, area.cols - tw);
 
     tui_reset_style(fd);
     return TUI_OK;
@@ -200,7 +280,7 @@ int tui_draw_border(int fd, tui_rect_t *inner,
         tui_set_fg(fd, border_color);
         write(fd, title, strlen(title));
         tui_set_attr(fd, TUI_ATTR_BOLD);
-        left = 2 + (int)strlen(title);
+        left = 2 + tui_strwidth(title);
     }
 
     /* 上边框水平线：手动写入 UTF-8 字符循环 */
@@ -317,7 +397,7 @@ int tui_progress_render(int fd, const tui_rect_t *area, void *userdata)
     tui_progress_t *p = (tui_progress_t *)userdata;
     if (!p || !area) return TUI_ERR_PARAM;
 
-    int label_w = p->label[0] ? (int)strlen(p->label) + 1 : 0;
+    int label_w = p->label[0] ? tui_strwidth(p->label) + 1 : 0;
     int pct_w   = p->show_percent ? 6 : 0;   /* " 100%" */
     int bracket = 2;                          /* "[]" */
     int avail   = area->cols - label_w - pct_w - bracket;
@@ -423,8 +503,8 @@ int tui_statusbar_render(int fd, const tui_rect_t *area, void *userdata)
     tui_set_fg(fd, fg);
     tui_set_attr(fd, TUI_ATTR_BOLD);
 
-    int left_len = (int)strlen(sb->left);
-    int right_len = (int)strlen(sb->right);
+    int left_len = tui_strwidth(sb->left);
+    int right_len = tui_strwidth(sb->right);
     int max_left = area->cols - right_len - 1;
     if (max_left < 0) max_left = 0;
 
@@ -470,7 +550,7 @@ static int header_render(int fd, const tui_rect_t *area, void *userdata)
     tui_set_fg(fd, TUI_COLOR_WHITE);
     tui_set_bg(fd, tui_meuos_theme.accent);
 
-    int len = (int)strlen(h->text);
+    int len = tui_strwidth(h->text);
     int max = area->cols - 4;
     if (len > max) len = max;
     write(fd, h->text, (size_t)len);
@@ -545,7 +625,7 @@ int tui_label_render(int fd, const tui_rect_t *area, void *userdata)
     if (!lb || !area) return TUI_ERR_PARAM;
     if (!tui_rect_valid(area)) return TUI_OK;
 
-    int len = (int)strlen(lb->text);
+    int len = tui_strwidth(lb->text);
     int pad = area->cols - len;
     if (pad < 0) pad = 0;
 
@@ -608,7 +688,7 @@ int tui_separator_render(int fd, const tui_rect_t *area, void *userdata)
             write(fd, &ch, 1);
         }
     } else {
-        int label_len = sep->label[0] ? (int)strlen(sep->label) + 2 : 0;
+        int label_len = sep->label[0] ? tui_strwidth(sep->label) + 2 : 0;
         int left = (area->cols - label_len) / 2;
         if (left < 0) left = 0;
         int right = area->cols - left - label_len;
@@ -662,7 +742,7 @@ int tui_badge_render(int fd, const tui_rect_t *area, void *userdata)
     if (!b || !area) return TUI_ERR_PARAM;
     if (!tui_rect_valid(area)) return TUI_OK;
 
-    int len = (int)strlen(b->text);
+    int len = tui_strwidth(b->text);
     int pad_l = (area->cols - len) / 2;
     int pad_r = area->cols - len - pad_l;
     if (pad_l < 1) pad_l = 1;
@@ -674,7 +754,9 @@ int tui_badge_render(int fd, const tui_rect_t *area, void *userdata)
     tui_set_attr(fd, TUI_ATTR_BOLD);
 
     tui_spaces(fd, pad_l);
-    write(fd, b->text, (size_t)(len < area->cols ? len : area->cols));
+    /* 写入文本（可能含 CJK），需要计算字节数 */
+    int bytes = tui_truncate(b->text, area->cols);
+    write(fd, b->text, (size_t)bytes);
     tui_spaces(fd, pad_r);
 
     tui_reset_style(fd);
@@ -728,14 +810,15 @@ int tui_table_render(int fd, const tui_rect_t *area, void *userdata)
         tui_cursor_goto(fd, y, x);
 
         const char *hdr = t->columns[c].header;
-        int hlen = (int)strlen(hdr);
-        int pad = (w - hlen) / 2;
+        int hw = tui_strwidth(hdr);
+        int pad = (w - hw) / 2;
         if (pad < 0) pad = 0;
+        int hbytes = tui_truncate(hdr, w);
 
         tui_spaces(fd, pad);
-        write(fd, hdr, (size_t)(hlen < w ? hlen : w));
-        if (w - pad - hlen > 0)
-            tui_spaces(fd, w - pad - hlen);
+        write(fd, hdr, (size_t)hbytes);
+        if (w - pad - hw > 0)
+            tui_spaces(fd, w - pad - hw);
 
         x += w + 1; /* +1 为列间距 */
         if (x >= area->col + area->cols) break;
@@ -771,19 +854,19 @@ int tui_table_render(int fd, const tui_rect_t *area, void *userdata)
 
             const char *cell = t->cell_fn ? t->cell_fn(ri, c, t->userdata) : "";
             if (!cell) cell = "";
-            int clen = (int)strlen(cell);
+            int cw = tui_strwidth(cell);
             int align = t->columns[c].align;
 
             int pad_l = 0;
-            if (align == 0)      pad_l = (w - clen) / 2;
-            else if (align > 0)  pad_l = w - clen;
+            if (align == 0)      pad_l = (w - cw) / 2;
+            else if (align > 0)  pad_l = w - cw;
             if (pad_l < 0) pad_l = 0;
 
-            int show = clen < w ? clen : w;
+            int cbytes = tui_truncate(cell, w);
             tui_spaces(fd, pad_l);
-            write(fd, cell, (size_t)show);
-            if (w - pad_l - show > 0)
-                tui_spaces(fd, w - pad_l - show);
+            write(fd, cell, (size_t)cbytes);
+            if (w - pad_l - cw > 0)
+                tui_spaces(fd, w - pad_l - cw);
 
             if (is_sel) tui_reset_style(fd);
 
