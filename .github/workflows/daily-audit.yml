@@ -6,6 +6,10 @@
 #   3. 运行 scripts/daily-audit.sh：对照预期文档 / 缺陷扫描 / git 提交记录
 #   4. 将报告写入 .issues/<MMDD>.md 并提交到分支，自动开 PR 到 main
 #
+# 首选驱动：CodeBuddy 的 `/loop`（见 scripts/audit-loop-prompt.md）可做带 AI 深度复核的
+#   每日审计；本 workflow 作为「严格定点凌晨」的备用触发器。两者幂等兼容：报告或分支
+#   一旦存在，另一方自动跳过，不会互相覆盖。若希望每日必带 AI 复核，请禁用本 workflow。
+#
 # 注：GitHub Actions 的 cron 为 UTC。如需「本地凌晨」，请按所在时区换算
 #     （如北京时间 08:00 = UTC 00:00，已是最接近的设置）。
 name: Daily Code Audit

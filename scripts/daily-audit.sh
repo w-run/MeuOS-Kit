@@ -28,6 +28,7 @@ DATE="$(date -u +%m%d)"          # 四位数 MMDD，匹配 .issues/ 约定
 SYSROOT="${MEUOS_SYSROOT:-$ROOT/sysroot}"
 NO_BUILD=0
 FORCE=0
+AGENT=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -36,6 +37,7 @@ while [[ $# -gt 0 ]]; do
     --sysroot)  SYSROOT="$2"; shift 2;;
     --no-build) NO_BUILD=1; shift;;
     --force)    FORCE=1; shift;;
+    --agent)    AGENT=1; shift;;
     *) echo "未知参数: $1" >&2; exit 2;;
   esac
 done
@@ -314,6 +316,14 @@ if [[ $any -eq 0 ]]; then
   emit "- 本期未见阻断性异常，可保持现状并继续按计划推进。"
 fi
 emit
+
+# --agent 模式：留出插入点，由 CodeBuddy loop 的 Agent 补全「深度复核」章节与页脚
+if [[ $AGENT -eq 1 ]]; then
+  emit "<!--AGENT-REVIEW-->"
+  echo "✅ 已生成基础报告（待 Agent 深度复核）: $OUT"
+  exit 0
+fi
+
 emit "---"
 emit "_本报告由 \`scripts/daily-audit.sh\` 自动生成，属数据驱动的初步筛查，深度语义审查仍建议由人工/Agent 复核。_"
 emit
