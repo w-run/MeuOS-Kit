@@ -9,6 +9,7 @@
 
 #include "mxa.h"
 #include "mz.h"
+#include "mz_ed25519.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -185,6 +186,7 @@ struct mxa_write_ctx {
     uint8_t  sk[32];
     int      has_key;
     int      has_sk;
+    int      next_file_id; /* for ChaCha20 nonce */
 };
 
 /* Read context */
@@ -197,6 +199,8 @@ struct mxa_read_ctx {
     int num_files;
 
     uint64_t cd_start;
+    uint8_t  key[32];     /* ChaCha20 key for decryption */
+    int      has_key;
 };
 
 /* ================================================================
@@ -325,6 +329,16 @@ int mxa_add_file(void *ctx, const char *name,
         codec = MXA_CODEC_STORED;
     }
 
+    /* Encrypt stored/compressed data if MXA_FLAG_ENCRYPTED */
+    if (w->has_key && (w->flags & MXA_FLAG_ENCRYPTED)) {
+        uint8_t nonce[12];
+        memset(nonce, 0, 12);
+        uint64_t fid = data_offset;
+        for (int b = 0; b < 8; b++) nonce[b] = (uint8_t)(fid >> (b * 8));
+        uint8_t *enc_target = w->buf + data_offset;
+        mz_chacha20(w->key, nonce, 0, enc_target, enc_target, (size_t)csize);
+    }
+
     ret = buf_align(w);
     if (ret != MXA_OK) return ret;
 
@@ -417,10 +431,23 @@ int mxa_finish(void *ctx, void **result, size_t *result_len) {
     memcpy(w->buf + w->buf_len, footer, MXA_CD_FOOTER_LEN);
     w->buf_len += MXA_CD_FOOTER_LEN;
 
-    /* Signature placeholder */
+    /* Signature: compute over full archive, append at end */
     if (w->has_sk) {
-        memset(w->buf + w->buf_len, 0, MXA_SIG_LEN);
-        w->buf_len += MXA_SIG_LEN;
+        uint8_t sk64[MZ_ED25519_SK_LEN];
+        uint8_t pk32[MZ_ED25519_PK_LEN];
+        if (mz_ed25519_keypair(w->sk, sk64, pk32) == 0) {
+            uint8_t sig[MXA_SIG_LEN];
+            mz_ed25519_sign(sk64, w->buf, w->buf_len, sig);
+            int ret = buf_append(w, sig, MXA_SIG_LEN);
+            if (ret != MXA_OK) return ret;
+            memset(sk64, 0, sizeof(sk64)); /* wipe key */
+        } else {
+            /* libsodium not available -- write placeholder */
+            int ret = buf_grow(w, w->buf_len + MXA_SIG_LEN);
+            if (ret != MXA_OK) return ret;
+            memset(w->buf + w->buf_len, 0, MXA_SIG_LEN);
+            w->buf_len += MXA_SIG_LEN;
+        }
     }
 
     void *out = malloc(w->buf_len);
@@ -479,6 +506,16 @@ int mxa_open(const void *data, size_t len, void **ctx) {
     r->flags = r16(p + 4);
     r->cd_start = cd_start;
 
+    /* Verify CD entries CRC32 (entries only, from CD header end to footer start) */
+    if (total_files > 0) {
+        size_t cd_entries_off = (size_t)(cd_start + MXA_CD_HDR_LEN);
+        size_t cd_entries_sz  = (size_t)(scan_start - cd_entries_off);
+        uint32_t stored_crc   = r32(p + scan_start + 32);
+        uint32_t calc_crc     = crc32_bytes(p + cd_entries_off, cd_entries_sz);
+        if (stored_crc != calc_crc)
+            { free(r->files); free(r); return MXA_ERR_DATA; }
+    }
+
     size_t cd_pos = cd_start + MXA_CD_HDR_LEN;
     r->files = calloc((size_t)total_files, sizeof(struct mxa_file_entry));
     if (!r->files && total_files > 0) { free(r); return MXA_ERR_MEMORY; }
@@ -536,19 +573,49 @@ int mxa_read_file(void *ctx, const char *name,
     const uint8_t *blob = r->data + entry->offset;
 
     if (entry->codec == MXA_CODEC_STORED) {
-        void *out = malloc(entry->size > 0 ? entry->size : 1);
+        size_t out_sz = (size_t)(entry->size > 0 ? entry->size : 1);
+        void *out = malloc(out_sz);
         if (!out) return MXA_ERR_MEMORY;
-        memcpy(out, blob, entry->size);
+
+        if (r->has_key && (r->flags & MXA_FLAG_ENCRYPTED)) {
+            /* Decrypt raw stored data */
+            uint8_t nonce[12];
+            memset(nonce, 0, 12);
+            uint64_t fid = entry->offset;
+            for (int b = 0; b < 8; b++) nonce[b] = (uint8_t)(fid >> (b * 8));
+            mz_chacha20(r->key, nonce, 0, blob, out, (size_t)entry->csize);
+        } else {
+            memcpy(out, blob, (size_t)entry->size);
+        }
+
         *data = out;
         *size = (size_t)entry->size;
         return MXA_OK;
     }
 
     if (entry->codec == MXA_CODEC_MEUOS) {
+        const uint8_t *decrypt_src = blob;
+        size_t decrypt_sz = (size_t)entry->csize;
+        uint8_t *decrypt_buf = NULL;
+
+        /* Decrypt if archive is encrypted */
+        if (r->has_key && (r->flags & MXA_FLAG_ENCRYPTED)) {
+            decrypt_buf = malloc(decrypt_sz);
+            if (!decrypt_buf) return MXA_ERR_MEMORY;
+            uint8_t nonce[12];
+            memset(nonce, 0, 12);
+            /* File ID from entry offset (deterministic) */
+            uint64_t fid = entry->offset;
+            for (int b = 0; b < 8; b++) nonce[b] = (uint8_t)(fid >> (b * 8));
+            mz_chacha20(r->key, nonce, 0, blob, decrypt_buf, decrypt_sz);
+            decrypt_src = decrypt_buf;
+        }
+
         void *decomp = NULL;
         size_t decomp_len = 0;
-        int ret = mz_decompress(blob, (size_t)entry->csize,
+        int ret = mz_decompress(decrypt_src, decrypt_sz,
                                 &decomp, &decomp_len, MZ_CODEC_MEUOS);
+        free(decrypt_buf);
         if (ret <= 0) return MXA_ERR_DATA;
         if (decomp_len != entry->size) return MXA_ERR_DATA;
         *data = decomp;
@@ -585,6 +652,26 @@ int mxa_list_files(void *ctx, struct mxa_file_entry **entries, int *count) {
 
     *entries = dup;
     return MXA_OK;
+}
+
+/* ================================================================
+ * mxa_verify -- verify Ed25519 signature of archived content
+ * ================================================================ */
+int mxa_set_key(void *ctx, const uint8_t key[32]) {
+    if (!ctx || !key) return MXA_ERR_PARAM;
+    struct mxa_read_ctx *r = (struct mxa_read_ctx *)ctx;
+    memcpy(r->key, key, 32);
+    r->has_key = 1;
+    return MXA_OK;
+}
+
+int mxa_verify(void *ctx, const uint8_t public_key[32]) {
+    if (!ctx || !public_key) return MXA_ERR_PARAM;
+    struct mxa_read_ctx *r = (struct mxa_read_ctx *)ctx;
+    if (!(r->flags & MXA_FLAG_SIGNED)) return MXA_ERR_DATA;
+    if (r->len < MXA_SIG_LEN) return MXA_ERR_DATA;
+    int ok = mz_verify_block(r->data, r->len, public_key);
+    return ok ? MXA_OK : MXA_ERR_CRYPT;
 }
 
 /* ================================================================

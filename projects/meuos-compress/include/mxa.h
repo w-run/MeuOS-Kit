@@ -4,6 +4,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* Set decryption key for reading an encrypted archive */
+int  mxa_set_key(void *ctx, const uint8_t key[32]);
+
 /* Archive flags */
 #define MXA_FLAG_SIGNED     0x0001
 #define MXA_FLAG_ENCRYPTED  0x0002
@@ -57,6 +60,9 @@ int  mxa_read_file(void *ctx, const char *name,
                    void **data, size_t *size);
 int  mxa_list_files(void *ctx,
                     struct mxa_file_entry **entries, int *count);
+/* Verify Ed25519 signature (optional, only for signed archives) */
+int  mxa_verify(void *ctx, const uint8_t public_key[32]);
+
 void mxa_close(void *ctx);
 
 /* Utility */
