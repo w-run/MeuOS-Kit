@@ -532,11 +532,21 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 			return -1;
 		if (!insn.fixed && insn.fixup_symbol) {
 			size_t section_offset = section->size - insn.size;
-			return as_add_fixup(as, section,
-			                    section_offset + insn.fixup_offset,
-			                    insn.fixup_width,
-			                    insn.reloc_type, insn.fixup_addend,
-			                    insn.fixup_symbol);
+			if (as_add_fixup(as, section,
+			                 section_offset + insn.fixup_offset,
+			                 insn.fixup_width,
+			                 insn.reloc_type, insn.fixup_addend,
+			                 insn.fixup_symbol) != 0)
+				return -1;
+		}
+		if (insn.fixup2_present) {
+			size_t section_offset = section->size - insn.size;
+			if (as_add_fixup(as, section,
+			                 section_offset + insn.fixup2_offset,
+			                 insn.fixup2_width,
+			                 insn.reloc_type2, insn.fixup2_addend,
+			                 insn.fixup2_symbol) != 0)
+				return -1;
 		}
 		return 0;
 	}

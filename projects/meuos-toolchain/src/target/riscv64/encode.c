@@ -286,6 +286,19 @@ set_fixup(struct mt_insn *out, size_t offset, unsigned width,
 	out->fixup_addend = addend;
 }
 
+/* Set a second fixup for two-instruction pseudo-ops (e.g. la) */
+static void
+set_fixup2(struct mt_insn *out, size_t offset, unsigned width,
+           unsigned reloc_type, const char *sym, int64_t addend)
+{
+	out->fixup2_present = 1;
+	out->fixup2_offset = offset;
+	out->fixup2_width = width;
+	out->reloc_type2 = reloc_type;
+	out->fixup2_symbol = sym;
+	out->fixup2_addend = addend;
+}
+
 /* ---- Main instruction encoder ---- */
 
 int
@@ -511,6 +524,23 @@ riscv64_encode_insn(const struct mt_target *target,
 		if (strcmp(mnemonic, "sra") == 0)  { emit32(out->bytes, r_type(0x33, rd, 5, rs1, rs2, 0x20)); return 0; }
 		if (strcmp(mnemonic, "or") == 0)   { emit32(out->bytes, r_type(0x33, rd, 6, rs1, rs2, 0x00)); return 0; }
 		if (strcmp(mnemonic, "and") == 0)  { emit32(out->bytes, r_type(0x33, rd, 7, rs1, rs2, 0x00)); return 0; }
+	}
+
+	/* xor / or / and with immediate (mcc may emit xor rd, rs, imm instead of xori) */
+	if (nops == 3 && ops[0].kind == 1 && ops[1].kind == 1 && ops[2].kind == 2) {
+		unsigned rd = (unsigned)ops[0].reg, rs1 = (unsigned)ops[1].reg;
+		if (strcmp(mnemonic, "xor") == 0) {
+			emit32(out->bytes, i_type(0x13, rd, 4, rs1, (int32_t)ops[2].imm));
+			return 0;
+		}
+		if (strcmp(mnemonic, "or") == 0) {
+			emit32(out->bytes, i_type(0x13, rd, 6, rs1, (int32_t)ops[2].imm));
+			return 0;
+		}
+		if (strcmp(mnemonic, "and") == 0) {
+			emit32(out->bytes, i_type(0x13, rd, 7, rs1, (int32_t)ops[2].imm));
+			return 0;
+		}
 	}
 
 	/* R-type with W suffix (RV64): addw, subw, sllw, srlw, sraw */
@@ -844,6 +874,24 @@ riscv64_encode_insn(const struct mt_target *target,
 	}
 	if (strcmp(mnemonic, "tail") == 0 && nops == 1 && ops[0].kind == 2) {
 		emit32(out->bytes, j_type(0x6F, 0, (int32_t)ops[0].imm));
+		return 0;
+	}
+
+	/* la rd, symbol  — load address (auipc + addi pair) */
+	if (strcmp(mnemonic, "la") == 0 && nops == 2 &&
+	    ops[0].kind == 1 && ops[1].kind == 4) {
+		unsigned rd = (unsigned)ops[0].reg;
+		/* Emit auipc rd, %pcrel_hi(symbol) */
+		out->size = 8;
+		emit32(out->bytes, u_type(0x17, rd, 0));
+		/* Emit addi rd, rd, %pcrel_lo(symbol) */
+		emit32(out->bytes + 4, i_type(0x13, rd, 0, rd, 0));
+		/* First fixup: auipc with PCREL_HI20 */
+		set_fixup(out, 0, 4, 23 /* R_RISCV_PCREL_HI20 */,
+		          ops[1].sym, ops[1].addend);
+		/* Second fixup: addi with PCREL_LO12_I */
+		set_fixup2(out, 4, 4, 24 /* R_RISCV_PCREL_LO12_I */,
+		           ops[1].sym, ops[1].addend);
 		return 0;
 	}
 

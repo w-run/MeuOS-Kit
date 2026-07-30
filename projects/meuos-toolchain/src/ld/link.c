@@ -2132,7 +2132,9 @@ build_rela_dyn(struct ld_context *ctx)
 				}
 			}
 			uint64_t info;
-			if (ctx->target->elf_class == MT_ELFCLASS32)
+			if (strcmp(ctx->target->name, "arm") == 0)
+				info = (sym_idx << 8) | MT_R_ARM_JUMP_SLOT;
+			else if (ctx->target->elf_class == MT_ELFCLASS32)
 				info = (sym_idx << 8) | MT_R_386_JUMP_SLOT;
 			else
 				info = ((uint64_t)sym_idx << 32) | MT_R_X86_64_JUMP_SLOT;
@@ -2144,7 +2146,9 @@ build_rela_dyn(struct ld_context *ctx)
 			if (!g) continue;
 			uint64_t sym_value = ctx->groups[g->group].address + g->offset;
 			uint64_t info;
-			if (ctx->target->elf_class == MT_ELFCLASS32)
+			if (strcmp(ctx->target->name, "arm") == 0)
+				info = (uint64_t)MT_R_ARM_RELATIVE;
+			else if (ctx->target->elf_class == MT_ELFCLASS32)
 				info = (uint64_t)MT_R_X86_64_RELATIVE;
 			else
 				info = (0ULL << 32) | MT_R_X86_64_RELATIVE;

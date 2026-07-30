@@ -270,7 +270,20 @@ aarch64_encode_insn(const struct mt_target *target,
 					ops[i].wreg = wreg2;
 				} else {
 					const char *imm_s = skip_hash(comma);
-					if (parse_imm(imm_s, &ops[i].imm) != 0) return -1;
+					/* Check for symbol reference: #:modifier:symbol */
+					if (*imm_s == ':') {
+						const char *mod_end = strchr(imm_s + 1, ':');
+						if (mod_end) {
+							size_t mlen = (size_t)(mod_end - imm_s - 1);
+							if (mlen < sizeof(ops[i].modifier)) {
+								memcpy(ops[i].modifier, imm_s + 1, mlen);
+								ops[i].modifier[mlen] = '\0';
+							}
+							ops[i].sym_start = mod_end + 1;
+							/* Symbol ref in offset: flag by setting imm=1, kind stays 'm' */
+							ops[i].imm = 1; /* non-zero to indicate symbol offset */
+						} else return -1;
+					} else if (parse_imm(imm_s, &ops[i].imm) != 0) return -1;
 				}
 			} else {
 				ops[i].imm = 0;
@@ -384,6 +397,31 @@ aarch64_encode_insn(const struct mt_target *target,
 				((unsigned)rd & 0x1F);
 			emit32(out, &off, enc);
 			return 0;
+		}
+		/* Negative immediate: use MOVN (move NOT) */
+		{
+			int64_t sval = ops[1].imm;
+			if (sval < 0) {
+				uint64_t inv = ~val;
+				if (inv <= 0xFFFF) {
+					/* MOVN with hw=0 */
+					int is64 = (ops[0].wreg == XREG);
+					uint32_t enc = (is64 ? 0x92800000 : 0x12800000) |
+						((unsigned)(inv & 0xFFFF) << 5) |
+						((unsigned)rd & 0x1F);
+					emit32(out, &off, enc);
+					return 0;
+				}
+				if ((inv & 0xFFFFFFFFFFFF0000ULL) == 0) {
+					/* MOVN with lsl #16 */
+					int is64 = (ops[0].wreg == XREG);
+					uint32_t enc = (is64 ? 0x92A00000 : 0x12A00000) |
+						((unsigned)((inv >> 16) & 0xFFFF) << 5) |
+						((unsigned)rd & 0x1F);
+					emit32(out, &off, enc);
+					return 0;
+				}
+			}
 		}
 		return -1; /* imm too large for now */
 	}
@@ -535,6 +573,20 @@ aarch64_encode_insn(const struct mt_target *target,
 		int wreg = ops[0].wreg;
 		int is64 = (wreg == XREG);
 
+		if (ops[1].sym_start) {
+			/* Symbol offset (e.g. #:got_lo12:symbol) */
+			unsigned base_op;
+			unsigned reloc;
+			if (strcmp(mnemonic, "ldr") == 0 && is64) {
+				if (strcmp(ops[1].modifier, "got_lo12") == 0) {
+					base_op = 0xF9400000; /* LDR xd, [xn, #imm12] */
+					reloc = 312; /* R_AARCH64_LD64_GOT_LO12_NC */
+				} else return -1;
+			} else return -1;
+			emit32(out, &off, base_op | (rn << 5) | rt);
+			set_fixup(out, 0, 4, reloc, ops[1].sym_start, 0);
+			return 0;
+		}
 		if (ops[1].imm >= 0) {
 			/* Scalar immediate offset */
 			unsigned size = 0;
@@ -557,7 +609,7 @@ aarch64_encode_insn(const struct mt_target *target,
 			emit32(out, &off, base_op | ((unsigned)scaled << 10) |
 			       (rn << 5) | rt);
 			return 0;
-		} else {
+				} else {
 			/* Register offset */
 			unsigned rm = (unsigned)ops[1].reg;
 			uint32_t base_op;
@@ -1176,8 +1228,15 @@ aarch64_encode_insn(const struct mt_target *target,
 		emit32(out, &off, (strcmp(mnemonic, "adrp") == 0 ? 0x90000000 : 0x10000000) |
 		       ((unsigned)rd & 0x1F));
 
-		unsigned reloc = (strcmp(mnemonic, "adrp") == 0) ?
-			275 : 274; /* R_AARCH64_ADR_PREL_PG_HI21, ADR_PREL_LO21 */
+		unsigned reloc;
+		if (strcmp(mnemonic, "adrp") == 0) {
+			if (ops[1].modifier[0] != '\0' && strcmp(ops[1].modifier, "got") == 0)
+				reloc = 311; /* R_AARCH64_ADR_GOT_PAGE */
+			else
+				reloc = 275; /* R_AARCH64_ADR_PREL_PG_HI21 */
+		} else {
+			reloc = 274; /* R_AARCH64_ADR_PREL_LO21 */
+		}
 		int64_t addend = ops[1].imm;
 		const char *sym = ops[1].sym_start;
 
@@ -1196,7 +1255,7 @@ aarch64_encode_insn(const struct mt_target *target,
 		return 0;
 	}
 
-	/* b.cond label */
+	/* b.cond label (dot form: b.eq, b.ne, ...) */
 	if (mnemonic[0] == 'b' && mnemonic[1] == '.' && nops == 1 && ops[0].kind == 'l') {
 		static const struct { const char *name; unsigned cond; } conds[] = {
 			{"eq", 0}, {"ne", 1}, {"cs", 2}, {"cc", 3},
@@ -1221,6 +1280,31 @@ aarch64_encode_insn(const struct mt_target *target,
 		const char *sym = ops[0].sym_start;
 		set_fixup(out, 0, 4, 279, sym, 0); /* R_AARCH64_CONDBR19 */
 		return 0;
+	}
+
+	/* bne/beq/blt/bgt/ble/bge label (no-dot form) */
+	if (nops == 1 && ops[0].kind == 'l') {
+		static const struct { const char *name; unsigned cond; } nodot_conds[] = {
+			{"beq", 0}, {"bne", 1}, {"bge", 10}, {"blt", 11},
+			{"bgt", 12}, {"ble", 13},
+			{NULL, 0}
+		};
+		unsigned cond = 0;
+		int found = 0;
+		for (int ci = 0; nodot_conds[ci].name; ci++) {
+			if (strcmp(mnemonic, nodot_conds[ci].name) == 0) {
+				cond = nodot_conds[ci].cond;
+				found = 1;
+				break;
+			}
+		}
+		if (found) {
+			uint32_t base = 0x54000000 | (cond << 12);
+			emit32(out, &off, base);
+			const char *sym = ops[0].sym_start;
+			set_fixup(out, 0, 4, 279, sym, 0); /* R_AARCH64_CONDBR19 */
+			return 0;
+		}
 	}
 
 	/* cbz/cbnz rt, label */

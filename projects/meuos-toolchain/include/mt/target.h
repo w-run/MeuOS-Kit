@@ -45,13 +45,21 @@ struct mt_insn {
 	int    fixed;            /* 1 = instruction is fully resolved */
 	unsigned char bytes[16]; /* encoded instruction bytes */
 	size_t size;             /* number of valid bytes */
-	/* Optional pending fixup (when operand references a symbol) */
+	/* Optional pending fixups (when operand references a symbol).
+	 * fixup2 is used by pseudo-instructions that expand to two
+	 * instructions (e.g. riscv la: auipc + addi). */
 	int         fixup_section;   /* section index or -1 if none */
 	size_t      fixup_offset;    /* byte offset within bytes[] */
 	unsigned    fixup_width;     /* 1/2/4 bytes */
 	unsigned    reloc_type;      /* relocation type constant */
 	const char *fixup_symbol;    /* symbol name (must stay valid) */
 	int64_t     fixup_addend;
+	int         fixup2_present;  /* non-zero when fixup2 is active */
+	size_t      fixup2_offset;
+	unsigned    fixup2_width;
+	unsigned    reloc_type2;
+	const char *fixup2_symbol;
+	int64_t     fixup2_addend;
 	/* ISA feature bits (MT_FEATURE_*) this instruction requires beyond
 	 * the baseline for its architecture.  The assembler compares these
 	 * against the active feature set and rejects the instruction when

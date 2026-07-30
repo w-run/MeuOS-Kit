@@ -166,8 +166,15 @@ parse_operand(const char *text, struct i386_op *op)
 			if (end == paren) {
 				op->disp = (int64_t)dv;
 			} else {
-				/* Not a numeric prefix — might be a symbol */
-				return 0;
+				/* Symbol displacement (e.g. global_var@GOT(%ebx)) */
+				char sym_name[128];
+				size_t slen = (size_t)(paren - text);
+				if (slen >= sizeof(sym_name)) return 0;
+				memcpy(sym_name, text, slen);
+				sym_name[slen] = '\0';
+				op->sym = strdup(sym_name);
+				if (!op->sym) return 0;
+				op->disp = 0;
 			}
 		}
 
@@ -271,7 +278,7 @@ modrm(unsigned mod, unsigned reg, unsigned rm)
 
 /* Emit ModR/M + optional SIB + displacement for a memory operand.
  * Returns bytes emitted (1 or 2 for ModR/M+SIB, plus displacement). */
-static void
+static size_t
 emit_modrm_mem(unsigned char **pp, int reg_num, const struct i386_op *op)
 {
 	unsigned char *p = *pp;
@@ -280,9 +287,13 @@ emit_modrm_mem(unsigned char **pp, int reg_num, const struct i386_op *op)
 	int scale = op->scale;
 	int64_t disp = op->disp;
 	int mod;
+	size_t disp_offset = 0;
 
 	/* Determine mod field based on displacement */
-	if (disp == 0 && base != 5)
+	if (op->sym) {
+		/* Symbol displacement: always 32-bit */
+		mod = 2;
+	} else if (disp == 0 && base != 5)
 		mod = 0;
 	else if (disp >= -128 && disp <= 127)
 		mod = 1;
@@ -313,11 +324,13 @@ emit_modrm_mem(unsigned char **pp, int reg_num, const struct i386_op *op)
 		emit8(p, (uint8_t)(disp & 0xFF));
 		p++;
 	} else if (mod == 2 || (mod == 0 && base == 5)) {
+		disp_offset = (size_t)(p - *pp);
 		emit32(p, (uint32_t)(disp & 0xFFFFFFFFULL));
 		p += 4;
 	}
 
 	*pp = p;
+	return disp_offset;
 }
 
 /* Set fixup fields on an insn. */
@@ -484,6 +497,10 @@ i386_encode_insn(const struct mt_target *target,
 			p++;
 			emit_modrm_mem(&p, ops[0].reg, &ops[1]);
 			out->size = (size_t)(p - out->bytes);
+			if (ops[1].sym) {
+				size_t fixup_off = (size_t)((p - out->bytes) - 4);
+				set_fixup(out, fixup_off, 4, R_386_32, ops[1].sym, 0);
+			}
 			goto done;
 		} else if (ops[0].kind == OP_MEM && ops[1].kind == OP_REG) {
 			/* mov (mem), reg — 0x8B */
@@ -491,6 +508,10 @@ i386_encode_insn(const struct mt_target *target,
 			p++;
 			emit_modrm_mem(&p, ops[1].reg, &ops[0]);
 			out->size = (size_t)(p - out->bytes);
+			if (ops[0].sym) {
+				size_t fixup_off = (size_t)((p - out->bytes) - 4);
+				set_fixup(out, fixup_off, 4, R_386_32, ops[0].sym, 0);
+			}
 			goto done;
 		}
 	}
@@ -590,6 +611,15 @@ i386_encode_insn(const struct mt_target *target,
 	if (strcmp(base, "hlt") == 0) {
 		match = 1;
 		emit8(p, 0xF4);
+		p++;
+		out->size = (size_t)(p - out->bytes);
+		goto done;
+	}
+
+	/* ---- CLTD / CDQ (sign-extend eax to edx:eax) ---- */
+	if (strcmp(base, "cltd") == 0 || strcmp(base, "cdq") == 0) {
+		match = 1;
+		emit8(p, 0x99);
 		p++;
 		out->size = (size_t)(p - out->bytes);
 		goto done;
@@ -1043,6 +1073,74 @@ skip_jcc:
 			emit_modrm_mem(&p, 4, &ops[0]);
 			out->size = (size_t)(p - out->bytes);
 			goto done;
+		}
+	}
+
+	/* ---- MOVZB / MOVSB / MOVZW / MOVSW (zero/sign extend) ---- */
+	if ((strcmp(base, "movzb") == 0 || strcmp(base, "movsb") == 0 ||
+	     strcmp(base, "movzw") == 0 || strcmp(base, "movsw") == 0) && nops == 2) {
+		unsigned opcode;
+		if (strcmp(base, "movzb") == 0) opcode = 0xB6;
+		else if (strcmp(base, "movsb") == 0) opcode = 0xBE;
+		else if (strcmp(base, "movzw") == 0) opcode = 0xB7;
+		else opcode = 0xBF;
+		match = 1;
+		if (ops[0].kind == OP_REG && ops[1].kind == OP_REG) {
+			/* movzbl/movsbl reg, reg */
+			emit8(p, 0x0F);
+			emit8(p + 1, opcode);
+			emit8(p + 2, modrm(3, ops[0].reg, ops[1].reg));
+			p += 3;
+			out->size = (size_t)(p - out->bytes);
+			goto done;
+		}
+		if (ops[0].kind == OP_REG && ops[1].kind == OP_MEM) {
+			/* movsbl (mem), reg */
+			emit8(p, 0x0F);
+			emit8(p + 1, opcode);
+			p += 2;
+			emit_modrm_mem(&p, ops[0].reg, &ops[1]);
+			out->size = (size_t)(p - out->bytes);
+			goto done;
+		}
+	}
+
+	/* ---- CMOVcc (conditional move) ---- */
+	if (strncmp(base, "cmov", 4) == 0 && nops == 2 &&
+	    ops[0].kind == OP_REG && ops[1].kind == OP_REG) {
+		int cond = condition_code(base + 4);
+		if (cond >= 0) {
+			match = 1;
+			emit8(p, 0x0F);
+			emit8(p + 1, 0x40 | cond);
+			emit8(p + 2, modrm(3, ops[0].reg, ops[1].reg));
+			p += 3;
+			out->size = (size_t)(p - out->bytes);
+			goto done;
+		}
+	}
+
+	/* ---- SETcc (set byte on condition) ---- */
+	if (strncmp(mnemonic, "set", 3) == 0 && nops == 1) {
+		int cond = condition_code(mnemonic + 3);
+		if (cond >= 0) {
+			match = 1;
+			if (ops[0].kind == OP_REG) {
+				emit8(p, 0x0F);
+				emit8(p + 1, 0x90 | cond);
+				emit8(p + 2, modrm(3, 0, ops[0].reg));
+				p += 3;
+				out->size = (size_t)(p - out->bytes);
+				goto done;
+			}
+			if (ops[0].kind == OP_MEM) {
+				emit8(p, 0x0F);
+				emit8(p + 1, 0x90 | cond);
+				p += 2;
+				emit_modrm_mem(&p, 0, &ops[0]);
+				out->size = (size_t)(p - out->bytes);
+				goto done;
+			}
 		}
 	}
 
