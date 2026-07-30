@@ -120,12 +120,15 @@ int main(void)
 
     tui_list_t *list = tui_list_new(list_items, (int)NPACKAGES);
 
-    tui_raw_mode(0, 1);
-    tui_clear_screen(0);
-    tui_cursor_show(0, 0);
+    int ofd = STDOUT_FILENO;
+    int ifd = STDIN_FILENO;
+
+    tui_raw_mode(ifd, 1);
+    tui_clear_screen(ofd);
+    tui_cursor_show(ofd, 0);
 
     tui_size_t size;
-    if (tui_get_size(0, &size) != TUI_OK) {
+    if (tui_get_size(ofd, &size) != TUI_OK) {
         size.rows = 24;
         size.cols = 80;
     }
@@ -134,7 +137,7 @@ int main(void)
     int running = 1;
 
     while (running) {
-        tui_clear_screen(0);
+        tui_clear_screen(ofd);
 
         /* ── 双栏布局渲染 ── */
         package_t *sel_pkg = (package_t *)tui_list_selected_data(list);
@@ -146,33 +149,33 @@ int main(void)
         );
 
         tui_rect_t full = { 3, 1, size.rows - 4, size.cols - 3 };
-        tui_layout_render(0, dual, full);
+        tui_layout_render(ofd, dual, full);
         tui_layout_free(dual);
 
         /* ── Header ── */
-        tui_cursor_goto(0, 1, 1);
-        tui_set_bg(0, tui_meuos_theme.accent);
-        tui_set_attr(0, TUI_ATTR_BOLD);
-        tui_set_fg(0, TUI_COLOR_WHITE);
-        tui_spaces(0, size.cols - 1);
-        tui_cursor_goto(0, 1, 3);
-        tui_write(0, "Package Manager - libtui Demo");
-        tui_reset_style(0);
+        tui_cursor_goto(ofd, 1, 1);
+        tui_set_bg(ofd, tui_meuos_theme.accent);
+        tui_set_attr(ofd, TUI_ATTR_BOLD);
+        tui_set_fg(ofd, TUI_COLOR_WHITE);
+        tui_spaces(ofd, size.cols - 1);
+        tui_cursor_goto(ofd, 1, 3);
+        tui_write(ofd, "Package Manager - libtui Demo");
+        tui_reset_style(ofd);
 
         /* ── Status bar ── */
-        tui_cursor_goto(0, size.rows, 1);
-        tui_set_bg(0, tui_meuos_theme.accent);
-        tui_set_fg(0, TUI_COLOR_WHITE);
-        tui_set_attr(0, TUI_ATTR_BOLD);
-        tui_spaces(0, size.cols - 1);
-        tui_cursor_goto(0, size.rows, 3);
-        tui_printf(0, " %s  |  %d packages", sel_pkg ? sel_pkg->name : "", (int)NPACKAGES);
-        tui_cursor_goto(0, size.rows, size.cols - 22);
-        tui_printf(0, " %-16s", "q=quit  arrows=nav");
-        tui_reset_style(0);
+        tui_cursor_goto(ofd, size.rows, 1);
+        tui_set_bg(ofd, tui_meuos_theme.accent);
+        tui_set_fg(ofd, TUI_COLOR_WHITE);
+        tui_set_attr(ofd, TUI_ATTR_BOLD);
+        tui_spaces(ofd, size.cols - 1);
+        tui_cursor_goto(ofd, size.rows, 3);
+        tui_printf(ofd, " %s  |  %d packages", sel_pkg ? sel_pkg->name : "", (int)NPACKAGES);
+        tui_cursor_goto(ofd, size.rows, size.cols - 22);
+        tui_printf(ofd, " %-16s", "q=quit  arrows=nav");
+        tui_reset_style(ofd);
 
         /* ── 等待按键 ── */
-        tui_getkey(0, &ev);
+        tui_getkey(ifd, &ev);
 
         if (ev.key == TUI_KEY_ESC ||
             (ev.key >= 0x20 && ev.key < 0x7F && (char)ev.key == 'q')) {
@@ -183,9 +186,9 @@ int main(void)
     }
 
     tui_list_free(list);
-    tui_cursor_show(0, 1);
-    tui_clear_screen(0);
-    tui_raw_mode(0, 0);
+    tui_cursor_show(ofd, 1);
+    tui_clear_screen(ofd);
+    tui_raw_mode(ifd, 0);
 
     return 0;
 }

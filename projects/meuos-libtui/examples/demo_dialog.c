@@ -53,7 +53,7 @@ static int blocking_dlg(tui_size_t scr, const char *title, const char *msg,
     if (dr < 1) dr = 1;
     if (dc < 1) dc = 1;
 
-    return tui_dialog_blocking(0,
+    return tui_dialog_blocking(STDIN_FILENO,
         (tui_rect_t){ dr, dc, dlg_h, dlg_w },
         title, msg, type, buttons);
 }
@@ -64,12 +64,15 @@ static int blocking_dlg(tui_size_t scr, const char *title, const char *msg,
 
 int main(void)
 {
-    tui_raw_mode(0, 1);
-    tui_clear_screen(0);
-    tui_cursor_show(0, 0);
+    int ofd = STDOUT_FILENO;
+    int ifd = STDIN_FILENO;
+
+    tui_raw_mode(ifd, 1);
+    tui_clear_screen(ofd);
+    tui_cursor_show(ofd, 0);
 
     tui_size_t scr;
-    if (tui_get_size(0, &scr) != TUI_OK) {
+    if (tui_get_size(ofd, &scr) != TUI_OK) {
         scr.rows = 24;
         scr.cols = 80;
     }
@@ -77,12 +80,12 @@ int main(void)
     int btn;
 
     /* ── Step 1: Info ── */
-    tui_clear_screen(0);
+    tui_clear_screen(ofd);
     tui_layout_t *wz = tui_layout_wizard(
         "  Install Wizard  ", step_content, "Initializing ...",
         "Step 1/5");
     tui_rect_t full = { 1, 1, scr.rows, scr.cols - 1 };
-    tui_layout_render(0, wz, full);
+    tui_layout_render(ofd, wz, full);
 
     btn = blocking_dlg(scr, "Welcome",
         "Welcome to MeuOS Kit setup.\nThis wizard will guide you\nthrough the installation.",
@@ -92,11 +95,11 @@ int main(void)
     if (btn != TUI_DLG_OK) goto cleanup;
 
     /* ── Step 2: Question ── */
-    tui_clear_screen(0);
+    tui_clear_screen(ofd);
     wz = tui_layout_wizard(
         "  Install Wizard  ", step_content,
         "Downloading packages ...", "Step 2/5");
-    tui_layout_render(0, wz, full);
+    tui_layout_render(ofd, wz, full);
 
     btn = blocking_dlg(scr, "Confirm",
         "Download 42 packages?\nTotal transfer: 256 MB",
@@ -106,11 +109,11 @@ int main(void)
     if (btn != TUI_DLG_YES) goto cleanup;
 
     /* ── Step 3: Warning ── */
-    tui_clear_screen(0);
+    tui_clear_screen(ofd);
     wz = tui_layout_wizard(
         "  Install Wizard  ", step_content,
         "Installing ... (67 %)", "Step 3/5");
-    tui_layout_render(0, wz, full);
+    tui_layout_render(ofd, wz, full);
 
     btn = blocking_dlg(scr, "Warning",
         "Low disk space: only 1.2 GB left.\nContinue anyway?",
@@ -120,11 +123,11 @@ int main(void)
     if (btn != TUI_DLG_YES) goto cleanup;
 
     /* ── Step 4: Input ── */
-    tui_clear_screen(0);
+    tui_clear_screen(ofd);
     wz = tui_layout_wizard(
         "  Install Wizard  ", step_content,
         "Configuration ...", "Step 4/5");
-    tui_layout_render(0, wz, full);
+    tui_layout_render(ofd, wz, full);
 
     btn = blocking_dlg(scr, "User Name",
         "Enter your username:",
@@ -134,11 +137,11 @@ int main(void)
     if (btn != TUI_DLG_OK) goto cleanup;
 
     /* ── Step 5: Error ── */
-    tui_clear_screen(0);
+    tui_clear_screen(ofd);
     wz = tui_layout_wizard(
         "  Install Wizard  ", step_content,
         "Finalizing ...", "Step 5/5");
-    tui_layout_render(0, wz, full);
+    tui_layout_render(ofd, wz, full);
 
     btn = blocking_dlg(scr, "Network Error",
         "Connection timeout.\nPlease check your network.",
@@ -147,17 +150,17 @@ int main(void)
     tui_layout_free(wz);
 
 cleanup:
-    tui_clear_screen(0);
-    tui_cursor_goto(0, scr.rows/2, scr.cols/2 - 10);
-    tui_set_fg(0, tui_meuos_theme.accent);
-    tui_set_attr(0, TUI_ATTR_BOLD);
-    tui_write(0, "Thanks for trying MeuOS Kit !");
-    tui_reset_style(0);
+    tui_clear_screen(ofd);
+    tui_cursor_goto(ofd, scr.rows/2, scr.cols/2 - 10);
+    tui_set_fg(ofd, tui_meuos_theme.accent);
+    tui_set_attr(ofd, TUI_ATTR_BOLD);
+    tui_write(ofd, "Thanks for trying MeuOS Kit !");
+    tui_reset_style(ofd);
     sleep(1);
 
-    tui_cursor_show(0, 1);
-    tui_clear_screen(0);
-    tui_raw_mode(0, 0);
+    tui_cursor_show(ofd, 1);
+    tui_clear_screen(ofd);
+    tui_raw_mode(ifd, 0);
 
     return 0;
 }

@@ -2,6 +2,10 @@
  *
  * 展示：布局模板、面板表格、进度条、徽章、标签、分隔线。
  * 运行: make demo && ./build/demo
+ *
+ * 特殊模式：
+ *   TUI_DEMO_CAPTURE=1    自动渲染一帧后退出（用于截图/CI）
+ *   TUI_OUTPUT_FD=N       使用 fd=N 作为输出（默认 1 = stdout）
  */
 
 #define _XOPEN_SOURCE 700
@@ -11,6 +15,15 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <time.h>
+
+/* 决定输出 fd：默认 stdout，便于 script(1) 捕获 */
+static int get_output_fd(void)
+{
+    const char *fds = getenv("TUI_OUTPUT_FD");
+    if (fds) return atoi(fds);
+    return STDOUT_FILENO;  /* 改用 stdout 而不是 stdin */
+}
 
 /* ══════════════════════════════════════════════════════
  *  表格数据
@@ -132,18 +145,31 @@ static int demo_content(int fd, const tui_rect_t *area, void *udata)
 
 int main(void)
 {
-    tui_raw_mode(0, 1);
-    tui_clear_screen(0);
-    tui_cursor_show(0, 0);
+    int ofd = get_output_fd();
+    int capture_mode = getenv("TUI_DEMO_CAPTURE") != NULL;
 
+    /* 立即 flush stdout，避免 PTY 缓存 */
+    setvbuf(stdout, NULL, _IOLBF, 0);
+
+    /* ── 终端初始化 ── */
+    if (!capture_mode) {
+        tui_raw_mode(ofd, 1);
+    }
+    tui_clear_screen(ofd);
+    tui_cursor_show(ofd, 0);
+
+    /* ── 获取终端大小 ── */
     tui_size_t size;
-
-    /* 容错：若无法获取尺寸则设默认值 */
-    if (tui_get_size(0, &size) != TUI_OK) {
+    if (capture_mode) {
+        /* Capture 模式：使用固定 80x30，避免依赖 TIOCGWINSZ */
+        size.rows = 30;
+        size.cols = 80;
+    } else if (tui_get_size(ofd, &size) != TUI_OK) {
         size.rows = 24;
         size.cols = 80;
     }
 
+    /* ── 创建并渲染应用布局 ── */
     tui_layout_t *app = tui_app_layout(
         "  MeuOS Kit - libtui Demo  ",
         demo_content, NULL,
@@ -153,17 +179,28 @@ int main(void)
 
     if (app) {
         tui_rect_t area = { 1, 1, size.rows, size.cols - 1 };
-        tui_layout_render(0, app, area);
+        tui_layout_render(ofd, app, area);
         tui_layout_free(app);
     }
 
+    /* 强制 flush PTY，确保 script -f 能立即看到 */
+    fsync(ofd >= 0 ? ofd : 1);
+    fflush(stdout);
+
+    /* ── 截图模式：保留渲染内容立即退出（不要 clear，否则捕获的是清屏后状态） ── */
+    if (capture_mode) {
+        /* 重要：不要调 tui_raw_mode(ofd, 0)，否则会破坏 PTY 设置 */
+        return 0;
+    }
+
+    /* ── 交互模式：等待按键 ── */
     tui_event_t ev;
-    do { tui_getkey(0, &ev); }
+    do { tui_getkey(ofd, &ev); }
     while (ev.key != (tui_key_t)'q' && ev.key != TUI_KEY_ESC);
 
-    tui_cursor_show(0, 1);
-    tui_clear_screen(0);
-    tui_raw_mode(0, 0);
+    tui_cursor_show(ofd, 1);
+    tui_clear_screen(ofd);
+    tui_raw_mode(ofd, 0);
 
     return 0;
 }
