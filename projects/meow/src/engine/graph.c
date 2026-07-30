@@ -109,33 +109,47 @@ expand_uses(void)
 	if (nuses == 0)
 		return;
 
-	char libs_buf[1024] = {0};
-	char cflags_buf[1024] = {0};
+	char libs_buf[4096] = {0};
+	char cflags_buf[4096] = {0};
 	size_t libs_pos = 0, cflags_pos = 0;
 
 	for (size_t i = 0; i < nuses; i++) {
-		const struct pkg_lib *lib = find_lib(uses[i]);
-		if (!lib) {
-			meow_msg(MSG_WARN, "uses: unknown library '%s', skipping", uses[i]);
-			continue;
+		char pc_cflags[4096], pc_libs[4096];
+		const char *lib_cflags = NULL;
+		const char *lib_libs = NULL;
+
+		/* 优先尝试 .pc 文件 */
+		if (pkg_config_lookup(uses[i], pc_cflags, sizeof(pc_cflags),
+		                      pc_libs, sizeof(pc_libs)) == 0) {
+			lib_cflags = pc_cflags;
+			lib_libs = pc_libs;
+		} else {
+			/* 回退到 known_libs 表 */
+			const struct pkg_lib *lib = find_lib(uses[i]);
+			if (!lib) {
+				meow_msg(MSG_WARN, "uses: unknown library '%s', skipping", uses[i]);
+				continue;
+			}
+			lib_cflags = lib->cflags;
+			lib_libs = lib->libs;
 		}
 
 		/* Append to aggregate LIBS / CFLAGS */
-		if (lib->libs[0]) {
+		if (lib_libs && lib_libs[0]) {
 			if (libs_pos > 0 && libs_pos < sizeof(libs_buf) - 1)
 				libs_buf[libs_pos++] = ' ';
-			size_t len = strlen(lib->libs);
+			size_t len = strlen(lib_libs);
 			if (libs_pos + len < sizeof(libs_buf)) {
-				memcpy(libs_buf + libs_pos, lib->libs, len);
+				memcpy(libs_buf + libs_pos, lib_libs, len);
 				libs_pos += len;
 			}
 		}
-		if (lib->cflags[0]) {
+		if (lib_cflags && lib_cflags[0]) {
 			if (cflags_pos > 0 && cflags_pos < sizeof(cflags_buf) - 1)
 				cflags_buf[cflags_pos++] = ' ';
-			size_t len = strlen(lib->cflags);
+			size_t len = strlen(lib_cflags);
 			if (cflags_pos + len < sizeof(cflags_buf)) {
-				memcpy(cflags_buf + cflags_pos, lib->cflags, len);
+				memcpy(cflags_buf + cflags_pos, lib_cflags, len);
 				cflags_pos += len;
 			}
 		}
@@ -145,18 +159,18 @@ expand_uses(void)
 		snprintf(varname, sizeof(varname), "PKG_%s_LIBS", uses[i]);
 		for (char *p = varname + 4; *p; p++)
 			if (*p >= 'a' && *p <= 'z') *p &= ~0x20;
-		snprintf(envbuf, sizeof(envbuf), "export %s='%s'; ", varname, lib->libs);
+		snprintf(envbuf, sizeof(envbuf), "export %s='%s'; ", varname, lib_libs ? lib_libs : "");
 		if (strlen(recipe_environment) + strlen(envbuf) < RECIPE_ENV_MAX)
 			strcat(recipe_environment, envbuf);
-		setenv(varname, lib->libs, 1);
+		setenv(varname, lib_libs ? lib_libs : "", 1);
 
 		snprintf(varname, sizeof(varname), "PKG_%s_CFLAGS", uses[i]);
 		for (char *p = varname + 4; *p; p++)
 			if (*p >= 'a' && *p <= 'z') *p &= ~0x20;
-		snprintf(envbuf, sizeof(envbuf), "export %s='%s'; ", varname, lib->cflags);
+		snprintf(envbuf, sizeof(envbuf), "export %s='%s'; ", varname, lib_cflags ? lib_cflags : "");
 		if (strlen(recipe_environment) + strlen(envbuf) < RECIPE_ENV_MAX)
 			strcat(recipe_environment, envbuf);
-		setenv(varname, lib->cflags, 1);
+		setenv(varname, lib_cflags ? lib_cflags : "", 1);
 	}
 
 	/* Aggregate LIBS and CFLAGS for %LIBS% / %CFLAGS% interpolation */

@@ -180,4 +180,10 @@ const char *lookup_lib_cflags(const char *name);
 const char *lookup_lib_libs(const char *name);
 int cmd_pkg_config(int argc, char **argv);
 
+/* pkg_config_parse.c - .pc file parser (pkg-config compatible) */
+int pkg_config_find(const char *name, char *path, size_t path_sz);
+int pkg_config_lookup(const char *name,
+                      char *cflags, size_t cflags_sz,
+                      char *libs, size_t libs_sz);
+
 #endif /* MEOW_H */
