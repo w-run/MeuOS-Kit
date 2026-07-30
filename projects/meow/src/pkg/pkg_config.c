@@ -1,10 +1,7 @@
 /* pkg_config.c — meow pkg-config 子命令 + 库查询 API
  *
- * 提供与标准 pkg-config 兼容的 CLI 接口，依赖内置已知库数据库
- * (pkglib.c) 而非 .pc 文件。支持 --cflags / --libs 等常见选项。
- *
- * 当 autoconf/meson 等构建系统调用 `pkg-config` 时，
- * meow 的 pkg-config 符号链接（或别名）将透明接管查询。
+ * 提供与标准 pkg-config 兼容的 CLI 接口，优先解析系统的 .pc 文件，
+ * 未找到时回退到内置已知库数据库 (pkglib.c)。
  *
  * 同时导出 lookup_lib_*() API 供配方系统在 uses: 字段中使用。 */
 
@@ -12,18 +9,38 @@
 #include <string.h>
 #include "meow.h"
 
-/* 查询库的编译标志。返回字符串指针或 NULL。 */
+/* 内部静态缓冲区 — 供 lookup_lib_* 保存 .pc 解析结果 */
+static char lookup_cflags_buf[4096];
+static char lookup_libs_buf[4096];
+
+/* 查询库的编译标志。返回字符串指针或 NULL。
+ * 优先使用 .pc 文件，失败后回退到 known_libs 表。 */
 const char *
 lookup_lib_cflags(const char *name)
 {
+	/* 尝试 .pc 文件 */
+	if (pkg_config_lookup(name, lookup_cflags_buf, sizeof(lookup_cflags_buf),
+	                      lookup_libs_buf, sizeof(lookup_libs_buf)) == 0) {
+		return lookup_cflags_buf[0] ? lookup_cflags_buf : NULL;
+	}
+
+	/* 回退到 known_libs */
 	const struct pkg_lib *lib = find_lib(name);
 	return lib ? lib->cflags : NULL;
 }
 
-/* 查询库的链接标志。返回字符串指针或 NULL。 */
+/* 查询库的链接标志。返回字符串指针或 NULL。
+ * 优先使用 .pc 文件，失败后回退到 known_libs 表。 */
 const char *
 lookup_lib_libs(const char *name)
 {
+	/* 尝试 .pc 文件 */
+	if (pkg_config_lookup(name, lookup_cflags_buf, sizeof(lookup_cflags_buf),
+	                      lookup_libs_buf, sizeof(lookup_libs_buf)) == 0) {
+		return lookup_libs_buf[0] ? lookup_libs_buf : NULL;
+	}
+
+	/* 回退到 known_libs */
 	const struct pkg_lib *lib = find_lib(name);
 	return lib ? lib->libs : NULL;
 }
@@ -74,13 +91,15 @@ cmd_pkg_config(int argc, char **argv)
 	int found = 0;
 	for (int pi = first_pkg; pi < argc; pi++) {
 		const char *pkg_name = argv[pi];
-		const struct pkg_lib *lib = find_lib(pkg_name);
-		if (lib) {
+		char cflags[4096], libs[4096];
+
+		if (pkg_config_lookup(pkg_name, cflags, sizeof(cflags),
+		                      libs, sizeof(libs)) == 0) {
 			if (found > 0) putchar(' ');
-			if (want_cflags && lib->cflags[0])
-				fputs(lib->cflags, stdout);
-			if (want_libs && lib->libs[0])
-				fputs(lib->libs, stdout);
+			if (want_cflags && cflags[0])
+				fputs(cflags, stdout);
+			if (want_libs && libs[0])
+				fputs(libs, stdout);
 			found++;
 		} else {
 			fprintf(stderr, "meow pkg-config: unknown package '%s'\n", pkg_name);
