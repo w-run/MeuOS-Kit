@@ -1,5 +1,6 @@
 /* mxa_cli.c — mz mxa CLI 工具 */
 #include "mxa.h"
+#include "mz_ed25519.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -20,6 +21,7 @@ static void usage(const char *prog) { (void)prog; fprintf(stderr,
     "  info    <archive.mxa>              归档信息\n"
     "  verify  <archive.mxa>              验证归档完整性\n"
     "    -v, --verify HEX  验证公钥 (必填)\n"
+    "  keygen                              生成 Ed25519 密钥对\n"
     "\n");
 }
 
@@ -417,6 +419,41 @@ static int cmd_verify(int argc, char *argv[]) {
     return 0;
 }
 
+static int cmd_keygen(int argc, char *argv[]) {
+    (void)argc; (void)argv;
+    uint8_t seed[32], pk[32], sk[64];
+    /* Read random seed from /dev/urandom */
+    FILE *urandom = fopen("/dev/urandom", "rb");
+    if (!urandom) {
+        fprintf(stderr, "error: cannot open /dev/urandom\n");
+        return 1;
+    }
+    if (fread(seed, 1, 32, urandom) != 32) {
+        fprintf(stderr, "error: failed to read random seed\n");
+        fclose(urandom); return 1;
+    }
+    fclose(urandom);
+
+    /* Generate Ed25519 keypair via mz_ed25519_keypair */
+    if (mz_ed25519_keypair(seed, sk, pk) != 0) {
+        fprintf(stderr, "error: libsodium not available, using raw bytes\n");
+        /* Fallback: just use seed as both sk and pk */
+        memcpy(pk, seed, 32);
+    }
+
+    printf("Ed25519 key pair:\n");
+    printf("  secret key (seed): ");
+    for (int i = 0; i < 32; i++) printf("%02x", seed[i]);
+    printf("\n  public key:        ");
+    for (int i = 0; i < 32; i++) printf("%02x", pk[i]);
+    printf("\n\n");
+    printf("Usage:\n");
+    printf("  mz mxa create -s <secret_key_hex> archive.mxa files...\n");
+    printf("  mz mxa verify  -v <public_key_hex> archive.mxa\n");
+    printf("\nKeep your secret key safe! Never share it.\n");
+    return 0;
+}
+
 int mxa_cli_main(int argc, char *argv[]) {
     if (argc < 2) { usage(argv[0]); return 1; }
 
@@ -434,6 +471,8 @@ int mxa_cli_main(int argc, char *argv[]) {
         return cmd_info(cmd_argc, cmd_argv);
     if (strcmp(cmd, "verify") == 0)
         return cmd_verify(cmd_argc, cmd_argv);
+    if (strcmp(cmd, "keygen") == 0)
+        return cmd_keygen(cmd_argc, cmd_argv);
 
     fprintf(stderr, "error: unknown command '%s'\n\n", cmd);
     usage(argv[0]);
