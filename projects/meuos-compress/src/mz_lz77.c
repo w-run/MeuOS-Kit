@@ -6,7 +6,8 @@
 /* MZ LZ77 — Minimal LZ77 compressor/decompressor
  * Format: "MZ" magic + 4-byte uncompressed size + stream of tokens
  * Token: (1 bit type) + (7 bit data) or (15 bit match)
- *   0xxxxxxx = literal byte
+ *   0xxxxxxx = literal byte (value < 0x80)
+ *   10000001 xxxxxxxx = escaped literal (value >= 0x80): 0x81 marker + raw byte
  *   1ooooooo ol llllllll = match: 15-bit offset, 8-bit length+3
  *   (big-endian bit layout: bit 15 is match flag, bits 14-0 vary)
  *
@@ -83,7 +84,9 @@ int
 mz_compress(const void *input, size_t inlen, void **result, size_t *result_len,
              int codec, int level)
 {
-    if (!input || !result || !result_len || codec != 1) return MZ_ERR_PARAM;
+    if (!input || !result || !result_len) return MZ_ERR_PARAM;
+    if (codec != 1) return MZ_ERR_CODEC;
+    if (inlen == 0) return MZ_ERR_PARAM;
     (void)level;
 
     /* Upper bound: worst case is each byte stored as literal + header + end marker */
@@ -108,7 +111,7 @@ mz_compress(const void *input, size_t inlen, void **result, size_t *result_len,
         size_t match_off;
 
         if (mz_find(&state, ip, in, inlen, &match_len, &match_off)) {
-            /* Encode match: 2 bytes — 1 bit flag + 15 bits offset, then 1 byte length */
+            /* Encode match: 2 bytes -- 1 bit flag + 15 bits offset, then 1 byte length */
             /* Byte 0: 1ooooooo (flag + offset high 7 bits) */
             /* Byte 1: oooooooo (offset low 8 bits) */
             /* Byte 2: llllllll (length - 3, 8 bits = 3..258) */
@@ -126,9 +129,16 @@ mz_compress(const void *input, size_t inlen, void **result, size_t *result_len,
                 ip++;
             }
         } else {
-            /* Encode literal: 1 byte (bit 7 = 0) */
-            if (op + 1 > max_out) { free(out); return MZ_ERR_STREAM; }
-            out[op++] = in[ip] & 0x7F;  /* literal, bit 7 = 0 */
+            /* Encode literal: use escape encoding for values >= 0x80 */
+            if (op + (in[ip] >= 0x80 ? 2 : 1) > max_out) { free(out); return MZ_ERR_STREAM; }
+            if (in[ip] >= 0x80) {
+                /* High literal: 2-byte escape encoding (0x81 + raw byte) */
+                out[op++] = 0x81;
+                out[op++] = in[ip];
+            } else {
+                /* Low literal: 1 byte, bit 7 = 0 */
+                out[op++] = in[ip];
+            }
 
             state.win[state.win_pos] = in[ip];
             state.win_pos = (state.win_pos + 1) & MZ_WMASK;
@@ -150,7 +160,8 @@ int
 mz_decompress(const void *input, size_t inlen, void **result, size_t *result_len,
                int codec)
 {
-    if (!input || !result || !result_len || codec != 1) return MZ_ERR_PARAM;
+    if (!input || !result || !result_len) return MZ_ERR_PARAM;
+    if (codec != 1) return MZ_ERR_CODEC;
     if (inlen < 6) return MZ_ERR_DATA;
 
     const uint8_t *in = (const uint8_t *)input;
@@ -169,8 +180,15 @@ mz_decompress(const void *input, size_t inlen, void **result, size_t *result_len
     while (ip < inlen && op < uncompsz) {
         uint8_t b0 = in[ip++];
 
-        if (b0 & 0x80) {
-            /* Match */
+        if (b0 == 0x81) {
+            /* Escape literal: next byte is the raw 8-bit literal value */
+            if (ip >= inlen) { free(out); return MZ_ERR_DATA; }
+            uint8_t val = in[ip++];
+            out[op++] = val;
+            win[wp] = val;
+            wp = (wp + 1) & MZ_WMASK;
+        } else if (b0 & 0x80) {
+            /* Match (including end marker when offset == 0) */
             if (ip + 2 > inlen) { free(out); return MZ_ERR_DATA; }
             uint8_t b1 = in[ip++];
             uint8_t b2 = in[ip++];
@@ -181,18 +199,15 @@ mz_decompress(const void *input, size_t inlen, void **result, size_t *result_len
             if (offset == 0) break;  /* End marker */
 
             for (int i = 0; i < length && op < uncompsz; i++) {
-                size_t src = (wp + MZ_WSIZE - offset) % MZ_WSIZE;
-                src = (src + i) % MZ_WSIZE;
-                /* Handle case where offset < i (RLE-like, overlapping match) */
+                /* read_pos advances naturally as wp increments each iteration */
                 size_t read_pos = (wp + MZ_WSIZE - offset) % MZ_WSIZE;
-                read_pos = (read_pos + i) % MZ_WSIZE;
                 uint8_t b = win[read_pos];
                 out[op++] = b;
                 win[wp] = b;
                 wp = (wp + 1) & MZ_WMASK;
             }
         } else {
-            /* Literal */
+            /* Literal (bit 7 = 0) */
             out[op++] = b0;
             win[wp] = b0;
             wp = (wp + 1) & MZ_WMASK;
