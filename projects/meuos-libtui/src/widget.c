@@ -309,12 +309,21 @@ void tui_panel_set_style(tui_panel_t *panel, const tui_panel_t *cfg)
  *  进度条
  * ══════════════════════════════════════════════════════ */
 
+#define PROGRESS_FULL "█"   /* U+2588, 3 bytes UTF-8 */
+#define PROGRESS_EMPT "░"   /* U+2591, 3 bytes UTF-8 */
+
 int tui_progress_render(int fd, const tui_rect_t *area, void *userdata)
 {
     tui_progress_t *p = (tui_progress_t *)userdata;
     if (!p || !area) return TUI_ERR_PARAM;
 
-    int bar_w = p->bar_width > 0 ? p->bar_width : area->cols - 2;
+    int label_w = p->label[0] ? (int)strlen(p->label) + 1 : 0;
+    int pct_w   = p->show_percent ? 6 : 0;   /* " 100%" */
+    int bracket = 2;                          /* "[]" */
+    int avail   = area->cols - label_w - pct_w - bracket;
+    if (avail < 4) avail = 4;
+
+    int bar_w = p->bar_width > 0 ? (p->bar_width < avail ? p->bar_width : avail) : avail;
     if (bar_w < 4) bar_w = 4;
 
     int filled = (int)(p->value * bar_w);
@@ -331,34 +340,22 @@ int tui_progress_render(int fd, const tui_rect_t *area, void *userdata)
         tui_reset_style(fd);
     }
 
-    /* 进度条: [████░░░░] */
+    /* 进度条: [██████░░░░] */
     tui_set_fg(fd, TUI_COLOR_DEFAULT);
     tui_write(fd, "[");
 
-    /* 已填充部分 */
-    if (filled > 0) {
-        tui_color_t fc = p->fill_color ? p->fill_color : tui_meuos_theme.accent;
-        tui_set_fg(fd, fc);
-        tui_set_attr(fd, TUI_ATTR_BOLD);
+    tui_color_t fc = p->fill_color ? p->fill_color : tui_meuos_theme.accent;
+    tui_set_fg(fd, fc);
+    tui_set_attr(fd, TUI_ATTR_BOLD);
 
-        int i;
-        for (i = 0; i < filled; i++) {
-            /* 若已到最后填充格且不满整条，绘箭头 */
-            if (i == filled - 1 && filled < bar_w)
-                write(fd, ">", 1);
-            else
-                write(fd, "=", 1);
-        }
-    }
+    int i;
+    for (i = 0; i < filled; i++)
+        write(fd, PROGRESS_FULL, 3);
 
-    /* 未填充部分 */
-    if (filled < bar_w) {
-        tui_reset_style(fd);
-        tui_set_attr(fd, TUI_ATTR_DIM);
-        int i;
-        for (i = filled; i < bar_w; i++)
-            write(fd, "-", 1);
-    }
+    tui_reset_style(fd);
+    tui_set_attr(fd, TUI_ATTR_DIM);
+    for (i = filled; i < bar_w; i++)
+        write(fd, PROGRESS_EMPT, 3);
 
     tui_reset_style(fd);
     tui_write(fd, "]");
@@ -753,7 +750,7 @@ int tui_table_render(int fd, const tui_rect_t *area, void *userdata)
     tui_set_fg(fd, tui_meuos_theme.dim);
     int i;
     for (i = 0; i < area->cols && area->col + i < x; i++)
-        write(fd, "─", 1);
+        write(fd, "─", 3);
     tui_reset_style(fd);
 
     /* ── 数据行 ── */
