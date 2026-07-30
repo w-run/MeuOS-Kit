@@ -2,8 +2,8 @@ CC ?= cc
 CFLAGS ?= -O2 -g -Wall -Wextra -Wpedantic -std=c11
 AR ?= ar
 BUILD := build
-SRCS := $(sort $(wildcard src/*.c))
-OBJS := $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS))
+SRCS := $(sort $(wildcard src/*/*.c))
+OBJS := $(addprefix $(BUILD)/,$(notdir $(SRCS:.c=.o)))
 LIB := $(BUILD)/libtui.a
 TEST := $(BUILD)/test_tui
 
@@ -14,7 +14,9 @@ EXE := $(addprefix $(BUILD)/,$(EXAMPLES))
 
 all: $(LIB)
 
-$(BUILD)/%.o: src/%.c include/meuos/libtui.h | $(BUILD)
+vpath %.c src/core:src/widget
+
+$(BUILD)/%.o: %.c include/meuos/libtui.h | $(BUILD)
 	$(CC) $(CFLAGS) -Iinclude -c -o $@ $<
 
 $(LIB): $(OBJS)
