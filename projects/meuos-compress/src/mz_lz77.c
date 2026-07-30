@@ -52,8 +52,8 @@
 struct mz_state {
     uint8_t win[MZ_WSIZE];
     size_t win_pos;
-    uint16_t chain[MZ_WSIZE];      /* per-position chain */
-    uint16_t head[MZ_HASH_SIZE];   /* 3-byte hash -> most recent position */
+    uint32_t chain[MZ_WSIZE];      /* full stream pos */      /* per-position chain */
+    uint32_t head[MZ_HASH_SIZE];   /* 3-byte hash -> most recent position */
     int level;
 };
 
@@ -111,9 +111,9 @@ mz_insert(struct mz_state *s, size_t pos, const uint8_t *data, size_t limit)
 {
     if (pos + 2 >= limit) return;  /* need >= 3 bytes */
     uint16_t h3 = MZ_HASH3(data + pos);
-    uint16_t idx = (uint16_t)(pos & MZ_WMASK);
+    size_t idx = pos & MZ_WMASK;
     s->chain[idx] = s->head[h3];
-    s->head[h3] = (uint16_t)pos;
+    s->head[h3] = (uint32_t)pos;
 }
 
 /* Find best match for position pos.
@@ -125,7 +125,7 @@ mz_find(const struct mz_state *s, size_t pos, const uint8_t *data, size_t limit,
 {
     if (pos + 2 >= limit) return 0;
     uint16_t h3 = MZ_HASH3(data + pos);
-    uint16_t idx = s->head[h3];
+    uint32_t idx = s->head[h3];
     int best_len = 0;
     size_t best_off = 0;
     int max_chain = mz_chain_depth(s->level);
@@ -145,12 +145,12 @@ mz_find(const struct mz_state *s, size_t pos, const uint8_t *data, size_t limit,
         if (max_len > MZ_MAX_MATCH_V2) max_len = MZ_MAX_MATCH_V2;
     }
 
-    /* 2-byte pre-filter: only compare candidates with matching first 2 bytes */
-    uint16_t key2 = data[pos] | ((uint16_t)data[pos+1] << 8);
+    /* 3-byte pre-filter */
+    uint32_t key3 = (uint32_t)data[pos] | ((uint32_t)data[pos+1] << 8) | ((uint32_t)data[pos+2] << 16);
 
-    for (int c = 0; c < max_chain && idx != 0xFFFF && pos > idx && pos - idx <= max_dist; c++) {
-        uint16_t cand_key2 = data[idx] | ((uint16_t)data[idx+1] << 8);
-        if (cand_key2 == key2) {
+    for (int c = 0; c < max_chain && idx != (uint32_t)-1 && pos > idx && pos - idx <= max_dist; c++) {
+        uint32_t cand_key3 = (uint32_t)data[idx] | ((uint32_t)data[idx+1] << 8) | ((uint32_t)data[idx+2] << 16);
+        if (cand_key3 == key3) {
             int ml = (int)(limit - pos);
             if (ml > max_len) ml = max_len;
             int len = MZ_MIN_MATCH;
@@ -264,9 +264,29 @@ mz_compress_lz77(const void *input, size_t inlen, void **result, size_t *result_
                 }
             }
 
-            /* v2 match encode */
+            /* v2 match encode with fallback */
             if (op + 3 > max_out) { free(out); return MZ_ERR_STREAM; }
             int len = match_len > MZ_MAX_MATCH_V2 ? MZ_MAX_MATCH_V2 : match_len;
+            {
+                int _ok = 1;
+                size_t _n = (size_t)len;
+                if (_n > inlen - ip) _n = inlen - ip;
+                for (size_t _vi = 0; _vi < _n; _vi++) {
+                    if (in[ip + _vi] != in[ip - match_off + _vi]) { _ok = 0; break; }
+                }
+                if (!_ok) {
+                    for (int _lj = 0; _lj < len && ip < inlen; _lj++) {
+                        unsigned char _bv = in[ip];
+                        if (_bv >= 128) { out[op++] = 0x81; }
+                        out[op++] = _bv;
+                        state.win[state.win_pos] = _bv;
+                        state.win_pos = (state.win_pos + 1) & MZ_WMASK;
+                        mz_insert(&state, ip, in, inlen);
+                        ip++;
+                    }
+                    continue;
+                }
+            }
             write_match_v2(out, &op, match_off, len);
             slide_and_insert(&state, in, &ip, inlen, (size_t)len);
         } else {
