@@ -1738,8 +1738,11 @@ layout_output(struct ld_context *ctx)
 		ctx->tls_size = align_up(align_up(tdata, talign) + tbss, talign);
 	}
 
-	/* Pass 1: PROGBITS sections (skip TLS .tdata) */
-	for (rank = 0; rank <= 5; ++rank) {
+	/* Pass 1: PROGBITS sections (skip TLS .tdata).
+	 * rank 0-4 are loaded (ALLOC) sections; .debug/.comment/.note and
+	 * other non-allocatable sections (rank 5+) are laid out in Pass 3 so
+	 * that .bss (NOBITS, rank 4) ends up before them. */
+	for (rank = 0; rank <= 4; ++rank) {
 		if (rank >= 2 && !have_rw) {
 			offset = align_up(offset, LD_PAGE);
 			have_rw = 1;
@@ -1757,8 +1760,10 @@ layout_output(struct ld_context *ctx)
 		}
 	}
 
-	/* Pass 2: NOBITS sections (skip TLS .tbss) - always after PROGBITS */
-	for (rank = 2; rank <= 5; ++rank) {
+	/* Pass 2: NOBITS sections (skip TLS .tbss) - after PROGBITS rank 0-4.
+	 * .bss (rank 4) must come before non-allocatable sections (rank 5+),
+	 * so only ranks 2-4 are handled here. */
+	for (rank = 2; rank <= 4; ++rank) {
 		for (i = 0; i < ctx->group_count; ++i) {
 			struct ld_group *group = &ctx->groups[i];
 			if (group->rank != rank || group->type != MT_SHT_NOBITS)
@@ -1769,6 +1774,24 @@ layout_output(struct ld_context *ctx)
 			group->file_offset = offset;
 			group->address = base + offset;
 			/* NOBITS: does not advance file offset */
+		}
+	}
+
+	/* Pass 3: non-allocatable sections (.debug*, .comment, .note, ...).
+	 * These carry no loadable content, so place them after every loaded
+	 * section (PROGBITS and NOBITS alike). */
+	for (rank = 5; rank <= 6; ++rank) {
+		for (i = 0; i < ctx->group_count; ++i) {
+			struct ld_group *group = &ctx->groups[i];
+			if (group->rank != rank)
+				continue;
+			if (is_tls_group(ctx, (int)i))
+				continue;
+			offset = align_up(offset, group->align ? group->align : 1);
+			group->file_offset = offset;
+			group->address = base + offset;
+			if (group->type != MT_SHT_NOBITS)
+				offset += group->size;
 		}
 	}
 
@@ -1847,6 +1870,27 @@ symbol_tls_offset(struct ld_context *ctx, struct ld_object *object,
 	return 0;
 }
 
+/* Width in bytes of the relocated field for the given architecture and
+ * relocation type.  64-bit absolute data relocations (R_X86_64_64,
+ * R_AARCH64_ABS64, R_RISCV_64, R_LARCH_64) write 8 bytes; every other
+ * type emitted by this toolchain patches a 4-byte field.  The check must
+ * be architecture-aware because type numbers overlap across targets
+ * (e.g. R_LARCH_64 == R_RISCV_64 == 2 == LD_R_X86_64_PC32). */
+static unsigned
+reloc_field_width(const struct ld_context *ctx, int type)
+{
+	const char *t = ctx->target->name;
+	if (strcmp(t, "x86_64") == 0 && type == LD_R_X86_64_64)
+		return 8;
+	if (strcmp(t, "aarch64") == 0 && type == 257)    /* R_AARCH64_ABS64 */
+		return 8;
+	if (strcmp(t, "riscv64") == 0 && type == 2)      /* R_RISCV_64 */
+		return 8;
+	if (strcmp(t, "loongarch64") == 0 && type == 2)  /* R_LARCH_64 */
+		return 8;
+	return 4;
+}
+
 static int
 write_relocation(struct ld_context *ctx, struct ld_object *object,
                  const struct mt_elf64_section *reloc_section,
@@ -1894,8 +1938,8 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 
 	/* Skip relocations targeting GC'd (--gc-sections) sections */
 	if (target->size == 0) return 0;
-	if (offset > target->size || target->size - offset <
-	    (type == LD_R_X86_64_64 ? 8 : 4))
+	if (offset > target->size ||
+	    reloc_field_width(ctx, type) > target->size - offset)
 		return ld_error(ctx, "relocation offset is outside output section");
 	if (symbol_value(ctx, object, symbol_index, &resolved_value, &name) != 0)
 		return -1;
@@ -2906,8 +2950,9 @@ write_executable(struct ld_context *ctx, const char *path,
 	phnum++; /* PT_GNU_STACK */
 		if (ctx->shared || ctx->pie) phnum += 2;
 		if (ctx->pie) phnum += 1;
-		if (find_group(ctx, ".dynamic") >= 0 || find_group(ctx, ".got") >= 0)
-			phnum++;
+		if ((ctx->shared || ctx->pie) &&
+		    (find_group(ctx, ".dynamic") >= 0 || find_group(ctx, ".got") >= 0))
+			phnum++; /* PT_GNU_RELRO */
 		write16(h + 44, (uint16_t)phnum);
 		write16(h + 46, target->shdr_size);
 		write16(h + 48, (uint16_t)output_count);
@@ -2933,8 +2978,9 @@ write_executable(struct ld_context *ctx, const char *path,
 	phnum++; /* PT_GNU_STACK */
 		if (ctx->shared || ctx->pie) phnum += 2; /* PT_PHDR + PT_DYNAMIC */
 		if (ctx->pie) phnum += 1;    /* PT_INTERP */
-		if (find_group(ctx, ".dynamic") >= 0 || find_group(ctx, ".got") >= 0)
-			phnum++;
+		if ((ctx->shared || ctx->pie) &&
+		    (find_group(ctx, ".dynamic") >= 0 || find_group(ctx, ".got") >= 0))
+			phnum++; /* PT_GNU_RELRO */
 		write16(h + 56, (uint16_t)phnum);
 		write16(h + 58, target->shdr_size);
 		write16(h + 60, (uint16_t)output_count);
@@ -2942,14 +2988,14 @@ write_executable(struct ld_context *ctx, const char *path,
 		if (fwrite(h, 1, sizeof(h), file) != sizeof(h))
 			goto out_file;
 	}
-	/* QEMU 7.2 loongarch64 user-mode loader has a bug: it crashes
-	 * (SEGV_ACCERR) when executing code from the first LOAD segment
-	 * if a second non-empty PT_LOAD exists.  Workaround: emit a single
-	 * LOAD segment covering both RX and RW data with RWX permissions.
+	/* Program header order per ELF spec: PHDR (if present) before LOAD.
 	 *
-	 * Set FileSiz to load_file_end (non-NOBITS data only) so the kernel
-	 * zero-fills the BSS area (between load_file_end and memory_end). */
-	/* Program header order per ELF spec: PHDR (if present) before LOAD. */
+	 * Note: QEMU 7.2 loongarch64 user-mode loader had a bug that crashed
+	 * (SEGV_ACCERR) when executing code from the first LOAD segment if a
+	 * second non-empty PT_LOAD existed; the old workaround collapsed both
+	 * segments into one RWX LOAD.  The current layout emits the standard
+	 * two-segment form below (1st LOAD R|X, 2nd LOAD R|W), which is what
+	 * the QEMU/kernel loaders used in tests accept. */
 	if (ctx->shared || ctx->pie) {
 		uint64_t phoff = target->ehdr_size;
 		if (write_program_header_type(file, MT_PT_PHDR, LD_PF_R,

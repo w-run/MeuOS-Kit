@@ -1175,6 +1175,8 @@ process_file(const char *path, struct options *opts)
 	size_t size;
 	struct mt_elf64_view view;
 	enum mt_elf_status st;
+	int is_elf32;
+	int unsupported = 0;
 	int i;
 
 	if (load_file(path, &bytes, &size) != 0)
@@ -1188,23 +1190,37 @@ process_file(const char *path, struct options *opts)
 		return 1;
 	}
 
+	/* ELF32 is only partially supported: -h/-S/-s/-x decode ELF32 via the
+	 * libelf is_elf32 paths, but the program-header, relocation and
+	 * dynamic readers are ELF64-only.  Refuse those explicitly instead of
+	 * printing spurious layout errors or garbage. */
+	is_elf32 = (bytes[4] == MT_ELFCLASS32);
+	if (is_elf32 && (opts->dump_programs || opts->dump_relocs ||
+	    opts->dump_dynamic)) {
+		fprintf(stderr,
+		        "readelf: %s: ELF32 not supported for -l/-r/-d\n", path);
+		unsupported = 1;
+	}
+
 	if (opts->dump_header)
 		dump_ehdr(bytes, size, &view);
-	if (opts->dump_programs)
-		dump_phdrs(bytes, size, &view);
+	if (!unsupported) {
+		if (opts->dump_programs)
+			dump_phdrs(bytes, size, &view);
+		if (opts->dump_relocs)
+			dump_relocs(bytes, size, &view);
+		if (opts->dump_dynamic)
+			dump_dynamic(bytes, size, &view);
+	}
 	if (opts->dump_sections)
 		dump_shdrs(bytes, size, &view);
 	if (opts->dump_symbols)
 		dump_symbols(bytes, size, &view);
-	if (opts->dump_relocs)
-		dump_relocs(bytes, size, &view);
-	if (opts->dump_dynamic)
-		dump_dynamic(bytes, size, &view);
 	for (i = 0; i < opts->hex_count; ++i)
 		dump_hexdump(bytes, size, &view, opts->hex_secs[i]);
 
 	free(bytes);
-	return 0;
+	return unsupported ? 1 : 0;
 }
 
 /* ---- 选项解析 ---- */
