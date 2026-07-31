@@ -2075,6 +2075,23 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 			/* Shared library or PIE: leave for ld.so via GOT */
 			return 0;
 		}
+		if (type == 17 /* R_386_TLS_LE */) {
+			/* Local-Exec TLS (variant II): the symbol resolves to a
+			 * negative offset from the %gs thread pointer, which the
+			 * TCB places after the TLS image (tls_size).  mcc emits
+			 * `movl %gs:sym@ntpoff, %reg`; the disp32 holds
+			 * (tls_off - tls_size), not the symbol's linked VA. */
+			uint64_t tls_off;
+			if (symbol_tls_offset(ctx, object, symbol_index, &tls_off) != 0)
+				return -1;
+			uint32_t val = (uint32_t)((int64_t)tls_off - (int64_t)ctx->tls_size)
+			               + (uint32_t)addend;
+			target->data[target_offset + 0] = (unsigned char)val;
+			target->data[target_offset + 1] = (unsigned char)(val >> 8);
+			target->data[target_offset + 2] = (unsigned char)(val >> 16);
+			target->data[target_offset + 3] = (unsigned char)(val >> 24);
+			return 0;
+		}
 		if (i386_apply_reloc(type, target->data + target_offset,
 		                     resolved_value, addend, place) == 0)
 			return 0;
