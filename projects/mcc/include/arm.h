@@ -10,11 +10,14 @@ enum Arm32Reg {
 	NFPR = D15 - D0 + 1,
 	NGPR = LR - R0 + 1,
 	NGPS = 5,
-	/* FP caller-saved pool.  D1 is reserved as the floating-point
-	 * conversion scratch (s2): the emitter lowers int<->float casts to
-	 * `vmov s2, rN; vcvt.f64.s32 dN, s2` (and the reverse), which would
-	 * clobber a live value if rega assigned D1. */
-	NFPS = D7 - D0,
+	/* FP caller-saved pool: D0-D7, the full AAPCS argument/return
+	 * register set.  D1 is an ordinary caller-saved register here —
+	 * values arriving in D1 (2nd double argument) or allocated to it
+	 * must be spilled around calls.  The int<->float conversion
+	 * scratch is s16, which aliases D8; D8 is excluded from rega's
+	 * allocation pool (arm_targ.c RFPSCRATCH / T.reserved), so
+	 * conversions can never clobber a live value. */
+	NFPS = D7 - D0 + 1,
 	NCLR = 15,
 };
 MAKESURE(reg_not_tmp, D15 < (int)Tmp0);

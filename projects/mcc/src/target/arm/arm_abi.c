@@ -103,7 +103,7 @@ call_meta(Ins *call, int nargs, Fn *fn)
 	Ins *argp = call;
 	(void)fn;
 	for (int j = 0; j < nargs; j++) {
-		--argp;
+		do { --argp; } while (argp->op == Oargv);
 		int k = argp->cls;
 		int is_float = KBASE(k) == 1;
 		if (is_float && nfp < 8)
@@ -152,9 +152,10 @@ emit_call_args(Ins *call, int nargs, Fn *fn)
 	 * `--argp` walks from the call backwards (argN-1 first).  Read the
 	 * per-arg class in that order, then assign AAPCS register numbers
 	 * in FORWARD order (arg0 gets D0/R0), since the register pools are
-	 * indexed by argument position, not by walk order. */
+	 * indexed by argument position, not by walk order.  Oargv (the
+	 * vararg marker) is skipped, matching the nargs count above. */
 	for (int j = nargs - 1; j >= 0; j--) {
-		--argp;
+		do { --argp; } while (argp->op == Oargv);
 		acls[j] = argp->cls;
 		isf[j] = (KBASE(argp->cls) == 1);
 	}
@@ -178,7 +179,7 @@ emit_call_args(Ins *call, int nargs, Fn *fn)
 	}
 	argp = call;
 	for (int j = nargs - 1; j >= 0; j--) {
-		--argp;
+		do { --argp; } while (argp->op == Oargv);
 		int k = argp->cls;
 		int reg = -1;
 		if (gp_idx[j] >= 0)
@@ -226,8 +227,13 @@ void arm32_abi(Fn *fn) {
 				int nargs = 0;
 				while (prev > b->ins && prev[-1].op != Onop) {
 					switch (prev[-1].op) {
-					case Oarg: case Oargc: case Oargv:
+					case Oarg: case Oargc:
 						nargs++; prev--; continue;
+					case Oargv:
+						/* Vararg boundary marker (cls=0, arg={R,R}):
+						 * not a real argument, never materialize a
+						 * copy for it. */
+						prev--; continue;
 					default: break;
 					}
 					break;

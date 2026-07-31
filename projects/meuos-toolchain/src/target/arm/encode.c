@@ -70,7 +70,7 @@ static int reg_num(const char *s, int *r) {
 	if (s[0] == 's' && s[1]=='p') { *r=13; return 1; }
 	if (s[0] == 'l' && s[1]=='r') { *r=14; return 1; }
 	if (s[0] == 'p' && s[1]=='c') { *r=15; return 1; }
-	if (s[0] == 's' && s[1]>='0' && s[1]<='9') { *r=16+(s[1]-'0'); return 1; }
+	if (s[0] == 's' && s[1]>='0' && s[1]<='9') { int n = s[1]-'0'; if(s[2]>='0'&&s[2]<='9') n=n*10+s[2]-'0'; if(n>31)return -1; *r=16+n; return 1; }
 	if (s[0] == 'd' && s[1]>='0' && s[1]<='9') { int n = s[1]-'0'; if(s[2]>='0'&&s[2]<='9') n=n*10+s[2]-'0'; if(n>31)return -1; *r=n; return 1; }
 	return -1;
 }
@@ -650,8 +650,14 @@ ldr_mem:
 		if (off > 1023) off = 1023;
 		uint32_t base = is_load ? 0xED100A00 : 0xED000A00;
 		if (is_double) base |= 0x100;
-		uint32_t d = (uint32_t)(rd & 0x1F);
-		base |= (rn << 16) | ((d & 1) << 22) | ((d >> 1) << 12) | (off & 0xFF);
+		/* The register field differs by precision: a double dN uses
+		 * D=bit4, Vd=N&0xF (dp_dst_field); a single sN uses D=N&1,
+		 * Vd=N>>1 (sp_dst_field).  Previously both used the single
+		 * layout, so fldd/fstd on even-numbered high double regs
+		 * (e.g. d8 -> Vd=4) saved/restored the WRONG register. */
+		base |= (rn << 16)
+		      | (is_double ? dp_dst_field(rd) : sp_dst_field(sp_reg(rd)))
+		      | (off & 0xFF);
 		emit32(out->bytes, base);
 		return 0;
 	}
@@ -1226,7 +1232,11 @@ ldr_mem:
 			if (sscanf(regtext, "d%d-d%d", &first, &last) < 2) return -1;
 			uint32_t dregs = (uint32_t)(last - first + 1);
 			uint32_t base = is_pop ? 0xECBD0B00 : 0xED2D0B00;
-			emit32(out->bytes, base | (((uint32_t)first >> 1) << 12) | ((first & 1) << 22) | dregs);
+			/* VSTMDB/VLDMIA register list: D=bit4 of the first
+			 * register, Vd=first&0xF (dp_dst_field).  The old
+			 * single-layout ((first>>1)<<12 | (first&1)<<22) mapped
+			 * d8 -> Vd=4, encoding the wrong register. */
+			emit32(out->bytes, base | dp_dst_field(first) | dregs);
 			return 0;
 		}
 	}

@@ -184,9 +184,9 @@ ralloctry(RMap *m, int t, int try)
 		return TMP(r);
 	}
 	r = tmp[t].visit;
-	if (r == -1 || bshas(m->b, r))
+	if (r == -1 || bshas(m->b, r) || (T.reserved & BIT(r)))
 		r = *hint(t);
-	if (r == -1 || bshas(m->b, r)) {
+	if (r == -1 || bshas(m->b, r) || (T.reserved & BIT(r))) {
 		if (try)
 			return R;
 		regs = tmp[phicls(t, tmp)].hint.m;
@@ -199,10 +199,10 @@ ralloctry(RMap *m, int t, int try)
 			r1 = r0 + T.nfpr;
 		}
 		for (r=r0; r<r1; r++)
-			if (!(regs & BIT(r)))
+			if (!(regs & BIT(r)) && !(T.reserved & BIT(r)))
 				goto Found;
 		for (r=r0; r<r1; r++)
-			if (!bshas(m->b, r))
+			if (!bshas(m->b, r) && !(T.reserved & BIT(r)))
 				goto Found;
 		die("no more regs");
 	}

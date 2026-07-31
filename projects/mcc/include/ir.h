@@ -54,6 +54,11 @@ struct Target {
 	int nfpr;
 	bits rglob; /* globally live regs (e.g., sp, fp) */
 	int nrglob;
+	bits reserved; /* registers rega must never allocate (e.g. a
+	                  target's implicit conversion scratch).  They may
+	                  still appear in rsave/rclob, ABI argument copies,
+	                  and instruction operands, but ralloctry() skips
+	                  them when picking a free register. */
 	int kl_in_reg; /* 1 if Kl (64-bit) values may live in registers
 	                * (amd64/arm64/rv64); 0 if Kl must always be in slots
 	                * because the ISA has no 64-bit GPRs (i386). When 0,

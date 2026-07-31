@@ -99,19 +99,23 @@ static struct {
 	{ Ocast,   Ks, "vmov %=, %W0" },
 	{ Ocast,   Kd, "vmov %=, %L0" },
 	/* int<->float casts.  ARM has no VCVT between a core register and
-	 * a VFP double, so the conversion goes through the s2 scratch
-	 * (D1, excluded from rega's allocation pool — see arm.h NFPS):
-	 *   int -> double: vmov s2, rN ; vcvt.f64.s32 dN, s2
-	 *   double -> int: vcvt.s32.f64 s2, dN ; vmov rN, s2 */
-	{ Ostosi,  Ka, "vcvt.s32.f64 s2, %S0\n\tvmov\t%=, s2" },
-	{ Ostoui,  Ka, "vcvt.u32.f64 s2, %S0\n\tvmov\t%=, s2" },
-	{ Odtosi,  Ka, "vcvt.s32.f64 s2, %D0\n\tvmov\t%=, s2" },
-	{ Odtoui,  Ka, "vcvt.u32.f64 s2, %D0\n\tvmov\t%=, s2" },
-	{ Oswtof,  Ka, "vmov s2, %W0\n\tvcvt.f64.s32\t%=, s2" },
-	{ Ouwtof,  Ka, "vmov s2, %W0\n\tvcvt.f64.u32\t%=, s2" },
+	 * a VFP double, so the conversion goes through the s16 scratch
+	 * (the low half of D8, which arm_targ.c reserves from rega's
+	 * allocation pool):
+	 *   int -> double: vmov s16, rN ; vcvt.f64.s32 dN, s16
+	 *   double -> int: vcvt.s32.f64 s16, dN ; vmov rN, s16
+	 * D8 is never assigned by rega, so conversions cannot clobber a
+	 * live value (unlike the old s2/D1 scratch, which collided with
+	 * the 2nd double argument register). */
+	{ Ostosi,  Ka, "vcvt.s32.f64 s16, %S0\n\tvmov\t%=, s16" },
+	{ Ostoui,  Ka, "vcvt.u32.f64 s16, %S0\n\tvmov\t%=, s16" },
+	{ Odtosi,  Ka, "vcvt.s32.f64 s16, %D0\n\tvmov\t%=, s16" },
+	{ Odtoui,  Ka, "vcvt.u32.f64 s16, %D0\n\tvmov\t%=, s16" },
+	{ Oswtof,  Ka, "vmov s16, %W0\n\tvcvt.f64.s32\t%=, s16" },
+	{ Ouwtof,  Ka, "vmov s16, %W0\n\tvcvt.f64.u32\t%=, s16" },
 	{ Osltof,  Kd, "bl __aeabi_l2d\n\tvmov\t%=, r0, r1" },
 	{ Osltof,  Ks, "bl __aeabi_l2f\n\tvmov\t%=, r0" },
-	{ Oultof,  Ka, "vmov s2, %W0\n\tvcvt.f64.u32\t%=, s2" },
+	{ Oultof,  Ka, "vmov s16, %W0\n\tvcvt.f64.u32\t%=, s16" },
 	{ Ocall,   Kw, "blx %L0" },
 	{ Oacmp,   Ki, "cmp %0, %1" },
 	{ Oacmn,   Ki, "cmn %0, %1" },
@@ -1068,6 +1072,7 @@ arm32_emitfn(Fn *fn, FILE *f)
 	Blk *b, *t;
 	Ins *i;
 	int csgpr = 0; /* any callee-saved GPR (r4-r9) used by rega */
+	int csfp = 0;  /* count of callee-saved FPRs (d8-d15) used by rega */
 
 	emitfnlnk(fn->name, &fn->lnk, f);
 	/* Save every callee-saved GPR that rega assigned (r4-r9), plus the
@@ -1080,23 +1085,36 @@ arm32_emitfn(Fn *fn, FILE *f)
 			csgpr = 1;
 			break;
 		}
+	/* Callee-saved FPRs (d8-d15) follow the same rule: rega keeps
+	 * values in them across calls (they are in rclob), so a callee that
+	 * uses them must preserve them for its caller.  Save each used
+	 * d8-d15 into the frame top ([r11, #4*fn->slot + 8*i]) and restore
+	 * them in the epilogue, mirroring aarch64's V8-V15 handling. */
+	for (int rr = D8; rr <= D15; rr++)
+		if (fn->reg & BIT(rr))
+			csfp++;
 	if (csgpr) {
 		fprintf(f, "\tpush\t{r4, r5, r6, r7, r8, r9, r11, lr}\n");
-	} else if (fn->slot) {
+	} else if (fn->slot || csfp) {
 		fprintf(f, "\tpush\t{r11, lr}\n");
 	} else {
 		fprintf(f, "\tpush\t{lr}\n");
 	}
-	if (fn->slot || fn->dynalloc) {
+	if (fn->slot || csfp || fn->dynalloc) {
 		/* Local slots are addressed as [r11, #off] (see Oload/Ostore/
 		 * Oaddr), so r11 is the frame pointer.  Point it at the new
 		 * stack top after the frame is allocated.  Without this, r11
 		 * holds whatever the caller left (crt1._start zeroes it), so
 		 * any local-variable access dereferences a null/invalid base.
 		 * A function with salloc() also needs r11 so the epilogue can
-		 * restore sp across the dynamic allocation. */
-		fprintf(f, "\tsub\tsp, sp, #%d\n", 4 * fn->slot);
+		 * restore sp across the dynamic allocation.  The frame also
+		 * holds the d8-d15 save area (8 bytes each) above the slots. */
+		fprintf(f, "\tsub\tsp, sp, #%d\n", 4 * (fn->slot + 2 * csfp));
 		fprintf(f, "\tmov\tr11, sp\n");
+		for (int rr = D8, i = 0; rr <= D15; rr++)
+			if (fn->reg & BIT(rr))
+				fprintf(f, "\tfstd\t%s, [r11, #%d]\n",
+					rname(rr, Kd), 4 * fn->slot + 8 * i++);
 	}
 	lbl = 0;
 	for (b = fn->start; b; b = b->link) {
@@ -1110,15 +1128,22 @@ arm32_emitfn(Fn *fn, FILE *f)
 			fprintf(f, "\tbkpt\t#1000\n");
 			break;
 		case Jret0:
+			if (csfp)
+				/* Restore callee-saved FPRs from the frame top; r11
+				 * is still the frame pointer at this point. */
+				for (int rr = D8, i = 0; rr <= D15; rr++)
+					if (fn->reg & BIT(rr))
+						fprintf(f, "\tfldd\t%s, [r11, #%d]\n",
+							rname(rr, Kd), 4 * fn->slot + 8 * i++);
 			if (fn->dynalloc)
 				/* salloc() lowered sp at runtime; restore it from the
 				 * frame pointer (r11) before popping saved registers. */
-				fprintf(f, "\tadd\tsp, r11, #%d\n", 4 * fn->slot);
-			else if (fn->slot)
-				fprintf(f, "\tadd\tsp, sp, #%d\n", 4 * fn->slot);
+				fprintf(f, "\tadd\tsp, r11, #%d\n", 4 * (fn->slot + 2 * csfp));
+			else if (fn->slot || csfp)
+				fprintf(f, "\tadd\tsp, sp, #%d\n", 4 * (fn->slot + 2 * csfp));
 			if (csgpr)
 				fprintf(f, "\tpop\t{r4, r5, r6, r7, r8, r9, r11, pc}\n");
-			else if (fn->slot)
+			else if (fn->slot || csfp)
 				fprintf(f, "\tpop\t{r11, pc}\n");
 			else
 				fprintf(f, "\tpop\t{pc}\n");
