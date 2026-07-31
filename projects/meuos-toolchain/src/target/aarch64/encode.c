@@ -190,6 +190,30 @@ strip_quotes(char *s)
 	}
 }
 
+/* Split a trailing "+N" / "-N" numeric offset from a symbol name in place,
+ * returning the symbol part (NUL-terminated) and storing the signed offset
+ * in *off.  Quoted symbol names ("...") and offsetless symbols are left
+ * untouched (offset 0).  mcc emits "sym+8" for e.g. ga[2] element accesses. */
+static char *
+split_sym_offset(char *s, int64_t *off)
+{
+	char *p;
+
+	*off = 0;
+	if (!s || !*s || s[0] == '"')
+		return s;
+	for (p = s; *p; p++) {
+		if ((*p == '+' || *p == '-') && p[1] >= '0' && p[1] <= '9') {
+			*off = strtoll(p + 1, NULL, 10);
+			if (*p == '-')
+				*off = -*off;
+			*p = '\0';
+			break;
+		}
+	}
+	return s;
+}
+
 /* Check if the operand text starts with a symbol (not a register/immediate) */
 static int is_symbol(const char *s)
 {
@@ -313,9 +337,16 @@ aarch64_encode_insn(const struct mt_target *target,
 								ops[i].modifier[mlen] = '\0';
 							}
 							ops[i].sym_start = mod_end + 1;
-							strip_quotes((char *)ops[i].sym_start);
-							/* Symbol ref in offset: flag by setting imm=1, kind stays 'm' */
-							ops[i].imm = 1; /* non-zero to indicate symbol offset */
+							{
+								char *ss = (char *)ops[i].sym_start;
+								int quoted = (ss[0] == '"');
+								strip_quotes(ss);
+								if (!quoted)
+									ss = split_sym_offset(ss, &ops[i].imm);
+								ops[i].sym_start = ss;
+							}
+							/* Symbol ref in offset: imm is the addend,
+							 * kind stays 'm' */
 						} else return -1;
 					} else if (parse_imm(imm_s, &ops[i].imm) != 0) return -1;
 				}
@@ -366,13 +397,27 @@ aarch64_encode_insn(const struct mt_target *target,
 						memcpy(ops[i].modifier, colon + 1, mlen);
 						ops[i].modifier[mlen] = '\0';
 						ops[i].sym_start = end_mod + 1;
-						strip_quotes((char *)ops[i].sym_start);
+						{
+							char *ss = (char *)ops[i].sym_start;
+							int quoted = (ss[0] == '"');
+							strip_quotes(ss);
+							if (!quoted)
+								ss = split_sym_offset(ss, &ops[i].imm);
+							ops[i].sym_start = ss;
+						}
 					}
 				}
 			} else {
 				/* Simple symbol name — point into trim(ed) opbuf */
 				ops[i].sym_start = s;
-				strip_quotes((char *)ops[i].sym_start);
+				{
+					char *ss = (char *)ops[i].sym_start;
+					int quoted = (ss[0] == '"');
+					strip_quotes(ss);
+					if (!quoted)
+						ss = split_sym_offset(ss, &ops[i].imm);
+					ops[i].sym_start = ss;
+				}
 			}
 			continue;
 		}
@@ -566,7 +611,7 @@ aarch64_encode_insn(const struct mt_target *target,
 		       (((unsigned)rn & 0x1F) << 5) |
 		       ((unsigned)rd & 0x1F));
 		const char *sym = ops[2].sym_start;
-		set_fixup(out, 0, 4, 277, sym, 0); /* R_AARCH64_ADD_ABS_LO12_NC */
+		set_fixup(out, 0, 4, 277, sym, ops[2].imm); /* R_AARCH64_ADD_ABS_LO12_NC */
 		return 0;
 	}
 
@@ -714,7 +759,7 @@ aarch64_encode_insn(const struct mt_target *target,
 				} else return -1;
 			} else return -1;
 			emit32(out, &off, base_op | (rn << 5) | rt);
-			set_fixup(out, 0, 4, reloc, ops[1].sym_start, 0);
+			set_fixup(out, 0, 4, reloc, ops[1].sym_start, ops[1].imm);
 			return 0;
 		}
 		if (ops[1].imm >= 0) {
