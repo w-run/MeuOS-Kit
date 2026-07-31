@@ -100,6 +100,7 @@ struct rv_op {
 	const char *sym;  /* symbol name for fixups */
 	int64_t addend;
 	int mem_reg;      /* base register for mem operand */
+	const char *raw;  /* original token text (for reg/symbol ambiguity) */
 };
 
 static int
@@ -126,6 +127,7 @@ parse_operands(const char *text, struct rv_op ops[4], int *nops)
 		ops[*nops].sym = NULL;
 		ops[*nops].addend = 0;
 		ops[*nops].mem_reg = -1;
+		ops[*nops].raw = tok;
 
 		/* GAS modifier form: %hi(sym) / %lo(sym). Must be checked
 		 * before the memory branch because it also contains '('. */
@@ -852,6 +854,24 @@ fp_unary:
 			emit32(out->bytes, r_type(0x53, rd, 0, rs1, rs1, (4 << 2) | 1));
 			return 0;
 		}
+		/* fneg.s/d rd, rs  →  fsgnjn.s/d rd, rs, rs (flip sign bit) */
+		if (strcmp(mnemonic, "fneg.s") == 0) {
+			emit32(out->bytes, r_type(0x53, rd, 1, rs1, rs1, (4 << 2) | 0));
+			return 0;
+		}
+		if (strcmp(mnemonic, "fneg.d") == 0) {
+			emit32(out->bytes, r_type(0x53, rd, 1, rs1, rs1, (4 << 2) | 1));
+			return 0;
+		}
+		/* fabs.s/d rd, rs  →  fsgnjx.s/d rd, rs, rs (clear sign bit) */
+		if (strcmp(mnemonic, "fabs.s") == 0) {
+			emit32(out->bytes, r_type(0x53, rd, 2, rs1, rs1, (4 << 2) | 0));
+			return 0;
+		}
+		if (strcmp(mnemonic, "fabs.d") == 0) {
+			emit32(out->bytes, r_type(0x53, rd, 2, rs1, rs1, (4 << 2) | 1));
+			return 0;
+		}
 	}
 	if (nops == 2 && ops[0].kind == 1 && ops[1].kind == 1) {
 		unsigned rd = (unsigned)ops[0].reg;
@@ -1269,6 +1289,26 @@ branch_fallthrough:
 			return 0;
 		} else if (ops[0].kind == 2) {
 			emit32(out->bytes, j_type(0x6F, 1, (int32_t)ops[0].imm));
+			return 0;
+		} else if (ops[0].kind == 1 && ops[0].raw) {
+			/* The callee name may collide with a register name (e.g.
+			 * a function literally named `f2` or `x8`).  A `call`
+			 * operand is always a symbol, never a register, so treat
+			 * the raw token as the symbol. */
+			char sym[128];
+			const char *p = ops[0].raw;
+			size_t i = 0;
+			while (*p && i < sizeof(sym) - 1)
+				sym[i++] = *p++;
+			sym[i] = '\0';
+			{
+				char *q = sym;
+				strip_sym_quotes(&q);
+			}
+			out->size = 8;
+			emit32(out->bytes, u_type(0x17, 1, 0));
+			emit32(out->bytes + 4, i_type(0x67, 1, 0, 1, 0));
+			set_fixup(out, 0, 4, 18 /* R_RISCV_CALL */, sym, 0);
 			return 0;
 		}
 	}

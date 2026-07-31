@@ -733,6 +733,15 @@ i386_encode_insn(const struct mt_target *target,
 		out->size = (size_t)(p - out->bytes);
 		goto done;
 	}
+	/* x87 no-operand forms (D9 D8-DF register array).  fchs = D9 E0. */
+	if (strcmp(mnemonic, "fchs") == 0) {
+		match = 1;
+		emit8(p, 0xD9);
+		emit8(p + 1, 0xE0);
+		p += 2;
+		out->size = (size_t)(p - out->bytes);
+		goto done;
+	}
 
 	/* ---- RET ---- */
 	if (strcmp(base, "ret") == 0) {
