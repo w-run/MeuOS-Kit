@@ -8,14 +8,14 @@
  *     there are NO VFP CPRCs, so vararg floats/doubles occupy general
  *     purpose register words (or the stack);
  *   - the first four GPR words go in R0-R3, further words on the stack;
- *   - 4-byte types (int, float, pointer, long in the ILP32 libc) take
+ *   - 4-byte types (int, float, pointer in the real ILP32 ABI) take
  *     one word; 8-byte types (double, long long) take two words and
- *     start at an even word index.
+ *     start at an even word index, both in registers and on the stack.
  * mcc models arm pointers/long as 8 bytes (Kl) — indistinguishable in
- * the IR from long long — so Kl arguments are packed as ONE word to
- * match the real AAPCS / the GCC-built libc layout.  The callee's
- * va_arg and the caller's packing use the same word rules, keeping
- * mcc-compiled code self-consistent.
+ * the IR from long long — so mcc's own vararg convention packs every
+ * Kl value (pointer/long/long long) as TWO words, matching the AAPCS
+ * long long layout.  mcc-compiled callers and callees use the same
+ * word rules, keeping mcc-compiled code self-consistent.
  *
  * The callee spills R0-R3 into a 16-byte register save area at the top
  * of its frame (see arm32_emitfn); the caller just loads R0-R3 with the
@@ -62,12 +62,21 @@ arm32_selpar(Fn *fn, Ins *i0, Ins *i1)
 			 * variadic function, where every parameter word follows
 			 * the base standard (Kl = one word).  The pair-start
 			 * register is the Ocopy operand; kl_emit reads the low
-			 * half from it and the high half from its successor. */
+			 * half from it and the high half from its successor.
+			 * In the variadic one-word case the caller only fills
+			 * the single register (its high successor is garbage),
+			 * so zero-extend the word into the 64-bit slot. */
 			int need = (k == Kl && !fn->vararg) ? 2 : 1;
 			if (ngp + need > 4)
 				err("arm: %d-th argument past 4 GPR registers is unsupported",
 				    (int)(i - i0) + 1);
-			emit(Ocopy, k, i->to, TMP(gpreg[ngp]), R);
+			if (fn->vararg && k == Kl) {
+				Ref w = newtmp("abi", Kw, fn);
+				emit(Oextuw, Kl, i->to, w, R);
+				emit(Ocopy, Kw, w, TMP(gpreg[ngp]), R);
+			} else {
+				emit(Ocopy, k, i->to, TMP(gpreg[ngp]), R);
+			}
 			ngp += need;
 		} else
 			err("arm: %d-th argument past 4 GPR/8 FPR registers is unsupported",
@@ -191,18 +200,25 @@ arm32_callclass(Ins *call, int nargs, Ins *lim, struct Armcall *c)
 				err("arm: too many named float arguments");
 		} else {
 			/* integer (named or vararg) or vararg float.
-			 * In a variadic call every word follows the base
-			 * standard (Kl counts one word); in a plain call a Kl
-			 * argument takes two GPRs as before.  8-byte varargs
-			 * (Kd) start at an even word so the libc's 8-byte-aligned
-			 * va_arg reads line up. */
-			if (c->va >= 0)
-				need = (k == Kd) ? 2 : 1;
-			else
+			 * In a plain call a Kl argument takes two GPRs (AAPCS).
+			 * In a variadic call every word follows the base standard:
+			 * named Kl parameters count ONE word (matching
+			 * arm32_selpar), while vararg 8-byte values — Kd (double)
+			 * and Kl (long long, and mcc's 8-byte pointer/long model)
+			 * — take TWO words and start at an even word so the
+			 * callee's 8-byte-aligned va_arg reads line up. */
+			if (c->isva[j]) {
+				need = (k == Kd || k == Kl) ? 2 : 1;
+				if (need == 2 && (g & 1))
+					g++;	/* even-align 8-byte values */
+			} else if (c->va >= 0) {
+				need = 1;	/* named arg of a variadic call */
+			} else {
 				need = (k == Kl) ? 2 : 1;
-			if (c->va >= 0 && k == Kd && (g & 1))
-				g++;	/* even-align 8-byte values */
+			}
 			if (c->isva[j] && g + need > 4) {
+				if (need == 2)
+					c->stack = (c->stack + 7) & -8;
 				c->stackoff[j] = c->stack;
 				c->stack += 4 * need;
 			} else if (g + need > 4) {
@@ -283,10 +299,17 @@ emit_call_args(Ins *call, int nargs, Fn *fn, struct Armcall *c, Ins *lim)
 			/* vararg float → GPR (vmov rN, sM) */
 			emit(Ocast, Kw, TMP(reg), argp->arg[0], R);
 		} else if (c->gp[j] >= 0 && k == Kl && c->isva[j]) {
-			/* pointer/long vararg: only the low word is passed.
-			 * (A named Kl in a plain call is a full 64-bit
-			 * argument in R0:R1 and falls through to the Ocopy
-			 * below.) */
+			/* vararg long long / pointer: the full 64-bit value
+			 * goes into the GPR pair R(g):R(g+1) (base-standard
+			 * word rules).  The Kl Ocopy to a machine register
+			 * pair loads the low/high halves from the source. */
+			emit(Ocopy, Kl, TMP(reg), argp->arg[0], R);
+		} else if (c->gp[j] >= 0 && k == Kl && c->va >= 0) {
+			/* Named Kl parameter of a variadic call: the base
+			 * standard packs it in ONE word (matching arm32_selpar),
+			 * so only the low word is passed.  Without this, the
+			 * Ocopy Kl below would clobber the successor GPR that a
+			 * later argument is packed into. */
 			emit(Ocopy, Kw, TMP(reg), argp->arg[0], R);
 		} else {
 			emit(Ocopy, k, TMP(reg), argp->arg[0], R);
@@ -315,9 +338,9 @@ emit_call_args(Ins *call, int nargs, Fn *fn, struct Armcall *c, Ins *lim)
 		} else if (k == Ks) {
 			emit(Ostores, Ks, R, argp->arg[0], addr);
 		} else if (k == Kl) {
-			Ref lo = newtmp("abi", Kw, fn);
-			emit(Ostorew, Kw, R, lo, addr);
-			emit(Ocopy, Kw, lo, argp->arg[0], R);
+			/* 8-byte vararg: Ostorel stores the full 64-bit value
+			 * (low word at addr, high word at addr+4). */
+			emit(Ostorel, Kl, R, argp->arg[0], addr);
 		} else {
 			emit(Ostorew, Kw, R, argp->arg[0], addr);
 		}
@@ -353,9 +376,9 @@ arm32_selvastart(Fn *fn, int ngp, Ref ap)
  *   new = loc + step
  *   store Kw, new, [ap]
  *
- * Word rules mirror the caller: 4-byte types step by 4; Kl (pointer/
- * long) reads 4 bytes zero-extended (mcc models it as 8); Kd aligns up
- * to 8 and reads 8. */
+ * Word rules mirror the caller: 4-byte types step by 4; 8-byte types
+ * (Kd double, Kl long long/pointer) align the read up to 8 and step
+ * by 8, reading the full 64-bit value. */
 static void
 arm32_selvaarg(Fn *fn, Ins *i)
 {
@@ -364,23 +387,19 @@ arm32_selvaarg(Fn *fn, Ins *i)
 
 	(void)fn;
 	loc = newtmp("abi", Kw, fn);
-	if (k == Kd) {
+	if (k == Kd || k == Kl) {
+		/* 8-byte vararg (double, or long long / mcc's 8-byte
+		 * pointer): the caller packs it in two words starting at
+		 * an even word, so round the read address up to 8 and
+		 * step by 8.  Oload Kd/Kl reads the full 8 bytes. */
 		Ref al = newtmp("abi", Kw, fn);
 		Ref t7 = newtmp("abi", Kw, fn);
 		newloc = newtmp("abi", Kw, fn);
 		emit(Ostorew, Kw, R, newloc, i->arg[0]);
 		emit(Oadd, Kw, newloc, al, getcon(8, fn));
-		emit(Oload, Kd, i->to, al, R);
+		emit(Oload, k, i->to, al, R);
 		emit(Oand, Kw, al, t7, getcon(-8, fn));
 		emit(Oadd, Kw, t7, loc, getcon(7, fn));
-		emit(Oload, Kw, loc, i->arg[0], R);
-	} else if (k == Kl) {
-		Ref lo = newtmp("abi", Kw, fn);
-		newloc = newtmp("abi", Kw, fn);
-		emit(Ostorew, Kw, R, newloc, i->arg[0]);
-		emit(Oadd, Kw, newloc, loc, getcon(4, fn));
-		emit(Oextuw, Kl, i->to, lo, R);
-		emit(Oload, Kw, lo, loc, R);
 		emit(Oload, Kw, loc, i->arg[0], R);
 	} else {
 		int step = KWIDE(k) ? 8 : 4;

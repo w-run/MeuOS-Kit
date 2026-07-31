@@ -113,6 +113,14 @@ check-loongarch64: $(BIN)
 check-i386: $(BIN)
 	sh test/i386/regress.sh ./$(BIN)
 
+# arm runtime regression: compiles and runs arm static binaries through
+# qemu-arm (user-mode).  Exercises AAPCS base-standard vararg
+# marshalling — 8-byte stack alignment and 64-bit Kl packing.  Requires
+# sysroot/arm, mt/as + mt/ld, and env/qemu/qemu-arm-static; skips
+# gracefully if any is absent.
+check-arm: $(BIN)
+	sh test/arm/regress.sh ./$(BIN)
+
 # i386 runtime regression: compiles and runs i386 static binaries that
 # exercise Kl decomposition (push/pop EAX fix), x87 floating-point,
 # time64/stat (64-bit time_t), and cross-function va_list.  Requires
@@ -230,7 +238,7 @@ check-sysroot-static: $(BIN)
 # Compatibility alias for existing scripts.
 check-la64: check-loongarch64
 
-.PHONY: all clean check check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community
+.PHONY: all clean check check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community
 
 # chibicc community functional test suite (C11/C23 conformance).
 # Runs test/community/chibicc/run.sh against the MeuOS sysroot.
