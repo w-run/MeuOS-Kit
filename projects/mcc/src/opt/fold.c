@@ -151,7 +151,7 @@ foldint(Con *res, int op, int w, Con *cl, Con *cr)
 	return 0;
 }
 
-static void
+static int
 foldflt(Con *res, int op, int w, Con *cl, Con *cr)
 {
 	float xs, ls, rs;
@@ -168,7 +168,7 @@ foldflt(Con *res, int op, int w, Con *cl, Con *cr)
 		case Oadd: xd = ld + rd; break;
 		case Osub: xd = ld - rd; break;
 		case Oneg: xd = -ld; break;
-		case Odiv: if (rd == 0.0) return; xd = ld / rd; break;
+		case Odiv: if (rd == 0.0) return 1; xd = ld / rd; break;
 		case Omul: xd = ld * rd; break;
 		case Oswtof: xd = (int32_t)cl->bits.i; break;
 		case Ouwtof: xd = (uint32_t)cl->bits.i; break;
@@ -187,7 +187,7 @@ foldflt(Con *res, int op, int w, Con *cl, Con *cr)
 		case Oadd: xs = ls + rs; break;
 		case Osub: xs = ls - rs; break;
 		case Oneg: xs = -ls; break;
-		case Odiv: if (rs == 0.0f) return; xs = ls / rs; break;
+		case Odiv: if (rs == 0.0f) return 1; xs = ls / rs; break;
 		case Omul: xs = ls * rs; break;
 		case Oswtof: xs = (int32_t)cl->bits.i; break;
 		case Ouwtof: xs = (uint32_t)cl->bits.i; break;
@@ -200,6 +200,7 @@ foldflt(Con *res, int op, int w, Con *cl, Con *cr)
 		res->bits.s = xs;
 		res->flt = 1;
 	}
+	return 0;
 }
 
 static Ref
@@ -211,8 +212,8 @@ opfold(int op, int cls, Con *cl, Con *cr, Fn *fn)
 	if (cls == Kw || cls == Kl) {
 		if (foldint(&c, op, cls == Kl, cl, cr))
 			return R;
-	} else
-		foldflt(&c, op, cls == Kd, cl, cr);
+	} else if (foldflt(&c, op, cls == Kd, cl, cr))
+		return R;
 	if (!KWIDE(cls))
 		c.bits.i &= 0xffffffff;
 	r = newcon(&c, fn);

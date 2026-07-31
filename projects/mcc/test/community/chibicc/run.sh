@@ -18,7 +18,15 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 MCC="$ROOT/projects/mcc/mcc"
-SYS="$ROOT/sysroot"
+# Sysroot layout is multiarch (sysroot/<arch>); prefer the explicit env var
+# (MEUOS_SYSROOT=/path/to/sysroot/<arch>) and fall back to the repo default.
+if [ -n "${MEUOS_SYSROOT:-}" ] && [ -d "$MEUOS_SYSROOT/usr/include" ]; then
+  SYS="$MEUOS_SYSROOT"
+elif [ -d "$ROOT/sysroot/x86_64" ]; then
+  SYS="$ROOT/sysroot/x86_64"
+else
+  SYS="$ROOT/sysroot"
+fi
 DIR="$SCRIPT_DIR"
 ADAPT="$DIR/assert_adapt.c"
 LOG="$DIR/results.log"
