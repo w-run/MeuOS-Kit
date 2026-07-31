@@ -242,6 +242,15 @@ seladdr(Ref *r, Num *tn, Fn *fn)
 			emit(Oextuw, Kw, r1, r0, R);
 			r0 = r1;
 			*r = r1;
+			/* r1 is a freshly-allocated temp; the Num[] tree was
+			 * computed by anumber() for the original block IR and
+			 * does not cover it, so amatch() below would index
+			 * tn[r1.val] out of bounds (newtmp grew fn->ntmp past
+			 * the array size allocated in i386_isel()).  The
+			 * truncated value is a plain 32-bit address with no
+			 * add/sub structure worth folding, so leave *r as r1
+			 * and bail out. */
+			return;
 		}
 		memset(&a, 0, sizeof a);
 		if (!amatch(&a, tn, r0, fn))

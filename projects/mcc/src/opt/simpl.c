@@ -11,7 +11,7 @@ blit(Ref sd[2], int sz, Fn *fn)
 		{ Ostoreb, Oloadub, Kw, 1 }
 	};
 	Ref r, r1, ro;
-	int off, fwd, n;
+	int off, fwd, n, ac;
 
 	fwd = sz >= 0;
 	sz = abs(sz);
@@ -22,18 +22,28 @@ blit(Ref sd[2], int sz, Fn *fn)
 	 * struct copies decompose into 4-byte Kw moves (two per 8 bytes).
 	 * LP64 targets (amd64/arm64/rv64) keep the 8-byte fast path.
 	 * TODO: replace strcmp with a proper T.target_is_i386 flag. */
-	p = strcmp(T.name, "i386") == 0 ? tbl + 1 : tbl;
+	if (strcmp(T.name, "i386") == 0) {
+		p = tbl + 1;
+		/* i386 地址是 32 位（Kw），不是 Kl。若用 Oadd Kl 计算地址，
+		 * 源/目标地址若是带 slot 的 Kw temp（如 va_list 参数），
+		 * fixarg 的 k==Kl 分支会放行带 slot 的 Kw temp，触发
+		 * i386_isel.c sel() 尾部断言。地址运算必须用 Kw。 */
+		ac = Kw;
+	} else {
+		p = tbl;
+		ac = Kl;
+	}
 	for (; sz; p++)
 		for (n=p->size; sz>=n; sz-=n) {
 			off -= fwd ? n : 0;
-			r = newtmp("blt", Kl, fn);
-			r1 = newtmp("blt", Kl, fn);
+			r = newtmp("blt", p->cls, fn);
+			r1 = newtmp("blt", ac, fn);
 			ro = getcon(off, fn);
 			emit(p->st, 0, R, r, r1);
-			emit(Oadd, Kl, r1, sd[1], ro);
-			r1 = newtmp("blt", Kl, fn);
+			emit(Oadd, ac, r1, sd[1], ro);
+			r1 = newtmp("blt", ac, fn);
 			emit(p->ld, p->cls, r, r1, R);
-			emit(Oadd, Kl, r1, sd[0], ro);
+			emit(Oadd, ac, r1, sd[0], ro);
 			off += fwd ? 0 : n;
 		}
 }
