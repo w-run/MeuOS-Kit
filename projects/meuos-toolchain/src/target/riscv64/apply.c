@@ -145,9 +145,11 @@ riscv64_apply_reloc(unsigned reloc_type, unsigned char *place,
 	}
 
 	case 38: /* R_RISCV_TPREL_ADD: rd = rd + tp (zero contribution in static link) */
+	case 32: /* GNU as TPREL_ADD (compat numbering for 38) */
 		return 0;
 
 	case 39: /* R_RISCV_TPREL_LO12_I: (S + A) & 0xFFF → I-type immediate */
+	case 30: /* GNU as TPREL_LO12_I (compat numbering for 39) */
 		delta = (int64_t)(S + (uint64_t)A);
 		set_bits(place, 31, 20, (uint32_t)(delta & 0xFFF) << 20);
 		return 0;
@@ -164,6 +166,7 @@ riscv64_apply_reloc(unsigned reloc_type, unsigned char *place,
 		return 0;
 
 	case 41: /* R_RISCV_TPREL_HI20: (S + A + 0x800) >> 12 → LUI imm20 */
+	case 29: /* GNU as TPREL_HI20 (compat numbering for 41) */
 		delta = (int64_t)(S + (uint64_t)A);
 		set_bits(place, 31, 12, (uint32_t)((delta + 0x800) >> 12) << 12);
 		return 0;
@@ -188,9 +191,6 @@ riscv64_apply_reloc(unsigned reloc_type, unsigned char *place,
 	/* R_RISCV_32_PCREL (53): 32-bit PC-relative offset */
 	/* R_RISCV_ADD32 (31): 32-bit addition for relaxation */
 	/* R_RISCV_SUB8 (34), SUB16 (35), SUB32 (36): subtraction for relaxation */
-	case 29: /* GCC: TPREL_HI20 (alt numbering) */
-	case 30: /* GCC: TPREL_LO12_I (alt numbering) */
-	case 32: /* GCC: TPREL_ADD (alt numbering) */
 	case 31: /* R_RISCV_ADD32 */
 	case 34: /* R_RISCV_SUB8 */
 	case 35: /* R_RISCV_SUB16 */

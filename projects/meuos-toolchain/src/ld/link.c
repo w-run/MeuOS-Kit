@@ -1950,12 +1950,90 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 		return ld_errorf(ctx, "unsupported relocation type", name);
 	}
 	if (strcmp(ctx->target->name, "riscv64") == 0) {
-		/* TLS LE relocations need TP-relative offset, not full VA */
-		if (type == 39 || type == 40 || type == 41) {
+		/* TLS LE relocations need TP-relative offset, not full VA.
+		 * Two numbering schemes appear in practice:
+		 *   - standard psABI: TPREL_ADD=38, TPREL_LO12_I=39,
+		 *     TPREL_LO12_S=40, TPREL_HI20=41 (mt/as emits these)
+		 *   - GNU as/binutils compatibility numbers: TPREL_HI20=29,
+		 *     TPREL_LO12_I=30, TPREL_ADD=32 (libc objects built with
+		 *     riscv64-linux-gnu-gcc emit these)
+		 * Both must resolve the symbol to its TP-relative offset. */
+		if (type == 38 || type == 39 || type == 40 || type == 41 ||
+		    type == 29 || type == 30 || type == 32) {
 			uint64_t tls_off;
 			if (symbol_tls_offset(ctx, object, symbol_index, &tls_off) != 0)
 				return ld_errorf(ctx, "unsupported TLS relocation", name);
 			resolved_value = tls_off;
+		}
+		/* R_RISCV_PCREL_LO12_I/S (24/25): the relocation references a
+		 * local label (.L0) placed on the paired auipc instruction, not
+		 * the final symbol.  The low 12 bits must be computed from the
+		 * paired R_RISCV_PCREL_HI20 (23) relocation:
+		 *     lo12 = (S_hi + A_hi - P_hi) & 0xFFF
+		 * where P_hi is the auipc instruction address.  Without this,
+		 * the LO12 operand is wrong whenever the auipc position's low
+		 * 12 bits differ from the target symbol's. */
+		if (type == 24 || type == 25) {
+			struct mt_elf64_symbol lo_sym;
+			const char *lo_name;
+			uint64_t lo_sym_value = 0;
+			uint64_t p_hi = resolved_value;  /* .L0 解析地址 = auipc 位置 */
+			uint64_t p_off;
+			uint64_t n;
+			uint64_t hi_sym = 0;
+			int64_t hi_addend = 0;
+			int found = 0;
+			unsigned char *q;
+			/* The LO12 relocation's symbol is a local label (.L0)
+			 * placed on the paired auipc instruction; its value is the
+			 * auipc's offset within the source section.  Find the
+			 * R_RISCV_PCREL_HI20 (23) relocation at that same offset. */
+			if (get_symbol_by_index(ctx, object, symbol_index, &lo_sym,
+			                        &lo_name) == 0)
+				lo_sym_value = lo_sym.value;
+			p_off = lo_sym_value;
+			/* Scan the same relocation section for a PCREL_HI20 (23)
+			 * whose offset matches the auipc instruction. */
+			for (n = 0; n < reloc_section->size / reloc_section->entry_size; ++n) {
+				uint64_t roff, rinfo, rtype, rsym;
+				int64_t raddend;
+				if (object->elf_class == 1) {
+					q = (unsigned char *)(object->data + reloc_section->offset +
+					                      n * reloc_section->entry_size);
+					if (reloc_section->type == MT_SHT_RELA) {
+						roff = read32(q + 0);
+						rinfo = read32(q + 4);
+						raddend = (int32_t)read32(q + 8);
+					} else {
+						roff = read32(q + 0);
+						rinfo = read32(q + 4);
+						raddend = 0;
+					}
+					rtype = rinfo & 0xff;
+					rsym = rinfo >> 8;
+				} else {
+					q = (unsigned char *)(object->data + reloc_section->offset +
+					                      n * reloc_section->entry_size);
+					roff = read64(q + 0);
+					rinfo = read64(q + 8);
+					rtype = rinfo & 0xffffffffu;
+					rsym = rinfo >> 32;
+					raddend = (int64_t)read64(q + 16);
+				}
+				if (rtype == 23 && roff == p_off) {
+					hi_sym = rsym;
+					hi_addend = raddend;
+					found = 1;
+					break;
+				}
+			}
+			if (!found)
+				return ld_errorf(ctx, "PCREL_LO12 without paired HI20", name);
+			if (symbol_value(ctx, object, hi_sym, &value, &name) != 0)
+				return -1;
+			/* lo12 = (S_hi + A_hi - P_hi) & 0xFFF, where P_hi is the
+			 * resolved address of the .L0 label (the auipc position). */
+			resolved_value = value + (uint64_t)hi_addend - p_hi;
 		}
 		if (riscv64_apply_reloc(type, target->data + target_offset,
 		                         resolved_value, addend, place) == 0)

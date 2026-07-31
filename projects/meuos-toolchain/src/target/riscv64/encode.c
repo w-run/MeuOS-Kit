@@ -138,6 +138,7 @@ struct rv_op {
 	int64_t addend;
 	int mem_reg;      /* base register for mem operand */
 	const char *raw;  /* original token text (for reg/symbol ambiguity) */
+	char mod[16];     /* GAS relocation modifier: %hi/%lo/%tprel_hi/... */
 };
 
 static int
@@ -165,6 +166,7 @@ parse_operands(const char *text, struct rv_op ops[4], int *nops)
 		ops[*nops].addend = 0;
 		ops[*nops].mem_reg = -1;
 		ops[*nops].raw = tok;
+		ops[*nops].mod[0] = '\0';
 
 		/* GAS modifier form: %hi(sym) / %lo(sym). Must be checked
 		 * before the memory branch because it also contains '('. */
@@ -172,6 +174,11 @@ parse_operands(const char *text, struct rv_op ops[4], int *nops)
 			char *paren = strchr(tok, '(');
 			char *endp = strchr(tok, ')');
 			if (paren && endp && endp > paren) {
+				size_t modlen = (size_t)(paren - (tok + 1));
+				if (modlen >= sizeof(ops[*nops].mod))
+					modlen = sizeof(ops[*nops].mod) - 1;
+				memcpy(ops[*nops].mod, tok + 1, modlen);
+				ops[*nops].mod[modlen] = '\0';
 				*endp = '\0';
 				ops[*nops].kind = 4; /* symbol */
 				ops[*nops].sym = paren + 1;
@@ -458,8 +465,11 @@ riscv64_encode_insn(const struct mt_target *target,
 			return 0;
 		} else if (ops[1].kind == 4) {
 			emit32(out->bytes, u_type(0x37, (unsigned)ops[0].reg, 0));
-			set_fixup(out, 0, 4, 26 /* R_RISCV_HI20 */,
-			           ops[1].sym, ops[1].addend);
+			set_fixup(out, 0, 4,
+			          strcmp(ops[1].mod, "tprel_hi") == 0
+			              ? 41 /* R_RISCV_TPREL_HI20 */
+			              : 26 /* R_RISCV_HI20 */,
+			          ops[1].sym, ops[1].addend);
 			return 0;
 		}
 	}
@@ -488,8 +498,11 @@ riscv64_encode_insn(const struct mt_target *target,
 		} else if (ops[2].kind == 4) {
 			emit32(out->bytes, i_type(0x13, (unsigned)ops[0].reg, 0,
 			                          (unsigned)ops[1].reg, 0));
-			set_fixup(out, 0, 4, 24 /* R_RISCV_LO12_I */,
-			           ops[2].sym, ops[2].addend);
+			set_fixup(out, 0, 4,
+			          strcmp(ops[2].mod, "tprel_lo") == 0
+			              ? 39 /* R_RISCV_TPREL_LO12_I */
+			              : 27 /* R_RISCV_LO12_I */,
+			          ops[2].sym, ops[2].addend);
 			return 0;
 		}
 	}
@@ -504,7 +517,7 @@ riscv64_encode_insn(const struct mt_target *target,
 		} else if (ops[2].kind == 4) {
 			emit32(out->bytes, i_type(0x1B, (unsigned)ops[0].reg, 0,
 			                          (unsigned)ops[1].reg, 0));
-			set_fixup(out, 0, 4, 24 /* R_RISCV_LO12_I */,
+			set_fixup(out, 0, 4, 27 /* R_RISCV_LO12_I */,
 			           ops[2].sym, ops[2].addend);
 			return 0;
 		}
@@ -536,7 +549,7 @@ riscv64_encode_insn(const struct mt_target *target,
 		else if (ops[2].kind == 4) {
 			emit32(out->bytes, i_type(0x13, (unsigned)ops[0].reg, 4,
 			                          (unsigned)ops[1].reg, 0));
-			set_fixup(out, 0, 4, 24, ops[2].sym, ops[2].addend);
+			set_fixup(out, 0, 4, 27, ops[2].sym, ops[2].addend);
 		}
 		return 0;
 	}
@@ -547,7 +560,7 @@ riscv64_encode_insn(const struct mt_target *target,
 		else if (ops[2].kind == 4) {
 			emit32(out->bytes, i_type(0x13, (unsigned)ops[0].reg, 6,
 			                          (unsigned)ops[1].reg, 0));
-			set_fixup(out, 0, 4, 24, ops[2].sym, ops[2].addend);
+			set_fixup(out, 0, 4, 27, ops[2].sym, ops[2].addend);
 		}
 		return 0;
 	}
@@ -558,7 +571,7 @@ riscv64_encode_insn(const struct mt_target *target,
 		else if (ops[2].kind == 4) {
 			emit32(out->bytes, i_type(0x13, (unsigned)ops[0].reg, 7,
 			                          (unsigned)ops[1].reg, 0));
-			set_fixup(out, 0, 4, 24, ops[2].sym, ops[2].addend);
+			set_fixup(out, 0, 4, 27, ops[2].sym, ops[2].addend);
 		}
 		return 0;
 	}
@@ -617,6 +630,23 @@ riscv64_encode_insn(const struct mt_target *target,
 			imm = -imm;
 		emit32(out->bytes, i_type(w ? 0x1B : 0x13, (unsigned)ops[0].reg,
 		                          0, (unsigned)ops[1].reg, imm));
+		return 0;
+	}
+
+	/* TLS LE sequence: add rd, rd, tp, %tprel_add(sym)
+	 * GAS form has 4 operands: rd, rs1, tp, %tprel_add(sym).  The
+	 * R_RISCV_TPREL_ADD relocation contributes nothing in a static
+	 * link (the address is already tp-relative via the preceding
+	 * %tprel_hi), so emit a plain add rd, rs1, rs2 and record the
+	 * relocation for the linker to ignore. */
+	if (strcmp(mnemonic, "add") == 0 && nops == 4 &&
+	    ops[0].kind == 1 && ops[1].kind == 1 && ops[2].kind == 1 &&
+	    ops[3].kind == 4 && strcmp(ops[3].mod, "tprel_add") == 0) {
+		emit32(out->bytes, r_type(0x33, (unsigned)ops[0].reg, 0,
+		                          (unsigned)ops[1].reg,
+		                          (unsigned)ops[2].reg, 0x00));
+		set_fixup(out, 0, 4, 38 /* R_RISCV_TPREL_ADD */,
+		          ops[3].sym, ops[3].addend);
 		return 0;
 	}
 
@@ -754,7 +784,7 @@ try_fpsym:
 		if (is_load) {
 			if (ops[1].sym) {
 				emit32(out->bytes, i_type(op, regA, funct3, rs1, 0));
-				set_fixup(out, 0, 4, 24 /* R_RISCV_LO12_I */,
+				set_fixup(out, 0, 4, 27 /* R_RISCV_LO12_I */,
 				           ops[1].sym, ops[1].addend);
 			} else {
 				emit32(out->bytes, i_type(op, regA, funct3, rs1,
@@ -764,7 +794,7 @@ try_fpsym:
 			unsigned rs2 = regA;
 			if (ops[1].sym) {
 				emit32(out->bytes, s_type(op, funct3, rs1, rs2, 0));
-				set_fixup(out, 0, 4, 25 /* R_RISCV_LO12_S */,
+				set_fixup(out, 0, 4, 28 /* R_RISCV_LO12_S */,
 				           ops[1].sym, ops[1].addend);
 			} else {
 				emit32(out->bytes, s_type(op, funct3, rs1, rs2,
@@ -796,7 +826,7 @@ try_fpsym:
 		} else if (ops[2].kind == 4) {
 			emit32(out->bytes, i_type(0x67, (unsigned)ops[0].reg, 0,
 			                          (unsigned)ops[1].reg, 0));
-			set_fixup(out, 0, 4, 24, ops[2].sym, ops[2].addend);
+			set_fixup(out, 0, 4, 27, ops[2].sym, ops[2].addend);
 		}
 		return 0;
 	}
@@ -1305,7 +1335,7 @@ branch_fallthrough:
 		emit32(out->bytes + 4, i_type(0x13, rd, 0, rd, 0));  /* addi rd, rd, 0 */
 		set_fixup(out, 0, 4, 26 /* R_RISCV_HI20 */,
 		          ops[1].sym, ops[1].addend);
-		set_fixup2(out, 4, 4, 24 /* R_RISCV_LO12_I */,
+		set_fixup2(out, 4, 4, 27 /* R_RISCV_LO12_I */,
 		           ops[1].sym, ops[1].addend);
 		return 0;
 	}

@@ -63,7 +63,16 @@ __meuos_tls_init(char **environment)
 {
 	struct meuos_auxv *auxv;
 	struct meuos_phdr *headers = 0;
-	unsigned long entry_size = 0, count = 0, index;
+	/* NOTE: entry_size and count are accessed via pointers to force the
+	 * compiler to allocate them on the stack.  mcc's register allocator
+	 * (rega/spill) does not reliably spill temporary registers back to
+	 * the stack slot, causing the update to be lost when the register
+	 * is reused later in the loop (the same bug fixed for loongarch64
+	 * in commit ed49dbd).  The pointer indirection forces the compiler
+	 * to keep the stack slot up to date. */
+	unsigned long entry_value = 0, count_value = 0;
+	unsigned long *entry_size = &entry_value, *count = &count_value;
+	unsigned long index;
 	void *thread_pointer;
 
 	while (*environment)
@@ -71,13 +80,13 @@ __meuos_tls_init(char **environment)
 	auxv = (struct meuos_auxv *)(environment + 1);
 	for (; auxv->type != AT_NULL; ++auxv) {
 		if (auxv->type == AT_PHDR) headers = (struct meuos_phdr *)auxv->value;
-		else if (auxv->type == AT_PHENT) entry_size = auxv->value;
-		else if (auxv->type == AT_PHNUM) count = auxv->value;
+		else if (auxv->type == AT_PHENT) *entry_size = auxv->value;
+		else if (auxv->type == AT_PHNUM) *count = auxv->value;
 	}
-	if (!headers || entry_size != sizeof(*headers))
+	if (!headers || *entry_size != sizeof(*headers))
 		return 0;
-	for (index = 0; index < count; ++index) {
-		struct meuos_phdr *header = (struct meuos_phdr *)((char *)headers + index * entry_size);
+	for (index = 0; index < *count; ++index) {
+		struct meuos_phdr *header = (struct meuos_phdr *)((char *)headers + index * *entry_size);
 		if (header->type != PT_TLS)
 			continue;
 		if (!header->memory_size || !header->alignment || (header->alignment & (header->alignment - 1)))
