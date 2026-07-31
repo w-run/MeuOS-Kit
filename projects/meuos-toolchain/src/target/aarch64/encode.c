@@ -1150,18 +1150,27 @@ aarch64_encode_insn(const struct mt_target *target,
 		return 0;
 	}
 
-	/* fmov rd, rn  (scalar float) — Rd[4:0], Rn[9:5] */
+	/* fmov rd, rn (scalar float, both float regs) — Rd[4:0], Rn[9:5];
+	 * also FMOV (general): core <-> float via w0..w30/x0..x30. */
 	if (strcmp(mnemonic, "fmov") == 0 && nops == 2 &&
 	    ops[0].kind == 'r' && ops[1].kind == 'r') {
 		int rd = ops[0].reg, rn = ops[1].reg;
-		int is_double = (ops[0].wreg == DREG);
-		emit32(out, &off, (is_double ? 0x1E604000 : 0x1E204000) |
+		int t0 = ops[0].wreg, t1 = ops[1].wreg;
+		uint32_t base;
+		if (t0 == DREG && t1 == XREG) base = 0x9E670000; /* fmov d, x */
+		else if (t0 == XREG && t1 == DREG) base = 0x9E660000; /* fmov x, d */
+		else if (t0 == SREG && t1 == WREG) base = 0x1E270000; /* fmov s, w */
+		else if (t0 == WREG && t1 == SREG) base = 0x1E260000; /* fmov w, s */
+		else if (t0 == DREG && t1 == DREG) base = 0x1E604000; /* fmov d, d */
+		else if (t0 == SREG && t1 == SREG) base = 0x1E204000; /* fmov s, s */
+		else return -1;
+		emit32(out, &off, base |
 		       (((unsigned)rn & 0x1F) << 5) | ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
-	/* fadd/fsub/fmul/fdiv/fsqrt: only scalar double for now
-	 * — Rd[4:0], Rn[9:5], Rm[20:16] */
+	/* fadd/fsub/fmul/fdiv/fsqrt scalar: Rd[4:0], Rn[9:5], Rm[20:16].
+	 * Bit 22 (M=0/sf) selects precision: 0=.s single, 1=.d double. */
 	if ((strcmp(mnemonic, "fadd") == 0 || strcmp(mnemonic, "fsub") == 0 ||
 	     strcmp(mnemonic, "fmul") == 0 || strcmp(mnemonic, "fdiv") == 0) &&
 	    nops == 3 && ops[0].kind == 'r' && ops[1].kind == 'r' && ops[2].kind == 'r') {
@@ -1170,6 +1179,7 @@ aarch64_encode_insn(const struct mt_target *target,
 		else if (strcmp(mnemonic, "fsub") == 0) base = 0x1E603800;
 		else if (strcmp(mnemonic, "fmul") == 0) base = 0x1E600800;
 		else base = 0x1E601800;
+		if (ops[0].wreg == SREG) base &= ~0x400000u; /* single precision */
 		int rd = ops[0].reg, rn = ops[1].reg, rm = ops[2].reg;
 		emit32(out, &off, base |
 		       (((unsigned)rm & 0x1F) << 16) |
@@ -1178,11 +1188,17 @@ aarch64_encode_insn(const struct mt_target *target,
 		return 0;
 	}
 
-	/* fneg rd, rn — Rd[4:0], Rn[9:5] */
-	if (strcmp(mnemonic, "fneg") == 0 && nops == 2 &&
+	/* fneg/fabs/fsqrt rd, rn — Rd[4:0], Rn[9:5] */
+	if ((strcmp(mnemonic, "fneg") == 0 || strcmp(mnemonic, "fabs") == 0 ||
+	     strcmp(mnemonic, "fsqrt") == 0) && nops == 2 &&
 	    ops[0].kind == 'r' && ops[1].kind == 'r') {
+		uint32_t base;
+		if (strcmp(mnemonic, "fneg") == 0) base = 0x1E614000;
+		else if (strcmp(mnemonic, "fabs") == 0) base = 0x1E60C000;
+		else base = 0x1E61C000;
+		if (ops[0].wreg == SREG) base &= ~0x400000u; /* single precision */
 		int rd = ops[0].reg, rn = ops[1].reg;
-		emit32(out, &off, 0x1E614000 |
+		emit32(out, &off, base |
 		       (((unsigned)rn & 0x1F) << 5) | ((unsigned)rd & 0x1F));
 		return 0;
 	}
@@ -1564,12 +1580,16 @@ aarch64_encode_insn(const struct mt_target *target,
 		return 0;
 	}
 
-	/* fcmpe rn, rm — Rn[9:5], Rm[20:16]; the E bit (quiet) is bit 4.
-	 * Verified against GNU as: fcmpe d0, d1 = 0x1E612010. */
-	if (strcmp(mnemonic, "fcmpe") == 0 && nops == 2 &&
-	    ops[0].kind == 'r' && ops[1].kind == 'r') {
+	/* fcmp/fcmpe rn, rm — Rn[9:5], Rm[20:16]; E bit (quiet) is bit 4.
+	 * Verified against GNU as: fcmpe d0, d1 = 0x1E612010,
+	 *                          fcmpe s0, s1 = 0x1E212010,
+	 *                          fcmp  d0, d1 = 0x1E612000. */
+	if ((strcmp(mnemonic, "fcmpe") == 0 || strcmp(mnemonic, "fcmp") == 0) &&
+	    nops == 2 && ops[0].kind == 'r' && ops[1].kind == 'r') {
 		int rn = ops[0].reg, rm = ops[1].reg;
-		emit32(out, &off, 0x1E602010 |
+		uint32_t base = strcmp(mnemonic, "fcmpe") == 0 ? 0x1E602010 : 0x1E602000;
+		if (ops[0].wreg == SREG) base &= ~0x400000u; /* single precision */
+		emit32(out, &off, base |
 		       (((unsigned)rm & 0x1F) << 16) |
 		       (((unsigned)rn & 0x1F) << 5));
 		return 0;
