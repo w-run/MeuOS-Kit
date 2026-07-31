@@ -279,6 +279,14 @@ mz_compress_lz77(const void *input, size_t inlen, void **result, size_t *result_
                     if (in[ip + _vi] != in[ip - match_off + _vi]) { _ok = 0; break; }
                 }
                 if (!_ok) {
+                    /* Fallback literal emission writes up to 2 bytes per
+                     * literal (0x81 escape marker + value), for at most
+                     * `len` literals.  Bound the whole sequence up front
+                     * so a degenerate input cannot overflow the output
+                     * buffer mid-loop. */
+                    if (op + 2 * (size_t)len > max_out) {
+                        free(out); return MZ_ERR_STREAM;
+                    }
                     for (int _lj = 0; _lj < len && ip < inlen; _lj++) {
                         unsigned char _bv = in[ip];
                         if (_bv >= 128) { out[op++] = 0x81; }
