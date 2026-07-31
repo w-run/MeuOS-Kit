@@ -309,6 +309,14 @@ loadaddr(Con *c, char *rn, E *e)
 		if (T.apple)
 			s = "\tadrp\tR, S@gotpageO\n"
 			    "\tldr\tR, [R, S@gotpageoffO]\n";
+		else if (!T.pic)
+			/* Static (non-PIC) linking: load the symbol's absolute
+			 * address directly, like the SGlo case.  The GOT form
+			 * (adrp :got:S + ldr) needs a mapped GOT section, which
+			 * static executables lack — the GOT slot lands outside
+			 * every LOAD segment and the access faults (SIGSEGV). */
+			s = "\tadrp\tR, SO\n"
+			    "\tadd\tR, R, #:lo12:SO\n";
 		else
 			s = "\tadrp\tR, :got:SO\n"
 			    "\tldr\tR, [R, #:got_lo12:SO]\n";
