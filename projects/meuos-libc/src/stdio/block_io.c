@@ -21,6 +21,8 @@ fread(void *ptr, size_t size, size_t count, FILE *stream)
 		errno = EBADF;
 		return 0;
 	}
+	if (size == 0)
+		return 0;	/* 避免返回 done / size 时 0/0 除零 */
 	while (done < total) {
 		int c = getc(stream);
 

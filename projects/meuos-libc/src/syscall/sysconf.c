@@ -3,14 +3,17 @@
 #include "../internal/syscall.h"
 #define LINUX_SYS_SYSCONF 158
 
+/* 注意：case 值必须与 include/unistd.h 中的 _PC_* / _SC_* 常量严格一致。
+ * 此前 case 编号与常量错位两号，导致 sysconf(_SC_ARG_MAX) 落入 default
+ * 返回 EINVAL、sysconf(_SC_PAGESIZE) 返回 1 等错误结果。 */
 long pathconf(const char *path, int name) {
 	(void)path;
 	switch (name) {
-	case 1: return 256;   /* _PC_LINK_MAX */
-	case 4: return 255;   /* _PC_NAME_MAX */
-	case 5: return 4096;  /* _PC_PATH_MAX */
-	case 6: return 4096;  /* _PC_PIPE_BUF */
-	case 7: return 8;     /* _PC_CHOWN_RESTRICTED */
+	case _PC_LINK_MAX: return 256;
+	case _PC_NAME_MAX: return 255;
+	case _PC_PATH_MAX: return 4096;
+	case _PC_PIPE_BUF: return 4096;
+	case _PC_CHOWN_RESTRICTED: return 8;
 	default: errno = EINVAL; return -1;
 	}
 }
@@ -19,21 +22,20 @@ long fpathconf(int fd, int name) { return pathconf("", name); }
 
 long sysconf(int name) {
 	switch (name) {
-	case 2: return 256;   /* _SC_ARG_MAX */
-	case 3: return 256;   /* _SC_CHILD_MAX */
-	case 4: return 64;    /* _SC_CLK_TCK */
-	case 5: return 8192;  /* _SC_NGROUPS_MAX */
-	case 6: return 256;   /* _SC_OPEN_MAX */
-	case 7: return 1;     /* _SC_JOB_CONTROL */
-	case 8: return 1;     /* _SC_SAVED_IDS */
-	case 9: return 1;     /* _SC_VERSION */
-	case 10: return 1;    /* _SC_STREAMS */
-	case 11: return 1;    /* _SC_TZNAME */
-	case 12: return 1;    /* _SC_PAGESIZE / _SC_PAGE_SIZE */
-	case 13: return 4096; /* _SC_PAGESIZE */
-	case 14: return 2;    /* _SC_PHYS_PAGES fallback */
-	case 24: return 4096; /* _SC_GETPW_R_SIZE_MAX */
-	case 39: return 1;    /* _SC_ATEXIT_MAX */
+	case _SC_ARG_MAX: return 256;
+	case _SC_CHILD_MAX: return 256;
+	case _SC_CLK_TCK: return 64;
+	case _SC_NGROUPS_MAX: return 8192;
+	case _SC_OPEN_MAX: return 256;
+	case _SC_JOB_CONTROL: return 1;
+	case _SC_SAVED_IDS: return 1;
+	case _SC_VERSION: return 1;
+	case _SC_TZNAME: return 1;
+	case _SC_PAGESIZE: return 4096;
+	case _SC_PHYS_PAGES: return 2;
+	case _SC_GETPW_R_SIZE_MAX: return 4096;
+	case _SC_ATEXIT_MAX: return 1;
+	case _SC_NPROCESSORS_ONLN: return 1;
 	default: errno = EINVAL; return -1;
 	}
 }

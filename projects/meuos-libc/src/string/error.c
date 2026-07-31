@@ -45,8 +45,13 @@ strerror_r(int error, char *buf, size_t buflen)
 	const char *msg = strerror(error);
 	size_t len = strlen(msg) + 1;
 	if (len > buflen) {
-		memcpy(buf, msg, buflen - 1);
-		buf[buflen - 1] = '\0';
+		/* buflen == 0 时 buflen - 1 会下溢成 SIZE_MAX 导致巨量越界写。
+		 * buflen > 0 时尽量截断：写 buflen-1 个字符并补 NUL。 */
+		if (buflen > 0) {
+			if (buflen > 1)
+				memcpy(buf, msg, buflen - 1);
+			buf[buflen - 1] = '\0';
+		}
 		return ERANGE;
 	}
 	memcpy(buf, msg, len);

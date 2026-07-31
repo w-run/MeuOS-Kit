@@ -12,9 +12,14 @@
  * discipline used by established libcs while keeping this implementation
  * independent and auditable.
  */
+/* struct 总大小必须为 16 的倍数（max_align_t 对齐要求）：
+ * 否则每次 sbrk 增量 sizeof(*block)+size 非 16 倍数，block+1（用户区）
+ * 会落在 8 字节对齐地址上，__int128/long double 等类型将未对齐。
+ * reserved 显式填充 24 -> 32 字节。 */
 struct allocation {
 	size_t size;
 	int available;
+	size_t reserved;
 	struct allocation *next;
 };
 
