@@ -303,8 +303,17 @@ copyref(Fn *fn, Blk *b, Ins *i)
 	int64_t v;
 	int w, z;
 
-	if (i->op == Ocopy)
+	if (i->op == Ocopy) {
+		/* Copies whose destination is a physical register (e.g. the
+		 * argument-register moves emitted by selcall, or ABI-lowering
+		 * Ocopy TMP(RAX),...) must NOT be propagated: the value must
+		 * physically reach that register, and after propagation rega
+		 * would have no hint to put it there (the call/ABI convention
+		 * is implicit, not an IR use).  Keep such copies intact. */
+		if (rtype(i->to) == RTmp && i->to.val < Tmp0)
+			return R;
 		return i->arg[0];
+	}
 
 	/* op identity value */
 	if (optab[i->op].hasid

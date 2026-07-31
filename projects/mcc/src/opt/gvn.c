@@ -274,10 +274,17 @@ dedupins(Fn *fn, Blk *b, Ins *i)
 		killins(fn, i, r);
 		return;
 	}
-	i1 = gvndup(i, 1);
-	if (i1) {
-		killins(fn, i, i1->to);
-		return;
+	/* Copies whose destination is a physical register (argument-register
+	 * moves from selcall, ABI-lowered Ocopy to RAX, ...) must not be
+	 * deduplicated: they are per-call register assignments whose target
+	 * register must be populated every time.  Dropping one leaves the
+	 * call/ABI register unset. */
+	if (!(i->op == Ocopy && rtype(i->to) == RTmp && i->to.val < Tmp0)) {
+		i1 = gvndup(i, 1);
+		if (i1) {
+			killins(fn, i, i1->to);
+			return;
+		}
 	}
 }
 

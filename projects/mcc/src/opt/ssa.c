@@ -254,7 +254,11 @@ rendef(Ref *r, Blk *b, Name **stk, Fn *fn)
 	int t;
 
 	t = r->val;
-	if (req(*r, R) || !fn->tmp[t].visit)
+	/* Physical registers (argument-register moves from selcall,
+	 * ABI-lowered Ocopy to RAX, ...) are not SSA temporaries and must
+	 * never be renamed: renaming would detach the value from the
+	 * register the calling convention requires it in. */
+	if (req(*r, R) || t < Tmp0 || !fn->tmp[t].visit)
 		return;
 	r1 = refindex(t, fn);
 	fn->tmp[r1.val].visit = t;
@@ -295,6 +299,7 @@ renblk(Blk *b, Name **stk, Fn *fn)
 		for (m=0; m<2; m++) {
 			t = i->arg[m].val;
 			if (rtype(i->arg[m]) == RTmp)
+			if (t >= Tmp0)
 			if (fn->tmp[t].visit)
 				i->arg[m] = getstk(t, b, stk);
 		}
@@ -302,6 +307,7 @@ renblk(Blk *b, Name **stk, Fn *fn)
 	}
 	t = b->jmp.arg.val;
 	if (rtype(b->jmp.arg) == RTmp)
+	if (t >= Tmp0)
 	if (fn->tmp[t].visit)
 		b->jmp.arg = getstk(t, b, stk);
 	succ[0] = b->s1;
