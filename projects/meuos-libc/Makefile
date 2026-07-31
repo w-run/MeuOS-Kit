@@ -148,7 +148,7 @@ STDIO_OBJS     := $(BUILD)/stdio/file.o $(BUILD)/stdio/char_io.o \
                   $(BUILD)/stdio/popen.o
 SYSCALL_OBJS   := $(addprefix $(BUILD)/syscall/, \
                   read.o write.o open.o close.o fork.o execve.o exit.o \
-                  mmap.o munmap.o brk.o stat.o fstat.o lstat.o lseek.o \
+                  mmap.o munmap.o mprotect.o brk.o stat.o fstat.o lstat.o lseek.o \
                   getpid.o gettid.o getcwd.o chdir.o \
                   dup.o dup2.o pipe.o waitpid.o wait.o wait4.o nanosleep.o \
                   clock_gettime.o getdents64.o socketcall.o chmod.o fchmod.o \
