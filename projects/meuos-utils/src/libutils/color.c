@@ -4,6 +4,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "meuos/color.h"
@@ -95,4 +96,14 @@ const char *color_named(int c) {
 
 const char *color_reset(void) {
     return color_is_on() ? "\033[0m" : "";
+}
+
+const char *color_for_mode(mode_t m) {
+    if (S_ISDIR(m))  return color_named(4);
+    if (S_ISLNK(m))  return color_named(6);
+    if (S_ISSOCK(m)) return color_named(5);
+    if (S_ISFIFO(m)) return color_named(3);
+    if (S_ISBLK(m) || S_ISCHR(m)) return color_named(3);
+    if ((m & S_IXUSR) || (m & S_IXGRP) || (m & S_IXOTH)) return color_named(2);
+    return color_named(7);
 }

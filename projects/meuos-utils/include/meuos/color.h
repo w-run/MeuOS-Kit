@@ -57,6 +57,11 @@ const char *color_reset(void);
 #define STYLE_UNDERLINE    "\033[4m"
 #define STYLE_INVERT       "\033[7m"
 
+#include <sys/types.h>  /* mode_t */
+
+/* 按 st_mode 选色：文件/目录/链接/可执行等 */
+const char *color_for_mode(mode_t m);
+
 /* MeuOS 默认主题色板 */
 #define MEUOS_THEME_FG          color_named(7)       /* 主文本 */
 #define MEUOS_THEME_ACCENT      color_named(2)       /* 绿色：MeuOS 主调 */

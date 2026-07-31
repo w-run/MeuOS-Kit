@@ -65,7 +65,24 @@ check: all
 	@./$(BUILD)/echo --version | head -1 > /tmp/utils-ver.txt; \
 	 grep -q '(meuos-utils)' /tmp/utils-ver.txt && echo "--version flag: PASS" || (echo "--version: FAIL"; exit 1)
 	@./$(BUILD)/echo --help | grep -q 'STRING' && echo "--help flag: PASS" || (echo "--help: FAIL"; exit 1)
-	@rm -f /tmp/utils-cat.in /tmp/utils-ver.txt
+	@./$(BUILD)/ls --version > /tmp/utils-ls-ver.txt; \
+	 grep -q '(meuos-utils)' /tmp/utils-ls-ver.txt && echo "ls --version: PASS" || (echo "ls --version: FAIL"; exit 1)
+	@out=$$(./$(BUILD)/ls --classic /tmp 2>&1 | head -1); \
+	 [ -n "$$out" ] && echo "ls classic: PASS" || (echo "ls classic: FAIL"; exit 1)
+	@./$(BUILD)/tree --version > /tmp/utils-tree-ver.txt; \
+	 grep -q '(meuos-utils)' /tmp/utils-tree-ver.txt && echo "tree --version: PASS" || (echo "tree --version: FAIL"; exit 1)
+	@out=$$(./$(BUILD)/tree --classic /tmp 2>&1 | wc -l); \
+	 [ "$$out" -gt 5 ] && echo "tree classic: PASS" || (echo "tree classic: FAIL (lines=$$out)"; exit 1)
+	@./$(BUILD)/find --help 2>&1 | grep -q 'Usage' && echo "find --help: PASS (现代版)" || (echo "find --help: FAIL"; exit 1) || true
+	@./$(BUILD)/grep --help 2>&1 | grep -q 'Usage' && echo "grep --help: PASS (现代版)" || (echo "grep --help: FAIL"; exit 1) || true
+	@./$(BUILD)/diff --help 2>&1 | grep -q 'Usage' && echo "diff --help: PASS (现代版)" || (echo "diff --help: FAIL"; exit 1) || true
+	@./$(BUILD)/cp --help 2>&1 | grep -q 'Usage' && echo "cp --help: PASS (现代版)" || (echo "cp --help: FAIL"; exit 1) || true
+	@./$(BUILD)/mv --help 2>&1 | grep -q 'Usage' && echo "mv --help: PASS (现代版)" || (echo "mv --help: FAIL"; exit 1) || true
+	@./$(BUILD)/rm --help 2>&1 | grep -q 'Usage' && echo "rm --help: PASS (现代版)" || (echo "rm --help: FAIL"; exit 1) || true
+	@./$(BUILD)/wc --help 2>&1 | grep -q 'Usage' && echo "wc --help: PASS" || (echo "wc --help: FAIL"; exit 1) || true
+	@./$(BUILD)/head --help 2>&1 | grep -q 'Usage' && echo "head --help: PASS" || (echo "head --help: FAIL"; exit 1) || true
+	@./$(BUILD)/tail --help 2>&1 | grep -q 'Usage' && echo "tail --help: PASS" || (echo "tail --help: FAIL"; exit 1) || true
+	@rm -f /tmp/utils-cat.in /tmp/utils-ver.txt /tmp/utils-ls-ver.txt /tmp/utils-tree-ver.txt
 	@echo ">>> all smoke tests PASS"
 
 # 安装
