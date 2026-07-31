@@ -156,6 +156,14 @@ int mz_solid_add(struct mz_solid_ctx *ctx, const void *data, size_t len,
     uint8_t *out = (uint8_t *)output;
     size_t op = 0;
 
+    /* 每个文件独立压缩：重置哈希链，使匹配只引用当前文件内已编码字节，
+     * 与解压侧 mz_decompress_lz77 的独立窗口语义一致。
+     * （此前 head/chain 跨文件保留，压缩侧可能引用前一文件字节——偏移
+     *  超出解压方独立窗口 → 数据损坏/越界读。） */
+    memset(ctx->chain, 0, sizeof(ctx->chain));
+    memset(ctx->head, 0xFF, sizeof(ctx->head));
+    ctx->win_pos = 0;
+
     /* 写入 "mZ" 流头：magic(2B) + 未压缩大小(4B LE) */
     out[op++] = 'm';
     out[op++] = 'Z';
@@ -171,7 +179,11 @@ int mz_solid_add(struct mz_solid_ctx *ctx, const void *data, size_t len,
         int match_len;
         size_t match_off;
 
-        if (find_match(ctx, ip, in, len, &match_len, &match_off)) {
+        if (find_match(ctx, ip, in, len, &match_len, &match_off) &&
+            /* 同 mz_lz77.c：偏移 0x200-0x3FF 的 match token 首字节为 0x81，
+             * 与转义字面量标记冲突，解码器无法区分 → 数据损坏。此类匹配
+             * 退化为字面量。 */
+            !(match_off >= 0x200 && match_off <= 0x3FF)) {
             /* Lazy matching: for levels >= 4, check if the NEXT position
              * has a longer match. */
             if (use_lazy && ip + 1 < len && ip + 2 < len) {

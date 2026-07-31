@@ -241,7 +241,11 @@ mz_compress_lz77(const void *input, size_t inlen, void **result, size_t *result_
         int match_len;
         size_t match_off;
 
-        if (mz_find(&state, ip, in, inlen, &match_len, &match_off, 1)) {
+        if (mz_find(&state, ip, in, inlen, &match_len, &match_off, 1) &&
+            /* 偏移 0x200-0x3FF 时 match token 首字节为 0x81，与转义字面量
+             * 标记 (0x81 <val>) 冲突，解码器无法区分 → 数据损坏。此类匹配
+             * 退化为字面量（字面量编码无歧义）。 */
+            !(match_off >= 0x200 && match_off <= 0x3FF)) {
             /* Lazy matching: for levels >= 4, check if the NEXT position
              * has a longer match.  If yes, emit current byte as literal
              * and let the next iteration handle the better match. */

@@ -216,7 +216,38 @@ int main(void)
         free(text);
     }
 
-        /* Test 6: Error handling */
+    /* Test 5c: v2 match-token 0x81 冲突回归
+     *
+     * v2 match token 偏移 0x200-0x3FF 时首字节为 0x81，与转义字面量标记
+     * (0x81 <val>) 冲突，解码器会将其误判为转义字面量 → 数据损坏（提前
+     * 命中结束标记 / 内容错乱）。压缩侧已避免编码该偏移范围的匹配；
+     * 本测试用周期 600 的数据（匹配偏移恰落 0x200-0x3FF）确保各压缩级别
+     * 均能完整往返。 */
+    {
+        const size_t sz = 3000;
+        const size_t period = 600;   /* 匹配偏移 = 600 ∈ [512,1023] */
+        uint8_t *data = (uint8_t *)malloc(sz);
+        for (size_t i = 0; i < sz; i++)
+            data[i] = (uint8_t)(i % period);
+
+        for (int lv = 1; lv <= 9; lv++) {
+            void *c = NULL; size_t cl = 0;
+            int r = mz_compress(data, sz, &c, &cl, MZ_CODEC_LZ77, lv);
+            TEST("0x81-collision: compress ok", r > 0);
+            if (r > 0) {
+                void *d = NULL; size_t dl = 0;
+                r = mz_decompress(c, cl, &d, &dl, MZ_CODEC_LZ77);
+                TEST("0x81-collision: roundtrip len", r > 0 && dl == sz);
+                TEST("0x81-collision: roundtrip data",
+                     r > 0 && dl == sz && memcmp(data, d, sz) == 0);
+                free(d);
+            }
+            free(c);
+        }
+        free(data);
+    }
+
+    /* Test 6: Error handling */
     uint8_t bad_data[4] = {0, 0, 0, 0};
     ret = mz_decompress(bad_data, 4, &decompressed, &decomp_len,
                         MZ_CODEC_LZ77);

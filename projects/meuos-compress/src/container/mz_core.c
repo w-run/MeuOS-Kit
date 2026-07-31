@@ -470,13 +470,15 @@ int mz2_read_file(void *ctx, const char *name, void **data, size_t *size)
         return MZ_ERR_DATA;
 
     if (blk_type == MZ_BLOCK_RAW) {
-        void *out = malloc(e->size ? e->size : 1);
+        /* 拷贝用实际块大小 blk_sz（前面已校验在文件范围内），而非文件表
+         * 中的 e->size，避免 e->size > blk_sz 时越界读。 */
+        void *out = malloc(blk_sz ? blk_sz : 1);
         if (!out)
             return MZ_ERR_MEMORY;
-        if (e->size)
-            memcpy(out, p + MZ2_BLOCK_HDR_LEN, e->size);
+        if (blk_sz)
+            memcpy(out, p + MZ2_BLOCK_HDR_LEN, blk_sz);
         *data = out;
-        *size = e->size;
+        *size = blk_sz;
         return MZ_OK;
     }
 
