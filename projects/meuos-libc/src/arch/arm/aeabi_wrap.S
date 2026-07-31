@@ -16,10 +16,12 @@
 .globl __aeabi_uldivmod
 .type __aeabi_uldivmod,%function
 __aeabi_uldivmod:
-	/* n(r0,r1), d(r2,r3), rem_ptr(r4) */
+	/* n(r0,r1), d(r2,r3); the remainder pointer (3rd C argument)
+	 * goes on the stack after the four register words. */
 	push	{r4, lr}
 	sub	sp, sp, #8		/* 8 bytes for remainder storage */
 	mov	r4, sp			/* rem ptr */
+	str	r4, [sp]		/* pass rem_ptr to udivmod64 */
 	bl	udivmod64		/* q in r0,r1; rem at [r4] */
 	ldr	r2, [r4]		/* rem low */
 	ldr	r3, [r4, #4]		/* rem high */
@@ -33,6 +35,7 @@ __aeabi_ldivmod:
 	push	{r4, lr}
 	sub	sp, sp, #8
 	mov	r4, sp
+	str	r4, [sp]		/* pass rem_ptr to divmod64 */
 	bl	divmod64		/* q in r0,r1; rem at [r4] */
 	ldr	r2, [r4]
 	ldr	r3, [r4, #4]

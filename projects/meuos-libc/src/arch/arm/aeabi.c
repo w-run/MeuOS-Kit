@@ -51,11 +51,13 @@ udivmod64(uint64_t n, uint64_t d, uint64_t *rem)
 	for (i = 63; i >= 0; i--) {
 		uint32_t carry = (nh >> 31) & 1;
 		/* Shift R left 1, bring in top bit of N */
-		rh = (rh << 1) | (nl >> 31);
+		rh = (rh << 1) | (rl >> 31);
 		rl = (rl << 1) | carry;
-		/* Shift N left 1 */
+		/* Shift N left 1.  nl's old top bit was moved to nh above, so
+		 * the uint32_t wrap discards exactly that bit; the next bit
+		 * (old bit 30) must survive to feed nh on the next iteration. */
 		nh = (nh << 1) | (nl >> 31);
-		nl = (nl << 1) & 0x7fffffff;  /* discard shifted-out bit (it went to carry and R) */
+		nl = nl << 1;
 		if (ge64(rl, rh, dl, dh)) {
 			sub64(&rl, &rh, dl, dh);
 			if (i >= 32)

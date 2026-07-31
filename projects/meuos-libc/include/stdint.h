@@ -15,8 +15,10 @@ typedef unsigned long long uint64_t;
 typedef int intptr_t;
 typedef unsigned int uintptr_t;
 #else
-typedef long int64_t;
-typedef unsigned long uint64_t;
+/* ARM (ILP32) has 32-bit long; on the 64-bit targets long is 64-bit,
+ * but long long is 64-bit everywhere, so use it for the 64-bit types. */
+typedef long long int64_t;
+typedef unsigned long long uint64_t;
 typedef long intptr_t;
 typedef unsigned long uintptr_t;
 #endif
@@ -34,8 +36,8 @@ typedef long int_fast16_t;
 typedef unsigned long uint_fast16_t;
 typedef long int_fast32_t;
 typedef unsigned long uint_fast32_t;
-typedef long int_fast64_t;
-typedef unsigned long uint_fast64_t;
+typedef long long int_fast64_t;
+typedef unsigned long long uint_fast64_t;
 
 #define SIZE_MAX ((size_t)-1)
 
