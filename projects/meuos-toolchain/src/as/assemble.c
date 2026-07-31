@@ -648,6 +648,13 @@ next_csv(char **cursor)
 	return trim(start);
 }
 
+/* Absolute (non-PC-relative) data relocation type for a symbol reference
+ * of the given byte width, for the active target.  x86_64 uses the
+ * generic MT_R_X86_64_* numbers; every other target uses its own ELF
+ * relocation numbering, so the data directive cannot hardcode x86_64. */
+static unsigned
+data_reloc_type(const struct mt_target *target, unsigned width);
+
 static int
 parse_data_value(struct as_file *as, struct as_section *section,
                  char *text, unsigned width)
@@ -682,13 +689,52 @@ parse_data_value(struct as_file *as, struct as_section *section,
 	}
 	if (as_emit_le(as, section, 0, width) != 0 ||
 	    as_add_fixup(as, section, offset, width,
-	               width == 8 ? MT_R_X86_64_64 : MT_R_X86_64_32,
+	               data_reloc_type(as->target, width),
 	               addend, symbol) != 0) {
 		free(symbol);
 		return -1;
 	}
 	free(symbol);
 	return 0;
+}
+
+/* Absolute (non-PC-relative) data relocation type for a symbol reference
+ * of the given byte width, for the active target.  x86_64 uses the
+ * generic MT_R_X86_64_* numbers; every other target uses its own ELF
+ * relocation numbering, so the data directive cannot hardcode x86_64. */
+static unsigned
+data_reloc_type(const struct mt_target *target, unsigned width)
+{
+	if (target && target->emachine == MT_EM_ARM) {
+		/* ELF32 ARM: .byte/.short/.long/.quad → ABS8/ABS16/ABS32.
+		 * .quad stores a zero-extended 32-bit address (low word). */
+		switch (width) {
+		case 1: return 8;  /* R_ARM_ABS8 */
+		case 2: return 5;  /* R_ARM_ABS16 */
+		case 4: return 2;  /* R_ARM_ABS32 */
+		case 8: return 2;  /* R_ARM_ABS32 (low word; high word is 0) */
+		}
+		return 2;
+	}
+	if (target && target->emachine == MT_EM_AARCH64) {
+		/* R_AARCH64_ABS64/ABS32 */
+		return width == 8 ? 257 : 258;
+	}
+	if (target && target->emachine == MT_EM_RISCV) {
+		return width == 8 ? 2 /* R_RISCV_64 */ : 1 /* R_RISCV_32 */;
+	}
+	if (target && target->emachine == MT_EM_LOONGARCH) {
+		return width == 8 ? 2 /* R_LARCH_64 */ : 1 /* R_LARCH_32 */;
+	}
+	if (target && target->emachine == MT_EM_386) {
+		switch (width) {
+		case 1: return 22; /* R_386_8 */
+		case 2: return 20; /* R_386_16 */
+		default: return 1; /* R_386_32 */
+		}
+	}
+	/* x86_64 (or unknown target): keep the historical numbers. */
+	return width == 8 ? MT_R_X86_64_64 : MT_R_X86_64_32;
 }
 
 static int
@@ -1633,12 +1679,13 @@ resolve_fixups(struct as_file *as, const int *section_map,
 		symbol = find_symbol(as, fix->symbol);
 		if (!symbol)
 			return as_error(as, "undefined internal symbol: %s", fix->symbol);
-		/* Only plain "value patch" relocations can be folded at assembly
-		 * time.  Every other relocation must go to the linker, which
-		 * knows how to re-encode the instruction bits (e.g. ARM branch
-		 * relocations need the offset stuffed into the 24-bit imm field;
-		 * LoongArch/AArch64/RISC-V relocs are all >= 64).  The numeric
-		 * constants collide across targets, so key off the machine. */
+		/* Only PC-relative relocations can be folded at assembly time
+		 * (the same-section offset delta is known).  Absolute data
+		 * relocations must always go to the linker: the section base
+		 * address is only known after layout, so folding `.quad sym`
+		 * to the section offset would yield 0 instead of the runtime
+		 * address of sym.  The numeric constants collide across
+		 * targets, so key off the machine. */
 		{
 			int is_x86 = as->target &&
 			             (as->target->emachine == MT_EM_X86_64 ||
@@ -1646,9 +1693,8 @@ resolve_fixups(struct as_file *as, const int *section_map,
 			int is_arm = as->target &&
 			             as->target->emachine == MT_EM_ARM;
 			int raw_resolvable =
-			    (is_x86 && (fix->type == 1 || fix->type == 2 ||
-			                fix->type == 4)) ||
-			    (is_arm && (fix->type == 2 || fix->type == 3));
+			    (is_x86 && (fix->type == 2 || fix->type == 4)) ||
+			    (is_arm && (fix->type == 3));
 			can_resolve = symbol->defined &&
 			              symbol->section == fix->section &&
 			              raw_resolvable;

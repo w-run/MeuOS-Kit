@@ -27,6 +27,22 @@ static void emit32(unsigned char *p, uint32_t v) {
 
 static void set_fixup(struct mt_insn *out, size_t offset, unsigned width,
                       unsigned type, const char *sym, int64_t addend) {
+	/* The symbol may carry a `+N`/`-N` offset suffix (mcc emits
+	 * `#:lower16:.Lstring.2+1` for address arithmetic).  Split it off
+	 * so the relocation applies to a plain symbol with an addend,
+	 * otherwise the linker cannot resolve `sym+1`. */
+	char buf[256];
+	if (sym) {
+		const char *p;
+		snprintf(buf, sizeof buf, "%s", sym);
+		for (p = buf; *p; ++p)
+			if ((*p == '+' || *p == '-') && p != buf) {
+				addend += strtoll(p, NULL, 0);
+				*(char *)p = '\0';
+				break;
+			}
+		sym = buf;
+	}
 	size_t len = sym ? strlen(sym) : 0;
 	out->fixup_offset = offset;
 	out->fixup_width = width;
@@ -48,6 +64,40 @@ static int reg_num(const char *s, int *r) {
 	if (s[0] == 's' && s[1]>='0' && s[1]<='9') { *r=16+(s[1]-'0'); return 1; }
 	if (s[0] == 'd' && s[1]>='0' && s[1]<='9') { int n = s[1]-'0'; if(s[2]>='0'&&s[2]<='9') n=n*10+s[2]-'0'; if(n>31)return -1; *r=n; return 1; }
 	return -1;
+}
+
+/* reg_num() returns 16+N for a single-precision register sN; convert
+ * back to the raw N used in VFP encodings. */
+static int sp_reg(int r) {
+	return (r >= 16 && r <= 47) ? r - 16 : r;
+}
+
+/* VFP double-precision register field encodings (Vd/Vn/Vm = d0-d31).
+ * D/N/M bits carry bit 4 of the register number. */
+static uint32_t
+dp_dst_field(int reg)
+{
+	return ((uint32_t)((reg >> 4) & 1) << 22) |
+	       ((uint32_t)(reg & 0xF) << 12);
+}
+static uint32_t
+dp_src_field(int reg)
+{
+	return ((uint32_t)((reg >> 4) & 1) << 5) |
+	       ((uint32_t)(reg & 0xF));
+}
+/* Single-precision register field encodings (s0-s31). */
+static uint32_t
+sp_dst_field(int reg)
+{
+	return ((uint32_t)(reg & 1) << 22) |
+	       ((uint32_t)(reg >> 1) << 12);
+}
+static uint32_t
+sp_src_field(int reg)
+{
+	return ((uint32_t)(reg & 1) << 5) |
+	       ((uint32_t)(reg >> 1));
 }
 
 /* ---- Helper: parse condition suffix from mnemonic like "addgt" -> ("add", 11) ---- */
@@ -81,7 +131,8 @@ static int parse_op_cond(const char *mnemonic, const char **base_out, int *cond_
 
 /* ---- Helper: parse a comma-separated core register list into a bitmask.
  * The operand text is already brace-stripped (e.g. "r4, r5, r6, r7").
- * Bits 0-15 map to r0-r15; VFP single/double registers are rejected. */
+ * Ranges (e.g. "r4-r9") are expanded.  Bits 0-15 map to r0-r15; VFP
+ * single/double registers are rejected. */
 static int parse_reglist(const char *s, uint16_t *mask) {
 	const char *p = s;
 	*mask = 0;
@@ -95,9 +146,27 @@ static int parse_reglist(const char *s, uint16_t *mask) {
 		if (len >= sizeof tok) return -1;
 		memcpy(tok, start, len);
 		tok[len] = '\0';
-		int r;
-		if (reg_num(tok, &r) < 0 || r > 15) return -1;
-		*mask |= (uint16_t)(1u << r);
+		/* Range token "rN-rM" (or "sp"/"lr"/"pc" endpoints are not
+		 * ranges — only rN-rM is meaningful, as in `push {r4-r9, lr}`). */
+		const char *dash = strchr(tok, '-');
+		if (dash) {
+			char lo[16], hi[16];
+			size_t lo_len = (size_t)(dash - tok);
+			if (lo_len == 0 || lo_len >= sizeof lo) return -1;
+			memcpy(lo, tok, lo_len);
+			lo[lo_len] = '\0';
+			if (strlen(dash + 1) >= sizeof hi) return -1;
+			strcpy(hi, dash + 1);
+			int rlo, rhi;
+			if (reg_num(lo, &rlo) < 0 || reg_num(hi, &rhi) < 0) return -1;
+			if (rlo > 15 || rhi > 15 || rlo > rhi) return -1;
+			for (int r = rlo; r <= rhi; r++)
+				*mask |= (uint16_t)(1u << r);
+		} else {
+			int r;
+			if (reg_num(tok, &r) < 0 || r > 15) return -1;
+			*mask |= (uint16_t)(1u << r);
+		}
 		if (*p == ',') p++;
 	}
 	return 0;
@@ -236,11 +305,35 @@ int arm_encode_insn(const struct mt_target *target,
 	int cond_code = 14; /* AL */
 	(void)parse_op_cond(mnemonic, &dp_base, &cond_code);
 
+	/* Parse the S ("set flags") suffix: adds/adcs/subs/sbcs/rsbs/ands/
+	 * orrs/eors/bics/movs/mvns.  The 64-bit (Kl) decomposition of mcc
+	 * uses adds/adcs/subs/sbcs/rsbs to chain carry across the low and
+	 * high 32-bit halves.  S is bit 20 of the data-processing word. */
+	int setflags = 0;
+	{
+		size_t dlen = strlen(mnemonic);
+		if (dlen > 3 && mnemonic[dlen-1] == 's') {
+			static char sbase[16];
+			size_t blen = dlen - 1;
+			if (blen < 16) {
+				memcpy(sbase, mnemonic, blen);
+				sbase[blen] = '\0';
+				for (int d = 0; dp_ops[d].name; d++)
+					if (strcmp(sbase, dp_ops[d].name) == 0) {
+						dp_base = sbase;
+						setflags = 1;
+						break;
+					}
+			}
+		}
+	}
+
 	if (nops >= 2) {
 		for (int d = 0; dp_ops[d].name; d++) {
 			if (strcmp(dp_base, dp_ops[d].name) != 0) continue;
 			uint32_t opc = dp_ops[d].opcode;
 			uint32_t cond = (uint32_t)cond_code << 28;
+			uint32_t sbit = (uint32_t)setflags << 20;
 
 			if (nops == 2 && (opc == 13 || opc == 15)) {
 				/* mov/mvn rd, rm  or  mov/mvn rd, #imm */
@@ -249,26 +342,27 @@ int arm_encode_insn(const struct mt_target *target,
 					int imm = 0; sscanf(ops[1]+1, "%i", &imm);
 					uint32_t op2;
 					if (arm_imm_encode(imm, &op2) < 0) return -1;
-					emit32(out->bytes, cond | 0x3A00000 | (opc==15?0x600000:0) | (rd<<12) | op2);
+					emit32(out->bytes, cond | sbit | 0x3A00000 | (opc==15?0x600000:0) | (rd<<12) | op2);
 					return 0;
 				}
 				int rm; if (reg_num(ops[1], &rm) < 0) return -1;
-				emit32(out->bytes, cond | 0x1A00000 | (opc==15?0x600000:0) | (rd<<12) | rm);
+				emit32(out->bytes, cond | sbit | 0x1A00000 | (opc==15?0x600000:0) | (rd<<12) | rm);
 				return 0;
 			}
 
 			if (nops == 2 && (opc == 10 || opc == 11 || opc == 8 || opc == 9)) {
-				/* cmp/cmn/tst/teq rn, rm  or  cmp rn, #imm */
+				/* cmp/cmn/tst/teq rn, rm  or  cmp rn, #imm
+				 * (these always set flags; the S bit is fixed) */
 				int rn; if (reg_num(ops[0], &rn) < 0) return -1;
 				if (ops[1][0] == '#') {
 					int imm = 0; sscanf(ops[1]+1, "%i", &imm);
 					uint32_t op2;
 					if (arm_imm_encode(imm, &op2) < 0) return -1;
-					emit32(out->bytes, cond | 0x3500000 | (opc<<21) | (rn<<16) | op2);
+					emit32(out->bytes, cond | sbit | 0x3500000 | (opc<<21) | (rn<<16) | op2);
 					return 0;
 				}
 				int rm; if (reg_num(ops[1], &rm) < 0) return -1;
-				emit32(out->bytes, cond | 0x1500000 | (opc<<21) | (rn<<16) | rm);
+				emit32(out->bytes, cond | sbit | 0x1500000 | (opc<<21) | (rn<<16) | rm);
 				return 0;
 			}
 
@@ -283,7 +377,7 @@ int arm_encode_insn(const struct mt_target *target,
 					int imm = 0; sscanf(ops[2]+1, "%i", &imm);
 					uint32_t op2;
 					if (arm_imm_encode(imm, &op2) < 0) return -1;
-					emit32(out->bytes, cond | 0x2000000 | (opc<<21) | (1<<25) | (rn<<16) | (rd<<12) | op2);
+					emit32(out->bytes, cond | sbit | 0x2000000 | (opc<<21) | (1<<25) | (rn<<16) | (rd<<12) | op2);
 					return 0;
 				}
 
@@ -302,12 +396,12 @@ int arm_encode_insn(const struct mt_target *target,
 					const char *sv = sh + 3;
 					while (*sv == ' ' || *sv == '\t' || *sv == '#') sv++;
 					int shift_amt = 0; sscanf(sv, "%i", &shift_amt);
-				emit32(out->bytes, cond | 0xE0000000 | (opc<<21) | (rn<<16) | (rd<<12)
+				emit32(out->bytes, cond | sbit | 0xE0000000 | (opc<<21) | (rn<<16) | (rd<<12)
 				       | (shift_amt<<7) | (shift_type<<5) | rm);
 				return 0;
 			}
 
-			emit32(out->bytes, cond | 0xE0000000 | (opc<<21) | (rn<<16) | (rd<<12) | rm);
+			emit32(out->bytes, cond | sbit | 0xE0000000 | (opc<<21) | (rn<<16) | (rd<<12) | rm);
 				return 0;
 			}
 
@@ -315,7 +409,7 @@ int arm_encode_insn(const struct mt_target *target,
 				/* Two-address: {add,sub,and,...} rd, rm */
 				int rd; if (reg_num(ops[0], &rd) < 0) return -1;
 				int rm; if (reg_num(ops[1], &rm) < 0) return -1;
-				emit32(out->bytes, cond | 0xE0000000 | (opc<<21) | (rd<<16) | (rd<<12) | rm);
+				emit32(out->bytes, cond | sbit | 0xE0000000 | (opc<<21) | (rd<<16) | (rd<<12) | rm);
 				return 0;
 			}
 		}
@@ -438,7 +532,10 @@ int arm_encode_insn(const struct mt_target *target,
 		}
 		if (op[0] == '#') {
 			int imm = 0; sscanf(op+1, "%i", &imm);
-			uint32_t imm16 = ((uint32_t)imm >> 16) & 0xFFFF;
+			/* GNU convention: the operand is the 16-bit value placed in
+			 * the upper half (e.g. `movt r0, #0x3b9a` loads 0x3b9a0000).
+			 * mcc emits `movt rd, #0x<(n>>16)&0xffff>` accordingly. */
+			uint32_t imm16 = (uint32_t)imm & 0xFFFF;
 			emit32(out->bytes, 0xE3400000 | (rd<<12) | ((imm16>>12)&0xF)<<16 | (imm16 & 0xFFF));
 			return 0;
 		}
@@ -541,6 +638,82 @@ ldr_mem:
 		if (is_double) base |= 0x100;
 		uint32_t d = (uint32_t)(rd & 0x1F);
 		base |= (rn << 16) | ((d & 1) << 22) | ((d >> 1) << 12) | (off & 0xFF);
+		emit32(out->bytes, base);
+		return 0;
+	}
+
+	/* ---- VFPv3 unified syntax (mcc output): vadd.f64/vadd.f32/... ----
+	 * Encodings verified against arm-linux-gnu-as:
+	 *   vadd.f64 d0, d2, d1 = 0xee320b01
+	 *   vadd.f32 s0, s0, s1 = 0xee300a20 */
+	if (nops >= 3 && mnemonic[0] == 'v') {
+		int is_f64 = (strstr(mnemonic, ".f64") != NULL);
+		int is_f32 = (strstr(mnemonic, ".f32") != NULL);
+		uint32_t base = 0;
+		if (strncmp(mnemonic, "vadd", 4) == 0) base = is_f64 ? 0xEE300B00 : (is_f32 ? 0xEE300A00 : 0);
+		else if (strncmp(mnemonic, "vsub", 4) == 0) base = is_f64 ? 0xEE300B40 : (is_f32 ? 0xEE300A40 : 0);
+		else if (strncmp(mnemonic, "vmul", 4) == 0) base = is_f64 ? 0xEE200B00 : (is_f32 ? 0xEE200A00 : 0);
+		else if (strncmp(mnemonic, "vdiv", 4) == 0) base = is_f64 ? 0xEE800B00 : (is_f32 ? 0xEE800A00 : 0);
+		if (base != 0) {
+			int vd, vn, vm;
+			if (reg_num(ops[0], &vd) < 0 || reg_num(ops[1], &vn) < 0 ||
+			    reg_num(ops[2], &vm) < 0)
+				return -1;
+			if (is_f64) {
+				base |= dp_dst_field(vd) | ((uint32_t)(vn & 0xF) << 16)
+				     | ((uint32_t)((vn >> 4) & 1) << 7) | dp_src_field(vm);
+			} else {
+				vd = sp_reg(vd); vn = sp_reg(vn); vm = sp_reg(vm);
+				base |= sp_dst_field(vd) | ((uint32_t)(vn >> 1) << 16)
+				     | ((uint32_t)(vn & 1) << 7) | sp_src_field(vm);
+			}
+			emit32(out->bytes, base);
+			return 0;
+		}
+	}
+
+	/* ---- VFPv3 unary/compare (2 operands): vneg/vcmp ---- */
+	if (nops >= 2 && mnemonic[0] == 'v') {
+		int is_f64 = (strstr(mnemonic, ".f64") != NULL);
+		int is_f32 = (strstr(mnemonic, ".f32") != NULL);
+		uint32_t base = 0;
+		if (strncmp(mnemonic, "vneg", 4) == 0) base = is_f64 ? 0xEEB10B40 : (is_f32 ? 0xEEB10A40 : 0);
+		else if (strncmp(mnemonic, "vcmp", 4) == 0) base = is_f64 ? 0xEEB40B40 : (is_f32 ? 0xEEB40A40 : 0);
+		if (base != 0) {
+			int vd, vm;
+			if (reg_num(ops[0], &vd) < 0 || reg_num(ops[1], &vm) < 0)
+				return -1;
+			if (is_f64) {
+				base |= dp_dst_field(vd) | dp_src_field(vm);
+			} else {
+				vd = sp_reg(vd); vm = sp_reg(vm);
+				base |= sp_dst_field(vd) | sp_src_field(vm);
+			}
+			emit32(out->bytes, base);
+			return 0;
+		}
+	}
+
+	/* ---- VFP convert: vcvt.<dst>.<src> ---- */
+	if (nops >= 2 && strncmp(mnemonic, "vcvt", 4) == 0) {
+		int vd, vm;
+		if (reg_num(ops[0], &vd) < 0 || reg_num(ops[1], &vm) < 0)
+			return -1;
+		uint32_t base = 0;
+		int dst_f64 = 0, src_f64 = 0;
+		const char *m = mnemonic;
+		if (strstr(m, ".f64.s32")) { base = 0xEEB80BC0; dst_f64 = 1; }
+		else if (strstr(m, ".f64.u32")) { base = 0xEEB80B40; dst_f64 = 1; }
+		else if (strstr(m, ".s32.f64")) { base = 0xEEBD0BC0; src_f64 = 1; }
+		else if (strstr(m, ".u32.f64")) { base = 0xEEBC0BC0; src_f64 = 1; }
+		else if (strstr(m, ".s32.f32")) { base = 0xEEBD0AC0; }
+		else if (strstr(m, ".u32.f32")) { base = 0xEEBC0AC0; }
+		else if (strstr(m, ".f64.f32")) { base = 0xEEB70AC0; dst_f64 = 1; }
+		else if (strstr(m, ".f32.f64")) { base = 0xEEB70BC0; src_f64 = 1; }
+		else return -1;
+		vd = sp_reg(vd); vm = sp_reg(vm);
+		base |= dst_f64 ? dp_dst_field(vd) : sp_dst_field(vd);
+		base |= src_f64 ? dp_src_field(vm) : sp_src_field(vm);
 		emit32(out->bytes, base);
 		return 0;
 	}
@@ -695,26 +868,54 @@ ldr_mem:
 		}
 	}
 
-	/* ---- VFP move: vmov rd, rm (between core and VFP registers) ---- */
+	/* ---- VFP move: vmov between core and VFP registers ----
+	 * Encodings verified against arm-linux-gnu-as:
+	 *   vmov s1, r0 = 0xee000a90   (core -> single)
+	 *   vmov r0, s1 = 0xee100a90   (single -> core)
+	 *   vmov.f32 s2, s0 = 0xeeb01a40 (fcpy.s)
+	 *   vmov.f64 d3, d1 = 0xeeb03b41 (fcpy.d) */
 	if (nops >= 2 && strcmp(mnemonic, "vmov") == 0) {
-		/* vmov sN, rM or vmov rM, sN */
-		int is_vfp_to_core = (ops[0][0] == 'r' || ops[0][0] == 's');
-		/* Using bit[20] = 1 for VFP to ARM, 0 for ARM to VFP */
-		uint32_t base = 0x0E100A10;
-		if (is_vfp_to_core && ops[1][0] == 's') {
-			int sn, rd; if (reg_num(ops[1], &sn) < 0 || reg_num(ops[0], &rd) < 0) return -1;
-			uint32_t s = (uint32_t)(sn & 0x1F);
-			base = 0x0E100A10 | ((s & 1) << 16) | ((s >> 1) << 0);
-			emit32(out->bytes, base | (rd<<12) | (1<<20));
+		int a0 = ops[0][0], a1 = ops[1][0];
+		if ((a0 == 's' || a0 == 'd') && a1 == 'r') {
+			/* vmov sN, rM or vmov dN, rM — core -> VFP */
+			int vd, rm;
+			if (reg_num(ops[0], &vd) < 0 || reg_num(ops[1], &rm) < 0) return -1;
+			if (a0 == 'd')
+				return -1; /* double needs two core registers; not emitted */
+			int sn = sp_reg(vd);
+			uint32_t base = 0xEE000A10 | ((uint32_t)(sn >> 1) << 16)
+			              | ((uint32_t)(sn & 1) << 7) | ((uint32_t)rm << 12);
+			emit32(out->bytes, base);
 			return 0;
 		}
-		if (ops[0][0] == 's' && (ops[1][0] == 'r' || ops[1][0] == 's' || ops[1][0] == 'd')) {
-			int sd, rm; if (reg_num(ops[0], &sd) < 0 || reg_num(ops[1], &rm) < 0) return -1;
-			uint32_t s = (uint32_t)(sd & 0x1F);
-			base = 0x0E000A10 | ((s & 1) << 16) | ((s >> 1) << 0);
-			emit32(out->bytes, base | (rm<<12));
+		if (a0 == 'r' && (a1 == 's' || a1 == 'd')) {
+			/* vmov rM, sN or vmov rM, dN — VFP -> core */
+			int rd, vd;
+			if (reg_num(ops[0], &rd) < 0 || reg_num(ops[1], &vd) < 0) return -1;
+			if (a1 == 'd')
+				return -1; /* double needs two core registers; not emitted */
+			int sn = sp_reg(vd);
+			uint32_t base = 0xEE100A10 | ((uint32_t)(sn >> 1) << 16)
+			              | ((uint32_t)(sn & 1) << 7) | ((uint32_t)rd << 12);
+			emit32(out->bytes, base);
 			return 0;
 		}
+		if (a0 == 's' && a1 == 's') {
+			/* vmov sN, sM — fcpys */
+			int vd, vm;
+			if (reg_num(ops[0], &vd) < 0 || reg_num(ops[1], &vm) < 0) return -1;
+			vd = sp_reg(vd); vm = sp_reg(vm);
+			emit32(out->bytes, 0xEEB00A40 | sp_dst_field(vd) | sp_src_field(vm));
+			return 0;
+		}
+		if (a0 == 'd' && a1 == 'd') {
+			/* vmov dN, dM — fcpyd */
+			int vd, vm;
+			if (reg_num(ops[0], &vd) < 0 || reg_num(ops[1], &vm) < 0) return -1;
+			emit32(out->bytes, 0xEEB00B40 | dp_dst_field(vd) | dp_src_field(vm));
+			return 0;
+		}
+		return -1;
 	}
 
 	/* ---- preload: pld [rn, #off] ---- */
@@ -972,15 +1173,21 @@ ldr_mem:
 	/* ---- VMRS/VMSR: move between VFP status register and core register ---- */
 	if (nops >= 2 && (strcmp(mnemonic, "vmrs") == 0 || strcmp(mnemonic, "vmsr") == 0)) {
 		if (strcmp(mnemonic, "vmrs") == 0 && nops >= 2) {
-			/* vmrs Rd, fpscr */
-			int rd; if (reg_num(ops[0], &rd) < 0) return -1;
-			emit32(out->bytes, 0xEF00A100 | (rd<<12));
+			/* vmrs Rd, fpscr — APSR_nzcv is r15.
+			 * Verified: vmrs APSR_nzcv, fpscr = 0xeef1fa10
+			 * = 0xEEF10A10 | (15 << 12). */
+			int rd;
+			if (strncmp(ops[0], "APSR", 4) == 0)
+				rd = 15;
+			else if (reg_num(ops[0], &rd) < 0)
+				return -1;
+			emit32(out->bytes, 0xEEF10A10 | (rd << 12));
 			return 0;
 		}
 		if (strcmp(mnemonic, "vmsr") == 0 && nops >= 2) {
-			/* vmsr fpscr, Rm */
+			/* vmsr fpscr, Rm — Verified: vmsr fpscr, r0 = 0xeee10a10 */
 			int rm; if (reg_num(ops[1], &rm) < 0) return -1;
-			emit32(out->bytes, 0xEE000A10 | (rm<<12));
+			emit32(out->bytes, 0xEEE10A10 | (rm << 12));
 			return 0;
 		}
 	}
@@ -1010,9 +1217,11 @@ ldr_mem:
 		}
 	}
 
-	/* ---- VFP vldr/vstr (different offset encoding) ---- */
+	/* ---- VFP vldr/vstr (different offset encoding) ----
+	 * Verified: vldr d1, [r10] = 0xed9a1b00; vldr s2, [r11, #4] = 0xed9b1a01 */
 	if (nops >= 2 && (strcmp(mnemonic, "vldr") == 0 || strcmp(mnemonic, "vstr") == 0)) {
 		int is_load = (mnemonic[1] == 'l');
+		int is_double = (ops[0][0] == 'd');
 		int rd; if (reg_num(ops[0], &rd) < 0) return -1;
 		const char *mem = ops[1];
 		if (mem[0] == '[') mem++;
@@ -1025,11 +1234,12 @@ ldr_mem:
 			while (*mem && (*mem == ',' || *mem == ' ' || *mem == '#')) mem++;
 			sscanf(mem, "%i", &off);
 		}
-		uint32_t d = (uint32_t)(rd & 0x1F);
 		uint32_t imm8 = (uint32_t)(off >= 0 ? off : -off) >> 2;
 		int U = (off >= 0) ? 1 : 0;
-		uint32_t base = is_load ? 0xED100A00 : 0xED000A00;
-		base |= (rn<<16) | ((d&1)<<22) | ((d>>1)<<12) | (U<<23) | (imm8 & 0xFF);
+		uint32_t base = is_load ? (is_double ? 0xED100B00 : 0xED100A00)
+		                        : (is_double ? 0xED000B00 : 0xED000A00);
+		base |= (rn << 16) | (is_double ? dp_dst_field(rd) : sp_dst_field(sp_reg(rd)))
+		      | ((uint32_t)U << 23) | (imm8 & 0xFF);
 		emit32(out->bytes, base);
 		return 0;
 	}
