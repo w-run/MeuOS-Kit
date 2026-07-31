@@ -63,19 +63,36 @@ realpath(const char *path, char *resolved)
 {
 	/* Minimal realpath: just copy the path.  A proper implementation would
 	 * resolve symlinks, '.', '..', etc. but many programs work with the
-	 * simple form. */
+	 * simple form.
+	 *
+	 * We always compute into our own buffer first and then copy only the
+	 * actual result length into the caller's buffer, so a short resolved
+	 * buffer is never clobbered by a fixed 4096-byte block write.  POSIX
+	 * still requires the caller's buffer to be at least PATH_MAX bytes
+	 * (4096) when resolved is non-NULL. */
 	char buf[4096];
-	char *p = resolved ? resolved : buf;
+	ssize_t n;
+	size_t len;
 
-	if (!path)
+	if (!path) {
+		errno = EINVAL;
 		return NULL;
-	/* Try readlink first in case it's a symlink */
-	ssize_t n = readlink(path, p, sizeof(buf) - 1);
-	if (n > 0) {
-		p[n] = '\0';
-	} else {
-		strncpy(p, path, sizeof(buf) - 1);
-		p[sizeof(buf) - 1] = '\0';
 	}
-	return resolved ? resolved : strdup(p);
+	if (strlen(path) >= sizeof(buf)) {
+		errno = ENAMETOOLONG;
+		return NULL;
+	}
+	/* Try readlink first in case it's a symlink */
+	n = readlink(path, buf, sizeof(buf) - 1);
+	if (n > 0) {
+		buf[n] = '\0';
+	} else {
+		strcpy(buf, path);
+	}
+	len = strlen(buf) + 1;
+	if (resolved) {
+		memcpy(resolved, buf, len);
+		return resolved;
+	}
+	return strdup(buf);
 }

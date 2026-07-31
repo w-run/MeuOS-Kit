@@ -37,25 +37,41 @@ struct tm *
 gmtime_r(const time_t *t, struct tm *r)
 {
 	long long secs = (long long)*t;
+	long long days, epoch_days;
 	int y, m, d, h, min, s, wday, yday;
 
-	/* Break down seconds */
+	/* Break down seconds using floor division so negative time_t
+	 * (before 1970) yields non-negative seconds/minutes/hours. */
 	s = (int)(secs % 60); secs /= 60;
+	if (s < 0) { s += 60; secs--; }
 	min = (int)(secs % 60); secs /= 60;
+	if (min < 0) { min += 60; secs--; }
 	h = (int)(secs % 24); secs /= 24;
+	if (h < 0) { h += 24; secs--; }
 
-	/* days since epoch */
-	long long days = secs;
+	/* days since epoch (floor). */
+	days = secs;
+	epoch_days = days;
 
-	/* Year */
+	/* Year: step forward for non-negative days, backward (into the
+	 * pre-1970 range) for negative days. */
 	y = 1970;
 	while (1) {
 		int leap = is_leap(y);
 		int ydays = leap ? 366 : 365;
-		if (days < ydays) break;
-		days -= ydays;
-		y++;
+		if (days >= 0 && days < ydays)
+			break;
+		if (days >= ydays) {
+			days -= ydays;
+			y++;
+		} else {
+			y--;
+			days += is_leap(y) ? 366 : 365;
+		}
 	}
+
+	/* Day of year (0-based) before the month loop consumes it. */
+	yday = (int)days;
 
 	/* Month */
 	int leap = is_leap(y);
@@ -65,14 +81,10 @@ gmtime_r(const time_t *t, struct tm *r)
 	}
 	d = (int)days + 1; /* 1-based */
 
-	/* Day of week: 1970-01-01 was Thursday (4) */
-	wday = (int)(((long long)*t / 86400 + 4) % 7);
+	/* Day of week: 1970-01-01 was Thursday (4); epoch_days is the
+	 * floor day count so negative values also land correctly. */
+	wday = (int)((epoch_days + 4) % 7);
 	if (wday < 0) wday += 7;
-
-	/* Day of year */
-	yday = 0;
-	for (int i = 0; i < m; i++) yday += days_in_mon[leap][i];
-	yday += d - 1;
 
 	r->tm_sec = s;
 	r->tm_min = min;
@@ -145,6 +157,16 @@ strftime(char *s, size_t max, const char *format, const struct tm *tm)
 	static const char *mon_abbr[] = {"Jan","Feb","Mar","Apr","May","Jun",
 		"Jul","Aug","Sep","Oct","Nov","Dec"};
 
+	/* Append a snprintf result, counting only the bytes actually written
+	 * into buf (snprintf's return value is the would-be length and can
+	 * exceed the available space, which would drive pos past the end of
+	 * buf and then overflow at the terminating NUL). */
+#define STRFTIME_ADD(...) do { \
+		int __r = snprintf(buf + pos, sizeof(buf) - pos, __VA_ARGS__); \
+		int __avail = (int)(sizeof(buf) - 1 - pos); \
+		pos += (size_t)(__r < __avail ? __r : __avail); \
+	} while (0)
+
 	for (const char *f = format; *f && pos < sizeof(buf) - 1; f++) {
 		if (*f != '%') {
 			buf[pos++] = *f;
@@ -157,82 +179,82 @@ strftime(char *s, size_t max, const char *format, const struct tm *tm)
 		else if (*f == '^') { f++; } /* uppercase — skip for now */
 
 		switch (*f) {
-		case 'Y': pos += snprintf(buf+pos, sizeof(buf)-pos, "%04d", tm->tm_year + 1900); break;
-		case 'y': pos += snprintf(buf+pos, sizeof(buf)-pos, "%02d", tm->tm_year % 100); break;
-		case 'C': pos += snprintf(buf+pos, sizeof(buf)-pos, "%02d", (tm->tm_year + 1900) / 100); break;
-		case 'm': pos += snprintf(buf+pos, sizeof(buf)-pos, "%02d", tm->tm_mon + 1); break;
-		case 'd': pos += snprintf(buf+pos, sizeof(buf)-pos, "%02d", tm->tm_mday); break;
-		case 'e': pos += snprintf(buf+pos, sizeof(buf)-pos, "%2d", tm->tm_mday); break;
-		case 'H': pos += snprintf(buf+pos, sizeof(buf)-pos, "%02d", tm->tm_hour); break;
+		case 'Y': STRFTIME_ADD("%04d", tm->tm_year + 1900); break;
+		case 'y': STRFTIME_ADD("%02d", tm->tm_year % 100); break;
+		case 'C': STRFTIME_ADD("%02d", (tm->tm_year + 1900) / 100); break;
+		case 'm': STRFTIME_ADD("%02d", tm->tm_mon + 1); break;
+		case 'd': STRFTIME_ADD("%02d", tm->tm_mday); break;
+		case 'e': STRFTIME_ADD("%2d", tm->tm_mday); break;
+		case 'H': STRFTIME_ADD("%02d", tm->tm_hour); break;
 		case 'I': {
 			int h12 = tm->tm_hour % 12;
 			if (h12 == 0) h12 = 12;
-			pos += snprintf(buf+pos, sizeof(buf)-pos, "%02d", h12); break;
+			STRFTIME_ADD("%02d", h12); break;
 		}
-		case 'M': pos += snprintf(buf+pos, sizeof(buf)-pos, "%02d", tm->tm_min); break;
-		case 'S': pos += snprintf(buf+pos, sizeof(buf)-pos, "%02d", tm->tm_sec); break;
-		case 'p': pos += snprintf(buf+pos, sizeof(buf)-pos, "%s", tm->tm_hour < 12 ? "AM" : "PM"); break;
-		case 'P': pos += snprintf(buf+pos, sizeof(buf)-pos, "%s", tm->tm_hour < 12 ? "am" : "pm"); break;
-		case 'a': pos += snprintf(buf+pos, sizeof(buf)-pos, "%s", wday_abbr[tm->tm_wday]); break;
-		case 'A': pos += snprintf(buf+pos, sizeof(buf)-pos, "%s", wday_names[tm->tm_wday]); break;
-		case 'w': pos += snprintf(buf+pos, sizeof(buf)-pos, "%d", tm->tm_wday); break;
-		case 'u': pos += snprintf(buf+pos, sizeof(buf)-pos, "%d", tm->tm_wday ? tm->tm_wday : 7); break;
+		case 'M': STRFTIME_ADD("%02d", tm->tm_min); break;
+		case 'S': STRFTIME_ADD("%02d", tm->tm_sec); break;
+		case 'p': STRFTIME_ADD("%s", tm->tm_hour < 12 ? "AM" : "PM"); break;
+		case 'P': STRFTIME_ADD("%s", tm->tm_hour < 12 ? "am" : "pm"); break;
+		case 'a': STRFTIME_ADD("%s", wday_abbr[tm->tm_wday]); break;
+		case 'A': STRFTIME_ADD("%s", wday_names[tm->tm_wday]); break;
+		case 'w': STRFTIME_ADD("%d", tm->tm_wday); break;
+		case 'u': STRFTIME_ADD("%d", tm->tm_wday ? tm->tm_wday : 7); break;
 		case 'b':
-		case 'h': pos += snprintf(buf+pos, sizeof(buf)-pos, "%s", mon_abbr[tm->tm_mon]); break;
-		case 'B': pos += snprintf(buf+pos, sizeof(buf)-pos, "%s", mon_names[tm->tm_mon]); break;
-		case 'j': pos += snprintf(buf+pos, sizeof(buf)-pos, "%03d", tm->tm_yday + 1); break;
+		case 'h': STRFTIME_ADD("%s", mon_abbr[tm->tm_mon]); break;
+		case 'B': STRFTIME_ADD("%s", mon_names[tm->tm_mon]); break;
+		case 'j': STRFTIME_ADD("%03d", tm->tm_yday + 1); break;
 		case 'U': {
 			int w = (tm->tm_yday + 7 - tm->tm_wday) / 7;
-			pos += snprintf(buf+pos, sizeof(buf)-pos, "%02d", w); break;
+			STRFTIME_ADD("%02d", w); break;
 		}
 		case 'W': {
 			int first_wday = (tm->tm_yday - tm->tm_wday + 7) % 7;
 			int w = (tm->tm_yday + 7 - first_wday) / 7;
-			pos += snprintf(buf+pos, sizeof(buf)-pos, "%02d", w); break;
+			STRFTIME_ADD("%02d", w); break;
 		}
 		case 'V': {
 			/* ISO week number */
 			int jan1_wday = (tm->tm_wday - tm->tm_yday % 7 + 7) % 7;
 			int week = (tm->tm_yday + 7 - jan1_wday + 1) / 7;
-			pos += snprintf(buf+pos, sizeof(buf)-pos, "%02d", week); break;
+			STRFTIME_ADD("%02d", week); break;
 		}
-		case 'G': pos += snprintf(buf+pos, sizeof(buf)-pos, "%04d", tm->tm_year + 1900); break;
-		case 'g': pos += snprintf(buf+pos, sizeof(buf)-pos, "%02d", (tm->tm_year + 1900) % 100); break;
+		case 'G': STRFTIME_ADD("%04d", tm->tm_year + 1900); break;
+		case 'g': STRFTIME_ADD("%02d", (tm->tm_year + 1900) % 100); break;
 		case 'c': {
 			/* %a %b %e %T %Y */
-			pos += snprintf(buf+pos, sizeof(buf)-pos, "%s %s %2d %02d:%02d:%02d %04d",
+			STRFTIME_ADD("%s %s %2d %02d:%02d:%02d %04d",
 				wday_abbr[tm->tm_wday], mon_abbr[tm->tm_mon], tm->tm_mday,
 				tm->tm_hour, tm->tm_min, tm->tm_sec, tm->tm_year + 1900);
 			break;
 		}
 		case 'x': /* %m/%d/%y */
-			pos += snprintf(buf+pos, sizeof(buf)-pos, "%02d/%02d/%02d",
+			STRFTIME_ADD("%02d/%02d/%02d",
 				tm->tm_mon+1, tm->tm_mday, tm->tm_year % 100);
 			break;
 		case 'X':
-			pos += snprintf(buf+pos, sizeof(buf)-pos, "%02d:%02d:%02d",
+			STRFTIME_ADD("%02d:%02d:%02d",
 				tm->tm_hour, tm->tm_min, tm->tm_sec);
 			break;
 		case 'D': /* %m/%d/%y */
-			pos += snprintf(buf+pos, sizeof(buf)-pos, "%02d/%02d/%02d",
+			STRFTIME_ADD("%02d/%02d/%02d",
 				tm->tm_mon+1, tm->tm_mday, tm->tm_year % 100);
 			break;
 		case 'F': /* %Y-%m-%d */
-			pos += snprintf(buf+pos, sizeof(buf)-pos, "%04d-%02d-%02d",
+			STRFTIME_ADD("%04d-%02d-%02d",
 				tm->tm_year+1900, tm->tm_mon+1, tm->tm_mday);
 			break;
 		case 'T': /* %H:%M:%S */
-			pos += snprintf(buf+pos, sizeof(buf)-pos, "%02d:%02d:%02d",
+			STRFTIME_ADD("%02d:%02d:%02d",
 				tm->tm_hour, tm->tm_min, tm->tm_sec);
 			break;
 		case 'r': /* %I:%M:%S %p */
-			pos += snprintf(buf+pos, sizeof(buf)-pos, "%02d:%02d:%02d %s",
+			STRFTIME_ADD("%02d:%02d:%02d %s",
 				tm->tm_hour % 12 ? tm->tm_hour % 12 : 12,
 				tm->tm_min, tm->tm_sec,
 				tm->tm_hour < 12 ? "AM" : "PM");
 			break;
 		case 'R': /* %H:%M */
-			pos += snprintf(buf+pos, sizeof(buf)-pos, "%02d:%02d", tm->tm_hour, tm->tm_min);
+			STRFTIME_ADD("%02d:%02d", tm->tm_hour, tm->tm_min);
 			break;
 		case 'z': /* timezone offset — not supported */
 			break;
@@ -255,6 +277,8 @@ strftime(char *s, size_t max, const char *format, const struct tm *tm)
 		}
 		if (pos >= sizeof(buf)) break;
 	}
+	if (pos >= sizeof(buf))
+		pos = sizeof(buf) - 1;
 	buf[pos] = '\0';
 	if (pos >= max) {
 		if (max > 0) { memcpy(s, buf, max - 1); s[max - 1] = '\0'; }

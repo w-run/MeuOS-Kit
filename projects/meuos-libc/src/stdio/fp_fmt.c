@@ -76,6 +76,171 @@ is_inf(double v)
 	return v != 0 && v == v + v;
 }
 
+/* 128-bit unsigned integer, used by the exact digit extractor. */
+typedef struct {
+	unsigned long long lo;
+	unsigned long long hi;
+} u128;
+
+static void
+u128_mul10(u128 *a)
+{
+	unsigned long long lo = a->lo;
+	unsigned long long hi = a->hi;
+	/* a*2 */
+	unsigned long long lo2 = lo << 1;
+	unsigned long long hi2 = (hi << 1) | (lo >> 63);
+	/* a*8 */
+	unsigned long long lo8 = lo << 3;
+	unsigned long long hi8 = (hi << 3) | (lo >> 61);
+	/* a*10 = a*8 + a*2 */
+	unsigned long long lo10 = lo8 + lo2;
+	unsigned long long hi10 = hi8 + hi2 + (lo10 < lo8);
+	a->lo = lo10;
+	a->hi = hi10;
+}
+
+/* a >> n for n in [0, 127]. */
+static unsigned long long
+u128_shr(const u128 *a, int n)
+{
+	if (n == 0)
+		return a->lo;
+	if (n < 64)
+		return (a->lo >> n) | (a->hi << (64 - n));
+	if (n < 128)
+		return a->hi >> (n - 64);
+	return 0;
+}
+
+/* Keep the low n bits of a. */
+static void
+u128_mask(u128 *a, int n)
+{
+	if (n >= 128)
+		return;
+	if (n >= 64)
+		a->hi &= (n == 64) ? 0 : ((1ULL << (n - 64)) - 1);
+	else {
+		a->hi = 0;
+		a->lo &= (1ULL << n) - 1;
+	}
+}
+
+/* Round half-up at position `count`; adjust decpt on carry-out. */
+static void
+round_digits(char *digits, int count, int *decpt)
+{
+	if (digits[count] >= '5') {
+		int i = count - 1;
+		while (i >= 0 && digits[i] == '9') {
+			digits[i] = '0';
+			i--;
+		}
+		if (i >= 0) {
+			digits[i]++;
+		} else {
+			/* All nines: carry out, e.g. 9.99 -> 10.0. */
+			digits[0] = '1';
+			for (i = 1; i < count; i++) digits[i] = '0';
+			(*decpt)++;
+		}
+	}
+	digits[count] = '\0';
+}
+
+/* Exact decimal digit extraction via the integer mantissa.
+ *
+ * Every finite double is exactly v = M * 2^E with M a 53-bit integer.
+ * When E < 0 write v = M / 2^N; the decimal digits are then obtained
+ * exactly by long division (multiply the remainder by 10, take the
+ * quotient digit, keep the remainder).  This avoids the precision loss
+ * of the frexp/scale10 path, which rounds e.g. 0.1*10 to exactly 1.0
+ * and then emits a tail of zeros.
+ *
+ * Feasible when N <= 120 so all intermediates fit in 128 bits; values
+ * outside that range (|v| >= 2^53 or < ~1e-36) fall back to the double
+ * path, where it is either exact (large integers) or produces leading
+ * zeros that are correct at the requested precision.
+ *
+ * On success generates digits[0..count] and rounds, returning 1.
+ * Returns 0 to ask the caller to use the double fallback. */
+static int
+dto_digits_exact(double v, int count, char *digits, int *decpt)
+{
+	union { double d; unsigned long long u; } un;
+	unsigned long long M;
+	unsigned long long idig[20];
+	u128 num;
+	long long N;
+	int eb, binexp, e10, i, nid, di, skip;
+	double scaled;
+
+	un.d = v;
+	eb = (int)((un.u >> 52) & 0x7ff);
+	M = un.u & 0xfffffffffffffULL;
+	if (eb == 0)
+		N = 1074;		/* subnormal: v = M / 2^1074 */
+	else {
+		M |= 1ULL << 52;
+		N = (long long)1075 - eb;	/* v = M / 2^N */
+	}
+	if (N < 1 || N > 120)
+		return 0;
+
+	/* Decimal exponent via the same approximation the double path uses. */
+	(void)frexp(v, &binexp);
+	e10 = (int)((binexp - 1) * 0.301029995663981);
+	scaled = scale10(v, -e10);
+	while (scaled >= 10.0) { scaled *= 0.1; e10++; }
+	while (scaled < 1.0)   { scaled *= 10.0; e10--; }
+	*decpt = e10 + 1;
+
+	/* Integer part digits (v >= 1 implies N < 53, so M >> N is exact). */
+	nid = 0;
+	if (N < 64) {
+		unsigned long long ip = M >> N;
+		unsigned long long mask = (1ULL << N) - 1;
+		while (ip) {
+			idig[nid++] = ip % 10;
+			ip /= 10;
+		}
+		/* Trust the integer digit count over the log approximation. */
+		if (nid > 0)
+			*decpt = nid;
+		num.lo = M & mask;
+	} else {
+		num.lo = M;
+	}
+	di = 0;
+	for (i = nid - 1; i >= 0 && di <= count; i--)
+		digits[di++] = (char)('0' + (int)idig[i]);
+
+	/* Fractional digits by exact long division of (M mod 2^N) / 2^N.
+	 * The division yields digits at positions -1, -2, ... (tenths,
+	 * hundredths, ...).  The first significant digit sits at position
+	 * decpt-1, so skip the -decpt leading zero positions for v < 1. */
+	skip = (nid == 0) ? -(*decpt) : 0;
+	num.hi = 0;
+	while (di <= count) {
+		unsigned long long d;
+		if (skip > 0) {
+			u128_mul10(&num);
+			u128_mask(&num, (int)N);
+			skip--;
+			continue;
+		}
+		u128_mul10(&num);
+		d = u128_shr(&num, (int)N);
+		if (d > 9) d = 9;
+		digits[di++] = (char)('0' + (int)d);
+		u128_mask(&num, (int)N);
+	}
+
+	round_digits(digits, count, decpt);
+	return 1;
+}
+
 /* Generate `count` significant decimal digits of |v| into `digits`
  * (NUL-terminated).  v must be finite, nonzero, non-negative.
  *
@@ -90,6 +255,10 @@ dto_digits(double v, int count, char *digits, int *decpt)
 {
 	int binexp, e10, i;
 	double scaled;
+
+	/* Exact integer-mantissa extraction when it fits in 128 bits. */
+	if (dto_digits_exact(v, count, digits, decpt))
+		return;
 
 	/* frexp: v = m * 2^binexp, m in [0.5, 1).
 	 * So 2^(binexp-1) <= v < 2^binexp, giving
@@ -114,23 +283,26 @@ dto_digits(double v, int count, char *digits, int *decpt)
 		scaled = (scaled - (double)d) * 10.0;
 	}
 
-	/* Round half-up at position `count`. */
-	if (digits[count] >= '5') {
-		i = count - 1;
-		while (i >= 0 && digits[i] == '9') {
-			digits[i] = '0';
-			i--;
-		}
-		if (i >= 0) {
-			digits[i]++;
-		} else {
-			/* All nines: carry out, e.g. 9.99 -> 10.0. */
-			digits[0] = '1';
-			for (i = 1; i < count; i++) digits[i] = '0';
-			(*decpt)++;
-		}
-	}
-	digits[count] = '\0';
+	round_digits(digits, count, decpt);
+}
+
+/* Compute just the decimal point position (decpt = e10 + 1, as in
+ * dto_digits) without extracting digits; used to size the digit buffer
+ * for %f before the full extraction pass. */
+static int
+dto_decpt(double v)
+{
+	int binexp, e10;
+	double scaled;
+
+	if (v == 0.0)
+		return 1;
+	(void)frexp(v, &binexp);
+	e10 = (int)((binexp - 1) * 0.301029995663981);
+	scaled = scale10(v, -e10);
+	while (scaled >= 10.0) { scaled *= 0.1; e10++; }
+	while (scaled < 1.0)   { scaled *= 10.0; e10--; }
+	return e10 + 1;
 }
 
 #define EMIT(c) do { if (__meuos_sink_put(sink, (c)) < 0) return -1; } while (0)
@@ -143,8 +315,9 @@ int
 __meuos_fmt_fp(struct __meuos_print_sink *sink, double value, int conv,
 	int width, int precision, int flags)
 {
-	char digits[24];      /* up to 17 sig digits + rounding slack */
+	char digits[FP_MAX_PREC + 340];      /* sig digits + rounding slack */
 	int decpt;
+	int ndig;         /* number of significant digits in `digits` */
 	char sign_char = 0;
 	int prec;
 	int left  = flags & 1;
@@ -192,18 +365,37 @@ __meuos_fmt_fp(struct __meuos_print_sink *sink, double value, int conv,
 	if (precision > FP_MAX_PREC) precision = FP_MAX_PREC;
 
 	/* ---- Generate significant digits ---- */
-	if (value == 0.0) {
-		for (i = 0; i < 18; i++) digits[i] = '0';
-		digits[18] = '\0';
-		decpt = 1;
-	} else {
-		int sig = 17;
+	{
+		int sig;
 		if (was_g) {
+			/* %g: precision is the number of significant digits. */
 			sig = precision;
 			if (sig < 1) sig = 1;
-			if (sig > 17) sig = 17;
+		} else if (conv == 'f' || conv == 'F') {
+			/* %f: need the integer part plus `precision` fractional
+			 * digits, plus one digit that drives rounding at the
+			 * precision boundary.  Never fewer than the 17 digits a
+			 * double can represent (matches the historical output). */
+			int int_digits = 1;
+			if (value != 0.0) {
+				int_digits = dto_decpt(value);
+				if (int_digits < 0) int_digits = 0;
+			}
+			sig = int_digits + precision + 1;
+			if (sig < 17) sig = 17;
+		} else {
+			/* %e: one digit before the point + precision fraction. */
+			sig = precision + 1;
+			if (sig < 17) sig = 17;
 		}
-		dto_digits(value, sig, digits, &decpt);
+		ndig = sig;
+		if (value == 0.0) {
+			for (i = 0; i < sig; i++) digits[i] = '0';
+			digits[sig] = '\0';
+			decpt = 1;
+		} else {
+			dto_digits(value, sig, digits, &decpt);
+		}
 	}
 
 	/* ---- %g: decide %e vs %f, compute fractional precision ---- */
@@ -233,7 +425,7 @@ __meuos_fmt_fp(struct __meuos_print_sink *sink, double value, int conv,
 			/* Fractional digits are digits[1..prec]. */
 			for (i = prec - 1; i >= 0; i--) {
 				int idx = i + 1;
-				char c = (idx < 18) ? digits[idx] : '0';
+				char c = (idx < ndig) ? digits[idx] : '0';
 				if (c == '0') strip++;
 				else break;
 			}
@@ -241,7 +433,7 @@ __meuos_fmt_fp(struct __meuos_print_sink *sink, double value, int conv,
 			/* %f: fractional digits at virtual positions decpt..decpt+prec-1. */
 			for (i = prec - 1; i >= 0; i--) {
 				int idx = decpt + i;
-				char c = (idx >= 0 && idx < 18) ? digits[idx] : '0';
+				char c = (idx >= 0 && idx < ndig) ? digits[idx] : '0';
 				if (c == '0') strip++;
 				else break;
 			}
@@ -282,7 +474,7 @@ __meuos_fmt_fp(struct __meuos_print_sink *sink, double value, int conv,
 			EMIT('.');
 			for (i = 0; i < prec; i++) {
 				int idx = i + 1;
-				EMIT(idx < 18 ? digits[idx] : '0');
+				EMIT(idx < ndig ? digits[idx] : '0');
 			}
 		}
 		EMIT(conv);  /* 'e' or 'E' */
@@ -302,17 +494,15 @@ __meuos_fmt_fp(struct __meuos_print_sink *sink, double value, int conv,
 		/* %f */
 		if (decpt <= 0) {
 			EMIT('0');
-		} else if (decpt <= 18) {
-			for (i = 0; i < decpt; i++) EMIT(digits[i]);
 		} else {
-			for (i = 0; i < 18; i++) EMIT(digits[i]);
-			for (i = 18; i < decpt; i++) EMIT('0');
+			for (i = 0; i < decpt; i++)
+				EMIT(i < ndig ? digits[i] : '0');
 		}
 		if (has_dot) {
 			EMIT('.');
 			for (i = 0; i < prec; i++) {
 				int idx = decpt + i;
-				EMIT(idx >= 0 && idx < 18 ? digits[idx] : '0');
+				EMIT(idx >= 0 && idx < ndig ? digits[idx] : '0');
 			}
 		}
 	}

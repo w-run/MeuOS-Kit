@@ -192,8 +192,20 @@ exp(double x)
 double
 pow(double b, double e)
 {
-	if (b <= 0) return 0;
-	return exp(e * log(b));
+	if (b == 0) {
+		if (e == 0) return 1.0;		/* 0^0 = 1 */
+		return e > 0 ? 0.0 : 1e308;	/* 0^neg = +inf */
+	}
+	if (b > 0)
+		return exp(e * log(b));
+	/* Negative base: only defined for integral exponents; the sign of the
+	 * result follows the parity of the (truncated) exponent. */
+	if (e >= -9007199254740992.0 && e <= 9007199254740992.0 &&
+	    e == (e < 0 ? ceil(e) : floor(e))) {
+		double r = exp(e * log(-b));
+		return ((long long)e & 1) ? -r : r;
+	}
+	return NAN;
 }
 
 /* sin/cos via Taylor series with range reduction */

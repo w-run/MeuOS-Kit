@@ -24,6 +24,8 @@ vsscanf(const char *input, const char *format, va_list arguments)
 {
 	int assigned = 0;
 	while (*format) {
+		int width = 0;
+
 		if (isspace_int(*format)) {
 			while (isspace_int(*format)) ++format;
 			while (isspace_int(*input)) ++input;
@@ -37,51 +39,64 @@ vsscanf(const char *input, const char *format, va_list arguments)
 			continue;
 		}
 		++format;
+		/* Optional field width: limits how many input chars a
+		 * conversion consumes (0/absent means unlimited). */
+		while (*format >= '0' && *format <= '9')
+			width = width * 10 + *format++ - '0';
 		if (*format == 'c') {
 			char *out = va_arg(arguments, char *);
-			if (!*input) break;
-			*out = *input++;
-			++assigned;
+			int i;
+			if (width == 0) width = 1;
+			for (i = 0; i < width && *input; i++)
+				out[i] = *input++;
+			if (i == 0) break;
+			assigned += i;
 			++format;
 			continue;
 		}
 		while (isspace_int(*input)) ++input;
 		if (*format == 's') {
 			char *out = va_arg(arguments, char *);
+			int i = 0;
 			if (!*input) break;
-			while (*input && !isspace_int(*input))
-				*out++ = *input++;
-			*out = 0;
+			while (*input && !isspace_int(*input) && (width == 0 || i < width))
+				out[i++] = *input++;
+			out[i] = 0;
 			++assigned;
 			++format;
 			continue;
 		}
 		if (*format == 'd' || *format == 'x') {
 			int base = *format == 'x' ? 16 : 10, negative = 0, digits = 0;
+			int overflow = 0;
 			unsigned value = 0;
+			unsigned limit;
 			int *out = va_arg(arguments, int *);
 			if (*input == '-') { negative = 1; ++input; }
-			while (*input) {
+			else if (*input == '+') ++input;
+			/* Clamp target: the most negative int is INT_MAX+1. */
+			limit = negative ? (unsigned)INT_MAX + 1u : (unsigned)INT_MAX;
+			while (*input && (width == 0 || digits < width)) {
 				int digit = *input >= '0' && *input <= '9' ? *input - '0'
 					: (*input >= 'a' && *input <= 'f' ? *input - 'a' + 10
 					: (*input >= 'A' && *input <= 'F' ? *input - 'A' + 10 : base));
 				if (digit >= base) break;
-				value = value * (unsigned)base + (unsigned)digit;
+				/* Guard against unsigned wraparound on overflow; keep
+				 * consuming the remaining digits either way. */
+				if (value > (limit - (unsigned)digit) / (unsigned)base)
+					overflow = 1;
+				else if (!overflow)
+					value = value * (unsigned)base + (unsigned)digit;
 				++digits;
 				++input;
 			}
 			if (!digits) break;
-			if (negative) {
-				if (value > (unsigned)INT_MAX + 1u)
-					*out = INT_MIN;
-				else
-					*out = -(int)value;
-			} else {
-				if (value > (unsigned)INT_MAX)
-					*out = INT_MAX;
-				else
-					*out = (int)value;
-			}
+			if (overflow)
+				*out = negative ? INT_MIN : INT_MAX;
+			else if (negative)
+				*out = value > (unsigned)INT_MAX ? INT_MIN : -(int)value;
+			else
+				*out = value > (unsigned)INT_MAX ? INT_MAX : (int)value;
 			++assigned;
 			++format;
 			continue;

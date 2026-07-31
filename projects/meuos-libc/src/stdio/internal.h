@@ -59,7 +59,8 @@ int __meuos_sink_put(struct __meuos_print_sink *sink, int character);
 int __meuos_sink_repeat(struct __meuos_print_sink *sink, int character, int count);
 int __meuos_sink_number(struct __meuos_print_sink *sink,
     unsigned long long value, unsigned base, int width, int zero,
-    int negative, const char *prefix);
+    int negative, const char *prefix, int left, int plus, int min_digits,
+    int upper);
 int __meuos_vformat(struct __meuos_print_sink *sink, const char *format, va_list arguments);
 
 /* Floating-point formatter for %f/%e/%g (and uppercase variants).

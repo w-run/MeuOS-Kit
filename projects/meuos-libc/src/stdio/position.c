@@ -20,12 +20,20 @@ fseek(FILE *stream, long offset, int whence)
 		return -1;
 	}
 	if (stream->flags & FILE_MEMORY) {
+		long pos;
+
 		switch (whence) {
-		case SEEK_SET: stream->pos = offset; break;
-		case SEEK_CUR: stream->pos += offset; break;
-		case SEEK_END: stream->pos = stream->size + offset; break;
+		case SEEK_SET: pos = offset; break;
+		case SEEK_CUR: pos = (long)stream->pos + offset; break;
+		case SEEK_END: pos = (long)stream->size + offset; break;
 		default: errno = EINVAL; return -1;
 		}
+		if (pos < 0) {
+			/* Negative positions are invalid for a memory stream. */
+			errno = EINVAL;
+			return -1;
+		}
+		stream->pos = (size_t)pos;
 		stream->ungot = EOF;
 		return 0;
 	}

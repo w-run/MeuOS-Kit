@@ -44,9 +44,11 @@ fwrite(const void *ptr, size_t size, size_t count, FILE *stream)
 		errno = EBADF;
 		return 0;
 	}
+	if (size == 0)
+		return 0;
 	for (i = 0; i < total; ++i) {
 		if (fputc(p[i], stream) == EOF)
-			return i;
+			return i / size;	/* fwrite 返回元素数而非字节数 */
 	}
 	return count;
 }

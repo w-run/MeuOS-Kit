@@ -75,8 +75,10 @@ sigaction(int signum, const struct sigaction *act,
 		kact.flags = (unsigned long)act->sa_flags;
 #endif
 		kact.mask = act->sa_mask;
-		/* Avoid clearing the handler's own signal while it runs. */
-		kact.mask |= ((sigset_t)1 << (signum - 1));
+		/* By default the kernel blocks the handled signal while the
+		 * handler runs; SA_NODEFER asks for the opposite. */
+		if (!(act->sa_flags & SA_NODEFER))
+			kact.mask |= ((sigset_t)1 << (signum - 1));
 	}
 	if (do_sigaction(signum, act ? &kact : 0,
 	    oldact ? &kold : 0) < 0)
