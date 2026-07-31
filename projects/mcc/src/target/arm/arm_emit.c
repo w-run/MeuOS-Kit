@@ -409,6 +409,16 @@ kl_ldhalf(Ref r, int hi, int reg, Fn *fn, FILE *f)
 	int s;
 	if (rtype(r) == RCon) {
 		Con *c = &fn->con[r.val];
+		if (c->type == CAddr) {
+			/* Address constant (e.g. a string literal passed as a
+			 * Kl argument).  The 32-bit address goes in the low
+			 * word; the high word is zero. */
+			if (hi)
+				fprintf(f, "\tmov\t%s, #0\n", rname(reg, Kw));
+			else
+				loadaddr(c, (char *)rname(reg, Kl), f);
+			return;
+		}
 		assert(c->type == CBits);
 		Con h = *c;
 		h.bits.i = hi ? (int32_t)(c->bits.i >> 32) : (int32_t)c->bits.i;
@@ -438,14 +448,43 @@ kl_sthalf(Ref r, int hi, int reg, Fn *fn, FILE *f)
 		(unsigned)(klslotoff(s) + 4u * hi));
 }
 
+/* Return 1 when an RSlot address operand holds a POINTER value that
+ * must be dereferenced.  arm keeps every Kl value in a stack slot
+ * (kl_in_reg == 0); addresses are Kl, so an address operand that rega
+ * spilled to a slot is a slot whose CONTENT is the pointer (e.g. a
+ * local array's `&a` temp living in a slot).  Slots owned by non-Kl
+ * temps (spilled Kw/Ks/Kd values, spill write-backs/reloads) are
+ * plain variable locations and are accessed directly. */
+static int
+slot_is_ptr(Ref r, Fn *fn)
+{
+	int s, t;
+
+	if (rtype(r) != RSlot)
+		return 0;
+	s = rsval(r);
+	if (s < 0)
+		return 0;
+	for (t = Tmp0; t < fn->ntmp; t++)
+		if (fn->tmp[t].slot == s && fn->tmp[t].cls == Kl)
+			return 1;
+	return 0;
+}
+
 /* Emit `str reg, [addr, #+4*hi]` where addr is a memory address ref:
  * RSlot → local slot, RTmp → address register, RCon(CAddr) → global. */
 static void
 kl_staddr(Ref addr, int hi, int reg, Fn *fn, FILE *f)
 {
 	if (rtype(addr) == RSlot) {
-		fprintf(f, "\tstr\t%s, [r11, #%u]\n", rname(reg, Kw),
-			(unsigned)(slot(addr, fn, 0) + 4u * hi));
+		/* The slot holds the destination ADDRESS (a Kl pointer
+		 * value).  Load it into the r12 scratch and store through
+		 * it; a direct `str reg, [r11, #off]` would overwrite the
+		 * pointer slot instead of the pointed-to location. */
+		fprintf(f, "\tldr\t%s, [r11, #%u]\n", rname(R12, Kw),
+			(unsigned)slot(addr, fn, 0));
+		fprintf(f, "\tstr\t%s, [%s, #%u]\n", rname(reg, Kw),
+			rname(R12, Kw), 4u * hi);
 		return;
 	}
 	assert(rtype(addr) == RTmp && isreg(addr));
@@ -458,8 +497,11 @@ static void
 kl_ldaddr(Ref addr, int hi, int reg, Fn *fn, FILE *f)
 {
 	if (rtype(addr) == RSlot) {
-		fprintf(f, "\tldr\t%s, [r11, #%u]\n", rname(reg, Kw),
-			(unsigned)(slot(addr, fn, 0) + 4u * hi));
+		/* Same as kl_staddr: the slot holds the source ADDRESS. */
+		fprintf(f, "\tldr\t%s, [r11, #%u]\n", rname(R12, Kw),
+			(unsigned)slot(addr, fn, 0));
+		fprintf(f, "\tldr\t%s, [%s, #%u]\n", rname(reg, Kw),
+			rname(R12, Kw), 4u * hi);
 		return;
 	}
 	assert(rtype(addr) == RTmp && isreg(addr));
@@ -535,8 +577,11 @@ kl_emit(Ins *i, Fn *fn, FILE *f)
 	if (i->op == Ocopy && req(i->to, i->arg[0]))
 		return;
 	if (i->op == Ostorel
-	&& rtype(i->arg[0]) == RTmp && rtype(i->arg[1]) == RSlot
-	&& fn->tmp[i->arg[0].val].slot == rsval(i->arg[1]))
+	&& rtype(i->arg[1]) == RSlot
+	&& ((rtype(i->arg[0]) == RTmp && i->arg[0].val >= Tmp0
+	    && fn->tmp[i->arg[0].val].slot == rsval(i->arg[1]))
+	    || (rtype(i->arg[0]) == RSlot
+	        && rsval(i->arg[0]) == rsval(i->arg[1]))))
 		return;	/* spill 写回自己的 slot，跳过 */
 
 	fputs("\tpush\t{r10, r12}\n", f);
@@ -575,6 +620,17 @@ kl_emit(Ins *i, Fn *fn, FILE *f)
 			kl_sthalf(i->to, 1, R10, fn, f);
 			break;
 		}
+		/* Spill reload of a slot-resident Kl temp (e.g. a phi edge
+		 * copy): `Oload Kl %t, SLOT(tmp[t].slot)` — the value already
+		 * lives in the temp's own slot, so the reload is a no-op.
+		 * Dereferencing the slot would mis-read the VALUE as a
+		 * pointer.  Genuine pointer derefs have a DIFFERENT result
+		 * temp than the address-slot owner, so they fall through to
+		 * kl_ldaddr below. */
+		if (rtype(i->arg[0]) == RSlot
+		&& rtype(i->to) == RTmp && i->to.val >= Tmp0
+		&& fn->tmp[i->to.val].slot == rsval(i->arg[0]))
+			break;
 		if (rtype(i->arg[0]) == RTmp && i->arg[0].val == R12)
 			fprintf(f, "\tmov\t%s, %s\n", rname(R10, Kw), rname(R12, Kw));
 		kl_ldaddr(i->arg[0], 0, R10, fn, f);
@@ -809,12 +865,44 @@ emitins(Ins *i, Fn *fn, FILE *f)
 		 * temp whose VALUE is the location to dereference (arm keeps Kl
 		 * temps in slots, kl_in_reg==0) — NOT the slot's own memory.
 		 * Materialize the pointer into IP first, then dereference it.
-		 * Oload keeps reading the slot's content directly (scalar local
-		 * variable access). */
+		 * Oload handles its own slot/pointer distinction below. */
 		if (isload(i->op) && i->op != Oload && rtype(i->arg[0]) == RSlot) {
 			fprintf(f, "\tldr\t%s, [r11, #%" PRIu64 "]\n",
 				rname(IP, Kl), slot(i->arg[0], fn, 0));
 			i->arg[0] = TMP(IP);
+		}
+		/* Oload with an RSlot address: dereference when the slot holds
+		 * a pointer (owned by a Kl temp).  Slots owned by non-Kl temps
+		 * are plain spilled values (e.g. spill reloads) and are read
+		 * directly. */
+		if (isload(i->op) && i->op == Oload && rtype(i->arg[0]) == RSlot
+		&& slot_is_ptr(i->arg[0], fn)) {
+			fprintf(f, "\tldr\t%s, [r11, #%" PRIu64 "]\n",
+				rname(IP, Kl), slot(i->arg[0], fn, 0));
+			i->arg[0] = TMP(IP);
+		}
+		/* Stores: the value must sit in a register (ARM has no
+		 * immediate memory-store form), and an RSlot address that
+		 * holds a pointer must be dereferenced.  The address goes
+		 * into the r12 scratch first so the value may use IP. */
+		if (isstore(i->op)) {
+			if (rtype(i->arg[1]) == RCon) {
+				c = &fn->con[i->arg[1].val];
+				assert(c->type == CAddr);
+				loadaddr(c, (char *)rname(R12, Kl), f);
+				i->arg[1] = TMP(R12);
+			} else if (rtype(i->arg[1]) == RSlot
+			&& slot_is_ptr(i->arg[1], fn)) {
+				fprintf(f, "\tldr\t%s, [r11, #%" PRIu64 "]\n",
+					rname(R12, Kl), slot(i->arg[1], fn, 0));
+				i->arg[1] = TMP(R12);
+			}
+			if (rtype(i->arg[0]) == RCon && KBASE(i->cls) == 0) {
+				c = &fn->con[i->arg[0].val];
+				assert(c->type == CBits);
+				loadcon(c, IP, Kw, f);
+				i->arg[0] = TMP(IP);
+			}
 		}
 		/* Byte/half loads and stores have no ARM `=addr` (literal-pool)
 		 * form (only ldr does), so a global-address operand must be
@@ -825,12 +913,6 @@ emitins(Ins *i, Fn *fn, FILE *f)
 			assert(c->type == CAddr);
 			loadaddr(c, (char *)rname(IP, Kl), f);
 			i->arg[0] = TMP(IP);
-		}
-		if (isstore(i->op) && rtype(i->arg[1]) == RCon) {
-			c = &fn->con[i->arg[1].val];
-			assert(c->type == CAddr);
-			loadaddr(c, (char *)rname(IP, Kl), f);
-			i->arg[1] = TMP(IP);
 		}
 		for (o = 0;; o++) {
 			if (omap[o].op == NOp)
@@ -854,16 +936,33 @@ emitins(Ins *i, Fn *fn, FILE *f)
 		if (req(i->to, i->arg[0]))
 			break;
 		if (rtype(i->to) == RSlot) {
+			/* Direct store of a VALUE into the variable's slot.
+			 * Ocopy never dereferences: routing it through the
+			 * generic Ostore path would misinterpret a Kl-owned
+			 * slot (pointer slot) as a location to dereference
+			 * instead of overwriting. */
 			r = i->to;
 			if (!isreg(i->arg[0])) {
 				i->to = TMP(IP);
 				emitins(i, fn, f);
 				i->arg[0] = i->to;
 			}
-			i->op = Ostorew + i->cls;
-			i->cls = Kw;
-			i->arg[1] = r;
-			emitins(i, fn, f);
+			switch (i->cls) {
+			case Kw:
+				fprintf(f, "\tstr\t%s, [r11, #%" PRIu64 "]\n",
+					rname(i->arg[0].val, Kw), slot(r, fn, 0));
+				break;
+			case Ks:
+				fprintf(f, "\tvstr\t%s, [r11, #%" PRIu64 "]\n",
+					rname(i->arg[0].val, Ks), slot(r, fn, 0));
+				break;
+			case Kd:
+				fprintf(f, "\tvstr\t%s, [r11, #%" PRIu64 "]\n",
+					rname(i->arg[0].val, Kd), slot(r, fn, 0));
+				break;
+			default:
+				die("arm: Ocopy-to-slot class %d", i->cls);
+			}
 			break;
 		}
 		assert(isreg(i->to));
@@ -873,8 +972,26 @@ emitins(Ins *i, Fn *fn, FILE *f)
 			loadcon(c, i->to.val, i->cls, f);
 			break;
 		case RSlot:
-			i->op = Oload;
-			emitins(i, fn, f);
+			/* Direct load of the slot's VALUE (copy semantics).
+			 * Routing through Oload would make a Kl-owned slot
+			 * look like a pointer to dereference (e.g. `int w =
+			 * x` truncating a long whose slot is Kl). */
+			switch (i->cls) {
+			case Kw:
+				fprintf(f, "\tldr\t%s, [r11, #%" PRIu64 "]\n",
+					rname(i->to.val, Kw), slot(i->arg[0], fn, 0));
+				break;
+			case Ks:
+				fprintf(f, "\tvldr\t%s, [r11, #%" PRIu64 "]\n",
+					rname(i->to.val, Ks), slot(i->arg[0], fn, 0));
+				break;
+			case Kd:
+				fprintf(f, "\tvldr\t%s, [r11, #%" PRIu64 "]\n",
+					rname(i->to.val, Kd), slot(i->arg[0], fn, 0));
+				break;
+			default:
+				die("arm: Ocopy-from-slot class %d", i->cls);
+			}
 			break;
 		default:
 			assert(i->to.val != IP);
