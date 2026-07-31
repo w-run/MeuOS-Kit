@@ -493,7 +493,7 @@ int arm_encode_insn(const struct mt_target *target,
 
 	/* ---- asr/lsr/lsl/ror rd, rm, #N (standalone shifts) ---- */
 	{
-		const char *shift_mn[] = {"asr", "lsr", "lsl", "ror", 0};
+		const char *shift_mn[] = {"lsl", "lsr", "asr", "ror", 0};
 		int shift_type = -1;
 		const char *shift_base = mnemonic;
 		int shift_cond = 14;
