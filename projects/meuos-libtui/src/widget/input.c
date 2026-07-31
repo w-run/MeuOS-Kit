@@ -65,8 +65,12 @@ static int parse_csi(int fd, tui_event_t *ev)
     int params[4];
     int np = 0;
     char *token;
-    char *rest = buf;
-    int has_param = (buf[0] >= '0' && buf[0] <= '9');
+    /* SGR 鼠标序列以 '<' 开头 (\033[<Cb;Cx;CyM): 参数从 '<' 之后开始。
+     * 若把 '<' 留在参数串里，has_param 恒为假、np 恒为 0，下面的
+     * np>=3 判断永不成立，鼠标事件就永远无法识别。 */
+    int is_sgr = (buf[0] == '<');
+    char *rest = is_sgr ? buf + 1 : buf;
+    int has_param = (*rest >= '0' && *rest <= '9');
 
     if (has_param) {
         while ((token = strtok_r(rest, ";", &rest)) && np < 4) {
@@ -131,7 +135,7 @@ static int parse_csi(int fd, tui_event_t *ev)
     }
 
     /* SGR 鼠标事件: \033[<Cb;Cx;CyM 或 m */
-    if (np >= 3 && buf[0] == '<') {
+    if (np >= 3 && is_sgr) {
         ev->key = TUI_KEY_MOUSE;
         ev->mouse.button   = params[0] & 0x03;
         ev->mouse.pressed  = (term == 'M');
