@@ -225,10 +225,24 @@ static void
 seladdr(Ref *r, Num *tn, Fn *fn)
 {
 	Addr a;
-	Ref r0;
+	Ref r0, r1;
 
 	r0 = *r;
 	if (rtype(r0) == RTmp) {
+		/* On i386 (ILP32) addresses are 32-bit, but the C frontend
+		 * keeps a value's class unchanged when narrowing (e.g.
+		 * uintptr_t from uint64_t), so an address operand can arrive
+		 * as a Kl temp. If left as-is, amatch would fold the 64-bit
+		 * add into a memory operand whose base/index are Kl temps,
+		 * which rega turns into slot references (kl_in_reg==0) that
+		 * emit cannot address. Truncate to Kw first: Oextuw with a Kl
+		 * arg reads the low 32 bits (movl from the Kl slot). */
+		if (fn->tmp[r0.val].cls == Kl) {
+			r1 = newtmp("isel", Kw, fn);
+			emit(Oextuw, Kw, r1, r0, R);
+			r0 = r1;
+			*r = r1;
+		}
 		memset(&a, 0, sizeof a);
 		if (!amatch(&a, tn, r0, fn))
 			return;
@@ -904,6 +918,16 @@ amatch(Addr *a, Num *tn, Ref r, Fn *fn)
 	}
 	ri = adisp(&co, tn, ri, fn, s);
 	*a = (Addr){co, rb, ri, s};
+
+	/* On i386 addressing components must be 32-bit registers; a
+	 * 64-bit (Kl) temp used as base or index would later be resolved
+	 * to a stack slot by rega (kl_in_reg==0) and emit cannot encode
+	 * it. seladdr() truncates Kl address operands before this point,
+	 * so this is only a guard against other paths. */
+	if (rtype(rb) == RTmp && fn->tmp[rb.val].cls != Kw)
+		return 0;
+	if (rtype(ri) == RTmp && fn->tmp[ri.val].cls != Kw)
+		return 0;
 
 	if (rtype(ri) == RTmp)
 	if (fn->tmp[ri.val].slot != -1) {

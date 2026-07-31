@@ -1377,9 +1377,15 @@ emitins(Ins i, E *e)
 			break;
 	case Oextsw:
 		case Oextuw:
-			/* 32-bit -> 64-bit extension.
-			 * Low half: movl source -> EAX, store to dst.low.
-			 * High half: extsw -> sarl $31; extuw -> xorl. */
+		case Oextsb:
+		case Oextub:
+		case Oextsh:
+		case Oextuh:
+			/* byte/short/word -> 64-bit extension.
+			 * The source (result of loadub/loadsb/loaduh/loadsh or an
+			 * ABI arg) is a Kw value already extended to 32 bits by the
+			 * loader, so the low half is a plain copy.
+			 * High half: sign-extend -> sarl $31; zero-extend -> xorl. */
 			assert(kl_isslot(i.to));
 			if (rtype(i.arg[0]) == RCon) {
 				int64_t v = e->fn->con[i.arg[0].val].bits.i;
@@ -1400,7 +1406,7 @@ emitins(Ins i, E *e)
 					regtoa(e->fp, SLong));
 			}
 			kl_store_from(i.to, 0, EAX, e);
-			if (i.op == Oextsw)
+			if (i.op == Oextsw || i.op == Oextsb || i.op == Oextsh)
 				fputs("\tsarl $31, %eax\n", e->f);
 			else
 				fputs("\txorl %eax, %eax\n", e->f);
