@@ -123,6 +123,12 @@ cfg_value_t *cfg_new(void) {
 }
 
 static cfg_value_t *make_string(const char *s, size_t len) {
+    /* 去首尾引号（YAML 双/单引号） */
+    while (len > 0 && (s[0] == ' ' || s[0] == '\t')) { s++; len--; }
+    while (len > 0 && (s[len-1] == ' ' || s[len-1] == '\t')) len--;
+    if (len >= 2 && (s[0] == '"' || s[0] == '\'') && s[len-1] == s[0]) {
+        s++; len -= 2;
+    }
     cfg_value_t *v = xcalloc(1, sizeof(*v));
     v->type = CFG_STRING;
     v->u.string.data = xmalloc(len + 1);

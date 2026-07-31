@@ -100,6 +100,7 @@ check: all
 	 rm -f /tmp/utils-cat-classic.in
 	@rm -f /tmp/utils-cat.in /tmp/utils-ver.txt /tmp/utils-ls-ver.txt /tmp/utils-tree-ver.txt
 	@echo ">>> all smoke tests PASS"
+	@cd test && ./runner.sh
 
 # 安装
 install: all

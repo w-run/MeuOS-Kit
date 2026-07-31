@@ -83,6 +83,13 @@ char *utils_dirname(const char *path);
  * 返回 malloc 的字符串，调用者负责 free()。 */
 char *human_readable(uint64_t bytes, int si);
 
+/* === classic 模式（3 路递进兼容） ===
+ * 优先级：--classic argv > MSH_CLASSIC env > NO_COLOR env
+ * classic=1 时自动 color_disable()，工具主体查 utils_classic_mode 分支。
+ * 各工具 main 开头调 utils_classic_init(argc, argv)。 */
+extern int utils_classic_mode;
+int utils_classic_init(int argc, char **argv);
+
 #ifdef __cplusplus
 }
 #endif

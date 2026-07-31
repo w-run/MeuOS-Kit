@@ -13,20 +13,21 @@
 CC ?= cc
 CFLAGS ?= -O2 -g -Wall -Wextra -Wpedantic -std=c11
 BUILD := build
+UTILS_LIB := ../meuos-utils/build/libutils.a
 
 SRCS := $(sort $(wildcard src/*/*.c))
 OBJS := $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS))
 BIN := $(BUILD)/msh
 
-BASE_CFLAGS := -Iinclude
+BASE_CFLAGS := -Iinclude -I../meuos-utils/include
 
 .PHONY: all check clean install
 
 all: $(BIN)
 
-$(BIN): $(OBJS)
+$(BIN): $(OBJS) $(UTILS_LIB)
 	@mkdir -p $(BUILD)
-	$(CC) $(CFLAGS) $(BASE_CFLAGS) -o $@ $^
+	$(CC) $(CFLAGS) $(BASE_CFLAGS) -o $@ $^ $(UTILS_LIB)
 
 $(BUILD)/%.o: src/%.c
 	@mkdir -p $(dir $@)
@@ -46,6 +47,8 @@ check: all
 	@out=$$(printf 'echo via-stdin' | ./$(BIN) -c 'cat /dev/stdin' 2>&1); \
 	 echo "Note: -c 'cat /dev/stdin' is unsupported in skeleton (no parser), skipped"
 	@echo "Note: external true/false via PATH verified via -c 'echo \$?'"
+	@echo "--- POSIX smoke suite ---"
+	@sh test/posix/smoke.sh ./$(BIN)
 	@rm -f /tmp/msh-ver.txt /tmp/msh-script.sh
 	@echo ">>> all smoke tests PASS"
 

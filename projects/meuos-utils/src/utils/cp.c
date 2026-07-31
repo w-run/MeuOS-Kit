@@ -37,50 +37,61 @@ static int do_copy_file(const char *src, const char *dst, int preserve,
     struct stat st;
     if (fstat(fdin, &st) < 0) { close(fdin); return -1; }
 
-    char tmpdst[PATH_MAX];
-    if (flag_atomic) snprintf(tmpdst, sizeof(tmpdst), "%s.tmpXXXXXX", dst);
-    else snprintf(tmpdst, sizeof(tmpdst), "%s", dst);
-
-    int flags = O_WRONLY | O_CREAT | O_TRUNC;
-    mode_t mode = preserve ? st.st_mode : 0644;
     int fdout;
+    char tmpl[PATH_MAX] = "";
     if (flag_atomic) {
-        char tmpl[PATH_MAX];
-        snprintf(tmpl, sizeof(tmpl), "%s.tmp.XXXXXX", dst);
+        /* 原子写：mkstemp 到 .XXXXXX 后缀的临时文件，写完 rename */
+        snprintf(tmpl, sizeof(tmpl), "%s.tmpXXXXXX", dst);
         fdout = mkstemp(tmpl);
-        if (fdout < 0) { close(fdin); perror("mkstemp"); return -1; }
+        if (fdout < 0) {
+            close(fdin);
+            perror("mkstemp");
+            return -1;
+        }
+        /* 应用目标权限（preserve 时保留源模式，否则 0644） */
+        mode_t mode = preserve ? st.st_mode : 0644;
+        if (fchmod(fdout, mode) < 0) {
+            /* 非致命 */
+        }
     } else {
-        fdout = open(tmpdst, flags, mode);
+        int flags = O_WRONLY | O_CREAT | O_TRUNC;
+        mode_t mode = preserve ? st.st_mode : 0644;
+        fdout = open(dst, flags, mode);
+        if (fdout < 0) { close(fdin); perror(dst); return -1; }
     }
-    if (fdout < 0) { close(fdin); perror(dst); return -1; }
 
     progress_t *p = NULL;
     if (use_progress) p = progress_new("Copying", (uint64_t)st.st_size);
     char buf[64 * 1024];
     ssize_t n;
     uint64_t total = 0;
+    int err = 0;
     while ((n = read(fdin, buf, sizeof(buf))) > 0) {
         ssize_t m = write(fdout, buf, (size_t)n);
-        if (m != n) { close(fdin); close(fdout); return -1; }
+        if (m != n) { err = 1; break; }
         total += (uint64_t)n;
         if (p) progress_update(p, total);
     }
     if (p) { progress_finish(p); progress_free(p); }
 
     close(fdin);
+    close(fdout);
+
     if (flag_atomic) {
-        if (rename(tmpdst, dst) < 0) {
+        if (err) {
+            unlink(tmpl);
+            return -1;
+        }
+        if (rename(tmpl, dst) < 0) {
             perror("rename");
-            unlink(tmpdst);
-            close(fdout);
+            unlink(tmpl);
             return -1;
         }
     }
-    close(fdout);
     if (preserve && !flag_atomic) {
         chmod(dst, st.st_mode);
     }
-    return 0;
+    return err ? -1 : 0;
 }
 
 static int do_copy(const char *src, const char *dst, int preserve) {
