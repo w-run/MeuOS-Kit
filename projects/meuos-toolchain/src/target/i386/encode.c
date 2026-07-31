@@ -127,6 +127,14 @@ parse_operand(const char *text, struct i386_op *op)
 	while (*text == ' ')
 		text++;
 
+	/* AT&T indirect marker '*': skip it and try again as register/memory
+	 * (e.g. "call *%eax", "jmp *(mem)"). */
+	if (text[0] == '*') {
+		text++;
+		while (*text == ' ')
+			text++;
+	}
+
 	/* Immediate: $<value> or $<symbol> */
 	if (text[0] == '$') {
 		const char *val = text + 1;
@@ -568,8 +576,9 @@ i386_encode_insn(const struct mt_target *target,
 	/* ---- MOV ---- */
 	if (strcmp(base, "mov") == 0 && nops == 2) {
 		match = 1;
-		if (ops[0].kind == OP_IMM && ops[1].kind == OP_REG) {
-			/* mov $imm, reg — opcode 0xB8+reg */
+		if ((ops[0].kind == OP_IMM || ops[0].kind == OP_SYMBOL) &&
+		    ops[1].kind == OP_REG) {
+			/* mov $imm/$sym, reg — opcode 0xB8+reg */
 			emit8(p, 0xB8 + ops[1].reg);
 			p++;
 			offset = (size_t)(p - out->bytes);

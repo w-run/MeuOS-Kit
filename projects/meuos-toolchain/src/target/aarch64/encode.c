@@ -436,15 +436,17 @@ aarch64_encode_insn(const struct mt_target *target,
 		return 0;
 	}
 
-	/* br xn */
+	/* br xn — BR <Xn>: Rn is field [9:5] */
 	if (strcmp(mnemonic, "br") == 0 && nops == 1 && ops[0].kind == 'r') {
-		emit32(out, &off, 0xD61F0000 | ((unsigned)ops[0].reg & 0x1F));
+		emit32(out, &off, 0xD61F0000 |
+		       (((unsigned)ops[0].reg & 0x1F) << 5));
 		return 0;
 	}
 
-	/* blr xn */
+	/* blr xn — BLR <Xn>: Rn is field [9:5] */
 	if (strcmp(mnemonic, "blr") == 0 && nops == 1 && ops[0].kind == 'r') {
-		emit32(out, &off, 0xD63F0000 | ((unsigned)ops[0].reg & 0x1F));
+		emit32(out, &off, 0xD63F0000 |
+		       (((unsigned)ops[0].reg & 0x1F) << 5));
 		return 0;
 	}
 
