@@ -200,6 +200,30 @@ reloc_kind_of(const char *tok)
 	return RELK_PLAIN;
 }
 
+/* Split a trailing "+N" / "-N" numeric offset from a symbol name in place,
+ * returning the symbol part (NUL-terminated) and storing the signed offset
+ * in *off.  Quoted symbol names ("...") and offsetless symbols are left
+ * untouched (offset 0).  mcc emits "sym+8" for e.g. ga[2] element accesses. */
+static char *
+split_sym_offset(char *s, int64_t *off)
+{
+	char *p;
+
+	*off = 0;
+	if (!s || !*s || s[0] == '"')
+		return s;
+	for (p = s; *p; p++) {
+		if ((*p == '+' || *p == '-') && p[1] >= '0' && p[1] <= '9') {
+			*off = strtoll(p + 1, NULL, 10);
+			if (*p == '-')
+				*off = -*off;
+			*p = '\0';
+			break;
+		}
+	}
+	return s;
+}
+
 static int
 parse_operands(const char *text, struct la_op ops[4], int *nops)
 {
@@ -234,7 +258,7 @@ parse_operands(const char *text, struct la_op ops[4], int *nops)
 			s[len] = '\0';
 			ops[*nops].kind = 4;
 			ops[*nops].relkind = rk;
-			ops[*nops].sym = s;
+			ops[*nops].sym = split_sym_offset(s, &ops[*nops].addend);
 			(*nops)++; tok = strtok(NULL, ","); continue;
 		}
 
@@ -248,7 +272,8 @@ parse_operands(const char *text, struct la_op ops[4], int *nops)
 			}
 			ops[*nops].kind = 4;
 			ops[*nops].relkind = RELK_PLAIN;
-			ops[*nops].sym = xstrdup(tok);
+			ops[*nops].sym = split_sym_offset(xstrdup(tok),
+			                                  &ops[*nops].addend);
 			(*nops)++; tok = strtok(NULL, ","); continue;
 		}
 
@@ -299,7 +324,8 @@ parse_operands(const char *text, struct la_op ops[4], int *nops)
 				} else {
 					ops[*nops].kind = 4;
 					ops[*nops].relkind = RELK_PLAIN;
-					ops[*nops].sym = xstrdup(tok);
+					ops[*nops].sym = split_sym_offset(xstrdup(tok),
+					                                  &ops[*nops].addend);
 				}
 			}
 			(*nops)++;
@@ -401,7 +427,7 @@ la64_encode_insn(const struct mt_target *target,
 		const char *jsym = (nops >= 3 && ops[2].kind == 4) ? ops[2].sym : NULL;
 		if (jsym) {
 			emit32(out->bytes, (0x13 << 26) | rd_j | (rj_j << 5));
-			set_fixup(out, 0, 4, RLA_B16, jsym, 0);
+			set_fixup(out, 0, 4, RLA_B16, jsym, ops[2].addend);
 		} else {
 			emit32(out->bytes, (0x13 << 26) | rd_j | (rj_j << 5) |
 			       ((uint32_t)(off_j & 0x3FFFFFF) << 10));
@@ -516,6 +542,7 @@ la64_encode_insn(const struct mt_target *target,
 		rd = (unsigned)ops[0].reg;
 		rj = 0; imm = 0; sym = NULL; reloc_type = 0;
 		int have_reloc = 0;
+		int is_load = 0;
 		if (nops == 3 && ops[1].kind == 1) {
 			rj = (unsigned)ops[1].reg;
 			if (ops[2].kind == 2) imm = ops[2].imm;
@@ -530,26 +557,45 @@ la64_encode_insn(const struct mt_target *target,
 		} else return -1;
 
 		uint32_t op = 0;
-		if      (strcmp(mnemonic, "ld.b")  == 0) op = 0x0A0 << 22;
-		else if (strcmp(mnemonic, "ld.h")  == 0) op = 0x0A1 << 22;
-		else if (strcmp(mnemonic, "ld.w")  == 0) op = 0x0A2 << 22;
-		else if (strcmp(mnemonic, "ld.d")  == 0) op = 0x0A3 << 22;
-		else if (strcmp(mnemonic, "ld.bu") == 0) op = 0x0A8 << 22;
-		else if (strcmp(mnemonic, "ld.hu") == 0) op = 0x0A9 << 22;
-		else if (strcmp(mnemonic, "ld.wu") == 0) op = 0x0AA << 22;
-		else if (strcmp(mnemonic, "st.b")  == 0) op = 0x0A4 << 22;
-		else if (strcmp(mnemonic, "st.h")  == 0) op = 0x0A5 << 22;
-		else if (strcmp(mnemonic, "st.w")  == 0) op = 0x0A6 << 22;
-		else if (strcmp(mnemonic, "st.d")  == 0) op = 0x0A7 << 22;
-		else if (strcmp(mnemonic, "fld.s") == 0 || strcmp(mnemonic, "fld.w") == 0) op = 0x0AC << 22;
-		else if (strcmp(mnemonic, "fld.d") == 0) op = 0x0AE << 22;
-		else if (strcmp(mnemonic, "fst.s") == 0 || strcmp(mnemonic, "fst.w") == 0) op = 0x0AD << 22;
-		else if (strcmp(mnemonic, "fst.d") == 0) op = 0x0AF << 22;
+		if      (strcmp(mnemonic, "ld.b")  == 0) { op = 0x0A0 << 22; is_load = 1; }
+		else if (strcmp(mnemonic, "ld.h")  == 0) { op = 0x0A1 << 22; is_load = 1; }
+		else if (strcmp(mnemonic, "ld.w")  == 0) { op = 0x0A2 << 22; is_load = 1; }
+		else if (strcmp(mnemonic, "ld.d")  == 0) { op = 0x0A3 << 22; is_load = 1; }
+		else if (strcmp(mnemonic, "ld.bu") == 0) { op = 0x0A8 << 22; is_load = 1; }
+		else if (strcmp(mnemonic, "ld.hu") == 0) { op = 0x0A9 << 22; is_load = 1; }
+		else if (strcmp(mnemonic, "ld.wu") == 0) { op = 0x0AA << 22; is_load = 1; }
+		else if (strcmp(mnemonic, "st.b")  == 0) { op = 0x0A4 << 22; }
+		else if (strcmp(mnemonic, "st.h")  == 0) { op = 0x0A5 << 22; }
+		else if (strcmp(mnemonic, "st.w")  == 0) { op = 0x0A6 << 22; }
+		else if (strcmp(mnemonic, "st.d")  == 0) { op = 0x0A7 << 22; }
+		else if (strcmp(mnemonic, "fld.s") == 0 || strcmp(mnemonic, "fld.w") == 0) { op = 0x0AC << 22; is_load = 1; }
+		else if (strcmp(mnemonic, "fld.d") == 0) { op = 0x0AE << 22; is_load = 1; }
+		else if (strcmp(mnemonic, "fst.s") == 0 || strcmp(mnemonic, "fst.w") == 0) { op = 0x0AD << 22; }
+		else if (strcmp(mnemonic, "fst.d") == 0) { op = 0x0AF << 22; }
 		else return -1;
 
 		if (have_reloc) {
+			int64_t opaddend = ops[2].addend;
+			/* GOT-based address materialization with an offset:
+			 * "ld.d rd, rd, %got_pc_lo12(sym+A)" loads the GOT slot
+			 * (== &sym) into rd.  The GOT_PC_LO12 addend must NOT be
+			 * applied to the slot offset (that would read past the
+			 * GOT entry); instead append "addi.d rd, rd, A" so rd
+			 * ends up as &sym + A. */
+			if (reloc_type == RLA_GOT_PC_LO12 && opaddend != 0) {
+				if (!is_load)
+					return -1;
+				if (opaddend < -2048 || opaddend > 2047)
+					return -1; /* needs multi-instruction expansion */
+				emit32(out->bytes, ri12(op, rd, rj, 0));
+				set_fixup(out, 0, 4, reloc_type, sym, 0);
+				emit32(out->bytes + 4,
+				       ri12(0x0B << 22, rd, rd, (int32_t)opaddend));
+				out->size = 8;
+				return 0;
+			}
 			emit32(out->bytes, ri12(op, rd, rj, 0));
-			set_fixup(out, 0, 4, reloc_type, sym, 0);
+			set_fixup(out, 0, 4, reloc_type, sym, opaddend);
 		} else {
 			emit32(out->bytes, ri12(op, rd, rj, (int32_t)imm));
 		}
@@ -602,7 +648,7 @@ la64_encode_insn(const struct mt_target *target,
 				sym = ops[2].sym; relkind = ops[2].relkind;
 				reloc_type = relkind_to_type(relkind);
 				if (reloc_type == 0) reloc_type = RLA_TLS_LE64_HI12;
-				set_fixup(out, 0, 4, reloc_type, sym, 0);
+				set_fixup(out, 0, 4, reloc_type, sym, ops[2].addend);
 			} else if (ops[2].kind == 2) {
 				emit32(out->bytes, 0x16800000 | rd | (rj << 5) |
 				    ((uint32_t)(ops[2].imm & 0xFFF) << 10));
@@ -613,7 +659,7 @@ la64_encode_insn(const struct mt_target *target,
 		rd = (unsigned)ops[1].reg;   /* rk */
 		if (ops[2].kind == 4) {
 			emit32(out->bytes, (op26 << 26) | rd | (rj << 5));
-			set_fixup(out, 0, 4, RLA_B16, ops[2].sym, 0);
+			set_fixup(out, 0, 4, RLA_B16, ops[2].sym, ops[2].addend);
 		} else if (ops[2].kind == 2) {
 			int32_t off = (int32_t)ops[2].imm;
 			emit32(out->bytes, (op26 << 26) | rd | (rj << 5) | ((uint32_t)(off & 0xFFFF) << 10));
@@ -667,7 +713,7 @@ alu2ri12:
 			emit32(out->bytes, ri12(op, rd, rj, 0));
 			set_fixup(out, 0, 4,
 			    relkind_to_type(ops[2].relkind) ? relkind_to_type(ops[2].relkind) : RLA_PCALA_LO12,
-			    ops[2].sym, 0);
+			    ops[2].sym, ops[2].addend);
 		} else {
 			emit32(out->bytes, ri12(op, rd, rj, (int32_t)imm));
 		}
@@ -681,7 +727,7 @@ alu2ri12:
 			sym = ops[1].sym; relkind = ops[1].relkind;
 			reloc_type = relkind_to_type(relkind);
 			emit32(out->bytes, 0x14 << 24 | rd);
-			set_fixup(out, 0, 4, reloc_type, sym, 0);
+			set_fixup(out, 0, 4, reloc_type, sym, ops[1].addend);
 		} else if (ops[1].kind == 2) {
 			uint32_t imm20 = (uint32_t)(ops[1].imm & 0xFFFFF);
 			emit32(out->bytes, 0x14 << 24 | rd | (imm20 << 5));
@@ -697,7 +743,7 @@ alu2ri12:
 			reloc_type = relkind_to_type(relkind);
 			if (reloc_type == 0) reloc_type = RLA_TLS_LE64_LO20;
 			emit32(out->bytes, 0x16 << 24 | rd);
-			set_fixup(out, 0, 4, reloc_type, sym, 0);
+			set_fixup(out, 0, 4, reloc_type, sym, ops[1].addend);
 		} else if (ops[1].kind == 2) {
 			uint32_t imm20 = (uint32_t)(ops[1].imm & 0xFFFFF);
 			emit32(out->bytes, 0x16 << 24 | rd | (imm20 << 5));
@@ -713,7 +759,12 @@ alu2ri12:
 			reloc_type = relkind_to_type(relkind);
 			if (reloc_type == 0) reloc_type = RLA_PCALA_HI20;
 			emit32(out->bytes, 0x1A << 24 | rd);
-			set_fixup(out, 0, 4, reloc_type, sym, 0);
+			/* GOT_PC_HI20 addresses the GOT slot itself; a symbol
+			 * offset is applied by the addi.d appended after the
+			 * paired GOT_PC_LO12 load, so it must not be folded
+			 * into the page here. */
+			set_fixup(out, 0, 4, reloc_type, sym,
+			          reloc_type == RLA_GOT_PC_HI20 ? 0 : ops[1].addend);
 		} else if (ops[1].kind == 2) {
 			uint32_t imm20 = (uint32_t)(ops[1].imm & 0xFFFFF);
 			emit32(out->bytes, 0x1A << 24 | rd | (imm20 << 5));
@@ -738,7 +789,7 @@ alu2ri12:
 			uint32_t op26 = op24;
 			if (ops[1].kind == 4) {
 				emit32(out->bytes, (op26 << 26) | (0) | (rj << 5));
-				set_fixup(out, 0, 4, RLA_B16, ops[1].sym, 0);
+				set_fixup(out, 0, 4, RLA_B16, ops[1].sym, ops[1].addend);
 			} else if (ops[1].kind == 2) {
 				int32_t off = (int32_t)ops[1].imm;
 				emit32(out->bytes, (op26 << 26) | (rj << 5) | ((uint32_t)(off & 0xFFFF) << 10));
@@ -747,7 +798,7 @@ alu2ri12:
 		}
 		if (ops[1].kind == 4) {
 			emit32(out->bytes, (op24 << 24) | (rj << 5));
-			set_fixup(out, 0, 4, RLA_B16, ops[1].sym, 0);
+			set_fixup(out, 0, 4, RLA_B16, ops[1].sym, ops[1].addend);
 		} else if (ops[1].kind == 2) {
 			int32_t off = (int32_t)ops[1].imm;
 			emit32(out->bytes, (op24 << 24) | (rj << 5) | ((uint32_t)(off & 0xFFFF) << 10));
@@ -786,10 +837,10 @@ branch2:
 	if (nops == 1 && ops[0].kind == 4) {
 		if (strcmp(mnemonic, "b") == 0) {
 			emit32(out->bytes, 0x14 << 26);
-			set_fixup(out, 0, 4, RLA_B26, ops[0].sym, 0);
+			set_fixup(out, 0, 4, RLA_B26, ops[0].sym, ops[0].addend);
 		} else if (strcmp(mnemonic, "bl") == 0) {
 			emit32(out->bytes, 0x15 << 26);
-			set_fixup(out, 0, 4, RLA_B26, ops[0].sym, 0);
+			set_fixup(out, 0, 4, RLA_B26, ops[0].sym, ops[0].addend);
 		} else return -1;
 		return 0;
 	}
@@ -804,13 +855,13 @@ branch2:
 		emit32(out->bytes + 4,  ri12(0x0B << 22, rd, rd, 0));        /* addi.d rd, rd, 0 */
 		out->size = 8;
 		out->fixed = 0;
-		set_fixup(out, 0, 4, RLA_PCALA_HI20, lsym, 0);
+		set_fixup(out, 0, 4, RLA_PCALA_HI20, lsym, ops[1].addend);
 		out->fixup2_present = 1;
 		out->fixup2_offset  = 4;
 		out->fixup2_width   = 4;
 		out->reloc_type2    = RLA_PCALA_LO12;
 		out->fixup2_symbol  = lsym;
-		out->fixup2_addend  = 0;
+		out->fixup2_addend  = ops[1].addend;
 		return 0;
 	}
 

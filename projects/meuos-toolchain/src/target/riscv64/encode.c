@@ -91,6 +91,43 @@ strip_sym_quotes(char **sym)
 	}
 }
 
+/* Split a trailing "+N" / "-N" numeric offset from a symbol name in place,
+ * returning the symbol part (NUL-terminated) and storing the signed offset
+ * in *off.  Quoted symbol names ("...") and offsetless symbols are left
+ * untouched (offset 0).  mcc emits "sym+8" for e.g. ga[2] element accesses. */
+static char *
+split_sym_offset(char *s, int64_t *off)
+{
+	char *p;
+
+	*off = 0;
+	if (!s || !*s || s[0] == '"')
+		return s;
+	for (p = s; *p; p++) {
+		if ((*p == '+' || *p == '-') && p[1] >= '0' && p[1] <= '9') {
+			*off = strtoll(p + 1, NULL, 10);
+			if (*p == '-')
+				*off = -*off;
+			*p = '\0';
+			break;
+		}
+	}
+	return s;
+}
+
+/* Strip quotes (if any) and then split a trailing numeric offset off the
+ * symbol name.  Must be called after strip_sym_quotes' quote check on the
+ * raw token (quoted names are never split). */
+static void
+sym_strip_split(char **sym, int64_t *off)
+{
+	char *ss = *sym;
+	int quoted = (ss[0] == '"');
+	strip_sym_quotes(sym);
+	if (!quoted)
+		*sym = split_sym_offset((char *)*sym, off);
+}
+
 /* ---- Operand parsing ---- */
 
 struct rv_op {
@@ -138,7 +175,8 @@ parse_operands(const char *text, struct rv_op ops[4], int *nops)
 				*endp = '\0';
 				ops[*nops].kind = 4; /* symbol */
 				ops[*nops].sym = paren + 1;
-				strip_sym_quotes((char **)&ops[*nops].sym);
+				sym_strip_split((char **)&ops[*nops].sym,
+				                &ops[*nops].addend);
 				(*nops)++;
 				tok = strtok(NULL, ",");
 				continue;
@@ -160,8 +198,17 @@ parse_operands(const char *text, struct rv_op ops[4], int *nops)
 
 				if (paren > tok) {
 					char *endp;
-					ops[*nops].imm = strtol(tok, &endp, 0);
-					(void)endp;
+					long nv = strtol(tok, &endp, 0);
+					if (endp != tok) {
+						/* Numeric offset: "123(...)" — strtol stops
+						 * at the '(' */
+						ops[*nops].imm = nv;
+					} else {
+						/* Symbolic offset "sym" / "sym+N" */
+						ops[*nops].sym = tok;
+						sym_strip_split((char **)&ops[*nops].sym,
+						                &ops[*nops].addend);
+					}
 				}
 
 				if (!end) { tok = strtok(NULL, ","); continue; }
@@ -192,7 +239,8 @@ parse_operands(const char *text, struct rv_op ops[4], int *nops)
 			/* Symbol reference */
 			ops[*nops].kind = 4; /* symbol */
 			ops[*nops].sym = val;
-			strip_sym_quotes((char **)&ops[*nops].sym);
+			sym_strip_split((char **)&ops[*nops].sym,
+			                &ops[*nops].addend);
 			(*nops)++;
 			tok = strtok(NULL, ",");
 			continue;
@@ -208,7 +256,8 @@ parse_operands(const char *text, struct rv_op ops[4], int *nops)
 			} else {
 				ops[*nops].kind = 4; /* symbol */
 				ops[*nops].sym = tok;
-				strip_sym_quotes((char **)&ops[*nops].sym);
+				sym_strip_split((char **)&ops[*nops].sym,
+				                &ops[*nops].addend);
 			}
 			(*nops)++;
 		}
@@ -1240,20 +1289,23 @@ branch_fallthrough:
 		return 0;
 	}
 
-	/* la rd, symbol  — load address (auipc + addi pair) */
+	/* la rd, symbol  — load address.
+	 * Static (non-PIC) absolute addressing: lui + addi with
+	 * R_RISCV_HI20 / R_RISCV_LO12_I.  A PC-relative auipc + addi pair
+	 * with these relocs would need the LO12 computed relative to the
+	 * auipc instruction (P_hi), but the linker applies the LO12 at the
+	 * addi's own place, leaving an error of (place & 0xFFF) for any
+	 * non-page-aligned instruction address.  Absolute addressing is
+	 * correct for the static executables this toolchain produces. */
 	if (strcmp(mnemonic, "la") == 0 && nops == 2 &&
 	    ops[0].kind == 1 && ops[1].kind == 4) {
 		unsigned rd = (unsigned)ops[0].reg;
-		/* Emit auipc rd, %pcrel_hi(symbol) */
 		out->size = 8;
-		emit32(out->bytes, u_type(0x17, rd, 0));
-		/* Emit addi rd, rd, %pcrel_lo(symbol) */
-		emit32(out->bytes + 4, i_type(0x13, rd, 0, rd, 0));
-		/* First fixup: auipc with PCREL_HI20 */
-		set_fixup(out, 0, 4, 23 /* R_RISCV_PCREL_HI20 */,
+		emit32(out->bytes, u_type(0x37, rd, 0));              /* lui rd, 0 */
+		emit32(out->bytes + 4, i_type(0x13, rd, 0, rd, 0));  /* addi rd, rd, 0 */
+		set_fixup(out, 0, 4, 26 /* R_RISCV_HI20 */,
 		          ops[1].sym, ops[1].addend);
-		/* Second fixup: addi with PCREL_LO12_I */
-		set_fixup2(out, 4, 4, 24 /* R_RISCV_PCREL_LO12_I */,
+		set_fixup2(out, 4, 4, 24 /* R_RISCV_LO12_I */,
 		           ops[1].sym, ops[1].addend);
 		return 0;
 	}
