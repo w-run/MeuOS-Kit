@@ -52,8 +52,15 @@ parse_reg(const char *name)
 	size_t i;
 	if (!name || !*name) return -1;
 	if (name[0] == 'x' || name[0] == 'f') {
+		/* Require at least one digit: a bare "x" or "f" is a symbol
+		 * name, not the x0/f0 register.  strtol("") returns 0 with a
+		 * valid-looking end pointer, which would otherwise make e.g.
+		 * "call f" mis-parse the label as register f0. */
 		char *end;
-		long n = strtol(name + 1, &end, 10);
+		long n;
+		if (!name[1])
+			return -1;
+		n = strtol(name + 1, &end, 10);
 		if (*end == '\0' && n >= 0 && n <= 31)
 			return (int)n;
 	}
