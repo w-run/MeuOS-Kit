@@ -10,19 +10,22 @@ mkdir -p "$work"
 # The host linker must produce a real shared object, including a local TLS
 # definition.  On x86_64 mcc selects the linkable initial-exec GOT model for
 # that DSO; the remaining targets are checked at assembly-generation level.
-"$mcc" --shared -o "$work/libfeatures.so" "$root/test/driver/shared.c"
+# These are host-runtime checks: --specs=host forces the host specs so the
+# script behaves the same whether or not MEUOS_SYSROOT implies meuos specs
+# (which would try to link the static libc-meuos.a into a DSO).
+"$mcc" --specs=host --shared -o "$work/libfeatures.so" "$root/test/driver/shared.c"
 LC_ALL=C readelf -h "$work/libfeatures.so" | grep -Eq 'Type:[[:space:]]+DYN'
-"$mcc" --shared -o "$work/libfeatures-tls.so" "$root/test/driver/shared_tls.c"
+"$mcc" --specs=host --shared -o "$work/libfeatures-tls.so" "$root/test/driver/shared_tls.c"
 LC_ALL=C readelf -r "$work/libfeatures-tls.so" | grep -Eq 'TPOFF64'
-"$mcc" -o "$work/shared-tls-consumer" \
+"$mcc" --specs=host -o "$work/shared-tls-consumer" \
 	"$root/test/driver/shared_tls_consumer.c" -L"$work" -lfeatures-tls
 LD_LIBRARY_PATH="$work" "$work/shared-tls-consumer"
 
 # A Make-style final link gives the driver only object files.  They must be
 # passed to the host linker, never fed back into the C lexer as source text.
 printf '%s\n' 'int main(void) { return 0; }' > "$work/object-link.c"
-"$mcc" -c -o "$work/object-link.o" "$work/object-link.c"
-"$mcc" -o "$work/object-link" "$work/object-link.o"
+"$mcc" --specs=host -c -o "$work/object-link.o" "$work/object-link.c"
+"$mcc" --specs=host -o "$work/object-link" "$work/object-link.o"
 "$work/object-link"
 
 for target in x86_64-linux aarch64-linux riscv64-linux loongarch64-linux; do

@@ -10,7 +10,11 @@ printf '%s\n' '#define MCC_SYSROOT_VALUE 17' > "$work/include/mcc_sysroot_test.h
 printf '%s\n' '#include <mcc_sysroot_test.h>' \
     'int main(void) { return MCC_SYSROOT_VALUE != 17; }' > "$work/test.c"
 
-"$mcc" --sysroot="$work" -o "$work/plain" "$work/test.c"
+# A sysroot on the command line selects MeuOS specs implicitly (see
+# 42a53ed), which links -lc-meuos against a real CRT — this test's
+# empty libc-meuos.a cannot satisfy that.  --specs=host keeps the host
+# runtime while still exercising --sysroot's include lookup.
+"$mcc" --specs=host --sysroot="$work" -o "$work/plain" "$work/test.c"
 "$work/plain"
 "$mcc" --specs=meuos --sysroot="$work" -E "$work/test.c" >/dev/null
 
