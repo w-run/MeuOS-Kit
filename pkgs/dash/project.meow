@@ -3,26 +3,34 @@ version: 0.5.12
 default: all
 
 [variables]
-  CC: mcc
+  MCC: /workspace/MeuOS-Kit/.agents/worktrees/mcc-toolchain/projects/mcc/mcc
+  MEUOS_SYSROOT: /workspace/MeuOS-Kit/sysroot/x86_64
+  DL_DIR: /tmp/meow-dl
+  BUILD_DIR: /tmp/meow-build/dash
   CFLAGS: -O2 --sysroot=%MEUOS_SYSROOT%
 
 [all]
   deps: install
 
 [fetch]
-  run: wget -c http://gondor.apana.org.au/~herbert/dash/files/dash-0.5.12.tar.gz -O %DL_DIR%/dash-0.5.12.tar.gz
+  run: test -f %DL_DIR%/dash-0.5.12.tar.gz || wget -c http://gondor.apana.org.au/~herbert/dash/files/dash-0.5.12.tar.gz -O %DL_DIR%/dash-0.5.12.tar.gz
 
 [unpack]
   deps: fetch
   run: mkdir -p %BUILD_DIR% && tar xf %DL_DIR%/dash-0.5.12.tar.gz -C %BUILD_DIR%
 
+# Pure MeuOS toolchain build: every dash source file is compiled with mcc
+# and linked with mt/ld against libc-meuos.a.  The autotools configure/make
+# path is not used.  The patch also drops the generated init.c/nodes.c/
+# signames.c/syntax.c/token.h/builtins.c from the mcc-incompatible parts
+# (K&R declarations, void* arithmetic, volatile stores, missing headers).
 [build]
   deps: unpack
-  run: cd %BUILD_DIR%/dash-0.5.12 && ./configure --host=%HOST% --prefix=/usr && make
+  run: MCC=%MCC% MEUOS_SYSROOT=%MEUOS_SYSROOT% bash /workspace/MeuOS-Kit/.agents/worktrees/bug-audit/pkgs/dash/build-mcc.sh %DL_DIR%/dash-0.5.12.tar.gz %BUILD_DIR%/dash-pure
 
 [install]
   deps: build
-  run: cd %BUILD_DIR%/dash-0.5.12 && make DESTDIR=%MEUOS_SYSROOT% install
+  run: mkdir -p %MEUOS_SYSROOT%/bin && cp %BUILD_DIR%/dash-pure %MEUOS_SYSROOT%/bin/dash
 
 [clean]
-  run: rm -rf %BUILD_DIR%/dash-0.5.12
+  run: rm -rf %BUILD_DIR%/dash-0.5.12 %BUILD_DIR%/dash-pure

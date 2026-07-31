@@ -1,0 +1,2187 @@
+diff -ruN a/ b/
+--- a/src/cd.c
++++ b/src/cd.c
+@@ -218,7 +218,7 @@
+ 		new = stputs(curdir, new);
+ 	}
+ 	new = makestrspace(strlen(dir) + 2, new);
+-	lim = stackblock() + 1;
++	lim = (char *)stackblock() + 1;
+ 	if (*dir != '/') {
+ 		if (new[-1] != '/')
+ 			USTPUTC('/', new);
+--- a/src/error.c
++++ b/src/error.c
+@@ -62,7 +62,7 @@
+ struct jmploc *handler;
+ int exception;
+ int suppressint;
+-volatile sig_atomic_t intpending;
++sig_atomic_t intpending;
+ int errlinno;
+ 
+ 
+--- a/src/eval.c
++++ b/src/eval.c
+@@ -941,8 +941,8 @@
+ STATIC int
+ evalbltin(const struct builtincmd *cmd, int argc, char **argv, int flags)
+ {
+-	char *volatile savecmdname;
+-	struct jmploc *volatile savehandler;
++	char *savecmdname;
++	struct jmploc *savehandler;
+ 	struct jmploc jmploc;
+ 	int status;
+ 	int i;
+@@ -975,8 +975,8 @@
+ STATIC int
+ evalfun(struct funcnode *func, int argc, char **argv, int flags)
+ {
+-	volatile struct shparam saveparam;
+-	struct jmploc *volatile savehandler;
++	struct shparam saveparam;
++	struct jmploc *savehandler;
+ 	struct jmploc jmploc;
+ 	int e;
+ 	int savefuncline;
+--- a/src/exec.c
++++ b/src/exec.c
+@@ -770,11 +770,7 @@
+ }
+ 
+ STATIC int
+-describe_command(out, command, path, verbose)
+-	struct output *out;
+-	char *command;
+-	const char *path;
+-	int verbose;
++describe_command(struct output *out, char *command, const char *path, int verbose)
+ {
+ 	struct cmdentry entry;
+ 	struct tblentry *cmdp;
+@@ -876,9 +872,7 @@
+ }
+ 
+ int
+-commandcmd(argc, argv)
+-	int argc;
+-	char **argv;
++commandcmd(int argc, char **argv)
+ {
+ 	char *cmd;
+ 	int c;
+--- a/src/expand.c
++++ b/src/expand.c
+@@ -523,7 +523,7 @@
+ 
+ 	/* Eat all trailing newlines */
+ 	dest = expdest;
+-	for (; dest > ((char *)stackblock() + startloc) && dest[-1] == '\n';)
++	for (; dest > ((char *)(char *)stackblock() + startloc) && dest[-1] == '\n';)
+ 		STUNPUTC(dest);
+ 	expdest = dest;
+ 
+@@ -532,7 +532,7 @@
+ 	TRACE(("evalbackq: size=%d: \"%.*s\"\n",
+ 		(dest - (char *)stackblock()) - startloc,
+ 		(dest - (char *)stackblock()) - startloc,
+-		stackblock() + startloc));
++		(char *)stackblock() + startloc));
+ 
+ out:
+ 	argbackq = argbackq->next;
+@@ -622,7 +622,7 @@
+ 	if (flag & EXP_DISCARD)
+ 		return p;
+ 
+-	startp = stackblock() + startloc;
++	startp = (char *)stackblock() + startloc;
+ 
+ 	switch (subtype) {
+ 	case VSASSIGN:
+@@ -642,12 +642,12 @@
+ 		abort();
+ #endif
+ 
+-	rmescend = stackblock() + strloc;
++	rmescend = (char *)stackblock() + strloc;
+ 	str = preglob(rmescend, FNMATCH_IS_ENABLED ?
+ 				RMESCAPE_ALLOC | RMESCAPE_GROW : 0);
+ 	if (FNMATCH_IS_ENABLED) {
+-		startp = stackblock() + startloc;
+-		rmescend = stackblock() + strloc;
++		startp = (char *)stackblock() + startloc;
++		rmescend = (char *)stackblock() + strloc;
+ 		nstrloc = str - (char *)stackblock();
+ 	}
+ 
+@@ -656,8 +656,8 @@
+ 		rmesc = _rmescapes(startp, RMESCAPE_ALLOC | RMESCAPE_GROW);
+ 		if (rmesc != startp)
+ 			rmescend = expdest;
+-		startp = stackblock() + startloc;
+-		str = stackblock() + nstrloc;
++		startp = (char *)stackblock() + startloc;
++		str = (char *)stackblock() + nstrloc;
+ 	}
+ 	rmescend--;
+ 
+@@ -666,7 +666,7 @@
+ 	/* VSTRIMLEFT/VSTRIMRIGHTMAX -> scanleft */
+ 	scan = (subtype & 1) ^ zero ? scanleft : scanright;
+ 
+-	endp = stackblock() + strloc - 1;
++	endp = (char *)stackblock() + strloc - 1;
+ 	loc = scan(startp, endp, rmesc, rmescend, str, quotes, zero);
+ 	if (loc) {
+ 		if (zero) {
+@@ -1680,7 +1680,7 @@
+ 			int strloc = str - (char *)stackblock();
+ 
+ 			r = makestrspace(fulllen, expdest);
+-			str = (char *)stackblock() + strloc;
++			str = (char *)(char *)stackblock() + strloc;
+ 			p = str + len;
+ 		} else if (flag & RMESCAPE_HEAP) {
+ 			r = ckmalloc(fulllen);
+--- a/src/histedit.c
++++ b/src/histedit.c
+@@ -190,7 +190,7 @@
+ 	char *pat = NULL, *repl;	/* ksh "fc old=new" crap */
+ 	static int active = 0;
+ 	struct jmploc jmploc;
+-	struct jmploc *volatile savehandler;
++	struct jmploc *savehandler;
+ 	char editfile[MAXPATHLEN + 1];
+ 	FILE *efp;
+ #ifdef __GNUC__
+--- a/src/jobs.c
++++ b/src/jobs.c
+@@ -244,9 +244,7 @@
+ 
+ 
+ int
+-killcmd(argc, argv)
+-	int argc;
+-	char **argv;
++killcmd(int argc, char **argv)
+ {
+ 	extern char *signal_names[];
+ 	int signo = -1;
+--- a/src/main.c
++++ b/src/main.c
+@@ -90,7 +90,7 @@
+ main(int argc, char **argv)
+ {
+ 	char *shinit;
+-	volatile int state;
++	int state;
+ 	struct stackmark smark;
+ 	int login;
+ 
+--- a/src/memalloc.c
++++ b/src/memalloc.c
+@@ -263,7 +263,7 @@
+ 	size_t len = stackblocksize();
+ 
+ 	growstackblock(0);
+-	return stackblock() + len;
++	return (char *)stackblock() + len;
+ }
+ 
+ char *growstackto(size_t len)
+--- a/src/options.c
++++ b/src/options.c
+@@ -325,7 +325,7 @@
+  */
+ 
+ void
+-freeparam(volatile struct shparam *param)
++freeparam(struct shparam *param)
+ {
+ 	char **ap;
+ 
+@@ -390,8 +390,7 @@
+ 
+ 
+ void
+-getoptsreset(value)
+-	const char *value;
++getoptsreset(const char *value)
+ {
+ 	shellparam.optind = number(value) ?: 1;
+ 	shellparam.optoff = -1;
+--- a/src/parser.c
++++ b/src/parser.c
+@@ -33,7 +33,8 @@
+  */
+ 
+ #if HAVE_ALLOCA_H
+-#include <alloca.h>
++/* alloca is a compiler builtin in mcc */
++#define alloca __builtin_alloca
+ #endif
+ 
+ #include <stdlib.h>
+@@ -1555,7 +1556,7 @@
+ expandstr(const char *ps)
+ {
+ 	struct parsefile *file_stop;
+-	struct jmploc *volatile savehandler;
++	struct jmploc *savehandler;
+ 	struct heredoc *saveheredoclist;
+ 	const char *result;
+ 	int saveprompt;
+--- a/src/redir.c
++++ b/src/redir.c
+@@ -285,11 +285,11 @@
+ #ifdef notyet
+ dupredirect(redir, f, memory)
+ #else
+-dupredirect(redir, f)
++dupredirect(union node *redir, int f)
+ #endif
++#ifdef notyet
+ 	union node *redir;
+ 	int f;
+-#ifdef notyet
+ 	char memory[10];
+ #endif
+ 	{
+@@ -464,8 +464,8 @@
+ redirectsafe(union node *redir, int flags)
+ {
+ 	int err;
+-	volatile int saveint;
+-	struct jmploc *volatile savehandler = handler;
++	int saveint;
++	struct jmploc *savehandler = handler;
+ 	struct jmploc jmploc;
+ 
+ 	SAVEINT(saveint);
+--- a/src/system.c
++++ b/src/system.c
+@@ -64,7 +64,7 @@
+ #ifndef HAVE_MEMPCPY
+ void *mempcpy(void *dest, const void *src, size_t n)
+ {
+-	return memcpy(dest, src, n) + n;
++	return (char *)memcpy(dest, src, n) + n;
+ }
+ #endif
+ 
+--- a/src/trap.c
++++ b/src/trap.c
+@@ -74,9 +74,9 @@
+ /* indicates specified signal received */
+ static char gotsig[NSIG - 1];
+ /* last pending signal */
+-volatile sig_atomic_t pending_sig;
++sig_atomic_t pending_sig;
+ /* received SIGCHLD */
+-volatile sig_atomic_t gotsigchld;
++sig_atomic_t gotsigchld;
+ 
+ extern char *signal_names[];
+ 
+--- a/src/error.h
++++ b/src/error.h
+@@ -78,7 +78,7 @@
+  */
+ 
+ extern int suppressint;
+-extern volatile sig_atomic_t intpending;
++extern sig_atomic_t intpending;
+ 
+ #define barrier() ({ __asm__ __volatile__ ("": : :"memory"); })
+ #define INTOFF \
+--- a/src/options.h
++++ b/src/options.h
+@@ -78,7 +78,7 @@
+ int procargs(int, char **);
+ void optschanged(void);
+ void setparam(char **);
+-void freeparam(volatile struct shparam *);
++void freeparam(struct shparam *);
+ int shiftcmd(int, char **);
+ int setcmd(int, char **);
+ int getoptscmd(int, char **);
+--- a/src/trap.h
++++ b/src/trap.h
+@@ -38,8 +38,8 @@
+ 
+ extern int trapcnt;
+ extern char sigmode[];
+-extern volatile sig_atomic_t pending_sig;
+-extern volatile sig_atomic_t gotsigchld;
++extern sig_atomic_t pending_sig;
++extern sig_atomic_t gotsigchld;
+ 
+ int trapcmd(int, char **);
+ void setsignal(int);
+--- a/src/init.c
++++ b/src/init.c
+@@ -0,0 +1,335 @@
++/*
++ * This file was generated by the mkinit program.
++ */
++
++#include "shell.h"
++#include "mystring.h"
++#include "init.h"
++#include "eval.h"
++#include "expand.h"
++#include <stdio.h>
++#include <unistd.h>
++#include "input.h"
++#include "error.h"
++#include "parser.h"
++#include "redir.h"
++#include "memalloc.h"
++#include "trap.h"
++#include "output.h"
++#include <sys/types.h>
++#include <sys/stat.h>
++#include "cd.h"
++#include "var.h"
++
++
++
++#undef  ATABSIZE
++#define ATABSIZE 39
++#undef  ARITH_MAX_PREC
++#define ARITH_MAX_PREC 8
++#undef  CD_PHYSICAL
++#define CD_PHYSICAL 1
++#undef  CD_PRINT
++#define CD_PRINT 2
++#undef  CMDTABLESIZE
++#define CMDTABLESIZE 31		/* should be prime */
++#undef  ARB
++#define ARB 1			/* actual size determined at run time */
++#undef  RMESCAPE_ALLOC
++#define RMESCAPE_ALLOC	0x1	/* Allocate a new string */
++#undef  RMESCAPE_GLOB
++#define RMESCAPE_GLOB	0x2	/* Add backslashes for glob */
++#undef  RMESCAPE_GROW
++#define RMESCAPE_GROW	0x8	/* Grow strings instead of stalloc */
++#undef  RMESCAPE_HEAP
++#define RMESCAPE_HEAP	0x10	/* Malloc strings instead of stalloc */
++#undef  QUOTES_ESC
++#define QUOTES_ESC	(EXP_FULL | EXP_CASE)
++#undef  GLOB_ALTDIRFUNC
++#define GLOB_ALTDIRFUNC 0
++#undef  MAXHISTLOOPS
++#define MAXHISTLOOPS	4	/* max recursions through fc */
++#undef  DEFEDITOR
++#define DEFEDITOR	"ed"	/* default editor *should* be $EDITOR */
++#undef  editing
++#define editing (Eflag || Vflag)
++#undef  IBUFSIZ
++#define IBUFSIZ (BUFSIZ + 1)
++#undef  CUR_DELETE
++#define CUR_DELETE 2
++#undef  CUR_RUNNING
++#define CUR_RUNNING 1
++#undef  CUR_STOPPED
++#define CUR_STOPPED 0
++#undef  DOWAIT_NONBLOCK
++#define DOWAIT_NONBLOCK 0
++#undef  DOWAIT_BLOCK
++#define DOWAIT_BLOCK 1
++#undef  DOWAIT_WAITCMD
++#define DOWAIT_WAITCMD 2
++#undef  DOWAIT_WAITCMD_ALL
++#define DOWAIT_WAITCMD_ALL 4
++#undef  MAXMBOXES
++#define MAXMBOXES 10
++#undef  PROFILE
++#define PROFILE 0
++#undef  MINSIZE
++#define MINSIZE SHELL_ALIGN(504)
++#undef  DEFINE_OPTIONS
++#define DEFINE_OPTIONS
++#undef  alloca
++#define alloca __builtin_alloca
++#undef  FAKEEOFMARK
++#define FAKEEOFMARK (char *)1
++#undef  EMPTY
++#define EMPTY -2		/* marks an unused slot in redirtab */
++#undef  CLOSED
++#define CLOSED -1		/* fd opened for redir needs to be closed */
++#undef  S_DFL
++#define S_DFL 1			/* default signal handling (SIG_DFL) */
++#undef  S_CATCH
++#define S_CATCH 2		/* signal is caught */
++#undef  S_IGN
++#define S_IGN 3			/* signal is ignored (SIG_IGN) */
++#undef  S_HARD_IGN
++#define S_HARD_IGN 4		/* signal is ignored permenantly */
++#undef  S_RESET
++#define S_RESET 5		/* temporary - to reset a hard ignored sig */
++#undef  OUTBUFSIZ
++#define OUTBUFSIZ BUFSIZ
++#undef  MEM_OUT
++#define MEM_OUT -3		/* output to dynamically allocated memory */
++#undef  SKIP1
++#define SKIP1	"#-+ 0"
++#undef  SKIP2
++#define SKIP2	"*0123456789"
++#undef  isalnum
++#define isalnum _isalnum
++#undef  iscntrl
++#define iscntrl _iscntrl
++#undef  islower
++#define islower _islower
++#undef  isspace
++#define isspace _isspace
++#undef  isalpha
++#define isalpha _isalpha
++#undef  isdigit
++#define isdigit _isdigit
++#undef  isprint
++#define isprint _isprint
++#undef  isupper
++#define isupper _isupper
++#undef  isblank
++#define isblank _isblank
++#undef  isgraph
++#define isgraph _isgraph
++#undef  ispunct
++#define ispunct _ispunct
++#undef  isxdigit
++#define isxdigit _isxdigit
++#undef  VTABSIZE
++#define VTABSIZE 39
++
++
++
++extern int loopnest;		/* current loop nesting level */
++extern int inps4;
++
++extern struct parsefile basepf;	/* top level input file */
++extern char basebuf[IBUFSIZ];	/* buffer for top level input file */
++
++extern struct jmploc main_handler;
++
++struct redirtab {
++	struct redirtab *next;
++	int renamed[10];
++};
++
++extern struct redirtab *redirlist;
++
++extern char *trap[NSIG];
++
++extern struct localvar_list *localvar_stack;
++extern char defoptindvar[];
++extern char **environ;
++
++
++
++/*
++ * Initialization code.
++ */
++
++void
++init() {
++
++      /* from input.c: */
++      {
++	      basepf.nextc = basepf.buf = basebuf;
++	      basepf.linno = 1;
++      }
++
++      /* from trap.c: */
++      {
++	      sigmode[SIGCHLD - 1] = S_DFL;
++	      setsignal(SIGCHLD);
++      }
++
++      /* from output.c: */
++      {
++#ifdef USE_GLIBC_STDIO
++	      initstreams();
++#endif
++      }
++
++      /* from var.c: */
++      {
++	      char **envp;
++	      static char ppid[32] = "PPID=";
++	      const char *p;
++	      struct stat64 st1, st2;
++
++	      initvar();
++	      for (envp = environ ; *envp ; envp++) {
++		      p = endofname(*envp);
++		      if (p != *envp && *p == '=') {
++			      setvareq(*envp, VEXPORT|VTEXTFIXED);
++		      }
++	      }
++
++	      setvareq(defifsvar, VTEXTFIXED);
++	      setvareq(defoptindvar, VTEXTFIXED);
++
++	      fmtstr(ppid + 5, sizeof(ppid) - 5, "%ld", (long) getppid());
++	      setvareq(ppid, VTEXTFIXED);
++
++	      p = lookupvar("PWD");
++	      if (p)
++		      if (*p != '/' || stat64(p, &st1) || stat64(".", &st2) ||
++			  st1.st_dev != st2.st_dev || st1.st_ino != st2.st_ino)
++			      p = 0;
++	      setpwd(p, 0);
++      }
++}
++
++
++
++/*
++ * This routine is called when an error or an interrupt occurs in an
++ * interactive shell and control is returned to the main command loop
++ * but prior to exitshell. 
++ */
++
++void
++exitreset() {
++
++      /* from eval.c: */
++      {
++	      if (savestatus >= 0) {
++		      if (exception == EXEXIT || evalskip == SKIPFUNCDEF)
++			      exitstatus = savestatus;
++		      savestatus = -1;
++	      }
++	      evalskip = 0;
++	      loopnest = 0;
++	      inps4 = 0;
++      }
++
++      /* from expand.c: */
++      {
++	      ifsfree();
++      }
++
++      /* from redir.c: */
++      {
++	      /*
++	       * Discard all saved file descriptors.
++	       */
++	      unwindredir(0);
++      }
++}
++
++
++
++/*
++ * This routine is called when we enter a subshell.
++ */
++
++void
++forkreset() {
++
++      /* from input.c: */
++      {
++	      popallfiles();
++	      if (parsefile->fd > 0) {
++		      close(parsefile->fd);
++		      parsefile->fd = 0;
++	      }
++      }
++
++      /* from main.c: */
++      {
++	      handler = &main_handler;
++      }
++
++      /* from redir.c: */
++      {
++	      redirlist = NULL;
++      }
++
++      /* from trap.c: */
++      {
++	      char **tp;
++
++	      INTOFF;
++	      for (tp = trap ; tp < &trap[NSIG] ; tp++) {
++		      if (*tp && **tp) {	/* trap not NULL or SIG_IGN */
++			      ckfree(*tp);
++			      *tp = NULL;
++			      if (tp != &trap[0])
++				      setsignal(tp - trap);
++		      }
++	      }
++	      trapcnt = 0;
++	      INTON;
++      }
++}
++
++
++
++/*
++ * This routine is called when an error or an interrupt occurs in an
++ * interactive shell and control is returned to the main command loop.
++ */
++
++void
++reset() {
++
++      /* from input.c: */
++      {
++	      /* clear input buffer */
++	      basepf.lleft = basepf.nleft = 0;
++	      basepf.unget = 0;
++	      popallfiles();
++      }
++
++      /* from output.c: */
++      {
++#ifdef notyet
++	      out1 = &output;
++	      out2 = &errout;
++#ifdef USE_GLIBC_STDIO
++	      if (memout.stream != NULL)
++		      __closememout();
++#endif
++	      if (memout.buf != NULL) {
++		      ckfree(memout.buf);
++		      memout.buf = NULL;
++	      }
++#endif
++      }
++
++      /* from var.c: */
++      {
++	      unwindlocalvars(0);
++      }
++}
+--- a/src/nodes.c
++++ b/src/nodes.c
+@@ -0,0 +1,354 @@
++/*
++ * This file was generated by the mknodes program.
++ */
++
++/*-
++ * Copyright (c) 1991, 1993
++ *	The Regents of the University of California.  All rights reserved.
++ * Copyright (c) 1997-2005
++ *	Herbert Xu <herbert@gondor.apana.org.au>.  All rights reserved.
++ *
++ * This code is derived from software contributed to Berkeley by
++ * Kenneth Almquist.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ * 3. Neither the name of the University nor the names of its contributors
++ *    may be used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
++ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
++ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
++ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
++ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
++ * SUCH DAMAGE.
++ *
++ *	@(#)nodes.c.pat	8.2 (Berkeley) 5/4/95
++ */
++
++#include <stdlib.h>
++/*
++ * Routine for dealing with parsed shell commands.
++ */
++
++#include "shell.h"
++#include "nodes.h"
++#include "memalloc.h"
++#include "machdep.h"
++#include "mystring.h"
++#include "system.h"
++
++
++int     funcblocksize;		/* size of structures in function */
++int     funcstringsize;		/* size of strings in node */
++pointer funcblock;		/* block to allocate function from */
++char   *funcstring;		/* block to allocate strings from */
++
++static const short nodesize[26] = {
++      SHELL_ALIGN(sizeof (struct ncmd)),
++      SHELL_ALIGN(sizeof (struct npipe)),
++      SHELL_ALIGN(sizeof (struct nredir)),
++      SHELL_ALIGN(sizeof (struct nredir)),
++      SHELL_ALIGN(sizeof (struct nredir)),
++      SHELL_ALIGN(sizeof (struct nbinary)),
++      SHELL_ALIGN(sizeof (struct nbinary)),
++      SHELL_ALIGN(sizeof (struct nbinary)),
++      SHELL_ALIGN(sizeof (struct nif)),
++      SHELL_ALIGN(sizeof (struct nbinary)),
++      SHELL_ALIGN(sizeof (struct nbinary)),
++      SHELL_ALIGN(sizeof (struct nfor)),
++      SHELL_ALIGN(sizeof (struct ncase)),
++      SHELL_ALIGN(sizeof (struct nclist)),
++      SHELL_ALIGN(sizeof (struct ndefun)),
++      SHELL_ALIGN(sizeof (struct narg)),
++      SHELL_ALIGN(sizeof (struct nfile)),
++      SHELL_ALIGN(sizeof (struct nfile)),
++      SHELL_ALIGN(sizeof (struct nfile)),
++      SHELL_ALIGN(sizeof (struct nfile)),
++      SHELL_ALIGN(sizeof (struct nfile)),
++      SHELL_ALIGN(sizeof (struct ndup)),
++      SHELL_ALIGN(sizeof (struct ndup)),
++      SHELL_ALIGN(sizeof (struct nhere)),
++      SHELL_ALIGN(sizeof (struct nhere)),
++      SHELL_ALIGN(sizeof (struct nnot)),
++};
++
++
++STATIC void calcsize(union node *);
++STATIC void sizenodelist(struct nodelist *);
++STATIC union node *copynode(union node *);
++STATIC struct nodelist *copynodelist(struct nodelist *);
++STATIC char *nodesavestr(char *);
++
++
++
++/*
++ * Make a copy of a parse tree.
++ */
++
++struct funcnode *
++copyfunc(union node *n)
++{
++	struct funcnode *f;
++	size_t blocksize;
++
++	funcblocksize = offsetof(struct funcnode, n);
++	funcstringsize = 0;
++	calcsize(n);
++	blocksize = funcblocksize;
++	f = ckmalloc(blocksize + funcstringsize);
++	funcblock = (char *) f + offsetof(struct funcnode, n);
++	funcstring = (char *) f + blocksize;
++	copynode(n);
++	f->count = 0;
++	return f;
++}
++
++
++
++STATIC void
++calcsize(union node *n)
++{
++      if (n == NULL)
++	    return;
++      funcblocksize += nodesize[n->type];
++      switch (n->type) {
++      case NCMD:
++	    calcsize(n->ncmd.redirect);
++	    calcsize(n->ncmd.args);
++	    calcsize(n->ncmd.assign);
++	    break;
++      case NPIPE:
++	    sizenodelist(n->npipe.cmdlist);
++	    break;
++      case NREDIR:
++      case NBACKGND:
++      case NSUBSHELL:
++	    calcsize(n->nredir.redirect);
++	    calcsize(n->nredir.n);
++	    break;
++      case NAND:
++      case NOR:
++      case NSEMI:
++      case NWHILE:
++      case NUNTIL:
++	    calcsize(n->nbinary.ch2);
++	    calcsize(n->nbinary.ch1);
++	    break;
++      case NIF:
++	    calcsize(n->nif.elsepart);
++	    calcsize(n->nif.ifpart);
++	    calcsize(n->nif.test);
++	    break;
++      case NFOR:
++	    funcstringsize += strlen(n->nfor.var) + 1;
++	    calcsize(n->nfor.body);
++	    calcsize(n->nfor.args);
++	    break;
++      case NCASE:
++	    calcsize(n->ncase.cases);
++	    calcsize(n->ncase.expr);
++	    break;
++      case NCLIST:
++	    calcsize(n->nclist.body);
++	    calcsize(n->nclist.pattern);
++	    calcsize(n->nclist.next);
++	    break;
++      case NDEFUN:
++	    calcsize(n->ndefun.body);
++	    funcstringsize += strlen(n->ndefun.text) + 1;
++	    break;
++      case NARG:
++	    sizenodelist(n->narg.backquote);
++	    funcstringsize += strlen(n->narg.text) + 1;
++	    calcsize(n->narg.next);
++	    break;
++      case NTO:
++      case NCLOBBER:
++      case NFROM:
++      case NFROMTO:
++      case NAPPEND:
++	    calcsize(n->nfile.fname);
++	    calcsize(n->nfile.next);
++	    break;
++      case NTOFD:
++      case NFROMFD:
++	    calcsize(n->ndup.vname);
++	    calcsize(n->ndup.next);
++	    break;
++      case NHERE:
++      case NXHERE:
++	    calcsize(n->nhere.doc);
++	    calcsize(n->nhere.next);
++	    break;
++      case NNOT:
++	    calcsize(n->nnot.com);
++	    break;
++      };
++}
++
++
++
++STATIC void
++sizenodelist(struct nodelist *lp)
++{
++	while (lp) {
++		funcblocksize += SHELL_ALIGN(sizeof(struct nodelist));
++		calcsize(lp->n);
++		lp = lp->next;
++	}
++}
++
++
++
++STATIC union node *
++copynode(union node *n)
++{
++	union node *new;
++
++      if (n == NULL)
++	    return NULL;
++      new = funcblock;
++      funcblock = (char *) funcblock + nodesize[n->type];
++      switch (n->type) {
++      case NCMD:
++	    new->ncmd.redirect = copynode(n->ncmd.redirect);
++	    new->ncmd.args = copynode(n->ncmd.args);
++	    new->ncmd.assign = copynode(n->ncmd.assign);
++	    new->ncmd.linno = n->ncmd.linno;
++	    break;
++      case NPIPE:
++	    new->npipe.cmdlist = copynodelist(n->npipe.cmdlist);
++	    new->npipe.backgnd = n->npipe.backgnd;
++	    break;
++      case NREDIR:
++      case NBACKGND:
++      case NSUBSHELL:
++	    new->nredir.redirect = copynode(n->nredir.redirect);
++	    new->nredir.n = copynode(n->nredir.n);
++	    new->nredir.linno = n->nredir.linno;
++	    break;
++      case NAND:
++      case NOR:
++      case NSEMI:
++      case NWHILE:
++      case NUNTIL:
++	    new->nbinary.ch2 = copynode(n->nbinary.ch2);
++	    new->nbinary.ch1 = copynode(n->nbinary.ch1);
++	    break;
++      case NIF:
++	    new->nif.elsepart = copynode(n->nif.elsepart);
++	    new->nif.ifpart = copynode(n->nif.ifpart);
++	    new->nif.test = copynode(n->nif.test);
++	    break;
++      case NFOR:
++	    new->nfor.var = nodesavestr(n->nfor.var);
++	    new->nfor.body = copynode(n->nfor.body);
++	    new->nfor.args = copynode(n->nfor.args);
++	    new->nfor.linno = n->nfor.linno;
++	    break;
++      case NCASE:
++	    new->ncase.cases = copynode(n->ncase.cases);
++	    new->ncase.expr = copynode(n->ncase.expr);
++	    new->ncase.linno = n->ncase.linno;
++	    break;
++      case NCLIST:
++	    new->nclist.body = copynode(n->nclist.body);
++	    new->nclist.pattern = copynode(n->nclist.pattern);
++	    new->nclist.next = copynode(n->nclist.next);
++	    break;
++      case NDEFUN:
++	    new->ndefun.body = copynode(n->ndefun.body);
++	    new->ndefun.text = nodesavestr(n->ndefun.text);
++	    new->ndefun.linno = n->ndefun.linno;
++	    break;
++      case NARG:
++	    new->narg.backquote = copynodelist(n->narg.backquote);
++	    new->narg.text = nodesavestr(n->narg.text);
++	    new->narg.next = copynode(n->narg.next);
++	    break;
++      case NTO:
++      case NCLOBBER:
++      case NFROM:
++      case NFROMTO:
++      case NAPPEND:
++	    new->nfile.fname = copynode(n->nfile.fname);
++	    new->nfile.fd = n->nfile.fd;
++	    new->nfile.next = copynode(n->nfile.next);
++	    break;
++      case NTOFD:
++      case NFROMFD:
++	    new->ndup.vname = copynode(n->ndup.vname);
++	    new->ndup.dupfd = n->ndup.dupfd;
++	    new->ndup.fd = n->ndup.fd;
++	    new->ndup.next = copynode(n->ndup.next);
++	    break;
++      case NHERE:
++      case NXHERE:
++	    new->nhere.doc = copynode(n->nhere.doc);
++	    new->nhere.fd = n->nhere.fd;
++	    new->nhere.next = copynode(n->nhere.next);
++	    break;
++      case NNOT:
++	    new->nnot.com = copynode(n->nnot.com);
++	    break;
++      };
++      new->type = n->type;
++	return new;
++}
++
++
++STATIC struct nodelist *
++copynodelist(struct nodelist *lp)
++{
++	struct nodelist *start;
++	struct nodelist **lpp;
++
++	lpp = &start;
++	while (lp) {
++		*lpp = funcblock;
++		funcblock = (char *) funcblock +
++		    SHELL_ALIGN(sizeof(struct nodelist));
++		(*lpp)->n = copynode(lp->n);
++		lp = lp->next;
++		lpp = &(*lpp)->next;
++	}
++	*lpp = NULL;
++	return start;
++}
++
++
++
++STATIC char *
++nodesavestr(char *s)
++{
++	char   *rtn = funcstring;
++
++	funcstring = stpcpy(funcstring, s) + 1;
++	return rtn;
++}
++
++
++
++/*
++ * Free a parse tree.
++ */
++
++void
++freefunc(struct funcnode *f)
++{
++	if (f && --f->count < 0)
++		ckfree(f);
++}
+--- a/src/nodes.h
++++ b/src/nodes.h
+@@ -0,0 +1,178 @@
++/*
++ * This file was generated by the mknodes program.
++ */
++
++#define NCMD 0
++#define NPIPE 1
++#define NREDIR 2
++#define NBACKGND 3
++#define NSUBSHELL 4
++#define NAND 5
++#define NOR 6
++#define NSEMI 7
++#define NIF 8
++#define NWHILE 9
++#define NUNTIL 10
++#define NFOR 11
++#define NCASE 12
++#define NCLIST 13
++#define NDEFUN 14
++#define NARG 15
++#define NTO 16
++#define NCLOBBER 17
++#define NFROM 18
++#define NFROMTO 19
++#define NAPPEND 20
++#define NTOFD 21
++#define NFROMFD 22
++#define NHERE 23
++#define NXHERE 24
++#define NNOT 25
++
++
++
++struct ncmd {
++      int type;
++      int linno;
++      union node *assign;
++      union node *args;
++      union node *redirect;
++};
++
++
++struct npipe {
++      int type;
++      int backgnd;
++      struct nodelist *cmdlist;
++};
++
++
++struct nredir {
++      int type;
++      int linno;
++      union node *n;
++      union node *redirect;
++};
++
++
++struct nbinary {
++      int type;
++      union node *ch1;
++      union node *ch2;
++};
++
++
++struct nif {
++      int type;
++      union node *test;
++      union node *ifpart;
++      union node *elsepart;
++};
++
++
++struct nfor {
++      int type;
++      int linno;
++      union node *args;
++      union node *body;
++      char *var;
++};
++
++
++struct ncase {
++      int type;
++      int linno;
++      union node *expr;
++      union node *cases;
++};
++
++
++struct nclist {
++      int type;
++      union node *next;
++      union node *pattern;
++      union node *body;
++};
++
++
++struct ndefun {
++      int type;
++      int linno;
++      char *text;
++      union node *body;
++};
++
++
++struct narg {
++      int type;
++      union node *next;
++      char *text;
++      struct nodelist *backquote;
++};
++
++
++struct nfile {
++      int type;
++      union node *next;
++      int fd;
++      union node *fname;
++      char *expfname;
++};
++
++
++struct ndup {
++      int type;
++      union node *next;
++      int fd;
++      int dupfd;
++      union node *vname;
++};
++
++
++struct nhere {
++      int type;
++      union node *next;
++      int fd;
++      union node *doc;
++};
++
++
++struct nnot {
++      int type;
++      union node *com;
++};
++
++
++union node {
++      int type;
++      struct ncmd ncmd;
++      struct npipe npipe;
++      struct nredir nredir;
++      struct nbinary nbinary;
++      struct nif nif;
++      struct nfor nfor;
++      struct ncase ncase;
++      struct nclist nclist;
++      struct ndefun ndefun;
++      struct narg narg;
++      struct nfile nfile;
++      struct ndup ndup;
++      struct nhere nhere;
++      struct nnot nnot;
++};
++
++
++struct nodelist {
++	struct nodelist *next;
++	union node *n;
++};
++
++
++struct funcnode {
++	int count;
++	union node n;
++};
++
++
++struct funcnode *copyfunc(union node *);
++void freefunc(struct funcnode *);
+--- a/src/signames.c
++++ b/src/signames.c
+@@ -0,0 +1,74 @@
++/* This file was automatically created by ./mksignames.
++   Do not edit.  Edit support/mksignames.c instead. */
++
++#include <signal.h>
++
++/* A translation list so we can be polite to our users. */
++const char *const signal_names[] = {
++    "EXIT",
++    "HUP",
++    "INT",
++    "QUIT",
++    "ILL",
++    "TRAP",
++    "ABRT",
++    "BUS",
++    "FPE",
++    "KILL",
++    "USR1",
++    "SEGV",
++    "USR2",
++    "PIPE",
++    "ALRM",
++    "TERM",
++    "16",
++    "CHLD",
++    "CONT",
++    "STOP",
++    "TSTP",
++    "TTIN",
++    "TTOU",
++    "URG",
++    "XCPU",
++    "XFSZ",
++    "VTALRM",
++    "PROF",
++    "WINCH",
++    "IO",
++    "PWR",
++    "SYS",
++    "32",
++    "33",
++    "RTMIN",
++    "RTMIN+1",
++    "RTMIN+2",
++    "RTMIN+3",
++    "RTMIN+4",
++    "RTMIN+5",
++    "RTMIN+6",
++    "RTMIN+7",
++    "RTMIN+8",
++    "RTMIN+9",
++    "RTMIN+10",
++    "RTMIN+11",
++    "RTMIN+12",
++    "RTMIN+13",
++    "RTMIN+14",
++    "RTMIN+15",
++    "RTMAX-14",
++    "RTMAX-13",
++    "RTMAX-12",
++    "RTMAX-11",
++    "RTMAX-10",
++    "RTMAX-9",
++    "RTMAX-8",
++    "RTMAX-7",
++    "RTMAX-6",
++    "RTMAX-5",
++    "RTMAX-4",
++    "RTMAX-3",
++    "RTMAX-2",
++    "RTMAX-1",
++    "RTMAX",
++    (char *)0x0
++};
+--- a/src/syntax.c
++++ b/src/syntax.c
+@@ -0,0 +1,351 @@
++/*
++ * This file was generated by the mksyntax program.
++ */
++
++#include "shell.h"
++#include "syntax.h"
++
++/* syntax table used when not in quotes */
++const char basesyntax[] = {
++      CEOF,    CWORD,   CCTL,    CCTL,
++      CCTL,    CCTL,    CCTL,    CCTL,
++      CCTL,    CCTL,    CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CSPCL,   CNL,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CSPCL,   CWORD,   CDQUOTE,
++      CWORD,   CVAR,    CWORD,   CSPCL,
++      CSQUOTE, CSPCL,   CSPCL,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CSPCL,   CSPCL,   CWORD,   CSPCL,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CBACK,   CWORD,   CWORD,
++      CWORD,   CBQUOTE, CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CSPCL,   CENDVAR, CWORD,
++      CWORD
++};
++
++/* syntax table used when in double quotes */
++const char dqsyntax[] = {
++      CEOF,    CWORD,   CCTL,    CCTL,
++      CCTL,    CCTL,    CCTL,    CCTL,
++      CCTL,    CCTL,    CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CNL,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CCTL,    CENDQUOTE,
++      CWORD,   CVAR,    CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CCTL,
++      CWORD,   CWORD,   CCTL,    CWORD,
++      CCTL,    CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CCTL,
++      CWORD,   CWORD,   CCTL,    CWORD,
++      CCTL,    CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CCTL,    CBACK,   CCTL,    CWORD,
++      CWORD,   CBQUOTE, CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CENDVAR, CCTL,
++      CWORD
++};
++
++/* syntax table used when in single quotes */
++const char sqsyntax[] = {
++      CEOF,    CWORD,   CCTL,    CCTL,
++      CCTL,    CCTL,    CCTL,    CCTL,
++      CCTL,    CCTL,    CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CNL,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CCTL,    CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CENDQUOTE,CWORD,  CWORD,   CCTL,
++      CWORD,   CWORD,   CCTL,    CWORD,
++      CCTL,    CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CCTL,
++      CWORD,   CWORD,   CCTL,    CWORD,
++      CCTL,    CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CCTL,    CCTL,    CCTL,    CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CCTL,
++      CWORD
++};
++
++/* syntax table used when in arithmetic */
++const char arisyntax[] = {
++      CEOF,    CWORD,   CCTL,    CCTL,
++      CCTL,    CCTL,    CCTL,    CCTL,
++      CCTL,    CCTL,    CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CNL,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CVAR,    CWORD,   CWORD,
++      CWORD,   CLP,     CRP,     CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CBACK,   CWORD,   CWORD,
++      CWORD,   CBQUOTE, CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CWORD,   CWORD,
++      CWORD,   CWORD,   CENDVAR, CWORD,
++      CWORD
++};
++
++/* character classification table */
++const char is_type[] = {
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       0,       0,
++      0,       0,       ISSPECL, 0,
++      ISSPECL, ISSPECL, 0,       0,
++      0,       0,       0,       ISSPECL,
++      0,       0,       ISSPECL, 0,
++      0,       ISDIGIT, ISDIGIT, ISDIGIT,
++      ISDIGIT, ISDIGIT, ISDIGIT, ISDIGIT,
++      ISDIGIT, ISDIGIT, ISDIGIT, 0,
++      0,       0,       0,       0,
++      ISSPECL, ISSPECL, ISUPPER, ISUPPER,
++      ISUPPER, ISUPPER, ISUPPER, ISUPPER,
++      ISUPPER, ISUPPER, ISUPPER, ISUPPER,
++      ISUPPER, ISUPPER, ISUPPER, ISUPPER,
++      ISUPPER, ISUPPER, ISUPPER, ISUPPER,
++      ISUPPER, ISUPPER, ISUPPER, ISUPPER,
++      ISUPPER, ISUPPER, ISUPPER, ISUPPER,
++      0,       0,       0,       0,
++      ISUNDER, 0,       ISLOWER, ISLOWER,
++      ISLOWER, ISLOWER, ISLOWER, ISLOWER,
++      ISLOWER, ISLOWER, ISLOWER, ISLOWER,
++      ISLOWER, ISLOWER, ISLOWER, ISLOWER,
++      ISLOWER, ISLOWER, ISLOWER, ISLOWER,
++      ISLOWER, ISLOWER, ISLOWER, ISLOWER,
++      ISLOWER, ISLOWER, ISLOWER, ISLOWER,
++      0,       0,       0,       0,
++      0
++};
+--- a/src/syntax.h
++++ b/src/syntax.h
+@@ -0,0 +1,54 @@
++/*
++ * This file was generated by the mksyntax program.
++ */
++
++#include <ctype.h>
++
++#ifdef CEOF
++#undef CEOF
++#endif
++
++/* Syntax classes */
++#define CWORD 0			/* character is nothing special */
++#define CNL 1			/* newline character */
++#define CBACK 2			/* a backslash character */
++#define CSQUOTE 3		/* single quote */
++#define CDQUOTE 4		/* double quote */
++#define CENDQUOTE 5		/* a terminating quote */
++#define CBQUOTE 6		/* backwards single quote */
++#define CVAR 7			/* a dollar sign */
++#define CENDVAR 8		/* a '}' character */
++#define CLP 9			/* a left paren in arithmetic */
++#define CRP 10			/* a right paren in arithmetic */
++#define CEOF 11			/* end of file */
++#define CCTL 12			/* like CWORD, except it must be escaped */
++#define CSPCL 13		/* these terminate a word */
++
++/* Syntax classes for is_ functions */
++#define ISDIGIT 01		/* a digit */
++#define ISUPPER 02		/* an upper case letter */
++#define ISLOWER 04		/* a lower case letter */
++#define ISUNDER 010		/* an underscore */
++#define ISSPECL 020		/* the name of a special parameter */
++
++#define SYNBASE 129
++#define PEOF -129
++
++
++#define BASESYNTAX (basesyntax + SYNBASE)
++#define DQSYNTAX (dqsyntax + SYNBASE)
++#define SQSYNTAX (sqsyntax + SYNBASE)
++#define ARISYNTAX (arisyntax + SYNBASE)
++
++#define is_digit(c)	((unsigned)((c) - '0') <= 9)
++#define is_alpha(c)	isalpha((unsigned char)(c))
++#define is_name(c)	((c) == '_' || isalpha((unsigned char)(c)))
++#define is_in_name(c)	((c) == '_' || isalnum((unsigned char)(c)))
++#define is_special(c)	((is_type+SYNBASE)[(signed char)(c)] & (ISSPECL|ISDIGIT))
++#define digit_val(c)	((c) - '0')
++
++extern const char basesyntax[];
++extern const char dqsyntax[];
++extern const char sqsyntax[];
++extern const char arisyntax[];
++extern const char is_type[];
+--- a/src/token.h
++++ b/src/token.h
+@@ -0,0 +1,29 @@
++#define TEOF 0
++#define TNL 1
++#define TSEMI 2
++#define TBACKGND 3
++#define TAND 4
++#define TOR 5
++#define TPIPE 6
++#define TLP 7
++#define TRP 8
++#define TENDCASE 9
++#define TENDBQUOTE 10
++#define TREDIR 11
++#define TWORD 12
++#define TNOT 13
++#define TCASE 14
++#define TDO 15
++#define TDONE 16
++#define TELIF 17
++#define TELSE 18
++#define TESAC 19
++#define TFI 20
++#define TFOR 21
++#define TIF 22
++#define TIN 23
++#define TTHEN 24
++#define TUNTIL 25
++#define TWHILE 26
++#define TBEGIN 27
++#define TEND 28
+--- a/src/token_vars.h
++++ b/src/token_vars.h
+@@ -0,0 +1,86 @@
++
++/* Array indicating which tokens mark the end of a list */
++static const char tokendlist[] = {
++	1,
++	0,
++	0,
++	0,
++	0,
++	0,
++	0,
++	0,
++	1,
++	1,
++	1,
++	0,
++	0,
++	0,
++	0,
++	1,
++	1,
++	1,
++	1,
++	1,
++	1,
++	0,
++	0,
++	0,
++	1,
++	0,
++	0,
++	0,
++	1,
++};
++
++static const char *const tokname[] = {
++	"end of file",
++	"newline",
++	"\";\"",
++	"\"&\"",
++	"\"&&\"",
++	"\"||\"",
++	"\"|\"",
++	"\"(\"",
++	"\")\"",
++	"\";;\"",
++	"\"`\"",
++	"redirection",
++	"word",
++	"\"!\"",
++	"\"case\"",
++	"\"do\"",
++	"\"done\"",
++	"\"elif\"",
++	"\"else\"",
++	"\"esac\"",
++	"\"fi\"",
++	"\"for\"",
++	"\"if\"",
++	"\"in\"",
++	"\"then\"",
++	"\"until\"",
++	"\"while\"",
++	"\"{\"",
++	"\"}\"",
++};
++
++#define KWDOFFSET 13
++
++static const char *const parsekwd[] = {
++	"!",
++	"case",
++	"do",
++	"done",
++	"elif",
++	"else",
++	"esac",
++	"fi",
++	"for",
++	"if",
++	"in",
++	"then",
++	"until",
++	"while",
++	"{",
++	"}"
++};
+--- a/src/builtins.c
++++ b/src/builtins.c
+@@ -0,0 +1,81 @@
++/*
++ * This file was generated by the mkbuiltins program.
++ */
++
++#include "shell.h"
++#include "builtins.h"
++
++int bgcmd(int, char **);
++int fgcmd(int, char **);
++int breakcmd(int, char **);
++int cdcmd(int, char **);
++int commandcmd(int, char **);
++int dotcmd(int, char **);
++int echocmd(int, char **);
++int evalcmd(int, char **);
++int execcmd(int, char **);
++int exitcmd(int, char **);
++int exportcmd(int, char **);
++int falsecmd(int, char **);
++int getoptscmd(int, char **);
++int hashcmd(int, char **);
++int jobscmd(int, char **);
++int localcmd(int, char **);
++int printfcmd(int, char **);
++int pwdcmd(int, char **);
++int readcmd(int, char **);
++int returncmd(int, char **);
++int setcmd(int, char **);
++int shiftcmd(int, char **);
++int timescmd(int, char **);
++int trapcmd(int, char **);
++int truecmd(int, char **);
++int typecmd(int, char **);
++int umaskcmd(int, char **);
++int unaliascmd(int, char **);
++int unsetcmd(int, char **);
++int waitcmd(int, char **);
++int aliascmd(int, char **);
++int testcmd(int, char **);
++int killcmd(int, char **);
++
++const struct builtincmd builtincmd[] = {
++	{ ".", dotcmd, 3 },
++	{ ":", truecmd, 3 },
++	{ "[", testcmd, 0 },
++	{ "alias", aliascmd, 6 },
++	{ "bg", bgcmd, 2 },
++	{ "break", breakcmd, 3 },
++	{ "cd", cdcmd, 2 },
++	{ "chdir", cdcmd, 0 },
++	{ "command", commandcmd, 2 },
++	{ "continue", breakcmd, 3 },
++	{ "echo", echocmd, 0 },
++	{ "eval", NULL, 3 },
++	{ "exec", execcmd, 3 },
++	{ "exit", exitcmd, 3 },
++	{ "export", exportcmd, 7 },
++	{ "false", falsecmd, 2 },
++	{ "fg", fgcmd, 2 },
++	{ "getopts", getoptscmd, 2 },
++	{ "hash", hashcmd, 2 },
++	{ "jobs", jobscmd, 2 },
++	{ "kill", killcmd, 2 },
++	{ "local", localcmd, 7 },
++	{ "printf", printfcmd, 0 },
++	{ "pwd", pwdcmd, 2 },
++	{ "read", readcmd, 2 },
++	{ "readonly", exportcmd, 7 },
++	{ "return", returncmd, 3 },
++	{ "set", setcmd, 3 },
++	{ "shift", shiftcmd, 3 },
++	{ "test", testcmd, 0 },
++	{ "times", timescmd, 3 },
++	{ "trap", trapcmd, 3 },
++	{ "true", truecmd, 2 },
++	{ "type", typecmd, 2 },
++	{ "umask", umaskcmd, 2 },
++	{ "unalias", unaliascmd, 2 },
++	{ "unset", unsetcmd, 3 },
++	{ "wait", waitcmd, 2 },
++};
+--- a/src/builtins.h
++++ b/src/builtins.h
+@@ -0,0 +1,51 @@
++/*
++ * This file was generated by the mkbuiltins program.
++ */
++
++#define ALIASCMD (builtincmd + 3)
++#define BGCMD (builtincmd + 4)
++#define BREAKCMD (builtincmd + 5)
++#define CDCMD (builtincmd + 6)
++#define COMMANDCMD (builtincmd + 8)
++#define DOTCMD (builtincmd + 0)
++#define ECHOCMD (builtincmd + 10)
++#define EVALCMD (builtincmd + 11)
++#define EXECCMD (builtincmd + 12)
++#define EXITCMD (builtincmd + 13)
++#define EXPORTCMD (builtincmd + 14)
++#define FALSECMD (builtincmd + 15)
++#define FGCMD (builtincmd + 16)
++#define GETOPTSCMD (builtincmd + 17)
++#define HASHCMD (builtincmd + 18)
++#define JOBSCMD (builtincmd + 19)
++#define KILLCMD (builtincmd + 20)
++#define LOCALCMD (builtincmd + 21)
++#define PRINTFCMD (builtincmd + 22)
++#define PWDCMD (builtincmd + 23)
++#define READCMD (builtincmd + 24)
++#define RETURNCMD (builtincmd + 26)
++#define SETCMD (builtincmd + 27)
++#define SHIFTCMD (builtincmd + 28)
++#define TESTCMD (builtincmd + 2)
++#define TIMESCMD (builtincmd + 30)
++#define TRAPCMD (builtincmd + 31)
++#define TRUECMD (builtincmd + 1)
++#define TYPECMD (builtincmd + 33)
++#define UMASKCMD (builtincmd + 34)
++#define UNALIASCMD (builtincmd + 35)
++#define UNSETCMD (builtincmd + 36)
++#define WAITCMD (builtincmd + 37)
++
++#define NUMBUILTINS 38
++
++#define BUILTIN_SPECIAL 0x1
++#define BUILTIN_REGULAR 0x2
++#define BUILTIN_ASSIGN 0x4
++
++struct builtincmd {
++	const char *name;
++	int (*builtin)(int, char **);
++	unsigned flags;
++};
++
++extern const struct builtincmd builtincmd[];
+--- a/src/supplement.c
++++ b/src/supplement.c
+@@ -0,0 +1,96 @@
++/* Supplement functions missing from meuos-libc that dash needs.
++ * These are called without #ifdef guards in dash source code.
++ */
++#include <string.h>
++#include <sys/types.h>
++#include <sys/wait.h>
++
++/* Like strncpy but returns pointer to the null terminator in dest. */
++char *stpncpy(char *dest, const char *src, size_t n)
++{
++	char *d = dest;
++	while (n > 0 && *src != '\0') {
++		*d++ = *src++;
++		n--;
++	}
++	while (n > 0) {
++		*d++ = '\0';
++		n--;
++	}
++	return d;
++}
++
++/* sys_siglist for strsignal() fallback in system.c */
++const char *sys_siglist[32] = {
++	[0]  = "Signal 0",
++	[1]  = "Hangup",
++	[2]  = "Interrupt",
++	[3]  = "Quit",
++	[4]  = "Illegal instruction",
++	[5]  = "Trace/breakpoint trap",
++	[6]  = "Aborted",
++	[7]  = "Bus error",
++	[8]  = "Floating point exception",
++	[9]  = "Killed",
++	[10] = "User defined signal 1",
++	[11] = "Segmentation fault",
++	[12] = "User defined signal 2",
++	[13] = "Broken pipe",
++	[14] = "Alarm clock",
++	[15] = "Terminated",
++	[16] = "Stack fault",
++	[17] = "Child exited",
++	[18] = "Continued",
++	[19] = "Stopped (signal)",
++	[20] = "Stopped",
++	[21] = "Stopped (tty input)",
++	[22] = "Stopped (tty output)",
++	[23] = "Urgent I/O condition",
++	[24] = "CPU time limit exceeded",
++	[25] = "File size limit exceeded",
++	[26] = "Virtual timer expired",
++	[27] = "Profiling timer expired",
++	[28] = "Window changed",
++	[29] = "I/O possible",
++	[30] = "Power failure",
++	[31] = "Bad system call",
++};
++
++/* Job control stubs - return error so dash disables job control */
++pid_t tcgetpgrp(int fd)
++{
++	(void)fd;
++	return -1;
++}
++
++int tcsetpgrp(int fd, pid_t pgrp)
++{
++	(void)fd;
++	(void)pgrp;
++	return -1;
++}
++
++pid_t getpgrp(void)
++{
++	return -1;
++}
++
++int setpgid(pid_t pid, pid_t pgid)
++{
++	(void)pid;
++	(void)pgid;
++	return -1;
++}
++
++/* wait3 is BSD: wait3(status, options, rusage) */
++pid_t wait3(int *status, int options, void *rusage)
++{
++	(void)rusage;
++	return waitpid(-1, status, options);
++}
++
++/* getppid stub - libc-meuos has no getppid */
++pid_t getppid(void)
++{
++	return 0;
++}
+--- a/config.h
++++ b/config.h
+@@ -0,0 +1,112 @@
++/* config.h - adjusted for meuos-libc */
++/* #undef HAVE_ALIAS_ATTRIBUTE */
++#define HAVE_ALLOCA_H 1
++#define HAVE_BSEARCH 1
++#define HAVE_DECL_ISBLANK 1
++#define HAVE_FNMATCH 1
++/* #undef HAVE_GLOB - use dash's internal glob fallback */
++/* #define HAVE_GLOB 1 */
++#define HAVE_INTTYPES_H 1
++#define HAVE_ISALPHA 1
++#define HAVE_MEMORY_H 1
++#define HAVE_PATHS_H 1
++#define HAVE_STDINT_H 1
++#define HAVE_STDLIB_H 1
++#define HAVE_STRINGS_H 1
++#define HAVE_STRING_H 1
++#define HAVE_STRTOD 1
++#define HAVE_SYSCONF 1
++#define HAVE_SYS_STAT_H 1
++#define HAVE_SYS_TYPES_H 1
++#define HAVE_UNISTD_H 1
++#define HAVE_ST_MTIM 1
++#define STDC_HEADERS 1
++#define PACKAGE "dash"
++#define PACKAGE_BUGREPORT ""
++#define PACKAGE_NAME "dash"
++#define PACKAGE_STRING "dash 0.5.12"
++#define PACKAGE_TARNAME "dash"
++#define PACKAGE_URL ""
++#define PACKAGE_VERSION "0.5.12"
++#define SIZEOF_INTMAX_T 8
++#define SIZEOF_LONG_LONG_INT 8
++#define SMALL 1
++#define VERSION "0.5.12"
++#define WITH_LINENO 1
++
++/* Functions NOT in meuos-libc: undefine so system.c/system.h fallbacks work */
++/* #undef HAVE_MEMPCPY */
++/* #undef HAVE_STPCPY */
++/* #undef HAVE_STRCHRNUL */
++/* #undef HAVE_STRSIGNAL */
++/* #undef HAVE_STRTOIMAX */
++/* #undef HAVE_STRTOUMAX */
++/* #undef HAVE_KILLPG */
++/* #undef HAVE_SIGSETMASK */
++/* #undef HAVE_GETRLIMIT */
++/* #undef HAVE_GETPWNAM */
++/* #undef HAVE_FACCESSAT */
++
++/* 64-bit operations are the same as 32-bit (meuos uses regular stat/open) */
++#define dirent64 dirent
++#define fstat64 fstat
++#define glob64 glob
++#define glob64_t struct glob_t
++#define globfree64 globfree
++#define lstat64 lstat
++#define open64 open
++#define readdir64 readdir
++#define stat64 stat
++/* GLOB_NOMAGIC and GLOB_ALTDIRFUNC - let expand.c define them as 0 */
++
++/* Include sys/wait.h for wait macros (jobs.c doesn't include it on non-BSD) */
++#include <sys/wait.h>
++
++/* Job control function declarations (not in meuos-libc) */
++pid_t tcgetpgrp(int);
++int tcsetpgrp(int, pid_t);
++pid_t getpgrp(void);
++int setpgid(pid_t, pid_t);
++
++/* wait3 BSD function (use wait4 from meuos-libc) */
++pid_t wait3(int *, int, void *);
++
++/* stpncpy */
++char *stpncpy(char *, const char *, size_t);
++
++/* meuo -include config.h */
++#undef BUFSIZ
++#define BUFSIZ 8192
++
++/* PRIdMAX for intmax_t (int64_t on LP64) */
++#define PRIdMAX "ld"
++
++/* EWOULDBLOCK = EAGAIN */
++#define EWOULDBLOCK EAGAIN
++
++/* vfork -> fork */
++#define vfork fork
++
++/* Job control and wait macros not in meuos sys/wait.h */
++#define WUNTRACED 4
++#define WIFSTOPPED(status) (((status) & 0xff) == 0x7f)
++#define WSTOPSIG(status) ((((status) >> 8) & 0xff))
++
++/* Missing path definitions */
++#define _PATH_TTY "/dev/tty"
++#define _PATH_DEVNULL "/dev/null"
++#define _PATH_BSHELL "/bin/sh"
++
++/* Missing POSIX constants */
++#define NAME_MAX 255
++
++/* getgroups stub - returns 0 (no supplementary groups) */
++#define getgroups(a,b) ((void)(b), 0)
++
++/* sys_siglist declaration (normally in string.h with _GNU_SOURCE) */
++extern const char *sys_siglist[];
++
++/* Enable GNU extensions */
++#ifndef _GNU_SOURCE
++# define _GNU_SOURCE 1
++#endif
+--- a/include/paths.h
++++ b/include/paths.h
+@@ -0,0 +1,11 @@
++/* Minimal paths.h stub for MeuOS.
++ * dash only needs _PATH_BSHELL, _PATH_TMP, _PATH_TTY, _PATH_DEVNULL. */
++#ifndef _PATHS_H_
++#define _PATHS_H_
++
++#define _PATH_BSHELL "/bin/sh"
++#define _PATH_TMP "/tmp/"
++#define _PATH_TTY "/dev/tty"
++#define _PATH_DEVNULL "/dev/null"
++
++#endif /* _PATHS_H_ */
+--- a/include/getopt.h
++++ b/include/getopt.h
+@@ -0,0 +1,11 @@
++/* Minimal getopt.h stub for MeuOS.
++ * dash's histedit.c includes <getopt.h>; the getopt() calls live only
++ * inside #ifndef SMALL code which is compiled out for the MeuOS build. */
++#ifndef _GETOPT_H_
++#define _GETOPT_H_
++
++int getopt(int argc, char *const argv[], const char *optstring);
++extern char *optarg;
++extern int optind, opterr, optopt;
++
++#endif /* _GETOPT_H_ */
