@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <threads.h>
 
@@ -296,19 +297,21 @@ int pthread_spin_destroy(pthread_spinlock_t *sp) { (void)sp; return 0; }
 int
 pthread_spin_lock(pthread_spinlock_t *sp)
 {
-	while (__sync_lock_test_and_set(sp, 1))
-		while (*sp) asm volatile("pause" ::: "memory");
+	_Atomic int *lock = (_Atomic int *)sp;
+
+	while (atomic_exchange(lock, 1))
+		while (*lock) __asm__ __volatile__("pause");
 	return 0;
 }
 int
 pthread_spin_trylock(pthread_spinlock_t *sp)
 {
-	return __sync_lock_test_and_set(sp, 1) ? EBUSY : 0;
+	return atomic_exchange((_Atomic int *)sp, 1) ? EBUSY : 0;
 }
 int
 pthread_spin_unlock(pthread_spinlock_t *sp)
 {
-	__sync_lock_release(sp);
+	atomic_store((_Atomic int *)sp, 0);
 	return 0;
 }
 #else
