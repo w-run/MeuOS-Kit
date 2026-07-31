@@ -6,12 +6,26 @@
 #include <stdint.h>
 #include <string.h>
 
+/* Read the 32-bit little-endian value currently at the place.
+ *
+ * i386 objects use the ELF REL format: the addend is stored implicitly
+ * in the original contents of the place being relocated (for a call/jmp
+ * the rel32 field holds 0xfffffffc == -4).  When the linker already
+ * supplied an explicit addend from a RELA entry the place holds 0, so
+ * adding the in-place value covers both cases. */
+static inline int32_t
+read_place32(const unsigned char *place)
+{
+	return (int32_t)((uint32_t)place[0] | ((uint32_t)place[1] << 8) |
+	                 ((uint32_t)place[2] << 16) | ((uint32_t)place[3] << 24));
+}
+
 /* Apply a single i386 relocation.
  *
  * reloc_type:   R_386_* constant
  * place:        4-byte aligned location to patch (in-place)
  * S:            symbol value (final linked address)
- * A:            addend (from the relocation entry)
+ * A:            addend (from the relocation entry, if RELA)
  * P:            position of the place (the offset being relocated)
  *
  * Returns 0 on success, -1 on unsupported relocation type. */
@@ -26,7 +40,7 @@ i386_apply_reloc(unsigned reloc_type, unsigned char *place,
 		return 0;
 
 	case 1:  /* R_386_32 — S + A */
-		value = (uint32_t)(S + (uint64_t)A);
+		value = (uint32_t)(S + (uint64_t)A + read_place32(place));
 		place[0] = (unsigned char)value;
 		place[1] = (unsigned char)(value >> 8);
 		place[2] = (unsigned char)(value >> 16);
@@ -34,7 +48,7 @@ i386_apply_reloc(unsigned reloc_type, unsigned char *place,
 		return 0;
 
 	case 2:  /* R_386_PC32 — S + A - P */
-		value = (uint32_t)(S + (uint64_t)A - P);
+		value = (uint32_t)(S + (uint64_t)A + read_place32(place) - P);
 		place[0] = (unsigned char)value;
 		place[1] = (unsigned char)(value >> 8);
 		place[2] = (unsigned char)(value >> 16);
@@ -42,7 +56,7 @@ i386_apply_reloc(unsigned reloc_type, unsigned char *place,
 		return 0;
 
 	case 11: /* R_386_32S — same as R_386_32 */
-		value = (uint32_t)(S + (uint64_t)A);
+		value = (uint32_t)(S + (uint64_t)A + read_place32(place));
 		place[0] = (unsigned char)value;
 		place[1] = (unsigned char)(value >> 8);
 		place[2] = (unsigned char)(value >> 16);
@@ -55,7 +69,7 @@ i386_apply_reloc(unsigned reloc_type, unsigned char *place,
 
 	case 4:  /* R_386_PLT32 — L + A - P */
 		/* PLT not yet implemented; fallback to PC32 */
-		value = (uint32_t)(S + (uint64_t)A - P);
+		value = (uint32_t)(S + (uint64_t)A + read_place32(place) - P);
 		place[0] = (unsigned char)value;
 		place[1] = (unsigned char)(value >> 8);
 		place[2] = (unsigned char)(value >> 16);
@@ -67,10 +81,10 @@ i386_apply_reloc(unsigned reloc_type, unsigned char *place,
 	 * the value is simply S + A written as a 32-bit absolute. */
 	case 12: /* R_386_TLS_LE_DEFAULT */
 	case 17: /* R_386_TLS_LE — assumes tp = 0 for static link */
-		value = (uint32_t)(S + (uint64_t)A);
+		value = (uint32_t)(S + (uint64_t)A + read_place32(place));
 		goto write32;
 	case 13: /* R_386_TLS_LE_32 — same as TLS_LE but explicitly 32-bit */
-		value = (uint32_t)(S + (uint64_t)A);
+		value = (uint32_t)(S + (uint64_t)A + read_place32(place));
 		goto write32;
 
 	default:

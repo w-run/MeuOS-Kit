@@ -1829,7 +1829,8 @@ build_symbol_data(unsigned char *data, const struct elf_sym_out *symbols,
 }
 
 static void
-build_reloc_data(unsigned char *data, const struct reloc_group *group)
+build_reloc_data(unsigned char *data, const struct reloc_group *group,
+                 int elf_class)
 {
 	unsigned char *cursor = data;
 	size_t i;
@@ -1837,9 +1838,21 @@ build_reloc_data(unsigned char *data, const struct reloc_group *group)
 	for (i = 0; i < group->count; ++i) {
 		info = ((uint64_t)group->items[i].symbol << 32) |
 		       group->items[i].type;
-		mem_u64(&cursor, group->items[i].offset);
-		mem_u64(&cursor, info);
-		mem_u64(&cursor, (uint64_t)group->items[i].addend);
+		if (elf_class == 1) {
+			/* ELF32 RELA entry (12 bytes): offset, info, addend.
+			 * ELF32 r_info packs the symbol index in bits [31:8]
+			 * and the type in the low 8 bits. */
+			mem_u32(&cursor, (uint32_t)group->items[i].offset);
+			mem_u32(&cursor,
+			        ((uint32_t)group->items[i].symbol << 8) |
+			        group->items[i].type);
+			mem_u32(&cursor, (uint32_t)group->items[i].addend);
+		} else {
+			/* ELF64 RELA entry (24 bytes): offset, info, addend */
+			mem_u64(&cursor, group->items[i].offset);
+			mem_u64(&cursor, info);
+			mem_u64(&cursor, (uint64_t)group->items[i].addend);
+		}
 	}
 }
 
@@ -1979,13 +1992,15 @@ write_object(struct as_file *as, const struct mt_target *target,
 	for (i = 0; i < as->section_count; ++i) {
 		if (groups[i].count == 0)
 			continue;
-		section_size = groups[i].count * 24;
+		section_size = groups[i].count *
+		               ((target->elf_class == 1) ? 12 : 24);
 		out[reloc_output_map[i]].data =
 		    (unsigned char *)mt_malloc((size_t)section_size);
 		if (!out[reloc_output_map[i]].data)
 			goto out;
 		out[reloc_output_map[i]].size = section_size;
-		build_reloc_data(out[reloc_output_map[i]].data, &groups[i]);
+		build_reloc_data(out[reloc_output_map[i]].data, &groups[i],
+		                 target->elf_class);
 	}
 	/* Assign file offsets. NOBITS reserves virtual size but no file bytes. */
 	offset = target->ehdr_size;

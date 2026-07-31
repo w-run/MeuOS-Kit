@@ -37,6 +37,10 @@ struct i386_op {
 	int64_t disp;       /* displacement */
 	const char *sym;    /* symbol name (for fixups) */
 	int64_t addend;
+	/* Symbol storage.  Operand text points into a scratch buffer that
+	 * is reused later in the encoder, so symbol names are copied here
+	 * to stay valid until the caller consumes the fixup. */
+	char sym_buf[128];
 };
 
 /* Register name table (i386: only 8 general-purpose regs, no REX) */
@@ -135,7 +139,9 @@ parse_operand(const char *text, struct i386_op *op)
 
 		/* Symbol reference */
 		op->kind = OP_SYMBOL;
-		op->sym = val;
+		strncpy(op->sym_buf, val, sizeof(op->sym_buf) - 1);
+		op->sym_buf[sizeof(op->sym_buf) - 1] = '\0';
+		op->sym = op->sym_buf;
 		return 1;
 	}
 
@@ -250,7 +256,9 @@ parse_operand(const char *text, struct i386_op *op)
 	/* Symbol (plain text, e.g., function label for call/jmp) */
 	{
 		op->kind = OP_SYMBOL;
-		op->sym = text;
+		strncpy(op->sym_buf, text, sizeof(op->sym_buf) - 1);
+		op->sym_buf[sizeof(op->sym_buf) - 1] = '\0';
+		op->sym = op->sym_buf;
 		return 1;
 	}
 }
@@ -333,16 +341,29 @@ emit_modrm_mem(unsigned char **pp, int reg_num, const struct i386_op *op)
 	return disp_offset;
 }
 
-/* Set fixup fields on an insn. */
+/* Set fixup fields on an insn.
+ *
+ * The symbol is copied to the heap here: the operand text (and even the
+ * i386_op array) lives on the encoder's stack and is gone by the time
+ * the assembler reads insn.fixup_symbol after i386_encode_insn()
+ * returns.  parse_operand first saves the name in op.sym_buf so the
+ * value read here is the intact operand string. */
 static void
 set_fixup(struct mt_insn *out, size_t offset, unsigned width,
           unsigned reloc_type, const char *sym, int64_t addend)
 {
+	size_t len;
 	out->fixed = 0;
 	out->fixup_offset = offset;
 	out->fixup_width = width;
 	out->reloc_type = reloc_type;
-	out->fixup_symbol = sym;
+	out->fixup_symbol = NULL;
+	if (sym) {
+		len = strlen(sym);
+		out->fixup_symbol = (char *)malloc(len + 1);
+		if (out->fixup_symbol)
+			memcpy((char *)out->fixup_symbol, sym, len + 1);
+	}
 	out->fixup_addend = addend;
 }
 

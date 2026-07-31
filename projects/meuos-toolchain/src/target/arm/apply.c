@@ -54,11 +54,13 @@ mt_apply_arm_reloc(unsigned type, unsigned char *loc,
 		return 0;
 
 	case 2: /* R_ARM_ABS32: S + A */
-		write32(loc, (uint32_t)(S + A));
+		/* REL format: the addend lives in the original 32-bit contents
+		 * of the place (e.g. a jump-table entry's symbol offset). */
+		write32(loc, (uint32_t)(S + (int64_t)A + (int32_t)read32(loc)));
 		return 0;
 
 	case 3: /* R_ARM_REL32: S + A - P */
-		write32(loc, (uint32_t)(S + A - P));
+		write32(loc, (uint32_t)(S + (int64_t)A + (int32_t)read32(loc) - P));
 		return 0;
 
 	case 43: /* R_ARM_MOVW_ABS_NC: lower 16 of S+A */
@@ -94,23 +96,23 @@ mt_apply_arm_reloc(unsigned type, unsigned char *loc,
 		/* For static TLS, the linker computes the final offset
 		 * from the thread pointer.  S is the TLS symbol address,
 		 * tp is known at link time for static binaries. */
-		write32(loc, (uint32_t)(S + A));
+		write32(loc, (uint32_t)(S + (int64_t)A + (int32_t)read32(loc)));
 		return 0;
 
 	case 96: /* R_ARM_GOT_PREL: GOT + A - P */
-		write32(loc, (uint32_t)(S + A - P));
+		write32(loc, (uint32_t)(S + (int64_t)A + (int32_t)read32(loc) - P));
 		return 0;
 
 	case 27: /* R_ARM_PLT32: PLT + A - P */
-		write32(loc, (uint32_t)(S + A - P));
+		write32(loc, (uint32_t)(S + (int64_t)A + (int32_t)read32(loc) - P));
 		return 0;
 
 	case 26: /* R_ARM_GOT32: GOT entry offset */
-		write32(loc, (uint32_t)(S + A));
+		write32(loc, (uint32_t)(S + (int64_t)A + (int32_t)read32(loc)));
 		return 0;
 
 	case 4: /* R_ARM_LDR_PC_G0: S + A - P (LDR literal) */
-		write32(loc, (uint32_t)(S + A - P));
+		write32(loc, (uint32_t)(S + (int64_t)A + (int32_t)read32(loc) - P));
 		return 0;
 
 	case 32: /* R_ARM_ALU_PCREL_0: (S + A - P) for ADR */
@@ -124,11 +126,11 @@ mt_apply_arm_reloc(unsigned type, unsigned char *loc,
 		}
 
 	case 104: /* R_ARM_TLS_GD32: GOT + A - P (TLS GD) */
-		write32(loc, (uint32_t)(S + A - P));
+		write32(loc, (uint32_t)(S + (int64_t)A + (int32_t)read32(loc) - P));
 		return 0;
 
 	case 106: /* R_ARM_TLS_LDO32: S + A - tp (TLS LDO) */
-		write32(loc, (uint32_t)(S + A));
+		write32(loc, (uint32_t)(S + (int64_t)A + (int32_t)read32(loc)));
 		return 0;
 
 	/* ---- Dynamic linking relocations (preserved for ld.so) ---- */

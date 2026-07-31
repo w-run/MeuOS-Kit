@@ -154,9 +154,12 @@ mt_apply_aarch64_reloc(unsigned type, unsigned char *loc,
 
 	case 286: { /* R_AARCH64_LDST64_ABS_LO12_NC */
 		/* Low 12 bits of (S + A) for 64-bit LDR/STR scaled addressing.
-		 * The value is placed in bits [21:10] of the instruction. */
+		 * The value is placed in bits [21:10] of the instruction.
+		 * Mask the page offset (low 12 bits) first, then divide by
+		 * the 8-byte access width so only the page-local offset is
+		 * encoded in imm12. */
 		uint64_t val = (uint64_t)(S + A);
-		uint32_t imm12 = (uint32_t)((val >> 3) & 0xFFF);
+		uint32_t imm12 = (uint32_t)((val & 0xFFF) >> 3);
 		uint32_t insn = (uint32_t)loc[0] | ((uint32_t)loc[1] << 8) |
 		                ((uint32_t)loc[2] << 16) | ((uint32_t)loc[3] << 24);
 		insn = (insn & 0xFFC003FF) | (imm12 << 10);
@@ -201,7 +204,7 @@ mt_apply_aarch64_reloc(unsigned type, unsigned char *loc,
 	}
 
 	case 312: { /* R_AARCH64_LD64_GOT_LO12_NC — LDR from GOT entry */
-		uint32_t imm12 = (uint32_t)((S + A) >> 3) & 0xFFF;
+		uint32_t imm12 = (uint32_t)(((uint64_t)(S + A) & 0xFFF) >> 3);
 		uint32_t insn = (uint32_t)loc[0] | ((uint32_t)loc[1] << 8) |
 		                ((uint32_t)loc[2] << 16) | ((uint32_t)loc[3] << 24);
 		insn = (insn & 0xFFC003FF) | (imm12 << 10);
