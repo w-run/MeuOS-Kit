@@ -152,6 +152,25 @@ static int cmd_stat(struct msys *m, const char *path) {
 }
 
 /* ── extract (single archive) ── */
+
+/* Reject entry names that could escape the extraction directory: absolute
+ * paths, empty names, and any path component of ".." (zip-slip). */
+static int is_safe_entry_name(const char *name) {
+	if (!name || !*name || name[0] == '/')
+		return 0;
+	const char *p = name;
+	for (;;) {
+		const char *slash = strchr(p, '/');
+		size_t comp_len = slash ? (size_t)(slash - p) : strlen(p);
+		if (comp_len == 2 && p[0] == '.' && p[1] == '.')
+			return 0;
+		if (!slash)
+			break;
+		p = slash + 1;
+	}
+	return 1;
+}
+
 static int cmd_extract(struct msys *m, const char *outdir) {
 	uint32_t cnt = msys_count(m); size_t extracted = 0;
 	for (uint32_t i = 0; i < cnt; i++) {
@@ -160,6 +179,10 @@ static int cmd_extract(struct msys *m, const char *outdir) {
 		if (nlen > 0 && name[0] == '@') continue;
 		char namebuf[4096]; if (nlen >= sizeof(namebuf)) continue;
 		memcpy(namebuf, name, nlen); namebuf[nlen] = '\0';
+		if (!is_safe_entry_name(namebuf)) {
+			fprintf(stderr, "  skip '%s': unsafe entry name\n", namebuf);
+			continue;
+		}
 		char path[16384]; int n = snprintf(path, sizeof(path), "%s/%s", outdir, namebuf);
 		if (n < 0 || (size_t)n >= sizeof(path)) continue;
 		char *slash = strrchr(path, '/');
@@ -425,6 +448,10 @@ static int arch_extract(struct archive *a, const char *dir) {
 			if (nlen > 0 && name[0] == '@') continue;
 			char namebuf[4096]; if (nlen >= sizeof(namebuf)) continue;
 			memcpy(namebuf, name, nlen); namebuf[nlen] = '\0';
+			if (!is_safe_entry_name(namebuf)) {
+				fprintf(stderr, "  skip '%s': unsafe entry name\n", namebuf);
+				continue;
+			}
 			char path[16384]; snprintf(path, sizeof(path), "%s/%s", dir, namebuf);
 			if (access(path, F_OK) == 0) continue;
 			char *slash = strrchr(path, '/');

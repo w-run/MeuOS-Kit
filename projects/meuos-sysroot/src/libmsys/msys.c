@@ -288,20 +288,29 @@ int msys_readdir(struct msys *m, const char *dir, msys_dir_cb cb, void *arg)
 			? msys_fnv1a((const unsigned char *)dir, dlen)
 			: 0;
 		uint16_t ph_trunc = (uint16_t)(parent_hash >> 16);
+		/* dir_offset/dir_count come from the file header (attacker
+		 * controlled): bound the walk to the mapped region so a malformed
+		 * block cannot over-read. */
+		if ((uint64_t)m->hdr_v2->dir_offset >= m->size) { errno = EINVAL; return -1; }
 		unsigned char *dp = (unsigned char *)m->base + m->hdr_v2->dir_offset;
+		uint64_t avail = m->size - m->hdr_v2->dir_offset;
 		uint32_t found = 0;
 
 		for (uint32_t i = 0; i < m->hdr_v2->dir_count; i++) {
+			if (avail < 4) { errno = EIO; return -1; }
 			uint16_t dph = (uint16_t)dp[0] | ((uint16_t)dp[1] << 8);
 			uint8_t dnlen = dp[2];
 			uint8_t dtype = dp[3];
+			uint64_t ent = 4 + (uint64_t)dnlen;
+			if (avail < ent) { errno = EIO; return -1; }
 			if (dph == ph_trunc) {
 				found++;
 				int is_dir = (dtype == MSYS_FILE_DIR);
 				int ret = cb((const char *)(dp + 4), dnlen, 0, is_dir, arg);
 				if (ret) return 0;
 			}
-			dp += 4 + dnlen;
+			dp += ent;
+			avail -= ent;
 		}
 		if (found == 0) { errno = ENOENT; return -1; }
 		return 0;
@@ -661,6 +670,10 @@ int msys_get_extension(struct msys *m, uint32_t type,
 
 	uint32_t ext_off = m->hdr_v2->extension_offset;
 	if (ext_off == 0) { errno = ENOENT; return -1; }
+	/* extension_offset comes from the file header (attacker controlled):
+	 * without this bound, m->size - ext_off underflows and the walk below
+	 * reads far past the end of the mapped region. */
+	if ((uint64_t)ext_off >= m->size) { errno = EINVAL; return -1; }
 
 	unsigned char *p = (unsigned char *)m->base + ext_off;
 	uint64_t avail = m->size - ext_off;
