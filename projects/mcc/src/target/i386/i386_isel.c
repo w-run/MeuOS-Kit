@@ -116,8 +116,16 @@ fixarg(Ref *r, int k, Ins *i, Fn *fn)
 	 * a Kl store source that lives in a stack slot falls through to the
 	 * "slot -> Oaddr" path below and stores the slot *address* instead
 	 * of its value.  amd64 never hits this because Kl temps live in
-	 * 64-bit registers and are never slot-resident here. */
-	if (k == -2)  /* Ke: optab sentinel for store value class */
+	 * 64-bit registers and are never slot-resident here.
+	 *
+	 * The Ke sentinel is only meaningful for the value operand
+	 * (arg[0]); the store *address* (arg[1]) is Ke too on Ks/Kd
+	 * stores, but must NOT be reinterpreted as a float class.  If it
+	 * were, a CAddr target (e.g. `g = 2.0`) would fall into the
+	 * float-literal-pool branch below and stashbits() the symbol's
+	 * bit pattern (its offset, usually 0) as an .LfpN rodata label,
+	 * turning the store into a write to read-only memory — SIGSEGV. */
+	if (k == -2 && r == &i->arg[0])  /* Ke: optab sentinel for store value class */
 		k = i->cls;
 
 	if (KBASE(k) == 1 && rtype(r0) == RCon) {

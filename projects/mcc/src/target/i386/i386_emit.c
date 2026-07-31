@@ -1666,10 +1666,17 @@ emitins(Ins i, E *e)
 				regtoa(i.to.val, SLong));
 			break;
 		case SExt:
-			/* load address from the GOT */
+			/* Static (non-PIC) linking: load the symbol's absolute
+			 * address directly.  The previous @GOT(%ebx) form
+			 * required ebx to point at the GOT, which is only true
+			 * under the SysV PIC register convention; static
+			 * executables never set ebx up, so the load faulted or
+			 * silently depended on the linker folding the GOT
+			 * relocation into an absolute address.  meuos builds
+			 * are always static, so use plain absolute addressing. */
 			assert(!con->bits.i);
 			fprintf(e->f,
-				"\tmovl %s%s@GOT(%%ebx), %%%s\n",
+				"\tmovl $%s%s, %%%s\n",
 				sym[0] == '"' ? "" : T.assym, sym,
 				regtoa(i.to.val, SLong));
 			break;

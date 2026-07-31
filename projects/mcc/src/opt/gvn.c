@@ -148,12 +148,22 @@ normins(Fn *fn, Ins *i)
 {
 	uint n;
 	int64_t v;
+	int k;
 	Ref r;
 
 	/* truncate constant bits to
 	 * 32 bits for s/w uses */
 	for (n=0; n<2; n++) {
-		if (!KWIDE(argcls(i, n)))
+		k = argcls(i, n);
+		/* Ke (-2) is the optab sentinel for a store's value
+		 * operand: its real width is i->cls, not the 32-bit
+		 * width KWIDE() would infer.  Without this, e.g.
+		 * `stored 2.0` or `storel 0x123456789` had the constant
+		 * truncated to v & 0xffffffff (2.0 -> 0), silently
+		 * corrupting the stored value. */
+		if (k == -2)
+			k = i->cls;
+		if (!KWIDE(k))
 		if (isconbits(fn, i->arg[n], &v))
 		if ((v & 0xffffffff) != v)
 			i->arg[n] = getcon(v & 0xffffffff, fn);
