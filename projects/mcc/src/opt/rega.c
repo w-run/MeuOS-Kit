@@ -637,13 +637,17 @@ rega(Fn *fn)
 	for (bp=blk, b=fn->start; b; b=b->link)
 		*bp++ = b;
 	qsort(blk, fn->nblk, sizeof blk[0], carve);
+	/* Hint function-entry parameter copies (dst = copy PhysReg) to the
+	 * physical source register so pre-allocation places them there and
+	 * w[] does not record a stale hint that later fires a wrong hint
+	 * move.  Unlike upstream QBE (which stops at the first non-copy),
+	 * scan the whole start block: the frontend may emit stack-parameter
+	 * loads (e.g. load S-x) ahead of the register parameter copies,
+	 * which would otherwise leave those copies unhinted. */
 	for (b=fn->start, i=b->ins; i<&b->ins[b->nins]; i++)
-		if (i->op != Ocopy || !isreg(i->arg[0]))
-			break;
-		else {
-			assert(rtype(i->to) == RTmp);
+		if (i->op == Ocopy && isreg(i->arg[0])
+		&& rtype(i->to) == RTmp)
 			sethint(i->to.val, i->arg[0].val);
-		}
 
 	/* 2. assign registers */
 	for (bp=blk; bp<&blk[fn->nblk]; bp++) {
