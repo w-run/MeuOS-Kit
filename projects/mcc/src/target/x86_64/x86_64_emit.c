@@ -218,6 +218,8 @@ emitcon(Con *con, E *e)
 			assert((con->sym.type & ~SExt) == SGlo
 			    || con->sym.type == SGenThr);
 			fprintf(e->f, "%s%s", p, l);
+			if (con->sym.type == SGenThr)
+				fprintf(e->f, "@tlsgd");
 		}
 		if (con->bits.i)
 			fprintf(e->f, "%+"PRId64, con->bits.i);
@@ -631,7 +633,7 @@ emitins(Ins i, E *e)
 			 * low word is unsigned-looking (for example a converted -5). */
 			if (rtype(i.to) == RSlot || rtype(i.to) == RMem) {
 				emitf("movl %u0, %=", &i, e);
-				emitf("movl %U0, 4%=", &i, e);
+				emitf("movl %U0, %N=", &i, e);
 				break;
 			}
 			if (isreg(i.to))

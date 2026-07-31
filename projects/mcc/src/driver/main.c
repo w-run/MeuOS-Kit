@@ -618,8 +618,15 @@ main(int argc, char *argv[])
 		if (asm_fd < 0)
 			fatal("mkstemp:");
 		asm_out = fdopen(asm_fd, "w");
-		if (!asm_out)
+		if (!asm_out) {
+			close(asm_fd);
 			fatal("fdopen:");
+		}
+		/* asm_out never writes: the frontend and IR emitfn output is
+		 * redirected through the freopen below.  Close it (and thus the
+		 * mkstemp descriptor) so the temp fd does not leak. */
+		fclose(asm_out);
+		asm_out = NULL;
 		/* Redirect frontend writes (printf etc.) and IR emitfn
 		 * output to the asm temp file. */
 		if (!freopen(asm_tmp_path, "w", stdout))
