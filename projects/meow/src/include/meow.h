@@ -27,6 +27,11 @@
 #define RECIPE_DEPS_MAX 64
 #define USES_MAX 32
 
+/* Per-command run(X) modifier flags, index-aligned with commands[]. */
+#define CMD_F_QUIET   0x01  /* run(q): suppress command output */
+#define CMD_F_ABORT   0x02  /* run(!): abort target on failure (default) */
+#define CMD_F_NOABORT 0x04  /* run(?): continue on failure */
+
 /* Message levels for meow_msg(). */
 #define MSG_ERROR   0
 #define MSG_WARN    1
@@ -49,8 +54,11 @@ struct target {
 	size_t noutputs;
 	int phony;
 	char *when;           /* condition expression (NULL = always) */
-	int run_abort_on_fail; /* 1 = abort on failure (default), 0 = continue */
-	int run_quiet;        /* 1 = suppress command output */
+	int run_abort_on_fail; /* target-level default abort-on-fail; per-command
+	                          run(X) modifiers in cmd_flags[] override it */
+	int run_quiet;        /* target-level default; 1 = suppress output */
+	int unpack;           /* 1 = auto-extract downloaded archive */
+	unsigned char cmd_flags[TARGET_COMMANDS_MAX]; /* per-command run(X) flags */
 	char *download_url;   /* download source URL */
 	char *download_sha256;/* optional SHA-256 */
 	char *log_file;       /* build log file path */

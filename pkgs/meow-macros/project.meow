@@ -1,6 +1,7 @@
 name: meow-macros
 version: 1.0
-env: CC=mcc, CFLAGS=-O2
+# CC 用宿主 cc（mcc 不在 PATH 上）；%CC% --version 需在 run(!) 下成功
+env: CC=cc, CFLAGS=-O2
 
 [clean]
   phony: true

@@ -29,6 +29,9 @@ static enum meow_section current_section;
 static int in_runblock;    /* 收集 run: 块的行 */
 static char runblock_buf[32768];
 static size_t runblock_len;
+/* run(X) 修饰符按命令记录（run 级，而非 target 级）。默认遇错中断。 */
+static int pending_abort = 1;
+static int pending_quiet = 0;
 
 /* 探测子节区（[probe] 内部） */
 static int in_probe_list;
@@ -50,8 +53,16 @@ flush_runblock(void)
 	/* 整个 run 块作为一条命令存入（执行时写入 temp sh 脚本） */
 	current_target->commands[current_target->ncommands] =
 		strdup(interpolated);
-	if (current_target->commands[current_target->ncommands])
+	if (current_target->commands[current_target->ncommands]) {
+		/* 把 run(X) 修饰符记到该命令自己的标志（run 级作用域） */
+		unsigned char fl = CMD_F_ABORT;  /* 默认遇错中断 */
+		if (pending_quiet)
+			fl |= CMD_F_QUIET;
+		if (!pending_abort)
+			fl = (unsigned char)((fl & ~CMD_F_ABORT) | CMD_F_NOABORT);
+		current_target->cmd_flags[current_target->ncommands] = fl;
 		current_target->ncommands++;
+	}
 	runblock_len = 0;
 	runblock_buf[0] = '\0';
 }
@@ -174,6 +185,8 @@ parse_meow(char *data)
 	in_runblock = 0;
 	runblock_len = 0;
 	runblock_buf[0] = '\0';
+	pending_abort = 1;
+	pending_quiet = 0;
 	current_target = NULL;
 	current_section = SEC_NONE;
 	in_probe_list = 0;
@@ -499,7 +512,7 @@ parse_meow(char *data)
 			/* unpack: true — 自动解压下载的压缩包 */
 			else if (strcmp(key, "unpack") == 0 && current_target) {
 				if (strcmp(val, "true") == 0 || strcmp(val, "yes") == 0)
-					current_target->run_quiet = 2;  /* flag: unpack requested */
+					current_target->unpack = 1;
 			}
 			/* patch: file1, file2 — 补丁文件列表 */
 			else if (strcmp(key, "patch") == 0 && current_target) {
@@ -653,14 +666,36 @@ parse_meow(char *data)
 					while (*p && *p != ',') p++;
 				}
 			}
-			/* env: KEY=VALUE — 环境变量注入（每行一个，支持 ''/"" 引号） */
+			/* env: KEY=VALUE[, KEY2=VALUE2] — 环境变量注入，支持逗号分隔
+			 * 多个对（如 env: CC=mcc, CFLAGS=-O2），值可用 ''/"" 包裹 */
 			else if (strcmp(key, "env") == 0) {
-				char *eq = strchr(val, '=');
-				if (eq) {
+				char *p = val;
+				while (*p) {
+					while (*p == ' ' || *p == '\t' || *p == ',') p++;
+					if (!*p) break;
+					char *eq = strchr(p, '=');
+					if (!eq) break;
 					char *eq_save = eq;
 					*eq = '\0';
-					char *k = trim(val);
+					char *k = trim(p);
 					char *v = trim(eq + 1);
+					/* 值到下一个 "KEY=" 对之前的逗号为止（含逗号的值保留） */
+					char *scan = v;
+					char *next = NULL;
+					while ((scan = strchr(scan, ',')) != NULL) {
+						char *after = scan + 1;
+						while (*after == ' ' || *after == '\t') after++;
+						if (*after && strchr(after, '=')) { next = scan; break; }
+						scan++;
+					}
+					if (next) {
+						char *end = next;
+						while (end > v && (end[-1] == ' ' || end[-1] == '\t')) end--;
+						*end = '\0';
+						p = next + 1;
+					} else {
+						p = v + strlen(v);
+					}
 					size_t vlen = strlen(v);
 					if (vlen >= 2 && ((v[0] == '"' && v[vlen-1] == '"') ||
 					                  (v[0] == '\'' && v[vlen-1] == '\''))) {
@@ -706,15 +741,18 @@ parse_meow(char *data)
 			/* key: + 值空 = 多行块开始 */
 			else if (!*val && current_target) {
 				if (strncmp(key, "run", 3) == 0) {
-					/* 解析修饰符 run(!): / run(?): / run(q): */
+					/* 解析修饰符 run(!): / run(?): / run(q): —
+					 * 只作用于本条 run 命令（run 级），默认遇错中断 */
+					pending_abort = 1;
+					pending_quiet = 0;
 					const char *mod = key + 3;
 					if (*mod == '(') {
 						mod++;
 						while (*mod && *mod != ')') {
 							switch (*mod) {
-								case '!': current_target->run_abort_on_fail = 1; break;
-								case '?': current_target->run_abort_on_fail = 0; break;
-								case 'q': current_target->run_quiet = 1; break;
+								case '!': pending_abort = 1; break;
+								case '?': pending_abort = 0; break;
+								case 'q': pending_quiet = 1; break;
 							}
 							mod++;
 						}
@@ -726,23 +764,22 @@ parse_meow(char *data)
 			}
 			/* run(X): command 同行情景（支持修饰符） */
 			else if (*val && strncmp(key, "run", 3) == 0 && current_target) {
+				in_runblock = 0;
+				flush_runblock();  /* 先冲刷前一个块（通常为空） */
+				pending_abort = 1;
+				pending_quiet = 0;
 				const char *mod = key + 3;
-				int mod_abort = 1, mod_quiet = 0;
 				if (*mod == '(') {
 					mod++;
 					while (*mod && *mod != ')') {
 						switch (*mod) {
-							case '!': mod_abort = 1; break;
-							case '?': mod_abort = 0; break;
-							case 'q': mod_quiet = 1; break;
+							case '!': pending_abort = 1; break;
+							case '?': pending_abort = 0; break;
+							case 'q': pending_quiet = 1; break;
 						}
 						mod++;
 					}
 				}
-				current_target->run_abort_on_fail = mod_abort;
-				current_target->run_quiet = mod_quiet;
-				in_runblock = 0;
-				flush_runblock();
 				add_to_runblock(trim(val));
 				flush_runblock();
 			}

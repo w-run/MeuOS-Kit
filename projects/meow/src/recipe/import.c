@@ -411,20 +411,29 @@ resolve_includes(const char *ac_path, const char *src, size_t srclen)
 			size_t fnlen = (size_t)(fend - fstart);
 			if (fnlen > 0 && fnlen < 1024) {
 				char incpath[1024];
-				snprintf(incpath, sizeof(incpath), "%s/", d);
-				strncat(incpath, fstart, fnlen);
-				char fname[1024];
-				strncpy(fname, fstart, fnlen);
-				fname[fnlen] = '\0';
+				/* 有界拼接：dir + "/" + include 文件名，总长不超数组 */
+				int dlen = snprintf(incpath, sizeof(incpath), "%s/", d);
+				if (dlen < 0)
+					dlen = 0;
+				if ((size_t)dlen + fnlen < sizeof(incpath)) {
+					memcpy(incpath + dlen, fstart, fnlen);
+					incpath[dlen + fnlen] = '\0';
+					char fname[1024];
+					strncpy(fname, fstart, fnlen);
+					fname[fnlen] = '\0';
 
-				size_t ilen;
-				char *icontent = read_file(incpath, &ilen);
-				if (icontent) {
-					strncat(out, icontent, IMPORT_MAX + 16384 - strlen(out) - 1);
-					free(icontent);
+					size_t ilen;
+					char *icontent = read_file(incpath, &ilen);
+					if (icontent) {
+						strncat(out, icontent, IMPORT_MAX + 16384 - strlen(out) - 1);
+						free(icontent);
+					} else {
+						/* Could not read included file; skip */
+						meow_msg(MSG_WARN, "could not read included file: %s", incpath);
+					}
 				} else {
-					/* Could not read included file; skip */
-					meow_msg(MSG_WARN, "could not read included file: %s", incpath);
+					meow_msg(MSG_WARN, "include path too long: %s/%.*s",
+					        d, (int)fnlen, fstart);
 				}
 
 				/* Advance p past the include directive */

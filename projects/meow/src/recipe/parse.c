@@ -203,8 +203,6 @@ expand_env_vars(const char *input, char *output, size_t output_size)
 				size_t key_len = (size_t)(close - input - 2);
 				char search_prefix[9 + 256];
 				char *found;
-				const char *val_start, *val_end;
-				size_t val_len;
 				if (key_len > 256) return -1;
 				memcpy(search_prefix, "export ", 7);
 				memcpy(search_prefix + 7, input + 2, key_len);
@@ -213,12 +211,23 @@ expand_env_vars(const char *input, char *output, size_t output_size)
 				search_prefix[9 + key_len] = 0;
 				found = strstr(recipe_environment, search_prefix);
 				if (found) {
-					val_start = found + 9 + key_len;
-					val_end = strchr(val_start, '\'');
-					val_len = val_end ? (size_t)(val_end - val_start) : strlen(val_start);
-					if (out_len + val_len + 1 > output_size) return -1;
-					memcpy(output + out_len, val_start, val_len);
-					out_len += val_len;
+					/* 值以 ' 开头；内嵌单引号被编码为 '\''（闭合+转义+重开）。
+					 * 遇到 "后跟 \'" 的组合时输出一个字面量 ' 并跳过整个
+					 * 序列，遇到独立的 ' 才是值的结束。 */
+					const char *val_start = found + 9 + key_len;
+					while (*val_start) {
+						if (*val_start == '\'') {
+							if (val_start[1] == '\\' && val_start[2] == '\'') {
+								if (out_len + 1 >= output_size) return -1;
+								output[out_len++] = '\'';
+								val_start += 4;
+								continue;
+							}
+							break;  /* 值的结束引号 */
+						}
+						if (out_len + 1 >= output_size) return -1;
+						output[out_len++] = *val_start++;
+					}
 				}
 				input = close + 1;
 				continue;

@@ -8,6 +8,8 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/file.h>
 
 #include "meow.h"
 
@@ -32,6 +34,65 @@ expand_path(const char *path)
 			return buffer;
 	}
 	return path;
+}
+
+/* Wrap s in single quotes, escaping any embedded single quote as '\''
+ * (close-quote + escaped quote + reopen-quote) so the result is a single
+ * shell word even when s contains quotes.  Returns 0 on success, -1 if
+ * the escaped form would not fit in the buffer. */
+static int
+shell_quote(char *out, size_t size, const char *s)
+{
+	size_t pos = 0;
+	if (size < 3) return -1;
+	out[pos++] = '\'';
+	for (; *s; s++) {
+		if (*s == '\'') {
+			if (pos + 4 >= size) return -1;
+			out[pos++] = '\'';
+			out[pos++] = '\\';
+			out[pos++] = '\'';
+			out[pos++] = '\'';
+		} else {
+			if (pos + 1 >= size) return -1;
+			out[pos++] = *s;
+		}
+	}
+	if (pos + 1 >= size) return -1;
+	out[pos++] = '\'';
+	out[pos] = '\0';
+	return 0;
+}
+
+/* Cross-process target lock.  run_target() recurses via fork(): each child
+ * inherits a private copy of the target table, so the target->done flags
+ * are not shared and two sibling processes can build the same transitive
+ * dependency twice.  A per-target flock() in /tmp serializes the build
+ * decision across processes; callers re-check out-of-date after acquiring
+ * the lock so a target already produced by another process is skipped.
+ * Lock files are intentionally left in place (unlink would race). */
+static int
+target_lock(const char *name)
+{
+	unsigned long h = 5381;
+	for (const char *p = name; *p; p++)
+		h = ((h << 5) + h) + (unsigned char)*p;
+	char path[128];
+	snprintf(path, sizeof(path), "/tmp/meow-lock-%08lx", h);
+	int fd = open(path, O_CREAT | O_RDWR, 0600);
+	if (fd < 0)
+		return -1;
+	flock(fd, LOCK_EX);
+	return fd;
+}
+
+static void
+target_unlock(int fd)
+{
+	if (fd >= 0) {
+		flock(fd, LOCK_UN);
+		close(fd);
+	}
 }
 
 /* Evaluate a "when:" condition expression.
@@ -330,16 +391,22 @@ run_target(struct target *target)
 			meow_msg(MSG_DEBUG, "tool found: %s", has_tools_stack[hi]);
 		}
 	}
-	/* download: URL — 下载源文件 */
+	/* download: URL — 下载源文件（写入 /tmp，与 sha256/unpack 路径一致） */
 	if (target->download_url) {
-		char cmd[1024];
-		/* Check if file is already downloaded */
 		const char *fname = strrchr(target->download_url, '/');
 		fname = fname ? fname + 1 : target->download_url;
+		char dlpath[512];
+		snprintf(dlpath, sizeof(dlpath), "/tmp/%s", fname);
 		struct stat st;
-		if (stat(fname, &st) != 0) {
-			snprintf(cmd, sizeof(cmd), "curl -sSL -o '%s' '%s' 2>/dev/null || wget -q '%s' -O '%s'",
-			         fname, target->download_url, target->download_url, fname);
+		if (stat(dlpath, &st) != 0) {
+			/* URL/路径经单引号转义，防止注入 */
+			char q_url[2048], q_path[2048];
+			if (shell_quote(q_url, sizeof(q_url), target->download_url) != 0 ||
+			    shell_quote(q_path, sizeof(q_path), dlpath) != 0)
+				return -1;
+			char cmd[4096];
+			snprintf(cmd, sizeof(cmd), "curl -sSL -o %s %s 2>/dev/null || wget -q %s -O %s",
+			         q_path, q_url, q_url, q_path);
 			if (run(cmd) != 0) {
 				meow_msg(MSG_ERROR, "download failed: %s", target->download_url);
 				return -1;
@@ -351,34 +418,42 @@ run_target(struct target *target)
 	if (target->download_sha256 && target->download_url) {
 		const char *fname = strrchr(target->download_url, '/');
 		fname = fname ? fname + 1 : target->download_url;
+		char dlpath[512];
+		snprintf(dlpath, sizeof(dlpath), "/tmp/%s", fname);
+		char check[640];
+		snprintf(check, sizeof(check), "%s  %s", target->download_sha256, dlpath);
+		char q_check[768];
+		if (shell_quote(q_check, sizeof(q_check), check) != 0)
+			return -1;
 		char cmd[1024];
-		snprintf(cmd, sizeof(cmd), "echo '%s  /tmp/%s' | sha256sum -c - >/dev/null 2>&1",
-		         target->download_sha256, fname);
+		snprintf(cmd, sizeof(cmd), "echo %s | sha256sum -c - >/dev/null 2>&1", q_check);
 		if (run(cmd) != 0) {
 			meow_msg(MSG_ERROR, "SHA-256 mismatch for %s", fname);
 			return -1;
 		}
 	}
 	/* unpack: 自动解压 */
-	if (target->run_quiet == 2 && target->download_url) {
+	if (target->unpack && target->download_url) {
 		const char *fname = strrchr(target->download_url, '/');
 		fname = fname ? fname + 1 : target->download_url;
 		char tar_path[512];
 		snprintf(tar_path, sizeof(tar_path), "/tmp/%s", fname);
+		char q_tar[768];
+		if (shell_quote(q_tar, sizeof(q_tar), tar_path) != 0)
+			return -1;
 		size_t tlen = strlen(tar_path);
 		char cmd[1024];
 		if (tlen > 7 && strcmp(tar_path + tlen - 7, ".tar.gz") == 0)
-			snprintf(cmd, sizeof(cmd), "mkdir -p /tmp/meow-build && tar xzf %s -C /tmp/meow-build", tar_path);
+			snprintf(cmd, sizeof(cmd), "mkdir -p /tmp/meow-build && tar xzf %s -C /tmp/meow-build", q_tar);
 		else if (tlen > 8 && strcmp(tar_path + tlen - 8, ".tar.xz") == 0)
-			snprintf(cmd, sizeof(cmd), "mkdir -p /tmp/meow-build && tar xJf %s -C /tmp/meow-build", tar_path);
+			snprintf(cmd, sizeof(cmd), "mkdir -p /tmp/meow-build && tar xJf %s -C /tmp/meow-build", q_tar);
 		else if (tlen > 7 && strcmp(tar_path + tlen - 7, ".tar.bz2") == 0)
-			snprintf(cmd, sizeof(cmd), "mkdir -p /tmp/meow-build && tar xjf %s -C /tmp/meow-build", tar_path);
+			snprintf(cmd, sizeof(cmd), "mkdir -p /tmp/meow-build && tar xjf %s -C /tmp/meow-build", q_tar);
 		else if (tlen > 4 && strcmp(tar_path + tlen - 4, ".zip") == 0)
-			snprintf(cmd, sizeof(cmd), "mkdir -p /tmp/meow-build && unzip -o %s -d /tmp/meow-build", tar_path);
+			snprintf(cmd, sizeof(cmd), "mkdir -p /tmp/meow-build && unzip -o %s -d /tmp/meow-build", q_tar);
 		else
 			snprintf(cmd, sizeof(cmd), "echo 'unpack: unknown format: %s'", tar_path);
 		if (run(cmd) != 0) return -1;
-		target->run_quiet = 0;
 	}
 	/* patch: 应用补丁 */
 	for (size_t pi = 0; pi < target->npatch; pi++) {
@@ -408,7 +483,17 @@ run_target(struct target *target)
 		if (g_log_fp)
 			setvbuf(g_log_fp, NULL, _IONBF, 0);
 	}
-	if (target_out_of_date(target)) {
+	/* 并行防重复构建：run_target() 递归经 fork 复制内存，target->done 标志
+	 * 无法跨进程共享，兄弟子进程可能重复构建同一个共享传递依赖（竞态）。
+	 * 轻量防护：执行目标命令前加 per-target flock，获得锁后重新检查
+	 * out-of-date —— 若另一进程已完成（产出文件已生成）则跳过构建。 */
+	int lockfd = -1;
+	if (parallel_jobs > 1)
+		lockfd = target_lock(target->name);
+	int do_build = target_out_of_date(target);
+	if (do_build && lockfd >= 0)
+		do_build = target_out_of_date(target);  /* 锁内重新检查 */
+	if (do_build) {
 		/* pre: 前置钩子 */
 		if (target->pre_cmd) {
 			char cmd[RECIPE_MAX];
@@ -417,6 +502,16 @@ run_target(struct target *target)
 		}
 		for (size_t i = 0; i < target->ncommands; ++i)
 			{
+				/* 该命令自己的 run(X) 修饰符（run 级），未设置时回退到
+				 * target 级默认。 */
+				unsigned char cflags = (i < TARGET_COMMANDS_MAX) ?
+					target->cmd_flags[i] : 0;
+				int cmd_quiet = target->run_quiet;
+				int cmd_abort = target->run_abort_on_fail;
+				if (cflags & CMD_F_QUIET) cmd_quiet = 1;
+				if (cflags & CMD_F_ABORT) cmd_abort = 1;
+				else if (cflags & CMD_F_NOABORT) cmd_abort = 0;
+
 				char command[RECIPE_MAX];
 				if (expand_command(target, target->commands[i], command,
 					sizeof(command)) != 0)
@@ -431,12 +526,12 @@ run_target(struct target *target)
 				} else {
 					exec_cmd = command;
 				}
-				if (target->run_quiet) {
+				if (cmd_quiet) {
 					char *buf = malloc(strlen(exec_cmd) + 32);
 					sprintf(buf, "%s >/dev/null 2>&1", exec_cmd);
 					int rc = run(buf);
 					free(buf);
-					if (rc != 0 && target->run_abort_on_fail) {
+					if (rc != 0 && cmd_abort) {
 						if (target->error_cmd) {
 							char ec[RECIPE_MAX];
 							setenv("CMD", exec_cmd, 1);
@@ -448,7 +543,7 @@ run_target(struct target *target)
 					}
 				} else {
 					int rc = run(exec_cmd);
-					if (rc != 0 && target->run_abort_on_fail) {
+					if (rc != 0 && cmd_abort) {
 						if (target->error_cmd) {
 							char ec[RECIPE_MAX];
 							setenv("CMD", exec_cmd, 1);
@@ -468,6 +563,8 @@ run_target(struct target *target)
 		/* Target is up-to-date, still count for progress. */
 		completed_commands += target->ncommands;
 	}
+	if (lockfd >= 0)
+		target_unlock(lockfd);
 	/* ———— 宏执行（构建后） ———— */
 	/* post: 后置钩子 */
 	if (target->post_cmd) {

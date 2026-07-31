@@ -19,16 +19,18 @@ static char tmpdir[] = "/tmp/meow-probe.XXXXXX";
 /* Maximum argument count for compiler command. */
 #define PROBE_ARGS_MAX 64
 
-/* Reject strings containing shell metacharacters. */
+/* Reject strings containing shell metacharacters.  Whitespace (space/tab)
+ * is allowed: it is a separator that split_args() tokenizes into argv,
+ * and execvp() runs the compiler directly without a shell. */
 static int
 is_safe_arg(const char *s)
 {
 	if (!s || !*s) return 1;
 	for (; *s; s++) {
-		if (*s <= ' ' || *s == '|' || *s == ';' || *s == '&' ||
+		if (*s == '|' || *s == ';' || *s == '&' ||
 		    *s == '$' || *s == '`' || *s == '\'' || *s == '"' ||
 		    *s == '(' || *s == ')' || *s == '<' || *s == '>' ||
-		    *s == '\\' || *s == '\n' || *s == '\t')
+		    *s == '\\' || *s == '\n')
 			return 0;
 	}
 	return 1;
@@ -73,9 +75,16 @@ exec_compiler(const char *cc, const char *cflags,
 
 	int cc_argc = split_args(cc_copy, cc_argv, PROBE_ARGS_MAX);
 	if (cc_argc <= 0) return -1;
-	for (int i = 0; i < cc_argc; i++) argv[argc++] = cc_argv[i];
-
 	int cflags_argc = split_args(cflags_copy, cflags_argv, PROBE_ARGS_MAX);
+
+	/* 固定追加项：suffix（1）+ (-o obj | src)（3 或 2）+ argv[NULL]（1）。
+	 * cc/cflags 拆分已各自限制在 PROBE_ARGS_MAX-1 个，但总和仍可能越界，
+	 * 这里做总长检查后再拼接。 */
+	int fixed = 1 + (obj_or_exe[0] ? 3 : 2);
+	if (cc_argc + cflags_argc + fixed >= PROBE_ARGS_MAX)
+		return -1;
+
+	for (int i = 0; i < cc_argc; i++) argv[argc++] = cc_argv[i];
 	for (int i = 0; i < cflags_argc; i++) argv[argc++] = cflags_argv[i];
 
 	argv[argc++] = suffix; /* "-c" for compile, (empty) for link */
