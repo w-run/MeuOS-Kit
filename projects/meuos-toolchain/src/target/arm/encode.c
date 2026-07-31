@@ -35,6 +35,15 @@ static void set_fixup(struct mt_insn *out, size_t offset, unsigned width,
 	if (sym) {
 		const char *p;
 		snprintf(buf, sizeof buf, "%s", sym);
+		/* mcc quotes local labels containing dots (e.g. ".Lfp1"); the
+		 * label definition is unquoted, so strip the quotes here. */
+		{
+			size_t bl = strlen(buf);
+			if (bl >= 2 && buf[0] == '"' && buf[bl - 1] == '"') {
+				memmove(buf, buf + 1, bl - 2);
+				buf[bl - 2] = '\0';
+			}
+		}
 		for (p = buf; *p; ++p)
 			if ((*p == '+' || *p == '-') && p != buf) {
 				addend += strtoll(p, NULL, 0);

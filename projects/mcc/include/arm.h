@@ -10,7 +10,11 @@ enum Arm32Reg {
 	NFPR = D15 - D0 + 1,
 	NGPR = LR - R0 + 1,
 	NGPS = 5,
-	NFPS = D7 - D0 + 1,
+	/* FP caller-saved pool.  D1 is reserved as the floating-point
+	 * conversion scratch (s2): the emitter lowers int<->float casts to
+	 * `vmov s2, rN; vcvt.f64.s32 dN, s2` (and the reverse), which would
+	 * clobber a live value if rega assigned D1. */
+	NFPS = D7 - D0,
 	NCLR = 15,
 };
 MAKESURE(reg_not_tmp, D15 < (int)Tmp0);

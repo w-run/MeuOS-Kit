@@ -247,7 +247,7 @@ fixmem(Ref *pr, Fn *fn, FILE *f)
 }
 
 static void
-emitcmp(Ins *i, int c, FILE *f)
+emitcmp(Ins *i, int c, int k, FILE *f)
 {
 	static char *name[] = {
 		[Cfeq] = "ceq", [Cfge] = "cge", [Cfgt] = "cgt", [Cfle] = "cle", [Cflt] = "clt", [Cfne] = "cne",
@@ -266,7 +266,9 @@ emitcmp(Ins *i, int c, FILE *f)
 		swap = 1;
 	fprintf(f, "\tfcmp.%s.%c $fcc0, %s, %s\n\tmovcf2gr %s, $fcc0\n",
 		loongarch_name[c],
-		i->cls == Ks ? 's' : 'd',
+		/* Precision comes from the OPERAND class (Ks/Kd), not the
+		 * comparison's result class (Kw), which is always integer. */
+		k == Ks ? 's' : 'd',
 		swap ? rname[i->arg[1].val] : rname[i->arg[0].val],
 		swap ? rname[i->arg[0].val] : rname[i->arg[1].val],
 		rname[i->to.val]);
@@ -279,7 +281,7 @@ emitins(Ins *i, Fn *fn, FILE *f)
 	int64_t offset;
 	Con *c;
 	if (iscmp(i->op, &k, &o) && o >= NCmpI) {
-		emitcmp(i, o, f);
+		emitcmp(i, o, k, f);
 		return;
 	}
 	switch (i->op) {

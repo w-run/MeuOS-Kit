@@ -435,19 +435,28 @@ la64_encode_insn(const struct mt_target *target,
 
 	/* === 3-address floating-point R-type (before integer R-type to
 	 * avoid "all-register" block interception). ===
-	 * fadd.s/d, fsub.s/d, fmul.s/d, fdiv.s/d rd, fj, fk */
+	 * fadd.s/d, fsub.s/d, fmul.s/d, fdiv.s/d rd, fj, fk
+	 * fcmp.* is handled below (its first operand is $fcc, not a float
+	 * register), so exclude it here.
+	 * Opcode constants verified against loongarch64-linux-gnu-as 2.41
+	 * (e.g. fadd.d $fa0, $ft0, $ft1 = 0x01012500). */
 	if (nops == 3 && ops[0].kind == 1 && ops[1].kind == 1 && ops[2].kind == 1 &&
-	    mnemonic[0] == 'f') {
+	    mnemonic[0] == 'f' && strncmp(mnemonic, "fcmp.", 5) != 0) {
 		rd = (unsigned)ops[0].reg;
 		rj = (unsigned)ops[1].reg;
 		rk = (unsigned)ops[2].reg;
-		int is_d = (strstr(mnemonic, ".d") != NULL);
-		uint32_t op_base = is_d ? 0xD << 24 : 0xC << 24;
-		if      (strcmp(mnemonic, "fadd.s") == 0 || strcmp(mnemonic, "fadd.d") == 0) { emit32(out->bytes, op_base | rd | (rj<<5) | (rk<<10) | (0<<15)); return 0; }
-		else if (strcmp(mnemonic, "fsub.s") == 0 || strcmp(mnemonic, "fsub.d") == 0) { emit32(out->bytes, op_base | rd | (rj<<5) | (rk<<10) | (1<<15)); return 0; }
-		else if (strcmp(mnemonic, "fmul.s") == 0 || strcmp(mnemonic, "fmul.d") == 0) { emit32(out->bytes, op_base | rd | (rj<<5) | (rk<<10) | (2<<15)); return 0; }
-		else if (strcmp(mnemonic, "fdiv.s") == 0 || strcmp(mnemonic, "fdiv.d") == 0) { emit32(out->bytes, op_base | rd | (rj<<5) | (rk<<10) | (3<<15)); return 0; }
+		uint32_t op = 0;
+		if      (strcmp(mnemonic, "fadd.s") == 0) op = 0x01008000;
+		else if (strcmp(mnemonic, "fadd.d") == 0) op = 0x01010000;
+		else if (strcmp(mnemonic, "fsub.s") == 0) op = 0x01028000;
+		else if (strcmp(mnemonic, "fsub.d") == 0) op = 0x01030000;
+		else if (strcmp(mnemonic, "fmul.s") == 0) op = 0x01048000;
+		else if (strcmp(mnemonic, "fmul.d") == 0) op = 0x01050000;
+		else if (strcmp(mnemonic, "fdiv.s") == 0) op = 0x01068000;
+		else if (strcmp(mnemonic, "fdiv.d") == 0) op = 0x01070000;
 		else return -1;
+		emit32(out->bytes, r3(op, rd, rj, rk));
+		return 0;
 	}
 
 	/* === 3-address R-type (integer) === */
@@ -456,6 +465,8 @@ la64_encode_insn(const struct mt_target *target,
 		rj = (unsigned)ops[1].reg;
 		rk = (unsigned)ops[2].reg;
 		uint32_t op = 0;
+		if (strncmp(mnemonic, "fcmp.", 5) == 0)
+			goto la_fcmp;
 		if      (strcmp(mnemonic, "add.w") == 0)  op = 0x100000;
 		else if (strcmp(mnemonic, "add.d") == 0)  op = 0x108000;
 		else if (strcmp(mnemonic, "sub.w") == 0)  op = 0x110000;
@@ -916,41 +927,56 @@ branch2:
 	}
 
 	/* === Float comparison: fcmp.cond.s/d $fccN, fj, fk === */
+la_fcmp:
 	if (strncmp(mnemonic, "fcmp.", 5) == 0 && nops == 3) {
 		int fcc = ops[0].reg;
 		unsigned fj = (unsigned)ops[1].reg;
 		unsigned fk = (unsigned)ops[2].reg;
 		int is_d = (strstr(mnemonic, ".d") != NULL);
-		int cond = 8;
-		if (strstr(mnemonic, "ceq")) cond = 8;
-		else if (strstr(mnemonic, "clt")) cond = 4;
-		else if (strstr(mnemonic, "cle")) cond = 6;
-		else if (strstr(mnemonic, "cuge")) cond = 10;
-		else if (strstr(mnemonic, "cult")) cond = 5;
-		else if (strstr(mnemonic, "cne")) cond = 9;
-		else if (strstr(mnemonic, "cor")) cond = 14;
-		else if (strstr(mnemonic, "cun")) cond = 2;
-		uint32_t base = is_d ? 0xD << 24 : 0xC << 24;
-		emit32(out->bytes, base | (fcc << 0) | (fj << 5) | (fk << 10) | (cond << 20));
+		int cond = 2; /* default: ceq */
+		if (strstr(mnemonic, "clt")) cond = 1;
+		else if (strstr(mnemonic, "ceq")) cond = 2;
+		else if (strstr(mnemonic, "cle")) cond = 3;
+		else if (strstr(mnemonic, "cun")) cond = 4;
+		else if (strstr(mnemonic, "cne")) cond = 8;
+		else if (strstr(mnemonic, "cor")) cond = 10;
+		else return -1;
+		/* Verified against loongarch64-linux-gnu-as 2.41:
+		 *   fcmp.ceq.s $fcc0, $ft0, $ft1 = 0x0c122500
+		 *   fcmp.ceq.d $fcc0, $ft0, $ft1 = 0x0c222500
+		 * The base differs by bit 20 (.s=1, .d=0):
+		 *   .s base 0x0C100000, .d base 0x0C200000
+		 * cond occupies bits 19:16. */
+		uint32_t enc = (is_d ? 0x0C200000u : 0x0C100000u) |
+		               ((uint32_t)cond << 16) |
+		               ((uint32_t)fcc & 7u) | (fj << 5) | (fk << 10);
+		emit32(out->bytes, enc);
 		return 0;
 	}
 
-	/* === movcf2gr rd, $fccN === */
+	/* === movcf2gr rd, $fccN ===
+	 * Verified: movcf2gr $t0, $fcc0 = 0x0114dc0c = 0x0114dc00 | (fcc<<5) | rd */
 	if (strcmp(mnemonic, "movcf2gr") == 0 && nops >= 2) {
 		rd = (unsigned)ops[0].reg;
 		int fcc = ops[1].reg & 0x7;
-		emit32(out->bytes, (0x3<<20) | rd | (fcc << 5));
+		emit32(out->bytes, 0x0114dc00 | (rd) | ((uint32_t)fcc << 5));
 		return 0;
 	}
 
-	/* === movgr2fr.w / movgr2fr.d / movfr2gr.s / movfr2gr.d === */
+	/* === movfr2gr.s/d / movgr2fr.w/d ===
+	 * Verified against loongarch64-linux-gnu-as 2.41:
+	 *   movfr2gr.s = 0x0114b400 | (fj<<5) | rd
+	 *   movfr2gr.d = 0x0114b800 | (fj<<5) | rd
+	 *   movgr2fr.w = 0x0114a400 | (rj<<5) | fd
+	 *   movgr2fr.d = 0x0114a800 | (rj<<5) | fd */
 	if (nops == 2 && ops[0].kind == 1 && ops[1].kind == 1) {
 		rd = (unsigned)ops[0].reg;
 		rj = (unsigned)ops[1].reg;
-		if (strcmp(mnemonic, "movfr2gr.w") == 0) { emit32(out->bytes, (0x3<<20) | rd | (rj<<5) | (0<<15)); return 0; }
-		if (strcmp(mnemonic, "movfr2gr.d") == 0) { emit32(out->bytes, (0x3<<20) | rd | (rj<<5) | (1<<15)); return 0; }
-		if (strcmp(mnemonic, "movgr2fr.w") == 0) { emit32(out->bytes, (0x3<<20) | rj | (rd<<5) | (0<<15)); return 0; }
-		if (strcmp(mnemonic, "movgr2fr.d") == 0) { emit32(out->bytes, (0x3<<20) | rj | (rd<<5) | (1<<15)); return 0; }
+		if (strcmp(mnemonic, "movfr2gr.s") == 0) { emit32(out->bytes, 0x0114b400 | (rj << 5) | rd); return 0; }
+		if (strcmp(mnemonic, "movfr2gr.w") == 0) { emit32(out->bytes, 0x0114b400 | (rj << 5) | rd); return 0; }
+		if (strcmp(mnemonic, "movfr2gr.d") == 0) { emit32(out->bytes, 0x0114b800 | (rj << 5) | rd); return 0; }
+		if (strcmp(mnemonic, "movgr2fr.w") == 0) { emit32(out->bytes, 0x0114a400 | (rj << 5) | rd); return 0; }
+		if (strcmp(mnemonic, "movgr2fr.d") == 0) { emit32(out->bytes, 0x0114a800 | (rj << 5) | rd); return 0; }
 	}
 
 	/* === Float unary: fneg.s/d, fabs.s/d, fmov.s/d,
@@ -959,21 +985,32 @@ branch2:
 	if (nops == 2 && ops[0].kind == 1 && ops[1].kind == 1 && mnemonic[0] == 'f') {
 		rd = (unsigned)ops[0].reg;
 		rj = (unsigned)ops[1].reg;
-		int is_d = (strstr(mnemonic, ".d") != NULL);
-		uint32_t op_base = is_d ? 0xD << 24 : 0xC << 24;
-		if (strcmp(mnemonic, "fneg.s") == 0 || strcmp(mnemonic, "fneg.d") == 0) { emit32(out->bytes, op_base | rd | (rj<<5) | (2<<15)); return 0; }
-		if (strcmp(mnemonic, "fabs.s") == 0 || strcmp(mnemonic, "fabs.d") == 0) { emit32(out->bytes, op_base | rd | (rj<<5) | (5<<15)); return 0; }
-		if (strcmp(mnemonic, "frint.s") == 0 || strcmp(mnemonic, "frint.d") == 0) { emit32(out->bytes, op_base | rd | (rj<<5) | (1<<15)); return 0; }
-		/* fcvt.s.d: result is .s (base=0xC), input is .d */
-		if (strcmp(mnemonic, "fcvt.s.d") == 0) { emit32(out->bytes, (0xC<<24) | rd | (rj<<5) | (2<<15)); return 0; }
-		/* fcvt.d.s: result is .d (base=0xD), input is .s */
-		if (strcmp(mnemonic, "fcvt.d.s") == 0) { emit32(out->bytes, (0xD<<24) | rd | (rj<<5) | (2<<15)); return 0; }
-		/* ffint.s.w / ffint.s.l */
-		if (strcmp(mnemonic, "ffint.s.w") == 0) { emit32(out->bytes, (0xC<<24) | rd | (rj<<5) | (12<<15)); return 0; }
-		if (strcmp(mnemonic, "ffint.s.l") == 0) { emit32(out->bytes, (0xC<<24) | rd | (rj<<5) | (13<<15)); return 0; }
-		/* ffint.d.w / ffint.d.l */
-		if (strcmp(mnemonic, "ffint.d.w") == 0) { emit32(out->bytes, (0xD<<24) | rd | (rj<<5) | (12<<15)); return 0; }
-		if (strcmp(mnemonic, "ffint.d.l") == 0) { emit32(out->bytes, (0xD<<24) | rd | (rj<<5) | (13<<15)); return 0; }
+		/* fmov.s/d fd, fj  →  fcpy (GAS alias).  These live in the
+		 * 0x0114_9_00 opcode space, not the 0xC/0xD ALU family. */
+		if (strcmp(mnemonic, "fmov.s") == 0) { emit32(out->bytes, 0x01149400 | (rj << 5) | rd); return 0; }
+		if (strcmp(mnemonic, "fmov.d") == 0) { emit32(out->bytes, 0x01149800 | (rj << 5) | rd); return 0; }
+		/* ftintrz.{w,l}.{s,d} fd, fj — floating-point to integer with
+		 * round-towards-zero (the result goes to a floating-point
+		 * register, unlike ffint which takes an integer register). */
+		if (strcmp(mnemonic, "ftintrz.w.s") == 0) { emit32(out->bytes, 0x011a8400 | (rj << 5) | rd); return 0; }
+		if (strcmp(mnemonic, "ftintrz.w.d") == 0) { emit32(out->bytes, 0x011a8800 | (rj << 5) | rd); return 0; }
+		if (strcmp(mnemonic, "ftintrz.l.s") == 0) { emit32(out->bytes, 0x011aa400 | (rj << 5) | rd); return 0; }
+		if (strcmp(mnemonic, "ftintrz.l.d") == 0) { emit32(out->bytes, 0x011aa800 | (rj << 5) | rd); return 0; }
+		/* fneg/fabs: float unary (opcode space 0x0114_0_/0x0114_1_). */
+		if (strcmp(mnemonic, "fneg.s") == 0) { emit32(out->bytes, 0x01141400 | (rj << 5) | rd); return 0; }
+		if (strcmp(mnemonic, "fneg.d") == 0) { emit32(out->bytes, 0x01141800 | (rj << 5) | rd); return 0; }
+		if (strcmp(mnemonic, "fabs.s") == 0) { emit32(out->bytes, 0x01140400 | (rj << 5) | rd); return 0; }
+		if (strcmp(mnemonic, "fabs.d") == 0) { emit32(out->bytes, 0x01140800 | (rj << 5) | rd); return 0; }
+		/* fcvt.s.d: result .s, source .d; fcvt.d.s: result .d, source .s */
+		if (strcmp(mnemonic, "fcvt.s.d") == 0) { emit32(out->bytes, 0x01191800 | (rj << 5) | rd); return 0; }
+		if (strcmp(mnemonic, "fcvt.d.s") == 0) { emit32(out->bytes, 0x01192400 | (rj << 5) | rd); return 0; }
+		/* ffint.{s,d}.{w,l}: integer GPR → float (signed).  The source
+		 * register is a GPR but the encoding is the standard 2R float
+		 * form (register number in bits 9:5). */
+		if (strcmp(mnemonic, "ffint.s.w") == 0) { emit32(out->bytes, 0x011d1000 | (rj << 5) | rd); return 0; }
+		if (strcmp(mnemonic, "ffint.s.l") == 0) { emit32(out->bytes, 0x011d1800 | (rj << 5) | rd); return 0; }
+		if (strcmp(mnemonic, "ffint.d.w") == 0) { emit32(out->bytes, 0x011d2000 | (rj << 5) | rd); return 0; }
+		if (strcmp(mnemonic, "ffint.d.l") == 0) { emit32(out->bytes, 0x011d2800 | (rj << 5) | rd); return 0; }
 	}
 
 	out->size = 0;

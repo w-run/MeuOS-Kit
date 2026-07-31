@@ -100,6 +100,20 @@ parse_reg_text(const char *text, int *reg_out)
 	return 0;
 }
 
+/* Strip surrounding double quotes from a symbol name in place.  mcc
+ * quotes local labels containing dots (e.g. ".Lfp1"), but the symbol
+ * table entry (defined by the label line) is unquoted, so the fixup
+ * must reference the bare name. */
+static void
+strip_sym_quotes(char *sym)
+{
+	size_t n = strlen(sym);
+	if (n >= 2 && sym[0] == '"' && sym[n - 1] == '"') {
+		memmove(sym, sym + 1, n - 2);
+		sym[n - 2] = '\0';
+	}
+}
+
 /* Parse an operand string into an i386_op. */
 static int
 parse_operand(const char *text, struct i386_op *op)
@@ -146,6 +160,9 @@ parse_operand(const char *text, struct i386_op *op)
 		op->kind = OP_SYMBOL;
 		strncpy(op->sym_buf, val, sizeof(op->sym_buf) - 1);
 		op->sym_buf[sizeof(op->sym_buf) - 1] = '\0';
+		/* mcc quotes local labels containing dots (e.g. ".Lfp1");
+		 * the label definition is unquoted, so strip the quotes. */
+		strip_sym_quotes(op->sym_buf);
 		op->sym = op->sym_buf;
 		return 1;
 	}
@@ -263,10 +280,16 @@ parse_operand(const char *text, struct i386_op *op)
 		op->kind = OP_SYMBOL;
 		strncpy(op->sym_buf, text, sizeof(op->sym_buf) - 1);
 		op->sym_buf[sizeof(op->sym_buf) - 1] = '\0';
+		strip_sym_quotes(op->sym_buf);
 		op->sym = op->sym_buf;
 		return 1;
 	}
 }
+
+/* Strip surrounding double quotes from a symbol name in place.  mcc
+ * quotes local labels containing dots (e.g. ".Lfp1"), but the symbol
+ * table entry (defined by the label line) is unquoted, so the fixup
+ * must reference the bare name. */
 
 /* ---- Encoding helpers ---- */
 
@@ -628,6 +651,85 @@ i386_encode_insn(const struct mt_target *target,
 		emit8(p, 0x87);
 		emit8(p + 1, modrm(3, ops[0].reg, ops[1].reg));
 		p += 2;
+		out->size = (size_t)(p - out->bytes);
+		goto done;
+	}
+
+	/* ---- x87 floating point ----
+	 * Memory operand forms:  opcode + ModR/M(/ext) [+ disp32 for symbols].
+	 * The mnemonic suffix (fldl/flds/fmull/...) selects single/double.
+	 * Verified against `as --32`: fldl 8(%ebp) = DD 45 08. */
+	if (nops == 1) {
+		static const struct { const char *name; unsigned op; int ext; } x87m[] = {
+			{"flds", 0xD9, 0}, {"fldl", 0xDD, 0},
+			{"fsts", 0xD9, 2}, {"fstl", 0xDD, 2},
+			{"fstps", 0xD9, 3}, {"fstpl", 0xDD, 3},
+			{"fadds", 0xD8, 0}, {"faddl", 0xDC, 0},
+			{"fmuls", 0xD8, 1}, {"fmull", 0xDC, 1},
+			{"fsubs", 0xD8, 4}, {"fsubl", 0xDC, 4},
+			{"fsubrs", 0xD8, 5}, {"fsubrl", 0xDC, 5},
+			{"fdivs", 0xD8, 6}, {"fdivl", 0xDC, 6},
+			{"fdivrs", 0xD8, 7}, {"fdivrl", 0xDC, 7},
+			{"fcoms", 0xD8, 2}, {"fcoml", 0xDC, 2},
+			{"fcomps", 0xD8, 3}, {"fcompl", 0xDC, 3},
+			{"filds", 0xDF, 0}, {"fildl", 0xDB, 0}, {"fildll", 0xDF, 5},
+			{"fistps", 0xDB, 2}, {"fistpl", 0xDB, 3}, {"fistpll", 0xDF, 7},
+			{"fisttps", 0xDB, 1}, {"fisttpl", 0xDB, 1}, {"fisttpll", 0xDD, 1},
+			{"fnstenv", 0xD9, 6}, {"fnstcw", 0xD9, 7},
+			{"fldcw", 0xD9, 5}, {"fstcw", 0xD9, 7},
+		};
+		size_t xi;
+		for (xi = 0; xi < sizeof(x87m) / sizeof(x87m[0]); ++xi) {
+			if (strcmp(mnemonic, x87m[xi].name) != 0)
+				continue;
+			if (ops[0].kind == OP_SYMBOL) {
+				/* Absolute address: mod=00 rm=101 + disp32 */
+				match = 1;
+				emit8(p, (uint8_t)x87m[xi].op);
+				p++;
+				emit8(p, modrm(0, x87m[xi].ext, 5));
+				p++;
+				offset = (size_t)(p - out->bytes);
+				emit32(p, 0);
+				set_fixup(out, offset, 4, R_386_32,
+				          ops[0].sym, ops[0].addend);
+				p += 4;
+				out->size = (size_t)(p - out->bytes);
+				goto done;
+			}
+			if (ops[0].kind == OP_MEM) {
+				match = 1;
+				emit8(p, (uint8_t)x87m[xi].op);
+				p++;
+				emit_modrm_mem(&p, x87m[xi].ext, &ops[0]);
+				out->size = (size_t)(p - out->bytes);
+				goto done;
+			}
+		}
+	}
+
+	/* x87 no-operand / register forms */
+	if (strcmp(mnemonic, "fcompp") == 0) {
+		match = 1;
+		emit8(p, 0xDE);
+		emit8(p + 1, 0xD9);
+		p += 2;
+		out->size = (size_t)(p - out->bytes);
+		goto done;
+	}
+	if (strcmp(mnemonic, "fnstsw") == 0) {
+		/* fnstsw %ax — fixed DF E0 encoding */
+		match = 1;
+		emit8(p, 0xDF);
+		emit8(p + 1, 0xE0);
+		p += 2;
+		out->size = (size_t)(p - out->bytes);
+		goto done;
+	}
+	if (strcmp(mnemonic, "sahf") == 0) {
+		match = 1;
+		emit8(p, 0x9E);
+		p++;
 		out->size = (size_t)(p - out->bytes);
 		goto done;
 	}

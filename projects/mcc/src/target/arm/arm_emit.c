@@ -98,19 +98,39 @@ static struct {
 	{ Ocast,   Kl, "vmov %=, %D0" },
 	{ Ocast,   Ks, "vmov %=, %W0" },
 	{ Ocast,   Kd, "vmov %=, %L0" },
-	{ Ostosi,  Ka, "vcvt.s32.f64 %=, %S0" },
-	{ Ostoui,  Ka, "vcvt.u32.f64 %=, %S0" },
-	{ Odtosi,  Ka, "vcvt.s32.f64 %=, %D0" },
-	{ Odtoui,  Ka, "vcvt.u32.f64 %=, %D0" },
-	{ Oswtof,  Ka, "vcvt.f64.s32 %=, %W0" },
-	{ Ouwtof,  Ka, "vcvt.f64.u32 %=, %W0" },
+	/* int<->float casts.  ARM has no VCVT between a core register and
+	 * a VFP double, so the conversion goes through the s2 scratch
+	 * (D1, excluded from rega's allocation pool — see arm.h NFPS):
+	 *   int -> double: vmov s2, rN ; vcvt.f64.s32 dN, s2
+	 *   double -> int: vcvt.s32.f64 s2, dN ; vmov rN, s2 */
+	{ Ostosi,  Ka, "vcvt.s32.f64 s2, %S0\n\tvmov\t%=, s2" },
+	{ Ostoui,  Ka, "vcvt.u32.f64 s2, %S0\n\tvmov\t%=, s2" },
+	{ Odtosi,  Ka, "vcvt.s32.f64 s2, %D0\n\tvmov\t%=, s2" },
+	{ Odtoui,  Ka, "vcvt.u32.f64 s2, %D0\n\tvmov\t%=, s2" },
+	{ Oswtof,  Ka, "vmov s2, %W0\n\tvcvt.f64.s32\t%=, s2" },
+	{ Ouwtof,  Ka, "vmov s2, %W0\n\tvcvt.f64.u32\t%=, s2" },
 	{ Osltof,  Kd, "bl __aeabi_l2d\n\tvmov\t%=, r0, r1" },
 	{ Osltof,  Ks, "bl __aeabi_l2f\n\tvmov\t%=, r0" },
-	{ Oultof,  Ka, "vcvt.f64.u32 %=, %W0" },
+	{ Oultof,  Ka, "vmov s2, %W0\n\tvcvt.f64.u32\t%=, s2" },
 	{ Ocall,   Kw, "blx %L0" },
 	{ Oacmp,   Ki, "cmp %0, %1" },
 	{ Oacmn,   Ki, "cmn %0, %1" },
 	{ Oafcmp,  Ka, "vcmp.f64 %0, %1\n\tvmrs\tAPSR_nzcv, fpscr" },
+	/* Floating-point comparisons: vcmp sets NZCV (via fpscr), then a
+	 * conditional mov materializes 0/1 in a GPR.  The comparison's
+	 * i->cls is Kw (result class), so entries use Ki; %S0/%S1 and
+	 * %D0/%D1 force the fp operand widths.  Condition codes mirror
+	 * aarch64: eq/ne, ge/gt, ls (<=), mi (<). */
+#define FPCMP(o, cc) \
+	{ O##o##s, Ki, "vcmp.f32 %S0, %S1\n\tvmrs\tAPSR_nzcv, fpscr\n\tmov\t%W=, #0\n\tmov" cc "\t%W=, #1" }, \
+	{ O##o##d, Ki, "vcmp.f64 %D0, %D1\n\tvmrs\tAPSR_nzcv, fpscr\n\tmov\t%W=, #0\n\tmov" cc "\t%W=, #1" },
+	FPCMP(ceq, "eq")
+	FPCMP(cne, "ne")
+	FPCMP(cge, "ge")
+	FPCMP(cgt, "gt")
+	FPCMP(cle, "ls")
+	FPCMP(clt, "mi")
+#undef FPCMP
 	{ Oceqw,   Ki, "cmp %0, %1\n\tmov\t%=, #0\n\tmoveq\t%=, #1" },
 	{ Oceql,   Ki, "cmp %0, %1\n\tmov\t%=, #0\n\tmoveq\t%=, #1" },
 	{ Ocnew,   Ki, "cmp %0, %1\n\tmov\t%=, #0\n\tmovne\t%=, #1" },
@@ -141,7 +161,14 @@ static struct {
 static const char *
 rname(int r, int k)
 {
-	static char buf[8];
+	/* Ring of buffers so multiple rname() calls in one fprintf (e.g.
+	 * "ldr %s, [%s]" with two registers) don't alias: a single static
+	 * buffer would be overwritten by the later call and both %s would
+	 * print the same register name.  Six slots cover the deepest use
+	 * (4 registers in one call). */
+	static char buf[6][8];
+	static unsigned idx;
+	char *b = buf[idx++ % 6];
 	switch (k) {
 	default:
 	case Kw:
@@ -150,14 +177,14 @@ rname(int r, int k)
 		if (r == SP) return "sp";
 		if (r == LR) return "lr";
 		if (R0 <= r && r <= R12) {
-			snprintf(buf, sizeof buf, "r%d", r - R0); return buf;
+			snprintf(b, 8, "r%d", r - R0); return b;
 		}
 		break;
 	case Ks:
 	case Kd:
 		if (D0 <= r && r <= D15) {
-			snprintf(buf, sizeof buf, k == Ks ? "s%d" : "d%d", r - D0);
-			return buf;
+			snprintf(b, 8, k == Ks ? "s%d" : "d%d", r - D0);
+			return b;
 		}
 		break;
 	}
@@ -265,10 +292,26 @@ loadaddr(Con *c, char *rn, FILE *f)
 	default: die("unreachable");
 	case SGlo:
 		if (g_arm_arch_ver >= 7) {
-			fprintf(f, "\tmovw\t%s, #:lower16:%s%c%" PRIi64 "%s\n", rn, T.assym, str(c->sym.id), c->bits.i, T.assym[0] ? "" : "");
-			fprintf(f, "\tmovt\t%s, #:upper16:%s%c%" PRIi64 "\n", rn, T.assym, str(c->sym.id), c->bits.i);
+			/* 符号偏移作为 addend 拼在符号名后（mt/as 的
+			 * parse_reference 会把 `sym+N` 拆成 symbol + addend）。 */
+			if (c->bits.i) {
+				fprintf(f, "\tmovw\t%s, #:lower16:%s%s%+" PRIi64 "\n",
+					rn, T.assym, str(c->sym.id), c->bits.i);
+				fprintf(f, "\tmovt\t%s, #:upper16:%s%s%+" PRIi64 "\n",
+					rn, T.assym, str(c->sym.id), c->bits.i);
+			} else {
+				fprintf(f, "\tmovw\t%s, #:lower16:%s%s\n",
+					rn, T.assym, str(c->sym.id));
+				fprintf(f, "\tmovt\t%s, #:upper16:%s%s\n",
+					rn, T.assym, str(c->sym.id));
+			}
 		} else {
-			fprintf(f, "\tldr\t%s, =%s%c%" PRIi64 "%s\n", rn, T.assym, str(c->sym.id), c->bits.i, T.assym[0] ? "" : "");
+			if (c->bits.i)
+				fprintf(f, "\tldr\t%s, =%s%s%+" PRIi64 "\n",
+					rn, T.assym, str(c->sym.id), c->bits.i);
+			else
+				fprintf(f, "\tldr\t%s, =%s%s\n",
+					rn, T.assym, str(c->sym.id));
 		}
 		break;
 	case SThr:
@@ -320,6 +363,406 @@ fixarg(Ref *pr, int sz, int t, Fn *fn, FILE *f)
 	return 0;
 }
 
+/* ---- Kl (64-bit) decomposition ----
+ *
+ * ARMv7 has no 64-bit GPR (kl_in_reg == 0): Kl values live in 8-byte
+ * stack slots, low 32 bits at the slot offset, high 32 bits at
+ * slot+4.  rega rewrites Kl RTmp arguments to their slots, but Kl
+ * results (i->to) remain RTmp (the store of the result happens in a
+ * trailing Ostorel), so the generic emitf paths — which assert isreg
+ * on every register operand — cannot handle Kl ops.  Decompose each
+ * Kl op into 32-bit ops on the low/high halves, mirroring the i386
+ * backend's kl_* helpers.
+ *
+ * Scratch: r10 (IP) and r12, saved/restored around each op because
+ * rega does not know about these implicit clobbers.  The EABI
+ * 64-bit-return convention (R0:R1, low:high) is honored by Ocopy to/
+ * from R0.
+ */
+
+/* Slot index of a Kl reference, or -1 when r is a machine register. */
+static int
+klslot(Ref r, Fn *fn)
+{
+	if (rtype(r) == RSlot)
+		return rsval(r);
+	if (rtype(r) == RTmp && r.val >= Tmp0)
+		return fn->tmp[r.val].slot;
+	return -1;
+}
+
+static uint64_t
+klslotoff(int s)
+{
+	if (s < 0)
+		return (uint64_t)(-(s + 1)) * 4;
+	return (uint64_t)s * 4;
+}
+
+/* Load half hi (0=low, 1=high) of Kl ref r into register reg.
+ * RCon yields the corresponding 32-bit half of the 64-bit constant;
+ * a machine register yields its (32-bit) value for either half
+ * (callers responsible for sign/zero-extension). */
+static void
+kl_ldhalf(Ref r, int hi, int reg, Fn *fn, FILE *f)
+{
+	int s;
+	if (rtype(r) == RCon) {
+		Con *c = &fn->con[r.val];
+		assert(c->type == CBits);
+		Con h = *c;
+		h.bits.i = hi ? (int32_t)(c->bits.i >> 32) : (int32_t)c->bits.i;
+		loadcon(&h, reg, Kw, f);
+		return;
+	}
+	if (rtype(r) == RTmp && r.val < Tmp0) {
+		fprintf(f, "\tmov\t%s, %s\n", rname(reg, Kw), rname(r.val, Kw));
+		return;
+	}
+	s = klslot(r, fn);
+	assert(s != -1);
+	fprintf(f, "\tldr\t%s, [r11, #%u]\n", rname(reg, Kw),
+		(unsigned)(klslotoff(s) + 4u * hi));
+}
+
+/* Store register reg into half hi of Kl ref r.  Machine-register
+ * destinations (e.g. the R0:R1 return pair) are handled by the
+ * callers, so a non-slot destination is a no-op here. */
+static void
+kl_sthalf(Ref r, int hi, int reg, Fn *fn, FILE *f)
+{
+	int s = klslot(r, fn);
+	if (s == -1)
+		return;
+	fprintf(f, "\tstr\t%s, [r11, #%u]\n", rname(reg, Kw),
+		(unsigned)(klslotoff(s) + 4u * hi));
+}
+
+/* Emit `str reg, [addr, #+4*hi]` where addr is a memory address ref:
+ * RSlot → local slot, RTmp → address register, RCon(CAddr) → global. */
+static void
+kl_staddr(Ref addr, int hi, int reg, Fn *fn, FILE *f)
+{
+	if (rtype(addr) == RSlot) {
+		fprintf(f, "\tstr\t%s, [r11, #%u]\n", rname(reg, Kw),
+			(unsigned)(slot(addr, fn, 0) + 4u * hi));
+		return;
+	}
+	assert(rtype(addr) == RTmp && isreg(addr));
+	fprintf(f, "\tstr\t%s, [%s, #%u]\n", rname(reg, Kw),
+		rname(addr.val, Kw), 4u * hi);
+}
+
+/* Emit `ldr reg, [addr, #+4*hi]` for a memory address ref. */
+static void
+kl_ldaddr(Ref addr, int hi, int reg, Fn *fn, FILE *f)
+{
+	if (rtype(addr) == RSlot) {
+		fprintf(f, "\tldr\t%s, [r11, #%u]\n", rname(reg, Kw),
+			(unsigned)(slot(addr, fn, 0) + 4u * hi));
+		return;
+	}
+	assert(rtype(addr) == RTmp && isreg(addr));
+	fprintf(f, "\tldr\t%s, [%s, #%u]\n", rname(reg, Kw),
+		rname(addr.val, Kw), 4u * hi);
+}
+
+/* 64-bit comparison (Oceql..Ocultl): operands are Kl, result is a
+ * 32-bit (or 64-bit) boolean.  The `subs lo; sbcs hi` idiom does NOT
+ * leave correct condition flags for 64-bit comparisons on ARM (the Z
+ * flag after SBCS does not propagate the low-word result), so compare
+ * the high words first and, only when they are equal, the low words
+ * (as unsigned): for a 64-bit value with equal high words the
+ * comparison reduces to the unsigned low words for both signed and
+ * unsigned operators. */
+static void
+kl_cmp(Ins *i, Fn *fn, FILE *f)
+{
+	static const char *cc[] = {
+		[Cieq] = "eq", [Cine] = "ne",
+		[Cisge] = "ge", [Cisgt] = "gt",
+		[Cisle] = "le", [Cislt] = "lt",
+		[Ciuge] = "cs", [Ciugt] = "hi",
+		[Ciule] = "ls", [Ciult] = "cc",
+	};
+	static int cmp_id;
+	int c = i->op - Oceql;
+	int l = ++cmp_id;
+	Ref to = i->to;
+
+	assert(c >= 0 && c < NCmpI);
+	fputs("\tpush\t{r0, r1, r10, r12}\n", f);
+	kl_ldhalf(i->arg[0], 0, R10, fn, f);
+	kl_ldhalf(i->arg[1], 0, R0, fn, f);
+	kl_ldhalf(i->arg[0], 1, R12, fn, f);
+	kl_ldhalf(i->arg[1], 1, R1, fn, f);
+	fprintf(f, "\tcmp\t%s, %s\n", rname(R12, Kw), rname(R1, Kw));
+	fprintf(f, "\tbne\t.Lklcmp%d\n", l);
+	fprintf(f, "\tcmp\t%s, %s\n", rname(R10, Kw), rname(R0, Kw));
+	fprintf(f, ".Lklcmp%d:\n", l);
+	/* Restore the scratch registers before materializing the boolean:
+	 * pop does not affect the flags, and the conditional mov must write
+	 * the result directly to its destination (which may itself be a
+	 * scratch register like r0). */
+	fputs("\tpop\t{r0, r1, r10, r12}\n", f);
+	if (rtype(to) == RTmp && to.val < Tmp0) {
+		/* boolean in a register (Kw result) */
+		fprintf(f, "\tmov\t%s, #0\n", rname(to.val, Kw));
+		fprintf(f, "\tmov%s\t%s, #1\n", cc[c], rname(to.val, Kw));
+	} else {
+		/* boolean in a Kl slot: low half = bool, high half = 0.
+		 * Materialize via r10 (protected, does not affect flags). */
+		fputs("\tpush\t{r10}\n", f);
+		fprintf(f, "\tmov\t%s, #0\n", rname(R10, Kw));
+		fprintf(f, "\tmov%s\t%s, #1\n", cc[c], rname(R10, Kw));
+		kl_sthalf(to, 0, R10, fn, f);
+		fprintf(f, "\tmov\t%s, #0\n", rname(R10, Kw));
+		kl_sthalf(to, 1, R10, fn, f);
+		fputs("\tpop\t{r10}\n", f);
+	}
+}
+
+static void
+kl_emit(Ins *i, Fn *fn, FILE *f)
+{
+	Con *c;
+	Ref r;
+	int s, n;
+
+	/* no-ops */
+	if (i->op == Ocopy && (req(i->to, R) || req(i->arg[0], R)))
+		return;
+	if (i->op == Ocopy && req(i->to, i->arg[0]))
+		return;
+	if (i->op == Ostorel
+	&& rtype(i->arg[0]) == RTmp && rtype(i->arg[1]) == RSlot
+	&& fn->tmp[i->arg[0].val].slot == rsval(i->arg[1]))
+		return;	/* spill 写回自己的 slot，跳过 */
+
+	fputs("\tpush\t{r10, r12}\n", f);
+	switch (i->op) {
+	case Ocopy:
+		/* R0:R1 约定：to=R0 表示把结果装入返回对；
+		 * arg[0]=R0 表示从返回对接收。 */
+		if (rtype(i->to) == RTmp && i->to.val == R0) {
+			kl_ldhalf(i->arg[0], 0, R0, fn, f);
+			kl_ldhalf(i->arg[0], 1, R1, fn, f);
+			break;
+		}
+		if (rtype(i->arg[0]) == RTmp && i->arg[0].val == R0) {
+			kl_sthalf(i->to, 0, R0, fn, f);
+			kl_sthalf(i->to, 1, R1, fn, f);
+			break;
+		}
+		kl_ldhalf(i->arg[0], 0, R10, fn, f);
+		kl_sthalf(i->to, 0, R10, fn, f);
+		kl_ldhalf(i->arg[0], 1, R10, fn, f);
+		kl_sthalf(i->to, 1, R10, fn, f);
+		break;
+	case Oload:
+		/* 64-bit load from memory/global/local into slot. */
+		if (rtype(i->arg[0]) == RCon) {
+			c = &fn->con[i->arg[0].val];
+			assert(c->type == CAddr);
+			loadaddr(c, (char *)rname(R12, Kw), f);
+			fprintf(f, "\tldr\t%s, [%s]\n", rname(R10, Kw), rname(R12, Kw));
+			kl_sthalf(i->to, 0, R10, fn, f);
+			fprintf(f, "\tldr\t%s, [%s, #4]\n", rname(R10, Kw), rname(R12, Kw));
+			kl_sthalf(i->to, 1, R10, fn, f);
+			break;
+		}
+		if (rtype(i->arg[0]) == RTmp && i->arg[0].val == R12)
+			fprintf(f, "\tmov\t%s, %s\n", rname(R10, Kw), rname(R12, Kw));
+		kl_ldaddr(i->arg[0], 0, R10, fn, f);
+		kl_sthalf(i->to, 0, R10, fn, f);
+		kl_ldaddr(i->arg[0], 1, R10, fn, f);
+		kl_sthalf(i->to, 1, R10, fn, f);
+		break;
+	case Ostorel:
+		/* 64-bit store of slot/con value to memory. */
+		if (rtype(i->arg[1]) == RCon) {
+			c = &fn->con[i->arg[1].val];
+			assert(c->type == CAddr);
+			loadaddr(c, (char *)rname(R12, Kw), f);
+			kl_ldhalf(i->arg[0], 0, R10, fn, f);
+			fprintf(f, "\tstr\t%s, [%s]\n", rname(R10, Kw), rname(R12, Kw));
+			kl_ldhalf(i->arg[0], 1, R10, fn, f);
+			fprintf(f, "\tstr\t%s, [%s, #4]\n", rname(R10, Kw), rname(R12, Kw));
+			break;
+		}
+		if (rtype(i->arg[1]) == RTmp && i->arg[1].val == R12)
+			fprintf(f, "\tmov\t%s, %s\n", rname(R10, Kw), rname(R12, Kw));
+		kl_ldhalf(i->arg[0], 0, R10, fn, f);
+		kl_staddr(i->arg[1], 0, R10, fn, f);
+		kl_ldhalf(i->arg[0], 1, R10, fn, f);
+		kl_staddr(i->arg[1], 1, R10, fn, f);
+		break;
+	case Oadd:
+	case Osub:
+		kl_ldhalf(i->arg[0], 0, R10, fn, f);
+		kl_ldhalf(i->arg[1], 0, R12, fn, f);
+		fprintf(f, "\t%s\t%s, %s, %s\n", i->op == Oadd ? "adds" : "subs",
+			rname(R10, Kw), rname(R10, Kw), rname(R12, Kw));
+		kl_sthalf(i->to, 0, R10, fn, f);
+		kl_ldhalf(i->arg[0], 1, R10, fn, f);
+		kl_ldhalf(i->arg[1], 1, R12, fn, f);
+		fprintf(f, "\t%s\t%s, %s, %s\n", i->op == Oadd ? "adcs" : "sbcs",
+			rname(R10, Kw), rname(R10, Kw), rname(R12, Kw));
+		kl_sthalf(i->to, 1, R10, fn, f);
+		break;
+	case Oneg:
+		/* 64-bit 取负：hi=-hi, lo=-lo, hi-=lo!=0 */
+		kl_ldhalf(i->arg[0], 1, R10, fn, f);
+		fprintf(f, "\trsbs\t%s, %s, #0\n", rname(R10, Kw), rname(R10, Kw));
+		kl_sthalf(i->to, 1, R10, fn, f);
+		kl_ldhalf(i->arg[0], 0, R10, fn, f);
+		fprintf(f, "\trsbs\t%s, %s, #0\n", rname(R10, Kw), rname(R10, Kw));
+		kl_sthalf(i->to, 0, R10, fn, f);
+		kl_ldhalf(i->to, 1, R10, fn, f);
+		fprintf(f, "\tsbcs\t%s, %s, #0\n", rname(R10, Kw), rname(R10, Kw));
+		kl_sthalf(i->to, 1, R10, fn, f);
+		break;
+	case Oand:
+	case Oor:
+	case Oxor:
+		n = i->op == Oand ? 0 : i->op == Oor ? 1 : 2;
+		kl_ldhalf(i->arg[0], 0, R10, fn, f);
+		kl_ldhalf(i->arg[1], 0, R12, fn, f);
+		fprintf(f, "\t%s\t%s, %s, %s\n",
+			(char *[]){"and", "orr", "eor"}[n],
+			rname(R10, Kw), rname(R10, Kw), rname(R12, Kw));
+		kl_sthalf(i->to, 0, R10, fn, f);
+		kl_ldhalf(i->arg[0], 1, R10, fn, f);
+		kl_ldhalf(i->arg[1], 1, R12, fn, f);
+		fprintf(f, "\t%s\t%s, %s, %s\n",
+			(char *[]){"and", "orr", "eor"}[n],
+			rname(R10, Kw), rname(R10, Kw), rname(R12, Kw));
+		kl_sthalf(i->to, 1, R10, fn, f);
+		break;
+	case Oextsw: case Oextuw:
+	case Oextsb: case Oextub:
+	case Oextsh: case Oextuh:
+		/* 源是 32 位值（装载器已扩展到 32 位）：低字复制，
+		 * 高字符号扩展 asr #31 / 零扩展 mov #0。 */
+		kl_ldhalf(i->arg[0], 0, R10, fn, f);
+		kl_sthalf(i->to, 0, R10, fn, f);
+		if (i->op == Oextsw || i->op == Oextsb || i->op == Oextsh)
+			fprintf(f, "\tasr\t%s, %s, #31\n", rname(R10, Kw), rname(R10, Kw));
+		else
+			fprintf(f, "\tmov\t%s, #0\n", rname(R10, Kw));
+		kl_sthalf(i->to, 1, R10, fn, f);
+		break;
+	case Omul:
+		/* 64 位乘法：结果 = a_lo*b_lo + (a_lo*b_hi + a_hi*b_lo)<<32。
+		 * 模 2^64 下与符号无关，用 umull/umlal。 */
+		fputs("\tpush\t{r0, r1, r2, r3}\n", f);
+		kl_ldhalf(i->arg[0], 0, R0, fn, f);
+		kl_ldhalf(i->arg[0], 1, R1, fn, f);
+		kl_ldhalf(i->arg[1], 0, R2, fn, f);
+		kl_ldhalf(i->arg[1], 1, R3, fn, f);
+		fprintf(f, "\tumull\t%s, %s, %s, %s\n",
+			rname(R10, Kw), rname(R12, Kw), rname(R0, Kw), rname(R2, Kw));
+		fprintf(f, "\tumlal\t%s, %s, %s, %s\n",
+			rname(R10, Kw), rname(R12, Kw), rname(R0, Kw), rname(R3, Kw));
+		fprintf(f, "\tumlal\t%s, %s, %s, %s\n",
+			rname(R10, Kw), rname(R12, Kw), rname(R1, Kw), rname(R2, Kw));
+		kl_sthalf(i->to, 0, R10, fn, f);
+		kl_sthalf(i->to, 1, R12, fn, f);
+		fputs("\tpop\t{r0, r1, r2, r3}\n", f);
+		break;
+	case Odiv: case Oudiv: case Orem: case Ourem:
+		/* EABI __aeabi_[u]ldivmod(n=r0:r1, d=r2:r3) →
+		 * q=r0:r1, rem=r2:r3。 */
+		fputs("\tpush\t{r0, r1, r2, r3, lr}\n", f);
+		kl_ldhalf(i->arg[0], 0, R0, fn, f);
+		kl_ldhalf(i->arg[0], 1, R1, fn, f);
+		kl_ldhalf(i->arg[1], 0, R2, fn, f);
+		kl_ldhalf(i->arg[1], 1, R3, fn, f);
+		fprintf(f, "\tbl\t%s\n",
+			(i->op == Odiv || i->op == Orem) ?
+				"__aeabi_ldivmod" : "__aeabi_uldivmod");
+		if (i->op == Odiv || i->op == Oudiv) {
+			kl_sthalf(i->to, 0, R0, fn, f);
+			kl_sthalf(i->to, 1, R1, fn, f);
+		} else {
+			kl_sthalf(i->to, 0, R2, fn, f);
+			kl_sthalf(i->to, 1, R3, fn, f);
+		}
+		fputs("\tpop\t{r0, r1, r2, r3, lr}\n", f);
+		break;
+	case Oshl:
+	case Oshr:
+	case Osar:
+		/* 64 位移位（立即数）。 arg[1] 必须为常量；
+		 * 寄存器移位量尚未支持。 */
+		if (rtype(i->arg[1]) != RCon)
+			die("arm: %s Kl with non-constant shift not supported",
+				optab[i->op].name);
+		n = (int)(fn->con[i->arg[1].val].bits.i & 63);
+		if (n == 0) {
+			kl_ldhalf(i->arg[0], 0, R10, fn, f);
+			kl_sthalf(i->to, 0, R10, fn, f);
+			kl_ldhalf(i->arg[0], 1, R10, fn, f);
+			kl_sthalf(i->to, 1, R10, fn, f);
+		} else if (i->op == Oshl) {
+			kl_ldhalf(i->arg[0], 0, R10, fn, f);
+			kl_ldhalf(i->arg[0], 1, R12, fn, f);
+			if (n < 32) {
+				/* hi = (hi<<n)|(lo>>(32-n)), lo <<= n */
+				fprintf(f, "\tlsl\t%s, %s, #%d\n", rname(R12, Kw), rname(R12, Kw), n);
+				fprintf(f, "\torr\t%s, %s, %s, LSR #%d\n", rname(R12, Kw),
+					rname(R12, Kw), rname(R10, Kw), 32 - n);
+				fprintf(f, "\tlsl\t%s, %s, #%d\n", rname(R10, Kw), rname(R10, Kw), n);
+				kl_sthalf(i->to, 1, R12, fn, f);
+			} else if (n == 32) {
+				/* hi=lo, lo=0 (r12 == 0) */
+				fprintf(f, "\tmov\t%s, #0\n", rname(R12, Kw));
+				kl_sthalf(i->to, 1, R10, fn, f);
+			} else {
+				/* hi=lo<<(n-32), lo=0 (r12 == 0) */
+				fprintf(f, "\tmov\t%s, #0\n", rname(R12, Kw));
+				fprintf(f, "\tlsl\t%s, %s, #%d\n", rname(R10, Kw), rname(R10, Kw), n - 32);
+				kl_sthalf(i->to, 1, R10, fn, f);
+			}
+			kl_sthalf(i->to, 0, n == 32 || n > 32 ? R12 : R10, fn, f);
+		} else {
+			/* Oshr (逻辑) / Osar (算术) */
+			kl_ldhalf(i->arg[0], 0, R10, fn, f);
+			kl_ldhalf(i->arg[0], 1, R12, fn, f);
+			const char *sh = i->op == Osar ? "asr" : "lsr";
+			if (n < 32) {
+				/* lo = (lo>>n)|(hi<<(32-n)), hi >>= n */
+				fprintf(f, "\t%s\t%s, %s, #%d\n", sh, rname(R10, Kw), rname(R10, Kw), n);
+				fprintf(f, "\torr\t%s, %s, %s, LSL #%d\n", rname(R10, Kw),
+					rname(R10, Kw), rname(R12, Kw), 32 - n);
+				fprintf(f, "\t%s\t%s, %s, #%d\n", sh, rname(R12, Kw), rname(R12, Kw), n);
+				kl_sthalf(i->to, 1, R12, fn, f);
+			} else if (n == 32) {
+				/* lo=hi, hi=0（逻辑）或符号扩展（算术） */
+				fprintf(f, "\tmov\t%s, %s\n", rname(R10, Kw), rname(R12, Kw));
+				if (i->op == Osar)
+					fprintf(f, "\tasr\t%s, %s, #31\n", rname(R12, Kw), rname(R12, Kw));
+				else
+					fprintf(f, "\tmov\t%s, #0\n", rname(R12, Kw));
+				kl_sthalf(i->to, 1, R12, fn, f);
+			} else {
+				/* lo=hi>>(n-32); hi=0 或符号扩展 */
+				fprintf(f, "\t%s\t%s, %s, #%d\n", sh, rname(R10, Kw), rname(R12, Kw), n - 32);
+				if (i->op == Osar)
+					fprintf(f, "\tasr\t%s, %s, #31\n", rname(R12, Kw), rname(R12, Kw));
+				else
+					fprintf(f, "\tmov\t%s, #0\n", rname(R12, Kw));
+				kl_sthalf(i->to, 1, R12, fn, f);
+			}
+			kl_sthalf(i->to, 0, R10, fn, f);
+		}
+		break;
+	default:
+		die("arm: Kl op %s not supported", optab[i->op].name);
+	}
+	fputs("\tpop\t{r10, r12}\n", f);
+}
+
 static void
 emitins(Ins *i, Fn *fn, FILE *f)
 {
@@ -330,6 +773,25 @@ emitins(Ins *i, Fn *fn, FILE *f)
 	case Oarg: case Oargc: case Oargv:
 		break;	/* 伪指令，emit 阶段无输出 */
 	default:
+		if (INRANGE(i->op, Oceql, Ocultl)) {
+			/* 64-bit comparisons: operands are Kl slots, the generic
+			 * omap Ki entry would emit `cmp [r11,#off], [r11,#off]`
+			 * (no ARM memory operand). */
+			kl_cmp(i, fn, f);
+			break;
+		}
+		if (i->cls == Kl || i->op == Ostorel) {
+			/* 64-bit ops: no ARM instruction handles a 64-bit GPR
+			 * value (kl_in_reg == 0), so decompose into 32-bit ops
+			 * on the low/high slot halves (see kl_emit below).
+			 * Ocall Kl is a function returning long long: the call
+			 * itself is the same as Kw (the result copy is a
+			 * separate Ocopy Kl), so let it fall through. */
+			if (i->op != Ocall) {
+				kl_emit(i, fn, f);
+				break;
+			}
+		}
 	Table:
 		/* RSlot operands on load/store are rendered directly by %M0/%M1
 		 * as [r11, #off]; fixarg must NOT load them into IP first (that
@@ -338,6 +800,22 @@ emitins(Ins *i, Fn *fn, FILE *f)
 			fixarg(&i->arg[0], 0, IP, fn, f);
 		if (!isstore(i->op) && rtype(i->arg[1]) == RSlot)
 			fixarg(&i->arg[1], 0, IP, fn, f);
+		/* Byte/half loads and stores have no ARM `=addr` (literal-pool)
+		 * form (only ldr does), so a global-address operand must be
+		 * materialized into a register first.  Load it into IP (r10)
+		 * and rewrite the operand so %M0/%M1 emit [r10]. */
+		if (isload(i->op) && rtype(i->arg[0]) == RCon) {
+			c = &fn->con[i->arg[0].val];
+			assert(c->type == CAddr);
+			loadaddr(c, (char *)rname(IP, Kl), f);
+			i->arg[0] = TMP(IP);
+		}
+		if (isstore(i->op) && rtype(i->arg[1]) == RCon) {
+			c = &fn->con[i->arg[1].val];
+			assert(c->type == CAddr);
+			loadaddr(c, (char *)rname(IP, Kl), f);
+			i->arg[1] = TMP(IP);
+		}
 		for (o = 0;; o++) {
 			if (omap[o].op == NOp)
 				die("no match for %s(%c)", optab[i->op].name, "wlsd"[i->cls]);
@@ -351,6 +829,12 @@ emitins(Ins *i, Fn *fn, FILE *f)
 	case Onop:
 		break;
 	case Ocopy:
+		if (i->cls == Kl) {
+			/* 64 位复制：走 Kl 分解（to 可能是未重写为 slot 的
+			 * Kl temp，generic 路径的 assert(isreg) 会失败）。 */
+			kl_emit(i, fn, f);
+			break;
+		}
 		if (req(i->to, i->arg[0]))
 			break;
 		if (rtype(i->to) == RSlot) {
@@ -406,15 +890,31 @@ emitins(Ins *i, Fn *fn, FILE *f)
 		if (rtype(i->arg[0]) == RSlot)
 			fixarg(&i->arg[0], 0, IP, fn, f);
 		/* salloc() sets arg[0] to a constant (the aligned allocation size).
-		 * Emit the sub directly rather than through emitf(), whose %0/%= 
+		 * Emit the sub directly rather than through emitf(), whose %0/%=
 		 * handlers only support register operands. */
 		assert(rtype(i->arg[0]) == RCon);
 		{
 			int64_t sz = fn->con[i->arg[0].val].bits.i;
 			fprintf(f, "\tsub\tsp, sp, #%" PRIi64 "\n", sz);
 		}
-		if (!req(i->to, R))
+		if (rtype(i->to) == RTmp && i->to.val < Tmp0) {
 			fprintf(f, "\tmov\t%s, sp\n", rname(i->to.val, Kl));
+		} else if (rtype(i->to) == RTmp && i->to.val >= Tmp0) {
+			/* kl_in_reg==0: a live allocation address (32-bit) is kept
+			 * in its Kl slot (low word); the high word is zero.  A dead
+			 * salloc result (e.g. fixed-size local array whose address
+			 * is never materialized) is simply dropped. */
+			int ss = klslot(i->to, fn);
+			if (ss != -1) {
+				fprintf(f, "\tstr\tsp, [r11, #%u]\n",
+					(unsigned)klslotoff(ss));
+				fputs("\tpush\t{r10}\n", f);
+				fputs("\tmov\tr10, #0\n", f);
+				fprintf(f, "\tstr\tr10, [r11, #%u]\n",
+					(unsigned)(klslotoff(ss) + 4));
+				fputs("\tpop\t{r10}\n", f);
+			}
+		}
 		break;
 	case Odbgloc:
 		emitdbgloc(i->arg[0].val, i->arg[1].val, f);
@@ -454,12 +954,14 @@ arm32_emitfn(Fn *fn, FILE *f)
 	} else {
 		fprintf(f, "\tpush\t{lr}\n");
 	}
-	if (fn->slot) {
+	if (fn->slot || fn->dynalloc) {
 		/* Local slots are addressed as [r11, #off] (see Oload/Ostore/
 		 * Oaddr), so r11 is the frame pointer.  Point it at the new
 		 * stack top after the frame is allocated.  Without this, r11
 		 * holds whatever the caller left (crt1._start zeroes it), so
-		 * any local-variable access dereferences a null/invalid base. */
+		 * any local-variable access dereferences a null/invalid base.
+		 * A function with salloc() also needs r11 so the epilogue can
+		 * restore sp across the dynamic allocation. */
 		fprintf(f, "\tsub\tsp, sp, #%d\n", 4 * fn->slot);
 		fprintf(f, "\tmov\tr11, sp\n");
 	}
@@ -475,7 +977,11 @@ arm32_emitfn(Fn *fn, FILE *f)
 			fprintf(f, "\tbkpt\t#1000\n");
 			break;
 		case Jret0:
-			if (fn->slot)
+			if (fn->dynalloc)
+				/* salloc() lowered sp at runtime; restore it from the
+				 * frame pointer (r11) before popping saved registers. */
+				fprintf(f, "\tadd\tsp, r11, #%d\n", 4 * fn->slot);
+			else if (fn->slot)
 				fprintf(f, "\tadd\tsp, sp, #%d\n", 4 * fn->slot);
 			if (csgpr)
 				fprintf(f, "\tpop\t{r4, r5, r6, r7, r8, r9, r11, pc}\n");

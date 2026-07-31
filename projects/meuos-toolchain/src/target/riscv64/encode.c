@@ -73,6 +73,24 @@ parse_reg(const char *name)
 	return -1;
 }
 
+/* Strip surrounding double quotes from a symbol name in place.  mcc
+ * quotes local labels containing dots (e.g. ".Lfp1"), but the symbol
+ * table entry (defined by the label line) is unquoted, so the fixup
+ * must reference the bare name. */
+static void
+strip_sym_quotes(char **sym)
+{
+	const char *s = *sym;
+	size_t n;
+	if (!s)
+		return;
+	n = strlen(s);
+	if (n >= 2 && s[0] == '"' && s[n - 1] == '"') {
+		memmove((char *)s, s + 1, n - 2);
+		((char *)s)[n - 2] = '\0';
+	}
+}
+
 /* ---- Operand parsing ---- */
 
 struct rv_op {
@@ -118,6 +136,7 @@ parse_operands(const char *text, struct rv_op ops[4], int *nops)
 				*endp = '\0';
 				ops[*nops].kind = 4; /* symbol */
 				ops[*nops].sym = paren + 1;
+				strip_sym_quotes((char **)&ops[*nops].sym);
 				(*nops)++;
 				tok = strtok(NULL, ",");
 				continue;
@@ -171,6 +190,7 @@ parse_operands(const char *text, struct rv_op ops[4], int *nops)
 			/* Symbol reference */
 			ops[*nops].kind = 4; /* symbol */
 			ops[*nops].sym = val;
+			strip_sym_quotes((char **)&ops[*nops].sym);
 			(*nops)++;
 			tok = strtok(NULL, ",");
 			continue;
@@ -186,6 +206,7 @@ parse_operands(const char *text, struct rv_op ops[4], int *nops)
 			} else {
 				ops[*nops].kind = 4; /* symbol */
 				ops[*nops].sym = tok;
+				strip_sym_quotes((char **)&ops[*nops].sym);
 			}
 			(*nops)++;
 		}
@@ -616,6 +637,40 @@ riscv64_encode_insn(const struct mt_target *target,
 		if (strcmp(mnemonic, "remuw") == 0) { emit32(out->bytes, r_type(0x3B, rd, 7, rs1, rs2, 0x01)); return 0; }
 	}
 
+	/* Float load/store with a symbol address and an explicit temporary
+	 * register: `fld rd, symbol, tmp` (mcc's address form).  Expanded
+	 * with absolute addressing (lui + load) — the same R_RISCV_HI20/
+	 * R_RISCV_LO12 pair mcc's `lui/addi` address loads use — because
+	 * the R_RISCV_PCREL_LO12 reloc in this linker has no auipc label
+	 * to anchor the low 12 bits to (P is not subtracted). */
+	if (nops == 3 && ops[0].kind == 1 && ops[1].kind == 4 && ops[2].kind == 1) {
+		int is_load = 0;
+		unsigned funct3 = 0;
+		uint32_t op = 0;
+		if (strcmp(mnemonic, "flw") == 0) { is_load = 1; op = 0x07; funct3 = 2; }
+		else if (strcmp(mnemonic, "fld") == 0) { is_load = 1; op = 0x07; funct3 = 3; }
+		else if (strcmp(mnemonic, "fsw") == 0) { op = 0x27; funct3 = 2; }
+		else if (strcmp(mnemonic, "fsd") == 0) { op = 0x27; funct3 = 3; }
+		else goto try_fpsym;
+		{
+			unsigned regA = (unsigned)ops[0].reg; /* rd (load) / rs2 (store) */
+			unsigned tmp = (unsigned)ops[2].reg;  /* address register */
+			out->size = 8;
+			emit32(out->bytes, u_type(0x37, tmp, 0)); /* lui tmp, 0 */
+			if (is_load)
+				emit32(out->bytes + 4, i_type(op, regA, funct3, tmp, 0));
+			else
+				emit32(out->bytes + 4, s_type(op, funct3, tmp, regA, 0));
+			set_fixup(out, 0, 4, 26 /* R_RISCV_HI20 */,
+			           ops[1].sym, ops[1].addend);
+			set_fixup2(out, 4, 4, is_load ? 24 /* R_RISCV_LO12_I */
+			                                : 25 /* R_RISCV_LO12_S */,
+			           ops[1].sym, ops[1].addend);
+			return 0;
+		}
+	}
+try_fpsym:
+
 	/* Load/Store (integer + float) — single dispatch on mem operand.
 	 * Unmatched mem mnemonics fall through to the atomic handlers. */
 	if (nops == 2 && ops[1].kind == 3) {
@@ -754,7 +809,7 @@ riscv64_encode_insn(const struct mt_target *target,
 
 		/* FP compare: rd = X register, rs1/rs2 = FP registers */
 		{
-			unsigned funct7 = (0xE << 2) | fmt; /* funct5 = 01110 */
+			unsigned funct7 = (0x14 << 2) | fmt; /* funct5 = 10100 */
 			if (strcmp(mnemonic, "feq.s") == 0 || strcmp(mnemonic, "feq.d") == 0)
 				{ emit32(out->bytes, r_type(0x53, rd, 2, rs1, rs2, funct7)); return 0; }
 			if (strcmp(mnemonic, "flt.s") == 0 || strcmp(mnemonic, "flt.d") == 0)
@@ -776,7 +831,7 @@ fp_cmp_pseudo:
 		if (strcmp(mnemonic, "fgt.s") == 0 || strcmp(mnemonic, "fge.s") == 0) fmt = 0;
 		else if (strcmp(mnemonic, "fgt.d") == 0 || strcmp(mnemonic, "fge.d") == 0) fmt = 1;
 		else goto fp_unary;
-		unsigned funct7 = (0xE << 2) | fmt; /* funct5 = 01110 */
+		unsigned funct7 = (0x14 << 2) | fmt; /* funct5 = 10100 */
 		if (strcmp(mnemonic, "fgt.s") == 0 || strcmp(mnemonic, "fgt.d") == 0)
 			{ emit32(out->bytes, r_type(0x53, rd, 1, b, a, funct7)); return 0; } /* flt rd, b, a */
 		if (strcmp(mnemonic, "fge.s") == 0 || strcmp(mnemonic, "fge.d") == 0)
@@ -785,6 +840,19 @@ fp_cmp_pseudo:
 
 	/* fsqrt.s/d rd, rs1  — 2-operand FP unary */
 fp_unary:
+	/* fmv.s/d rd, rs1  →  fsgnj.s/d rd, rs1, rs1 (copy FP register) */
+	if (nops == 2 && ops[0].kind == 1 && ops[1].kind == 1) {
+		unsigned rd = (unsigned)ops[0].reg;
+		unsigned rs1 = (unsigned)ops[1].reg;
+		if (strcmp(mnemonic, "fmv.s") == 0) {
+			emit32(out->bytes, r_type(0x53, rd, 0, rs1, rs1, (4 << 2) | 0));
+			return 0;
+		}
+		if (strcmp(mnemonic, "fmv.d") == 0) {
+			emit32(out->bytes, r_type(0x53, rd, 0, rs1, rs1, (4 << 2) | 1));
+			return 0;
+		}
+	}
 	if (nops == 2 && ops[0].kind == 1 && ops[1].kind == 1) {
 		unsigned rd = (unsigned)ops[0].reg;
 		unsigned rs1 = (unsigned)ops[1].reg;
@@ -885,11 +953,16 @@ fp_unary:
 		if (strcmp(mnemonic, "fcvt.s.lu") == 0)
 			{ emit32(out->bytes, r_type(0x53, rd, 0, rs1, 3, (0x1A << 2) | 0)); return 0; }
 
-		/* --- between float sizes --- */
+		/* --- between float sizes ---
+		 * fcvt.d.s rd, rs1: funct7=0100001, rs2=00000 (single -> double)
+		 * fcvt.s.d rd, rs1: funct7=0100000, rs2=00001, funct3=rm
+		 *   (double -> single, rounding mode in funct3; mcc emits the
+		 *   2-operand form, defaulting to RNE).  Verified against
+		 *   riscv64-linux-gnu-as: fcvt.d.s ft0,fs1 = 0x42048053. */
 		if (strcmp(mnemonic, "fcvt.d.s") == 0)
-			{ emit32(out->bytes, r_type(0x53, rd, 0, rs1, 1, (8 << 2) | 0)); return 0; }
+			{ emit32(out->bytes, r_type(0x53, rd, 0, rs1, 0, (8 << 2) | 1)); return 0; }
 		if (strcmp(mnemonic, "fcvt.s.d") == 0)
-			{ emit32(out->bytes, r_type(0x53, rd, rm, rs1, 1, (8 << 2) | 1)); return 0; }
+			{ emit32(out->bytes, r_type(0x53, rd, rm, rs1, 1, (8 << 2) | 0)); return 0; }
 	}
 
 	/* ---- FMADD / FMSUB / FNMADD / FNMSUB (R4-type, opcode 0x43/0x4B/0x4B/0x4F)
