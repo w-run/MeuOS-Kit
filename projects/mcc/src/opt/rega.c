@@ -472,8 +472,18 @@ doblk(Blk *b, RMap *cur)
 				continue;
 			}
 			if (isreg(i->to))
-			if (rtype(i->arg[0]) == RTmp)
-				sethint(i->arg[0].val, i->to.val);
+			if (rtype(i->arg[0]) == RTmp) {
+				int kh = tmp[i->arg[0].val].cls;
+				int isgpr = i->to.val >= T.gpr0
+				         && i->to.val < T.gpr0 + T.ngpr;
+				/* Only hint when the source class matches the
+				 * destination register pool.  A mismatched hint (e.g.
+				 * a double source hinted at the GPR written by an
+				 * arm vararg call) would later allocate the wrong
+				 * register class. */
+				if (kh != Kx && KBASE(kh) == (isgpr ? 0 : 1))
+					sethint(i->arg[0].val, i->to.val);
+			}
 			/* fall through */
 		default:
 		if (!req(i->to, R)) {

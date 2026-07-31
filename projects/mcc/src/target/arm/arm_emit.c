@@ -95,9 +95,7 @@ static struct {
 	{ Oexts,   Kd, "vcvt.f64.f32 %=, %S0" },
 	{ Otruncd, Ks, "vcvt.f32.f64 %=, %D0" },
 	{ Ocast,   Kw, "vmov %=, %S0" },
-	{ Ocast,   Kl, "vmov %=, %D0" },
 	{ Ocast,   Ks, "vmov %=, %W0" },
-	{ Ocast,   Kd, "vmov %=, %L0" },
 	/* int<->float casts.  ARM has no VCVT between a core register and
 	 * a VFP double, so the conversion goes through the s16 scratch
 	 * (the low half of D8, which arm_targ.c reserves from rega's
@@ -111,11 +109,14 @@ static struct {
 	{ Ostoui,  Ka, "vcvt.u32.f64 s16, %S0\n\tvmov\t%=, s16" },
 	{ Odtosi,  Ka, "vcvt.s32.f64 s16, %D0\n\tvmov\t%=, s16" },
 	{ Odtoui,  Ka, "vcvt.u32.f64 s16, %D0\n\tvmov\t%=, s16" },
-	{ Oswtof,  Ka, "vmov s16, %W0\n\tvcvt.f64.s32\t%=, s16" },
-	{ Ouwtof,  Ka, "vmov s16, %W0\n\tvcvt.f64.u32\t%=, s16" },
-	{ Osltof,  Kd, "bl __aeabi_l2d\n\tvmov\t%=, r0, r1" },
-	{ Osltof,  Ks, "bl __aeabi_l2f\n\tvmov\t%=, r0" },
-	{ Oultof,  Ka, "vmov s16, %W0\n\tvcvt.f64.u32\t%=, s16" },
+	{ Oswtof,  Kd, "vmov s16, %W0\n\tvcvt.f64.s32\t%=, s16" },
+	{ Oswtof,  Ks, "vmov s16, %W0\n\tvcvt.f32.s32\t%=, s16" },
+	{ Ouwtof,  Kd, "vmov s16, %W0\n\tvcvt.f64.u32\t%=, s16" },
+	{ Ouwtof,  Ks, "vmov s16, %W0\n\tvcvt.f32.u32\t%=, s16" },
+	/* Kl 结果的 Odtosi/Odtoui/Ostosi/Ostoui 和 Osltof/Oultof (Kl 源)
+	 * 由 kl_emit 走 EABI softfp helper(__aeabi_d2lz 等),见
+	 * kl_emit 的转换 case。 Ocast Kl/Kd(64 位 bitcast)同样由
+	 * kl_emit 用 MCRR/MRRC 处理。 */
 	{ Ocall,   Kw, "blx %L0" },
 	{ Oacmp,   Ki, "cmp %0, %1" },
 	{ Oacmn,   Ki, "cmn %0, %1" },
@@ -187,7 +188,14 @@ rname(int r, int k)
 	case Ks:
 	case Kd:
 		if (D0 <= r && r <= D15) {
-			snprintf(b, 8, k == Ks ? "s%d" : "d%d", r - D0);
+			/* ARM VFP: a double register Dn aliases the single
+			 * pair {s2n, s2n+1} — D0=s0/s1, D1=s2/s3, ...
+			 * rega allocates FP registers by D number; the Ks name
+			 * must be 2×(D-D0) (the low half of the pair).  A bare
+			 * `s(r-D0)` would name s1 for D1, which is D0's high
+			 * half, silently corrupting any live d0 value. */
+			snprintf(b, 8, k == Ks ? "s%d" : "d%d",
+				k == Ks ? 2 * (r - D0) : r - D0);
 			return b;
 		}
 		break;
@@ -195,14 +203,49 @@ rname(int r, int k)
 	die("invalid register %d for class %d", r, k);
 }
 
+/* Callee stack frame size in bytes: the local slots plus the d8-d15
+ * save area, rounded up to 8 so sp stays AAPCS-aligned at calls (the
+ * libc's va_arg aligns 8-byte reads to 8 and relies on it). */
+static int
+arm32_framesz(Fn *fn)
+{
+	int csfp = 0;
+	for (int rr = D8; rr <= D15; rr++)
+		if (fn->reg & BIT(rr))
+			csfp++;
+	return (4 * (fn->slot + 2 * csfp) + 7) & -8;
+}
+
+/* Bytes pushed by the prologue below the register save area: 32 for
+ * the full {r4..r9, r11, lr} set, 8 for {r11, lr}. */
+static int
+arm32_pushbytes(Fn *fn)
+{
+	for (int rr = R4; rr <= R9; rr++)
+		if (fn->reg & BIT(rr))
+			return 32;
+	return 8;
+}
+
 static uint64_t
 slot(Ref r, Fn *fn, uint64_t frame)
 {
 	int s = rsval(r);
-	if (s < 0)
+	if (s < 0) {
+		if (fn->vararg) {
+			/* Variadic functions keep a 16-byte register save area
+			 * (R0-R3) immediately above the saved registers (hence
+			 * arm32_pushbytes) and below the caller's stack
+			 * arguments, so va_arg can walk from it into the stack.
+			 * SLOT(-k) addresses word k-1 of that area.  The frame
+			 * size is only final at emit time (spill/rega run after
+			 * the ABI pass), so va_start resolves it here. */
+			return (uint64_t)arm32_framesz(fn) + arm32_pushbytes(fn)
+				+ 4 * (-(s + 1));
+		}
 		return (uint64_t)(-(s + 1)) * 4;
-	else
-		return frame + (uint64_t)s * 4;
+	}
+	return frame + (uint64_t)s * 4;
 }
 
 static void
@@ -821,6 +864,162 @@ kl_emit(Ins *i, Fn *fn, FILE *f)
 			kl_sthalf(i->to, 0, R10, fn, f);
 		}
 		break;
+	case Odtosi: case Odtoui: case Ostosi: case Ostoui:
+	case Osltof: case Oultof: case Ocast: {
+		/* 浮点 ↔ 64 位整数转换。
+		 *
+		 * ARMv7 VFP 没有 f64↔s64 指令(只有 32 位 vcvt),所以
+		 * Kl 与 FP 之间的转换走 EABI softfp helper
+		 * (__aeabi_d2lz/d2ulz/f2lz/f2ulz/l2d/l2f/ul2d/ul2f,
+		 * 由 meuos-libc 提供)。这些 helper 遵循 softfp 调用
+		 * 约定: double 参数/返回值经 r0:r1 传递位模式, float 经
+		 * r0; 按 AAPCS 破坏 r0-r3, r12, d0-d7, lr。
+		 *
+		 * 调用序列(方向 d→l 与 l→d 对称):
+		 *   - 源装入 r0:r1(FP 源用 MRRC 或 vmov 从 d/s 寄存器取)
+		 *   - push {r0,r1,r2,r3,lr} + vpush {d0-d7} 保护调用者
+		 *   - bl helper; 结果在 r0:r1
+		 *   - 立即把结果写入目标(在 pop 之前,pop 会覆盖 r0:r1)
+		 *   - 恢复保护
+		 *
+		 * Ocast 是纯位拷贝(union 语义),不需要 helper: 用 MRRC
+		 * 把 dN 的位模式移入 r0:r1 直接存。 */
+		const char *h;
+		Ref src = i->arg[0];
+		int is_d;
+		int ss;
+
+		switch (i->op) {
+		case Odtosi: h = "__aeabi_d2lz"; is_d = 1; break;
+		case Odtoui: h = "__aeabi_d2ulz"; is_d = 1; break;
+		case Ostosi: h = "__aeabi_f2lz"; is_d = 0; break;
+		case Ostoui: h = "__aeabi_f2ulz"; is_d = 0; break;
+		case Osltof: h = i->cls == Kd ? "__aeabi_l2d" : "__aeabi_l2f"; is_d = 1; break;
+		case Oultof: h = i->cls == Kd ? "__aeabi_ul2d" : "__aeabi_ul2f"; is_d = 1; break;
+		default: h = 0; is_d = 1; break; /* Ocast */
+		}
+
+		if (i->op != Ocast) {
+			/* 装载源到 r0:r1:
+			 *   - Odtosi/Odtoui/Ostosi/Ostoui: FP 源(Kd/Ks)
+			 *   - Osltof/Oultof: Kl 源(slot 或寄存器对)
+			 * helper 的 softfp 参数 = 源位模式。 */
+			if (i->op == Osltof || i->op == Oultof) {
+				kl_ldhalf(src, 0, R0, fn, f);
+				kl_ldhalf(src, 1, R1, fn, f);
+			} else if (rtype(src) == RTmp && src.val < Tmp0) {
+				if (is_d)
+					fprintf(f, "\tvmov\tr0, r1, %s\n",
+						rname(src.val, Kd));
+				else
+					fprintf(f, "\tvmov\tr0, %s\n",
+						rname(src.val, Ks));
+			} else {
+				if (rtype(src) == RSlot)
+					ss = rsval(src);
+				else
+					ss = klslot(src, fn);
+				assert(ss != -1);
+				if (is_d) {
+					fprintf(f, "\tvldr\td0, [r11, #%u]\n",
+						(unsigned)klslotoff(ss));
+					fputs("\tvmov\tr0, r1, d0\n", f);
+				} else {
+					fprintf(f, "\tvldr\ts0, [r11, #%u]\n",
+						(unsigned)klslotoff(ss));
+					fputs("\tvmov\tr0, s0\n", f);
+				}
+			}
+			/* 保护调用者寄存器: helper 破坏 r0-r3, r12, d0-d7, lr。
+			 * r12 已由 kl_emit 外层 push {r10, r12} 保护。 */
+			fputs("\tpush\t{r0, r1, r2, r3, lr}\n", f);
+			fputs("\tvpush\t{d0-d7}\n", f);
+			fprintf(f, "\tbl\t%s\n", h);
+			/* 结果在 r0:r1(Kd)或 r0(Ks)。
+			 * d→l 方向: 目标 Kl slot, 在 pop/vpop 前直接 str 写入
+			 *   (slot 不会被寄存器恢复覆盖)。
+			 * l→d 方向: 目标 FP 寄存器可能落在 d0-d7(vpop 会覆盖),
+			 *   所以先暂存到 d8(callee-saved, 不在 vpush 保护范围,
+			 *   也被 rega 保留为转换 scratch), 恢复后再写目标。 */
+			if (i->op == Osltof || i->op == Oultof) {
+				if (i->cls == Kd)
+					fputs("\tvmov\td8, r0, r1\n", f);
+				else
+					fputs("\tvmov\ts16, r0\n", f); /* s16=d8 低半 */
+				fputs("\tvpop\t{d0-d7}\n", f);
+				fputs("\tpop\t{r0, r1, r2, r3, lr}\n", f);
+				/* 目标 FP 寄存器 */
+				if (rtype(i->to) == RTmp && i->to.val < Tmp0) {
+					if (i->cls == Kd)
+						fprintf(f, "\tvmov\t%s, d8\n",
+							rname(i->to.val, Kd));
+					else
+						fprintf(f, "\tvmov\t%s, s16\n",
+							rname(i->to.val, Ks));
+				} else {
+					/* 目标溢出到 FP slot */
+					if (rtype(i->to) == RSlot)
+						ss = rsval(i->to);
+					else
+						ss = klslot(i->to, fn);
+					assert(ss != -1);
+					if (i->cls == Kd)
+						fprintf(f, "\tvstr\td8, [r11, #%u]\n",
+							(unsigned)klslotoff(ss));
+					else
+						fprintf(f, "\tvstr\ts16, [r11, #%u]\n",
+							(unsigned)klslotoff(ss));
+				}
+			} else {
+				kl_sthalf(i->to, 0, R0, fn, f);
+				kl_sthalf(i->to, 1, R1, fn, f);
+				fputs("\tvpop\t{d0-d7}\n", f);
+				fputs("\tpop\t{r0, r1, r2, r3, lr}\n", f);
+			}
+			break;
+		}
+
+		/* Ocast: bitcast。 方向由 i->cls 决定:
+		 *   - Kd → Kl (i->cls==Kl, 源 Kd): MRRC 把 dN 位模式移入
+		 *     r0:r1 直存。
+		 *   - Kl → Kd (i->cls==Kd, 源 Kl): 先加载源低/高半到
+		 *     r0:r1, MCRR 移入目标 dN。 */
+		if (i->cls == Kl) {
+			if (rtype(src) == RTmp && src.val < Tmp0) {
+				fprintf(f, "\tvmov\tr0, r1, %s\n",
+					rname(src.val, Kd));
+			} else {
+				if (rtype(src) == RSlot)
+					ss = rsval(src);
+				else
+					ss = klslot(src, fn);
+				assert(ss != -1);
+				fprintf(f, "\tvldr\td0, [r11, #%u]\n",
+					(unsigned)klslotoff(ss));
+				fputs("\tvmov\tr0, r1, d0\n", f);
+			}
+			kl_sthalf(i->to, 0, R0, fn, f);
+			kl_sthalf(i->to, 1, R1, fn, f);
+		} else {
+			/* Kl → Kd: 源 Kl 槽/寄存器对 → r0:r1 → dN */
+			kl_ldhalf(src, 0, R0, fn, f);
+			kl_ldhalf(src, 1, R1, fn, f);
+			if (rtype(i->to) == RTmp && i->to.val < Tmp0) {
+				fprintf(f, "\tvmov\t%s, r0, r1\n",
+					rname(i->to.val, Kd));
+			} else {
+				if (rtype(i->to) == RSlot)
+					ss = rsval(i->to);
+				else
+					ss = klslot(i->to, fn);
+				assert(ss != -1);
+				fprintf(f, "\tvmov\td0, r0, r1\n"
+					"\tvstr\td0, [r11, #%u]\n",
+					(unsigned)klslotoff(ss));
+			}
+		}
+		break;
+	}
 	default:
 		die("arm: Kl op %s not supported", optab[i->op].name);
 	}
@@ -844,13 +1043,21 @@ emitins(Ins *i, Fn *fn, FILE *f)
 			kl_cmp(i, fn, f);
 			break;
 		}
-		if (i->cls == Kl || i->op == Ostorel) {
+		if (i->cls == Kl || i->op == Ostorel
+		|| i->op == Osltof || i->op == Oultof
+		|| (i->op == Ocast && i->cls == Kd)) {
 			/* 64-bit ops: no ARM instruction handles a 64-bit GPR
 			 * value (kl_in_reg == 0), so decompose into 32-bit ops
 			 * on the low/high slot halves (see kl_emit below).
 			 * Ocall Kl is a function returning long long: the call
 			 * itself is the same as Kw (the result copy is a
-			 * separate Ocopy Kl), so let it fall through. */
+			 * separate Ocopy Kl), so let it fall through.
+			 * Osltof/Oultof (Kl → float/double) have a Kl source in
+			 * a slot; kl_emit loads it into r0:r1 and calls the
+			 * EABI softfp helper.  Ocast with a Kd result (Kl →
+			 * double bitcast) also moves a Kl slot value into the
+			 * FP register pair, which the omap's single-register
+			 * `vmov %=, %L0` cannot express. */
 			if (i->op != Ocall) {
 				kl_emit(i, fn, f);
 				break;
@@ -931,6 +1138,26 @@ emitins(Ins *i, Fn *fn, FILE *f)
 	case Onop:
 		break;
 	case Ocopy:
+		if (i->cls == Kd && rtype(i->to) == RTmp && i->to.val < Tmp0
+		&& i->to.val >= R0 && i->to.val <= R3) {
+			/* A vararg double passed in a GPR pair (AAPCS varargs
+			 * never use VFP): vmov rN, rN+1, dM.  A spilled source is
+			 * reloaded into the d8 scratch (never allocated by rega)
+			 * under vpush/vpop so a live d8 survives. */
+			if (rtype(i->arg[0]) == RSlot) {
+				fputs("\tvpush\t{d8}\n", f);
+				fprintf(f, "\tvldr\td8, [r11, #%" PRIu64 "]\n",
+					slot(i->arg[0], fn, 0));
+				fprintf(f, "\tvmov\t%s, %s, d8\n",
+					rname(i->to.val, Kw), rname(i->to.val + 1, Kw));
+				fputs("\tvpop\t{d8}\n", f);
+			} else {
+				fprintf(f, "\tvmov\t%s, %s, %s\n",
+					rname(i->to.val, Kw), rname(i->to.val + 1, Kw),
+					rname(i->arg[0].val, Kd));
+			}
+			break;
+		}
 		if (i->cls == Kl) {
 			/* 64 位复制：走 Kl 分解（to 可能是未重写为 slot 的
 			 * Kl temp，generic 路径的 assert(isreg) 会失败）。 */
@@ -973,6 +1200,23 @@ emitins(Ins *i, Fn *fn, FILE *f)
 		switch (rtype(i->arg[0])) {
 		case RCon:
 			c = &fn->con[i->arg[0].val];
+			if (KBASE(i->cls) != 0) {
+				/* movw/movt only address core registers.  A float
+				 * destination copies the constant's bit pattern from
+				 * the literal pool.  This normally goes through the
+				 * isel fixarg(), but rega-generated phi-edge copies
+				 * of constants (e.g. `double s = 0` in a loop)
+				 * reach the emitter directly. */
+				Con cc = {.type = CAddr};
+				char buf[32];
+				int n = stashbits(c->bits.i, KWIDE(i->cls) ? 8 : 4);
+				sprintf(buf, "\"%sfp%d\"", T.asloc, n);
+				cc.sym.id = intern(buf);
+				loadaddr(&cc, (char *)rname(IP, Kl), f);
+				fprintf(f, "\tvldr\t%s, [%s]\n",
+					rname(i->to.val, i->cls), rname(IP, Kl));
+				break;
+			}
 			loadcon(c, i->to.val, i->cls, f);
 			break;
 		case RSlot:
@@ -1093,14 +1337,28 @@ arm32_emitfn(Fn *fn, FILE *f)
 	for (int rr = D8; rr <= D15; rr++)
 		if (fn->reg & BIT(rr))
 			csfp++;
+	/* Variadic functions: spill R0-R3 into a 16-byte register save
+	 * area at the very top of the callee frame, immediately below the
+	 * caller's stack arguments.  va_start/va_arg walk it and then the
+	 * stack, so it must be contiguous with the stack arguments and is
+	 * therefore pushed before the saved r11/lr. */
+	if (fn->vararg) {
+		fprintf(f, "\tsub\tsp, sp, #16\n");
+		for (int rr = R0; rr <= R3; rr++)
+			fprintf(f, "\tstr\t%s, [sp, #%d]\n",
+				rname(rr, Kw), 4 * (rr - R0));
+	}
 	if (csgpr) {
 		fprintf(f, "\tpush\t{r4, r5, r6, r7, r8, r9, r11, lr}\n");
-	} else if (fn->slot || csfp) {
+	} else if (fn->slot || csfp || fn->vararg) {
 		fprintf(f, "\tpush\t{r11, lr}\n");
 	} else {
-		fprintf(f, "\tpush\t{lr}\n");
+		/* Keep the stack 8-byte aligned (AAPCS): a bare push {lr}
+		 * would leave sp ≡ 4 (mod 8) at the calls below, which
+		 * misaligns the libc's 8-byte-aligned va_arg reads. */
+		fprintf(f, "\tpush\t{r11, lr}\n");
 	}
-	if (fn->slot || csfp || fn->dynalloc) {
+	if (fn->slot || csfp || fn->dynalloc || fn->vararg) {
 		/* Local slots are addressed as [r11, #off] (see Oload/Ostore/
 		 * Oaddr), so r11 is the frame pointer.  Point it at the new
 		 * stack top after the frame is allocated.  Without this, r11
@@ -1109,7 +1367,7 @@ arm32_emitfn(Fn *fn, FILE *f)
 		 * A function with salloc() also needs r11 so the epilogue can
 		 * restore sp across the dynamic allocation.  The frame also
 		 * holds the d8-d15 save area (8 bytes each) above the slots. */
-		fprintf(f, "\tsub\tsp, sp, #%d\n", 4 * (fn->slot + 2 * csfp));
+		fprintf(f, "\tsub\tsp, sp, #%d\n", arm32_framesz(fn));
 		fprintf(f, "\tmov\tr11, sp\n");
 		for (int rr = D8, i = 0; rr <= D15; rr++)
 			if (fn->reg & BIT(rr))
@@ -1138,15 +1396,24 @@ arm32_emitfn(Fn *fn, FILE *f)
 			if (fn->dynalloc)
 				/* salloc() lowered sp at runtime; restore it from the
 				 * frame pointer (r11) before popping saved registers. */
-				fprintf(f, "\tadd\tsp, r11, #%d\n", 4 * (fn->slot + 2 * csfp));
-			else if (fn->slot || csfp)
-				fprintf(f, "\tadd\tsp, sp, #%d\n", 4 * (fn->slot + 2 * csfp));
-			if (csgpr)
+				fprintf(f, "\tadd\tsp, r11, #%d\n", arm32_framesz(fn));
+			else if (fn->slot || csfp || fn->vararg)
+				fprintf(f, "\tadd\tsp, sp, #%d\n", arm32_framesz(fn));
+			if (fn->vararg) {
+				/* Deallocate the register save area after popping the
+				 * saved registers; the save area sits above them. */
+				if (csgpr)
+					fprintf(f, "\tpop\t{r4, r5, r6, r7, r8, r9, r11, lr}\n");
+				else
+					fprintf(f, "\tpop\t{r11, lr}\n");
+				fprintf(f, "\tadd\tsp, sp, #16\n");
+				fprintf(f, "\tbx\tlr\n");
+			} else if (csgpr)
 				fprintf(f, "\tpop\t{r4, r5, r6, r7, r8, r9, r11, pc}\n");
-			else if (fn->slot || csfp)
-				fprintf(f, "\tpop\t{r11, pc}\n");
 			else
-				fprintf(f, "\tpop\t{pc}\n");
+				/* The prologue always pushes r11 (8-byte stack
+				 * alignment), so it must be popped back. */
+				fprintf(f, "\tpop\t{r11, pc}\n");
 			break;
 		case Jjmp:
 		Jmp:
