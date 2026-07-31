@@ -63,8 +63,9 @@ typedef unsigned long long uint_fast64_t;
 #define UINTPTR_MAX UINT64_MAX
 #endif
 
-/* Maximum-width integer types (C99 §7.18.1.5) */
-#if defined(__i386__)
+/* Maximum-width integer types (C99 §7.18.1.5).
+ * int64_t is long long on every target (see above), so intmax_t must be
+ * long long too — inttypes.h typedefs intmax_t as int64_t. */
 typedef long long intmax_t;
 typedef unsigned long long uintmax_t;
 #define INTMAX_MIN (-9223372036854775807LL - 1LL)
@@ -72,15 +73,6 @@ typedef unsigned long long uintmax_t;
 #define UINTMAX_MAX (18446744073709551615ULL)
 #define INTMAX_C(x) (x ## LL)
 #define UINTMAX_C(x) (x ## ULL)
-#else
-typedef long intmax_t;
-typedef unsigned long uintmax_t;
-#define INTMAX_MIN (-9223372036854775807L - 1)
-#define INTMAX_MAX (9223372036854775807L)
-#define UINTMAX_MAX (18446744073709551615UL)
-#define INTMAX_C(x) (x ## L)
-#define UINTMAX_C(x) (x ## UL)
-#endif
 
 /* intptr_t / uintptr_t already defined in the arch-conditional block above. */
 
