@@ -125,10 +125,15 @@ int tui_truncate(const char *s, int max_cols)
 
 int tui_spaces(int fd, int n)
 {
-    static const char spaces[64] =
-        "                                                               ";
+    static char spaces[64];
+    static int  init = 0;
+    if (!init) {
+        /* 全部填空格：避免原字面量末尾 NUL 被写出 */
+        memset(spaces, ' ', sizeof(spaces));
+        init = 1;
+    }
     while (n > 0) {
-        int chunk = n > 64 ? 64 : n;
+        int chunk = n > (int)sizeof(spaces) ? (int)sizeof(spaces) : n;
         if (write(fd, spaces, (size_t)chunk) != chunk) return TUI_ERR_IO;
         n -= chunk;
     }

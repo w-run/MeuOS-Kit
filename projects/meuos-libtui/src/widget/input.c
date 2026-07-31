@@ -14,13 +14,22 @@
 #include <string.h>
 #include <errno.h>
 
-/* ── 简单 atoi（不含 strtol 依赖展开）─────────────── */
+/* ── 简单 atoi（含溢出保护：饱和到 CSI_PARAM_MAX）────── */
+
+#define CSI_PARAM_MAX 0xFFFF
 
 static int atoi_se(const char *s)
 {
     int n = 0;
     while (*s >= '0' && *s <= '9') {
-        n = n * 10 + (*s - '0');
+        int d = *s - '0';
+        if (n > (CSI_PARAM_MAX - d) / 10) {
+            /* 溢出：饱和到上限，并跳过剩余数字 */
+            n = CSI_PARAM_MAX;
+            while (*s >= '0' && *s <= '9') s++;
+            break;
+        }
+        n = n * 10 + d;
         s++;
     }
     return n;
@@ -43,6 +52,7 @@ static int parse_csi(int fd, tui_event_t *ev)
     char buf[16];
     int  i = 0;
     int  nread = 0;
+    int  terminated = 0;
 
     /* 收集 CSI 参数 (最多 16 字节) */
     while (i < (int)sizeof(buf) - 1) {
@@ -56,10 +66,22 @@ static int parse_csi(int fd, tui_event_t *ev)
         buf[i++] = c;
 
         /* 终止字符: 字母 (0x40-0x7E) 或 ~ */
-        if (c >= 0x40 && c <= 0x7E) break;
-        if (c == '~') break;
+        if (c >= 0x40 && c <= 0x7E) { terminated = 1; break; }
+        if (c == '~') { terminated = 1; break; }
     }
     buf[i] = '\0';
+
+    /* 序列过长被截断（缓冲区已满仍未遇终止符）：继续消费输入流直到
+     * 终止符，避免剩余字节滞留在流中被当作后续独立事件解析。 */
+    if (!terminated) {
+        for (int k = 0; k < 256; k++) {
+            char c;
+            if (read_byte(fd, &c) != TUI_OK)
+                break;
+            if (c >= 0x40 && c <= 0x7E)
+                break;
+        }
+    }
 
     /* 解析参数 */
     int params[4];
