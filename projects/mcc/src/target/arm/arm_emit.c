@@ -328,10 +328,11 @@ emitins(Ins *i, Fn *fn, FILE *f)
 	Table:
 		if (rtype(i->arg[0]) == RSlot)
 			fixarg(&i->arg[0], 0, IP, fn, f);
-		if (rtype(i->arg[1]) == RSlot)
-			fixarg(&i->arg[1], 0, IP, fn, f);
-		if (isload(i->op))
-		if (isstore(i->op))
+		/* A store's destination may be an RSlot: %M1 renders it directly
+		 * as [r11, #off], so it must NOT be fixarg'd (that would emit
+		 * "ldr ip,[r11,#off]; str v,[ip]" — an indirect store through
+		 * the slot's stale value). */
+		if (!isstore(i->op) && rtype(i->arg[1]) == RSlot)
 			fixarg(&i->arg[1], 0, IP, fn, f);
 		for (o = 0;; o++) {
 			if (omap[o].op == NOp)
