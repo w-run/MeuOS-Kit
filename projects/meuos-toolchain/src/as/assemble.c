@@ -1633,16 +1633,26 @@ resolve_fixups(struct as_file *as, const int *section_map,
 		symbol = find_symbol(as, fix->symbol);
 		if (!symbol)
 			return as_error(as, "undefined internal symbol: %s", fix->symbol);
-		can_resolve = symbol->defined && symbol->section == fix->section &&
-		              fix->type != MT_R_X86_64_GOTPCREL &&
-		              fix->type != MT_R_X86_64_REX_GOTPCRELX &&
-		              fix->type != MT_R_X86_64_64 &&
-		              fix->type != MT_R_X86_64_32 &&
-		              fix->type != MT_R_X86_64_32S &&
-		              /* LoongArch relocs need proper instruction encoding,
-		               * not raw value patching. Skip assembly-time resolve
-		               * so the linker handles B26/B16/PCALA/GOT/TLS fixups. */
-		              fix->type < 64;
+		/* Only plain "value patch" relocations can be folded at assembly
+		 * time.  Every other relocation must go to the linker, which
+		 * knows how to re-encode the instruction bits (e.g. ARM branch
+		 * relocations need the offset stuffed into the 24-bit imm field;
+		 * LoongArch/AArch64/RISC-V relocs are all >= 64).  The numeric
+		 * constants collide across targets, so key off the machine. */
+		{
+			int is_x86 = as->target &&
+			             (as->target->emachine == MT_EM_X86_64 ||
+			              as->target->emachine == MT_EM_386);
+			int is_arm = as->target &&
+			             as->target->emachine == MT_EM_ARM;
+			int raw_resolvable =
+			    (is_x86 && (fix->type == 1 || fix->type == 2 ||
+			                fix->type == 4)) ||
+			    (is_arm && (fix->type == 2 || fix->type == 3));
+			can_resolve = symbol->defined &&
+			              symbol->section == fix->section &&
+			              raw_resolvable;
+		}
 		if (can_resolve) {
 			value = (int64_t)symbol->value + fix->addend -
 			        (fix->type == MT_R_X86_64_PC32 ||

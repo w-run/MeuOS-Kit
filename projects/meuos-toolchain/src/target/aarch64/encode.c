@@ -55,6 +55,8 @@ struct operand {
 	int shift;      /* shift type: 0=none, 1=lsl */
 	int shift_imm;  /* shift amount */
 	int writeback;  /* 0=none, 1=pre-indexed (!), 2=post-indexed (, offset) */
+	int is_sp;      /* 1 when the register text was exactly "sp" (31 both
+	                 * means sp and xzr, but they encode differently) */
 	char *symbol;   /* symbol name (malloc'd) — or NULL */
 	const char *sym_start; /* pointer into original operands for symbol */
 	char modifier[32]; /* e.g. "lo12" */
@@ -170,6 +172,22 @@ static const char *trim_start(const char *s)
 {
 	while (*s == ' ' || *s == '\t') s++;
 	return s;
+}
+
+/* Strip surrounding double quotes from a symbol name.  mcc quotes symbol
+ * names that contain '.' or other characters (e.g. adrp x0, ".Lfp0").
+ * The text lives in the operand scratch buffer, so it can be modified. */
+static void
+strip_quotes(char *s)
+{
+	size_t n;
+	if (!s)
+		return;
+	n = strlen(s);
+	if (n >= 2 && s[0] == '"' && s[n - 1] == '"') {
+		memmove(s, s + 1, n - 2);
+		s[n - 2] = '\0';
+	}
 }
 
 /* Check if the operand text starts with a symbol (not a register/immediate) */
@@ -295,6 +313,7 @@ aarch64_encode_insn(const struct mt_target *target,
 								ops[i].modifier[mlen] = '\0';
 							}
 							ops[i].sym_start = mod_end + 1;
+							strip_quotes((char *)ops[i].sym_start);
 							/* Symbol ref in offset: flag by setting imm=1, kind stays 'm' */
 							ops[i].imm = 1; /* non-zero to indicate symbol offset */
 						} else return -1;
@@ -324,11 +343,13 @@ aarch64_encode_insn(const struct mt_target *target,
 
 		/* Check for register */
 		int wreg;
-		int reg = parse_reg(trim_start(s), &wreg);
+		const char *regtext = trim_start(s);
+		int reg = parse_reg(regtext, &wreg);
 		if (reg >= 0) {
 			ops[i].kind = 'r';
 			ops[i].reg = reg;
 			ops[i].wreg = wreg;
+			ops[i].is_sp = (strcmp(regtext, "sp") == 0);
 			continue;
 		}
 
@@ -345,11 +366,13 @@ aarch64_encode_insn(const struct mt_target *target,
 						memcpy(ops[i].modifier, colon + 1, mlen);
 						ops[i].modifier[mlen] = '\0';
 						ops[i].sym_start = end_mod + 1;
+						strip_quotes((char *)ops[i].sym_start);
 					}
 				}
 			} else {
 				/* Simple symbol name — point into trim(ed) opbuf */
 				ops[i].sym_start = s;
+				strip_quotes((char *)ops[i].sym_start);
 			}
 			continue;
 		}
@@ -385,8 +408,16 @@ aarch64_encode_insn(const struct mt_target *target,
 	    ops[0].kind == 'r' && ops[1].kind == 'r') {
 		int rd = ops[0].reg, rm = ops[1].reg;
 		int is64 = (ops[0].wreg == XREG);
+		if (ops[1].is_sp && is64) {
+			/* mov xd, sp — alias of add xd, sp, #0 (ORR cannot
+			 * encode SP in Rm). */
+			emit32(out, &off, 0x910003E0 | ((unsigned)rd & 0x1F));
+			return 0;
+		}
+		/* mov rd, rm — ORR rd, xzr, rm: Rd[4:0], Rm[20:16] */
 		emit32(out, &off, (is64 ? 0xAA0003E0 : 0x2A0003E0) |
-		       ((unsigned)rm & 0x1F) | (((unsigned)rd & 0x1F) << 16));
+		       (((unsigned)rm & 0x1F) << 16) |
+		       ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
@@ -545,9 +576,9 @@ aarch64_encode_insn(const struct mt_target *target,
 		int rd = ops[0].reg, rn = ops[1].reg, rm = ops[2].reg;
 		int is64 = (ops[0].wreg == XREG);
 		emit32(out, &off, (is64 ? 0x8B000000 : 0x0B000000) |
-		       ((unsigned)rm & 0x1F) |
+		       (((unsigned)rm & 0x1F) << 16) |
 		       (((unsigned)rn & 0x1F) << 5) |
-		       (((unsigned)rd & 0x1F) << 16));
+		       ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
@@ -578,10 +609,11 @@ aarch64_encode_insn(const struct mt_target *target,
 		int rd = is_cmp ? REG_ZR : ops[0].reg;
 		int rn = is_cmp ? ops[0].reg : ops[1].reg;
 		int rm = is_cmp ? ops[1].reg : ops[2].reg;
-		emit32(out, &off, 0xCB000000 |
-		       ((unsigned)rm & 0x1F) |
+		int is64 = (ops[0].wreg == XREG);
+		emit32(out, &off, (is64 ? 0xCB000000 : 0x4B000000) |
+		       (((unsigned)rm & 0x1F) << 16) |
 		       (((unsigned)rn & 0x1F) << 5) |
-		       (((unsigned)rd & 0x1F) << 16));
+		       ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
@@ -589,8 +621,9 @@ aarch64_encode_insn(const struct mt_target *target,
 	if (strcmp(mnemonic, "cmp") == 0 && nops == 2 &&
 	    ops[0].kind == 'r' && ops[1].kind == 'r') {
 		int rn = ops[0].reg, rm = ops[1].reg;
-		emit32(out, &off, 0xEB00001F |
-		       ((unsigned)rm & 0x1F) |
+		int is64 = (ops[0].wreg == XREG);
+		emit32(out, &off, (is64 ? 0xEB00001F : 0x6B00001F) |
+		       (((unsigned)rm & 0x1F) << 16) |
 		       (((unsigned)rn & 0x1F) << 5));
 		return 0;
 	}
@@ -934,9 +967,9 @@ aarch64_encode_insn(const struct mt_target *target,
 		int rd = ops[0].reg, rn = ops[1].reg, rm = ops[2].reg;
 		int is64 = (ops[0].wreg == XREG);
 		emit32(out, &off, (is64 ? 0xAA000000 : 0x2A000000) |
-		       ((unsigned)rm & 0x1F) |
+		       (((unsigned)rm & 0x1F) << 16) |
 		       (((unsigned)rn & 0x1F) << 5) |
-		       (((unsigned)rd & 0x1F) << 16));
+		       ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
@@ -946,9 +979,9 @@ aarch64_encode_insn(const struct mt_target *target,
 		int rd = ops[0].reg, rn = ops[1].reg, rm = ops[2].reg;
 		int is64 = (ops[0].wreg == XREG);
 		emit32(out, &off, (is64 ? 0xCA000000 : 0x4A000000) |
-		       ((unsigned)rm & 0x1F) |
+		       (((unsigned)rm & 0x1F) << 16) |
 		       (((unsigned)rn & 0x1F) << 5) |
-		       (((unsigned)rd & 0x1F) << 16));
+		       ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
@@ -958,9 +991,9 @@ aarch64_encode_insn(const struct mt_target *target,
 		int rd = ops[0].reg, rn = ops[1].reg, rm = ops[2].reg;
 		int is64 = (ops[0].wreg == XREG);
 		emit32(out, &off, (is64 ? 0x8A000000 : 0x0A000000) |
-		       ((unsigned)rm & 0x1F) |
+		       (((unsigned)rm & 0x1F) << 16) |
 		       (((unsigned)rn & 0x1F) << 5) |
-		       (((unsigned)rd & 0x1F) << 16));
+		       ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
@@ -970,9 +1003,9 @@ aarch64_encode_insn(const struct mt_target *target,
 		int rd = ops[0].reg, rn = ops[1].reg, rm = ops[2].reg;
 		int is64 = (ops[0].wreg == XREG);
 		emit32(out, &off, (is64 ? 0x9B007C00 : 0x1B007C00) |
-		       ((unsigned)rm & 0x1F) |
+		       (((unsigned)rm & 0x1F) << 16) |
 		       (((unsigned)rn & 0x1F) << 5) |
-		       (((unsigned)rd & 0x1F) << 16));
+		       ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
@@ -981,12 +1014,12 @@ aarch64_encode_insn(const struct mt_target *target,
 	    ops[0].kind == 'r' && ops[1].kind == 'r' && ops[2].kind == 'r' && ops[3].kind == 'r') {
 		int rd = ops[0].reg, rn = ops[1].reg, rm = ops[2].reg, ra = ops[3].reg;
 		int is64 = (ops[0].wreg == XREG);
-		/* sf=1/0, op=00, 11011, o0=1(MSUB), Rm<<16, 0, Ra<<10, Rn<<5, Rd */
+		/* sf=1/0, op=00, 11011, o0=1(MSUB), Rm<<16, Ra<<10, Rn<<5, Rd */
 		emit32(out, &off, (is64 ? 0x9B800000 : 0x1B800000) |
-		       ((unsigned)rm & 0x1F) |
+		       (((unsigned)rm & 0x1F) << 16) |
 		       (((unsigned)ra & 0x1F) << 10) |
 		       (((unsigned)rn & 0x1F) << 5) |
-		       (((unsigned)rd & 0x1F) << 16));
+		       ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
@@ -996,9 +1029,9 @@ aarch64_encode_insn(const struct mt_target *target,
 		int rd = ops[0].reg, rn = ops[1].reg, rm = ops[2].reg;
 		int is64 = (ops[0].wreg == XREG);
 		emit32(out, &off, (is64 ? 0x9AC00C00 : 0x1AC00C00) |
-		       ((unsigned)rm & 0x1F) |
+		       (((unsigned)rm & 0x1F) << 16) |
 		       (((unsigned)rn & 0x1F) << 5) |
-		       (((unsigned)rd & 0x1F) << 16));
+		       ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
@@ -1008,9 +1041,9 @@ aarch64_encode_insn(const struct mt_target *target,
 		int rd = ops[0].reg, rn = ops[1].reg, rm = ops[2].reg;
 		int is64 = (ops[0].wreg == XREG);
 		emit32(out, &off, (is64 ? 0x9AC00800 : 0x1AC00800) |
-		       ((unsigned)rm & 0x1F) |
+		       (((unsigned)rm & 0x1F) << 16) |
 		       (((unsigned)rn & 0x1F) << 5) |
-		       (((unsigned)rd & 0x1F) << 16));
+		       ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
@@ -1020,8 +1053,8 @@ aarch64_encode_insn(const struct mt_target *target,
 		int rd = ops[0].reg, rm = ops[1].reg;
 		int is64 = (ops[0].wreg == XREG);
 		emit32(out, &off, (is64 ? 0xCB0003E0 : 0x4B0003E0) |
-		       ((unsigned)rm & 0x1F) |
-		       (((unsigned)rd & 0x1F) << 16));
+		       (((unsigned)rm & 0x1F) << 16) |
+		       ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
@@ -1029,12 +1062,12 @@ aarch64_encode_insn(const struct mt_target *target,
 	if ((strcmp(mnemonic, "lsl") == 0) && nops == 3 &&
 	    ops[0].kind == 'r' && ops[1].kind == 'r' && ops[2].kind == 'r') {
 		int rd = ops[0].reg, rn = ops[1].reg, rm = ops[2].reg;
-		/* LSL is UBFM rd, rn, (-shift % 64), (shift - 1) for immediate,
-		 * or LSLV for register. Use LSLV: 1 0 11010110 00000 001000 rm rn rd */
-		emit32(out, &off, 0x9AC02000 |
-		       ((unsigned)rm & 0x1F) |
+		int is64 = (ops[0].wreg == XREG);
+		/* LSLV (register): 1 0 11010110 00000 001000 rm rn rd */
+		emit32(out, &off, (is64 ? 0x9AC02000 : 0x1AC02000) |
+		       (((unsigned)rm & 0x1F) << 16) |
 		       (((unsigned)rn & 0x1F) << 5) |
-		       (((unsigned)rd & 0x1F) << 16));
+		       ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
@@ -1042,10 +1075,11 @@ aarch64_encode_insn(const struct mt_target *target,
 	if ((strcmp(mnemonic, "lsr") == 0) && nops == 3 &&
 	    ops[0].kind == 'r' && ops[1].kind == 'r' && ops[2].kind == 'r') {
 		int rd = ops[0].reg, rn = ops[1].reg, rm = ops[2].reg;
-		emit32(out, &off, 0x9AC02400 |
-		       ((unsigned)rm & 0x1F) |
+		int is64 = (ops[0].wreg == XREG);
+		emit32(out, &off, (is64 ? 0x9AC02400 : 0x1AC02400) |
+		       (((unsigned)rm & 0x1F) << 16) |
 		       (((unsigned)rn & 0x1F) << 5) |
-		       (((unsigned)rd & 0x1F) << 16));
+		       ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
@@ -1053,20 +1087,22 @@ aarch64_encode_insn(const struct mt_target *target,
 	if ((strcmp(mnemonic, "asr") == 0) && nops == 3 &&
 	    ops[0].kind == 'r' && ops[1].kind == 'r' && ops[2].kind == 'r') {
 		int rd = ops[0].reg, rn = ops[1].reg, rm = ops[2].reg;
-		emit32(out, &off, 0x9AC02800 |
-		       ((unsigned)rm & 0x1F) |
+		int is64 = (ops[0].wreg == XREG);
+		emit32(out, &off, (is64 ? 0x9AC02800 : 0x1AC02800) |
+		       (((unsigned)rm & 0x1F) << 16) |
 		       (((unsigned)rn & 0x1F) << 5) |
-		       (((unsigned)rd & 0x1F) << 16));
+		       ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
-	/* sxtb rd, rn */
+	/* sxtb rd, rn — SBFM: Rd[4:0], Rn[9:5] */
 	if (strcmp(mnemonic, "sxtb") == 0 && nops == 2 &&
 	    ops[0].kind == 'r' && ops[1].kind == 'r') {
 		int rd = ops[0].reg, rn = ops[1].reg;
-		emit32(out, &off, 0x93401C00 |
+		int is64 = (ops[0].wreg == XREG);
+		emit32(out, &off, (is64 ? 0x93401C00 : 0x13001C00) |
 		       (((unsigned)rn & 0x1F) << 5) |
-		       (((unsigned)rd & 0x1F) << 16));
+		       ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
@@ -1074,9 +1110,10 @@ aarch64_encode_insn(const struct mt_target *target,
 	if (strcmp(mnemonic, "sxth") == 0 && nops == 2 &&
 	    ops[0].kind == 'r' && ops[1].kind == 'r') {
 		int rd = ops[0].reg, rn = ops[1].reg;
-		emit32(out, &off, 0x93403C00 |
+		int is64 = (ops[0].wreg == XREG);
+		emit32(out, &off, (is64 ? 0x93403C00 : 0x13003C00) |
 		       (((unsigned)rn & 0x1F) << 5) |
-		       (((unsigned)rd & 0x1F) << 16));
+		       ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
@@ -1084,19 +1121,21 @@ aarch64_encode_insn(const struct mt_target *target,
 	if (strcmp(mnemonic, "sxtw") == 0 && nops == 2 &&
 	    ops[0].kind == 'r' && ops[1].kind == 'r') {
 		int rd = ops[0].reg, rn = ops[1].reg;
-		emit32(out, &off, 0x93407C00 |
+		int is64 = (ops[0].wreg == XREG);
+		emit32(out, &off, (is64 ? 0x93407C00 : 0x13007C00) |
 		       (((unsigned)rn & 0x1F) << 5) |
-		       (((unsigned)rd & 0x1F) << 16));
+		       ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
-	/* uxtb rd, rn */
+	/* uxtb rd, rn — UBFM: Rd[4:0], Rn[9:5] */
 	if (strcmp(mnemonic, "uxtb") == 0 && nops == 2 &&
 	    ops[0].kind == 'r' && ops[1].kind == 'r') {
 		int rd = ops[0].reg, rn = ops[1].reg;
-		emit32(out, &off, 0x53001C00 |
+		int is64 = (ops[0].wreg == XREG);
+		emit32(out, &off, (is64 ? 0xD3401C00 : 0x53001C00) |
 		       (((unsigned)rn & 0x1F) << 5) |
-		       (((unsigned)rd & 0x1F) << 16));
+		       ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
@@ -1104,23 +1143,25 @@ aarch64_encode_insn(const struct mt_target *target,
 	if (strcmp(mnemonic, "uxth") == 0 && nops == 2 &&
 	    ops[0].kind == 'r' && ops[1].kind == 'r') {
 		int rd = ops[0].reg, rn = ops[1].reg;
-		emit32(out, &off, 0x53003C00 |
+		int is64 = (ops[0].wreg == XREG);
+		emit32(out, &off, (is64 ? 0xD3403C00 : 0x53003C00) |
 		       (((unsigned)rn & 0x1F) << 5) |
-		       (((unsigned)rd & 0x1F) << 16));
+		       ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
-	/* fmov rd, rn  (scalar float) */
+	/* fmov rd, rn  (scalar float) — Rd[4:0], Rn[9:5] */
 	if (strcmp(mnemonic, "fmov") == 0 && nops == 2 &&
 	    ops[0].kind == 'r' && ops[1].kind == 'r') {
 		int rd = ops[0].reg, rn = ops[1].reg;
 		int is_double = (ops[0].wreg == DREG);
 		emit32(out, &off, (is_double ? 0x1E604000 : 0x1E204000) |
-		       ((unsigned)rn & 0x1F) | (((unsigned)rd & 0x1F) << 16));
+		       (((unsigned)rn & 0x1F) << 5) | ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
-	/* fadd/fsub/fmul/fdiv/fsqrt: only scalar double for now */
+	/* fadd/fsub/fmul/fdiv/fsqrt: only scalar double for now
+	 * — Rd[4:0], Rn[9:5], Rm[20:16] */
 	if ((strcmp(mnemonic, "fadd") == 0 || strcmp(mnemonic, "fsub") == 0 ||
 	     strcmp(mnemonic, "fmul") == 0 || strcmp(mnemonic, "fdiv") == 0) &&
 	    nops == 3 && ops[0].kind == 'r' && ops[1].kind == 'r' && ops[2].kind == 'r') {
@@ -1130,43 +1171,48 @@ aarch64_encode_insn(const struct mt_target *target,
 		else if (strcmp(mnemonic, "fmul") == 0) base = 0x1E600800;
 		else base = 0x1E601800;
 		int rd = ops[0].reg, rn = ops[1].reg, rm = ops[2].reg;
-		emit32(out, &off, base | ((unsigned)rm & 0x1F) |
+		emit32(out, &off, base |
+		       (((unsigned)rm & 0x1F) << 16) |
 		       (((unsigned)rn & 0x1F) << 5) |
-		       (((unsigned)rd & 0x1F) << 16));
+		       ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
-	/* fneg rd, rn */
+	/* fneg rd, rn — Rd[4:0], Rn[9:5] */
 	if (strcmp(mnemonic, "fneg") == 0 && nops == 2 &&
 	    ops[0].kind == 'r' && ops[1].kind == 'r') {
 		int rd = ops[0].reg, rn = ops[1].reg;
 		emit32(out, &off, 0x1E614000 |
-		       ((unsigned)rn & 0x1F) | (((unsigned)rd & 0x1F) << 16));
+		       (((unsigned)rn & 0x1F) << 5) | ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
-	/* fcvt rd, rn */
+	/* fcvt rd, rn — Rd[4:0], Rn[9:5] */
 	if (strcmp(mnemonic, "fcvt") == 0 && nops == 2 &&
 	    ops[0].kind == 'r' && ops[1].kind == 'r') {
 		int rd = ops[0].reg, rn = ops[1].reg;
 		if (ops[0].wreg == DREG && ops[1].wreg == SREG) {
 			emit32(out, &off, 0x1E22C000 |
-			       ((unsigned)rn & 0x1F) | (((unsigned)rd & 0x1F) << 16));
+			       (((unsigned)rn & 0x1F) << 5) | ((unsigned)rd & 0x1F));
 		} else if (ops[0].wreg == SREG && ops[1].wreg == DREG) {
 			emit32(out, &off, 0x1E624000 |
-			       ((unsigned)rn & 0x1F) | (((unsigned)rd & 0x1F) << 16));
+			       (((unsigned)rn & 0x1F) << 5) | ((unsigned)rd & 0x1F));
 		} else return -1;
 		return 0;
 	}
 
-	/* fcvtzs rd, rn (float to signed int) */
+	/* fcvtzs rd, rn (float to signed int) — Rd[4:0], Rn[9:5];
+	 * base depends on dest width (W/X) and source precision (S/D) */
 	if (strcmp(mnemonic, "fcvtzs") == 0 && nops == 2 &&
 	    ops[0].kind == 'r' && ops[1].kind == 'r') {
 		int rd = ops[0].reg, rn = ops[1].reg;
+		unsigned dest64 = (ops[0].wreg == XREG);
 		if (ops[1].wreg == DREG) {
-			emit32(out, &off, 0x9E780000 | ((unsigned)rn & 0x1F) | (((unsigned)rd & 0x1F) << 16));
+			emit32(out, &off, (dest64 ? 0x9E780000 : 0x1E780000) |
+			       (((unsigned)rn & 0x1F) << 5) | ((unsigned)rd & 0x1F));
 		} else if (ops[1].wreg == SREG) {
-			emit32(out, &off, 0x1E380000 | ((unsigned)rn & 0x1F) | (((unsigned)rd & 0x1F) << 16));
+			emit32(out, &off, (dest64 ? 0x9E380000 : 0x1E380000) |
+			       (((unsigned)rn & 0x1F) << 5) | ((unsigned)rd & 0x1F));
 		} else return -1;
 		return 0;
 	}
@@ -1175,22 +1221,29 @@ aarch64_encode_insn(const struct mt_target *target,
 	if (strcmp(mnemonic, "fcvtzu") == 0 && nops == 2 &&
 	    ops[0].kind == 'r' && ops[1].kind == 'r') {
 		int rd = ops[0].reg, rn = ops[1].reg;
+		unsigned dest64 = (ops[0].wreg == XREG);
 		if (ops[1].wreg == DREG) {
-			emit32(out, &off, 0x9E790000 | ((unsigned)rn & 0x1F) | (((unsigned)rd & 0x1F) << 16));
+			emit32(out, &off, (dest64 ? 0x9E790000 : 0x1E790000) |
+			       (((unsigned)rn & 0x1F) << 5) | ((unsigned)rd & 0x1F));
 		} else if (ops[1].wreg == SREG) {
-			emit32(out, &off, 0x1E390000 | ((unsigned)rn & 0x1F) | (((unsigned)rd & 0x1F) << 16));
+			emit32(out, &off, (dest64 ? 0x9E390000 : 0x1E390000) |
+			       (((unsigned)rn & 0x1F) << 5) | ((unsigned)rd & 0x1F));
 		} else return -1;
 		return 0;
 	}
 
-	/* scvtf rd, rn (signed int to float) */
+	/* scvtf rd, rn (signed int to float) — Rd[4:0], Rn[9:5];
+	 * base depends on dest precision (S/D) and source width (W/X) */
 	if (strcmp(mnemonic, "scvtf") == 0 && nops == 2 &&
 	    ops[0].kind == 'r' && ops[1].kind == 'r') {
 		int rd = ops[0].reg, rn = ops[1].reg;
+		unsigned src64 = (ops[1].wreg == XREG);
 		if (ops[0].wreg == DREG) {
-			emit32(out, &off, 0x9E620000 | ((unsigned)rn & 0x1F) | (((unsigned)rd & 0x1F) << 16));
+			emit32(out, &off, (src64 ? 0x9E620000 : 0x1E620000) |
+			       (((unsigned)rn & 0x1F) << 5) | ((unsigned)rd & 0x1F));
 		} else if (ops[0].wreg == SREG) {
-			emit32(out, &off, 0x1E220000 | ((unsigned)rn & 0x1F) | (((unsigned)rd & 0x1F) << 16));
+			emit32(out, &off, (src64 ? 0x9E220000 : 0x1E220000) |
+			       (((unsigned)rn & 0x1F) << 5) | ((unsigned)rd & 0x1F));
 		} else return -1;
 		return 0;
 	}
@@ -1199,10 +1252,13 @@ aarch64_encode_insn(const struct mt_target *target,
 	if (strcmp(mnemonic, "ucvtf") == 0 && nops == 2 &&
 	    ops[0].kind == 'r' && ops[1].kind == 'r') {
 		int rd = ops[0].reg, rn = ops[1].reg;
+		unsigned src64 = (ops[1].wreg == XREG);
 		if (ops[0].wreg == DREG) {
-			emit32(out, &off, 0x9E630000 | ((unsigned)rn & 0x1F) | (((unsigned)rd & 0x1F) << 16));
+			emit32(out, &off, (src64 ? 0x9E630000 : 0x1E630000) |
+			       (((unsigned)rn & 0x1F) << 5) | ((unsigned)rd & 0x1F));
 		} else if (ops[0].wreg == SREG) {
-			emit32(out, &off, 0x1E230000 | ((unsigned)rn & 0x1F) | (((unsigned)rd & 0x1F) << 16));
+			emit32(out, &off, (src64 ? 0x9E230000 : 0x1E230000) |
+			       (((unsigned)rn & 0x1F) << 5) | ((unsigned)rd & 0x1F));
 		} else return -1;
 		return 0;
 	}
@@ -1459,7 +1515,8 @@ aarch64_encode_insn(const struct mt_target *target,
 			}
 		}
 		if (!found) return -1;
-		uint32_t base = 0x54000000 | (cond << 12);
+		/* B.cond: cond sits in bits [4:0]; imm19 occupies [23:5]. */
+		uint32_t base = 0x54000000 | (cond & 0xF);
 		emit32(out, &off, base);
 		const char *sym = ops[0].sym_start;
 		set_fixup(out, 0, 4, 279, sym, 0); /* R_AARCH64_CONDBR19 */
@@ -1471,6 +1528,7 @@ aarch64_encode_insn(const struct mt_target *target,
 		static const struct { const char *name; unsigned cond; } nodot_conds[] = {
 			{"beq", 0}, {"bne", 1}, {"bhs", 2}, {"bcs", 2},
 			{"blo", 3}, {"bcc", 3},
+			{"bmi", 4}, {"bpl", 5}, {"bvs", 6}, {"bvc", 7},
 			{"bhi", 8}, {"bls", 9},
 			{"bge", 10}, {"blt", 11},
 			{"bgt", 12}, {"ble", 13},
@@ -1486,7 +1544,8 @@ aarch64_encode_insn(const struct mt_target *target,
 			}
 		}
 		if (found) {
-			uint32_t base = 0x54000000 | (cond << 12);
+			/* B.cond: cond sits in bits [4:0]; imm19 occupies [23:5]. */
+			uint32_t base = 0x54000000 | (cond & 0xF);
 			emit32(out, &off, base);
 			const char *sym = ops[0].sym_start;
 			set_fixup(out, 0, 4, 279, sym, 0); /* R_AARCH64_CONDBR19 */
@@ -1505,11 +1564,13 @@ aarch64_encode_insn(const struct mt_target *target,
 		return 0;
 	}
 
-	/* fcmpe rn, rm */
+	/* fcmpe rn, rm — Rn[9:5], Rm[20:16]; the E bit (quiet) is bit 4.
+	 * Verified against GNU as: fcmpe d0, d1 = 0x1E612010. */
 	if (strcmp(mnemonic, "fcmpe") == 0 && nops == 2 &&
 	    ops[0].kind == 'r' && ops[1].kind == 'r') {
 		int rn = ops[0].reg, rm = ops[1].reg;
-		emit32(out, &off, 0x1E6020A0 | ((unsigned)rm & 0x1F) |
+		emit32(out, &off, 0x1E602010 |
+		       (((unsigned)rm & 0x1F) << 16) |
 		       (((unsigned)rn & 0x1F) << 5));
 		return 0;
 	}

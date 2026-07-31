@@ -11,6 +11,7 @@
 
 #include <ctype.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -81,12 +82,16 @@ lookup_reg(const char *name)
 	return -1;
 }
 
-/* Parse a register text and return its number (0-7) or -1. */
+/* Parse a register text and return its number (0-7) or -1.
+ * Tolerates leading whitespace: mcc emits "8(%ebp, %eax, 4)" where the
+ * index register is separated by ", " (space after comma). */
 static int
 parse_reg_text(const char *text, int *reg_out)
 {
 	int ri;
 	text = strip_pct(text);
+	while (*text == ' ' || *text == '\t')
+		text++;
 	ri = lookup_reg(text);
 	if (ri < 0)
 		return -1;
@@ -341,6 +346,67 @@ emit_modrm_mem(unsigned char **pp, int reg_num, const struct i386_op *op)
 	return disp_offset;
 }
 
+/* Emit an ALU immediate operation: 0x83 /ext imm8 when the immediate fits
+ * in a signed byte, otherwise 0x81 /ext imm32.  `dst` is a register or
+ * memory operand (AT&T: add/sub $imm, dst).  Returns bytes emitted or -1. */
+static int
+emit_alu_imm(unsigned char *p, int ext, const struct i386_op *imm,
+             const struct i386_op *dst)
+{
+	if (imm->kind != OP_IMM)
+		return -1;
+	if (imm->disp >= -128 && imm->disp <= 127) {
+		p[0] = 0x83;
+		if (dst->kind == OP_REG) {
+			p[1] = modrm(3, ext, dst->reg);
+			p[2] = (uint8_t)(imm->disp & 0xFF);
+			return 3;
+		}
+		if (dst->kind == OP_MEM) {
+			unsigned char *q = p + 1;
+			emit_modrm_mem(&q, ext, dst);
+			*q = (uint8_t)(imm->disp & 0xFF);
+			q++;
+			return (int)(q - p);
+		}
+	} else {
+		p[0] = 0x81;
+		if (dst->kind == OP_REG) {
+			p[1] = modrm(3, ext, dst->reg);
+			emit32(p + 2, (uint32_t)(imm->disp & 0xFFFFFFFFULL));
+			return 6;
+		}
+		if (dst->kind == OP_MEM) {
+			unsigned char *q = p + 1;
+			emit_modrm_mem(&q, ext, dst);
+			emit32(q, (uint32_t)(imm->disp & 0xFFFFFFFFULL));
+			q += 4;
+			return (int)(q - p);
+		}
+	}
+	return -1;
+}
+
+/* Split a "symbol@modifier" reference (e.g. helper@plt) into a bare symbol
+ * name and modifier.  The returned name lives in `name_buf`. */
+static void
+split_symbol_modifier(const char *sym, char *name_buf, size_t name_size,
+                      char *mod_buf, size_t mod_size)
+{
+	const char *at = strchr(sym, '@');
+	if (at) {
+		size_t sl = (size_t)(at - sym);
+		if (sl >= name_size)
+			sl = name_size - 1;
+		memcpy(name_buf, sym, sl);
+		name_buf[sl] = '\0';
+		snprintf(mod_buf, mod_size, "%s", at + 1);
+	} else {
+		snprintf(name_buf, name_size, "%s", sym);
+		mod_buf[0] = '\0';
+	}
+}
+
 /* Set fixup fields on an insn.
  *
  * The symbol is copied to the heap here: the operand text (and even the
@@ -537,6 +603,22 @@ i386_encode_insn(const struct mt_target *target,
 		}
 	}
 
+	/* ---- LEA ---- */
+	if (strcmp(base, "lea") == 0 && nops == 2 &&
+	    ops[0].kind == OP_MEM && ops[1].kind == OP_REG) {
+		/* leal disp(%base,%idx,scale), %reg — 0x8D /r */
+		match = 1;
+		emit8(p, 0x8D);
+		p++;
+		emit_modrm_mem(&p, ops[1].reg, &ops[0]);
+		out->size = (size_t)(p - out->bytes);
+		if (ops[0].sym) {
+			size_t fixup_off = (size_t)((p - out->bytes) - 4);
+			set_fixup(out, fixup_off, 4, R_386_32, ops[0].sym, 0);
+		}
+		goto done;
+	}
+
 	/* ---- RET ---- */
 	if (strcmp(base, "ret") == 0) {
 		match = 1;
@@ -648,7 +730,16 @@ i386_encode_insn(const struct mt_target *target,
 
 	/* ---- XOR ---- */
 	if (strcmp(base, "xor") == 0 && nops == 2) {
-		match = 1;
+		match = 1;  /* unmatched operand forms are rejected by the size-0 guard */
+		if (ops[0].kind == OP_IMM &&
+		    (ops[1].kind == OP_REG || ops[1].kind == OP_MEM)) {
+			int len = emit_alu_imm(p, 6, &ops[0], &ops[1]);
+			if (len > 0) {
+				p += len;
+				out->size = (size_t)(p - out->bytes);
+				goto done;
+			}
+		}
 		if (ops[0].kind == OP_REG && ops[1].kind == OP_REG) {
 			emit8(p, 0x31);
 			emit8(p + 1, modrm(3, ops[0].reg, ops[1].reg));
@@ -676,7 +767,16 @@ i386_encode_insn(const struct mt_target *target,
 
 	/* ---- AND ---- */
 	if (strcmp(base, "and") == 0 && nops == 2) {
-		match = 1;
+		match = 1;  /* unmatched operand forms are rejected by the size-0 guard */
+		if (ops[0].kind == OP_IMM &&
+		    (ops[1].kind == OP_REG || ops[1].kind == OP_MEM)) {
+			int len = emit_alu_imm(p, 4, &ops[0], &ops[1]);
+			if (len > 0) {
+				p += len;
+				out->size = (size_t)(p - out->bytes);
+				goto done;
+			}
+		}
 		if (ops[0].kind == OP_REG && ops[1].kind == OP_REG) {
 			emit8(p, 0x21);
 			emit8(p + 1, modrm(3, ops[0].reg, ops[1].reg));
@@ -702,7 +802,16 @@ i386_encode_insn(const struct mt_target *target,
 
 	/* ---- OR ---- */
 	if (strcmp(base, "or") == 0 && nops == 2) {
-		match = 1;
+		match = 1;  /* unmatched operand forms are rejected by the size-0 guard */
+		if (ops[0].kind == OP_IMM &&
+		    (ops[1].kind == OP_REG || ops[1].kind == OP_MEM)) {
+			int len = emit_alu_imm(p, 1, &ops[0], &ops[1]);
+			if (len > 0) {
+				p += len;
+				out->size = (size_t)(p - out->bytes);
+				goto done;
+			}
+		}
 		if (ops[0].kind == OP_REG && ops[1].kind == OP_REG) {
 			emit8(p, 0x09);
 			emit8(p + 1, modrm(3, ops[0].reg, ops[1].reg));
@@ -728,7 +837,16 @@ i386_encode_insn(const struct mt_target *target,
 
 	/* ---- ADD ---- */
 	if (strcmp(base, "add") == 0 && nops == 2) {
-		match = 1;
+		match = 1;  /* unmatched operand forms are rejected by the size-0 guard */
+		if (ops[0].kind == OP_IMM &&
+		    (ops[1].kind == OP_REG || ops[1].kind == OP_MEM)) {
+			int len = emit_alu_imm(p, 0, &ops[0], &ops[1]);
+			if (len > 0) {
+				p += len;
+				out->size = (size_t)(p - out->bytes);
+				goto done;
+			}
+		}
 		if (ops[0].kind == OP_REG && ops[1].kind == OP_REG) {
 			emit8(p, 0x01);
 			emit8(p + 1, modrm(3, ops[0].reg, ops[1].reg));
@@ -754,7 +872,16 @@ i386_encode_insn(const struct mt_target *target,
 
 	/* ---- SUB ---- */
 	if (strcmp(base, "sub") == 0 && nops == 2) {
-		match = 1;
+		match = 1;  /* unmatched operand forms are rejected by the size-0 guard */
+		if (ops[0].kind == OP_IMM &&
+		    (ops[1].kind == OP_REG || ops[1].kind == OP_MEM)) {
+			int len = emit_alu_imm(p, 5, &ops[0], &ops[1]);
+			if (len > 0) {
+				p += len;
+				out->size = (size_t)(p - out->bytes);
+				goto done;
+			}
+		}
 		if (ops[0].kind == OP_REG && ops[1].kind == OP_REG) {
 			emit8(p, 0x29);
 			emit8(p + 1, modrm(3, ops[0].reg, ops[1].reg));
@@ -918,12 +1045,18 @@ i386_encode_insn(const struct mt_target *target,
 	if (strcmp(mnemonic, "call") == 0 && nops == 1) {
 		match = 1;
 		if (ops[0].kind == OP_SYMBOL) {
-			/* call sym — 0xE8 rel32 */
+			/* call sym / call sym@plt — 0xE8 rel32 */
+			char symname[128];
+			char mod[16];
+			unsigned rtype;
+			split_symbol_modifier(ops[0].sym, symname, sizeof(symname),
+			                      mod, sizeof(mod));
+			rtype = strcmp(mod, "plt") == 0 ? R_386_PLT32 : R_386_PC32;
 			emit8(p, 0xE8);
 			p++;
 			offset = (size_t)(p - out->bytes);
 			emit32(p, 0);
-			set_fixup(out, offset, 4, R_386_PC32, ops[0].sym, -4);
+			set_fixup(out, offset, 4, rtype, symname, -4);
 			p += 4;
 			out->size = (size_t)(p - out->bytes);
 			goto done;
@@ -949,12 +1082,18 @@ i386_encode_insn(const struct mt_target *target,
 	if (strcmp(mnemonic, "jmp") == 0 && nops == 1) {
 		match = 1;
 		if (ops[0].kind == OP_SYMBOL) {
-			/* jmp sym — 0xE9 rel32 */
+			/* jmp sym / jmp sym@plt — 0xE9 rel32 */
+			char symname[128];
+			char mod[16];
+			unsigned rtype;
+			split_symbol_modifier(ops[0].sym, symname, sizeof(symname),
+			                      mod, sizeof(mod));
+			rtype = strcmp(mod, "plt") == 0 ? R_386_PLT32 : R_386_PC32;
 			emit8(p, 0xE9);
 			p++;
 			offset = (size_t)(p - out->bytes);
 			emit32(p, 0);
-			set_fixup(out, offset, 4, R_386_PC32, ops[0].sym, -4);
+			set_fixup(out, offset, 4, rtype, symname, -4);
 			p += 4;
 			out->size = (size_t)(p - out->bytes);
 			goto done;
@@ -1228,7 +1367,10 @@ skip_imul3:
 
 done:
 	out->ok = match;
-	if (!match) {
+	/* Guard against a mnemonic "matched" by a block header but not by any
+	 * operand form: previously this silently emitted zero bytes. */
+	if (!match || out->size == 0) {
+		out->ok = 0;
 		out->fixed = 0;
 		out->size = 0;
 		return -1;
