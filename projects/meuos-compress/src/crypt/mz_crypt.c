@@ -21,6 +21,11 @@ store32_le(uint8_t *p, uint32_t v) {
     p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24);
 }
 
+static inline int64_t
+load24_le(const uint8_t *p) {
+    return (int64_t)p[0] | ((int64_t)p[1] << 8) | ((int64_t)p[2] << 16);
+}
+
 static inline void
 store64_le(uint8_t *p, uint64_t v) {
     for (int i = 0; i < 8; i++) { p[i] = (uint8_t)(v >> (i * 8)); }
@@ -254,9 +259,10 @@ typedef int64_t fe[10];
 static const int64_t fe_zero[10] = {0};
 static const int64_t fe_one[10]  = {1};
 
-/* p = 2^255 - 19 */
+/* p = 2^255 - 19 (交替 26/25 bit 表示的规范 limbs) */
 static const int64_t fe_p[10] = {
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, 15
+    67108845, 33554431, 67108863, 33554431, 67108863,
+    33554431, 67108863, 33554431, 67108863, 33554431
 };
 
 /* d = -121665/121666 mod p */
@@ -280,21 +286,22 @@ fe_0(fe h) { for (int i = 0; i < 10; i++) h[i] = 0; }
 static void
 fe_1(fe h) { for (int i = 0; i < 10; i++) h[i] = 0; h[0] = 1; }
 
-/* Carry propagation: reduce limbs to fit in 26 bits */
+/* Carry propagation: reduce limbs to fit in alternating 26/25 bits (ref10).
+ * 偶数 limb (0,2,4,6,8) 为 26 位，奇数 limb (1,3,5,7,9) 为 25 位。 */
 static void
 fe_carry(fe h)
 {
     int64_t c0, c1, c2, c3, c4, c5, c6, c7, c8, c9;
     c0 = (h[0] + (int64_t)(1 << 25)) >> 26; h[0] -= c0 << 26;
     c4 = (h[4] + (int64_t)(1 << 25)) >> 26; h[4] -= c4 << 26;
-    c1 = (h[1] + (int64_t)(1 << 25)) >> 26; h[1] -= c1 << 26;
-    c5 = (h[5] + (int64_t)(1 << 25)) >> 26; h[5] -= c5 << 26;
+    c1 = (h[1] + (int64_t)(1 << 24)) >> 25; h[1] -= c1 << 25;
+    c5 = (h[5] + (int64_t)(1 << 24)) >> 25; h[5] -= c5 << 25;
     c2 = (h[2] + (int64_t)(1 << 25)) >> 26; h[2] -= c2 << 26;
     c6 = (h[6] + (int64_t)(1 << 25)) >> 26; h[6] -= c6 << 26;
-    c3 = (h[3] + (int64_t)(1 << 25)) >> 26; h[3] -= c3 << 26;
-    c7 = (h[7] + (int64_t)(1 << 25)) >> 26; h[7] -= c7 << 26;
+    c3 = (h[3] + (int64_t)(1 << 24)) >> 25; h[3] -= c3 << 25;
+    c7 = (h[7] + (int64_t)(1 << 24)) >> 25; h[7] -= c7 << 25;
     c8 = (h[8] + (int64_t)(1 << 25)) >> 26; h[8] -= c8 << 26;
-    c9 = (h[9] + (int64_t)(1 << 25)) >> 26; h[9] -= c9 << 26;
+    c9 = (h[9] + (int64_t)(1 << 24)) >> 25; h[9] -= c9 << 25;
     h[0] += c9 * 19; h[1] += c0; h[2] += c1; h[3] += c2;
     h[4] += c3; h[5] += c4; h[6] += c5; h[7] += c6;
     h[8] += c7; h[9] += c8;
@@ -321,7 +328,7 @@ fe_neg(fe h, const fe f)
     for (int i = 0; i < 10; i++) h[i] = -f[i];
 }
 
-/* fe_mul: h = f * g (schoolbook, then reduce) */
+/* fe_mul: h = f * g (ref10 schoolbook，交替 38/19 缩减系数 + 内联交错进位) */
 static void
 fe_mul(fe h, const fe f, const fe g)
 {
@@ -329,31 +336,45 @@ fe_mul(fe h, const fe f, const fe g)
     int64_t f5 = f[5], f6 = f[6], f7 = f[7], f8 = f[8], f9 = f[9];
     int64_t g0 = g[0], g1 = g[1], g2 = g[2], g3 = g[3], g4 = g[4];
     int64_t g5 = g[5], g6 = g[6], g7 = g[7], g8 = g[8], g9 = g[9];
+    int64_t f1_2 = 2 * f1, f3_2 = 2 * f3, f5_2 = 2 * f5, f7_2 = 2 * f7;
 
-    int64_t h0 = f0*g0 + f1*g9*19 + f2*g8*19 + f3*g7*19 + f4*g6*19
-               + f5*g5*19 + f6*g4*19 + f7*g3*19 + f8*g2*19 + f9*g1*19;
+    int64_t h0 = f0*g0 + f1*g9*38 + f2*g8*19 + f3*g7*38 + f4*g6*19
+               + f5*g5*38 + f6*g4*19 + f7*g3*38 + f8*g2*19 + f9*g1*38;
     int64_t h1 = f0*g1 + f1*g0 + f2*g9*19 + f3*g8*19 + f4*g7*19
                + f5*g6*19 + f6*g5*19 + f7*g4*19 + f8*g3*19 + f9*g2*19;
-    int64_t h2 = f0*g2 + f1*g1 + f2*g0 + f3*g9*19 + f4*g8*19 + f5*g7*19
-               + f6*g6*19 + f7*g5*19 + f8*g4*19 + f9*g3*19;
+    int64_t h2 = f0*g2 + f1_2*g1 + f2*g0 + f3*g9*38 + f4*g8*19 + f5*g7*38
+               + f6*g6*19 + f7*g5*38 + f8*g4*19 + f9*g3*38;
     int64_t h3 = f0*g3 + f1*g2 + f2*g1 + f3*g0 + f4*g9*19 + f5*g8*19
                + f6*g7*19 + f7*g6*19 + f8*g5*19 + f9*g4*19;
-    int64_t h4 = f0*g4 + f1*g3 + f2*g2 + f3*g1 + f4*g0 + f5*g9*19
-               + f6*g8*19 + f7*g7*19 + f8*g6*19 + f9*g5*19;
+    int64_t h4 = f0*g4 + f1_2*g3 + f2*g2 + f3_2*g1 + f4*g0 + f5*g9*38
+               + f6*g8*19 + f7*g7*38 + f8*g6*19 + f9*g5*38;
     int64_t h5 = f0*g5 + f1*g4 + f2*g3 + f3*g2 + f4*g1 + f5*g0
                + f6*g9*19 + f7*g8*19 + f8*g7*19 + f9*g6*19;
-    int64_t h6 = f0*g6 + f1*g5 + f2*g4 + f3*g3 + f4*g2 + f5*g1 + f6*g0
-               + f7*g9*19 + f8*g8*19 + f9*g7*19;
+    int64_t h6 = f0*g6 + f1_2*g5 + f2*g4 + f3_2*g3 + f4*g2 + f5_2*g1
+               + f6*g0 + f7*g9*38 + f8*g8*19 + f9*g7*38;
     int64_t h7 = f0*g7 + f1*g6 + f2*g5 + f3*g4 + f4*g3 + f5*g2 + f6*g1
                + f7*g0 + f8*g9*19 + f9*g8*19;
-    int64_t h8 = f0*g8 + f1*g7 + f2*g6 + f3*g5 + f4*g4 + f5*g3 + f6*g2
-               + f7*g1 + f8*g0 + f9*g9*19;
+    int64_t h8 = f0*g8 + f1_2*g7 + f2*g6 + f3_2*g5 + f4*g4 + f5_2*g3
+               + f6*g2 + f7_2*g1 + f8*g0 + f9*g9*38;
     int64_t h9 = f0*g9 + f1*g8 + f2*g7 + f3*g6 + f4*g5 + f5*g4 + f6*g3
                + f7*g2 + f8*g1 + f9*g0;
 
+    int64_t c0, c1, c2, c3, c4, c5, c6, c7, c8, c9;
+    c0 = (h0 + (int64_t)(1 << 25)) >> 26; h1 += c0; h0 -= c0 << 26;
+    c4 = (h4 + (int64_t)(1 << 25)) >> 26; h5 += c4; h4 -= c4 << 26;
+    c1 = (h1 + (int64_t)(1 << 24)) >> 25; h2 += c1; h1 -= c1 << 25;
+    c5 = (h5 + (int64_t)(1 << 24)) >> 25; h6 += c5; h5 -= c5 << 25;
+    c2 = (h2 + (int64_t)(1 << 25)) >> 26; h3 += c2; h2 -= c2 << 26;
+    c6 = (h6 + (int64_t)(1 << 25)) >> 26; h7 += c6; h6 -= c6 << 26;
+    c3 = (h3 + (int64_t)(1 << 24)) >> 25; h4 += c3; h3 -= c3 << 25;
+    c7 = (h7 + (int64_t)(1 << 24)) >> 25; h8 += c7; h7 -= c7 << 25;
+    c4 = (h4 + (int64_t)(1 << 25)) >> 26; h5 += c4; h4 -= c4 << 26;
+    c8 = (h8 + (int64_t)(1 << 25)) >> 26; h9 += c8; h8 -= c8 << 26;
+    c9 = (h9 + (int64_t)(1 << 24)) >> 25; h0 += c9 * 19; h9 -= c9 << 25;
+    c0 = (h0 + (int64_t)(1 << 25)) >> 26; h1 += c0; h0 -= c0 << 26;
+
     h[0] = h0; h[1] = h1; h[2] = h2; h[3] = h3; h[4] = h4;
     h[5] = h5; h[6] = h6; h[7] = h7; h[8] = h8; h[9] = h9;
-    fe_carry(h);
 }
 
 /* fe_sq: h = f^2 */
@@ -363,69 +384,146 @@ fe_sq(fe h, const fe f)
     fe_mul(h, f, f);
 }
 
-/* fe_invert: h = f^(-1) mod p (Fermat: a^(p-2)) */
+/* fe_invert: h = f^(-1) mod p (ref10 pow225521 加法链，指数 2^255-21 = p-2) */
 static void
 fe_invert(fe h, const fe f)
 {
-    fe t1, t2, t3;
-    fe_copy(t1, f);
-    for (int i = 1; i < 253; i++) { fe_sq(t1, t1); fe_mul(t1, t1, f); }
-    fe_sq(t2, t1); fe_sq(t2, t2); fe_mul(t2, t2, t1);
-    for (int i = 0; i < 4; i++) { fe_sq(t2, t2); fe_mul(t2, t2, t1); }
-    fe_sq(t3, t2); fe_sq(t3, t3); fe_sq(t3, t3); fe_mul(t3, t3, t2);
-    fe_sq(t1, t3); fe_sq(t1, t1); fe_mul(t1, t1, t2); fe_sq(t1, t1);
-    fe_mul(h, t3, t1);
+    fe t0, t1, t2, t3;
+    int i;
+
+    fe_sq(t0, f);                          /* f^2 */
+    fe_sq(t1, t0); fe_sq(t1, t1);          /* f^8 */
+    fe_mul(t1, f, t1);                     /* f^9 */
+    fe_mul(t0, t0, t1);                    /* f^11 */
+    fe_sq(t2, t0);                         /* f^22 */
+    fe_mul(t1, t1, t2);                    /* f^31 */
+    fe_sq(t2, t1);
+    for (i = 1; i < 5; ++i) fe_sq(t2, t2);
+    fe_mul(t1, t2, t1);                    /* f^(2^10-1) */
+    fe_sq(t2, t1);
+    for (i = 1; i < 10; ++i) fe_sq(t2, t2);
+    fe_mul(t2, t2, t1);                    /* f^(2^20-1) */
+    fe_sq(t3, t2);
+    for (i = 1; i < 20; ++i) fe_sq(t3, t3);
+    fe_mul(t2, t3, t2);                    /* f^(2^40-1) */
+    fe_sq(t2, t2);
+    for (i = 1; i < 10; ++i) fe_sq(t2, t2);
+    fe_mul(t1, t2, t1);                    /* f^(2^50-1) */
+    fe_sq(t2, t1);
+    for (i = 1; i < 50; ++i) fe_sq(t2, t2);
+    fe_mul(t2, t2, t1);                    /* f^(2^100-1) */
+    fe_sq(t3, t2);
+    for (i = 1; i < 100; ++i) fe_sq(t3, t3);
+    fe_mul(t2, t3, t2);                    /* f^(2^200-1) */
+    fe_sq(t2, t2);
+    for (i = 1; i < 50; ++i) fe_sq(t2, t2);
+    fe_mul(t1, t2, t1);                    /* f^(2^250-1) */
+    fe_sq(t1, t1);
+    for (i = 1; i < 5; ++i) fe_sq(t1, t1); /* f^(2^255-2^5) */
+    fe_mul(h, t1, t0);                     /* f^(2^255-21) = f^(p-2) */
 }
 
-/* 编码/解码 */
-
+/* fe_tobytes: 打包 255 位 (10 limb, 交替 26/25 bit), ref10 方式 */
 static void
 fe_tobytes(uint8_t s[32], const fe h)
 {
     fe t;
     fe_copy(t, h);
-    fe_carry(t);
-    int64_t c;
-    for (int i = 0; i < 2; i++) {
-        c = (t[0] + (int64_t)(1 << 25)) >> 26; t[0] -= c << 26; t[1] += c;
-        c = (t[4] + (int64_t)(1 << 25)) >> 26; t[4] -= c << 26; t[5] += c;
-        c = (t[1] + (int64_t)(1 << 25)) >> 26; t[1] -= c << 26; t[2] += c;
-        c = (t[5] + (int64_t)(1 << 25)) >> 26; t[5] -= c << 26; t[6] += c;
-        c = (t[2] + (int64_t)(1 << 25)) >> 26; t[2] -= c << 26; t[3] += c;
-        c = (t[6] + (int64_t)(1 << 25)) >> 26; t[6] -= c << 26; t[7] += c;
-        c = (t[3] + (int64_t)(1 << 25)) >> 26; t[3] -= c << 26; t[4] += c;
-        c = (t[7] + (int64_t)(1 << 25)) >> 26; t[7] -= c << 26; t[8] += c;
-    }
-    c = (t[8] + (int64_t)(1 << 25)) >> 26; t[8] -= c << 26; t[9] += c;
-    c = (t[9] + (int64_t)(1 << 25)) >> 26; t[9] -= c << 26; t[0] += c * 19;
-    c = (t[0] + (int64_t)(1 << 25)) >> 26; t[0] -= c << 26; t[1] += c;
+    fe_carry(t);   /* 归一化 limbs 至 ±2^25/±2^24 范围 */
+    int64_t h0 = t[0], h1 = t[1], h2 = t[2], h3 = t[3], h4 = t[4];
+    int64_t h5 = t[5], h6 = t[6], h7 = t[7], h8 = t[8], h9 = t[9];
+    int64_t q, c;
+
+    /* q = floor(h/p)：先整体缩减到 [0, p-1] */
+    q = (19 * h9 + (int64_t)(1 << 24)) >> 25;
+    q = (h0 + q) >> 26;
+    q = (h1 + q) >> 25;
+    q = (h2 + q) >> 26;
+    q = (h3 + q) >> 25;
+    q = (h4 + q) >> 26;
+    q = (h5 + q) >> 25;
+    q = (h6 + q) >> 26;
+    q = (h7 + q) >> 25;
+    q = (h8 + q) >> 26;
+    q = (h9 + q) >> 25;
+    h0 += 19 * q;
+
+    /* 逐 limb 向下进位，使每个 limb 落在自身位宽内 */
+    c = h0 >> 26; h1 += c; h0 -= c << 26;
+    c = h1 >> 25; h2 += c; h1 -= c << 25;
+    c = h2 >> 26; h3 += c; h2 -= c << 26;
+    c = h3 >> 25; h4 += c; h3 -= c << 25;
+    c = h4 >> 26; h5 += c; h4 -= c << 26;
+    c = h5 >> 25; h6 += c; h5 -= c << 25;
+    c = h6 >> 26; h7 += c; h6 -= c << 26;
+    c = h7 >> 25; h8 += c; h7 -= c << 25;
+    c = h8 >> 26; h9 += c; h8 -= c << 26;
+    c = h9 >> 25; h9 -= c << 25;
+
     memset(s, 0, 32);
-    for (int i = 0; i < 10; i++) {
-        int64_t v = t[i];
-        if (v < 0) v += (1 << 26);
-        s[i * 26 / 8]     |= (uint8_t)(v << (i * 26 % 8));
-        s[i * 26 / 8 + 1] |= (uint8_t)(v >> (8 - (i * 26 % 8)));
-        s[i * 26 / 8 + 2] |= (uint8_t)(v >> (16 - (i * 26 % 8)));
-    }
+    s[0]  = (uint8_t)(h0 >> 0);
+    s[1]  = (uint8_t)(h0 >> 8);
+    s[2]  = (uint8_t)(h0 >> 16);
+    s[3]  = (uint8_t)((h0 >> 24) | (h1 << 2));
+    s[4]  = (uint8_t)(h1 >> 6);
+    s[5]  = (uint8_t)(h1 >> 14);
+    s[6]  = (uint8_t)((h1 >> 22) | (h2 << 3));
+    s[7]  = (uint8_t)(h2 >> 5);
+    s[8]  = (uint8_t)(h2 >> 13);
+    s[9]  = (uint8_t)((h2 >> 21) | (h3 << 5));
+    s[10] = (uint8_t)(h3 >> 3);
+    s[11] = (uint8_t)(h3 >> 11);
+    s[12] = (uint8_t)((h3 >> 19) | (h4 << 6));
+    s[13] = (uint8_t)(h4 >> 2);
+    s[14] = (uint8_t)(h4 >> 10);
+    s[15] = (uint8_t)(h4 >> 18);
+    s[16] = (uint8_t)(h5 >> 0);
+    s[17] = (uint8_t)(h5 >> 8);
+    s[18] = (uint8_t)(h5 >> 16);
+    s[19] = (uint8_t)((h5 >> 24) | (h6 << 1));
+    s[20] = (uint8_t)(h6 >> 7);
+    s[21] = (uint8_t)(h6 >> 15);
+    s[22] = (uint8_t)((h6 >> 23) | (h7 << 3));
+    s[23] = (uint8_t)(h7 >> 5);
+    s[24] = (uint8_t)(h7 >> 13);
+    s[25] = (uint8_t)((h7 >> 21) | (h8 << 4));
+    s[26] = (uint8_t)(h8 >> 4);
+    s[27] = (uint8_t)(h8 >> 12);
+    s[28] = (uint8_t)((h8 >> 20) | (h9 << 6));
+    s[29] = (uint8_t)(h9 >> 2);
+    s[30] = (uint8_t)(h9 >> 10);
+    s[31] = (uint8_t)(h9 >> 18);
 }
 
+/* fe_frombytes: 按交替 26/25 位边界加载 255 位 (忽略 top 符号位), ref10 方式 */
 static void
 fe_frombytes(fe h, const uint8_t s[32])
 {
-    for (int i = 0; i < 10; i++) {
-        int bit = i * 26;
-        h[i] = ((int64_t)(s[bit / 8]        & 0xFF) << (bit % 8))
-             | ((int64_t)(s[bit / 8 + 1]    & 0xFF) << (bit % 8 + 8))
-             | ((int64_t)(s[bit / 8 + 2]    & 0xFF) << (bit % 8 + 16));
-        if (bit % 8 + 24 < 32 && bit / 8 + 3 < 32)
-            h[i] |= ((int64_t)(s[bit / 8 + 3] & 0xFF) << (bit % 8 + 24));
-    }
-    /* 符号扩展 */
-    int64_t mask = ((int64_t)1 << 26) - 1;
-    for (int i = 0; i < 10; i++) {
-        if (h[i] & ((int64_t)1 << 25))
-            h[i] |= ~mask;
-    }
+    int64_t h0 = load32_le(s);
+    int64_t h1 = load24_le(s + 4) << 6;
+    int64_t h2 = load24_le(s + 7) << 5;
+    int64_t h3 = load24_le(s + 10) << 3;
+    int64_t h4 = load24_le(s + 13) << 2;
+    int64_t h5 = load32_le(s + 16);
+    int64_t h6 = load24_le(s + 20) << 7;
+    int64_t h7 = load24_le(s + 23) << 5;
+    int64_t h8 = load24_le(s + 26) << 4;
+    int64_t h9 = (load24_le(s + 29) & 0x7FFFFF) << 2;  /* 掩掉 bit 255 (符号位) */
+    int64_t c0, c1, c2, c3, c4, c5, c6, c7, c8, c9;
+
+    c9 = (h9 + (int64_t)(1 << 24)) >> 25; h0 += c9 * 19; h9 -= c9 << 25;
+    c1 = (h1 + (int64_t)(1 << 24)) >> 25; h2 += c1; h1 -= c1 << 25;
+    c3 = (h3 + (int64_t)(1 << 24)) >> 25; h4 += c3; h3 -= c3 << 25;
+    c5 = (h5 + (int64_t)(1 << 24)) >> 25; h6 += c5; h5 -= c5 << 25;
+    c7 = (h7 + (int64_t)(1 << 24)) >> 25; h8 += c7; h7 -= c7 << 25;
+    c0 = (h0 + (int64_t)(1 << 25)) >> 26; h1 += c0; h0 -= c0 << 26;
+    c2 = (h2 + (int64_t)(1 << 25)) >> 26; h3 += c2; h2 -= c2 << 26;
+    c4 = (h4 + (int64_t)(1 << 25)) >> 26; h5 += c4; h4 -= c4 << 26;
+    c6 = (h6 + (int64_t)(1 << 25)) >> 26; h7 += c6; h6 -= c6 << 26;
+    c8 = (h8 + (int64_t)(1 << 25)) >> 26; h9 += c8; h8 -= c8 << 26;
+
+    h[0] = h0; h[1] = h1; h[2] = h2; h[3] = h3; h[4] = h4;
+    h[5] = h5; h[6] = h6; h[7] = h7; h[8] = h8; h[9] = h9;
 }
 
 /* ===================================================================
@@ -464,36 +562,66 @@ static const ge_precomp ge_Bi[8] = {
      {15891264,16687234,29982253,8446207,23246483,14304230,22064071,4686194,10449496,12455269}}
 };
 
-/* 从 32 字节整数恢复 y 坐标并计算 x = sqrt((y^2 - 1)/(d*y^2 + 1)) */
-static int
-fe_sqrt(fe r, const fe x)
-{
-    fe t1, t2, t3;
-    fe_sq(t1, x);                          /* x^2 */
-    fe_sq(t2, t1);                         /* x^4 */
-    fe_mul(t2, t2, x);                     /* x^5 */
-    fe_sq(t1, t2);                         /* x^10 */
-    fe_mul(t2, t1, x);                     /* x^11 */
-    for (int i = 1; i < 5; i++) { fe_sq(t1, t2); fe_mul(t2, t1, x); }
-    fe_sq(t1, t2); fe_mul(t2, t1, x);      /* x^(2^5 - 2^0) ? */
-    fe_sq(t1, t2); fe_mul(t2, t1, x);      /* x^(2^6 - 2^1) */
-    for (int i = 0; i < 2; i++) { fe_sq(t1, t2); fe_mul(t2, t1, x); }
-    fe_sq(t1, t2); fe_mul(t2, t1, x);
-    for (int i = 0; i < 9; i++) { fe_sq(t1, t2); fe_mul(t2, t1, x); }
-    fe_sq(t1, t2); fe_mul(t2, t1, x);
-    for (int i = 0; i < 9; i++) { fe_sq(t1, t2); fe_mul(t2, t1, x); }
-    fe_sq(t1, t2); fe_mul(t2, t1, x);
-    for (int i = 0; i < 49; i++) { fe_sq(t1, t2); fe_mul(t2, t1, x); }
-    fe_copy(r, t2);
+/* sqrt(-1) mod p */
+static const int64_t fe_sqrtm1[10] = {
+    -32595792, -7943725, 9377950, 3500415, 12389472,
+    -272473, -25146209, -2005654, 326686, 11406482
+};
 
-    /* 验证 r^2 == x */
-    fe_sq(t1, r);
-    fe_sub(t2, t1, x);
-    fe_0(t1);
-    int ok = 1;
-    for (int i = 0; i < 10; i++)
-        if (t2[i] & ((int64_t)1 << 62)) ok = 0;
-    return ok;
+/* fe_pow22523: r = x^(2^252 - 3) (ref10 pow22523 加法链, 用于开方) */
+static void
+fe_pow22523(fe out, const fe z)
+{
+    fe t0, t1, t2;
+    int i;
+
+    fe_sq(t0, z);                          /* z^2 */
+    fe_sq(t1, t0); fe_sq(t1, t1);          /* z^8 */
+    fe_mul(t1, z, t1);                     /* z^9 */
+    fe_mul(t0, t0, t1);                    /* z^11 */
+    fe_sq(t0, t0);                         /* z^22 */
+    fe_mul(t0, t1, t0);                    /* z^31 */
+    fe_sq(t1, t0);
+    for (i = 1; i < 5; ++i) fe_sq(t1, t1);
+    fe_mul(t0, t1, t0);                    /* z^(2^10-1) */
+    fe_sq(t1, t0);
+    for (i = 1; i < 10; ++i) fe_sq(t1, t1);
+    fe_mul(t1, t1, t0);                    /* z^(2^20-1) */
+    fe_sq(t2, t1);
+    for (i = 1; i < 20; ++i) fe_sq(t2, t2);
+    fe_mul(t1, t2, t1);                    /* z^(2^40-1) */
+    fe_sq(t1, t1);
+    for (i = 1; i < 10; ++i) fe_sq(t1, t1);
+    fe_mul(t0, t1, t0);                    /* z^(2^50-1) */
+    fe_sq(t1, t0);
+    for (i = 1; i < 50; ++i) fe_sq(t1, t1);
+    fe_mul(t1, t1, t0);                    /* z^(2^100-1) */
+    fe_sq(t2, t1);
+    for (i = 1; i < 100; ++i) fe_sq(t2, t2);
+    fe_mul(t1, t2, t1);                    /* z^(2^200-1) */
+    fe_sq(t1, t1);
+    for (i = 1; i < 50; ++i) fe_sq(t1, t1);
+    fe_mul(t0, t1, t0);                    /* z^(2^250-1) */
+    fe_sq(t0, t0); fe_sq(t0, t0);          /* z^(4*(2^250-1)) */
+    fe_mul(out, t0, z);                    /* z^(2^252-3) */
+}
+
+static int
+fe_isnonzero(const fe f)
+{
+    uint8_t s[32];
+    fe_tobytes(s, f);
+    int r = 0;
+    for (int i = 0; i < 32; i++) r |= s[i];
+    return r != 0;
+}
+
+static int
+fe_isnegative(const fe f)
+{
+    uint8_t s[32];
+    fe_tobytes(s, f);
+    return s[0] & 1;
 }
 
 static void
@@ -504,41 +632,42 @@ ge_p3_to_p2(ge_p2 *r, const ge_p3 *p)
     fe_copy(r->Z, p->Z);
 }
 
-/* 从 y 坐标恢复点 */
+/* 从 32 字节整数恢复点 (ref10 算法: 恢复 y, 计算 x = sqrt((y^2-1)/(d*y^2+1))) */
 static int
 ge_frombytes_vartime(ge_p3 *h, const uint8_t s[32])
 {
     fe u, v, v3, vxx, check;
+
     fe_frombytes(h->Y, s);
     fe_1(h->Z);
-    fe_sq(u, h->Y);                       /* y^2 */
-    fe_mul(v, u, fe_d);                   /* dy^2 */
-    fe_sub(u, u, h->Z);                   /* y^2 - 1 */
-    fe_add(v, v, h->Z);                   /* dy^2 + 1 */
+    fe_sq(u, h->Y);                        /* u = y^2 */
+    fe_mul(v, u, fe_d);                    /* v = d*y^2 */
+    fe_sub(u, u, h->Z);                    /* u = y^2 - 1 */
+    fe_add(v, v, h->Z);                    /* v = d*y^2 + 1 */
 
     fe_sq(v3, v);
-    fe_mul(v3, v3, v);                    /* v^3 */
-    fe_sq(u, u);
-    fe_mul(v3, v3, u);                    /* v^3 * u^2 */
-    fe_mul(vxx, v3, v);                   /* v^4 * u^2 */
+    fe_mul(v3, v3, v);                     /* v3 = v^3 */
+    fe_sq(h->X, v3);
+    fe_mul(h->X, h->X, v);
+    fe_mul(h->X, h->X, u);                 /* x = u*v^7 */
 
-    /* x = u/v * sqrt(-1) ... 简化: x = sqrt(u/v) */
-    /* 计算 x = (u/v)^((p+3)/8) 然后检查 */
-    fe_sq(u, u);     fe_mul(u, u, v);     /* u^2 * v */
-    fe_mul(v3, u, v); fe_sq(v3, v3);
-    fe_mul(v3, v3, v);
-    fe_mul(v3, v3, u);                    /* = u/v ... 太复杂, 直接用 sqrt */
+    fe_pow22523(h->X, h->X);               /* x = (u*v^7)^((q-5)/8) */
+    fe_mul(h->X, h->X, v3);
+    fe_mul(h->X, h->X, u);                 /* x = u*v^3*(u*v^7)^((q-5)/8) */
 
-    if (!fe_sqrt(h->X, u)) {
-        fe_mul(u, u, fe_d2);
-        if (!fe_sqrt(h->X, u)) return -1;
+    fe_sq(vxx, h->X);
+    fe_mul(vxx, vxx, v);
+    fe_sub(check, vxx, u);                 /* v*x^2 - u */
+    if (fe_isnonzero(check)) {
+        fe_add(check, vxx, u);             /* v*x^2 + u */
+        if (fe_isnonzero(check)) return -1;
+        fe_mul(h->X, h->X, fe_sqrtm1);
     }
 
-    /* 根据符号位修正 x */
-    if ((h->X[0] & 1) != ((uint32_t)s[31] >> 7))
+    /* 根据符号位 (s[31] 最高位) 修正 x 的奇偶 */
+    if (fe_isnegative(h->X) != (s[31] >> 7))
         fe_neg(h->X, h->X);
 
-    fe_1(h->T);
     fe_mul(h->T, h->X, h->Y);
     return 0;
 }
