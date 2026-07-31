@@ -187,7 +187,14 @@ SUPPORT_OBJS   += $(BUILD)/netdb/gethost.o $(BUILD)/netdb/getserv.o \
                   $(BUILD)/netdb/herror.o $(BUILD)/netdb/h_errno.o
 SYSCALL_GATE_OBJ := $(BUILD)/internal/arch/$(ARCH)/syscall.o
 CRT1_OBJ := $(BUILD)/crt1.o
+# dlfcn.c is a hardcoded ELF64/x86_64 loader (EM_X86_64=62, ELF64 structs);
+# it has no meaning on 32-bit targets, where mcc's i386 backend also lacks
+# the Kl extub support it needs, so exclude it there.
+ifeq ($(filter $(ARCH),i386 arm),$(ARCH))
+DL_OBJS :=
+else
 DL_OBJS := $(BUILD)/dlfcn.o
+endif
 TERMIOS_OBJS := $(BUILD)/termios/termios.o
 TIME_OBJS    := $(BUILD)/time/time.o
 LIBC_LIB := $(BUILD)/libc-meuos.a
