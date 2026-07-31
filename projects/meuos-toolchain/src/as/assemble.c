@@ -432,11 +432,16 @@ parse_reference(const char *text, char **symbol, char *modifier,
 	} else
 		modifier[0] = '\0';
 	split = NULL;
-	for (end = buffer + 1; *end; ++end)
-		if ((*end == '+' || *end == '-') && end[-1] != 'e' && end[-1] != 'E') {
+	for (end = buffer + 1; *end; ++end) {
+		int sci_e = 0;
+		if (end[-1] == 'e' || end[-1] == 'E')
+			if (end > buffer + 1 && isdigit((unsigned char)end[-2]))
+				sci_e = 1;  /* 1e+5: '+' follows a scientific mantissa */
+		if ((*end == '+' || *end == '-') && !sci_e) {
 			split = end;
 			break;
 		}
+	}
 	if (split) {
 		*split++ = '\0';
 		if (parse_integer(split, addend) != 0)

@@ -152,11 +152,16 @@ parse_reference(const char *text, char **symbol, char *modifier,
 	} else
 		modifier[0] = '\0';
 	split = NULL;
-	for (end = buffer + 1; *end; ++end)
-		if ((*end == '+' || *end == '-') && end[-1] != 'e' && end[-1] != 'E') {
+	for (end = buffer + 1; *end; ++end) {
+		int sci_e = 0;
+		if (end[-1] == 'e' || end[-1] == 'E')
+			if (end > buffer + 1 && isdigit((unsigned char)end[-2]))
+				sci_e = 1;  /* 1e+5: '+' follows a scientific mantissa */
+		if ((*end == '+' || *end == '-') && !sci_e) {
 			split = end;
 			break;
 		}
+	}
 	if (split) {
 		*split++ = '\0';
 		if (parse_integer(split, addend) != 0)
@@ -463,7 +468,10 @@ emit_modrm(unsigned char *buf, size_t *size, struct mt_insn *out,
 		fix_offset = *size;
 		if (rm->symbol) {
 			emit_le(buf, size, 0, 4);
-			set_fixup(out, fix_offset, 4, fix_type, rm->symbol, fix_addend);
+			/* Symbol offset (e.g. `lea sym+248(%rip)`) must be added to
+			 * the relocation addend, or the +248 is silently dropped. */
+			set_fixup(out, fix_offset, 4, fix_type, rm->symbol,
+			         rm->addend + fix_addend);
 		} else {
 			emit_le(buf, size, (uint32_t)disp, 4);
 		}
@@ -481,7 +489,8 @@ emit_modrm(unsigned char *buf, size_t *size, struct mt_insn *out,
 		fix_offset = *size;
 		if (rm->symbol) {
 			emit_le(buf, size, 0, 4);
-			set_fixup(out, fix_offset, 4, fix_type, rm->symbol, fix_addend);
+			set_fixup(out, fix_offset, 4, fix_type, rm->symbol,
+			         rm->addend + fix_addend);
 		} else {
 			emit_le(buf, size, (uint32_t)disp, 4);
 		}
