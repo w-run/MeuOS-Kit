@@ -151,7 +151,7 @@ SYSCALL_OBJS   := $(addprefix $(BUILD)/syscall/, \
                   getpid.o gettid.o getcwd.o chdir.o \
                   dup.o dup2.o pipe.o waitpid.o wait.o wait4.o nanosleep.o \
                   clock_gettime.o getdents64.o socketcall.o chmod.o fchmod.o \
-                  access.o sched_yield.o \
+                  access.o sched_yield.o select.o \
                   fchown.o chown.o getuid.o getgid.o geteuid.o getegid.o \
                   umask.o isatty.o fchdir.o symlink.o link.o readlink.o \
                   unlink.o mkdir.o rmdir.o rename.o mkstemp.o mkstemps.o \
@@ -287,6 +287,7 @@ check: $(ATOMIC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/assert test/assert.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/c11-headers test/c11_headers.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/syscall-fs test/syscall_fs.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/select test/select.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/process test/process.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/kernel-interfaces test/kernel_interfaces.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/socket test/socket.c
@@ -324,6 +325,7 @@ check: $(ATOMIC_LIB)
 	/tmp/meuos-libc-check/assert
 	/tmp/meuos-libc-check/c11-headers
 	/tmp/meuos-libc-check/syscall-fs
+	/tmp/meuos-libc-check/select
 	/tmp/meuos-libc-check/process
 	/tmp/meuos-libc-check/kernel-interfaces
 	/tmp/meuos-libc-check/socket

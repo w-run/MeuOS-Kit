@@ -44,6 +44,11 @@ _Noreturn void _exit(int);
 
 pid_t wait(int *);
 
+/* glibc 兼容：<unistd.h> 也声明 select()（fd_set 来自 <sys/types.h>）。
+ * 完整定义见 <sys/select.h>。 */
+#include <time.h>
+int select(int, fd_set *, fd_set *, fd_set *, struct timeval *);
+
 #endif
 int fchmod(int, mode_t);
 int fchown(int, uid_t, gid_t);

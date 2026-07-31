@@ -29,6 +29,7 @@ __syscall_number(long number)
 	case 12: return 45; /* brk */
 	case 21: return 33; /* access */
 	case 22: return 42; /* pipe */
+	case 23: return 82; /* select */
 	case 24: return 158; /* sched_yield */
 	case 32: return 41; /* dup */
 	case 33: return 63; /* dup2 */
@@ -87,6 +88,7 @@ __syscall_number(long number)
 	case 16:  return 54;   /* ioctl */
 	case 21:  return 33;   /* access */
 	case 22:  return 42;   /* pipe */
+	case 23:  return 142;  /* select */
 	case 24:  return 158;  /* sched_yield */
 	case 28:  return 220;  /* madvise */
 	case 32:  return 41;   /* dup */
@@ -167,6 +169,7 @@ __syscall_number(long number)
 	case 13:  return 134;  /* rt_sigaction */
 	case 14:  return 135;  /* rt_sigprocmask */
 	case 16:  return 29;   /* ioctl */
+	case 23:  return 72;   /* pselect6（asm-generic 无 select，select.c 走 pselect6） */
 	case 24:  return 124;  /* sched_yield */
 	case 32:  return 23;   /* dup */
 	case 35:  return 101;  /* nanosleep */
