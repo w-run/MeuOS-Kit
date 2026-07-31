@@ -406,11 +406,28 @@ parse_operand(char *text, struct x86_op *op)
 /* ---- Encoding helpers ------------------------------------------------- */
 
 static void
-emit_rex(unsigned char *buf, size_t *size, int w, int r, int b)
+emit_rex(unsigned char *buf, size_t *size, int w, int r, int b, int x)
 {
-	if (w || r >= 8 || b >= 8)
+	if (w || r >= 8 || b >= 8 || x >= 8)
 		emit_u8(buf, size, 0x40 | (w ? 8 : 0) |
-		        (r >= 8 ? 4 : 0) | (b >= 8 ? 1 : 0));
+		        (r >= 8 ? 4 : 0) | (x >= 8 ? 2 : 0) | (b >= 8 ? 1 : 0));
+}
+
+/* 从 x86_op（寄存器或内存操作数）推导 REX.B（base）与 REX.X（SIB index）。 */
+static void
+emit_rex_rm(unsigned char *buf, size_t *size, int w, int r,
+            const struct x86_op *rm)
+{
+	int b = rm->kind == OP_REG ? rm->reg : rm->base;
+	int x = rm->kind == OP_MEM ? rm->index : -1;
+	/* 8 位低字节寄存器（sil/spl/bpl/dil，编号 4-7）作操作数时必须带 REX
+	 * 前缀，否则无 REX 时按 ah/ch/dh/bh 解码。movzx/movsx 等源为 8 位
+	 * 寄存器的指令走本函数，必须补上该前缀。 */
+	int need_rex = (rm->kind == OP_REG && rm->width == 1 &&
+	                rm->reg >= 4 && rm->reg < 8);
+	if (w || r >= 8 || b >= 8 || x >= 8 || need_rex)
+		emit_u8(buf, size, 0x40 | (w ? 8 : 0) |
+		        (r >= 8 ? 4 : 0) | (x >= 8 ? 2 : 0) | (b >= 8 ? 1 : 0));
 }
 
 static void
@@ -472,8 +489,6 @@ emit_modrm(unsigned char *buf, size_t *size, struct mt_insn *out,
 	}
 	if (base < 0 || base >= 16)
 		return;
-	if (rm->index >= 8)
-		return;
 	/* A symbol displacement with a base register needs the full 32-bit
 	 * displacement form (mod=2) so the linker can patch the addend. */
 	if (rm->symbol) {
@@ -487,7 +502,7 @@ emit_modrm(unsigned char *buf, size_t *size, struct mt_insn *out,
 	if (rm->index >= 0 || base == 4 || base == 12) {
 		unsigned scale = rm->scale == 8 ? 3 : rm->scale == 4 ? 2 :
 		                 rm->scale == 2 ? 1 : 0;
-		unsigned index = rm->index >= 0 ? (unsigned)rm->index : 4;
+		unsigned index = rm->index >= 0 ? (unsigned)rm->index & 7 : 4;
 		modrm = ((unsigned)mod << 6) | ((unsigned)reg & 7) << 3 | 4;
 		emit_u8(buf, size, modrm);
 		emit_u8(buf, size, (scale << 6) | (index << 3) |
@@ -543,8 +558,7 @@ emit_rm_reg(unsigned char *buf, size_t *size, struct mt_insn *out,
 	if (width == 1)
 		emit_byte_rex(buf, size, reg,
 		              rm->kind == OP_REG ? rm->reg : -1);
-	emit_rex(buf, size, width == 8, reg,
-	          rm->kind == OP_REG ? rm->reg : rm->base);
+	emit_rex_rm(buf, size, width == 8, reg, rm);
 	emit_u8(buf, size, opcode);
 	/* PC-relative relocs (PC32, PLT32, GOTPCREL) subtract the 4-byte
 	 * field from the addend; absolute and TLS relocs carry the raw
@@ -566,8 +580,7 @@ emit_binary_immediate(unsigned char *buf, size_t *size, struct mt_insn *out,
 	if (width == 1)
 		emit_byte_rex(buf, size, 0,
 		              dst->kind == OP_REG ? dst->reg : -1);
-	emit_rex(buf, size, width == 8, 0,
-	          dst->kind == OP_REG ? dst->reg : dst->base);
+	emit_rex_rm(buf, size, width == 8, 0, dst);
 	emit_u8(buf, size, width == 1 ? 0x80 : 0x81);
 	emit_modrm(buf, size, out, ext, dst, R_X86_64_PC32, -4);
 	emit_le(buf, size, (uint32_t)src->displacement, width == 1 ? 1 : 4);
@@ -817,7 +830,7 @@ x86_64_encode_insn(const struct mt_target *target,
 			goto done;
 		}
 		if (op[0].kind == OP_REG) {
-			emit_rex(out->bytes, &out->size, 0, 0, op[0].reg);
+			emit_rex(out->bytes, &out->size, 0, 0, op[0].reg, -1);
 			emit_u8(out->bytes, &out->size, 0xff);
 			emit_modrm(out->bytes, &out->size, out, 2, &op[0], R_X86_64_PC32, -4);
 			goto done;
@@ -849,7 +862,7 @@ x86_64_encode_insn(const struct mt_target *target,
 		code = condition_code(base + 3);
 		if (code < 0 || op[0].kind != OP_REG)
 			goto unsupported;
-		emit_rex(out->bytes, &out->size, 0, 0, op[0].reg);
+		emit_rex_rm(out->bytes, &out->size, 0, 0, &op[0]);
 		emit_u8(out->bytes, &out->size, 0x0f);
 		emit_u8(out->bytes, &out->size, 0x90 | code);
 		emit_modrm(out->bytes, &out->size, out, 0, &op[0], R_X86_64_PC32, -4);
@@ -864,7 +877,7 @@ x86_64_encode_insn(const struct mt_target *target,
 		out->required_features |= MT_FEATURE_SSE4_2 | MT_FEATURE_POPCNT;
 		width = op[0].width;
 		emit_u8(out->bytes, &out->size, 0xf3);
-		emit_rex(out->bytes, &out->size, width == 8, op[0].reg, op[1].reg);
+		emit_rex(out->bytes, &out->size, width == 8, op[0].reg, op[1].reg, -1);
 		emit_u8(out->bytes, &out->size, 0x0f);
 		emit_u8(out->bytes, &out->size, 0xb8);
 		emit_modrm(out->bytes, &out->size, out, op[0].reg, &op[1],
@@ -876,8 +889,7 @@ x86_64_encode_insn(const struct mt_target *target,
 		if (code < 0 || op[1].kind != OP_REG)
 			goto unsupported;
 		width = op[1].width;
-		emit_rex(out->bytes, &out->size, width == 8, op[1].reg,
-		          op[0].kind == OP_REG ? op[0].reg : -1);
+		emit_rex_rm(out->bytes, &out->size, width == 8, op[1].reg, &op[0]);
 		emit_u8(out->bytes, &out->size, 0x0f);
 		emit_u8(out->bytes, &out->size, 0x40 | code);
 		emit_modrm(out->bytes, &out->size, out, op[1].reg, &op[0],
@@ -894,15 +906,13 @@ x86_64_encode_insn(const struct mt_target *target,
 		if (op[1].kind != OP_REG && op[1].kind != OP_MEM)
 			goto unsupported;
 		if (op[0].kind == OP_IMM) {
-			emit_rex(out->bytes, &out->size, width == 8, 0,
-			          op[1].kind == OP_REG ? op[1].reg : op[1].base);
+			emit_rex_rm(out->bytes, &out->size, width == 8, 0, &op[1]);
 			emit_u8(out->bytes, &out->size, width == 1 ? 0xc0 : 0xc1);
 			emit_modrm(out->bytes, &out->size, out, ext, &op[1],
 			           R_X86_64_PC32, -4);
 			emit_le(out->bytes, &out->size, (uint8_t)op[0].displacement, 1);
 		} else if (op[0].kind == OP_REG && op[0].reg == 1 && op[0].width == 1) {
-			emit_rex(out->bytes, &out->size, width == 8, 0,
-			          op[1].kind == OP_REG ? op[1].reg : op[1].base);
+			emit_rex_rm(out->bytes, &out->size, width == 8, 0, &op[1]);
 			emit_u8(out->bytes, &out->size, width == 1 ? 0xd2 : 0xd3);
 			emit_modrm(out->bytes, &out->size, out, ext, &op[1],
 			           R_X86_64_PC32, -4);
@@ -918,8 +928,7 @@ x86_64_encode_insn(const struct mt_target *target,
 		        suffix_char == 'l' ? 4 : 8;
 		if (op[0].kind != OP_REG && op[0].kind != OP_MEM)
 			goto unsupported;
-		emit_rex(out->bytes, &out->size, width == 8, 0,
-		          op[0].kind == OP_REG ? op[0].reg : -1);
+		emit_rex_rm(out->bytes, &out->size, width == 8, 0, &op[0]);
 		emit_u8(out->bytes, &out->size, width == 1 ? 0xf6 : 0xf7);
 		emit_modrm(out->bytes, &out->size, out, ext, &op[0], R_X86_64_PC32, -4);
 		goto done;
@@ -1078,8 +1087,7 @@ x86_64_encode_insn(const struct mt_target *target,
 		else goto unsupported;
 		width = op[1].width;
 		if (source_width == 4 && width == 8) {
-			emit_rex(out->bytes, &out->size, 1, op[1].reg,
-			          op[0].kind == OP_REG ? op[0].reg : -1);
+			emit_rex_rm(out->bytes, &out->size, 1, op[1].reg, &op[0]);
 			emit_u8(out->bytes, &out->size, 0x63);
 			emit_modrm(out->bytes, &out->size, out, op[1].reg, &op[0],
 			           R_X86_64_PC32, -4);
@@ -1088,8 +1096,7 @@ x86_64_encode_insn(const struct mt_target *target,
 			         signed_move ? 0xbe : 0xb6;
 			if (source_width == 4)
 				goto unsupported;
-			emit_rex(out->bytes, &out->size, width == 8, op[1].reg,
-			          op[0].kind == OP_REG ? op[0].reg : -1);
+			emit_rex_rm(out->bytes, &out->size, width == 8, op[1].reg, &op[0]);
 			emit_u8(out->bytes, &out->size, 0x0f);
 			emit_u8(out->bytes, &out->size, opcode);
 			emit_modrm(out->bytes, &out->size, out, op[1].reg, &op[0],
@@ -1104,11 +1111,11 @@ x86_64_encode_insn(const struct mt_target *target,
 		if (op[0].kind == OP_IMM && op[1].kind == OP_REG) {
 			if (width == 8 && (op[0].displacement > INT32_MAX ||
 			                   op[0].displacement < INT32_MIN)) {
-				emit_rex(out->bytes, &out->size, 1, 0, op[1].reg);
+				emit_rex(out->bytes, &out->size, 1, 0, op[1].reg, -1);
 				emit_u8(out->bytes, &out->size, 0xb8 + (op[1].reg & 7));
 				emit_le(out->bytes, &out->size, (uint64_t)op[0].displacement, 8);
 			} else {
-				emit_rex(out->bytes, &out->size, width == 8, 0, op[1].reg);
+				emit_rex(out->bytes, &out->size, width == 8, 0, op[1].reg, -1);
 				emit_u8(out->bytes, &out->size, width == 1 ? 0xb0 : 0xb8 +
 				        (op[1].reg & 7));
 				emit_le(out->bytes, &out->size, (uint64_t)op[0].displacement,
@@ -1124,8 +1131,7 @@ x86_64_encode_insn(const struct mt_target *target,
 				fix_type = R_X86_64_TPOFF32;
 			if (op[1].kind == OP_MEM && op[1].seg)
 				emit_u8(out->bytes, &out->size, op[1].seg);
-			emit_rex(out->bytes, &out->size, width == 8, 0,
-			          op[1].kind == OP_REG ? op[1].reg : op[1].base);
+			emit_rex_rm(out->bytes, &out->size, width == 8, 0, &op[1]);
 			emit_u8(out->bytes, &out->size, width == 1 ? 0xc6 : 0xc7);
 			emit_modrm(out->bytes, &out->size, out, 0, &op[1], fix_type,
 			           fix_type == R_X86_64_PC32 ? -4 : 0);
@@ -1149,8 +1155,7 @@ x86_64_encode_insn(const struct mt_target *target,
 		if (op[0].kind == OP_MEM && op[0].symbol &&
 		    strcmp(op[0].modifier, "tpoff") == 0)
 			fix_type = R_X86_64_TPOFF32;
-		emit_rex(out->bytes, &out->size, width == 8, op[1].reg,
-		          op[0].kind == OP_REG ? op[0].reg : -1);
+		emit_rex_rm(out->bytes, &out->size, width == 8, op[1].reg, &op[0]);
 		emit_u8(out->bytes, &out->size, 0x8d);
 		/* Only the %rip-relative PC32 form subtracts the 4-byte field;
 		 * TPOFF32 carries the raw symbol addend. */
@@ -1177,9 +1182,8 @@ x86_64_encode_insn(const struct mt_target *target,
 				emit_byte_rex(out->bytes, &out->size,
 				              op[0].kind == OP_REG ? op[0].reg : op[1].reg,
 				              op[1].kind == OP_REG ? op[1].reg : -1);
-			emit_rex(out->bytes, &out->size, width == 8,
-			          op[0].kind == OP_REG ? op[0].reg : op[1].reg,
-			          op[1].kind == OP_REG ? op[1].reg : op[1].base);
+			emit_rex_rm(out->bytes, &out->size, width == 8,
+			          op[0].kind == OP_REG ? op[0].reg : op[1].reg, &op[1]);
 			emit_u8(out->bytes, &out->size, 0x0f);
 			emit_u8(out->bytes, &out->size, opcode);
 			emit_modrm(out->bytes, &out->size, out,
@@ -1196,8 +1200,7 @@ x86_64_encode_insn(const struct mt_target *target,
 		if (width == 1)
 			emit_byte_rex(out->bytes, &out->size, 0,
 			              op[0].kind == OP_REG ? op[0].reg : -1);
-		emit_rex(out->bytes, &out->size, width == 8, 0,
-		          op[0].kind == OP_REG ? op[0].reg : -1);
+		emit_rex_rm(out->bytes, &out->size, width == 8, 0, &op[0]);
 		emit_u8(out->bytes, &out->size, width == 1 ? 0xfe : 0xff);
 		emit_modrm(out->bytes, &out->size, out, opcode, &op[0],
 		           R_X86_64_PC32, -4);
@@ -1206,8 +1209,7 @@ x86_64_encode_insn(const struct mt_target *target,
 	if (strncmp(base, "imul", 4) == 0 && (n == 2 || n == 3)) {
 		if (n == 3 && op[0].kind == OP_IMM && op[2].kind == OP_REG) {
 			width = op[2].width;
-			emit_rex(out->bytes, &out->size, width == 8, op[2].reg,
-			          op[1].kind == OP_REG ? op[1].reg : op[1].base);
+			emit_rex_rm(out->bytes, &out->size, width == 8, op[2].reg, &op[1]);
 			emit_u8(out->bytes, &out->size, 0x69);
 			emit_modrm(out->bytes, &out->size, out, op[2].reg, &op[1],
 			           R_X86_64_PC32, -4);
@@ -1216,8 +1218,7 @@ x86_64_encode_insn(const struct mt_target *target,
 		}
 		if (n == 2 && op[1].kind == OP_REG) {
 			width = op[1].width;
-			emit_rex(out->bytes, &out->size, width == 8, op[1].reg,
-			          op[0].kind == OP_REG ? op[0].reg : -1);
+			emit_rex_rm(out->bytes, &out->size, width == 8, op[1].reg, &op[0]);
 			emit_u8(out->bytes, &out->size, 0x0f);
 			emit_u8(out->bytes, &out->size, 0xaf);
 			emit_modrm(out->bytes, &out->size, out, op[1].reg, &op[0],
@@ -1250,8 +1251,7 @@ x86_64_encode_insn(const struct mt_target *target,
 		if (width == 1)
 			emit_byte_rex(out->bytes, &out->size, 0,
 			              op[0].kind == OP_REG ? op[0].reg : -1);
-		emit_rex(out->bytes, &out->size, width == 8, 0,
-		          op[0].kind == OP_REG ? op[0].reg : -1);
+		emit_rex_rm(out->bytes, &out->size, width == 8, 0, &op[0]);
 		emit_u8(out->bytes, &out->size, width == 1 ? 0xf6 : 0xf7);
 		emit_modrm(out->bytes, &out->size, out, 3, &op[0], R_X86_64_PC32, -4);
 		goto done;
