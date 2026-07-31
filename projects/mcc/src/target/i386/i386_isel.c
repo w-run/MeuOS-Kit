@@ -919,16 +919,6 @@ amatch(Addr *a, Num *tn, Ref r, Fn *fn)
 	ri = adisp(&co, tn, ri, fn, s);
 	*a = (Addr){co, rb, ri, s};
 
-	/* On i386 addressing components must be 32-bit registers; a
-	 * 64-bit (Kl) temp used as base or index would later be resolved
-	 * to a stack slot by rega (kl_in_reg==0) and emit cannot encode
-	 * it. seladdr() truncates Kl address operands before this point,
-	 * so this is only a guard against other paths. */
-	if (rtype(rb) == RTmp && fn->tmp[rb.val].cls != Kw)
-		return 0;
-	if (rtype(ri) == RTmp && fn->tmp[ri.val].cls != Kw)
-		return 0;
-
 	if (rtype(ri) == RTmp)
 	if (fn->tmp[ri.val].slot != -1) {
 		if (a->scale != 1
