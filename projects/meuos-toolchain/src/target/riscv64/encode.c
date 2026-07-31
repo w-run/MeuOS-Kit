@@ -718,8 +718,9 @@ riscv64_encode_insn(const struct mt_target *target,
 		if (strcmp(mnemonic, "remuw") == 0) { emit32(out->bytes, r_type(0x3B, rd, 7, rs1, rs2, 0x01)); return 0; }
 	}
 
-	/* Float load/store with a symbol address and an explicit temporary
-	 * register: `fld rd, symbol, tmp` (mcc's address form).  Expanded
+	/* Load/Store with a symbol address and an explicit temporary
+	 * register: `ld rd, symbol, tmp` / `fld rd, symbol, tmp`
+	 * (mcc's address form for stores and float loads).  Expanded
 	 * with absolute addressing (lui + load) — the same R_RISCV_HI20/
 	 * R_RISCV_LO12 pair mcc's `lui/addi` address loads use — because
 	 * the R_RISCV_PCREL_LO12 reloc in this linker has no auipc label
@@ -728,8 +729,23 @@ riscv64_encode_insn(const struct mt_target *target,
 		int is_load = 0;
 		unsigned funct3 = 0;
 		uint32_t op = 0;
-		if (strcmp(mnemonic, "flw") == 0) { is_load = 1; op = 0x07; funct3 = 2; }
+		/* integer loads (I-type, opcode 0x03) */
+		if (strcmp(mnemonic, "lb") == 0)  { is_load = 1; op = 0x03; funct3 = 0; }
+		else if (strcmp(mnemonic, "lh") == 0)  { is_load = 1; op = 0x03; funct3 = 1; }
+		else if (strcmp(mnemonic, "lw") == 0)  { is_load = 1; op = 0x03; funct3 = 2; }
+		else if (strcmp(mnemonic, "ld") == 0)  { is_load = 1; op = 0x03; funct3 = 3; }
+		else if (strcmp(mnemonic, "lbu") == 0) { is_load = 1; op = 0x03; funct3 = 4; }
+		else if (strcmp(mnemonic, "lhu") == 0) { is_load = 1; op = 0x03; funct3 = 5; }
+		else if (strcmp(mnemonic, "lwu") == 0) { is_load = 1; op = 0x03; funct3 = 6; }
+		/* integer stores (S-type, opcode 0x23) */
+		else if (strcmp(mnemonic, "sb") == 0) { op = 0x23; funct3 = 0; }
+		else if (strcmp(mnemonic, "sh") == 0) { op = 0x23; funct3 = 1; }
+		else if (strcmp(mnemonic, "sw") == 0) { op = 0x23; funct3 = 2; }
+		else if (strcmp(mnemonic, "sd") == 0) { op = 0x23; funct3 = 3; }
+		/* float loads (I-type, opcode 0x07) */
+		else if (strcmp(mnemonic, "flw") == 0) { is_load = 1; op = 0x07; funct3 = 2; }
 		else if (strcmp(mnemonic, "fld") == 0) { is_load = 1; op = 0x07; funct3 = 3; }
+		/* float stores (S-type, opcode 0x27) */
 		else if (strcmp(mnemonic, "fsw") == 0) { op = 0x27; funct3 = 2; }
 		else if (strcmp(mnemonic, "fsd") == 0) { op = 0x27; funct3 = 3; }
 		else goto try_fpsym;
@@ -744,14 +760,48 @@ riscv64_encode_insn(const struct mt_target *target,
 				emit32(out->bytes + 4, s_type(op, funct3, tmp, regA, 0));
 			set_fixup(out, 0, 4, 26 /* R_RISCV_HI20 */,
 			           ops[1].sym, ops[1].addend);
-			set_fixup2(out, 4, 4, is_load ? 24 /* R_RISCV_LO12_I */
-			                                : 25 /* R_RISCV_LO12_S */,
+			set_fixup2(out, 4, 4, is_load ? 27 /* R_RISCV_LO12_I */
+			                                : 28 /* R_RISCV_LO12_S */,
 			           ops[1].sym, ops[1].addend);
 			return 0;
 		}
 	}
+
 try_fpsym:
 
+	/* Integer load from a bare symbol address with no base register:
+	 *   ld/lw/lb/lbu/lh/lhu/lwu rd, symbol
+	 * mcc's fixmem leaves SGlo addresses as direct symbol references,
+	 * producing this two-operand form.  Expanded with absolute
+	 * addressing (lui + load) — the same R_RISCV_HI20/R_RISCV_LO12_I
+	 * pair the la pseudo uses — with rd itself as the address base,
+	 * since rd is the load target.  Stores from a bare symbol are not
+	 * handled here (mcc emits an explicit t6 operand for those). */
+	if (nops == 2 && ops[0].kind == 1 && ops[1].kind == 4) {
+		unsigned funct3 = 0;
+		uint32_t op = 0;
+		if (strcmp(mnemonic, "lb") == 0)  { op = 0x03; funct3 = 0; }
+		else if (strcmp(mnemonic, "lh") == 0)  { op = 0x03; funct3 = 1; }
+		else if (strcmp(mnemonic, "lw") == 0)  { op = 0x03; funct3 = 2; }
+		else if (strcmp(mnemonic, "ld") == 0)  { op = 0x03; funct3 = 3; }
+		else if (strcmp(mnemonic, "lbu") == 0) { op = 0x03; funct3 = 4; }
+		else if (strcmp(mnemonic, "lhu") == 0) { op = 0x03; funct3 = 5; }
+		else if (strcmp(mnemonic, "lwu") == 0) { op = 0x03; funct3 = 6; }
+		else goto try_loadmem;
+		{
+			unsigned rd = (unsigned)ops[0].reg;
+			out->size = 8;
+			emit32(out->bytes, u_type(0x37, rd, 0));                /* lui rd, 0 */
+			emit32(out->bytes + 4, i_type(op, rd, funct3, rd, 0));  /* ld rd, 0(rd) */
+			set_fixup(out, 0, 4, 26 /* R_RISCV_HI20 */,
+			           ops[1].sym, ops[1].addend);
+			set_fixup2(out, 4, 4, 27 /* R_RISCV_LO12_I */,
+			           ops[1].sym, ops[1].addend);
+			return 0;
+		}
+	}
+
+try_loadmem:
 	/* Load/Store (integer + float) — single dispatch on mem operand.
 	 * Unmatched mem mnemonics fall through to the atomic handlers. */
 	if (nops == 2 && ops[1].kind == 3) {
