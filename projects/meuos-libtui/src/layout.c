@@ -591,15 +591,15 @@ tui_layout_t *tui_layout_dual(int sidebar_width, const char *sidebar_title,
     tui_layout_t *root = tui_layout_hbox(0);
     if (!root) return NULL;
 
-    tui_layout_t *side_panel = tui_panel_new(
+    tui_layout_t *side_panel = tui_box_new(
         sidebar_title ? sidebar_title : "",
-        side_fn, side_data);
+        0, side_fn, side_data);
     if (!side_panel) { tui_layout_free(root); return NULL; }
     tui_layout_add(root, side_panel, sidebar_width);
 
-    tui_layout_t *content_panel = tui_panel_new(
+    tui_layout_t *content_panel = tui_box_new(
         "",
-        content_fn, content_data);
+        0, content_fn, content_data);
     if (!content_panel) { tui_layout_free(root); return NULL; }
     tui_layout_add(root, content_panel, 1);
 

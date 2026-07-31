@@ -1,6 +1,6 @@
 /* demo_showcase.c — meuos-libtui V3 组件展示
  *
- * 集中演示所有 widgets_v3 组件:
+ * 集中演示所有 viz 组件:
  *   - Banner / Marquee / Pulse
  *   - Stat cards (大数字)
  *   - Gauge (4 风格)
@@ -83,7 +83,7 @@ static const double service_values[5] = {
 /* 文件树 */
 static tui_tree_node_t tree_nodes[] = {
     { "src",                       0, 0, 1, 0 },
-    { "widgets_v3.c",              1, 1, 0, 0 },
+    { "widgets_viz.c",              1, 1, 0, 0 },
     { "themes.c",                  1, 1, 0, 0 },
     { "layout.c",                  1, 1, 0, 0 },
     { "include",                   0, 0, 1, 0 },
@@ -730,7 +730,7 @@ static int main_content(int fd, const tui_rect_t *area, void *udata)
 
     /* ── 1. Banner (4 行) ── */
     {
-        tui_banner_v2_t *b = calloc(1, sizeof(tui_banner_v2_t));
+        tui_banner_t *b = calloc(1, sizeof(tui_banner_t));
         snprintf(b->text, sizeof(b->text), "Widget Gallery");
         snprintf(b->sub, sizeof(b->sub), "v3 components · 6 themes · 24-bit color");
         b->color = TUI_COLOR_DEFAULT;
@@ -738,7 +738,7 @@ static int main_content(int fd, const tui_rect_t *area, void *udata)
         b->gradient = 1;
         b->tag = "v3.0";
         tui_rect_t r = { y, x, 4, w };
-        tui_banner_render_v2(fd, &r, b);
+        tui_banner_render(fd, &r, b);
         free(b);
         y += 4;
     }

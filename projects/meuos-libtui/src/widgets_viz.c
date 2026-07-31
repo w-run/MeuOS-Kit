@@ -1,4 +1,4 @@
-/* widgets_v3.c — meuos-libtui 第三代 widgets
+/* widgets_viz.c — meuos-libtui 可视化组件
  *
  * 高级可视化组件：
  *   - Gauge         仪表盘（半圆 / 圆弧 / 线性）

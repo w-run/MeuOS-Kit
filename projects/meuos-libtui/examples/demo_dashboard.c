@@ -369,7 +369,7 @@ static int main_content(int fd, const tui_rect_t *area, void *udata)
 
     /* 左侧：渐变 Banner */
     {
-        tui_banner_v2_t *b = calloc(1, sizeof(tui_banner_v2_t));
+        tui_banner_t *b = calloc(1, sizeof(tui_banner_t));
         strcpy(b->text, "MeuOS Kit");
         strcpy(b->sub,  "v2 visual upgrade ready");
         b->color = TUI_COLOR_DEFAULT;
@@ -378,7 +378,7 @@ static int main_content(int fd, const tui_rect_t *area, void *udata)
         b->tag = "v2.0";
 
         tui_rect_t br = { y, x, mid_h, mid_w };
-        tui_banner_render_v2(fd, &br, b);
+        tui_banner_render(fd, &br, b);
         free(b);
     }
 

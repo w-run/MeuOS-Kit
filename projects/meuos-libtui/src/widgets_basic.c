@@ -1,4 +1,4 @@
-/* widgets_v2.c — meuos-libtui 第二代 widgets
+/* widgets_basic.c — meuos-libtui 基础组件
  *
  * Tabs / KeyHints / Stat / Sparkline / Card
  * + Banner/Progress/Spinner/Badge v2 风格
@@ -16,12 +16,12 @@
 #include <unistd.h>
 #include <time.h>
 
-/* Forward declarations for v2 render callbacks (used by factory functions
+/* Forward declarations for render callbacks (used by factory functions
  * before their definitions appear below). */
-int tui_banner_render_v2(int fd, const tui_rect_t *area, void *userdata);
-static int tui_progress_render_v2(int fd, const tui_rect_t *area, void *userdata);
-static int tui_spinner_render_v2(int fd, const tui_rect_t *area, void *userdata);
-static int tui_badge_render_v2(int fd, const tui_rect_t *area, void *userdata);
+int tui_banner_render(int fd, const tui_rect_t *area, void *userdata);
+static int tui_progress_render(int fd, const tui_rect_t *area, void *userdata);
+static int tui_spinner_render(int fd, const tui_rect_t *area, void *userdata);
+static int tui_badge_render(int fd, const tui_rect_t *area, void *userdata);
 
 /* ── helpers ────────────────────────────────────────── */
 
@@ -600,9 +600,9 @@ tui_layout_t *tui_card_new(const char *title, tui_render_fn content_fn, void *da
  *  Banner v2 — 多种风格 + 渐变标题
  * ══════════════════════════════════════════════════════ */
 
-int tui_banner_render_v2(int fd, const tui_rect_t *area, void *userdata)
+int tui_banner_render(int fd, const tui_rect_t *area, void *userdata)
 {
-    tui_banner_v2_t *b = (tui_banner_v2_t *)userdata;
+    tui_banner_t *b = (tui_banner_t *)userdata;
     if (!b || !area) return TUI_ERR_PARAM;
     if (!tui_rect_valid(area)) return TUI_OK;
 
@@ -784,10 +784,10 @@ int tui_banner_render_v2(int fd, const tui_rect_t *area, void *userdata)
     return TUI_OK;
 }
 
-tui_layout_t *tui_banner_v2(const tui_banner_v2_t *cfg)
+tui_layout_t *tui_banner(const tui_banner_t *cfg)
 {
     if (!cfg) return NULL;
-    tui_banner_v2_t *heap = (tui_banner_v2_t *)calloc(1, sizeof(tui_banner_v2_t));
+    tui_banner_t *heap = (tui_banner_t *)calloc(1, sizeof(tui_banner_t));
     if (!heap) return NULL;
     *heap = *cfg;
     return tui_layout_leaf_with_free(tui_banner_render, heap,
@@ -798,19 +798,19 @@ tui_layout_t *tui_banner_v2(const tui_banner_v2_t *cfg)
  *  Progress v2 — 多种风格
  * ══════════════════════════════════════════════════════ */
 
-tui_layout_t *tui_progress_v2(const tui_progress_v2_t *cfg)
+tui_layout_t *tui_progress(const tui_progress_t *cfg)
 {
     if (!cfg) return NULL;
-    tui_progress_v2_t *heap = (tui_progress_v2_t *)calloc(1, sizeof(tui_progress_v2_t));
+    tui_progress_t *heap = (tui_progress_t *)calloc(1, sizeof(tui_progress_t));
     if (!heap) return NULL;
     *heap = *cfg;
-    return tui_layout_leaf_with_free(tui_progress_render_v2, heap,
+    return tui_layout_leaf_with_free(tui_progress_render, heap,
                                      (void (*)(void *))free);
 }
 
-int tui_progress_render_v2(int fd, const tui_rect_t *area, void *userdata)
+int tui_progress_render(int fd, const tui_rect_t *area, void *userdata)
 {
-    tui_progress_v2_t *p = (tui_progress_v2_t *)userdata;
+    tui_progress_t *p = (tui_progress_t *)userdata;
     if (!p || !area) return TUI_ERR_PARAM;
 
     const tui_theme_t *th = tui_theme_current();
@@ -908,20 +908,20 @@ int tui_progress_render_v2(int fd, const tui_rect_t *area, void *userdata)
  *  Spinner v2 — 多种风格
  * ══════════════════════════════════════════════════════ */
 
-tui_layout_t *tui_spinner_v2(const tui_spinner_v2_t *cfg)
+tui_layout_t *tui_spinner(const tui_spinner_t *cfg)
 {
     if (!cfg) return NULL;
-    tui_spinner_v2_t *heap = (tui_spinner_v2_t *)calloc(1, sizeof(tui_spinner_v2_t));
+    tui_spinner_t *heap = (tui_spinner_t *)calloc(1, sizeof(tui_spinner_t));
     if (!heap) return NULL;
     *heap = *cfg;
     if (!heap->frames) heap->frames = TUI_SPINNER_DOTS;
-    return tui_layout_leaf_with_free(tui_spinner_render_v2, heap,
+    return tui_layout_leaf_with_free(tui_spinner_render, heap,
                                      (void (*)(void *))free);
 }
 
-int tui_spinner_render_v2(int fd, const tui_rect_t *area, void *userdata)
+int tui_spinner_render(int fd, const tui_rect_t *area, void *userdata)
 {
-    tui_spinner_v2_t *s = (tui_spinner_v2_t *)userdata;
+    tui_spinner_t *s = (tui_spinner_t *)userdata;
     if (!s || !area) return TUI_ERR_PARAM;
 
     const tui_theme_t *th = tui_theme_current();
@@ -955,19 +955,19 @@ int tui_spinner_render_v2(int fd, const tui_rect_t *area, void *userdata)
  *  Badge v2 — 多种风格
  * ══════════════════════════════════════════════════════ */
 
-tui_layout_t *tui_badge_v2(const tui_badge_v2_t *cfg)
+tui_layout_t *tui_badge(const tui_badge_t *cfg)
 {
     if (!cfg) return NULL;
-    tui_badge_v2_t *heap = (tui_badge_v2_t *)calloc(1, sizeof(tui_badge_v2_t));
+    tui_badge_t *heap = (tui_badge_t *)calloc(1, sizeof(tui_badge_t));
     if (!heap) return NULL;
     *heap = *cfg;
-    return tui_layout_leaf_with_free(tui_badge_render_v2, heap,
+    return tui_layout_leaf_with_free(tui_badge_render, heap,
                                      (void (*)(void *))free);
 }
 
-int tui_badge_render_v2(int fd, const tui_rect_t *area, void *userdata)
+int tui_badge_render(int fd, const tui_rect_t *area, void *userdata)
 {
-    tui_badge_v2_t *b = (tui_badge_v2_t *)userdata;
+    tui_badge_t *b = (tui_badge_t *)userdata;
     if (!b || !area) return TUI_ERR_PARAM;
     if (!tui_rect_valid(area)) return TUI_OK;
 
@@ -1064,7 +1064,7 @@ int tui_badge_render_v2(int fd, const tui_rect_t *area, void *userdata)
  *  通过扩展 tui_table_t 字段实现
  * ══════════════════════════════════════════════════════ */
 
-tui_table_t *tui_table_new_v2(tui_column_t *cols, int ncols,
+tui_table_t *tui_table_new(tui_column_t *cols, int ncols,
                               tui_table_cell_fn cell_fn, int nrows,
                               const tui_table_style_t *style)
 {
@@ -1083,5 +1083,173 @@ tui_table_t *tui_table_new_v2(tui_column_t *cols, int ncols,
 
 /* ══════════════════════════════════════════════════════
  *  tui_layout_leaf_with_free
- *  让 layout 自动释放用户数据（用于 *_v2 工厂）
+ *  让 layout 自动释放用户数据（用于工厂函数）
  * ══════════════════════════════════════════════════════ */
+
+/* ══════════════════════════════════════════════════════
+ *  Table 表格
+ * ══════════════════════════════════════════════════════ */
+
+int tui_table_render(int fd, const tui_rect_t *area, void *userdata)
+{
+    tui_table_t *t = (tui_table_t *)userdata;
+    if (!t || !area) return TUI_ERR_PARAM;
+    if (!tui_rect_valid(area)) return TUI_OK;
+
+    int y = area->row;
+    int ncols = t->ncols;
+    int nrows = t->nrows;
+
+    if (ncols <= 0) return TUI_OK;
+    if (ncols > TUI_TABLE_MAX_COLS) ncols = TUI_TABLE_MAX_COLS;
+    if (nrows > TUI_TABLE_MAX_ROWS) nrows = TUI_TABLE_MAX_ROWS;
+
+    /* 总行数不能超过可用行数 */
+    int max_rows = area->rows;
+    if (max_rows <= 0) return TUI_OK;
+
+    /* ── 24-bit 背景色：默认从主题推断 ──
+     * 自动背景 = surface + 6（与 dashboard 中其他卡片一致，
+     * 否则表行不设置 bg 会露出终端默认黑色 (13,13,26)）。
+     * 若调用方显式设置了 tbl.bg (非 (0,0,0)) 则覆盖。 */
+    const tui_theme_t *th = tui_theme_current();
+    tui_rgb_t surf_bg = th ? th->surface_bg : (tui_rgb_t){13,13,23};
+    tui_rgb_t auto_bg = {
+        (uint8_t)(surf_bg.r + 6),
+        (uint8_t)(surf_bg.g + 6),
+        (uint8_t)(surf_bg.b + 6)
+    };
+    tui_rgb_t row_bg = (t->bg.r || t->bg.g || t->bg.b) ? t->bg : auto_bg;
+    tui_rgb_t hdr_bg = (t->header_bg_rgb.r || t->header_bg_rgb.g || t->header_bg_rgb.b)
+                        ? t->header_bg_rgb
+                        : (th ? th->gradient[4] : (tui_rgb_t){74,222,128});
+    tui_rgb_t sel_bg = (t->select_bg_rgb.r || t->select_bg_rgb.g || t->select_bg_rgb.b)
+                        ? t->select_bg_rgb
+                        : (th ? th->selection_bg : (tui_rgb_t){74,222,128});
+
+    /* ── 表头 ── */
+    tui_cursor_goto(fd, y, area->col);
+    tui_set_bg_rgb(fd, hdr_bg);
+    tui_set_fg_rgb(fd, th ? th->surface_fg : (tui_rgb_t){13,13,13});
+    tui_set_attr(fd, TUI_ATTR_BOLD);
+
+    int col_x[TUI_TABLE_MAX_COLS];
+    int x = area->col;
+    int c;
+    for (c = 0; c < ncols; c++) {
+        col_x[c] = x;
+        int w = t->columns[c].width;
+        tui_cursor_goto(fd, y, x);
+
+        const char *hdr = t->columns[c].header;
+        int hw = tui_strwidth(hdr);
+        int pad = (w - hw) / 2;
+        if (pad < 0) pad = 0;
+        int hbytes = tui_truncate(hdr, w);
+
+        tui_spaces(fd, pad);
+        write(fd, hdr, (size_t)hbytes);
+        if (w - pad - hw > 0)
+            tui_spaces(fd, w - pad - hw);
+
+        x += w + 1; /* +1 为列间距 */
+        if (x >= area->col + area->cols) break;
+    }
+    tui_reset_style(fd);
+    tui_set_bg_rgb(fd, row_bg);
+
+    /* ── 分隔线 ── */
+    y++;
+    if (y >= area->row + max_rows) return TUI_OK;
+    tui_cursor_goto(fd, y, area->col);
+    tui_set_bg_rgb(fd, row_bg);
+    tui_set_fg_rgb(fd, th ? tui_color_to_rgb_xterm(th->palette.border) : (tui_rgb_t){60,60,72});
+    tui_set_attr(fd, TUI_ATTR_DIM);
+    int i;
+    for (i = 0; i < area->cols && area->col + i < x; i++)
+        write(fd, "─", 3);
+    tui_reset_style(fd);
+    tui_set_bg_rgb(fd, row_bg);
+
+    /* ── 数据行 ── */
+    for (int ri = 0; ri < nrows && y + 1 < area->row + max_rows; ri++) {
+        y++;
+        int is_sel = (ri == t->selected);
+        tui_rgb_t this_bg = is_sel ? sel_bg : row_bg;
+
+        /* 行背景：先 reset 再 set 24-bit bg，避免继承前一行错误样式 */
+        tui_reset_style(fd);
+        tui_set_bg_rgb(fd, this_bg);
+
+        for (c = 0; c < ncols; c++) {
+            if (col_x[c] >= area->col + area->cols) break;
+
+            tui_cursor_goto(fd, y, col_x[c]);
+            int w = t->columns[c].width;
+
+            if (is_sel) {
+                tui_set_bg_rgb(fd, sel_bg);
+                tui_set_fg_rgb(fd, th ? th->selection_fg : (tui_rgb_t){13,13,23});
+                tui_set_attr(fd, TUI_ATTR_BOLD);
+            } else {
+                tui_set_bg_rgb(fd, row_bg);
+                tui_set_fg_rgb(fd, th ? th->surface_fg : (tui_rgb_t){229,229,229});
+            }
+
+            const char *cell = t->cell_fn ? t->cell_fn(ri, c, t->userdata) : "";
+            if (!cell) cell = "";
+            int cw = tui_strwidth(cell);
+            int align = t->columns[c].align;
+
+            int pad_l = 0;
+            if (align == 0)      pad_l = (w - cw) / 2;
+            else if (align > 0)  pad_l = w - cw;
+            if (pad_l < 0) pad_l = 0;
+
+            int cbytes = tui_truncate(cell, w);
+            tui_spaces(fd, pad_l);
+            write(fd, cell, (size_t)cbytes);
+            if (w - pad_l - cw > 0)
+                tui_spaces(fd, w - pad_l - cw);
+
+            /* 列间距 */
+            if (c < ncols - 1) {
+                tui_set_bg_rgb(fd, this_bg);
+                tui_spaces(fd, 1);
+            }
+        }
+
+        /* 填充行尾 */
+        int fill = area->col + area->cols - x;
+        if (fill > 0) {
+            tui_set_bg_rgb(fd, this_bg);
+            tui_spaces(fd, fill);
+        }
+    }
+    tui_reset_style(fd);
+
+    return TUI_OK;
+}
+
+int tui_table_handle(tui_table_t *t, tui_event_t *ev)
+{
+    if (!t || !ev) return TUI_ERR_PARAM;
+
+    switch (ev->key) {
+    case TUI_KEY_UP:
+        if (t->selected > 0) t->selected--;
+        break;
+    case TUI_KEY_DOWN:
+        if (t->selected < t->nrows - 1) t->selected++;
+        break;
+    case TUI_KEY_HOME:
+        t->selected = 0;
+        break;
+    case TUI_KEY_END:
+        t->selected = t->nrows - 1;
+        break;
+    default:
+        return 0;  /* 未处理 */
+    }
+    return 1;  /* 已处理 */
+}
