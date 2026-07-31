@@ -17,6 +17,7 @@
 #define R_X86_64_PC32     2
 #define R_X86_64_PLT32    4
 #define R_X86_64_GOTPCREL 9
+#define R_X86_64_TPOFF32  23
 
 /* ---- Operand model ---- */
 
@@ -37,6 +38,7 @@ struct x86_op {
 	char *symbol;
 	char modifier[16];
 	int64_t addend;
+	unsigned seg;       /* segment prefix: 0x64 (%fs) / 0x65 (%gs), 0 = none */
 };
 
 /* ---- Helpers --------------------------------------------------------- */
@@ -305,6 +307,34 @@ parse_operand(char *text, struct x86_op *op)
 			return -1;
 		return 0;
 	}
+	/* TLS segment prefix: %fs:sym@tpoff / %fs:0 (local-exec access).
+	 * The thread pointer (TP) lives at %fs:0; a TLS symbol is a
+	 * displacement from TP.  We keep the segment prefix in op->seg so
+	 * the encoder can emit it and select the TPOFF32 relocation. */
+	if (strncmp(text, "%fs:", 4) == 0 || strncmp(text, "%gs:", 4) == 0) {
+		op->seg = (text[1] == 'f') ? 0x64 : 0x65;
+		text = trim(text + 4);
+		if (!*text)
+			return -1;
+		/* %fs:0 — the thread pointer itself. */
+		if (strcmp(text, "0") == 0) {
+			op->kind = OP_MEM;
+			op->base = -1;
+			op->displacement = 0;
+			return 0;
+		}
+		if (parse_reference(text, &symbol, op->modifier,
+		                    sizeof(op->modifier), &op->addend,
+		                    &is_number) != 0)
+			return -1;
+		op->kind = OP_MEM;
+		op->base = -1;
+		op->displacement = is_number ? op->addend : 0;
+		op->symbol = is_number ? NULL : symbol;
+		if (op->symbol && normalize_numeric_reference(&op->symbol) != 0)
+			return -1;
+		return 0;
+	}
 	if (text[0] == '%' && parse_register(text, &op->reg, &op->width) == 0) {
 		op->kind = OP_REG;
 		return 0;
@@ -422,11 +452,33 @@ emit_modrm(unsigned char *buf, size_t *size, struct mt_insn *out,
 		}
 		return;
 	}
+	if (base == -1) {
+		/* Absolute address with no base register.  In 64-bit mode the
+		 * mod=00 rm=101 form is RIP-relative, so GNU as emits the SIB
+		 * form (mod=00 rm=100 + SIB scale=0 index=100 base=101) for
+		 * true absolute addressing, e.g. `mov %fs:disp, %eax` =
+		 * 64 8b 04 25 <disp32>.  Used for TLS local-exec (%fs:sym@tpoff
+		 * / %fs:0) and for bare symbol references. */
+		emit_u8(buf, size, ((unsigned)reg & 7) << 3 | 4);
+		emit_u8(buf, size, 0x25);
+		fix_offset = *size;
+		if (rm->symbol) {
+			emit_le(buf, size, 0, 4);
+			set_fixup(out, fix_offset, 4, fix_type, rm->symbol, fix_addend);
+		} else {
+			emit_le(buf, size, (uint32_t)disp, 4);
+		}
+		return;
+	}
 	if (base < 0 || base >= 16)
 		return;
 	if (rm->index >= 8)
 		return;
-	if (!rm->symbol && disp == 0 && base != 5 && base != 13)
+	/* A symbol displacement with a base register needs the full 32-bit
+	 * displacement form (mod=2) so the linker can patch the addend. */
+	if (rm->symbol) {
+		mod = 2;
+	} else if (disp == 0 && base != 5 && base != 13)
 		mod = 0;
 	else if (disp >= -128 && disp <= 127)
 		mod = 1;
@@ -447,8 +499,16 @@ emit_modrm(unsigned char *buf, size_t *size, struct mt_insn *out,
 	}
 	if (mod == 1)
 		emit_le(buf, size, (uint8_t)disp, 1);
-	else if (mod == 2 || (mod == 0 && (base == 5 || base == 13)))
-		emit_le(buf, size, (uint32_t)disp, 4);
+	else if (mod == 2 || (mod == 0 && (base == 5 || base == 13))) {
+		fix_offset = *size;
+		if (rm->symbol) {
+			emit_le(buf, size, 0, 4);
+			set_fixup(out, fix_offset, 4, fix_type, rm->symbol,
+			          fix_addend + rm->addend);
+		} else {
+			emit_le(buf, size, (uint32_t)disp, 4);
+		}
+	}
 }
 
 static void
@@ -472,16 +532,27 @@ emit_rm_reg(unsigned char *buf, size_t *size, struct mt_insn *out,
 	if (rm->kind == OP_MEM && rm->symbol) {
 		if (strcmp(rm->modifier, "gotpcrel") == 0)
 			fix_type = R_X86_64_GOTPCREL;
-		else if (rm->base != -2)
+		else if (strcmp(rm->modifier, "tpoff") == 0)
+			fix_type = R_X86_64_TPOFF32;
+		else if (rm->base != -2 && rm->base != -1)
 			return;
 	}
+	/* Segment prefix (e.g. %fs for TLS) must precede the REX prefix. */
+	if (rm->kind == OP_MEM && rm->seg)
+		emit_u8(buf, size, rm->seg);
 	if (width == 1)
 		emit_byte_rex(buf, size, reg,
 		              rm->kind == OP_REG ? rm->reg : -1);
 	emit_rex(buf, size, width == 8, reg,
 	          rm->kind == OP_REG ? rm->reg : rm->base);
 	emit_u8(buf, size, opcode);
-	emit_modrm(buf, size, out, reg, rm, fix_type, rm->addend - 4);
+	/* PC-relative relocs (PC32, PLT32, GOTPCREL) subtract the 4-byte
+	 * field from the addend; absolute and TLS relocs carry the raw
+	 * symbol addend. */
+	emit_modrm(buf, size, out, reg, rm, fix_type,
+	           fix_type == R_X86_64_PC32 || fix_type == R_X86_64_PLT32 ||
+	           fix_type == R_X86_64_GOTPCREL
+	               ? rm->addend - 4 : rm->addend);
 }
 
 static void
@@ -1047,10 +1118,17 @@ x86_64_encode_insn(const struct mt_target *target,
 		}
 		if (op[0].kind == OP_IMM && (op[1].kind == OP_MEM ||
 		                              op[1].kind == OP_REG)) {
+			unsigned fix_type = R_X86_64_PC32;
+			if (op[1].kind == OP_MEM && op[1].symbol &&
+			    strcmp(op[1].modifier, "tpoff") == 0)
+				fix_type = R_X86_64_TPOFF32;
+			if (op[1].kind == OP_MEM && op[1].seg)
+				emit_u8(out->bytes, &out->size, op[1].seg);
 			emit_rex(out->bytes, &out->size, width == 8, 0,
 			          op[1].kind == OP_REG ? op[1].reg : op[1].base);
 			emit_u8(out->bytes, &out->size, width == 1 ? 0xc6 : 0xc7);
-			emit_modrm(out->bytes, &out->size, out, 0, &op[1], R_X86_64_PC32, -4);
+			emit_modrm(out->bytes, &out->size, out, 0, &op[1], fix_type,
+			           fix_type == R_X86_64_PC32 ? -4 : 0);
 			emit_le(out->bytes, &out->size, (uint64_t)op[0].displacement,
 			        width == 1 ? 1 : 4);
 			goto done;
@@ -1067,11 +1145,18 @@ x86_64_encode_insn(const struct mt_target *target,
 	}
 	if (strncmp(base, "lea", 3) == 0 && n == 2 && op[1].kind == OP_REG) {
 		width = op[1].width;
+		unsigned fix_type = R_X86_64_PC32;
+		if (op[0].kind == OP_MEM && op[0].symbol &&
+		    strcmp(op[0].modifier, "tpoff") == 0)
+			fix_type = R_X86_64_TPOFF32;
 		emit_rex(out->bytes, &out->size, width == 8, op[1].reg,
 		          op[0].kind == OP_REG ? op[0].reg : -1);
 		emit_u8(out->bytes, &out->size, 0x8d);
+		/* Only the %rip-relative PC32 form subtracts the 4-byte field;
+		 * TPOFF32 carries the raw symbol addend. */
 		emit_modrm(out->bytes, &out->size, out, op[1].reg, &op[0],
-		           R_X86_64_PC32, -4);
+		           fix_type,
+		           fix_type == R_X86_64_PC32 ? -4 : 0);
 		goto done;
 	}
 	if ((strncmp(base, "xchg", 4) == 0 || strncmp(base, "xadd", 4) == 0 ||
