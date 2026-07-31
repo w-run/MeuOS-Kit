@@ -119,25 +119,46 @@ call_meta(Ins *call, int nargs, Fn *fn)
 /* Emit Ocopy from temp to assigned register for each call argument.
  * Must run AFTER emiti() of the call: emit() fills *--curi so the
  * last-emitted instruction ends up FIRST in forward order, and the arg
- * copies must precede the call. */
+ * copies must precede the call.
+ *
+ * Args precede the call in forward order [arg0..argN-1, call]; emit()
+ * is reverse, so copies are emitted back-to-front.  The AAPCS register
+ * assignment is still forward: arg0 gets R0, arg1 gets R1, etc.  To
+ * keep both consistent, assign each arg its forward register index in a
+ * first pass, then emit back-to-front with those indices. */
 static void
 emit_call_args(Ins *call, int nargs, Fn *fn)
 {
+	int gp_idx[64], fp_idx[64];
 	int ngp = 0, nfp = 0;
 	Ins *argp = call;
+
 	(void)fn;
+	if (nargs > 64)
+		err("arm: too many call arguments");
 	for (int j = 0; j < nargs; j++) {
 		--argp;
 		int k = argp->cls;
 		int is_float = KBASE(k) == 1;
-		int reg = -1;
 		if (is_float && nfp < 8) {
-			reg = fpreg[nfp++];
+			fp_idx[j] = nfp++;
+			gp_idx[j] = -1;
 		} else if (!is_float && ngp < 4) {
-			reg = gpreg[ngp++];
+			gp_idx[j] = ngp++;
+			fp_idx[j] = -1;
 		} else {
-			continue; /* stack args unsupported on this backend */
+			gp_idx[j] = fp_idx[j] = -1; /* stack args unsupported */
 		}
+	}
+	argp = call;
+	for (int j = nargs - 1; j >= 0; j--) {
+		--argp;
+		int k = argp->cls;
+		int reg = -1;
+		if (gp_idx[j] >= 0)
+			reg = gpreg[gp_idx[j]];
+		else if (fp_idx[j] >= 0)
+			reg = fpreg[fp_idx[j]];
 		if (reg >= 0)
 			emit(Ocopy, k, TMP(reg), argp->arg[0], R);
 	}
