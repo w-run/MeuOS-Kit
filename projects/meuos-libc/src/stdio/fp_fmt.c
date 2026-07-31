@@ -61,7 +61,7 @@ sign_bit(double v)
 {
 	union { double d; unsigned long long u; } u;
 	u.d = v;
-	return (int)(u.u >> 63) < 0;
+	return (int)(u.u >> 63) != 0;
 }
 
 static int
