@@ -904,7 +904,26 @@ emit_float(Ins i, E *e)
 			}
 			return 1;
 		case Ocast:
-			return 0;
+			/* float<->int bitcast of the same width (union
+			 * type-punning).  Kd (double) <-> Kl (int64): fldl
+			 * loads the source slot's bytes verbatim — a pure
+			 * bit movement, no numeric conversion — and fstpl
+			 * stores them to the double destination slot (all
+			 * Ks/Kd values are slot-resident on i386).  Ks
+			 * (float) <-> Kw (int32): the Kw source may be in a
+			 * GPR or slot, so spill it to ESP scratch and flds. */
+			if (i.cls == Kd) {
+				float_load(i.arg[0], Kd, e);
+				float_store(i.to, Kd, e);
+			} else {
+				assert(i.cls == Ks);
+				fprintf(e->f, "\tsubl $4, %%esp\n");
+				emitf("movl %0, (%%esp)", &i, e);
+				fprintf(e->f, "\tflds (%%esp)\n");
+				fprintf(e->f, "\taddl $4, %%esp\n");
+				float_store(i.to, Ks, e);
+			}
+			return 1;
 		default:
 			break;
 		}
@@ -1387,6 +1406,27 @@ emitins(Ins i, E *e)
 				fputs("\txorl %eax, %eax\n", e->f);
 			kl_store_from(i.to, 1, EAX, e);
 			break;
+	case Ocast:
+			/* 64-bit bitcast: reinterpret a double's 8 bytes as
+			 * an int64 (union type-punning).  On i386 Ks/Kd values
+			 * are slot-resident (x87 is only a short-lived
+			 * execution stack), so the Kd source slot holds the
+			 * IEEE bits verbatim — copy them with two movl via EAX
+			 * (the usual Kl push/pop wraps this).  RCon sources
+			 * (bits of a double constant) come out of kl_load_to
+			 * the same way.  An R source (value already in ST(0))
+			 * is transient and should not occur, but fstpl would
+			 * store exactly the same bits to the destination. */
+			assert(kl_isslot(i.to));
+			if (req(i.arg[0], R)) {
+				float_store(i.to, Kd, e);
+			} else {
+				kl_load_to(i.arg[0], 0, EAX, e);
+				kl_store_from(i.to, 0, EAX, e);
+				kl_load_to(i.arg[0], 1, EAX, e);
+				kl_store_from(i.to, 1, EAX, e);
+			}
+			break;
 	default:
 			if (isxsel(i.op)) {
 				/* Kl conditional select: copy false value,
@@ -1537,6 +1577,33 @@ emitins(Ins i, E *e)
 			i.arg[0] = i.to;
 		}
 		goto Table;
+	case Ocast:
+		/* 32-bit bitcast: reinterpret a float's 4 bytes as an
+		 * int (union type-punning, e.g. float/unsigned union).
+		 * Ks sources are slot-resident on i386 and their bytes
+		 * ARE the int bits, so a plain movl from the slot to
+		 * the Kw destination (a GPR after rega) suffices; no
+		 * intermediate register is clobbered.  An ST(0) source
+		 * (R) is transient and should not occur; if it does,
+		 * fstps it to ESP scratch first. */
+		if (req(i.arg[0], R)) {
+			fprintf(e->f, "\tsubl $4, %%esp\n");
+			fprintf(e->f, "\tfstps (%%esp)\n");
+			emitf("movl (%%esp), %=", &i, e);
+			fprintf(e->f, "\taddl $4, %%esp\n");
+		} else if (rtype(i.arg[0]) == RCon
+		&& e->fn->con[i.arg[0].val].type == CBits) {
+			emitf("movl %0, %=", &i, e);
+		} else if (rtype(i.arg[0]) == RSlot) {
+			emitf("movl %M0, %=", &i, e);
+		} else if (rtype(i.arg[0]) == RTmp && !isreg(i.arg[0])) {
+			Ins f = i;
+			f.arg[0] = SLOT(e->fn->tmp[i.arg[0].val].slot);
+			emitf("movl %M0, %=", &f, e);
+		} else {
+			die("i386: Ocast from unsupported source kind");
+		}
+		break;
 	case Ocopy:
 		assert(rtype(i.to) != RMem);
 		if (req(i.to, R) || req(i.arg[0], R))

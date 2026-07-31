@@ -41,6 +41,24 @@ static void check(int cond, int code, const char *msg, long long val, long long 
 	}
 }
 
+/* noinline: keep the union store/load pair from being folded away so
+ * the Kl <-> double bitcast (Ocast) is actually exercised. */
+__attribute__((noinline))
+static unsigned long long dbl_to_bits(double d)
+{
+	union { double d; unsigned long long u; } u;
+	u.d = d;
+	return u.u;
+}
+
+__attribute__((noinline))
+static double bits_to_dbl(unsigned long long u)
+{
+	union { double d; unsigned long long u; } uu;
+	uu.u = u;
+	return uu.d;
+}
+
 int main(void)
 {
 	struct S s;
@@ -193,6 +211,20 @@ int main(void)
 
 	unsigned long long u4 = 0x100000001ULL % 0x100000000ULL;
 	check((long long)u4 == 1LL, 61, "Kl urem 64", (long long)u4, 1LL);
+
+	/* ---- Kl bitcast (Ocast): double <-> int64 via union ---- */
+	if (dbl_to_bits(-3.5) != 0xC00C000000000000ULL) {
+		printf("FAIL: Kl d2u bitcast\n");
+		return 70;
+	}
+	if (dbl_to_bits(bits_to_dbl(0xC00C000000000000ULL)) != 0xC00C000000000000ULL) {
+		printf("FAIL: Kl u2d bitcast\n");
+		return 71;
+	}
+	if (dbl_to_bits(1.0) != 0x3FF0000000000000ULL) {
+		printf("FAIL: Kl d2u 1.0 bitcast\n");
+		return 72;
+	}
 
 	printf("OK: Kl decomposition regression passed\n");
 	return 0;
