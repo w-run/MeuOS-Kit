@@ -198,6 +198,21 @@ sort_syms_by_nb(int order[256], const uint16_t norm[256])
 static int
 build_tables(struct ans_tables *t, const uint16_t norm[256])
 {
+    /* Validate the frequency table before building anything.  The table
+     * comes from the compressed stream on decompression and is attacker
+     * controlled: a sum != ANS_L can spin the slot-filling loop forever,
+     * and a single f > ANS_L overflows slot[s][i].  Accept only tables
+     * where every nonzero f is a power of two (<= ANS_L) and they sum
+     * exactly to ANS_L. */
+    uint32_t norm_sum = 0;
+    for (int i = 0; i < 256; i++) {
+        uint16_t f = norm[i];
+        if (f > ANS_L) return MZ_ERR_DATA;
+        if (f && (f & (f - 1))) return MZ_ERR_DATA;  /* not a power of two */
+        norm_sum += f;
+    }
+    if (norm_sum != ANS_L) return MZ_ERR_DATA;
+
     memcpy(t->norm, norm, sizeof(t->norm));
     memset(t->symbol, 0xFF, sizeof(t->symbol));
     memset(t->rank_tab, 0, sizeof(t->rank_tab));

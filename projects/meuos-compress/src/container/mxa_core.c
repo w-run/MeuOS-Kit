@@ -509,6 +509,12 @@ int mxa_open(const void *data, size_t len, void **ctx) {
     /* Verify CD entries CRC32 (entries only, from CD header end to footer start) */
     if (total_files > 0) {
         size_t cd_entries_off = (size_t)(cd_start + MXA_CD_HDR_LEN);
+        /* cd_start is attacker-controlled (it comes from the footer): when
+         * it points near EOF, cd_entries_off can exceed scan_start and
+         * scan_start - cd_entries_off wraps to a huge size_t, making
+         * crc32_bytes read far past the end of the buffer. */
+        if (cd_entries_off > scan_start)
+            { free(r->files); free(r); return MXA_ERR_DATA; }
         size_t cd_entries_sz  = (size_t)(scan_start - cd_entries_off);
         uint32_t stored_crc   = r32(p + scan_start + 32);
         uint32_t calc_crc     = crc32_bytes(p + cd_entries_off, cd_entries_sz);
@@ -573,6 +579,16 @@ int mxa_read_file(void *ctx, const char *name,
     const uint8_t *blob = r->data + entry->offset;
 
     if (entry->codec == MXA_CODEC_STORED) {
+        /* For STORED entries the stored blob is entry->csize bytes but both
+         * code paths below work with entry->size bytes: the encrypted path
+         * writes csize bytes into a size-byte buffer (heap overflow when
+         * csize > size) and the plain path memcpy()s size bytes from the
+         * blob (over-read when size > csize / offset+size past EOF). */
+        if (entry->csize > entry->size)
+            return MXA_ERR_DATA;
+        if (entry->offset + entry->size > r->len)
+            return MXA_ERR_DATA;
+
         size_t out_sz = (size_t)(entry->size > 0 ? entry->size : 1);
         void *out = malloc(out_sz);
         if (!out) return MXA_ERR_MEMORY;

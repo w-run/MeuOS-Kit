@@ -454,6 +454,11 @@ mz_huf_decompress(const unsigned char *in, size_t inlen,
 
     if (n_syms > 0) {
         int node_count = 0;
+        /* Bound the number of nodes we may allocate: code lengths come
+         * from the input stream, so a hostile table (e.g. 256 symbols of
+         * length 32) would otherwise overflow the stack-allocated
+         * nodes[512] array. */
+        int max_nodes = (int)(sizeof(nodes) / sizeof(nodes[0]));
         root = node_count++;
         nodes[root].sym = -1;
         nodes[root].left = -1;
@@ -469,6 +474,9 @@ mz_huf_decompress(const unsigned char *in, size_t inlen,
                 int bit = (int)((canon_code >> b) & 1);
                 if (bit == 0) {
                     if (nodes[idx].left < 0) {
+                        if (node_count >= max_nodes) {
+                            return MZ_ERR_DATA;
+                        }
                         int nid = node_count++;
                         nodes[nid].sym = -1;
                         nodes[nid].left = -1;
@@ -478,6 +486,9 @@ mz_huf_decompress(const unsigned char *in, size_t inlen,
                     idx = nodes[idx].left;
                 } else {
                     if (nodes[idx].right < 0) {
+                        if (node_count >= max_nodes) {
+                            return MZ_ERR_DATA;
+                        }
                         int nid = node_count++;
                         nodes[nid].sym = -1;
                         nodes[nid].left = -1;

@@ -238,6 +238,24 @@ static int cmd_list(int argc, char *argv[]) {
     return 0;
 }
 
+/* Reject archive entry names that could escape the extraction directory:
+ * absolute paths, empty names, and any path component of "..". */
+static int is_safe_entry_name(const char *name) {
+    if (!name || !*name || name[0] == '/')
+        return 0;
+    const char *p = name;
+    for (;;) {
+        const char *slash = strchr(p, '/');
+        size_t comp_len = slash ? (size_t)(slash - p) : strlen(p);
+        if (comp_len == 2 && p[0] == '.' && p[1] == '.')
+            return 0;
+        if (!slash)
+            break;
+        p = slash + 1;
+    }
+    return 1;
+}
+
 static int cmd_extract(int argc, char *argv[]) {
     const char *output_dir = ".";
     const char *archive_path = NULL;
@@ -294,6 +312,12 @@ static int cmd_extract(int argc, char *argv[]) {
     for (int i = 0; i < count; i++) {
         if (pattern && !strstr(entries[i].name, pattern))
             continue;
+        /* Refuse unsafe names (../, absolute paths): writing them would
+         * escape output_dir (zip-slip). */
+        if (!is_safe_entry_name(entries[i].name)) {
+            fprintf(stderr, "  skip '%s': unsafe entry name\n", entries[i].name);
+            continue;
+        }
 
         void *fdata = NULL; size_t fsize = 0;
         rc = mxa_read_file(ctx, entries[i].name, &fdata, &fsize);
