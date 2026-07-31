@@ -643,6 +643,24 @@ spill(Fn *fn)
 					more_slots = 1;
 				}
 		}
+		/* On targets where Kl never lives in registers (kl_in_reg==0,
+		 * e.g. i386), rega.c:ralloctry() unconditionally resolves a
+		 * Kl temp to SLOT(tmp[t].slot).  The spill paths that keep a
+		 * Kl temp in the register set without spilling it -- the
+		 * back-edge limit() at the loop header (it treats Kl as an
+		 * ordinary GPR-class temp and may keep it live in registers
+		 * when the GPR budget is not exceeded) and the no-successor
+		 * path that copies b->out straight into v -- leave
+		 * tmp[t].slot == -1.  Any later use of the value (e.g. a
+		 * phi argument crossing the loop back-edge) then trips
+		 * rega.c:ralloctry's assert.  Force a slot for every Kl temp
+		 * so the value can be spilled/reloaded through memory. */
+		if (!T.kl_in_reg)
+			for (t = Tmp0; t < ntmp; t++)
+				if (tmp[t].cls == Kl && tmp[t].slot == -1) {
+					slot(t);
+					more_slots = 1;
+				}
 		if (more_slots)
 			slot8 += slot8 & 3; /* re-align after new slots */
 	}
