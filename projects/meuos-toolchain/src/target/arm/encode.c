@@ -103,6 +103,22 @@ static int parse_reglist(const char *s, uint16_t *mask) {
 	return 0;
 }
 
+/* ---- Helper: encode an ARM 8-bit-rotated immediate.
+ * Stores the operand2 field (rot<<8 | imm8) in *out on success and
+ * returns 0; returns -1 when the constant is not encodable (so the
+ * caller fails instead of silently mis-encoding). */
+static int arm_imm_encode(int64_t imm, uint32_t *out) {
+	uint32_t v = (uint32_t)imm;
+	if (v < 256) { *out = v; return 0; }
+	for (int r = 1; r < 16; r++) {
+		/* imm8 = v ROL (2*r), so the CPU's imm8 ROR (2*r) decodes
+		 * back to v */
+		uint32_t rv = (v << (r*2)) | (v >> (32 - r*2));
+		if (rv < 256) { *out = ((uint32_t)r << 8) | rv; return 0; }
+	}
+	return -1;
+}
+
 /* ---- Main encode function ---- */
 int arm_encode_insn(const struct mt_target *target,
                       const char *mnemonic, const char *operand_text,
@@ -231,18 +247,9 @@ int arm_encode_insn(const struct mt_target *target,
 				int rd; if (reg_num(ops[0], &rd) < 0) return -1;
 				if (ops[1][0] == '#') {
 					int imm = 0; sscanf(ops[1]+1, "%i", &imm);
-					uint32_t imm8 = 0, rot = 0;
-					uint32_t v = (uint32_t)imm;
-					if (v < 256) { imm8 = v; rot = 0; }
-					else {
-						for (int r = 1; r < 16; r++) {
-							/* imm8 = v ROL (2*r), so the CPU's
-							 * imm8 ROR (2*r) decodes back to v */
-							uint32_t rv = (v << (r*2)) | (v >> (32 - r*2));
-							if (rv < 256) { imm8 = rv; rot = r; break; }
-						}
-					}
-					emit32(out->bytes, cond | 0x3A00000 | (opc==15?0x600000:0) | (rd<<12) | (rot<<8) | imm8);
+					uint32_t op2;
+					if (arm_imm_encode(imm, &op2) < 0) return -1;
+					emit32(out->bytes, cond | 0x3A00000 | (opc==15?0x600000:0) | (rd<<12) | op2);
 					return 0;
 				}
 				int rm; if (reg_num(ops[1], &rm) < 0) return -1;
@@ -255,14 +262,9 @@ int arm_encode_insn(const struct mt_target *target,
 				int rn; if (reg_num(ops[0], &rn) < 0) return -1;
 				if (ops[1][0] == '#') {
 					int imm = 0; sscanf(ops[1]+1, "%i", &imm);
-					uint32_t imm8 = 0, rot = 0;
-					uint32_t v = (uint32_t)imm;
-					if (v < 256) { imm8 = v; rot = 0; }
-					else { for (int r = 1; r < 16; r++) {
-						uint32_t rv = (v << (r*2)) | (v >> (32 - r*2));
-						if (rv < 256) { imm8 = rv; rot = r; break; }
-					}}
-					emit32(out->bytes, cond | 0x3500000 | (opc<<21) | (rn<<16) | (rot<<8) | imm8);
+					uint32_t op2;
+					if (arm_imm_encode(imm, &op2) < 0) return -1;
+					emit32(out->bytes, cond | 0x3500000 | (opc<<21) | (rn<<16) | op2);
 					return 0;
 				}
 				int rm; if (reg_num(ops[1], &rm) < 0) return -1;
@@ -279,14 +281,9 @@ int arm_encode_insn(const struct mt_target *target,
 				if (ops[2][0] == '#') {
 					/* Immediate: rd, rn, #imm */
 					int imm = 0; sscanf(ops[2]+1, "%i", &imm);
-					uint32_t imm8 = 0, rot = 0;
-					uint32_t v = (uint32_t)imm;
-					if (v < 256) { imm8 = v; rot = 0; }
-					else { for (int r = 1; r < 16; r++) {
-						uint32_t rv = (v << (r*2)) | (v >> (32 - r*2));
-						if (rv < 256) { imm8 = rv; rot = r; break; }
-					}}
-					emit32(out->bytes, cond | 0x2000000 | (opc<<21) | (1<<25) | (rn<<16) | (rd<<12) | (rot<<8) | imm8);
+					uint32_t op2;
+					if (arm_imm_encode(imm, &op2) < 0) return -1;
+					emit32(out->bytes, cond | 0x2000000 | (opc<<21) | (1<<25) | (rn<<16) | (rd<<12) | op2);
 					return 0;
 				}
 
