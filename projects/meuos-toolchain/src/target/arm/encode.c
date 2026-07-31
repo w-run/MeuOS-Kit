@@ -317,7 +317,11 @@ int arm_encode_insn(const struct mt_target *target,
 	/* Parse the S ("set flags") suffix: adds/adcs/subs/sbcs/rsbs/ands/
 	 * orrs/eors/bics/movs/mvns.  The 64-bit (Kl) decomposition of mcc
 	 * uses adds/adcs/subs/sbcs/rsbs to chain carry across the low and
-	 * high 32-bit halves.  S is bit 20 of the data-processing word. */
+	 * high 32-bit halves.  S is bit 20 of the data-processing word.
+	 * Note: parse_op_cond() above greedily matches "cs" as a condition
+	 * for "adcs"/"sbcs"; when the trailing 's' really is the S-bit
+	 * (stripping it yields a valid opcode), there is no condition
+	 * suffix, so reset the condition code to AL. */
 	int setflags = 0;
 	{
 		size_t dlen = strlen(mnemonic);
@@ -331,6 +335,7 @@ int arm_encode_insn(const struct mt_target *target,
 					if (strcmp(sbase, dp_ops[d].name) == 0) {
 						dp_base = sbase;
 						setflags = 1;
+						cond_code = 14; /* AL */
 						break;
 					}
 			}
