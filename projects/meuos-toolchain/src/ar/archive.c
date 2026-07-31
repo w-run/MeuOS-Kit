@@ -477,6 +477,7 @@ load_archive(const char *path, struct ar_collection *collection)
 	for (;;) {
 		unsigned char *data = NULL;
 		char *name = NULL;
+		int bsd_pad_consumed = 0;
 		result = read_header(file, raw_name, &member_size);
 		if (result == 1)
 			break;
@@ -532,17 +533,22 @@ load_archive(const char *path, struct ar_collection *collection)
 				memcpy(content, data + name_len, content_size);
 				free(data);
 				data = content;
-				if (member_size & 1u && fgetc(file) != '\n') {
-					set_error(MT_AR_E_FORMAT);
-					free(name); free(data); goto fail;
+				/* Consume the padding byte (if any) for the FULL member
+				 * size (name+content); keep the odd content length intact.
+				 * The outer pad check below is suppressed for BSD members
+				 * since padding was handled here for both parities. */
+				if (member_size & 1u) {
+					if (fgetc(file) != '\n') {
+						set_error(MT_AR_E_FORMAT);
+						free(name); free(data); goto fail;
+					}
 				}
+				bsd_pad_consumed = 1;
 				member_size = content_size;
-				/* padding already handled above; skip outer check */
-				member_size = content_size & ~1u; /* make even to skip outer check */
 			}
 		} else if (read_member_data(file, member_size, &data) != 0)
 			goto fail;
-		if (member_size & 1u && fgetc(file) != '\n') {
+		if (!bsd_pad_consumed && (member_size & 1u) && fgetc(file) != '\n') {
 			set_error(MT_AR_E_FORMAT);
 			free(name);
 			free(data);
