@@ -985,8 +985,6 @@ collect_one_object_sections(struct ld_context *ctx, size_t object_index)
 		                  section.alignment ? section.alignment : 1);
 		if (group < 0)
 			return ld_error(ctx, "out of memory");
-		if (strncmp(name, ".debug", 6) == 0)
-			fprintf(stderr, "DEBUG collect: section[%u]=%s group=%d\n", j, name, group);
 		out = &ctx->groups[group];
 		/* Set up group rank and flags based on section attributes */
 		if (section.flags & LD_SHF_ALLOC) {
@@ -2209,6 +2207,12 @@ apply_relocations(struct ld_context *ctx)
 			group = object->maps[section.info].group;
 			/* Skip relocations targeting GC'd sections */
 			if (ctx->groups[group].size == 0) continue;
+			/* Reject malformed relocation tables: sh_entsize==0 (with
+			 * a non-empty table) would divide by zero in the loop below. */
+			if (section.size != 0 &&
+			    (section.entry_size == 0 ||
+			     section.size % section.entry_size != 0))
+				return ld_errorf(ctx, "invalid relocation table", object->name);
 			for (n = 0; n < section.size / section.entry_size; ++n)
 				if (write_relocation(ctx, object, &section,
 				                    &ctx->groups[group], n) != 0)
@@ -2857,6 +2861,16 @@ write_executable(struct ld_context *ctx, const char *path,
 		}
 	}
 	alloc_file_end = file_end;
+	/* .shstrtab must not overlap non-allocatable sections (.debug*,
+	 * .comment, .note) that layout places after the ALLOC data:
+	 * extend file_end past every PROGBITS group before placing it.
+	 * alloc_file_end above keeps the ALLOC-only end for PT_LOAD fsz. */
+	for (i = 0; i < ctx->group_count; ++i) {
+		struct ld_group *group = &ctx->groups[i];
+		if (group->type != MT_SHT_NOBITS &&
+		    group->file_offset + group->size > file_end)
+			file_end = group->file_offset + group->size;
+	}
 	shstr_index = (uint32_t)(output_count - 1);
 	sections[shstr_index].name = ".shstrtab";
 	sections[shstr_index].type = MT_SHT_STRTAB;
