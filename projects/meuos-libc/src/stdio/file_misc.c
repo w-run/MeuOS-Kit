@@ -60,3 +60,32 @@ perror(const char *prefix)
 	else
 		printf("%s\n", strerror(errno));
 }
+
+/*
+ * 缓冲模式控制。当前流均为无缓冲实现：POSIX 规定对 _IONBF 忽略 buffer/size，
+ * 对 _IOFBF/_IOLBF 本实现无法实际缓存，但接受它们并与无缓冲等效
+ * （输出顺序与完整性不受影响）。
+ */
+int
+setvbuf(FILE *stream, char *buffer, int mode, size_t size)
+{
+	if (!stream || (mode != _IOFBF && mode != _IOLBF && mode != _IONBF)) {
+		errno = EINVAL;
+		return EOF;
+	}
+	(void)buffer;
+	(void)size;
+	return 0;
+}
+
+void
+setbuf(FILE *stream, char *buffer)
+{
+	(void)setvbuf(stream, buffer, buffer ? _IOFBF : _IONBF, BUFSIZ);
+}
+
+void
+setlinebuf(FILE *stream)
+{
+	(void)setvbuf(stream, NULL, _IOLBF, 0);
+}

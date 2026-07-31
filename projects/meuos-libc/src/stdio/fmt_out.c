@@ -116,9 +116,15 @@ __meuos_vformat(struct __meuos_print_sink *sink, const char *format, va_list arg
 			width = width * 10 + *format++ - '0';
 		if (*format == '.') {
 			++format;
-			precision = 0;
-			while (*format >= '0' && *format <= '9')
-				precision = precision * 10 + *format++ - '0';
+			if (*format == '*') {
+				/* 星号精度：从可变参数读取（负值视为省略精度）。 */
+				precision = va_arg(arguments, int);
+				++format;
+			} else {
+				precision = 0;
+				while (*format >= '0' && *format <= '9')
+					precision = precision * 10 + *format++ - '0';
+			}
 		}
 		if (*format == 'l') {
 			length = 1;
@@ -148,8 +154,10 @@ __meuos_vformat(struct __meuos_print_sink *sink, const char *format, va_list arg
 			int text_length;
 			if (!text) text = "(null)";
 			text_length = (int)strlen(text);
+			if (precision >= 0 && text_length > precision)
+				text_length = precision;
 			if (__meuos_sink_repeat(sink, ' ', width - text_length) < 0) return -1;
-			while (*text)
+			while (text_length--)
 				if (__meuos_sink_put(sink, *text++) < 0) return -1;
 			}
 			break;

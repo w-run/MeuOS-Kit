@@ -15,9 +15,9 @@
 #include <unistd.h>
 #include "internal.h"
 
-struct __meuos_FILE __meuos_stdin  = { 0, FILE_READ  | FILE_STATIC, 0, 0, 0, EOF };
-struct __meuos_FILE __meuos_stdout = { 1, FILE_WRITE | FILE_STATIC, 0, 0, 0, EOF };
-struct __meuos_FILE __meuos_stderr = { 2, FILE_WRITE | FILE_STATIC, 0, 0, 0, EOF };
+struct __meuos_FILE __meuos_stdin  = { 0, FILE_READ  | FILE_STATIC, 0, 0, 0, EOF, 0 };
+struct __meuos_FILE __meuos_stdout = { 1, FILE_WRITE | FILE_STATIC, 0, 0, 0, EOF, 0 };
+struct __meuos_FILE __meuos_stderr = { 2, FILE_WRITE | FILE_STATIC, 0, 0, 0, EOF, 0 };
 FILE *stdin  = &__meuos_stdin;
 FILE *stdout = &__meuos_stdout;
 FILE *stderr = &__meuos_stderr;
@@ -69,6 +69,7 @@ fdopen(int fd, const char *mode)
 	stream->size = 0;
 	stream->pos = 0;
 	stream->ungot = EOF;
+	stream->pid = 0;
 	return stream;
 }
 
@@ -109,6 +110,7 @@ fmemopen(void *buffer, size_t size, const char *mode)
 	stream->size = size;
 	stream->pos = 0;
 	stream->ungot = EOF;
+	stream->pid = 0;
 	return stream;
 }
 
@@ -156,5 +158,6 @@ freopen(const char *path, const char *mode, FILE *stream)
 	stream->size = 0;
 	stream->pos = 0;
 	stream->ungot = EOF;
+	stream->pid = 0;
 	return stream;
 }

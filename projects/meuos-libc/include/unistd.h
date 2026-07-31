@@ -14,6 +14,8 @@ pid_t getppid(void);
 pid_t gettid(void);
 pid_t fork(void);
 int execve(const char *, char *const[], char *const[]);
+int execv(const char *, char *const[]);
+int execvp(const char *, char *const[]);
 int pipe(int [2]);
 int link(const char *, const char *);
 int symlink(const char *, const char *);
@@ -41,6 +43,10 @@ _Noreturn void _exit(int);
 #define X_OK 1
 #define W_OK 2
 #define R_OK 4
+
+#define STDIN_FILENO 0
+#define STDOUT_FILENO 1
+#define STDERR_FILENO 2
 
 pid_t wait(int *);
 

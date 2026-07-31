@@ -19,6 +19,7 @@ struct __meuos_FILE {
 	size_t size;
 	size_t pos;
 	int ungot;
+	pid_t pid;		/* popen() 子进程，pclose() 需要；非 popen 流为 0 */
 	/* Cookie stream support (funopen/fopencookie). */
 	void *cookie;
 	ssize_t (*readfn)(void *, char *, size_t);

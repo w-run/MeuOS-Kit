@@ -32,6 +32,7 @@ fopencookie(void *cookie, const char *mode, cookie_io_functions_t funcs)
 	stream->size = 0;
 	stream->pos = 0;
 	stream->ungot = EOF;
+	stream->pid = 0;
 	stream->cookie = cookie;
 	stream->readfn = funcs.read;
 	stream->writefn = funcs.write;

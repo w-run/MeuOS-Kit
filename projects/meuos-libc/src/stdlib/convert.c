@@ -96,6 +96,32 @@ strtoll(const char *text, char **end, int base)
 	return negative ? -(long long)strtoull(text, end, base) : (long long)strtoull(text, end, base);
 }
 
+/* glibc 兼容别名：glibc 用独立符号暴露 C23 语义的 strtol 家族（base=0 时
+ * 解析 0b/0B 二进制前缀等）。本实现的 base 解析对既有调用已足够，直接转发。 */
+long
+__isoc23_strtol(const char *text, char **end, int base)
+{
+	return strtol(text, end, base);
+}
+
+unsigned long
+__isoc23_strtoul(const char *text, char **end, int base)
+{
+	return strtoul(text, end, base);
+}
+
+long long
+__isoc23_strtoll(const char *text, char **end, int base)
+{
+	return strtoll(text, end, base);
+}
+
+unsigned long long
+__isoc23_strtoull(const char *text, char **end, int base)
+{
+	return strtoull(text, end, base);
+}
+
 #if !defined(__i386__)
 double
 strtod(const char *text, char **end)

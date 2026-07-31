@@ -20,6 +20,8 @@ void qsort(void *, size_t, size_t, int (*)(const void *, const void *));
 void *bsearch(const void *, const void *, size_t, size_t, int (*)(const void *, const void *));
 extern char **environ;
 char *getenv(const char *);
+int setenv(const char *, const char *, int);
+int unsetenv(const char *);
 _Noreturn void exit(int);
 _Noreturn void abort(void);
 int atexit(void (*)(void));

@@ -10,6 +10,11 @@
 
 #define EOF (-1)
 #define L_tmpnam 20
+#define BUFSIZ 8192
+
+#define _IOFBF 0
+#define _IOLBF 1
+#define _IONBF 2
 
 typedef long fpos_t;
 
@@ -44,6 +49,8 @@ int vsprintf(char *, const char *, va_list);
 FILE *fopen(const char *, const char *);
 FILE *freopen(const char *, const char *, FILE *);
 FILE *fdopen(int, const char *);
+FILE *popen(const char *, const char *);
+int pclose(FILE *);
 size_t fread(void *, size_t, size_t, FILE *);
 int fseek(FILE *, long, int);
 long ftell(FILE *);
@@ -71,6 +78,9 @@ FILE *funopen(const void *, int (*)(void *, char *, int),
 int fclose(FILE *);
 int fflush(FILE *);
 int ferror(FILE *);
+int setvbuf(FILE *, char *, int, size_t);
+void setbuf(FILE *, char *);
+void setlinebuf(FILE *);
 char *fgets(char *, int, FILE *);
 ssize_t getline(char **, size_t *, FILE *);
 ssize_t getdelim(char **, size_t *, int, FILE *);

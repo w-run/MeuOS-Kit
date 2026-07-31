@@ -52,6 +52,9 @@ main(void)
 	if (snprintf(error_text, sizeof(error_text), "%03o %zu %ld", 7u,
 		(size_t)9, -2L) != 8 || strcmp(error_text, "007 9 -2") != 0)
 		return 1;
+	if (snprintf(error_text, sizeof(error_text), "%.*s", 3, "abcdef") != 3
+	 || strcmp(error_text, "abc") != 0)
+		return 1;
 	if (pipe(descriptors) != 0 || !(stream = fdopen(descriptors[1], "w"))
 	 || fprintf(stream, "%s:%d", "stream", 7) != 8 || fclose(stream) != 0)
 		return 1;
@@ -60,6 +63,10 @@ main(void)
 		return 1;
 	error_text[error_length] = 0;
 	if (strcmp(error_text, "stream:7") != 0)
+		return 1;
+	stream = popen("echo popen-ok", "r");
+	if (!stream || !fgets(error_text, sizeof(error_text), stream)
+	 || strcmp(error_text, "popen-ok\n") != 0 || pclose(stream) != 0)
 		return 1;
 	return printf("%s %d %x %c %p\n", "PASS", -7, 42, '!', (void *)0) < 0;
 }

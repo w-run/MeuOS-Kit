@@ -17,3 +17,43 @@ int isblank(int c) { return c == ' ' || c == '\t'; }
 int iscntrl(int c) { if (c == EOF) return 0; return (unsigned)c < 0x20 || c == 0x7f; }
 int isgraph(int c) { if (c == EOF) return 0; return c > 0x20 && c < 0x7f; }
 int ispunct(int c) { if (c == EOF) return 0; return isgraph(c) && !isalnum(c); }
+
+/*
+ * glibc 兼容内部符号：__ctype_b_loc() 返回指向 ctype 表指针的指针。
+ * 表按 glibc 布局为 384 项，索引 (unsigned char)c + 128 处存放字符 c 的
+ * _IS* 位标志；索引 127（EOF 处）为 0。懒初始化以避免构造器机制。
+ */
+static unsigned short ctype_b_table[384];
+static const unsigned short *ctype_b_loc_value;
+
+static void
+init_ctype_table(void)
+{
+	int c;
+
+	for (c = 0; c < 256; ++c) {
+		unsigned short flags = 0;
+		if (isupper(c)) flags |= _ISupper;
+		if (islower(c)) flags |= _ISlower;
+		if (isalpha(c)) flags |= _ISalpha;
+		if (isdigit(c)) flags |= _ISdigit;
+		if (isxdigit(c)) flags |= _ISxdigit;
+		if (isspace(c)) flags |= _ISspace;
+		if (isprint(c)) flags |= _ISprint;
+		if (isgraph(c)) flags |= _ISgraph;
+		if (isblank(c)) flags |= _ISblank;
+		if (iscntrl(c)) flags |= _IScntrl;
+		if (ispunct(c)) flags |= _ISpunct;
+		if (isalnum(c)) flags |= _ISalnum;
+		ctype_b_table[c + 128] = flags;
+	}
+}
+
+const unsigned short **
+__ctype_b_loc(void)
+{
+	if (!ctype_b_loc_value)
+		init_ctype_table();
+	ctype_b_loc_value = ctype_b_table + 128;
+	return &ctype_b_loc_value;
+}

@@ -135,7 +135,7 @@ endif
 # Per-feature C objects.
 STRING_OBJS    := $(BUILD)/string/memory.o $(BUILD)/string/duplicate.o \
                   $(BUILD)/string/error.o $(BUILD)/string/token.o \
-                  $(BUILD)/string/compare.o
+                  $(BUILD)/string/compare.o $(BUILD)/string/dirname.o
 STDLIB_OBJS    := $(BUILD)/stdlib/malloc.o $(BUILD)/stdlib/convert.o \
                   $(BUILD)/stdlib/env.o $(BUILD)/stdlib/exit.o \
                   $(BUILD)/stdlib/process.o $(BUILD)/stdlib/search.o \
@@ -144,7 +144,8 @@ STDIO_OBJS     := $(BUILD)/stdio/file.o $(BUILD)/stdio/char_io.o \
                   $(BUILD)/stdio/block_io.o $(BUILD)/stdio/position.o \
                   $(BUILD)/stdio/fmt_out.o $(BUILD)/stdio/fmt_in.o \
                   $(BUILD)/stdio/fp_fmt.o $(BUILD)/stdio/memory_stream.o \
-                  $(BUILD)/stdio/file_misc.o $(BUILD)/stdio/truncate.o
+                  $(BUILD)/stdio/file_misc.o $(BUILD)/stdio/truncate.o \
+                  $(BUILD)/stdio/popen.o
 SYSCALL_OBJS   := $(addprefix $(BUILD)/syscall/, \
                   read.o write.o open.o close.o fork.o execve.o exit.o \
                   mmap.o munmap.o brk.o stat.o fstat.o lstat.o lseek.o \
@@ -290,6 +291,7 @@ check: $(ATOMIC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/stdio test/stdio.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/malloc test/malloc.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/stdlib test/stdlib.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/libgen test/libgen.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/ctype test/ctype.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/assert test/assert.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/c11-headers test/c11_headers.c
@@ -328,6 +330,7 @@ check: $(ATOMIC_LIB)
 	/tmp/meuos-libc-check/stdio
 	/tmp/meuos-libc-check/malloc
 	/tmp/meuos-libc-check/stdlib
+	/tmp/meuos-libc-check/libgen
 	/tmp/meuos-libc-check/ctype
 	/tmp/meuos-libc-check/assert
 	/tmp/meuos-libc-check/c11-headers

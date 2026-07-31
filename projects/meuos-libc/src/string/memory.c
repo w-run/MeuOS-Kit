@@ -127,6 +127,21 @@ strcat(char *restrict destination, const char *restrict source)
 	return result;
 }
 
+char *
+strncat(char *restrict destination, const char *restrict source, size_t count)
+{
+	char *result = destination;
+
+	while (*destination)
+		++destination;
+	while (count && *source) {
+		*destination++ = *source++;
+		--count;
+	}
+	*destination = '\0';
+	return result;
+}
+
 int
 strcmp(const char *left, const char *right)
 {

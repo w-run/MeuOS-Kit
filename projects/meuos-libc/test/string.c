@@ -9,6 +9,7 @@ main(void)
 	char overlap[8] = "abcdef";
 	char tokens[] = "one,two,,three";
 	char *state;
+	char destination[16];
 
 	memset(buffer, 0, sizeof(buffer));
 	strcpy(buffer, "hello");
@@ -33,6 +34,16 @@ main(void)
 		return 1;
 	}
 	if (strcmp(strtok_r(tokens, ",", &state), "one") || strcmp(strtok_r(0, ",", &state), "two") || strcmp(strtok_r(0, ",", &state), "three") || strtok_r(0, ",", &state)) {
+		puts("FAIL");
+		return 1;
+	}
+	strcpy(destination, "ab");
+	if (strcmp(strncat(destination, "cdef", 2), "abcd") != 0) {
+		puts("FAIL");
+		return 1;
+	}
+	strcpy(destination, "xy");
+	if (strcmp(strncat(destination, "z", 0), "xy") != 0) {
 		puts("FAIL");
 		return 1;
 	}
