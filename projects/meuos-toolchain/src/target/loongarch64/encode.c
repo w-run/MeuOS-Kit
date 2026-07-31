@@ -186,17 +186,23 @@ static int
 reloc_kind_of(const char *tok)
 {
 	if (tok[0] != '%') return RELK_PLAIN;
-	if      (!strncmp(tok, "%pc_hi20(",     10)) return RELK_PC_HI20;
-	else if (!strncmp(tok, "%pc_lo12(",     10)) return RELK_PC_LO12;
+	/* NOTE: lengths must be the exact marker length without the '('
+	 * overrun.  %pc_hi20( and %le_hi20( are 9 chars; %got_pc_hi20( is
+	 * 13; %le64_lo20( is 12.  A length of 10 for the 9-char markers
+	 * compared tok's next char (the symbol name) against the NUL, so
+	 * %le_hi20/%le_lo12/%pc_hi20/%pc_lo12 never matched and fell back
+	 * to RELK_PLAIN (wrong relocation type, e.g. PCALA_LO12 for TLS). */
+	if      (!strncmp(tok, "%pc_hi20(",      9)) return RELK_PC_HI20;
+	else if (!strncmp(tok, "%pc_lo12(",      9)) return RELK_PC_LO12;
 	else if (!strncmp(tok, "%got_pc_hi20(", 13)) return RELK_GOT_PC_HI20;
 	else if (!strncmp(tok, "%got_pc_lo12(", 13)) return RELK_GOT_PC_LO12;
 	else if (!strncmp(tok, "%ie_pc_hi20(",  13)) return RELK_IE_PC_HI20;
 	else if (!strncmp(tok, "%ie_pc_lo12(",  13)) return RELK_IE_PC_LO12;
 	else if (!strncmp(tok, "%gd_pc_hi20(",  13)) return RELK_GD_PC_HI20;
-	else if (!strncmp(tok, "%le_hi20(",     10)) return RELK_LE_HI20;
-	else if (!strncmp(tok, "%le_lo12(",     10)) return RELK_LE_LO12;
-	else if (!strncmp(tok, "%le64_lo20(",  12)) return RELK_LE64_LO20;
-	else if (!strncmp(tok, "%le64_hi12(",  12)) return RELK_LE64_HI12;
+	else if (!strncmp(tok, "%le_hi20(",      9)) return RELK_LE_HI20;
+	else if (!strncmp(tok, "%le_lo12(",      9)) return RELK_LE_LO12;
+	else if (!strncmp(tok, "%le64_lo20(",   12)) return RELK_LE64_LO20;
+	else if (!strncmp(tok, "%le64_hi12(",   12)) return RELK_LE64_HI12;
 	return RELK_PLAIN;
 }
 
@@ -644,13 +650,18 @@ la64_encode_insn(const struct mt_target *target,
 			rd = (unsigned)ops[0].reg;
 			rj = (unsigned)ops[1].reg;
 			if (ops[2].kind == 4) {
-				emit32(out->bytes, 0x16800000 | rd | (rj << 5));
+				/* lu52i.d opcode is [31:22] = 0x0C, i.e. base
+				 * 0x03000000 (NOT 0x16800000, which overlaps the
+				 * lu32i.d opcode 0x16<<24).  Verified against
+				 * loongarch64-linux-gnu-as: lu52i.d $t8,$t8,0 =
+				 * 0x03000294. */
+				emit32(out->bytes, 0x03000000 | rd | (rj << 5));
 				sym = ops[2].sym; relkind = ops[2].relkind;
 				reloc_type = relkind_to_type(relkind);
 				if (reloc_type == 0) reloc_type = RLA_TLS_LE64_HI12;
 				set_fixup(out, 0, 4, reloc_type, sym, ops[2].addend);
 			} else if (ops[2].kind == 2) {
-				emit32(out->bytes, 0x16800000 | rd | (rj << 5) |
+				emit32(out->bytes, 0x03000000 | rd | (rj << 5) |
 				    ((uint32_t)(ops[2].imm & 0xFFF) << 10));
 			} else return -1;
 			return 0;

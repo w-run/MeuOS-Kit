@@ -1938,6 +1938,21 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 		return ld_errorf(ctx, "unsupported relocation type", name);
 	}
 	if (strcmp(ctx->target->name, "aarch64") == 0) {
+		/* TLSLE relocations need TP-relative offset, not full VA:
+		 *   R_AARCH64_TLSLE_ADD_TPREL_HI12     = 549
+		 *   R_AARCH64_TLSLE_ADD_TPREL_LO12_NC  = 551
+		 * mcc emits these for _Thread_local access; the linker must
+		 * resolve the symbol to its offset within the PT_TLS image,
+		 * not its linked virtual address.  aarch64 uses GAP_ABOVE_TP
+		 * = 16 (musl ABI: TPIDR_EL0 addresses the mmap base; .tdata
+		 * is copied at TP+16), so the TP-relative offset must include
+		 * the 16-byte TCB reservation. */
+		if (type == 549 || type == 551) {
+			uint64_t tls_off;
+			if (symbol_tls_offset(ctx, object, symbol_index, &tls_off) != 0)
+				return ld_errorf(ctx, "unsupported TLS relocation", name);
+			resolved_value = tls_off + 16; /* GAP_ABOVE_TP */
+		}
 		if (mt_apply_aarch64_reloc(type, target->data + target_offset,
 		                           resolved_value, addend, place) == 0)
 			return 0;

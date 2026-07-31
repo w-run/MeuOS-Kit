@@ -617,6 +617,43 @@ aarch64_encode_insn(const struct mt_target *target,
 		return 0;
 	}
 
+	/* add rd, rn, #:tprel_hi12:symbol{, lsl #12} — TLSLE hi
+	 * R_AARCH64_TLSLE_ADD_TPREL_HI12 (549).  mcc emits the GAS form
+	 * "add Xd, Xn, #:tprel_hi12:S, lsl #12"; the shift (lsl #12) is
+	 * folded into the ADD immediate encoding so the linker only needs
+	 * to fill imm12 with (S+A)>>12.  ops[3] is the "lsl #12" token,
+	 * parsed as a label operand. */
+	if (strcmp(mnemonic, "add") == 0 && nops >= 3 &&
+	    ops[0].kind == 'r' && ops[1].kind == 'r' &&
+	    ops[2].kind == 'l' && ops[2].modifier[0] != '\0' &&
+	    strcmp(ops[2].modifier, "tprel_hi12") == 0) {
+		int rd = ops[0].reg, rn = ops[1].reg;
+		int is64 = (ops[0].wreg == XREG);
+		emit32(out, &off, (is64 ? 0x91000000 : 0x11000000) |
+		       (1u << 22) | /* shift = lsl #12 */
+		       (((unsigned)rn & 0x1F) << 5) |
+		       ((unsigned)rd & 0x1F));
+		const char *sym = ops[2].sym_start;
+		set_fixup(out, 0, 4, 549, sym, ops[2].imm); /* TLSLE_ADD_TPREL_HI12 */
+		return 0;
+	}
+
+	/* add rd, rn, #:tprel_lo12_nc:symbol — TLSLE lo
+	 * R_AARCH64_TLSLE_ADD_TPREL_LO12_NC (551): imm12 = (S+A) & 0xFFF */
+	if (strcmp(mnemonic, "add") == 0 && nops == 3 &&
+	    ops[0].kind == 'r' && ops[1].kind == 'r' &&
+	    ops[2].kind == 'l' && ops[2].modifier[0] != '\0' &&
+	    strcmp(ops[2].modifier, "tprel_lo12_nc") == 0) {
+		int rd = ops[0].reg, rn = ops[1].reg;
+		int is64 = (ops[0].wreg == XREG);
+		emit32(out, &off, (is64 ? 0x91000000 : 0x11000000) |
+		       (((unsigned)rn & 0x1F) << 5) |
+		       ((unsigned)rd & 0x1F));
+		const char *sym = ops[2].sym_start;
+		set_fixup(out, 0, 4, 551, sym, ops[2].imm); /* TLSLE_ADD_TPREL_LO12_NC */
+		return 0;
+	}
+
 	/* add rd, rn, rm (register) */
 	if (strcmp(mnemonic, "add") == 0 && nops == 3 &&
 	    ops[0].kind == 'r' && ops[1].kind == 'r' && ops[2].kind == 'r') {
