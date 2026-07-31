@@ -57,30 +57,33 @@ meuos-shell/
 └── .todo/                   # 子任务设计文档
 ```
 
-## 4. 当前能力（骨架）
+## 4. 当前能力（P7 中期）
 
 | 能力 | 状态 | 说明 |
 |------|:----:|------|
-| `--version` | ✅ | 输出 `(MeuOS Shell) 0.1.0-skeleton` |
-| `--help` | ✅ | 输出 usage 信息 |
-| `-c "cmd"` | ✅ | 单命令模式：fork + execvp 执行 |
-| 脚本模式 `msh script.sh` | ✅ | 逐行读脚本 + 单命令执行（无解析） |
-| 注释行 (`#`) | ✅ | 跳过以 `#` 起始的行 |
-| 空行 | ✅ | 跳过 |
-| 交互模式（REPL） | ✅ | `getline` 循环 + `$` 提示符 |
-| `exit` 命令 | ❌ | P6 实现为 builtin |
-| `cd` / `pwd` / `export` 等 builtin | ❌ | P6 实现 |
-| 管道 (`\|`) | ❌ | P6 实现 |
-| 重定向 (`>` `<` `>>`) | ❌ | P6 实现 |
-| 变量 (`$VAR` `${VAR}`) | ❌ | P6 实现 |
-| 控制流 (`if`/`for`/`while`/`case`) | ❌ | P6 实现 |
-| 函数定义 | ❌ | P6 实现 |
-| 命令替换 (`$(...)`) | ❌ | P6 实现 |
-| Glob (`*.c`) | ❌ | P6 实现 |
-| 历史/行编辑/Tab 补全 | ❌ | P7 实现 |
-| 作业控制 (`&` `fg` `bg`) | ❌ | P7 实现 |
-| bash 兼容模式 | ❌ | P8 实现（可选） |
-| zsh 插件/主题 | ❌ | P8 实现（可选） |
+| `--version` / `--help` | ✅ | 版本与 usage 输出 |
+| `-c "cmd"` | ✅ | 单命令模式：parse + eval |
+| 脚本模式 `msh script.sh` | ✅ | 完整解析执行 |
+| 注释行 (`#`) / 空行 | ✅ | 词法层处理 |
+| 交互模式（REPL） | ✅ | 行编辑 + 历史 + 作业回收 |
+| 内建命令 | ✅ | cd/export/unset/set/exit/echo/pwd/read/type/exec/jobs/fg/bg/wait 等 |
+| 管道 (`\|`) | ✅ | N 级管道 |
+| 重定向 (`>` `<` `>>` `>&2` `<&N`) | ✅ | 含 fd 复制 |
+| 变量 (`$VAR` `${VAR}` 修饰符) | ✅ | `:-` `:=` `:+` `:?` `#` `##` `%` `%%` `/` 替换 `${#VAR}` |
+| 控制流 | ✅ | if/elif/else/for/while/until/case |
+| 函数定义 | ✅ | `name() {}` 与 `function name {}`，位置参数 `$1..$n` `$@` `$#` |
+| 命令替换 `$(...)` / 反引号 | ✅ | fork+pipe，支持嵌套（递归函数验证通过） |
+| 算术 `$((...))` | ✅ | 递归下降求值器（+ - * / % 比较 逻辑） |
+| Glob (`*.c`) / tilde (`~`) | ✅ | libc glob/fnmatch |
+| 后台作业 `&` | ✅ | jobs/fg/bg/wait + SIGCHLD 回收 |
+| 历史/行编辑 | ✅ | 裸 termios，`~/.msh_history`（限 1MB） |
+| YAML 配置 | ✅ | `~/.config/msh/config.yaml`（ps1/aliases/env/features） |
+| 兼容 3 路递进 | ✅ | `--classic` > `MSH_CLASSIC` env > yaml features |
+| Tab 补全 | ❌ | P7C |
+| here-doc `<<EOF` | ❌ | P7C |
+| trap 内建 | ❌ | P7C |
+| bash 数组/`[[]]`/`source` | ❌ | P8（可选） |
+| zsh 插件/主题 | ❌ | P8（可选） |
 
 ### 骨架运作原理
 
