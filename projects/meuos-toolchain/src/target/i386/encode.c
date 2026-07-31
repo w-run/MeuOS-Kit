@@ -19,6 +19,7 @@
 #define R_386_32       1
 #define R_386_PC32     2
 #define R_386_PLT32    4
+#define R_386_TLS_LE   17
 
 /* ---- Operand parsing ---- */
 
@@ -38,6 +39,9 @@ struct i386_op {
 	int64_t disp;       /* displacement */
 	const char *sym;    /* symbol name (for fixups) */
 	int64_t addend;
+	int is_imm;         /* operand came from '$' prefix (immediate) */
+	int seg_gs;         /* %gs: segment override prefix (TLS variant II) */
+	int tls_le;         /* symbol carries @ntpoff: R_386_TLS_LE */
 	/* Symbol storage.  Operand text points into a scratch buffer that
 	 * is reused later in the encoder, so symbol names are copied here
 	 * to stay valid until the caller consumes the fixup. */
@@ -114,6 +118,27 @@ strip_sym_quotes(char *sym)
 	}
 }
 
+/* Split a trailing numeric offset off a symbol name ("sym+4"/"sym-8")
+ * into the addend.  Quoted names are never split.  Mirrors the
+ * riscv64 encoder's split_sym_offset. */
+static void
+split_sym_offset(char *sym, int64_t *off)
+{
+	char *p;
+	*off = 0;
+	if (!sym || !*sym || sym[0] == '"')
+		return;
+	for (p = sym; *p; p++) {
+		if ((*p == '+' || *p == '-') && p[1] >= '0' && p[1] <= '9') {
+			*off = strtoll(p + 1, NULL, 10);
+			if (*p == '-')
+				*off = -*off;
+			*p = '\0';
+			break;
+		}
+	}
+}
+
 /* Parse an operand string into an i386_op. */
 static int
 parse_operand(const char *text, struct i386_op *op)
@@ -135,6 +160,14 @@ parse_operand(const char *text, struct i386_op *op)
 			text++;
 	}
 
+	/* TLS segment override (variant II): %gs:sym@ntpoff / %gs:0 */
+	if (strncmp(text, "%gs:", 4) == 0) {
+		op->seg_gs = 1;
+		text += 4;
+		while (*text == ' ')
+			text++;
+	}
+
 	/* Immediate: $<value> or $<symbol> */
 	if (text[0] == '$') {
 		const char *val = text + 1;
@@ -142,6 +175,7 @@ parse_operand(const char *text, struct i386_op *op)
 		long nv;
 
 		op->kind = OP_IMM;
+		op->is_imm = 1;
 		op->width = 4;  /* default for i386 */
 
 		/* Try parse as number first */
@@ -171,6 +205,8 @@ parse_operand(const char *text, struct i386_op *op)
 		/* mcc quotes local labels containing dots (e.g. ".Lfp1");
 		 * the label definition is unquoted, so strip the quotes. */
 		strip_sym_quotes(op->sym_buf);
+		/* Split trailing "+N"/"-N" offset (e.g. $sym+4) into addend. */
+		split_sym_offset(op->sym_buf, &op->addend);
 		op->sym = op->sym_buf;
 		return 1;
 	}
@@ -208,6 +244,15 @@ parse_operand(const char *text, struct i386_op *op)
 				if (slen >= sizeof(sym_name)) return 0;
 				memcpy(sym_name, text, slen);
 				sym_name[slen] = '\0';
+				/* TLS LE: strip the @ntpoff modifier from a memory
+				 * displacement like tls_var@ntpoff(%eax). */
+				{
+					char *at = strstr(sym_name, "@ntpoff");
+					if (at) {
+						*at = '\0';
+						op->tls_le = 1;
+					}
+				}
 				op->sym = strdup(sym_name);
 				if (!op->sym) return 0;
 				op->disp = 0;
@@ -276,9 +321,17 @@ parse_operand(const char *text, struct i386_op *op)
 			break;
 		}
 		if (has_digit && strchr(text, '(') == NULL && strchr(text, '$') == NULL) {
-			op->kind = OP_IMM;
-			op->disp = strtol(text, NULL, 0);
-			op->width = 4;
+			if (op->seg_gs) {
+				/* %gs:0 — TLS thread pointer read: absolute disp32
+				 * memory operand with GS prefix. */
+				op->kind = OP_MEM;
+				op->disp = strtol(text, NULL, 0);
+				op->base = -1;
+			} else {
+				op->kind = OP_IMM;
+				op->disp = strtol(text, NULL, 0);
+				op->width = 4;
+			}
 			return 1;
 		}
 	}
@@ -289,15 +342,21 @@ parse_operand(const char *text, struct i386_op *op)
 		strncpy(op->sym_buf, text, sizeof(op->sym_buf) - 1);
 		op->sym_buf[sizeof(op->sym_buf) - 1] = '\0';
 		strip_sym_quotes(op->sym_buf);
+		/* Split trailing "+N"/"-N" offset (e.g. so+4) into addend. */
+		split_sym_offset(op->sym_buf, &op->addend);
+		/* TLS LE: strip the @ntpoff modifier; the symbol resolves via
+		 * R_386_TLS_LE (TP-relative) instead of an absolute address. */
+		{
+			char *at = strstr(op->sym_buf, "@ntpoff");
+			if (at) {
+				*at = '\0';
+				op->tls_le = 1;
+			}
+		}
 		op->sym = op->sym_buf;
 		return 1;
 	}
 }
-
-/* Strip surrounding double quotes from a symbol name in place.  mcc
- * quotes local labels containing dots (e.g. ".Lfp1"), but the symbol
- * table entry (defined by the label line) is unquoted, so the fixup
- * must reference the bare name. */
 
 /* ---- Encoding helpers ---- */
 
@@ -334,6 +393,17 @@ emit_modrm_mem(unsigned char **pp, int reg_num, const struct i386_op *op)
 	size_t disp_offset = 0;
 
 	/* Determine mod field based on displacement */
+	if (base < 0) {
+		/* Pure absolute address: mod=00 rm=101 + disp32.  Covers both
+		 * bare symbols (fixup applied later) and %gs:0 thread-pointer
+		 * reads. */
+		emit8(p, modrm(0, reg_num & 7, 5));
+		p++;
+		emit32(p, (uint32_t)(disp & 0xFFFFFFFFULL));
+		p += 4;
+		*pp = p;
+		return 0;
+	}
 	if (op->sym) {
 		/* Symbol displacement: always 32-bit */
 		mod = 2;
@@ -576,8 +646,18 @@ i386_encode_insn(const struct mt_target *target,
 	/* ---- MOV ---- */
 	if (strcmp(base, "mov") == 0 && nops == 2) {
 		match = 1;
+		/* TLS variant II: %gs: segment override prefix (0x65) precedes
+		 * any instruction whose operand carries seg_gs. */
+		if (ops[0].seg_gs || ops[1].seg_gs) {
+			emit8(p, 0x65);
+			p++;
+		}
+		/* Reloc type: @ntpoff operands resolve TP-relative via
+		 * R_386_TLS_LE; plain symbols use an absolute R_386_32. */
+		unsigned mov_reloc = (ops[0].tls_le || ops[1].tls_le)
+		                         ? R_386_TLS_LE : R_386_32;
 		if ((ops[0].kind == OP_IMM || ops[0].kind == OP_SYMBOL) &&
-		    ops[1].kind == OP_REG) {
+		    ops[0].is_imm && ops[1].kind == OP_REG) {
 			/* mov $imm/$sym, reg — opcode 0xB8+reg */
 			emit8(p, 0xB8 + ops[1].reg);
 			p++;
@@ -593,6 +673,57 @@ i386_encode_insn(const struct mt_target *target,
 			}
 			out->size = (size_t)(p - out->bytes);
 			goto done;
+		} else if ((ops[0].kind == OP_SYMBOL || ops[0].kind == OP_IMM) &&
+		           !ops[0].is_imm && ops[1].kind == OP_REG) {
+			/* mov sym, reg — 0x8B /r with disp32 + reloc.
+			 * A bare symbol or bare number (no '$') is an absolute
+			 * memory load, not an immediate. */
+			emit8(p, 0x8B);
+			p++;
+			emit8(p, modrm(0, ops[1].reg, 5)); /* mod=00 rm=101 disp32 */
+			p++;
+			offset = (size_t)(p - out->bytes);
+			emit32(p, 0);
+			p += 4;
+			if (ops[0].kind == OP_SYMBOL)
+				set_fixup(out, offset, 4, mov_reloc,
+				          ops[0].sym, ops[0].addend);
+			else
+				emit32(p - 4, (uint32_t)(ops[0].disp & 0xFFFFFFFFULL));
+			out->size = (size_t)(p - out->bytes);
+			goto done;
+		} else if (ops[0].kind == OP_REG && ops[1].kind == OP_SYMBOL &&
+		           !ops[1].is_imm) {
+			/* mov reg, sym — 0x89 /r with disp32 + reloc.
+			 * Store a register to an absolute symbol address. */
+			emit8(p, 0x89);
+			p++;
+			emit8(p, modrm(0, ops[0].reg, 5)); /* mod=00 rm=101 disp32 */
+			p++;
+			offset = (size_t)(p - out->bytes);
+			emit32(p, 0);
+			p += 4;
+			set_fixup(out, offset, 4, mov_reloc,
+			          ops[1].sym, ops[1].addend);
+			out->size = (size_t)(p - out->bytes);
+			goto done;
+		} else if (ops[0].kind == OP_IMM && ops[1].kind == OP_SYMBOL &&
+		           !ops[1].is_imm) {
+			/* mov $imm, sym — 0xC7 /0 with disp32 + reloc + imm32.
+			 * Store an immediate to an absolute symbol address. */
+			emit8(p, 0xC7);
+			p++;
+			emit8(p, modrm(0, 0, 5)); /* mod=00 rm=101 disp32, /0 */
+			p++;
+			offset = (size_t)(p - out->bytes);
+			emit32(p, 0);
+			p += 4;
+			set_fixup(out, offset, 4, mov_reloc,
+			          ops[1].sym, ops[1].addend);
+			emit32(p, (uint32_t)(ops[0].disp & 0xFFFFFFFFULL));
+			p += 4;
+			out->size = (size_t)(p - out->bytes);
+			goto done;
 		} else if (ops[0].kind == OP_REG && ops[1].kind == OP_REG) {
 			/* mov reg, reg — 0x89 */
 			emit8(p, 0x89);
@@ -606,6 +737,10 @@ i386_encode_insn(const struct mt_target *target,
 			emit8(p, width == 1 ? 0xC6 : 0xC7);
 			p++;
 			emit_modrm_mem(&p, 0, &ops[1]);
+			if (ops[1].sym) {
+				size_t fixup_off = (size_t)((p - out->bytes) - 4);
+				set_fixup(out, fixup_off, 4, mov_reloc, ops[1].sym, 0);
+			}
 			emit32(p, (uint32_t)(ops[0].disp & 0xFFFFFFFFULL));
 			p += 4;
 			out->size = (size_t)(p - out->bytes);
@@ -618,7 +753,7 @@ i386_encode_insn(const struct mt_target *target,
 			out->size = (size_t)(p - out->bytes);
 			if (ops[1].sym) {
 				size_t fixup_off = (size_t)((p - out->bytes) - 4);
-				set_fixup(out, fixup_off, 4, R_386_32, ops[1].sym, 0);
+				set_fixup(out, fixup_off, 4, mov_reloc, ops[1].sym, 0);
 			}
 			goto done;
 		} else if (ops[0].kind == OP_MEM && ops[1].kind == OP_REG) {
@@ -629,26 +764,78 @@ i386_encode_insn(const struct mt_target *target,
 			out->size = (size_t)(p - out->bytes);
 			if (ops[0].sym) {
 				size_t fixup_off = (size_t)((p - out->bytes) - 4);
-				set_fixup(out, fixup_off, 4, R_386_32, ops[0].sym, 0);
+				set_fixup(out, fixup_off, 4, mov_reloc, ops[0].sym, 0);
 			}
 			goto done;
 		}
 	}
 
 	/* ---- LEA ---- */
-	if (strcmp(base, "lea") == 0 && nops == 2 &&
-	    ops[0].kind == OP_MEM && ops[1].kind == OP_REG) {
-		/* leal disp(%base,%idx,scale), %reg — 0x8D /r */
+	if (strcmp(base, "lea") == 0 && nops == 2 && ops[1].kind == OP_REG &&
+	    (ops[0].kind == OP_MEM ||
+	     (ops[0].kind == OP_SYMBOL && !ops[0].is_imm))) {
+		/* leal disp(%base,%idx,scale), %reg / leal sym, %reg — 0x8D /r */
 		match = 1;
+		unsigned lea_reloc = ops[0].tls_le ? R_386_TLS_LE : R_386_32;
 		emit8(p, 0x8D);
 		p++;
-		emit_modrm_mem(&p, ops[1].reg, &ops[0]);
-		out->size = (size_t)(p - out->bytes);
-		if (ops[0].sym) {
-			size_t fixup_off = (size_t)((p - out->bytes) - 4);
-			set_fixup(out, fixup_off, 4, R_386_32, ops[0].sym, 0);
+		if (ops[0].kind == OP_SYMBOL) {
+			/* Pure symbol: mod=00 rm=101 + disp32 */
+			emit8(p, modrm(0, ops[1].reg, 5));
+			p++;
+			offset = (size_t)(p - out->bytes);
+			emit32(p, 0);
+			p += 4;
+			set_fixup(out, offset, 4, lea_reloc, ops[0].sym, ops[0].addend);
+		} else {
+			emit_modrm_mem(&p, ops[1].reg, &ops[0]);
+			out->size = (size_t)(p - out->bytes);
+			if (ops[0].sym) {
+				size_t fixup_off = (size_t)((p - out->bytes) - 4);
+				set_fixup(out, fixup_off, 4, lea_reloc, ops[0].sym, 0);
+			}
+			goto done;
 		}
+		out->size = (size_t)(p - out->bytes);
 		goto done;
+	}
+
+	/* ---- MOVSX / MOVZX ---- */
+	/* movsbl/movswl: sign-extend byte/word to long — 0F BE/BF /r.
+	 * movzbl/movzwl: zero-extend byte/word to long — 0F B6/B7 /r.
+	 * AT&T: movsbl src, dst (src is a byte mem or %al-class reg).
+	 * NOTE: the trailing 'l' is consumed as a width suffix, so `base`
+	 * arrives here as "movsb"/"movzb". */
+	if ((strcmp(base, "movsb") == 0 || strcmp(base, "movzb") == 0 ||
+	     strcmp(base, "movsw") == 0 || strcmp(base, "movzw") == 0) &&
+	    nops == 2) {
+		unsigned opc;
+		if (strcmp(base, "movsb") == 0) opc = 0xBE;
+		else if (strcmp(base, "movzb") == 0) opc = 0xB6;
+		else if (strcmp(base, "movsw") == 0) opc = 0xBF;
+		else opc = 0xB7;
+		match = 1;
+		emit8(p, 0x0F);
+		p++;
+		if (ops[0].kind == OP_MEM && ops[1].kind == OP_REG) {
+			emit8(p, opc);
+			p++;
+			emit_modrm_mem(&p, ops[1].reg, &ops[0]);
+			out->size = (size_t)(p - out->bytes);
+			if (ops[0].sym) {
+				size_t fixup_off = (size_t)((p - out->bytes) - 4);
+				set_fixup(out, fixup_off, 4, R_386_32, ops[0].sym, 0);
+			}
+			goto done;
+		}
+		if (ops[0].kind == OP_REG && ops[1].kind == OP_REG) {
+			/* movzbl %al, %eax — mod=3 (register form) */
+			emit8(p, opc);
+			emit8(p + 1, modrm(3, ops[0].reg, ops[1].reg));
+			p += 2;
+			out->size = (size_t)(p - out->bytes);
+			goto done;
+		}
 	}
 
 	/* ---- XCHG ---- */
@@ -775,6 +962,16 @@ i386_encode_insn(const struct mt_target *target,
 		match = 1;
 		emit8(p, 0xCD);
 		emit8(p + 1, (uint8_t)(ops[0].disp & 0xFF));
+		p += 2;
+		out->size = (size_t)(p - out->bytes);
+		goto done;
+	}
+
+	/* ---- UD2 (undefined instruction, 0F 0B) ---- */
+	if (strcmp(mnemonic, "ud2") == 0) {
+		match = 1;
+		emit8(p, 0x0F);
+		emit8(p + 1, 0x0B);
 		p += 2;
 		out->size = (size_t)(p - out->bytes);
 		goto done;
@@ -1003,6 +1200,36 @@ i386_encode_insn(const struct mt_target *target,
 		}
 	}
 
+	/* ---- ADC (add with carry) ---- */
+	if (strcmp(base, "adc") == 0 && nops == 2) {
+		match = 1;
+		if (ops[0].kind == OP_IMM &&
+		    (ops[1].kind == OP_REG || ops[1].kind == OP_MEM)) {
+			/* adc $imm, dst — 0x83 /2 (imm8) or 0x81 /2 (imm32) */
+			int len = emit_alu_imm(p, 2, &ops[0], &ops[1]);
+			if (len > 0) {
+				p += len;
+				out->size = (size_t)(p - out->bytes);
+				goto done;
+			}
+		}
+		if (ops[0].kind == OP_REG && ops[1].kind == OP_REG) {
+			emit8(p, 0x11);
+			emit8(p + 1, modrm(3, ops[0].reg, ops[1].reg));
+			p += 2;
+			out->size = (size_t)(p - out->bytes);
+			goto done;
+		}
+		if (ops[0].kind == OP_MEM && ops[1].kind == OP_REG) {
+			/* adc (mem), reg — 0x13 /r */
+			emit8(p, 0x13);
+			p++;
+			emit_modrm_mem(&p, ops[1].reg, &ops[0]);
+			out->size = (size_t)(p - out->bytes);
+			goto done;
+		}
+	}
+
 	/* ---- SUB ---- */
 	if (strcmp(base, "sub") == 0 && nops == 2) {
 		match = 1;  /* unmatched operand forms are rejected by the size-0 guard */
@@ -1031,6 +1258,36 @@ i386_encode_insn(const struct mt_target *target,
 		}
 		if (ops[0].kind == OP_MEM && ops[1].kind == OP_REG) {
 			emit8(p, 0x2B);
+			p++;
+			emit_modrm_mem(&p, ops[1].reg, &ops[0]);
+			out->size = (size_t)(p - out->bytes);
+			goto done;
+		}
+	}
+
+	/* ---- SBB (subtract with borrow) ---- */
+	if (strcmp(base, "sbb") == 0 && nops == 2) {
+		match = 1;
+		if (ops[0].kind == OP_IMM &&
+		    (ops[1].kind == OP_REG || ops[1].kind == OP_MEM)) {
+			/* sbb $imm, dst — 0x83 /3 (imm8) or 0x81 /3 (imm32) */
+			int len = emit_alu_imm(p, 3, &ops[0], &ops[1]);
+			if (len > 0) {
+				p += len;
+				out->size = (size_t)(p - out->bytes);
+				goto done;
+			}
+		}
+		if (ops[0].kind == OP_REG && ops[1].kind == OP_REG) {
+			emit8(p, 0x19);
+			emit8(p + 1, modrm(3, ops[0].reg, ops[1].reg));
+			p += 2;
+			out->size = (size_t)(p - out->bytes);
+			goto done;
+		}
+		if (ops[0].kind == OP_MEM && ops[1].kind == OP_REG) {
+			/* sbb (mem), reg — 0x1B /r */
+			emit8(p, 0x1B);
 			p++;
 			emit_modrm_mem(&p, ops[1].reg, &ops[0]);
 			out->size = (size_t)(p - out->bytes);
@@ -1093,6 +1350,36 @@ i386_encode_insn(const struct mt_target *target,
 			emit8(p, 0x3B);
 			p++;
 			emit_modrm_mem(&p, ops[1].reg, &ops[0]);
+			out->size = (size_t)(p - out->bytes);
+			goto done;
+		}
+	}
+
+	/* ---- TEST ---- */
+	if (strcmp(base, "test") == 0 && nops == 2) {
+		match = 1;
+		if (ops[0].kind == OP_REG && ops[1].kind == OP_REG) {
+			/* testl %src, %dst — 0x85 /r */
+			emit8(p, 0x85);
+			emit8(p + 1, modrm(3, ops[0].reg, ops[1].reg));
+			p += 2;
+			out->size = (size_t)(p - out->bytes);
+			goto done;
+		}
+		if (ops[0].kind == OP_IMM && ops[1].kind == OP_REG) {
+			/* testl $imm, %reg — 0xF7 /0 */
+			emit8(p, 0xF7);
+			emit8(p + 1, modrm(3, 0, ops[1].reg));
+			emit32(p + 2, (uint32_t)(ops[0].disp & 0xFFFFFFFFULL));
+			p += 6;
+			out->size = (size_t)(p - out->bytes);
+			goto done;
+		}
+		if (ops[0].kind == OP_REG && ops[1].kind == OP_MEM) {
+			/* testl %reg, (mem) — 0x85 /r */
+			emit8(p, 0x85);
+			p++;
+			emit_modrm_mem(&p, ops[0].reg, &ops[1]);
 			out->size = (size_t)(p - out->bytes);
 			goto done;
 		}
@@ -1330,6 +1617,36 @@ skip_jcc:
 		}
 	}
 
+	/* ---- SHLD / SHRD (double-precision shift) ---- */
+	/* AT&T: shldl count, src, dst — count is %cl or $imm.
+	 *   %cl form:     0F A5 /r
+	 *   $imm8 form:   0F A4 /r imm8
+	 * ModR/M reg field = src, rm field = dst. */
+	if ((strcmp(base, "shld") == 0 || strcmp(base, "shrd") == 0) && nops == 3) {
+		int is_shrd = strcmp(base, "shrd") == 0;
+		match = 1;
+		if (ops[2].kind == OP_REG && ops[0].kind == OP_REG &&
+		    ops[0].reg == 1 && ops[0].width == 1) {
+			/* shldl %cl, src, dst — 0F A5 /r */
+			emit8(p, 0x0F);
+			emit8(p + 1, is_shrd ? 0xAD : 0xA5);
+			emit8(p + 2, modrm(3, ops[1].reg, ops[2].reg));
+			p += 3;
+			out->size = (size_t)(p - out->bytes);
+			goto done;
+		}
+		if (ops[2].kind == OP_REG && ops[0].kind == OP_IMM) {
+			/* shldl $imm, src, dst — 0F A4 /r imm8 */
+			emit8(p, 0x0F);
+			emit8(p + 1, is_shrd ? 0xAC : 0xA4);
+			emit8(p + 2, modrm(3, ops[1].reg, ops[2].reg));
+			emit8(p + 3, (uint8_t)(ops[0].disp & 0xFF));
+			p += 4;
+			out->size = (size_t)(p - out->bytes);
+			goto done;
+		}
+	}
+
 	/* ---- DIV / IDIV ---- */
 	if ((strcmp(base, "div") == 0 || strcmp(base, "idiv") == 0) && nops == 1) {
 		int ext = strcmp(base, "idiv") == 0 ? 7 : 6;
@@ -1400,14 +1717,25 @@ skip_jcc:
 
 	/* ---- CMOVcc (conditional move) ---- */
 	if (strncmp(base, "cmov", 4) == 0 && nops == 2 &&
-	    ops[0].kind == OP_REG && ops[1].kind == OP_REG) {
-		int cond = condition_code(base + 4);
+	    (ops[1].kind == OP_REG) &&
+	    (ops[0].kind == OP_REG || ops[0].kind == OP_MEM)) {
+		/* Condition suffix comes from the full mnemonic: the trailing
+		 * 'l' width suffix may coincide with a single-letter condition
+		 * (cmovl = cmov + l), and the suffix-stripping above has
+		 * already trimmed `base` to "cmov". */
+		int cond = condition_code(mnemonic + 4);
 		if (cond >= 0) {
 			match = 1;
 			emit8(p, 0x0F);
-			emit8(p + 1, 0x40 | cond);
-			emit8(p + 2, modrm(3, ops[0].reg, ops[1].reg));
-			p += 3;
+			p++;
+			emit8(p, 0x40 | cond);
+			p++;
+			if (ops[0].kind == OP_REG) {
+				emit8(p, modrm(3, ops[0].reg, ops[1].reg));
+				p++;
+			} else {
+				emit_modrm_mem(&p, ops[1].reg, &ops[0]);
+			}
 			out->size = (size_t)(p - out->bytes);
 			goto done;
 		}
@@ -1464,6 +1792,17 @@ skip_jcc:
 			emit8(p + 1, 0xAF);
 			emit8(p + 2, modrm(3, ops[1].reg, ops[0].reg));
 			p += 3;
+			out->size = (size_t)(p - out->bytes);
+			goto done;
+		}
+		if (nops == 2 && ops[1].kind == OP_REG && ops[0].kind == OP_MEM) {
+			/* imul (mem), reg — 0x0F 0xAF */
+			match = 1;
+			emit8(p, 0x0F);
+			p++;
+			emit8(p, 0xAF);
+			p++;
+			emit_modrm_mem(&p, ops[1].reg, &ops[0]);
 			out->size = (size_t)(p - out->bytes);
 			goto done;
 		}
