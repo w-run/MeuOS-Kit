@@ -200,3 +200,161 @@ __aeabi_memclr(void *dest, size_t n)
 {
 	__aeabi_memset(dest, 0, n);
 }
+
+/* ---- soft-float conversions (EABI softfp ABI) ----
+ *
+ * These helpers follow the ARM EABI "softfp" calling convention even
+ * when the target is hard-float (VFP): a double argument/result is
+ * passed in r0:r1 as its raw bit pattern, a float in r0.  Both gcc
+ * (libgcc) and mcc emit `vmov r0, r1, d0; bl __aeabi_d2lz` and
+ * `bl __aeabi_l2d; vmov d0, r0, r1` respectively, so the functions
+ * must declare pcs("aapcs") to override the default hard-float ABI.
+ *
+ * The bit-level algorithms avoid calling back into any __aeabi_*
+ * conversion helper (which would recurse): double→int64 is done by
+ * extracting the IEEE-754 exponent/mantissa, int64→double by
+ * splitting into signed hi + unsigned lo halves and scaling by 2^32.
+ *
+ * float→int64 is derived from double→int64 with the float exponent
+ * bias 127 and 23-bit mantissa; int64→float reuses the int64→double
+ * result and rounds to float precision (any double rounding is
+ * acceptable for the supported value range — libgcc does the same
+ * two-step for __aeabi_l2f).
+ */
+
+__attribute__((pcs("aapcs")))
+long long
+__aeabi_d2lz(double d)
+{
+	union { double d; unsigned long long u; } u;
+	unsigned long long mant;
+	int exp, sign;
+	u.d = d;
+	mant = u.u & 0xFFFFFFFFFFFFFULL;
+	exp = (int)((u.u >> 52) & 0x7FF);
+	sign = (int)(u.u >> 63);
+	if (exp == 0x7FF || exp == 0)
+		return 0;
+	exp -= 1023;
+	mant |= 1ULL << 52;
+	if (exp >= 63)
+		return sign ? 0x8000000000000000LL : 0x7FFFFFFFFFFFFFFFLL;
+	if (exp < 0)
+		return 0;
+	if (exp >= 52)
+		mant <<= exp - 52;
+	else
+		mant >>= 52 - exp;
+	if (sign)
+		return -(long long)mant;
+	return (long long)mant;
+}
+
+__attribute__((pcs("aapcs")))
+unsigned long long
+__aeabi_d2ulz(double d)
+{
+	union { double d; unsigned long long u; } u;
+	unsigned long long mant;
+	int exp;
+	u.d = d;
+	mant = u.u & 0xFFFFFFFFFFFFFULL;
+	exp = (int)((u.u >> 52) & 0x7FF);
+	if (exp == 0x7FF || exp == 0)
+		return 0;
+	exp -= 1023;
+	mant |= 1ULL << 52;
+	if (exp >= 64)
+		return ~0ULL;
+	if (exp < 0)
+		return 0;
+	if (exp >= 52)
+		mant <<= exp - 52;
+	else
+		mant >>= 52 - exp;
+	return mant;
+}
+
+__attribute__((pcs("aapcs")))
+long long
+__aeabi_f2lz(float f)
+{
+	union { float f; unsigned u; } u;
+	unsigned mant;
+	int exp, sign;
+	u.f = f;
+	mant = u.u & 0x7FFFFF;
+	exp = (int)((u.u >> 23) & 0xFF);
+	sign = (int)(u.u >> 31);
+	if (exp == 0xFF || exp == 0)
+		return 0;
+	exp -= 127;
+	mant |= 1u << 23;
+	if (exp >= 63)
+		return sign ? 0x8000000000000000LL : 0x7FFFFFFFFFFFFFFFLL;
+	if (exp < 0)
+		return 0;
+	if (exp >= 23) {
+		unsigned long long m = (unsigned long long)mant << (exp - 23);
+		return sign ? -(long long)m : (long long)m;
+	}
+	mant >>= 23 - exp;
+	if (sign)
+		return -(long long)mant;
+	return (long long)mant;
+}
+
+__attribute__((pcs("aapcs")))
+unsigned long long
+__aeabi_f2ulz(float f)
+{
+	union { float f; unsigned u; } u;
+	unsigned mant;
+	int exp;
+	u.f = f;
+	mant = u.u & 0x7FFFFF;
+	exp = (int)((u.u >> 23) & 0xFF);
+	if (exp == 0xFF || exp == 0)
+		return 0;
+	exp -= 127;
+	mant |= 1u << 23;
+	if (exp >= 64)
+		return ~0ULL;
+	if (exp < 0)
+		return 0;
+	if (exp >= 23)
+		return (unsigned long long)mant << (exp - 23);
+	return mant >> (23 - exp);
+}
+
+__attribute__((pcs("aapcs")))
+double
+__aeabi_l2d(long long x)
+{
+	int hi = (int)(x >> 32);
+	unsigned lo = (unsigned)x;
+	return (double)hi * 4294967296.0 + (double)lo;
+}
+
+__attribute__((pcs("aapcs")))
+float
+__aeabi_l2f(long long x)
+{
+	return (float)__aeabi_l2d(x);
+}
+
+__attribute__((pcs("aapcs")))
+double
+__aeabi_ul2d(unsigned long long x)
+{
+	unsigned hi = (unsigned)(x >> 32);
+	unsigned lo = (unsigned)x;
+	return (double)hi * 4294967296.0 + (double)lo;
+}
+
+__attribute__((pcs("aapcs")))
+float
+__aeabi_ul2f(unsigned long long x)
+{
+	return (float)__aeabi_ul2d(x);
+}

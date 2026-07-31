@@ -730,6 +730,8 @@ ldr_mem:
 		else if (strstr(m, ".u32.f32")) { base = 0xEEBC0AC0; }
 		else if (strstr(m, ".f64.f32")) { base = 0xEEB70AC0; dst_f64 = 1; }
 		else if (strstr(m, ".f32.f64")) { base = 0xEEB70BC0; src_f64 = 1; }
+		else if (strstr(m, ".f32.s32")) { base = 0xEEB80AC0; }
+		else if (strstr(m, ".f32.u32")) { base = 0xEEB80A40; }
 		else return -1;
 		vd = sp_reg(vd); vm = sp_reg(vm);
 		base |= dst_f64 ? dp_dst_field(vd) : sp_dst_field(vd);
@@ -893,11 +895,47 @@ ldr_mem:
 	 *   vmov s1, r0 = 0xee000a90   (core -> single)
 	 *   vmov r0, s1 = 0xee100a90   (single -> core)
 	 *   vmov.f32 s2, s0 = 0xeeb01a40 (fcpy.s)
-	 *   vmov.f64 d3, d1 = 0xeeb03b41 (fcpy.d) */
+	 *   vmov.f64 d3, d1 = 0xeeb03b41 (fcpy.d)
+	 *   vmov d0, r0, r1 = 0xec410b10 (MCRR, core pair -> double)
+	 *   vmov r0, r1, d0 = 0xec510b10 (MRRC, double -> core pair) */
 	if (nops >= 2 && strcmp(mnemonic, "vmov") == 0) {
 		int a0 = ops[0][0], a1 = ops[1][0];
+		if (nops == 3 && a0 == 'd' && a1 == 'r' && ops[2][0] == 'r') {
+			/* vmov dN, rM, rM2 — core register pair -> VFP double.
+			 * MCRR p11, 0, rM2, rM, cN:  Vd[3:0] in CRm, Vd[4] in
+			 * bit 5.  Encoded by GNU as as 0xEC400B10 plus the
+			 * Rt/Rt2/Vd fields (verified for d0/d5/d16/d31). */
+			int vd, rm, rm2;
+			if (reg_num(ops[0], &vd) < 0 ||
+			    reg_num(ops[1], &rm) < 0 ||
+			    reg_num(ops[2], &rm2) < 0) return -1;
+			uint32_t base = 0xEC400B10;
+			base |= ((uint32_t)(vd >> 4) & 1) << 5;
+			base |= ((uint32_t)rm2 & 0xF) << 16;
+			base |= ((uint32_t)rm & 0xF) << 12;
+			base |= (uint32_t)(vd & 0xF);
+			emit32(out->bytes, base);
+			return 0;
+		}
+		if (nops == 3 && a0 == 'r' && a1 == 'r' && ops[2][0] == 'd') {
+			/* vmov rM, rM2, dN — VFP double -> core register pair.
+			 * MRRC p11, 0, rM, rM2, cN. */
+			int rd, rd2, vd;
+			if (reg_num(ops[0], &rd) < 0 ||
+			    reg_num(ops[1], &rd2) < 0 ||
+			    reg_num(ops[2], &vd) < 0) return -1;
+			uint32_t base = 0xEC500B10;
+			base |= ((uint32_t)(vd >> 4) & 1) << 5;
+			base |= ((uint32_t)rd2 & 0xF) << 16;
+			base |= ((uint32_t)rd & 0xF) << 12;
+			base |= (uint32_t)(vd & 0xF);
+			emit32(out->bytes, base);
+			return 0;
+		}
 		if ((a0 == 's' || a0 == 'd') && a1 == 'r') {
-			/* vmov sN, rM or vmov dN, rM — core -> VFP */
+			/* vmov sN, rM — core -> single.  (A lone core register
+			 * cannot move into a double; use the 3-operand MCRR
+			 * form above.) */
 			int vd, rm;
 			if (reg_num(ops[0], &vd) < 0 || reg_num(ops[1], &rm) < 0) return -1;
 			if (a0 == 'd')
@@ -909,7 +947,7 @@ ldr_mem:
 			return 0;
 		}
 		if (a0 == 'r' && (a1 == 's' || a1 == 'd')) {
-			/* vmov rM, sN or vmov rM, dN — VFP -> core */
+			/* vmov rM, sN — single -> core. */
 			int rd, vd;
 			if (reg_num(ops[0], &rd) < 0 || reg_num(ops[1], &vd) < 0) return -1;
 			if (a1 == 'd')
@@ -1225,17 +1263,19 @@ ldr_mem:
 	/* ---- VFP push/pop for VFP registers: vpush/vpop {d0-dN} or {s0-sN} ---- */
 	if (nops >= 1 && (strcmp(mnemonic, "vpush") == 0 || strcmp(mnemonic, "vpop") == 0)) {
 		const char *regtext = ops[0];
-		int is_pop = (mnemonic[1] == 'p');
+		int is_pop = (mnemonic[1] == 'p' && mnemonic[2] == 'o');
 		/* Expecting {d0-dN} or d0-dN (braces already stripped) */
 		if (regtext[0] == 'd') {
 			int first, last;
 			if (sscanf(regtext, "d%d-d%d", &first, &last) < 2) return -1;
-			uint32_t dregs = (uint32_t)(last - first + 1);
+			uint32_t dregs = (uint32_t)(last - first + 1) * 2;
 			uint32_t base = is_pop ? 0xECBD0B00 : 0xED2D0B00;
 			/* VSTMDB/VLDMIA register list: D=bit4 of the first
 			 * register, Vd=first&0xF (dp_dst_field).  The old
 			 * single-layout ((first>>1)<<12 | (first&1)<<22) mapped
-			 * d8 -> Vd=4, encoding the wrong register. */
+			 * d8 -> Vd=4, encoding the wrong register.
+			 * The register-count field (imm8) is 2*N for double
+			 * registers (d0-d7 = 8 regs -> imm8=16). */
 			emit32(out->bytes, base | dp_dst_field(first) | dregs);
 			return 0;
 		}
