@@ -58,7 +58,7 @@ check: all
 	@out=$$(./$(BUILD)/echo -n "no newline"); \
 	 [ "$$out" = "no newline" ] && echo "echo -n: PASS" || (echo "echo -n: FAIL got=[$$out]"; exit 1)
 	@printf 'line1\nline2\n' > /tmp/utils-cat.in; \
-	 out=$$(./$(BUILD)/cat /tmp/utils-cat.in); \
+	 out=$$(./$(BUILD)/cat --classic /tmp/utils-cat.in); \
 	 [ "$$out" = $$'line1\nline2' ] && echo "cat: PASS" || (echo "cat: FAIL got=[$$out]"; exit 1)
 	@out=$$(./$(BUILD)/yes a | head -3); \
 	 [ "$$out" = $$'a\na\na' ] && echo "yes: PASS" || (echo "yes: FAIL got=[$$out]"; exit 1)
@@ -82,6 +82,22 @@ check: all
 	@./$(BUILD)/wc --help 2>&1 | grep -q 'Usage' && echo "wc --help: PASS" || (echo "wc --help: FAIL"; exit 1) || true
 	@./$(BUILD)/head --help 2>&1 | grep -q 'Usage' && echo "head --help: PASS" || (echo "head --help: FAIL"; exit 1) || true
 	@./$(BUILD)/tail --help 2>&1 | grep -q 'Usage' && echo "tail --help: PASS" || (echo "tail --help: FAIL"; exit 1) || true
+	@./$(BUILD)/sort --help 2>&1 | grep -q 'Usage' && echo "sort --help: PASS" || (echo "sort --help: FAIL"; exit 1) || true
+	@./$(BUILD)/uniq --help 2>&1 | grep -q 'Usage' && echo "uniq --help: PASS" || (echo "uniq --help: FAIL"; exit 1) || true
+	@./$(BUILD)/tr --help 2>&1 | grep -q 'Usage' && echo "tr --help: PASS" || (echo "tr --help: FAIL"; exit 1) || true
+	@./$(BUILD)/cut --help 2>&1 | grep -q 'Usage' && echo "cut --help: PASS" || (echo "cut --help: FAIL"; exit 1) || true
+	@out=$$(printf 'banana\napple\ncherry\n' | ./$(BUILD)/sort); \
+	 [ "$$out" = $$'apple\nbanana\ncherry' ] && echo "sort: PASS" || (echo "sort: FAIL got=[$$out]"; exit 1)
+	@out=$$(printf 'apple\napple\nbanana\n' | ./$(BUILD)/uniq); \
+	 [ "$$out" = $$'apple\nbanana' ] && echo "uniq: PASS" || (echo "uniq: FAIL got=[$$out]"; exit 1)
+	@out=$$(printf 'abcdef\n' | ./$(BUILD)/tr 'a-z' 'A-Z'); \
+	 [ "$$out" = 'ABCDEF' ] && echo "tr: PASS" || (echo "tr: FAIL got=[$$out]"; exit 1)
+	@out=$$(printf 'a\tb\tc\n' | ./$(BUILD)/cut -f1); \
+	 [ "$$out" = 'a' ] && echo "cut -f1: PASS" || (echo "cut: FAIL got=[$$out]"; exit 1)
+	@printf 'hello\nworld\n' > /tmp/utils-cat-classic.in; \
+	 out=$$(./$(BUILD)/cat --classic /tmp/utils-cat-classic.in); \
+	 [ "$$out" = $$'hello\nworld' ] && echo "cat classic: PASS" || (echo "cat classic: FAIL got=[$$out]"; exit 1); \
+	 rm -f /tmp/utils-cat-classic.in
 	@rm -f /tmp/utils-cat.in /tmp/utils-ver.txt /tmp/utils-ls-ver.txt /tmp/utils-tree-ver.txt
 	@echo ">>> all smoke tests PASS"
 
