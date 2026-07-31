@@ -542,16 +542,20 @@ kl_emit(Ins *i, Fn *fn, FILE *f)
 	fputs("\tpush\t{r10, r12}\n", f);
 	switch (i->op) {
 	case Ocopy:
-		/* R0:R1 约定：to=R0 表示把结果装入返回对；
-		 * arg[0]=R0 表示从返回对接收。 */
-		if (rtype(i->to) == RTmp && i->to.val == R0) {
-			kl_ldhalf(i->arg[0], 0, R0, fn, f);
-			kl_ldhalf(i->arg[0], 1, R1, fn, f);
+		/* ABI register pairs: a Kl Ocopy with a machine-register
+		 * operand comes only from ABI lowering — the return value in
+		 * R0:R1 and 64-bit call arguments in Rn:Rn+1 (R2:R3 for the
+		 * second, etc.).  With the register in the destination we
+		 * load the source's low/high halves into the pair; with it in
+		 * the source we store the pair into the destination slot. */
+		if (rtype(i->to) == RTmp && i->to.val < Tmp0) {
+			kl_ldhalf(i->arg[0], 0, i->to.val, fn, f);
+			kl_ldhalf(i->arg[0], 1, i->to.val + 1, fn, f);
 			break;
 		}
-		if (rtype(i->arg[0]) == RTmp && i->arg[0].val == R0) {
-			kl_sthalf(i->to, 0, R0, fn, f);
-			kl_sthalf(i->to, 1, R1, fn, f);
+		if (rtype(i->arg[0]) == RTmp && i->arg[0].val < Tmp0) {
+			kl_sthalf(i->to, 0, i->arg[0].val, fn, f);
+			kl_sthalf(i->to, 1, i->arg[0].val + 1, fn, f);
 			break;
 		}
 		kl_ldhalf(i->arg[0], 0, R10, fn, f);
@@ -800,6 +804,18 @@ emitins(Ins *i, Fn *fn, FILE *f)
 			fixarg(&i->arg[0], 0, IP, fn, f);
 		if (!isstore(i->op) && rtype(i->arg[1]) == RSlot)
 			fixarg(&i->arg[1], 0, IP, fn, f);
+		/* Loads other than Oload take a memory-ADDRESS operand.  When
+		 * that address is a slot ref, it is a spilled address/pointer
+		 * temp whose VALUE is the location to dereference (arm keeps Kl
+		 * temps in slots, kl_in_reg==0) — NOT the slot's own memory.
+		 * Materialize the pointer into IP first, then dereference it.
+		 * Oload keeps reading the slot's content directly (scalar local
+		 * variable access). */
+		if (isload(i->op) && i->op != Oload && rtype(i->arg[0]) == RSlot) {
+			fprintf(f, "\tldr\t%s, [r11, #%" PRIu64 "]\n",
+				rname(IP, Kl), slot(i->arg[0], fn, 0));
+			i->arg[0] = TMP(IP);
+		}
 		/* Byte/half loads and stores have no ARM `=addr` (literal-pool)
 		 * form (only ldr does), so a global-address operand must be
 		 * materialized into a register first.  Load it into IP (r10)
