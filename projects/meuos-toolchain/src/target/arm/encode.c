@@ -286,6 +286,30 @@ int arm_encode_insn(const struct mt_target *target,
 		return 0;
 	}
 
+	/* ---- mrc cp, op1, rt, crn, crm, op2 (coprocessor read) ----
+	 * mcc emits `mrc p15, 0, r10, c13, c0, 3` to read the thread
+	 * pointer (TPIDRURO, CP15 c13) into a general register.
+	 * AT&T/GNU syntax: mrc coproc, opcode_1, Rd, CRn, CRm, opcode_2.
+	 * Encoding: cond(0xE) 1110 op1 L(1) crn rt cpnum op2 crm, bit4=1.
+	 * Verified against arm-linux-gnu-as: mrc p15,0,r10,c13,c0,3 =
+	 * 0xEE1DAF70. */
+	if (strcmp(mnemonic, "mrc") == 0 && nops == 6) {
+		unsigned op1, cpnum, crn, rt, crm, op2;
+		op1 = (unsigned)strtoul(ops[1], NULL, 0);
+		cpnum = (unsigned)strtoul(ops[0][0]=='p'?ops[0]+1:ops[0], NULL, 0);
+		crn   = (unsigned)strtoul(ops[3][0]=='c'?ops[3]+1:ops[3], NULL, 0);
+		crm   = (unsigned)strtoul(ops[4][0]=='c'?ops[4]+1:ops[4], NULL, 0);
+		op2   = (unsigned)strtoul(ops[5], NULL, 0);
+		if (reg_num(ops[2], (int *)&rt) < 0) return -1;
+		emit32(out->bytes,
+		       0xEE000000 | (0xE << 28) /* cond AL, 1110 MRC */
+		       | ((op1 & 7) << 21) | (1u << 20) /* L=1 */
+		       | ((crn & 15) << 16) | ((rt & 15) << 12)
+		       | ((cpnum & 15) << 8) | ((op2 & 7) << 5)
+		       | (1u << 4) | (crm & 15));
+		return 0;
+	}
+
 	/* ---- push/pop (pseudo-instructions) ---- */
 	if (strcmp(mnemonic, "push") == 0 && nops >= 1) {
 		uint16_t reglist = 0;
@@ -387,6 +411,27 @@ int arm_encode_insn(const struct mt_target *target,
 				int rn; if (reg_num(ops[1], &rn) < 0) return -1;
 
 				if (ops[2][0] == '#') {
+					/* TLS local-exec modifiers (mcc):
+					 *   add rd, rn, #:tprel_hi12:sym  → upper 12 bits of TP offset
+					 *   add rd, rn, #:tprel_lo12:sym  → lower 12 bits of TP offset
+					 * Both use R_ARM_TLS_LE12 (110): a 12-bit TP-relative
+					 * value placed in the add immediate field, patched by
+					 * the linker.  hi12/lo12 differ only in which 12-bit
+					 * slice of the offset the linker fills in. */
+					if (strncmp(ops[2], "#:tprel_hi12:", 13) == 0 ||
+					    strncmp(ops[2], "#:tprel_lo12:", 13) == 0) {
+						int tls_hi = ops[2][8] == 'h';
+						const char *sym = ops[2] + 13;
+						out->fixed = 0;
+						out->reloc_type = tls_hi ? 111 : 110;
+						set_fixup(out, 0, 4, tls_hi ? 111 : 110, sym, 0);
+						/* add rd, rn, #imm12 (I=1): shifter operand field
+						 * (bits 11:0) left zero; linker fills it. */
+						emit32(out->bytes,
+						       cond | sbit | (opc<<21)
+						       | (1<<25) | (rn<<16) | (rd<<12));
+						return 0;
+					}
 					/* Immediate: rd, rn, #imm */
 					int imm = 0; sscanf(ops[2]+1, "%i", &imm);
 					uint32_t op2;

@@ -1959,6 +1959,18 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 		return ld_errorf(ctx, "unsupported relocation type", name);
 	}
 	if (strcmp(ctx->target->name, "arm") == 0) {
+		/* TLS local-exec relocations need TP-relative offset, not the
+		 * linked VA.  arm uses GAP_ABOVE_TP = 16 (musl ABI, same as
+		 * aarch64: the thread pointer addresses the mmap base; .tdata
+		 * is copied at TP+16), so the offset includes the 16-byte TCB
+		 * reservation.  R_ARM_TLS_LE32 = 107/108, R_ARM_TLS_LE12 =
+		 * 110/111 (mcc's #:tprel_hi12:/#:tprel_lo12: adds). */
+		if (type == 107 || type == 108 || type == 110 || type == 111) {
+			uint64_t tls_off;
+			if (symbol_tls_offset(ctx, object, symbol_index, &tls_off) != 0)
+				return ld_errorf(ctx, "unsupported TLS relocation", name);
+			resolved_value = tls_off + 16; /* GAP_ABOVE_TP */
+		}
 		if (mt_apply_arm_reloc(type, target->data + target_offset,
 		                       resolved_value, addend, place) == 0)
 			return 0;

@@ -99,6 +99,34 @@ mt_apply_arm_reloc(unsigned type, unsigned char *loc,
 		write32(loc, (uint32_t)(S + (int64_t)A + (int32_t)read32(loc)));
 		return 0;
 
+	case 110: /* R_ARM_TLS_LE12: 12-bit TP-relative value (hi12: off>>12<<12) */
+	case 111: /* R_ARM_TLS_LE12 alt: lower 12 bits of TP offset */
+		{
+			uint32_t insn = read32(loc);
+			uint32_t off = (uint32_t)(S + (int64_t)A);
+			uint32_t imm12 = (type == 111) ? off & 0xFFF
+			                               : (off >> 12) & 0xFFF;
+			/* Encode a 12-bit value as an ARM modified immediate
+			 * (8-bit rotated): find rot/imm8 such that
+			 * ror(imm8, 2*rot) == imm12.  The add's shifter-operand
+			 * field is bits 11:0 = rot:imm8. */
+			uint32_t best_rot = 0, best_imm = 0;
+			int found = 0;
+			for (uint32_t rot = 0; rot < 16 && !found; rot++) {
+				uint32_t r = rot ? (imm12 >> (2*rot)) | (imm12 << (32 - 2*rot))
+				                 : imm12;
+				if (r <= 0xFF) {
+					best_rot = rot; best_imm = r;
+					found = 1;
+				}
+			}
+			if (!found) return -1;
+			uint32_t op2 = (best_rot << 8) | best_imm;
+			insn = (insn & ~0xFFFu) | op2;
+			write32(loc, insn);
+			return 0;
+		}
+
 	case 96: /* R_ARM_GOT_PREL: GOT + A - P */
 		write32(loc, (uint32_t)(S + (int64_t)A + (int32_t)read32(loc) - P));
 		return 0;
