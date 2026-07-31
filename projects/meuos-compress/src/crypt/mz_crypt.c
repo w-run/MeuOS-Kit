@@ -543,26 +543,39 @@ ge_frombytes_vartime(ge_p3 *h, const uint8_t s[32])
     return 0;
 }
 
-/* 点加倍: ge_p2 -> ge_p2 */
+/* 点加倍: ge_p2 -> ge_p2
+ * 扭曲 Edwards 曲线 a*x^2 + y^2 = 1 + d*x^2*y^2, a = -1
+ * (HWCD 2008, dbl-2008-hwcd):
+ *   A = X^2
+ *   B = Y^2
+ *   C = 2*Z^2
+ *   D = a*A            (a = -1, 故 D = -A)
+ *   E = (X+Y)^2 - A - B
+ *   G = D + B
+ *   F = G - C
+ *   H = D - B
+ *   X3 = E * F
+ *   Y3 = G * H
+ *   Z3 = F * G
+ */
 static void
 ge_double(ge_p2 *r, const ge_p2 *p)
 {
-    fe t0, t1, t2, t3;
-    fe_sq(t0, p->X);
-    fe_sq(t1, p->Y);
-    fe_sq(t2, p->Z);
-    fe_add(t3, p->X, p->Y);
-    fe_sq(t3, t3);
-    fe_sub(t3, t3, t0);
-    fe_sub(t3, t3, t1);                   /* t3 = B = (X+Y)^2 - X^2 - Y^2 */
-    fe_add(r->Y, t0, t1);                 /* Y = X^2 + Y^2 */
-    fe_sub(r->Z, t0, t1);                 /* Z = X^2 - Y^2 */
-    fe_add(t0, t2, t2);
-    fe_sub(r->X, r->Y, t0);               /* X = X^2 + Y^2 - 2*Z^2 */
-    fe_mul(r->Y, r->Z, t3);               /* Y = (X^2 - Y^2) * B */
-    fe_mul(r->Z, r->Y, t0);               /* Z = (X^2 + Y^2) * 2*Z^2  */
-    /* wait, this is wrong. Let me compute correctly: */
-}
+    fe A, B, C, D, E, F, G, H;
 
-/* 等等，上面的实现有 bug。让我重新实现群运算。 */
-/* 使用完整的 extended 坐标加法和简化加法。 */
+    fe_sq(A, p->X);                       /* A = X^2 */
+    fe_sq(B, p->Y);                       /* B = Y^2 */
+    fe_sq(C, p->Z);                       /* Z^2 */
+    fe_add(C, C, C);                      /* C = 2*Z^2 */
+    fe_neg(D, A);                         /* D = -A (a = -1) */
+    fe_add(E, p->X, p->Y);
+    fe_sq(E, E);                          /* (X+Y)^2 */
+    fe_sub(E, E, A);                      /* (X+Y)^2 - A */
+    fe_sub(E, E, B);                      /* E = (X+Y)^2 - A - B */
+    fe_add(G, D, B);                      /* G = D + B */
+    fe_sub(F, G, C);                      /* F = G - C */
+    fe_sub(H, D, B);                      /* H = D - B */
+    fe_mul(r->X, E, F);                   /* X3 = E * F */
+    fe_mul(r->Y, G, H);                   /* Y3 = G * H */
+    fe_mul(r->Z, F, G);                   /* Z3 = F * G */
+}
