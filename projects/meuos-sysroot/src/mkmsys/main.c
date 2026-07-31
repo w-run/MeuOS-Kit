@@ -112,10 +112,8 @@ static void collector_add(struct collector *c, const char *relpath,
 	e->data      = malloc(data_size ? data_size : 1);
 	if (!e->data) die("malloc");
 	if (data_size > 0) memcpy(e->data, data, data_size);
-	if (data_size > 0)
-		sha256(data, data_size, e->content_hash);
-	else
-		memset(e->content_hash, 0, 32);
+	/* SHA-256 of data (empty data => SHA-256 of empty input) */
+	sha256(data, data_size, e->content_hash);
 	e->mtime     = mtime;
 	e->file_type = file_type;
 	e->mode      = mode;

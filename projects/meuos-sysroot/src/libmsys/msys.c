@@ -590,7 +590,8 @@ int msys_verify(struct msys *m, const char *name)
 					memcpy(stored, p + 32 + nlen, 32);
 					uint8_t computed[32];
 					uint32_t usz = read32(p + 14); /* uncompressed_size */
-					if (usz != 0) {
+					/* Stored size differs from original size => compressed */
+					if (dsize != usz) {
 						/* Data is compressed — decompress first */
 						size_t dec_size;
 						void *dec = decompress(m, data, dsize, &dec_size);
@@ -631,7 +632,8 @@ int msys_verify_all(struct msys *m)
 			memcpy(stored, p + 32 + nlen, 32);
 			uint8_t computed[32];
 			uint32_t usz = read32(p + 14);
-			if (usz != 0) {
+			/* Stored size differs from original size => compressed */
+			if (sz != usz) {
 				size_t dec_sz;
 				void *dec = decompress(m, data, sz, &dec_sz);
 				if (!dec) continue;
