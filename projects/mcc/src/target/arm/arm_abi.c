@@ -31,9 +31,18 @@ arm32_selpar(Fn *fn, Ins *i0, Ins *i1)
 			continue; /* struct params unsupported (call side too) */
 		if (KBASE(k) == 1 && nfp < 8)
 			emit(Ocopy, k, i->to, TMP(fpreg[nfp++]), R);
-		else if (KBASE(k) == 0 && ngp < 4)
-			emit(Ocopy, k, i->to, TMP(gpreg[ngp++]), R);
-		else
+		else if (KBASE(k) == 0) {
+			/* A 64-bit (Kl) integer parameter occupies two consecutive
+			 * GPRs (R0:R1, R2:R3, ...) per AAPCS.  The pair-start
+			 * register is the Ocopy operand; kl_emit reads the low
+			 * half from it and the high half from its successor. */
+			int need = (k == Kl) ? 2 : 1;
+			if (ngp + need > 4)
+				err("arm: %d-th argument past 4 GPR registers is unsupported",
+				    (int)(i - i0) + 1);
+			emit(Ocopy, k, i->to, TMP(gpreg[ngp]), R);
+			ngp += need;
+		} else
 			err("arm: %d-th argument past 4 GPR/8 FPR registers is unsupported",
 			    (int)(i - i0) + 1);
 	}
@@ -99,14 +108,16 @@ call_meta(Ins *call, int nargs, Fn *fn)
 		int is_float = KBASE(k) == 1;
 		if (is_float && nfp < 8)
 			nfp++;
-		else if (!is_float && ngp < 4)
-			ngp++;
+		else if (!is_float) {
+			/* Kl args occupy two GPRs (R0:R1, R2:R3, ...) */
+			ngp += (k == Kl) ? 2 : 1;
+		}
 	}
 	{
 		int rngp = 0, rnfp = 0;
 		if (!req(call->to, R)) {
 			if (KBASE(call->cls) == 0)
-				rngp = 1;
+				rngp = (call->cls == Kl) ? 2 : 1;
 			else
 				rnfp = 1;
 		}
@@ -130,22 +141,37 @@ static void
 emit_call_args(Ins *call, int nargs, Fn *fn)
 {
 	int gp_idx[64], fp_idx[64];
+	int isf[64], acls[64];
 	int ngp = 0, nfp = 0;
 	Ins *argp = call;
 
 	(void)fn;
 	if (nargs > 64)
 		err("arm: too many call arguments");
-	for (int j = 0; j < nargs; j++) {
+	/* Args precede the call in forward order [arg0..argN-1, call];
+	 * `--argp` walks from the call backwards (argN-1 first).  Read the
+	 * per-arg class in that order, then assign AAPCS register numbers
+	 * in FORWARD order (arg0 gets D0/R0), since the register pools are
+	 * indexed by argument position, not by walk order. */
+	for (int j = nargs - 1; j >= 0; j--) {
 		--argp;
-		int k = argp->cls;
-		int is_float = KBASE(k) == 1;
-		if (is_float && nfp < 8) {
+		acls[j] = argp->cls;
+		isf[j] = (KBASE(argp->cls) == 1);
+	}
+	for (int j = 0; j < nargs; j++) {
+		if (isf[j] && nfp < 8) {
 			fp_idx[j] = nfp++;
 			gp_idx[j] = -1;
-		} else if (!is_float && ngp < 4) {
-			gp_idx[j] = ngp++;
-			fp_idx[j] = -1;
+		} else if (!isf[j]) {
+			/* Kl args occupy two GPRs (R0:R1, R2:R3, ...) */
+			int need = (acls[j] == Kl) ? 2 : 1;
+			if (ngp + need <= 4) {
+				gp_idx[j] = ngp;
+				fp_idx[j] = -1;
+				ngp += need;
+			} else {
+				gp_idx[j] = fp_idx[j] = -1; /* stack args unsupported */
+			}
 		} else {
 			gp_idx[j] = fp_idx[j] = -1; /* stack args unsupported */
 		}
