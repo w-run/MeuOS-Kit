@@ -1036,6 +1036,27 @@ emitins(Ins *i, Fn *fn, FILE *f)
 	case Oarg: case Oargc: case Oargv:
 		break;	/* 伪指令，emit 阶段无输出 */
 	default:
+		if (i->op == Omul && i->cls != Kl && rtype(i->arg[1]) == RCon) {
+			/* ARM MUL 无立即数形式：常数乘法必须加载到寄存器。
+			 * 2 的幂用 lsl 代替（mul r0,r0,#2 是非法指令）；
+			 * 其他常数 mov 到 r12 后走 mul %=, %0, r12。 */
+			uint64_t m;
+			c = &fn->con[i->arg[1].val];
+			assert(c->type == CBits);
+			m = (uint64_t)c->bits.i;
+			if (rtype(i->arg[0]) == RSlot)
+				fixarg(&i->arg[0], 0, IP, fn, f);
+			if (m && !(m & (m - 1)) && m <= 0x80000000ull) {
+				unsigned n = 0;
+				for (uint64_t t = m; t > 1; t >>= 1)
+					n++;
+				fprintf(f, "\tlsl\t%s, %s, #%u\n",
+					rname(i->to.val, Kw), rname(i->arg[0].val, Kw), n);
+				break;
+			}
+			fprintf(f, "\tmov\tr12, #%" PRIu64 "\n", m);
+			i->arg[1] = TMP(R12);
+		}
 		if (INRANGE(i->op, Oceql, Ocultl)) {
 			/* 64-bit comparisons: operands are Kl slots, the generic
 			 * omap Ki entry would emit `cmp [r11,#off], [r11,#off]`
