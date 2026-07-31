@@ -619,6 +619,19 @@ i386_encode_insn(const struct mt_target *target,
 		goto done;
 	}
 
+	/* ---- XCHG ---- */
+	if (strcmp(base, "xchg") == 0 && nops == 2 &&
+	    ops[0].kind == OP_REG && ops[1].kind == OP_REG) {
+		/* xchgl %src, %dst — 0x87 /r; the swap is symmetric, so
+		 * modrm(3, src, dst) matches GNU as for the general form. */
+		match = 1;
+		emit8(p, 0x87);
+		emit8(p + 1, modrm(3, ops[0].reg, ops[1].reg));
+		p += 2;
+		out->size = (size_t)(p - out->bytes);
+		goto done;
+	}
+
 	/* ---- RET ---- */
 	if (strcmp(base, "ret") == 0) {
 		match = 1;

@@ -80,6 +80,11 @@ static struct {
 	{ Oloadsw, Kw, "ldr %=, %M0" },
 	{ Oloadsw, Kl, "ldr %=, %M0" },    /* 64-bit load: first 32 bits */
 	{ Oloaduw, Ki, "ldr %W=, %M0" },
+	/* Integer Oload (e.g. Ocopy from RSlot) must use ldr — the Ka
+	 * entry below is a wildcard and would otherwise route integer
+	 * loads through vldr into a floating-point register. */
+	{ Oload,   Kw, "ldr %W=, %M0" },
+	{ Oload,   Kl, "ldr %L=, %M0" },   /* 64-bit load: first 32 bits */
 	{ Oload,   Ka, "vldr %=, %M0" },
 	{ Oextsb,  Ki, "sxtb %=, %W0" },
 	{ Oextub,  Ki, "uxtb %W=, %W0" },
@@ -326,12 +331,11 @@ emitins(Ins *i, Fn *fn, FILE *f)
 		break;	/* 伪指令，emit 阶段无输出 */
 	default:
 	Table:
-		if (rtype(i->arg[0]) == RSlot)
+		/* RSlot operands on load/store are rendered directly by %M0/%M1
+		 * as [r11, #off]; fixarg must NOT load them into IP first (that
+		 * would emit an indirect access through the slot's value). */
+		if (!isload(i->op) && rtype(i->arg[0]) == RSlot)
 			fixarg(&i->arg[0], 0, IP, fn, f);
-		/* A store's destination may be an RSlot: %M1 renders it directly
-		 * as [r11, #off], so it must NOT be fixarg'd (that would emit
-		 * "ldr ip,[r11,#off]; str v,[ip]" — an indirect store through
-		 * the slot's stale value). */
 		if (!isstore(i->op) && rtype(i->arg[1]) == RSlot)
 			fixarg(&i->arg[1], 0, IP, fn, f);
 		for (o = 0;; o++) {
@@ -430,11 +434,35 @@ arm32_emitfn(Fn *fn, FILE *f)
 	int n, c, lbl;
 	Blk *b, *t;
 	Ins *i;
+	int csgpr = 0; /* any callee-saved GPR (r4-r9) used by rega */
 
 	emitfnlnk(fn->name, &fn->lnk, f);
-	fprintf(f, "\tpush\t{lr}\n");
-	if (fn->slot)
+	/* Save every callee-saved GPR that rega assigned (r4-r9), plus the
+	 * frame pointer r11 and lr.  These are callee-saved by AAPCS, so a
+	 * recursive/leaf callee would otherwise clobber the caller's values
+	 * (e.g. fib() keeping fib(n-1) in r4 across the second recursive
+	 * call).  Only the caller-saved registers need no saving. */
+	for (int rr = R4; rr <= R9; rr++)
+		if (fn->reg & BIT(rr)) {
+			csgpr = 1;
+			break;
+		}
+	if (csgpr) {
+		fprintf(f, "\tpush\t{r4, r5, r6, r7, r8, r9, r11, lr}\n");
+	} else if (fn->slot) {
+		fprintf(f, "\tpush\t{r11, lr}\n");
+	} else {
+		fprintf(f, "\tpush\t{lr}\n");
+	}
+	if (fn->slot) {
+		/* Local slots are addressed as [r11, #off] (see Oload/Ostore/
+		 * Oaddr), so r11 is the frame pointer.  Point it at the new
+		 * stack top after the frame is allocated.  Without this, r11
+		 * holds whatever the caller left (crt1._start zeroes it), so
+		 * any local-variable access dereferences a null/invalid base. */
 		fprintf(f, "\tsub\tsp, sp, #%d\n", 4 * fn->slot);
+		fprintf(f, "\tmov\tr11, sp\n");
+	}
 	lbl = 0;
 	for (b = fn->start; b; b = b->link) {
 		if (lbl || b->npred > 1)
@@ -449,7 +477,12 @@ arm32_emitfn(Fn *fn, FILE *f)
 		case Jret0:
 			if (fn->slot)
 				fprintf(f, "\tadd\tsp, sp, #%d\n", 4 * fn->slot);
-			fprintf(f, "\tpop\t{pc}\n");
+			if (csgpr)
+				fprintf(f, "\tpop\t{r4, r5, r6, r7, r8, r9, r11, pc}\n");
+			else if (fn->slot)
+				fprintf(f, "\tpop\t{r11, pc}\n");
+			else
+				fprintf(f, "\tpop\t{pc}\n");
 			break;
 		case Jjmp:
 		Jmp:
@@ -459,10 +492,21 @@ arm32_emitfn(Fn *fn, FILE *f)
 				lbl = 0;
 			break;
 		case Jjnz:
-			if (b->s1 != b->link)
-				fprintf(f, "\tbne\t%s%d\n", T.asloc, id0 + b->s2->id);
-			else
-				lbl = 0;
+			/* jnz r, s1, s2: branch to s1 when r != 0.  The flag-setting
+			 * mov/movle sequence for comparisons doesn't leave a usable
+			 * condition code, so compare the value explicitly.  When s1
+			 * falls through, invert to beq s2; otherwise emit bne s1 and
+			 * a fallthrough b to s2. */
+			fprintf(f, "\tcmp\t%s, #0\n", rname(b->jmp.arg.val, Kw));
+			if (b->s1 != b->link) {
+				fprintf(f, "\tbne\t%s%d\n", T.asloc, id0 + b->s1->id);
+				if (b->s2 != b->link)
+					fprintf(f, "\tb\t%s%d\n", T.asloc, id0 + b->s2->id);
+				else
+					lbl = 0;
+			} else {
+				fprintf(f, "\tbeq\t%s%d\n", T.asloc, id0 + b->s2->id);
+			}
 			break;
 		default:
 			c = b->jmp.type - Jjf;

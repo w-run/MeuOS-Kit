@@ -9,6 +9,36 @@
 static int gpreg[4] = {R0, R1, R2, R3};
 static int fpreg[8] = {D0, D1, D2, D3, D4, D5, D6, D7};
 
+/* Lower function parameters into their AAPCS argument registers.
+ *
+ * Without this binding, rega assigns parameter temps arbitrarily (e.g.
+ * R1) while the caller passes them in R0, so the callee reads garbage —
+ * observed as `f(41)-42` evaluating to 41-42 (the argument constant
+ * reused for the call result).  Beyond the 4 GPR / 8 FPR argument
+ * registers, ARM passes scalars on the stack; that path is not yet
+ * supported (matching selcall's lower_args), so it is rejected here. */
+static void
+arm32_selpar(Fn *fn, Ins *i0, Ins *i1)
+{
+	Ins *i;
+	int ngp = 0, nfp = 0;
+
+	for (i = i0; i < i1; i++) {
+		int k = i->cls;
+		if (i->op == Oargv || i->op == Opare)
+			continue;
+		if (i->op == Oparc)
+			continue; /* struct params unsupported (call side too) */
+		if (KBASE(k) == 1 && nfp < 8)
+			emit(Ocopy, k, i->to, TMP(fpreg[nfp++]), R);
+		else if (KBASE(k) == 0 && ngp < 4)
+			emit(Ocopy, k, i->to, TMP(gpreg[ngp++]), R);
+		else
+			err("arm: %d-th argument past 4 GPR/8 FPR registers is unsupported",
+			    (int)(i - i0) + 1);
+	}
+}
+
 bits arm32_retregs(Ref r, int p[2]) {
 	assert(rtype(r) == RCall);
 	int ngp = r.val & 3, nfp = (r.val >> 2) & 3;
@@ -49,10 +79,53 @@ static void selret(Blk *b, Fn *fn) {
 	b->jmp.arg = CALL(cty);
 }
 
-/* Lower call args: emit Ocopy from temp to assigned reg before the call */
-static int lower_args(Ins *call, int nargs, Fn *fn) {
-	int ngp = 0, nfp = 0, stk = 0;
+/* Update the call's RCall metadata: arg count in bits [4..11] (read by
+ * arm32_argregs) and return-value class in bits [0..3] (read by
+ * arm32_retregs).  The call's arg[1] is the functype ref from isel, so
+ * the return side must be derived from the call result itself —
+ * otherwise arm32_retregs reports "no return value", rega never keeps
+ * the result register live and the return value is lost (e.g. `f(41)-42`
+ * used 41 instead of 42).  Must run BEFORE emiti() so the copied call
+ * instruction carries the RCall type. */
+static void
+call_meta(Ins *call, int nargs, Fn *fn)
+{
+	int ngp = 0, nfp = 0;
 	Ins *argp = call;
+	(void)fn;
+	for (int j = 0; j < nargs; j++) {
+		--argp;
+		int k = argp->cls;
+		int is_float = KBASE(k) == 1;
+		if (is_float && nfp < 8)
+			nfp++;
+		else if (!is_float && ngp < 4)
+			ngp++;
+	}
+	{
+		int rngp = 0, rnfp = 0;
+		if (!req(call->to, R)) {
+			if (KBASE(call->cls) == 0)
+				rngp = 1;
+			else
+				rnfp = 1;
+		}
+		call->arg[1].val = rngp | (rnfp << 2) |
+		                   (ngp << 4) | (nfp << 8);
+	}
+	call->arg[1].type = RCall;
+}
+
+/* Emit Ocopy from temp to assigned register for each call argument.
+ * Must run AFTER emiti() of the call: emit() fills *--curi so the
+ * last-emitted instruction ends up FIRST in forward order, and the arg
+ * copies must precede the call. */
+static void
+emit_call_args(Ins *call, int nargs, Fn *fn)
+{
+	int ngp = 0, nfp = 0;
+	Ins *argp = call;
+	(void)fn;
 	for (int j = 0; j < nargs; j++) {
 		--argp;
 		int k = argp->cls;
@@ -63,22 +136,33 @@ static int lower_args(Ins *call, int nargs, Fn *fn) {
 		} else if (!is_float && ngp < 4) {
 			reg = gpreg[ngp++];
 		} else {
-			stk += (k == Kl) ? 8 : 4;
+			continue; /* stack args unsupported on this backend */
 		}
-		if (reg >= 0) {
+		if (reg >= 0)
 			emit(Ocopy, k, TMP(reg), argp->arg[0], R);
-		}
 	}
-	/* Update call metadata */
-	call->arg[1].val = (ngp << 4) | (nfp << 8);
-	call->arg[1].type = RCall;
-	return 0;
 }
 
 /* arm32_abi — main ABI lowering pass. */
 void arm32_abi(Fn *fn) {
-	Blk *b; Ins *i, *call_end;
+	Blk *b; Ins *i, *call_end, *i0;
 	int ngp, nfp;
+	int n0, n1, ioff;
+
+	/* Lower function parameters into argument registers. */
+	b = fn->start;
+	curi = &insb[NIns];
+	for (i0 = b->ins; i0 < &b->ins[b->nins]; i0++)
+		if (!ispar(i0->op))
+			break;
+	arm32_selpar(fn, b->ins, i0);
+	n0 = &insb[NIns] - curi;
+	ioff = i0 - b->ins;
+	n1 = b->nins - ioff;
+	vgrow(&b->ins, n0+n1);
+	icpy(b->ins+n0, b->ins+ioff, n1);
+	icpy(b->ins, curi, n0);
+	b->nins = n0+n1;
 
 	for (b = fn->start; b; b = b->link) {
 		curi = &insb[NIns];
@@ -101,18 +185,21 @@ void arm32_abi(Fn *fn) {
 					}
 					break;
 				}
-				lower_args(i, nargs, fn);
-				/* Re-emit the call with updated arg metadata.
-				 * emit() uses *--curi, so emit order (call then
-				 * result copy) places them AFTER arg copies in
-				 * forward order: arg copies -> call -> result. */
-				if (!req(i->to, R)) {
-					int ck = i->cls;
-					Ref rreg = KBASE(ck) == 0 ? TMP(R0) : TMP(D0);
-					emit(Ocopy, ck, i->to, rreg, R);
-				}
-				emiti(*i);
-				break;
+			/* emit() fills *--curi (last-emitted ends up FIRST in
+			 * forward order after idup), so emit in reverse order:
+			 * result copy, then call, then arg copies.  Forward:
+			 * arg copies -> call -> result copy.  The RCall metadata
+			 * must be written before emiti() so the copied call
+			 * carries it. */
+			call_meta(i, nargs, fn);
+			if (!req(i->to, R)) {
+				int ck = i->cls;
+				Ref rreg = KBASE(ck) == 0 ? TMP(R0) : TMP(D0);
+				emit(Ocopy, ck, i->to, rreg, R);
+			}
+			emiti(*i);
+			emit_call_args(i, nargs, fn);
+			break;
 			}
 			case Oarg: case Oargc: case Oargv:
 			case Opar: case Oparc: case Opare:
