@@ -79,6 +79,30 @@ static int parse_op_cond(const char *mnemonic, const char **base_out, int *cond_
 	return 0;
 }
 
+/* ---- Helper: parse a comma-separated core register list into a bitmask.
+ * The operand text is already brace-stripped (e.g. "r4, r5, r6, r7").
+ * Bits 0-15 map to r0-r15; VFP single/double registers are rejected. */
+static int parse_reglist(const char *s, uint16_t *mask) {
+	const char *p = s;
+	*mask = 0;
+	while (*p) {
+		while (*p == ' ' || *p == '\t') p++;
+		if (!*p) break;
+		const char *start = p;
+		while (*p && *p != ',') p++;
+		char tok[64];
+		size_t len = (size_t)(p - start);
+		if (len >= sizeof tok) return -1;
+		memcpy(tok, start, len);
+		tok[len] = '\0';
+		int r;
+		if (reg_num(tok, &r) < 0 || r > 15) return -1;
+		*mask |= (uint16_t)(1u << r);
+		if (*p == ',') p++;
+	}
+	return 0;
+}
+
 /* ---- Main encode function ---- */
 int arm_encode_insn(const struct mt_target *target,
                       const char *mnemonic, const char *operand_text,
@@ -111,17 +135,20 @@ int arm_encode_insn(const struct mt_target *target,
 	}
 
 	/* Parse operands: split by ',' and strip spaces.
-	 * Respect matching brackets: commas inside [...] are not splitters. */
-	char ops[4][64]; int nops = 0;
+	 * Respect matching brackets and braces: commas inside [...] or
+	 * {...} (register lists) are not splitters. */
+	char ops[20][128]; int nops = 0;
 	const char *p = operand_text ? operand_text : "";
-	while (*p && nops < 4) {
+	while (*p && nops < 20) {
 		while (*p == ' ' || *p == '\t') p++;
 		int i = 0;
-		int bracket_depth = 0;
-		while (*p && (bracket_depth > 0 || *p != ',')) {
+		int bracket_depth = 0, brace_depth = 0;
+		while (*p && (bracket_depth > 0 || brace_depth > 0 || *p != ',')) {
 			if (*p == '[') bracket_depth++;
 			if (*p == ']' && bracket_depth > 0) bracket_depth--;
-			if (i < 63) ops[nops][i++] = *p;
+			if (*p == '{') brace_depth++;
+			if (*p == '}' && brace_depth > 0) brace_depth--;
+			if (i < (int)sizeof ops[nops] - 1) ops[nops][i++] = *p;
 			p++;
 		}
 		ops[nops][i] = '\0'; nops++;
@@ -139,7 +166,6 @@ int arm_encode_insn(const struct mt_target *target,
 		if (sl > 0 && s[sl-1] == '}')
 			s[sl-1] = '\0';
 	}
-
 	/* ---- Branch: b label or bl label ---- */
 	if (strcmp(mnemonic, "b") == 0 && nops >= 1) {
 		out->fixed = 0;
@@ -169,19 +195,13 @@ int arm_encode_insn(const struct mt_target *target,
 	/* ---- push/pop (pseudo-instructions) ---- */
 	if (strcmp(mnemonic, "push") == 0 && nops >= 1) {
 		uint16_t reglist = 0;
-		for (int i = 0; i < nops; i++) {
-			int r; if (reg_num(ops[i], &r) < 0) return -1;
-			reglist |= 1 << r;
-		}
+		if (parse_reglist(ops[0], &reglist) < 0) return -1;
 		emit32(out->bytes, 0xE92D0000 | reglist);
 		return 0;
 	}
 	if (strcmp(mnemonic, "pop") == 0 && nops >= 1) {
 		uint16_t reglist = 0;
-		for (int i = 0; i < nops; i++) {
-			int r; if (reg_num(ops[i], &r) < 0) return -1;
-			reglist |= 1 << r;
-		}
+		if (parse_reglist(ops[0], &reglist) < 0) return -1;
 		emit32(out->bytes, 0xE8BD0000 | reglist);
 		return 0;
 	}
@@ -216,7 +236,9 @@ int arm_encode_insn(const struct mt_target *target,
 					if (v < 256) { imm8 = v; rot = 0; }
 					else {
 						for (int r = 1; r < 16; r++) {
-							uint32_t rv = (v >> (r*2)) | (v << (32 - r*2));
+							/* imm8 = v ROL (2*r), so the CPU's
+							 * imm8 ROR (2*r) decodes back to v */
+							uint32_t rv = (v << (r*2)) | (v >> (32 - r*2));
 							if (rv < 256) { imm8 = rv; rot = r; break; }
 						}
 					}
@@ -237,7 +259,7 @@ int arm_encode_insn(const struct mt_target *target,
 					uint32_t v = (uint32_t)imm;
 					if (v < 256) { imm8 = v; rot = 0; }
 					else { for (int r = 1; r < 16; r++) {
-						uint32_t rv = (v >> (r*2)) | (v << (32 - r*2));
+						uint32_t rv = (v << (r*2)) | (v >> (32 - r*2));
 						if (rv < 256) { imm8 = rv; rot = r; break; }
 					}}
 					emit32(out->bytes, cond | 0x3500000 | (opc<<21) | (rn<<16) | (rot<<8) | imm8);
@@ -261,7 +283,7 @@ int arm_encode_insn(const struct mt_target *target,
 					uint32_t v = (uint32_t)imm;
 					if (v < 256) { imm8 = v; rot = 0; }
 					else { for (int r = 1; r < 16; r++) {
-						uint32_t rv = (v >> (r*2)) | (v << (32 - r*2));
+						uint32_t rv = (v << (r*2)) | (v >> (32 - r*2));
 						if (rv < 256) { imm8 = rv; rot = r; break; }
 					}}
 					emit32(out->bytes, cond | 0x2000000 | (opc<<21) | (1<<25) | (rn<<16) | (rd<<12) | (rot<<8) | imm8);
@@ -616,15 +638,25 @@ ldr_mem:
 
 	/* ---- ldmia/stmia rn, {rlist} ---- */
 	if (nops >= 2 && (strcmp(mnemonic, "ldmia") == 0 || strcmp(mnemonic, "stmia") == 0)) {
-		int rn; if (reg_num(ops[0], &rn) < 0) return -1;
-		uint16_t reglist = 0;
-		int ri = 1;
-		while (ri < nops) {
-			int r; if (reg_num(ops[ri], &r) < 0) return -1;
-			reglist |= 1 << r; ri++;
+		char rn_str[16];
+		size_t rl = strlen(ops[0]);
+		int wb = 0;
+		if (rl > 0 && ops[0][rl-1] == '!') {
+			/* writeback suffix: rn! */
+			wb = 1;
+			memcpy(rn_str, ops[0], rl - 1);
+			rn_str[rl - 1] = '\0';
+		} else {
+			if (rl >= sizeof rn_str) return -1;
+			memcpy(rn_str, ops[0], rl + 1);
 		}
+		int rn; if (reg_num(rn_str, &rn) < 0) return -1;
+		uint16_t reglist = 0;
+		if (parse_reglist(ops[1], &reglist) < 0) return -1;
 		int is_load = (mnemonic[0] == 'l');
-		emit32(out->bytes, (is_load ? 0xE8B00000 : 0xE8A00000) | (rn<<16) | reglist);
+		uint32_t enc = (is_load ? 0xE8B00000 : 0xE8A00000) | ((uint32_t)rn << 16) | reglist;
+		if (wb) enc |= (1u << 21);
+		emit32(out->bytes, enc);
 		return 0;
 	}
 
