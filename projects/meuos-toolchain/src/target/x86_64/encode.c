@@ -581,7 +581,7 @@ emit_rm_reg(unsigned char *buf, size_t *size, struct mt_insn *out,
 static void
 emit_binary_immediate(unsigned char *buf, size_t *size, struct mt_insn *out,
                       unsigned ext, int width, const struct x86_op *src,
-                      const struct x86_op *dst)
+                      const struct x86_op *dst, int is_test)
 {
 	if (src->kind != OP_IMM ||
 	    (dst->kind != OP_REG && dst->kind != OP_MEM))
@@ -590,7 +590,10 @@ emit_binary_immediate(unsigned char *buf, size_t *size, struct mt_insn *out,
 		emit_byte_rex(buf, size, 0,
 		              dst->kind == OP_REG ? dst->reg : -1);
 	emit_rex_rm(buf, size, width == 8, 0, dst);
-	emit_u8(buf, size, width == 1 ? 0x80 : 0x81);
+	/* TEST uses 0xF6/0xF7 (not 0x80/0x81 like ADD/SUB/AND/OR/XOR/CMP):
+	 * both groups share the modrm /ext field but differ in the opcode. */
+	emit_u8(buf, size, width == 1 ? (is_test ? 0xf6 : 0x80)
+	                              : (is_test ? 0xf7 : 0x81));
 	emit_modrm(buf, size, out, ext, dst, R_X86_64_PC32, -4);
 	emit_le(buf, size, (uint32_t)src->displacement, width == 1 ? 1 : 4);
 }
@@ -1012,18 +1015,32 @@ x86_64_encode_insn(const struct mt_target *target,
 		}
 		if (n == 2 && (strcmp(base, "movq") == 0 || strcmp(base, "movd") == 0) &&
 		    (is_xmm(&op[0]) || is_xmm(&op[1]))) {
+			/* movd moves 32 bits (no REX.W); movq moves 64 bits.
+			 * GNU as encodes movd without REX.W (66 0F 6E/7E), so
+			 * setting REX.W here would silently widen movd to MOVQ. */
+			int is_movq = (strcmp(base, "movq") == 0);
 			if (is_xmm(&op[0]) && !is_xmm(&op[1])) {
-				int need_w = (op[1].width == 8);
+				int need_w = is_movq && (op[1].width == 8);
 				emit_sse(out->bytes, &out->size, out, 0x66, 0x7E,
 				         op[0].reg, &op[1], need_w, R_X86_64_PC32, -4);
 			} else if (!is_xmm(&op[0]) && is_xmm(&op[1])) {
-				int need_w = (op[0].width == 8);
+				int need_w = is_movq && (op[0].width == 8);
 				emit_sse(out->bytes, &out->size, out, 0x66, 0x6E,
 				         op[1].reg, &op[0], need_w, R_X86_64_PC32, -4);
 			} else {
 				emit_sse(out->bytes, &out->size, out, 0, 0x28,
 				         op[1].reg, &op[0], 0, R_X86_64_PC32, -4);
 			}
+			goto done;
+		}
+		if (n == 2 && (strcmp(base, "xorps") == 0 ||
+		               strcmp(base, "xorpd") == 0) &&
+		    is_xmm(&op[1]) && !is_xmm(&op[0])) {
+			/* XORPS (0F 57) / XORPD (66 0F 57) with a memory source.
+			 * The reg-xmm form is handled by the same case. */
+			unsigned pfx = (strcmp(base, "xorpd") == 0) ? 0x66 : 0;
+			emit_sse(out->bytes, &out->size, out, pfx, 0x57,
+			         op[1].reg, &op[0], 0, R_X86_64_PC32, -4);
 			goto done;
 		}
 		if (n == 2 && strcmp(base, "xorps") == 0 &&
@@ -1239,11 +1256,20 @@ x86_64_encode_insn(const struct mt_target *target,
 	for (i = 0; i < (int)(sizeof(bin) / sizeof(bin[0])); ++i)
 		if (strncmp(base, bin[i].name, strlen(bin[i].name)) == 0 && n == 2) {
 			char suffix_char = base[strlen(bin[i].name)];
+			/* Generic arithmetic mnemonics only take b/w/l/q suffixes
+			 * (or none).  SSE mnemonics share these prefixes (xorpd,
+			 * andps, cmpsd, ...) and must NOT be captured here, or the
+			 * xmm operands get encoded as scalar registers. */
+			if (suffix_char != '\0' && suffix_char != 'b' &&
+			    suffix_char != 'w' && suffix_char != 'l' &&
+			    suffix_char != 'q')
+				continue;
 			width = suffix_char == 'b' ? 1 : suffix_char == 'w' ? 2 :
 			        suffix_char == 'l' ? 4 : 8;
 			if (op[0].kind == OP_IMM) {
 				emit_binary_immediate(out->bytes, &out->size, out,
-				                      bin[i].ext, width, &op[0], &op[1]);
+				                      bin[i].ext, width, &op[0], &op[1],
+				                      strcmp(bin[i].name, "test") == 0);
 			} else {
 				unsigned binary_opcode = bin[i].opcode;
 				if (strcmp(bin[i].name, "test") != 0 &&
