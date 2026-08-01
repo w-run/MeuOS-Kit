@@ -284,7 +284,16 @@ check-mir-bridge: $(BIN)
 
 check-mir: check-mir-types check-mir-passes check-mir-bridge
 
-.PHONY: all clean check check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-bridge check-mir
+# m++ C++ lexer unit tests (C.1.2: keyword classification).
+CPP_SRCS := $(wildcard src/cpp/lex/*.c)
+check-cpp-lex: $(CPP_SRCS)
+	@mkdir -p build
+	$(HOST_CC) $(CFLAGS) -Iinclude -o build/cpp_lex_test $^ test/cpp/lex_test.c
+	./build/cpp_lex_test
+
+check-cpp: check-cpp-lex
+
+.PHONY: all clean check check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-bridge check-mir check-cpp-lex check-cpp
 
 # chibicc community functional test suite (C11/C23 conformance).
 # Runs test/community/chibicc/run.sh against the MeuOS sysroot.
