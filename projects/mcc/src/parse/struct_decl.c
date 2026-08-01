@@ -172,6 +172,7 @@ structdecl(struct scope *s, struct structbuilder *b)
 	int align;
 	enum storageclass sc;
 
+	extern enum cpp_tokenkind cpp_tok_kind(void);
 	if (staticassert(s))
 		return;
 	attr(NULL, 0);

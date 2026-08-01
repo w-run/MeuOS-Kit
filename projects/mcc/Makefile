@@ -63,7 +63,9 @@ CFLAGS += -DMCC_DEFAULT_TARGET=\"$(DEFAULT_TARGET)\"
 FE_DIRS := src/driver src/cpp src/lex src/parse src/sema src/irgen
 BE_DIRS := src/mir src/lir src/ir src/opt src/abi src/emit src/target src/util
 
-FE_SRCS := $(shell find $(FE_DIRS) -name '*.c' | sort)
+# mpp_main.c provides the C++-mode main() (g_lang=1) and is linked only
+# into m++; mcc links c_main.c (C mode, g_lang=0).
+FE_SRCS := $(shell find $(FE_DIRS) -name '*.c' ! -name 'mpp_main.c' | sort)
 BE_SRCS := $(shell find $(BE_DIRS) -name '*.c' | sort)
 FE_OBJS := $(patsubst %.c,build/%.o,$(FE_SRCS))
 BE_OBJS := $(patsubst %.c,build/%.o,$(BE_SRCS))
@@ -84,7 +86,7 @@ $(MSYS_LIB):
 	$(MAKE) -C $(MSYS_DIR)
 
 # mcc = C frontend objects + libmcc.a (shared backend archive).
-# mpp_main.o (in FE_OBJS) provides main() (-> mcc_main) so mcc and m++
+# mcc links c_main.o (C mode, g_lang=0); m++ links mpp_main.o (g_lang=1).
 # share the driver; the m++ binary (target `mpp`) will link the C++
 # frontend objects instead of the C frontend objects (dual-binary
 # shared-backend design, see C.1).
@@ -94,8 +96,10 @@ $(BIN): $(FE_OBJS) $(LIB)
 # m++ (C++ compiler) — stage C.1: same driver, C++ frontend under
 # construction (falls back to the shared C driver for now).
 MPP_BIN := m++
-$(MPP_BIN): $(FE_OBJS) $(LIB)
-	$(HOST_CC) $(CFLAGS) $(LDFLAGS) -o $@ $(FE_OBJS) $(LIB) $(LDLIBS) -L../meuos-sysroot/build -lmsys
+$(MPP_BIN): $(FE_OBJS) $(LIB) build/src/driver/mpp_main.o
+	$(HOST_CC) $(CFLAGS) $(LDFLAGS) -o $@ \
+	    $(filter-out build/src/driver/c_main.o,$(FE_OBJS)) \
+	    build/src/driver/mpp_main.o $(LIB) $(LDLIBS) -L../meuos-sysroot/build -lmsys
 
 # libmcc.a = backend objects (language-agnostic, future m++ shares this)
 $(LIB): $(BE_OBJS)
