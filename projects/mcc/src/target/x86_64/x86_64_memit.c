@@ -398,6 +398,29 @@ emit_mov(FILE *f, MVal *dst, MVal *src, MConst *c, MType dtype)
 		fputs("\n", f);
 		return;
 	}
+	/* direct moves where x86 allows them (postra: avoid the %rax trip) */
+	if (src && dst && src->kind == MV_REG && dst->kind == MV_REG) {
+		if (src != dst)
+			fprintf(f, "\tmovq\t%%%s, %%%s\n", src->name, dst->name);
+		return;   /* same-register copy is a no-op */
+	}
+	if (src && src->kind == MV_REG && dst && dst->kind == MV_TEMP) {
+		fprintf(f, "\tmovq\t%%%s, ", src->name);
+		emit_mval(f, dst);
+		fputs("\n", f);
+		return;
+	}
+	if (src && src->kind == MV_TEMP && dst && dst->kind == MV_REG) {
+		fputs("\tmovq\t", f);
+		emit_mval(f, src);
+		fprintf(f, ", %%%s\n", dst->name);
+		return;
+	}
+	if (src && src->kind == MV_REG && src->reg == X64MREG_RAX) {
+		/* value already in the accumulator */
+		rax_to_dst(f, dst);
+		return;
+	}
 	mov_to_rax(f, src, c);
 	rax_to_dst(f, dst);
 }
