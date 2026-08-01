@@ -171,19 +171,21 @@ fe_val(MFn *fn, struct value *v, MVal **tab)
 		 * local `.L<name>.<id>` symbols; reference them with that
 		 * local name so the LIR bridge produces a correct relocation.
 		 * Other globals use the bare name (extern) or `.L<name>.<id>`
-		 * (internal, id > 0). */
+		 * (internal, id > 0).  Thread-local globals keep their symbol
+		 * and the TLS flag. */
+		bool tls = (v->kind & VALUE_THREAD) != 0;
 		const char *nm = v->u.name ? v->u.name : "compound";
 		if (v->kind & VALUE_QUOTE) {
 			char buf[256];
 			snprintf(buf, sizeof buf, ".L%s.%u", nm, v->id);
-			m = mval_global(fn, buf, false);
-		} else if (v->id && !(v->kind & VALUE_EXTERN)) {
+			m = mval_global(fn, buf, false, false);
+		} else if (v->id && !(v->kind & VALUE_EXTERN) && !tls) {
 			char buf[256];
 			snprintf(buf, sizeof buf, ".L%s.%u", nm, v->id);
-			m = mval_global(fn, buf, false);
+			m = mval_global(fn, buf, false, false);
 		} else {
 			m = mval_global(fn, v->u.name,
-			                (v->kind & VALUE_EXTERN) != 0);
+			                (v->kind & VALUE_EXTERN) != 0, tls);
 		}
 		break;
 	}

@@ -52,7 +52,7 @@ build_fib(void)
 	MVal *nm2 = mval_new(fn, MV_TEMP, MT_I32, 0, "nm2");
 	MVal *sum = mval_new(fn, MV_TEMP, MT_I32, 0, "sum");
 	MVal *r = mval_new(fn, MV_TEMP, MT_I32, 0, "r");
-	MVal *fibsym = mval_global(fn, "fib", true);
+	MVal *fibsym = mval_global(fn, "fib", true, false);
 
 	fn->nparam = 1;
 	fn->param = malloc(sizeof *fn->param);

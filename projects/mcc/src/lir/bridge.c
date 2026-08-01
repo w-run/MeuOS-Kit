@@ -110,6 +110,8 @@ valref(MFn *fn, MVal *v, Fn *lir)
 		Con c = {.type = CAddr};
 		c.sym.id = intern(v->sym ? v->sym : "");
 		c.sym.type = v->hint ? SExt : SGlo;
+		if (v->tls)
+			c.sym.type |= SThr;
 		return newcon(&c, lir);
 	}
 	case MV_CONST:

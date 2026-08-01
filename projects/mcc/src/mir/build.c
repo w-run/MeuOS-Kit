@@ -74,11 +74,13 @@ MVal *mval_const(MFn *fn, MType t, MConst *c)
 	return v;
 }
 
-MVal *mval_global(MFn *fn, const char *sym, bool isext)
+MVal *mval_global(MFn *fn, const char *sym, bool isext, bool tls)
 {
 	MVal *v = mval_new(fn, MV_GLOBAL, MT_PTR, 0, sym);
 	v->sym = mx_strdup(sym);
 	v->hint = isext ? 1 : 0;
+	v->tls = tls;
+	v->isext = isext;
 	return v;
 }
 

@@ -152,6 +152,8 @@ typedef struct MVal {
 	/* global symbol payload */
 	const char *sym;
 	int32_t symref;            /* LIR sym id, -1 unset */
+	bool tls;                  /* MV_GLOBAL: thread-local symbol */
+	bool isext;                /* MV_GLOBAL: external symbol */
 	/* constant payload (MV_CONST) */
 	struct MConst *con;
 	/* LIR temp index (bridge): -1 until lir_bridge assigns it */
@@ -323,7 +325,7 @@ void mfn_addblk(MFn *fn, MBlk *b);
 MVal *mval_new(MFn *fn, MValKind kind, MType t, struct MTypeDesc *td,
                const char *name);
 MVal *mval_const(MFn *fn, MType t, MConst *c);
-MVal *mval_global(MFn *fn, const char *sym, bool isext);
+MVal *mval_global(MFn *fn, const char *sym, bool isext, bool tls);
 MVal *mval_type(MFn *fn, MTypeDesc *td);
 MVal *mval_label(MFn *fn, MBlk *b);
 
