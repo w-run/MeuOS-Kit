@@ -431,6 +431,9 @@ mcc_main(int argc, char *argv[])
 		if (msys_is_sysroot(sysroot)) {
 			msys_handle = msys_sysroot_open(sysroot);
 			if (msys_handle) {
+				/* publish to the global handle so pp.c's openinclude()
+				 * can serve <...> headers via msys_fopen() */
+				msys_sysroot_handle = msys_handle;
 				msys_sysroot_path = sysroot;
 				/* Auto-detect target architecture from @meuos_arch metadata
 				 * when --target is not explicitly set. */
