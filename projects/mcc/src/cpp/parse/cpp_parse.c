@@ -7,10 +7,11 @@
  * `decl()` loop when the input language is C++ (selected by the m++
  * driver).
  *
- * Currently this is a minimal skeleton: it delegates to the C parser for
- * the full translation unit.  C++ grammar handling (class member
- * declarations, access specifiers, namespace blocks, templates) is added
- * incrementally in later stages.
+ * Currently: `class` declarations with access-control sections
+ * (public:/private:/protected:) are handled by cpp_class_decl, which
+ * reuses the C type machinery (mktype + addmember + structdecl) while
+ * skipping access labels.  Member functions, inheritance, templates,
+ * and namespaces are added incrementally in later stages.
  */
 #include <stdio.h>
 #include <string.h>
@@ -18,21 +19,107 @@
 #include "util.h"
 #include "mcc.h"
 #include "cpp.h"
+#include "../../parse/decl_internal.h"
 
 /* Classify the current token as a C++ keyword, if any.  Wired to the C++
  * lexer's keyword table; the C lexer tokenizes identifiers, and this
- * re-interprets them as C++ keywords for the parser. */
+ * re-interprets them as C++ keywords for the parser.  Identifier names
+ * are recovered via tokenstr() (the C lexer stores identifier text in the
+ * tokstr table, not in tok.lit). */
 enum cpp_tokenkind
 cpp_tok_kind(void)
 {
-	if (tok.kind == TIDENT)
-		return cpp_classify_ident(tok.lit, tok.lit ? strlen(tok.lit) : 0);
+	if (tok.kind >= TIDENT) {
+		const char *name = tokenstr(tok.kind);
+		return cpp_classify_ident(name, name ? strlen(name) : 0);
+	}
 	return CPP_TNONE;
 }
 
+/* Parse a C++ `class`/`struct`/`union` declaration with access-control
+ * sections (public:/private:/protected:).  Reuses the C type machinery
+ * (mktype + addmember + structdecl) but skips access-specifier labels,
+ * which the C parser does not understand.  Currently handles the
+ * data-member subset; member functions, inheritance, and templates are
+ * added later. */
+static bool
+cpp_class_decl(struct scope *s)
+{
+	struct type *t;
+	char *tag;
+	struct structbuilder b;
+
+	/* class/struct/union keyword consumed here */
+	next();
+	if (tok.kind < TIDENT)
+		error(&tok.loc, "expected class name");
+	tag = tokenstr(tok.kind);
+	next();
+
+	/* create or look up the aggregate type */
+	t = scopegettag(s, tag, tok.kind != TLBRACE && tok.kind != TSEMICOLON);
+	if (t) {
+		if (t->kind != TYPESTRUCT && t->kind != TYPEUNION)
+			error(&tok.loc, "redeclaration of tag '%s' with different kind", tag);
+	} else {
+		t = mktype(TYPESTRUCT, 0);
+		t->size = 0;
+		t->align = 0;
+		t->u.structunion.tag = tag;
+		t->u.structunion.members = NULL;
+		t->incomplete = true;
+		scopeputtag(s, tag, t);
+	}
+
+	if (tok.kind != TLBRACE)
+		return true; /* forward declaration */
+	if (!t->incomplete)
+		error(&tok.loc, "redefinition of class '%s'", tag);
+	next(); /* consume '{' */
+
+	b.type = t;
+	b.last = &t->u.structunion.members;
+	b.bits = 0;
+	b.pack = false;
+
+	for (;;) {
+		/* skip access-control labels: public: private: protected: */
+		enum cpp_tokenkind k = cpp_tok_kind();
+		if (k == CPP_TPUBLIC || k == CPP_TPRIVATE || k == CPP_TPROTECTED) {
+			next(); /* consume the keyword */
+			if (tok.kind == TCOLON)
+				next(); /* consume ':' */
+			continue;
+		}
+		if (tok.kind == TCOLON) {
+			/* stray colon */
+			next();
+			continue;
+		}
+		if (tok.kind == TRBRACE)
+			break;
+		structdecl(s, &b);
+	}
+	next(); /* consume '}' */
+
+	/* Finalize: align the aggregate size up to its member alignment and
+	 * mark it complete, mirroring tagspec()'s struct branch. */
+	if (t->align < 0)
+		t->align = 0;
+	if (t->size)
+		t->size = ALIGNUP(t->size, t->align);
+	t->incomplete = false;
+
+	/* trailing ';' after the class body */
+	if (tok.kind == TSEMICOLON)
+		next();
+	return true;
+}
+
 /* Parse a C++ translation unit: top-level declaration loop.
- * C++ grammar is layered over the C parser; currently C-compatible
- * declarations are parsed by the shared C parser. */
+ * C++ grammar is layered over the C parser; `class` declarations with
+ * access control are handled here (cpp_class_decl), and C-compatible
+ * declarations fall through to the shared C parser. */
 void
 cpp_parse_translation_unit(void)
 {
@@ -40,6 +127,13 @@ cpp_parse_translation_unit(void)
 	extern void emittentativedefns(void);
 
 	while (tok.kind != TEOF) {
+		/* C++ class/struct/union with access control */
+		enum cpp_tokenkind k = cpp_tok_kind();
+		if (k == CPP_TCLASS) {
+			cpp_class_decl(&filescope);
+			continue;
+		}
+
 		if (!decl(&filescope, NULL)) {
 			if (tok.kind == TSEMICOLON)
 				error(&tok.loc, "unexpected ';' at top-level");

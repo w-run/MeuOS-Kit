@@ -278,6 +278,20 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 	if (align)
 		*align = 0;
 	for (;;) {
+		/* C++: a bare class/struct/union tag is a type name (`Point p`),
+		 * independent of the C implicit-int storage-class handling.  This
+		 * must be checked before the ts != SPECNONE skip in the default
+		 * branch below. */
+		extern int g_lang;
+		if (g_lang == 1 && tok.kind >= TIDENT && !t && !ts) {
+			struct type *ct = scopegettag(s, tokenstr(tok.kind), 1);
+			if (ct && (ct->kind == TYPESTRUCT || ct->kind == TYPEUNION)) {
+				t = ct;
+				++ntypes;
+				next();
+				break;
+			}
+		}
 		/* `_Atomic(type-name)` is a type specifier, unlike `_Atomic`
 		 * followed by ordinary declaration specifiers, which is a
 		 * qualifier. */
@@ -459,8 +473,22 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 			if (op < TIDENT || t || ts)
 				goto done;
 			d = scopegetdecl(s, tokenstr(tok.kind), 1);
-			if (!d || d->kind != DECLTYPE)
+			if (!d || d->kind != DECLTYPE) {
+				/* C++: a class/struct/union tag is usable as a bare
+				 * type name (`Point p`). */
+				extern int g_lang;
+				if (g_lang == 1) {
+					struct type *tt = scopegettag(s, tokenstr(tok.kind), 1);
+					if (tt && (tt->kind == TYPESTRUCT || tt->kind == TYPEUNION)) {
+						t = tt;
+						tq = QUALNONE;
+						++ntypes;
+						next();
+						break;
+					}
+				}
 				goto done;
+			}
 			t = d->type;
 			tq |= d->qual;
 			++ntypes;
@@ -549,9 +577,21 @@ bool
 istypename(struct scope *s, const char *name)
 {
 	struct decl *d;
+	struct type *t;
 
 	d = scopegetdecl(s, name, 1);
-	return d && d->kind == DECLTYPE;
+	if (d && d->kind == DECLTYPE)
+		return 1;
+	/* C++: a class/struct/union tag is itself a type name (`Point p`),
+	 * unlike C where a bare tag name is not a type.  Enabled when the
+	 * C++ frontend is active (m++ driver sets g_lang=1). */
+	extern int g_lang;
+	if (g_lang == 1) {
+		t = scopegettag(s, name, 0);
+		if (t && (t->kind == TYPESTRUCT || t->kind == TYPEUNION))
+			return 1;
+	}
+	return 0;
 }
 struct type *
 typename(struct scope *s, enum typequal *tq, struct expr **toeval)
