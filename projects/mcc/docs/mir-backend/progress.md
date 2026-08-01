@@ -43,14 +43,19 @@
 
 ## 当前工作点
 
-- **P4a 进行中**：`src/mir/regalloc.c` 的 mreg_intervals——机器层无
-  MVal.use 链（maddm 不维护），改用**指令数组扫描**收集 def/use 构造区间。
+- **P4 regalloc 全部完成（A-E）**。P5（自举/深度验证）待 team-lead 指示。
+- MCC_MIR_BACKEND=1：标量函数走完整新后端（isel + ABI + regalloc + emit），
+  聚合/varargs/TLS/VLA 动态 alloca fallback 到 bridge。
 
 ## 关键决策/发现
 
 - 机器层 MInsM 直接持有 MVal*（src/dst/addr），无反向 use 链；
   regalloc 区间从指令扫描构造（非设计文档假设的 MUse 链）。
 - 机器层无 MPhi（P3b 已把 SSA phi 降级为 pred 块尾 MMOP_MOV copy），
-  P4d 主要为确认这些 copy 的寄存器分配正确。
-- P3b emit 用"全栈虚拟值"方案（正确但未优化）；P4 由 regalloc 决定
-  MV_TEMP 的 `reg`（物理寄存器）或 `slot`（栈槽），emit 改为寄存器感知。
+  phi 值经 `extra=1` 标记强制 spill（P4d，避免并行移动覆盖）。
+- emit 的 scratch 寄存器（rax/rcx/rdx/r9/r10/r11/xmm0）从 regalloc 池排除
+  （MTargetM.scratch），累加器不与操作数别名。
+- 线性扫描的回边缺口（循环头入口值被循环体临时值覆盖）经"区间跨回边
+  延伸"修复；`fm->regsused` 记录全部已分配寄存器（非当前活跃集）。
+- 所有 spill 槽 8 字节对齐（emit 用 movq 访问），4 字节值不越界。
+- 静态 alloca 用帧内 leaq 预留（不碰 %rsp），动态 alloca（VLA）fallback。
