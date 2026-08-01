@@ -540,6 +540,7 @@ const char *mcc_name(MCC cc);
 
 struct MInsM {
 	uint32_t id;
+	uint32_t pos;            /* global linear-scan position (regalloc) */
 	MMOP op;
 	MType dtype;           /* result / memory width */
 	MVal *dst;             /* result value (register or temp) */
@@ -604,5 +605,12 @@ void mfnm_term(MFnM *fm, MBlkM *b, MMOP op, MVal *s0, MBlkM *s1, MBlkM *s2,
 
 void mfnm_dump(MFnM *fm, FILE *out);
 void mfnm_free(MFnM *fm);
+
+/* ---- Register allocation (P4) -------------------------------------------- */
+
+/* Linear-scan register allocation for a lowered MFnM (post-ABI, pre-emit).
+ * Fills MVal.reg (physical register) or MVal.slot (spill), plus fm->slot /
+ * fm->regsused for frame emission. */
+void mfnm_regalloc(MFnM *fm);
 
 #endif /* MCC_MIR_H */

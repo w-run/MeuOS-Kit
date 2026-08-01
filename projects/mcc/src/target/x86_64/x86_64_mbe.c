@@ -316,9 +316,10 @@ mfnm_backend_x86_64(MFn *mf)
 		}
 	}
 
-	/* ABI-lower, then emit real x86-64 assembly (P3b).  dump when
-	 * MCC_DEBUG_MBE is set. */
+	/* ABI-lower, then register-allocate and emit real x86-64 assembly
+	 * (P3b/P4).  dump when MCC_DEBUG_MBE is set. */
 	mfnm_abi_x86_64(fm);
+	mfnm_regalloc(fm);
 	if (getenv("MCC_DEBUG_MBE")) {
 		fprintf(stderr, "\n> MIR backend (x86_64, post-ABI) %s:\n",
 		        fm->name ? fm->name : "?");

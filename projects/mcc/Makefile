@@ -270,6 +270,12 @@ check-mir-passes: $(MIR_SRCS) $(MABI_SRC)
 	$(HOST_CC) $(CFLAGS) -Iinclude -o build/mir_pass_test $^ test/mir/pass_test.c
 	./build/mir_pass_test
 
+# P4a register allocator: live-interval construction on machine IR.
+check-mir-regalloc: $(MIR_SRCS) $(MABI_SRC)
+	@mkdir -p build
+	$(HOST_CC) $(CFLAGS) -Iinclude -o build/regalloc_test $^ test/mir/regalloc_test.c
+	./build/regalloc_test
+
 # P1 machine layer: physical registers as MVal, addressing modes, machine
 # opcodes (MMOP), machine functions/blocks/instructions (MFnM/MBlkM/MInsM).
 # Independent of the LIR/QBE pipeline — links mir/ sources only (plus the
@@ -309,7 +315,7 @@ check-mir-bridge: $(BIN)
 	@$(HOST_CC) -o /tmp/bridge_fib /tmp/bridge_main.o /tmp/bridge_fib.s
 	@/tmp/bridge_fib; echo "bridge exit=$$? (0 = fib(5)==5)"
 
-check-mir: check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir-bridge
+check-mir: check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir-regalloc check-mir-bridge
 
 # m++ C++ lexer unit tests (C.1.2: keyword classification).
 CPP_SRCS := $(wildcard src/cpp/lex/*.c)
