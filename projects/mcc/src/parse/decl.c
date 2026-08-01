@@ -294,6 +294,14 @@ decl(struct scope *s, struct func *f)
 						cpp_record_global_ctor(d);
 					else
 						cpp_emit_default_ctor(f, d);
+					/* record local class objects for reverse-order
+					 * destruction at scope exit (head-insert: newest
+					 * first, so front-to-back is reverse declaration) */
+					if (d->u.obj.storage == SDAUTO &&
+					    (t->kind == TYPESTRUCT || t->kind == TYPEUNION)) {
+						d->next = s->objects;
+						s->objects = d;
+					}
 				}
 			}
 			break;

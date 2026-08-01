@@ -237,6 +237,9 @@ struct scope {
 	struct scope *parent;
 	/* C++ namespace name (NULL for ordinary scopes). */
 	const char *name;
+	/* Class-typed objects declared in this scope, in declaration order
+	 * (C++ destroys them in reverse order at scope exit). */
+	struct decl *objects;
 };
 
 enum exprkind {

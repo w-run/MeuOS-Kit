@@ -1412,20 +1412,15 @@ cpp_emit_dtor(struct func *f, struct decl *d)
 void
 cpp_emit_scope_dtors(struct func *f, struct scope *s)
 {
-	size_t i;
+	struct decl *d;
 
 	if (!f || !s)
 		return;
-	/* len is zero-initialized by mkscope; cap/keys/vals are uninitialized
-	 * until the first scopeputdecl (mapinit), so an empty scope must not
-	 * be swept by cap. */
-	if (s->decls.len == 0)
-		return;
-	for (i = 0; i < s->decls.cap; i++) {
-		struct decl *d = s->decls.keys[i].str ? s->decls.vals[i].p : NULL;
-		if (d && d->kind == DECLOBJECT && !d->dtor_done)
+	/* objects is head-inserted in declaration order, so walking it
+	 * front-to-back destroys in reverse declaration order (C++). */
+	for (d = s->objects; d; d = d->next)
+		if (!d->dtor_done)
 			cpp_emit_dtor(f, d);
-	}
 }
 
 /* Emit a constructor call with explicit arguments for `Point p(3, 4);`

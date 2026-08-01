@@ -64,6 +64,7 @@ mkscope(struct scope *parent)
 	s->switchcases = parent->switchcases;
 	s->parent = parent;
 	s->name = NULL;
+	s->objects = NULL;
 
 	return s;
 }
