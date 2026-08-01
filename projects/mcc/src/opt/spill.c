@@ -105,6 +105,28 @@ static int slot8; /* ditto, 8 bytes */
 static BSet mask[2][1]; /* class masks */
 static BSet maskkl[1];  /* Kl temps (only used when T.kl_in_reg == 0) */
 
+/* Number of registers in a class pool that rega will never allocate
+ * (T.reserved, e.g. arm's R10 implicit scratch and D8 conversion
+ * scratch).  rega's ralloctry() skips these when picking a free
+ * register, so the spill budget for a class must be
+ * (pool size - reserved count), not pool size.  Otherwise a block
+ * whose live set needs exactly T.ngpr (or T.nfpr) class registers
+ * passes spill but rega dies with "no more regs". */
+static int
+nreserved(int r0, int rn)
+{
+	int n = 0, r;
+
+	for (r = r0; r < r0 + rn; r++)
+		if (T.reserved & BIT(r))
+			n++;
+	return n;
+}
+
+/* effective # of allocatable GPRs / FPRs (after T.reserved) */
+static int nallocgpr;
+static int nallocfpr;
+
 static int
 tcmp0(const void *pa, const void *pb)
 {
@@ -229,11 +251,11 @@ limit2(BSet *b1, int k1, int k2, BSet *f)
 		bsinter(bkl, maskkl);
 		bsdiff(b1, bkl);
 		limit(bkl, 0, f);
-		limit(b1, T.ngpr - k1, f);
+		limit(b1, nallocgpr - k1, f);
 		bsunion(b1, bkl);
 	} else
-		limit(b1, T.ngpr - k1, f);
-	limit(b2, T.nfpr - k2, f);
+		limit(b1, nallocgpr - k1, f);
+	limit(b2, nallocfpr - k2, f);
 	bsunion(b1, b2);
 }
 
@@ -417,6 +439,8 @@ spill(Fn *fn)
 	locs = fn->slot;
 	slot4 = 0;
 	slot8 = 0;
+	nallocgpr = T.ngpr - nreserved(T.gpr0, T.ngpr);
+	nallocfpr = T.nfpr - nreserved(T.fpr0, T.nfpr);
 	for (t=0; t<ntmp; t++) {
 		k = 0;
 		if (t >= T.fpr0 && t < T.fpr0 + T.nfpr)
@@ -449,7 +473,7 @@ spill(Fn *fn)
 			bszero(v);
 			hd->gen->t[0] |= T.rglob; /* don't spill registers */
 			for (k=0; k<2; k++) {
-				n = k == 0 ? T.ngpr : T.nfpr;
+				n = k == 0 ? nallocgpr : nallocfpr;
 				bscopy(u, b->out);
 				bsinter(u, mask[k]);
 				bscopy(w, u);
