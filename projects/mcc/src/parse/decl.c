@@ -290,11 +290,16 @@ decl(struct scope *s, struct func *f)
 			{
 				extern const char *cpp_take_qual_class(void);
 				extern void cpp_define_method(struct scope *,
-				    struct type *, const char *, const char *);
+				    struct type *, const char *, const char *, bool);
 				const char *qclass = cpp_take_qual_class();
 				if (qclass) {
 					const char *mname = name + strlen(qclass) + 1;
-					cpp_define_method(s, t, mname, qclass);
+					bool mc = false;
+					if (tok.kind == TCONST) {
+						mc = true;
+						next();
+					}
+					cpp_define_method(s, t, mname, qclass, mc);
 					return true;
 				}
 			}

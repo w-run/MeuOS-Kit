@@ -118,6 +118,7 @@ postfixexpr(struct scope *s, struct expr *r)
 				{
 					extern struct type *g_cpp_member_class;
 					extern const char *g_cpp_member_name;
+					extern bool g_cpp_member_const;
 					if (g_cpp_member_class && g_cpp_member_name) {
 						extern void cpp_mangled_name_args(struct type *,
 						    const char *, struct expr *, char *, size_t);
@@ -126,8 +127,19 @@ postfixexpr(struct scope *s, struct expr *r)
 						cpp_mangled_name_args(g_cpp_member_class,
 						    g_cpp_member_name, arglist, mname2,
 						    sizeof mname2);
+						if (g_cpp_member_const)
+							strncat(mname2, "K", sizeof mname2 - strlen(mname2) - 1);
 						fd2 = scopegetdecl(g_cpp_member_class->scope
 						    ? g_cpp_member_class->scope : s, mname2, 1);
+						/* a non-const object may call a const method */
+						if (!g_cpp_member_const && (!fd2 || fd2->kind != DECLFUNC)) {
+							char mk2[256];
+							snprintf(mk2, sizeof mk2, "%sK", mname2);
+							fd2 = scopegetdecl(g_cpp_member_class->scope
+							    ? g_cpp_member_class->scope : s, mk2, 1);
+							if (fd2 && fd2->kind == DECLFUNC)
+								strncat(mname2, "K", sizeof mname2 - strlen(mname2) - 1);
+						}
 						if (!fd2 || fd2->kind != DECLFUNC)
 							error(&tok.loc,
 							    "no matching member function for '%s'",
@@ -220,10 +232,22 @@ postfixexpr(struct scope *s, struct expr *r)
 				char mname[256];
 				struct decl *fd;
 				if (cpp_is_member_function(t, m->name)) {
+					extern bool g_cpp_member_const;
+					bool obj_const = (tq & QUALCONST) != 0;
 					cpp_mangled_name(t, m->name, mname, sizeof mname);
+					if (obj_const)
+						strncat(mname, "K", sizeof mname - strlen(mname) - 1);
 					/* member symbols live in the class's declaration
 					 * scope (namespace scope for `namespace n { class C }`) */
 					fd = scopegetdecl(t->scope ? t->scope : s, mname, 1);
+					/* a non-const object may call a const method */
+					if (!obj_const && (!fd || fd->kind != DECLFUNC)) {
+						char mk[256];
+						snprintf(mk, sizeof mk, "%sK", mname);
+						fd = scopegetdecl(t->scope ? t->scope : s, mk, 1);
+						if (fd && fd->kind == DECLFUNC)
+							strncat(mname, "K", sizeof mname - strlen(mname) - 1);
+					}
 					if (fd && fd->kind == DECLFUNC) {
 						e = mkexpr(EXPRIDENT, fd->type, NULL);
 						e->u.ident.decl = fd;
@@ -240,6 +264,7 @@ postfixexpr(struct scope *s, struct expr *r)
 					g_cpp_member_this = r; /* &obj */
 					g_cpp_member_class = t;
 					g_cpp_member_name = m->name;
+					g_cpp_member_const = obj_const;
 					cpp_pending_record_depth();
 					if (fd == NULL || fd->kind != DECLFUNC)
 						cpp_pending_set_placeholder();

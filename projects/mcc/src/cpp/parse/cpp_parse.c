@@ -30,6 +30,7 @@ struct expr *g_cpp_member_this;
  * to resolve overloads from the actual argument types. */
 struct type *g_cpp_member_class;
 const char *g_cpp_member_name;
+bool g_cpp_member_const;
 /* postfixexpr nesting depth (set by expr_postfix.c); a pending member
  * call records the depth it was created at so nested argument expressions
  * (which run their own postfixexpr) don't clear it prematurely. */
@@ -63,6 +64,7 @@ cpp_pending_clear_at_depth(int depth)
 		g_cpp_member_this = NULL;
 		g_cpp_member_class = NULL;
 		g_cpp_member_name = NULL;
+		g_cpp_member_const = false;
 		g_cpp_pending_placeholder = false;
 	}
 }
@@ -73,7 +75,8 @@ cpp_pending_is_mine(int depth)
 	return g_cpp_pending_depth == depth;
 }
 void cpp_define_method(struct scope *s, struct type *funct,
-                              const char *mname, const char *class_tag);
+                              const char *mname, const char *class_tag,
+                              bool is_const);
 
 /* Method-body context: while parsing a member-function body, bare member
  * identifiers (`count`) lower to `(*this).count` via cpp_member_ident,
@@ -207,7 +210,11 @@ cpp_member_ident(struct scope *s, const char *name)
 		/* member-function call: mangled free function + this */
 		if (!cpp_is_member_function(t, name))
 			return NULL;
+		bool this_const = g_cpp_method.this_decl &&
+		    (g_cpp_method.this_decl->type->qual & QUALCONST);
 		cpp_mangled_name(t, name, mname, sizeof mname);
+		if (this_const)
+			strncat(mname, "K", sizeof mname - strlen(mname) - 1);
 		fd = scopegetdecl(t->scope ? t->scope : s, mname, 1);
 		if (!fd || fd->kind != DECLFUNC) {
 			/* overloaded: symbol is argument-encoded; the call lowering
@@ -219,6 +226,7 @@ cpp_member_ident(struct scope *s, const char *name)
 			g_cpp_member_this = cpp_this_expr();
 			g_cpp_member_class = t;
 			g_cpp_member_name = name;
+			g_cpp_member_const = this_const;
 			cpp_pending_record_depth();
 			cpp_pending_set_placeholder();
 			return e;
@@ -230,17 +238,23 @@ cpp_member_ident(struct scope *s, const char *name)
 		g_cpp_member_this = cpp_this_expr();
 		g_cpp_member_class = t;
 		g_cpp_member_name = name;
+		g_cpp_member_const = this_const;
 		cpp_pending_record_depth();
 		return e;
 	}
 	/* data member: (*this).name — mirror postfixexpr()'s TPERIOD
-	 * lowering of `obj.member`. */
+	 * lowering of `obj.member`.  In a const member function the this
+	 * pointer is const, so the accessed member is const too. */
 	thise = cpp_this_expr();
 	if (!thise)
 		return NULL;
-	base = mkbinaryexpr(&tok.loc, TADD, exprconvert(thise, &typeulong),
-	                    mkconstexpr(&typeulong, offset));
-	base->type = mkpointertype(m->type, m->qual);
+	{
+		enum typequal thisq = g_cpp_method.this_decl
+		    ? g_cpp_method.this_decl->type->qual : QUALNONE;
+		base = mkbinaryexpr(&tok.loc, TADD, exprconvert(thise, &typeulong),
+		                    mkconstexpr(&typeulong, offset));
+		base->type = mkpointertype(m->type, m->qual | thisq);
+	}
 	e = mkunaryexpr(TMUL, base);
 	e->lvalue = true;
 	if (m->bits.before || m->bits.after) {
@@ -626,7 +640,7 @@ cpp_member_accessible(struct type *t, struct member *m)
  * member names resolve to `(*this).name` via cpp_member_ident. */
 void
 cpp_define_method(struct scope *s, struct type *funct, const char *mname,
-                  const char *class_tag)
+                  const char *class_tag, bool is_const)
 {
 	extern struct decl *mkdecl(char *, enum declkind, struct type *,
 	    enum typequal, enum linkage);
@@ -644,6 +658,10 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname,
 		error(&tok.loc, "'%s' is not a class type", class_tag);
 
 	snprintf(mangled, sizeof mangled, "%s_%s", class_tag, mname);
+	/* const member functions get a distinct mangled name so a const
+	 * object can only call const methods */
+	if (is_const)
+		strncat(mangled, "K", sizeof mangled - strlen(mangled) - 1);
 	/* overload resolution: append the encoded explicit parameter types
 	 * (`Class_method_ii`); no-arg methods keep the bare mangled name */
 	for (cur = funct->u.func.params; cur; cur = cur->next) {
@@ -669,7 +687,8 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname,
 	mtype->u.func.isvararg = funct->u.func.isvararg;
 	mtype->u.func.params = NULL;
 	mtype->u.func.nparam = 0;
-	thisd = mkdecl("this", DECLOBJECT, mkpointertype(classt, QUALNONE),
+	thisd = mkdecl("this", DECLOBJECT,
+	               mkpointertype(classt, is_const ? QUALCONST : QUALNONE),
 	               QUALNONE, LINKNONE);
 	thisd->u.obj.storage = SDAUTO;
 	mtype->u.func.params = thisd;

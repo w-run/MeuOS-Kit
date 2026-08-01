@@ -202,8 +202,8 @@ structdecl(struct scope *s, struct structbuilder *b)
 			width = -1;
 			{
 				extern void cpp_define_method(struct scope *,
-				    struct type *, const char *, const char *);
-				cpp_define_method(s, ct, "dtor", tag);
+				    struct type *, const char *, const char *, bool);
+				cpp_define_method(s, ct, "dtor", tag, false);
 			}
 			addmember(b, mt, name, align, width);
 			return;
@@ -252,8 +252,8 @@ structdecl(struct scope *s, struct structbuilder *b)
 		width = -1;
 		{
 			extern void cpp_define_method(struct scope *,
-			    struct type *, const char *, const char *);
-			cpp_define_method(s, ct, tag, tag);
+			    struct type *, const char *, const char *, bool);
+			cpp_define_method(s, ct, tag, tag, false);
 		}
 		addmember(b, mt, name, align, width);
 		return;
@@ -280,10 +280,16 @@ structdecl(struct scope *s, struct structbuilder *b)
 			extern int g_lang;
 			if (g_lang == 1 && mt.type->kind == TYPEFUNC) {
 				extern void cpp_define_method(struct scope *,
-				    struct type *, const char *, const char *);
+				    struct type *, const char *, const char *, bool);
+				/* const member function: `void get() const {...}` */
+				bool is_const = false;
+				if (tok.kind == TCONST) {
+					is_const = true;
+					next();
+				}
 				/* class tag for name mangling (Class_method) */
 				cpp_define_method(s, mt.type, name,
-				    b->type->u.structunion.tag);
+				    b->type->u.structunion.tag, is_const);
 				/* register the function member for call lowering */
 				addmember(b, mt, name, align, width);
 				/* leave the following token (class-body '}' or next
