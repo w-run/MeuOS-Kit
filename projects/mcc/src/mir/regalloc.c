@@ -131,6 +131,181 @@ mreg_slot_total(const MRegSlots *s)
 	return s->slot8 * 4;   /* 4-byte units -> bytes (caller aligns to 16) */
 }
 
+/* ---- Phase C: linear scan ------------------------------------------------ */
+
+typedef struct MRegPool {
+	int regs[64];
+	uint32_t nreg;
+} MRegPool;
+
+/* Fixed (ABI) register occupations: a physical register used by MV_REG at
+ * a given position must not be handed to an interval live there. */
+typedef struct {
+	uint32_t *pos;
+	uint32_t n, c;
+} MFixed;
+
+static int
+mreg_class(MType t)
+{
+	return (t == MT_F32 || t == MT_F64) ? 1 : 0;
+}
+
+static void
+fixed_add(MFixed *f, uint32_t pos)
+{
+	if (f->n == f->c) {
+		f->c = f->c ? f->c * 2 : 8;
+		f->pos = realloc(f->pos, f->c * sizeof *f->pos);
+	}
+	f->pos[f->n++] = pos;
+}
+
+static bool
+fixed_conflict(MFixed *f, uint32_t s, uint32_t e)
+{
+	for (uint32_t i = 0; i < f->n; i++)
+		if (f->pos[i] >= s && f->pos[i] < e)
+			return true;
+	return false;
+}
+
+static int
+intv_cmp_start(const void *a, const void *b)
+{
+	const MRegInterval *x = a, *y = b;
+	if (x->start != y->start)
+		return x->start < y->start ? -1 : 1;
+	return x->v->id < y->v->id ? -1 : 1;
+}
+
+/* Build the caller-saved (px) and callee-saved (pc) pools per class. */
+static void
+mreg_pool_build(const MTargetM *mt, MRegPool *pc, MRegPool *px)
+{
+	for (int r = mt->gpr0; r < mt->gpr0 + mt->ngpr; r++) {
+		if ((mt->rglob >> r) & 1)
+			continue;   /* rbp/rsp */
+		if (mt->regs[r].callee_saved)
+			pc[0].regs[pc[0].nreg++] = r;
+		else
+			px[0].regs[px[0].nreg++] = r;
+	}
+	for (int r = mt->fpr0; r < mt->fpr0 + mt->nfpr; r++) {
+		if (mt->regs[r].callee_saved)
+			pc[1].regs[pc[1].nreg++] = r;
+		else
+			px[1].regs[px[1].nreg++] = r;
+	}
+}
+
+static bool
+interval_crosses_call(uint32_t s, uint32_t e, uint32_t *calls, uint32_t nc)
+{
+	for (uint32_t i = 0; i < nc; i++)
+		if (calls[i] >= s && calls[i] < e)
+			return true;
+	return false;
+}
+
+static void
+mreg_scan(MFnM *fm, MRegCtx *ctx)
+{
+	const MTargetM *mt = fm->mt;
+	MRegSlots slots = { 0 };
+	MRegPool pc[2] = { 0 }, px[2] = { 0 };
+	mreg_pool_build(mt, pc, px);
+
+	/* fixed occupations (MV_REG operands) */
+	MFixed fixed[64];
+	memset(fixed, 0, sizeof fixed);
+	{
+		uint32_t calls[64], ncalls = 0;
+		for (MBlkM *b = fm->link; b; b = b->link) {
+			for (uint32_t j = 0; j < b->nins; j++) {
+				MInsM *in = &b->ins[j];
+				MVal *ops[5] = { in->dst, in->src[0], in->src[1],
+				                 in->addr.base, in->addr.index };
+				for (int k = 0; k < 5; k++)
+					if (ops[k] && ops[k]->kind == MV_REG && ops[k]->reg >= 0)
+						fixed_add(&fixed[ops[k]->reg], in->pos);
+				if (in->op == MMOP_CALL && ncalls < 64)
+					calls[ncalls++] = in->pos;
+			}
+			MInsM *t = &b->term;
+			MVal *tops[3] = { t->src[0], t->addr.base, t->addr.index };
+			for (int k = 0; k < 3; k++)
+				if (tops[k] && tops[k]->kind == MV_REG && tops[k]->reg >= 0)
+					fixed_add(&fixed[tops[k]->reg], t->pos);
+		}
+
+		/* collect candidate intervals (MV_TEMP), sort by start */
+		MRegInterval *cand = malloc(ctx->nval * sizeof *cand);
+		uint32_t ncand = 0;
+		for (uint32_t i = 0; i < ctx->nval; i++)
+			if (ctx->intv[i].v)
+				cand[ncand++] = ctx->intv[i];
+		qsort(cand, ncand, sizeof *cand, intv_cmp_start);
+
+		typedef struct { uint32_t end; int reg; MVal *v; } MActive;
+		MActive act[256];
+		uint32_t nact = 0;
+		bool busy[64] = { 0 };
+
+		for (uint32_t i = 0; i < ncand; i++) {
+			MRegInterval *iv = &cand[i];
+			uint32_t s = iv->start, e = iv->end;
+			/* expire */
+			for (uint32_t k = nact; k-- > 0;)
+				if (act[k].end <= s) {
+					busy[act[k].reg] = false;
+					act[k] = act[--nact];
+				}
+			int cls = mreg_class(iv->v->type);
+			bool cross = interval_crosses_call(s, e, calls, ncalls);
+			int chosen = -1;
+			/* caller-saved pool first for non-call-crossing values */
+			if (!cross)
+				for (uint32_t p = 0; p < px[cls].nreg && chosen < 0; p++) {
+					int r = px[cls].regs[p];
+					if (busy[r] || fixed_conflict(&fixed[r], s, e))
+						continue;
+					chosen = r;
+				}
+			if (chosen < 0)
+				for (uint32_t p = 0; p < pc[cls].nreg && chosen < 0; p++) {
+					int r = pc[cls].regs[p];
+					if (busy[r] || fixed_conflict(&fixed[r], s, e))
+						continue;
+					chosen = r;
+				}
+			if (chosen >= 0 && nact < 256) {
+				iv->reg = chosen;
+				busy[chosen] = true;
+				act[nact].end = e;
+				act[nact].reg = chosen;
+				act[nact].v = iv->v;
+				nact++;
+			} else {
+				/* spill to a stack slot */
+				iv->v->slot = mreg_slot_alloc(&slots, iv->v->type);
+				iv->v->reg = -1;
+			}
+		}
+		/* write back register assignments */
+		for (uint32_t i = 0; i < ncand; i++)
+			if (cand[i].reg >= 0)
+				cand[i].v->reg = cand[i].reg;
+		for (uint32_t r = 0; r < 64; r++)
+			if (busy[r])
+				fm->regsused |= 1ull << r;
+		fm->slot = mreg_slot_total(&slots);
+		free(cand);
+	}
+	for (uint32_t r = 0; r < 64; r++)
+		free(fixed[r].pos);
+}
+
 /* ---- allocation entry ------------------------------------------------------ */
 
 void
@@ -150,16 +325,16 @@ mfnm_regalloc(MFnM *fm)
 
 	mreg_pos(fm, &ctx);
 	mreg_intervals(fm, &ctx);
-
-	/* P4b: slot packing is available (Phase C uses it for spills). */
+	mreg_scan(fm, &ctx);
 
 	if (getenv("MCC_DEBUG_MBE")) {
-		fprintf(stderr, "> intervals %s:\n", fm->name ? fm->name : "?");
+		fprintf(stderr, "> regalloc %s:\n", fm->name ? fm->name : "?");
 		for (uint32_t i = 0; i < ctx.nval; i++) {
 			MRegInterval *iv = &ctx.intv[i];
 			if (iv->v)
-				fprintf(stderr, "  %s [%u,%u)\n",
-				        iv->v->name ? iv->v->name : "?", iv->start, iv->end);
+				fprintf(stderr, "  %s [%u,%u) reg=%d slot=%d\n",
+				        iv->v->name ? iv->v->name : "?", iv->start, iv->end,
+				        iv->v->reg, iv->v->slot);
 		}
 	}
 

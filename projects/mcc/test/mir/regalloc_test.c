@@ -97,6 +97,95 @@ test_slots(void)
 	CHECK(mreg_slot_total(&s2) == 16);
 }
 
+static bool
+is_callee_saved(int reg)
+{
+	return reg >= 0 && mtarget_x86_64.regs[reg].callee_saved;
+}
+
+static void
+test_scan_calls(void)
+{
+	MFn *fn = mfn_new("sc", 2);
+	MFnM *fm = mfnm_new(fn, &mtarget_x86_64, "sc");
+	MBlkM *b = mblkm_new(fm, "entry");
+	mfnm_addblk(fm, b);
+
+	MVal *a = mkv(fn, "a");
+	MVal *bv = mkv(fn, "b");
+	MVal *c = mkv(fn, "c");
+	MVal *d = mkv(fn, "d");
+	MVal *e = mkv(fn, "e");
+	MVal *g = mval_global(fn, "g", true, false);
+	/* pos0 a=mov rdi; pos1 b=mov rsi; pos2 c=add a,b */
+	maddm(fm, b, MMOP_MOV, MT_I64, a,
+	      mfn_reg(fn, &mtarget_x86_64, X64MREG_RDI), 0);
+	maddm(fm, b, MMOP_MOV, MT_I64, bv,
+	      mfn_reg(fn, &mtarget_x86_64, X64MREG_RSI), 0);
+	maddm(fm, b, MMOP_ADD, MT_I64, c, a, bv);
+	/* pos3 d=call g  (crosses the call) */
+	maddm(fm, b, MMOP_CALL, MT_I64, d, g, 0);
+	/* pos4 e=add c,d; pos5 ret e */
+	maddm(fm, b, MMOP_ADD, MT_I64, e, c, d);
+	mfnm_term(fm, b, MMOP_RET, e, 0, 0, MCC_NONE);
+
+	mfnm_regalloc(fm);
+
+	/* a/b are not live across the call -> may use caller-saved */
+	CHECK(a->reg >= 0);
+	CHECK(bv->reg >= 0);
+	/* c and d are live across the call -> must be callee-saved */
+	CHECK(is_callee_saved(c->reg));
+	CHECK(is_callee_saved(d->reg));
+	CHECK(e->reg >= 0);
+	/* assigned registers are distinct while both live */
+	CHECK(c->reg != d->reg);
+	CHECK(c->reg != e->reg);
+
+	mfnm_free(fm);
+	mfn_free(fn);
+}
+
+static void
+test_scan_spill(void)
+{
+	MFn *fn = mfn_new("sp", 2);
+	MFnM *fm = mfnm_new(fn, &mtarget_x86_64, "sp");
+	MBlkM *b = mblkm_new(fm, "entry");
+	mfnm_addblk(fm, b);
+
+	/* 16 simultaneously-live values exceed the GPR pools -> spill */
+	enum { N = 16 };
+	MVal *v[N];
+	MVal *sum = mkv(fn, "sum");
+	for (int i = 0; i < N; i++) {
+		v[i] = mkv(fn, "v");
+		MConst *ci = mconst_int(fn, MT_I64, i);
+		maddm_cst(fm, b, MMOP_ADD, MT_I64, v[i], 0, ci);
+	}
+	/* use all v[i] in a chain so they stay live simultaneously */
+	for (int i = 0; i < N; i++)
+		maddm(fm, b, MMOP_ADD, MT_I64, sum, i ? v[i] : sum, i ? sum : v[0]);
+	mfnm_term(fm, b, MMOP_RET, sum, 0, 0, MCC_NONE);
+
+	mfnm_regalloc(fm);
+
+	int nspill = 0, nreg = 0;
+	for (int i = 0; i < N; i++) {
+		if (v[i]->reg >= 0)
+			nreg++;
+		else if (v[i]->slot != -1)
+			nspill++;
+	}
+	CHECK(nspill > 0);          /* pool exhausted -> at least one spill */
+	CHECK(nreg + nspill == N);
+	CHECK(fm->slot > 0);        /* spill slots sized the frame */
+	CHECK(fm->regsused != 0);   /* prologue must save used callee regs */
+
+	mfnm_free(fm);
+	mfn_free(fn);
+}
+
 static void
 test_two_blocks(void)
 {
@@ -143,6 +232,8 @@ main(void)
 	test_intervals();
 	test_two_blocks();
 	test_slots();
+	test_scan_calls();
+	test_scan_spill();
 
 	printf("regalloc_test: %d passed, %d failed\n", npass, nfail);
 	return nfail ? 1 : 0;

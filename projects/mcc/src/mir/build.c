@@ -61,6 +61,7 @@ MVal *mval_new(MFn *fn, MValKind kind, MType t, MTypeDesc *td,
 	v->slot = -1;
 	v->hint = -1;
 	v->lirtmp = -1;
+	v->reg = -1;   /* unassigned; MV_REG gets its physical id in mfn_reg */
 	fn->val = realloc(fn->val, (fn->nval + 1) * sizeof *fn->val);
 	fn->val[fn->nval++] = v;
 	return v;
