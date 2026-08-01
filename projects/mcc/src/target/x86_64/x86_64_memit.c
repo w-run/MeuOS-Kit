@@ -886,9 +886,10 @@ mfnm_emit_x86_64(MFnM *fm, FILE *f)
 	for (int i = 0; fm->mt->rclob && fm->mt->rclob[i] >= 0; i++)
 		if ((fm->regsused >> fm->mt->rclob[i]) & 1)
 			csaves++;
-	/* every function (including main, as launched by the host runtime)
-	 * enters with rsp % 16 == 8 after the call pushed the return address */
-	int entryoff = 8;
+	/* callers leave rsp % 16 == 8 after pushing the return address;
+	 * libc enters main with rsp % 16 == 0 */
+	bool ismain = fm->name && strcmp(fm->name, "main") == 0;
+	int entryoff = ismain ? 16 : 8;
 	int postpush = (entryoff - 8 * (csaves + 1)) & 15;   /* after pushes */
 	int align = (16 - postpush) & 15;
 	framesize = (framesize + align + 15) & ~15;
