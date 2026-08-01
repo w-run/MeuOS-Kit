@@ -376,6 +376,16 @@ structdecl(struct scope *s, struct structbuilder *b)
 				sd->value = mkglobal(sd); /* symbol slot exists before
 				                             the out-of-line definition */
 				scopeputdecl(cs, sd);
+				/* in-class initializer: `static int count = 5;` */
+				if (tok.kind == TASSIGN) {
+					struct init *init;
+					next();
+					init = parseinit(s, mt.type);
+					emitdata(sd, init);
+					sd->defined = true;
+					expect(TSEMICOLON, "after static member initializer");
+					return;
+				}
 				/* skip addmember: no layout space */
 			} else {
 				addmember(b, mt, name, align, width);
