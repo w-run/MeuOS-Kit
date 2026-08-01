@@ -1670,6 +1670,18 @@ peek(enum tokenkind kind)
 	return false;
 }
 
+/* Push `n` tokens back onto the front of the token stream so the next n
+ * next() calls return t[0..n-1] in order.  Used by the C++ frontend to
+ * replay buffered method-body tokens after a class layout is known. */
+void
+tokpush(struct token *t, size_t n)
+{
+	size_t i;
+
+	for (i = n; i > 0; --i)
+		ctxpush(&t[i - 1], 1, NULL, t[i - 1].space);
+}
+
 char *
 expect(enum tokenkind kind, const char *msg)
 {

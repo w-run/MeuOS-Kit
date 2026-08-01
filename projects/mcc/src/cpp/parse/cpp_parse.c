@@ -90,6 +90,12 @@ static const char *g_cpp_qual_class;
 
 static void cpp_emit_base_ctor(struct func *f);
 static void cpp_mangle_type(struct type *t, char *buf, size_t bufsz);
+static void flush_pending_methods(void);
+
+/* Two-phase class parsing: while a class body is being collected, method
+ * bodies are buffered (tokens) and replayed after the class layout is
+ * known, so a method body may reference members declared later. */
+static bool g_cpp_class_parsing;
 
 /* Pending constructor-call arguments collected by declarator() for
  * `Point p(3, 4);` (vexing parse: the args are expressions, not a
@@ -323,6 +329,7 @@ cpp_class_decl(struct scope *s)
 		error(&tok.loc, "base class '%s' has incomplete type", base->u.structunion.tag);
 	t->scope = s; /* member symbols are registered here */
 	next(); /* consume '{' */
+	g_cpp_class_parsing = true; /* buffer method bodies for phase two */
 
 	b.type = t;
 	b.last = &t->u.structunion.members;
@@ -363,6 +370,10 @@ cpp_class_decl(struct scope *s)
 		structdecl(s, &b);
 	}
 	next(); /* consume '}' */
+	g_cpp_class_parsing = false;
+
+	/* Phase two: layout is fixed, parse the buffered method bodies. */
+	flush_pending_methods();
 
 	/* Finalize: align the aggregate size up to its member alignment and
 	 * mark it complete, mirroring tagspec()'s struct branch. */
@@ -457,6 +468,130 @@ cpp_parse_translation_unit(void)
 
 /* --- member function lowering (C.2.3) -------------------------------- */
 
+/* Two-phase class parsing: while a class body is being collected, method
+ * bodies are buffered (tokens) and replayed after the class layout is
+ * known, so a method body may reference members declared later in the
+ * class. */
+struct cpp_pending_method {
+	struct token *toks;      /* function-body tokens incl. braces */
+	size_t ntoks;
+	const char *mname;
+	const char *tag;
+	struct type *classt;     /* enclosing class */
+	struct type *mtype;      /* mangled signature incl. `this` */
+	struct decl *thisd;      /* implicit this parameter decl */
+	struct decl *d;          /* mangled function decl */
+	struct scope *s;         /* class's declaration scope */
+	struct cpp_pending_method *next;
+};
+
+static struct cpp_pending_method *g_cpp_pending_methods;
+static struct cpp_pending_method **g_cpp_pending_methods_end =
+    &g_cpp_pending_methods;
+
+/* Parse one method body (replayed token stream is positioned at '{'). */
+static void
+cpp_parse_method_body(struct cpp_pending_method *pm)
+{
+	extern struct func *mkfunc(struct decl *, char *, struct type *,
+	    struct scope *);
+	extern void delfunc(struct func *);
+	extern void stmt(struct func *, struct scope *);
+	extern void emitfunc(struct func *, bool);
+	extern void funchlt(struct func *);
+	extern struct scope *delscope(struct scope *);
+
+	struct scope *fs;
+	struct decl *nd;
+	struct func *f;
+
+	fs = mkscope(pm->s);
+	for (nd = pm->mtype->u.func.params; nd; nd = nd->next)
+		scopeputdecl(fs, nd);
+
+	g_cpp_method.class_type = pm->classt;
+	g_cpp_method.this_decl = pm->thisd;
+	g_cpp_method.active = true;
+
+	f = mkfunc(pm->d, pm->d->name, pm->d->type, fs);
+	/* constructor: run base-class constructors before the body */
+	if (strcmp(pm->mname, pm->tag) == 0)
+		cpp_emit_base_ctor(f);
+	stmt(f, fs);
+	if (pm->d->u.func.isnoreturn)
+		funchlt(f);
+	emitfunc(f, pm->d->linkage == LINKEXTERN);
+	delscope(fs);
+	delfunc(f);
+	pm->d->defined = true;
+
+	g_cpp_method.active = false;
+	g_cpp_method.this_decl = NULL;
+	g_cpp_method.class_type = NULL;
+}
+
+/* Collect the `{...}` body tokens and queue the method for replay once
+ * the enclosing class body is complete. */
+static void
+buffer_method_body(struct scope *s, struct type *classt, struct type *mtype,
+                   struct decl *thisd, struct decl *d,
+                   const char *mname, const char *tag)
+{
+	struct cpp_pending_method *pm;
+	size_t cap = 0;
+	int bd = 0;
+
+	pm = xmalloc(sizeof(*pm));
+	pm->toks = NULL;
+	pm->ntoks = 0;
+	pm->mname = mname;
+	pm->tag = tag;
+	pm->classt = classt;
+	pm->mtype = mtype;
+	pm->thisd = thisd;
+	pm->d = d;
+	pm->s = s;
+	pm->next = NULL;
+
+	do {
+		if (pm->ntoks >= cap) {
+			cap = cap ? cap * 2 : 64;
+			pm->toks = xreallocarray(pm->toks, cap, sizeof *pm->toks);
+		}
+		pm->toks[pm->ntoks++] = tok;
+		if (tok.kind == TLBRACE)
+			++bd;
+		else if (tok.kind == TRBRACE)
+			--bd;
+		next();
+	} while (bd > 0 && tok.kind != TEOF);
+
+	*g_cpp_pending_methods_end = pm;
+	g_cpp_pending_methods_end = &pm->next;
+}
+
+/* Replay all buffered method bodies (called after the class layout is
+ * fixed). */
+static void
+flush_pending_methods(void)
+{
+	extern void tokpush(struct token *, size_t);
+	struct cpp_pending_method *pm;
+
+	for (pm = g_cpp_pending_methods; pm; pm = pm->next) {
+		/* the class-body-following token (e.g. ';') currently sits in the
+		 * global tok; push it back so the replayed body is parsed in front
+		 * of it and next() returns to it afterwards. */
+		struct token cur = tok;
+		tokpush(&cur, 1);
+		tokpush(pm->toks, pm->ntoks);
+		next(); /* position tok at the first replayed token ('{') */
+		cpp_parse_method_body(pm);
+	}
+	g_cpp_pending_methods = NULL;
+	g_cpp_pending_methods_end = &g_cpp_pending_methods;
+}
+
 /* Is `t` the class whose method body is currently being parsed?  Inside a
  * method body, bare member names resolve (cpp_member_ident) and direct
  * member access is allowed regardless of access level. */
@@ -495,20 +630,11 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname,
 {
 	extern struct decl *mkdecl(char *, enum declkind, struct type *,
 	    enum typequal, enum linkage);
-	extern struct func *mkfunc(struct decl *, char *, struct type *,
-	    struct scope *);
-	extern void delfunc(struct func *);
-	extern void stmt(struct func *, struct scope *);
-	extern void emitfunc(struct func *, bool);
-	extern void funchlt(struct func *);
-	extern struct scope *delscope(struct scope *);
 
 	char mangled[256];
 	char *pmangled;
 	struct type *mtype, *classt;
 	struct decl *d, *thisd, *cur, *nd, **end;
-	struct scope *fs;
-	struct func *f;
 
 	if (!class_tag || !mname)
 		return;
@@ -586,32 +712,26 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname,
 		return; /* declaration only */
 	}
 
-	/* Function definition: open a fresh scope seeded with this + the
-	 * copied params, exactly as declarator's func branch + decl()'s
-	 * DECLFUNC path set up funcscope. */
-	fs = mkscope(s);
-	for (nd = mtype->u.func.params; nd; nd = nd->next)
-		scopeputdecl(fs, nd);
-
-	g_cpp_method.class_type = classt;
-	g_cpp_method.this_decl = thisd;
-	g_cpp_method.active = true;
-
-	f = mkfunc(d, d->name, d->type, fs);
-	/* constructor: run base-class constructors before the body */
-	if (strcmp(mname, class_tag) == 0)
-		cpp_emit_base_ctor(f);
-	stmt(f, fs);
-	if (d->u.func.isnoreturn)
-		funchlt(f);
-	emitfunc(f, d->linkage == LINKEXTERN);
-	delscope(fs);
-	delfunc(f);
-	d->defined = true;
-
-	g_cpp_method.active = false;
-	g_cpp_method.this_decl = NULL;
-	g_cpp_method.class_type = NULL;
+	/* Function definition.  Inside a class body the layout is not fixed
+	 * yet, so buffer the body tokens and parse it after the class closes
+	 * (two-phase: method bodies may use members declared later). */
+	if (g_cpp_class_parsing) {
+		buffer_method_body(s, classt, mtype, thisd, d, mname, class_tag);
+		return;
+	}
+	{
+		struct cpp_pending_method pm;
+		pm.toks = NULL;
+		pm.ntoks = 0;
+		pm.mname = mname;
+		pm.tag = class_tag;
+		pm.classt = classt;
+		pm.mtype = mtype;
+		pm.thisd = thisd;
+		pm.d = d;
+		pm.s = s;
+		cpp_parse_method_body(&pm);
+	}
 }
 
 /* C++ member-function lookup helpers.  A function member is registered in

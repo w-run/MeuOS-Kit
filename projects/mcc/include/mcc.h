@@ -433,6 +433,7 @@ void ppdumpdeps(FILE *f, const char *target, const char *input);
 
 void next(void);
 bool peek(enum tokenkind);
+void tokpush(struct token *, size_t);
 char *expect(enum tokenkind, const char *);
 bool consume(enum tokenkind);
 
