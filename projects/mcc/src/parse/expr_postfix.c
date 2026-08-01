@@ -168,14 +168,20 @@ postfixexpr(struct scope *s, struct expr *r)
 						p = p->next;
 				}
 				for (a = arglist; a; a = an) {
+					struct expr *arg;
 					an = a->next; /* exprassign may replace the node */
 					if (!p && !t->u.func.isvararg)
 						error(&tok.loc,
 						    "too many arguments for function call");
-					if (t->u.func.isvararg && !p)
-						*end = exprpromote(a);
-					else
-						*end = exprassign(a, p->type);
+					if (t->u.func.isvararg && !p) {
+						arg = exprpromote(a);
+					} else if (p->type->isref) {
+						/* C++ reference param: bind the address */
+						arg = exprassign(mkunaryexpr(TBAND, a), p->type);
+					} else {
+						arg = exprassign(a, p->type);
+					}
+					*end = arg;
 					end = &(*end)->next;
 					++e->u.call.nargs;
 					if (p)

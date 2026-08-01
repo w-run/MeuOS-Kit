@@ -1333,6 +1333,10 @@ cpp_mangle_type(struct type *t, char *buf, size_t bufsz)
 		*p++ = 'v';
 		goto out;
 	}
+	/* C++ references mangle by their referent type (the caller binds an
+	 * object, not a pointer). */
+	if (t->isref && t->kind == TYPEPOINTER)
+		t = t->base;
 	switch (t->kind) {
 	case TYPEVOID:     *p++ = 'v'; break;
 	case TYPEBOOL:     *p++ = 'b'; break;

@@ -225,6 +225,12 @@ primaryexpr(struct scope *s)
 			e->u.ident.decl = d;
 			if (d->kind != DECLBUILTIN)
 				e = decay(e);
+			/* C++ reference: the identifier denotes the referent, so
+			 * dereference the hidden pointer (`o` -> `*o`). */
+			if (d->type && d->type->isref && d->kind == DECLOBJECT) {
+				e = mkunaryexpr(TMUL, e);
+				e->lvalue = true;
+			}
 			next();
 			break;
 		}

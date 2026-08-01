@@ -54,6 +54,7 @@ mktype(enum typekind kind, enum typeprop prop)
 	t->qual = QUALNONE;
 	t->value = NULL;
 	t->incomplete = false;
+	t->isref = false;
 
 	return t;
 }

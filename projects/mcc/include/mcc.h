@@ -118,6 +118,9 @@ struct type {
 	/* qualifiers of the base type */
 	enum typequal qual;
 	bool incomplete;
+	/* C++ reference type: a pointer that auto-dereferences in
+	 * expressions and binds to the address of its initializer. */
+	bool isref;
 	union {
 		struct {
 			bool issigned, iscomplex;

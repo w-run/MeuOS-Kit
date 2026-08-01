@@ -64,6 +64,14 @@ declaratortypes(struct scope *s, struct list *result, char **name, int *align, s
 		t = mkpointertype(NULL, tq);
 		listinsert(result, &t->link);
 	}
+	/* C++ reference declarator: `T &name` is a reference type (a pointer
+	 * that auto-dereferences in expressions). */
+	extern int g_lang;
+	while (g_lang == 1 && consume(TBAND)) {
+		t = mkpointertype(NULL, QUALNONE);
+		t->isref = true;
+		listinsert(result, &t->link);
+	}
 	if (name)
 		*name = NULL;
 	a.kind = 0;
