@@ -105,7 +105,7 @@ find_library_msys(const char *name, char *result, size_t result_size)
 		/* Write directly to result to avoid -Wformat-truncation false positive.
 		 * Build: "@msys:0:usr/lib/lib<name>.a" */
 		snprintf(result, result_size, "@msys:0:usr/lib/lib%s.a", name);
-		if (msys_search(ld_msys, result + 7, &sz))
+		if (msys_search(ld_msys, result + 8, &sz))
 			return 0;
 	}
 	/* Extra -L .msys handles */
@@ -129,7 +129,7 @@ find_library_msys_exact(const char *name, char *result, size_t result_size)
 
 	if (ld_msys) {
 		snprintf(result, result_size, "@msys:0:usr/lib/%s", name);
-		if (msys_search(ld_msys, result + 7, &sz))
+		if (msys_search(ld_msys, result + 8, &sz))
 			return 0;
 	}
 	for (int i = 0; i < ld_msys_lib_count; ++i) {
