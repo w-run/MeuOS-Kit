@@ -187,6 +187,49 @@ test_scan_spill(void)
 }
 
 static void
+test_phislot(void)
+{
+	MFn *fn = mfn_new("ph", 2);
+	MFnM *fm = mfnm_new(fn, &mtarget_x86_64, "ph");
+	MBlkM *b0 = mblkm_new(fm, "p0");
+	MBlkM *b1 = mblkm_new(fm, "p1");
+	MBlkM *b2 = mblkm_new(fm, "join");
+	mfnm_addblk(fm, b0);
+	mfnm_addblk(fm, b1);
+	mfnm_addblk(fm, b2);
+
+	MVal *s0 = mkv(fn, "s0");
+	MVal *s1 = mkv(fn, "s1");
+	MVal *phi = mkv(fn, "phi");
+	/* p0: s0 = mov rdi; phi <- s0 (phi-edge copy); jmp join */
+	maddm(fm, b0, MMOP_MOV, MT_I64, s0,
+	      mfn_reg(fn, &mtarget_x86_64, X64MREG_RDI), 0);
+	MInsM *m0 = maddm(fm, b0, MMOP_MOV, MT_I64, phi, s0, 0);
+	m0->extra = 1;
+	mfnm_term(fm, b0, MMOP_JMP, 0, b2, 0, MCC_NONE);
+	/* p1: s1 = mov rsi; phi <- s1; jmp join */
+	maddm(fm, b1, MMOP_MOV, MT_I64, s1,
+	      mfn_reg(fn, &mtarget_x86_64, X64MREG_RSI), 0);
+	MInsM *m1 = maddm(fm, b1, MMOP_MOV, MT_I64, phi, s1, 0);
+	m1->extra = 1;
+	mfnm_term(fm, b1, MMOP_JMP, 0, b2, 0, MCC_NONE);
+	/* join: ret phi */
+	mfnm_term(fm, b2, MMOP_RET, phi, 0, 0, MCC_NONE);
+
+	mfnm_regalloc(fm);
+
+	/* phi destination must be slot-resident (parallel-edge safety) */
+	CHECK(phi->reg == -1);
+	CHECK(phi->slot != -1);
+	/* s0/s1 (the edge sources) may still take registers */
+	CHECK(s0->reg >= 0);
+	CHECK(s1->reg >= 0);
+
+	mfnm_free(fm);
+	mfn_free(fn);
+}
+
+static void
 test_two_blocks(void)
 {
 	MFn *fn = mfn_new("two", 2);
@@ -234,6 +277,7 @@ main(void)
 	test_slots();
 	test_scan_calls();
 	test_scan_spill();
+	test_phislot();
 
 	printf("regalloc_test: %d passed, %d failed\n", npass, nfail);
 	return nfail ? 1 : 0;

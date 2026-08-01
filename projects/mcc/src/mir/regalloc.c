@@ -29,6 +29,7 @@ typedef struct MRegInterval {
 	MVal *v;
 	int reg;               /* assigned physical reg, -1 = slot-resident */
 	int cost;
+	bool phislot;          /* defined by a phi-edge copy: force spill */
 } MRegInterval;
 
 typedef struct MRegCtx {
@@ -85,6 +86,8 @@ mreg_intervals(MFnM *fm, MRegCtx *ctx)
 			if (in->dst && in->dst->kind == MV_TEMP) {
 				MRegInterval *iv = mreg_intv(ctx, in->dst);
 				iv->start = in->pos;
+				if (in->extra == 1)
+					iv->phislot = true;   /* phi-edge copy dest */
 			}
 			for (int k = 0; k < 3; k++)
 				mreg_scan_use(ctx, in->src[k], in->pos);
@@ -264,22 +267,25 @@ mreg_scan(MFnM *fm, MRegCtx *ctx)
 			int cls = mreg_class(iv->v->type);
 			bool cross = interval_crosses_call(s, e, calls, ncalls);
 			int chosen = -1;
-			/* caller-saved pool first for non-call-crossing values */
-			if (!cross)
-				for (uint32_t p = 0; p < px[cls].nreg && chosen < 0; p++) {
-					int r = px[cls].regs[p];
-					if (busy[r] || fixed_conflict(&fixed[r], s, e))
-						continue;
-					chosen = r;
-				}
-			if (chosen < 0)
-				for (uint32_t p = 0; p < pc[cls].nreg && chosen < 0; p++) {
-					int r = pc[cls].regs[p];
-					if (busy[r] || fixed_conflict(&fixed[r], s, e))
-						continue;
-					chosen = r;
-				}
-			if (chosen >= 0 && nact < 256) {
+			if (!iv->phislot) {
+				/* caller-saved pool first for non-call-crossing values */
+				if (!cross)
+					for (uint32_t p = 0; p < px[cls].nreg && chosen < 0; p++) {
+						int r = px[cls].regs[p];
+						if (busy[r] || fixed_conflict(&fixed[r], s, e))
+							continue;
+						chosen = r;
+					}
+				if (chosen < 0)
+					for (uint32_t p = 0; p < pc[cls].nreg && chosen < 0; p++) {
+						int r = pc[cls].regs[p];
+						if (busy[r] || fixed_conflict(&fixed[r], s, e))
+							continue;
+						chosen = r;
+					}
+			}
+			/* phi-edge destinations stay in slots (parallel-move safety) */
+			if (chosen >= 0 && !iv->phislot && nact < 256) {
 				iv->reg = chosen;
 				busy[chosen] = true;
 				act[nact].end = e;

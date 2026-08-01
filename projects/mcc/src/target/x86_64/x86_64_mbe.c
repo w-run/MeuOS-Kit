@@ -310,8 +310,12 @@ mfnm_backend_x86_64(MFn *mf)
 				if (!p->blk[i] || !p->arg[i])
 					continue;
 				MBlkM *predm = mblk[p->blk[i]->id];
-				maddm(fm, predm, MMOP_MOV, p->dtype, p->dst,
-				      p->arg[i], 0);
+				MInsM *mi = maddm(fm, predm, MMOP_MOV, p->dtype, p->dst,
+				                  p->arg[i], 0);
+				/* phi-edge copy: the regalloc spills the destination so
+				 * parallel-edge moves never clobber each other (no
+				 * Oswap in the machine layer; a slot is safe). */
+				mi->extra = 1;
 			}
 		}
 	}
