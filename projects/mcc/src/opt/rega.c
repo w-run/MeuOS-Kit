@@ -346,10 +346,11 @@ pmgen()
 			pmrec(status, i, (int[]){pm[i].cls});
 }
 
-static void
+static int
 move(int r, Ref to, RMap *m)
 {
 	int n, t, r1;
+	int consumed = 0;
 
 	r1 = req(to, R) ? -1 : rfree(m, to.val);
 	if (bshas(m->b, r)) {
@@ -358,6 +359,18 @@ move(int r, Ref to, RMap *m)
 		for (n=0; m->r[n] != r; n++)
 			assert(n+1 < m->n);
 		t = m->t[n];
+		if (t == r && t < Tmp0) {
+			/* A physical-register self-mapping placeholder
+			 * (radd(cur, r, r), e.g. an argument register live in
+			 * the block's out set) is consumed by a parameter copy
+			 * that claims that register.  Replace the placeholder
+			 * entry in place so the map does not shrink, and report
+			 * the consumption so dopm's `m0.n <= m->n` assertion
+			 * can account for it. */
+			bsset(m->b, req(to, R) ? r : to.val);
+			m->t[n] = req(to, R) ? r : to.val;
+			return 1;
+		}
 		rfree(m, t);
 		bsset(m->b, r);
 		ralloc(m, t);
@@ -365,6 +378,7 @@ move(int r, Ref to, RMap *m)
 	}
 	t = req(to, R) ? r : to.val;
 	radd(m, t, r);
+	return consumed;
 }
 
 static int
@@ -377,18 +391,24 @@ static Ins *
 dopm(Blk *b, Ins *i, RMap *m)
 {
 	RMap m0;
-	int n, r, r1, t, s;
+	int n, r, r1, t, s, consumed;
 	Ins *i1, *ip;
 	bits def;
 
 	m0 = *m; /* okay since we don't use m0.b */
 	m0.b->t = 0;
 	i1 = ++i;
+	consumed = 0;
 	do {
 		i--;
-		move(i->arg[0].val, i->to, m);
+		consumed += move(i->arg[0].val, i->to, m);
 	} while (i != b->ins && regcpy(i-1));
-	assert(m0.n <= m->n);
+	/* Parameter copies may legitimately consume physical-register
+	 * self-mapping placeholders (radd(cur, r, r)) that were pre-added
+	 * for argument registers live in the out set; each consumption
+	 * folds the placeholder into the moved temp, reducing m->n by one.
+	 * Account for those in the invariant check. */
+	assert(m0.n <= m->n + consumed);
 	if (i != b->ins && (i-1)->op == Ocall) {
 		def = T.retregs((i-1)->arg[1], 0) | T.rglob;
 		for (r=0; T.rsave[r]>=0; r++)
@@ -409,7 +429,10 @@ dopm(Blk *b, Ins *i, RMap *m)
 		if (!req(ip->to, R))
 			rfree(m, ip->to.val);
 		r = ip->arg[0].val;
-		if (rfind(m, r) == -1)
+		/* Re-add the physical source register placeholder only if it is
+		 * not already occupied (a parameter copy may have claimed it,
+		 * e.g. t66 = copy R2 with the R2 placeholder consumed above). */
+		if (!bshas(m->b, r))
 			radd(m, r, r);
 	}
 	pmgen();
@@ -460,9 +483,19 @@ doblk(Blk *b, RMap *cur)
 		switch (i->op) {
 		case Ocall:
 			rs = T.argregs(i->arg[1], 0) | T.rglob;
-			for (r=0; T.rsave[r]>=0; r++)
-				if (!(BIT(T.rsave[r]) & rs))
-					rfree(cur, T.rsave[r]);
+			for (r=0; T.rsave[r]>=0; r++) {
+				int rreg = T.rsave[r];
+				if (!(BIT(rreg) & rs))
+					rfree(cur, rreg);
+				else if (!bshas(cur->b, rreg))
+					/* Argument registers are live from their set-up
+					 * copy through the call; placeholder them so a
+					 * later-lowered argument store (e.g. an arm
+					 * caller-stack argument whose source temp rega
+					 * would otherwise place in R0-R3) cannot steal
+					 * one. */
+					radd(cur, rreg, rreg);
+			}
 			break;
 		case Ocopy:
 			if (regcpy(i)) {
@@ -542,8 +575,16 @@ doblk(Blk *b, RMap *cur)
 				insert(&i->arg[x], ra, nr++);
 				break;
 			}
-		for (r=0; r<nr; r++)
-			*ra[r] = ralloc(cur, ra[r]->val);
+		for (r=0; r<nr; r++) {
+			int av = ra[r]->val;
+			/* Physical-register operands (e.g. the r12 store address
+			 * of arm caller-stack arguments) are not in the block's
+			 * out set, so pre-allocate them as self-mappings the same
+			 * way out-set physical registers are handled. */
+			if (av < Tmp0 && !bshas(cur->b, av))
+				radd(cur, av, av);
+			*ra[r] = ralloc(cur, av);
+		}
 		if (i->op == Ocopy && req(i->to, i->arg[0]))
 			curi++;
 

@@ -108,12 +108,21 @@ targinit(const char *name)
 	qual = QUALNONE;
 	typeadjvalist = typeadjust(targ->typevalist, &qual);
 
-	/* i386 is ILP32: int, long and pointers are all 4 bytes. The default
-	 * `typelong`/`typeulong` (initialized in type.c) are 8 bytes for the
-	 * LP64 targets (amd64/arm64/rv64). mkpointertype() reads typelong.size
-	 * to size pointer types, so retuning long/ulong here propagates the
-	 * correct width to every pointer built afterwards. long long stays 8. */
-	if (strcmp(targ->name, "i386-sysv") == 0) {
+	/* i386 and arm are ILP32: int, long and pointers are all 4 bytes.
+	 * The default `typelong`/`typeulong` (initialized in type.c) are 8
+	 * bytes for the LP64 targets (amd64/arm64/rv64/loongarch64).
+	 * mkpointertype() reads typelong.size to size pointer types, so
+	 * retuning long/ulong here propagates the correct width to every
+	 * pointer built afterwards.  long long stays 8.
+	 *
+	 * arm must be ILP32 too: the armv7 AAPCS passes pointers in a single
+	 * R0-R3 register, and the MeuOS arm sysroot/libc is built with a real
+	 * 32-bit toolchain.  Treating arm pointers as 8-byte Kl made every
+	 * multi-pointer call (strcpy, strncpy, ...) encode the second pointer
+	 * into the high word of the first argument pair, corrupting calls
+	 * into the ILP32 libc (SIGSEGV). */
+	if (strcmp(targ->name, "i386-sysv") == 0 ||
+	    strcmp(targ->name, "arm") == 0) {
 		typelong.size = 4;
 		typelong.align = 4;
 		typelong.u.arith.width = 32;

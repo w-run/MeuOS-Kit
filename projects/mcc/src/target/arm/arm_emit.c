@@ -45,7 +45,7 @@ static struct {
 	{ Osub,    Ki, "sub %=, %0, %1" },
 	{ Osub,    Ks, "vsub.f32 %=, %0, %1" },
 	{ Osub,    Kd, "vsub.f64 %=, %0, %1" },
-	{ Oneg,    Ki, "neg %=, %0" },
+	{ Oneg,    Ki, "rsb %=, %0, #0" },
 	{ Oneg,    Ks, "vneg.f32 %=, %0" },
 	{ Oneg,    Kd, "vneg.f64 %=, %0" },
 	{ Oand,    Ki, "and %=, %0, %1" },
@@ -61,8 +61,8 @@ static struct {
 	{ Odiv,    Ks, "vdiv.f32 %=, %0, %1" },
 	{ Odiv,    Kd, "vdiv.f64 %=, %0, %1" },
 	{ Oudiv,   Ki, "udiv %=, %0, %1" },
-	{ Orem,    Ki, "sdiv %?, %0, %1\n\tmsub\t%=, %?, %1, %0" },
-	{ Ourem,   Ki, "udiv %?, %0, %1\n\tmsub\t%=, %?, %1, %0" },
+	{ Orem,    Ki, "sdiv %?, %0, %1\n\tmls\t%=, %?, %1, %0" },
+	{ Ourem,   Ki, "udiv %?, %0, %1\n\tmls\t%=, %?, %1, %0" },
 	{ Ocopy,   Ki, "mov %=, %0" },
 	{ Ocopy,   Ka, "vmov %=, %0" },
 	{ Oswap,   Ki, "mov %?, %0\n\tmov\t%0, %1\n\tmov\t%1, %?" },
@@ -243,7 +243,12 @@ slot(Ref r, Fn *fn, uint64_t frame)
 			return (uint64_t)arm32_framesz(fn) + arm32_pushbytes(fn)
 				+ 4 * (-(s + 1));
 		}
-		return (uint64_t)(-(s + 1)) * 4;
+		/* Non-variadic stack parameters (word 5+ of a plain call):
+		 * the caller pushed them on the stack below the return
+		 * address, so they sit at [r11 + framesz + pushbytes + 4k]
+		 * after the prologue.  arm32_selpar assigns SLOT(-(k+1)). */
+		return (uint64_t)arm32_framesz(fn) + arm32_pushbytes(fn)
+			+ 4 * (-(s + 1));
 	}
 	return frame + (uint64_t)s * 4;
 }
@@ -800,11 +805,55 @@ kl_emit(Ins *i, Fn *fn, FILE *f)
 	case Oshl:
 	case Oshr:
 	case Osar:
-		/* 64 位移位（立即数）。 arg[1] 必须为常量；
-		 * 寄存器移位量尚未支持。 */
-		if (rtype(i->arg[1]) != RCon)
-			die("arm: %s Kl with non-constant shift not supported",
-				optab[i->op].name);
+		/* 64 位移位。 arg[1] 为常量时用展开编码；
+		 * 非常量（寄存器移位量）时逐位循环。 */
+		if (rtype(i->arg[1]) != RCon) {
+			/* Non-constant 64-bit shift: rotate one bit at a time.
+			 * lo→R10, hi→R12, shift count→R0, counter→R1.
+			 * R0/R1 are clobbered, so save them like the Kl
+			 * divmod path does. */
+			/* Large base avoids the per-block labels emitted by
+			 * arm32_emitfn (".L" + id0 + block id). */
+			static int shlbl = 1000000;
+			char l0[32], l1[32];
+			sprintf(l0, ".Lsh%d", shlbl++);
+			sprintf(l1, ".Lsh%d", shlbl++);
+			kl_ldhalf(i->arg[0], 0, R10, fn, f);
+			kl_ldhalf(i->arg[0], 1, R12, fn, f);
+			fputs("\tpush\t{r0, r1}\n", f);
+			if (rtype(i->arg[1]) == RSlot)
+				fprintf(f, "\tldr\t%s, [r11, #%" PRIu64 "]\n",
+					rname(R0, Kw), slot(i->arg[1], fn, 0));
+			else
+				fprintf(f, "\tmov\t%s, %s\n",
+					rname(R0, Kw), rname(i->arg[1].val, Kw));
+			fputs("\tmov\tr1, #0\n", f);
+			fprintf(f, "%s:\n", l0);
+			fputs("\tcmp\tr1, r0\n", f);
+			fprintf(f, "\tbeq\t%s\n", l1);
+			if (i->op == Oshl) {
+				/* hi = (hi<<1) | (lo>>31), lo <<= 1 (no S-suffix:
+				 * mt/as has no lsls). */
+				fputs("\tlsl\tr12, r12, #1\n", f);
+				fputs("\torr\tr12, r12, r10, LSR #31\n", f);
+				fputs("\tlsl\tr10, r10, #1\n", f);
+			} else {
+				const char *sh = i->op == Osar ? "asr" : "lsr";
+				/* lo = lo>>1 | (hi<<31), hi >>= 1 (arithmetic or
+				 * logical).  lo must shift before reading hi's low
+				 * bit into lo's top bit. */
+				fputs("\tlsr\tr10, r10, #1\n", f);
+				fputs("\torr\tr10, r10, r12, LSL #31\n", f);
+				fprintf(f, "\t%s\tr12, r12, #1\n", sh);
+			}
+			fputs("\tadd\tr1, r1, #1\n", f);
+			fprintf(f, "\tb\t%s\n", l0);
+			fprintf(f, "%s:\n", l1);
+			fputs("\tpop\t{r0, r1}\n", f);
+			kl_sthalf(i->to, 0, R10, fn, f);
+			kl_sthalf(i->to, 1, R12, fn, f);
+			break;
+		}
 		n = (int)(fn->con[i->arg[1].val].bits.i & 63);
 		if (n == 0) {
 			kl_ldhalf(i->arg[0], 0, R10, fn, f);
@@ -1279,8 +1328,21 @@ emitins(Ins *i, Fn *fn, FILE *f)
 		}
 		break;
 	case Ocall:
-		if (rtype(i->arg[0]) != RCon)
-			goto Table;
+		if (rtype(i->arg[0]) != RCon) {
+			/* Indirect call through a function pointer materialized
+			 * by selcall (e.g. `%armc =l copy extern $f; call S2`).
+			 * The pointer lives in a Kl slot (low word) or a
+			 * register. */
+			if (rtype(i->arg[0]) == RSlot) {
+				fprintf(f, "\tldr\t%s, [r11, #%" PRIu64 "]\n",
+					rname(R12, Kw), slot(i->arg[0], fn, 0));
+				fputs("\tblx\tr12\n", f);
+			} else if (rtype(i->arg[0]) == RTmp) {
+				fprintf(f, "\tblx\t%s\n", rname(i->arg[0].val, Kw));
+			} else
+				die("invalid call argument");
+			break;
+		}
 		c = &fn->con[i->arg[0].val];
 		if (c->type != CAddr || (c->sym.type & SThr) || c->bits.i)
 			die("invalid call argument");
@@ -1291,13 +1353,16 @@ emitins(Ins *i, Fn *fn, FILE *f)
 	case Osalloc:
 		if (rtype(i->arg[0]) == RSlot)
 			fixarg(&i->arg[0], 0, IP, fn, f);
-		/* salloc() sets arg[0] to a constant (the aligned allocation size).
-		 * Emit the sub directly rather than through emitf(), whose %0/%=
-		 * handlers only support register operands. */
-		assert(rtype(i->arg[0]) == RCon);
-		{
+		/* salloc() normally sets arg[0] to a constant (the aligned
+		 * allocation size); when the size has been spilled to a slot
+		 * it is loaded into IP by fixarg above.  Emit the sub either
+		 * way rather than through emitf(), whose %0/%= handlers only
+		 * support register operands. */
+		if (rtype(i->arg[0]) == RCon) {
 			int64_t sz = fn->con[i->arg[0].val].bits.i;
 			fprintf(f, "\tsub\tsp, sp, #%" PRIi64 "\n", sz);
+		} else {
+			fprintf(f, "\tsub\tsp, sp, %s\n", rname(IP, Kw));
 		}
 		if (rtype(i->to) == RTmp && i->to.val < Tmp0) {
 			fprintf(f, "\tmov\t%s, sp\n", rname(i->to.val, Kl));

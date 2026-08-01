@@ -101,26 +101,54 @@ sel(Ins i, Fn *fn)
 		return;
 	}
 	if (i.op != Onop) {
+		Ref a0 = i.arg[0], a1 = i.arg[1];
+		Ref t0 = R, t1 = R;
+		int pull0 = 0, pull1 = 0;
+		/* A constant in the FIRST operand slot cannot be encoded by the
+		 * ARM data-processing omap (it writes the source via %0), so
+		 * materialize it into a register first.  `div 10, %b` (a
+		 * constant dividend, e.g. after partial constant folding) and
+		 * `add 5, %x` both reach this.  Ocopy is excluded: its %0 is a
+		 * plain move source that loadcon handles directly. */
+		if (i.op != Ocopy && rtype(a0) == RCon
+		&& KBASE(argcls(&i, 0)) == 0) {
+			t0 = newtmp("armc", argcls(&i, 0), fn);
+			pull0 = 1;
+		}
 		/* Unencodable immediate second operand: pull it into a fresh
-		 * temp via Ocopy (emitted as movw/movt by loadcon).  Emitted
-		 * after the ALU op in the backward pass so it lands before it
-		 * in forward order.  Floating-point operands never take this
-		 * path — VFP has no immediates, and fixarg() below stashes
-		 * fp constants in rodata. */
-		r = i.arg[1];
+		 * temp via Ocopy (emitted as movw/movt by loadcon).  ARM
+		 * sdiv/udiv have no immediate form at all, so a constant
+		 * divisor/remainder must be moved into a register first
+		 * ('sdiv r0, r0, #7' is invalid).  CAddr (a symbol/global
+		 * address) can likewise never be encoded as a data-processing
+		 * immediate.  Floating-point operands never take this path —
+		 * VFP has no immediates, and fixarg() below stashes fp
+		 * constants in rodata. */
 		if (KBASE(argcls(&i, 1)) == 0
-		&& uses_imm1(i.op) && rtype(r) == RCon) {
-			c = &fn->con[r.val];
-			if (c->type == CBits && !arm_imm_ok(c->bits.i)) {
-				t = newtmp("armc", argcls(&i, 1), fn);
-				i.arg[1] = t;
-				emiti(i);
-				emiti((Ins){.op = Ocopy,
-				            .cls = argcls(&i, 1),
-				            .to = t,
-				            .arg = {r, R}});
-				return;
+		&& uses_imm1(i.op) && rtype(a1) == RCon) {
+			c = &fn->con[a1.val];
+			if (i.op == Odiv || i.op == Oudiv
+			|| i.op == Orem || i.op == Ourem
+			|| c->type == CAddr
+			|| (c->type == CBits && !arm_imm_ok(c->bits.i))) {
+				t1 = newtmp("armc", argcls(&i, 1), fn);
+				pull1 = 1;
 			}
+		}
+		if (pull0) i.arg[0] = t0;
+		if (pull1) i.arg[1] = t1;
+		if (pull0 || pull1) {
+			/* Backward pass: emiti() writes in reverse, so emit the
+			 * ALU op first (landing last) then the materializations
+			 * (landing before it in forward order). */
+			emiti(i);
+			if (pull1)
+				emiti((Ins){.op = Ocopy, .cls = argcls(&i, 1),
+				            .to = t1, .arg = {a1, R}});
+			if (pull0)
+				emiti((Ins){.op = Ocopy, .cls = argcls(&i, 0),
+				            .to = t0, .arg = {a0, R}});
+			return;
 		}
 		emiti(i);
 		{

@@ -26,8 +26,11 @@ int arm32_rclob[] = {
 /* D8 is reserved as the FP conversion scratch (s16): the emitter
  * lowers int<->float casts to `vmov s16, rN; vcvt.f64.s32 dN, s16`
  * (and the reverse), and s16 aliases D8.  rega never allocates D8
- * (T.reserved), so a conversion cannot clobber a live value. */
-#define RFPSCRATCH BIT(D8)
+ * (T.reserved), so a conversion cannot clobber a live value.
+ * R10 (IP) is likewise an implicit emitter scratch (Kl decomposition,
+ * indirect calls, spilled-address loads), so rega must not hand it to
+ * a general temporary either. */
+#define RFPSCRATCH (BIT(D8) | BIT(R10))
 
 static int
 arm32_memargs(int op)

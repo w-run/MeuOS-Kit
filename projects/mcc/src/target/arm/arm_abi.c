@@ -67,9 +67,16 @@ arm32_selpar(Fn *fn, Ins *i0, Ins *i1)
 			 * the single register (its high successor is garbage),
 			 * so zero-extend the word into the 64-bit slot. */
 			int need = (k == Kl && !fn->vararg) ? 2 : 1;
-			if (ngp + need > 4)
-				err("arm: %d-th argument past 4 GPR registers is unsupported",
-				    (int)(i - i0) + 1);
+			if (ngp + need > 4) {
+				/* Non-variadic argument past the four GPR words:
+				 * the caller pushed it on the stack.  Load it from
+				 * [r11 + framesz + pushbytes + 4k] (arm_emit.c
+				 * slot() resolves the negative SLOT). */
+				int kw = ngp - 4;   /* word index on the stack (0-based) */
+				emit(Ocopy, k, i->to, SLOT(-(kw + need)), R);
+				ngp += need;
+				continue;
+			}
 			if (fn->vararg && k == Kl) {
 				Ref w = newtmp("abi", Kw, fn);
 				emit(Oextuw, Kl, i->to, w, R);
@@ -216,14 +223,13 @@ arm32_callclass(Ins *call, int nargs, Ins *lim, struct Armcall *c)
 			} else {
 				need = (k == Kl) ? 2 : 1;
 			}
-			if (c->isva[j] && g + need > 4) {
+			if (g + need > 4) {
+				/* Words past the fourth go on the caller stack,
+				 * for both variadic and non-variadic calls. */
 				if (need == 2)
 					c->stack = (c->stack + 7) & -8;
 				c->stackoff[j] = c->stack;
 				c->stack += 4 * need;
-			} else if (g + need > 4) {
-				err("arm: %d-th named argument past 4 GPR "
-				    "registers is unsupported", j + 1);
 			} else {
 				c->gp[j] = g;
 			}
@@ -332,7 +338,11 @@ emit_call_args(Ins *call, int nargs, Fn *fn, struct Armcall *c, Ins *lim)
 		if (c->stackoff[j] < 0)
 			continue;
 		int k = c->acls[j];
-		Ref addr = newtmp("abi", Kw, fn);
+		/* Use the IP scratch (r12) as the store address.  A generic
+		 * temporary can let rega allocate it to R0-R3, clobbering an
+		 * already-set integer argument (the caller stack stores run
+		 * AFTER the GPR argument copies in forward order). */
+		Ref addr = TMP(R12);
 		if (k == Kd) {
 			emit(Ostored, Kd, R, argp->arg[0], addr);
 		} else if (k == Ks) {
