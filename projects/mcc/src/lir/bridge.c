@@ -362,6 +362,45 @@ lir_bridge(MFn *mfn)
 				                .arg = {a0, R}};
 				continue;
 			}
+			/* comparisons: the MIR dtype (fixed from the frontend opcode
+			 * suffix in func_to_mir) selects the LIR width (Ocnew for i32
+			 * vs Ocnel for i64, Oceqs for f32 vs Oceqd for f64). */
+			if (in->op >= MOP_CEQ && in->op <= MOP_CFGE) {
+				int isf = in->op >= MOP_CFEQ;
+				int is64 = !isf && in->dtype == MT_I64;
+				int isd = isf && in->dtype == MT_F64;
+				switch (in->op) {
+				case MOP_CEQ: qop = is64 ? Oceql : (isf ? (isd ? Oceqd : Oceqs) : Oceqw); break;
+				case MOP_CNE: qop = is64 ? Ocnel : (isf ? (isd ? Ocned : Ocnes) : Ocnew); break;
+				case MOP_CSLT: qop = is64 ? Ocsltl : (isf ? (isd ? Ocltd : Oclts) : Ocsltw); break;
+				case MOP_CSLE: qop = is64 ? Ocslel : (isf ? (isd ? Ocled : Ocles) : Ocslew); break;
+				case MOP_CSGT: qop = is64 ? Ocsgtl : (isf ? (isd ? Ocgtd : Ocgts) : Ocsgtw); break;
+				case MOP_CSGE: qop = is64 ? Ocsgel : (isf ? (isd ? Ocged : Ocges) : Ocsgew); break;
+				case MOP_CULT: qop = is64 ? Ocultl : Ocultw; break;
+				case MOP_CULE: qop = is64 ? Oculel : Oculew; break;
+				case MOP_CUGT: qop = is64 ? Ocugtl : Ocugtw; break;
+				case MOP_CUGE: qop = is64 ? Ocugel : Ocugew; break;
+				case MOP_CFEQ: qop = isd ? Oceqd : Oceqs; break;
+				case MOP_CFNE: qop = isd ? Ocned : Ocnes; break;
+				case MOP_CFLT: qop = isd ? Ocltd : Oclts; break;
+				case MOP_CFLE: qop = isd ? Ocled : Ocles; break;
+				case MOP_CFGT: qop = isd ? Ocgtd : Ocgts; break;
+				case MOP_CFGE: qop = isd ? Ocged : Ocges; break;
+				default: break;
+				}
+				/* comparisons always yield an int 0/1; the result class
+				 * must be Kw (or Kl), never Ks/Kd — otherwise ssa.c:96
+				 * retypes the result temp as float and downstream ext
+				 * instructions trip copy.c:354's KBASE assert. */
+				cls = is64 ? Kl : Kw;
+				Ref to = in->dst ? valref(mfn, in->dst, fn) : R;
+				Ref a0 = refval(mfn, in->src[0], fn);
+				Ref a1 = refval(mfn, in->src[1], fn);
+				*curi++ = (Ins){.op = qop, .cls = cls, .to = to,
+				                .arg = {a0, a1}};
+				continue;
+			}
+
 			Ref to = in->dst ? valref(mfn, in->dst, fn) : R;
 			Ref a0 = refval(mfn, in->src[0], fn);
 			Ref a1 = refval(mfn, in->src[1], fn);

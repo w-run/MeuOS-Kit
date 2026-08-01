@@ -381,6 +381,30 @@ func_to_mir(struct func *f, int optlevel, bool export)
 			MType dt = fe_cls_to_mtype(in->class);
 			fe_typ(res, in->class);
 
+			/* Comparisons and float conversions carry the operand width
+			 * in the frontend opcode suffix (W/L/S/D), not in the result
+			 * class (which is always 'w' for int-typed comparisons).
+			 * Derive the MIR dtype from the opcode so the bridge can pick
+			 * the correct-width LIR op (e.g. Ocnel for a 64-bit pointer
+			 * comparison instead of the 32-bit Ocnew). */
+			switch (in->kind) {
+			case ICEQW: case ICNEW: case ICSLEW: case ICSLTW:
+			case ICSGEW: case ICSGTW: case ICULEW: case ICULTW:
+			case ICUGEW: case ICUGTW:
+				dt = MT_I32; break;
+			case ICEQL: case ICNEL: case ICSLEL: case ICSLTL:
+			case ICSGEL: case ICSGTL: case ICULEL: case ICULTL:
+			case ICUGEL: case ICUGTL:
+				dt = MT_I64; break;
+			case ICEQS: case ICNES: case ICLES: case ICLTS:
+			case ICGES: case ICGTS: case ICOS: case ICUOS:
+				dt = MT_F32; break;
+			case ICEQD: case ICNED: case ICLED: case ICLTD:
+			case ICGED: case ICGTD: case ICOD: case ICUOD:
+				dt = MT_F64; break;
+			default: break;
+			}
+
 			if (op == MOP_STORE) {
 				madd(fn, mb, op, dt, 0, a0, a1);
 			} else if (a1.val || a1.con) {
