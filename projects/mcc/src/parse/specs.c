@@ -305,6 +305,27 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 		 * branch below. */
 		extern int g_lang;
 		if (g_lang == 1 && tok.kind >= TIDENT && !t && !ts) {
+			/* C++ namespace-qualified type name: `ns::Type`.  A namespace
+			 * identifier can only be followed by `::`, so no lookahead is
+			 * needed. */
+			struct decl *nsd = scopegetdecl(s, tokenstr(tok.kind), 1);
+			if (nsd && nsd->kind == DECLNAMESPACE) {
+				struct type *ct2;
+				next(); /* consume namespace name */
+				if (tok.kind != TCOLONCOLON)
+					error(&tok.loc, "expected '::' after namespace name");
+				next(); /* consume '::' */
+				if (tok.kind < TIDENT)
+					error(&tok.loc, "expected type name after '::'");
+				ct2 = scopegettag(nsd->u.ns, tokenstr(tok.kind), 1);
+				if (!ct2 || (ct2->kind != TYPESTRUCT && ct2->kind != TYPEUNION))
+					error(&tok.loc, "no class named '%s' in namespace '%s'",
+					      tokenstr(tok.kind), nsd->name);
+				t = ct2;
+				++ntypes;
+				next();
+				break;
+			}
 			struct type *ct = scopegettag(s, tokenstr(tok.kind), 1);
 			if (ct && (ct->kind == TYPESTRUCT || ct->kind == TYPEUNION)) {
 				t = ct;

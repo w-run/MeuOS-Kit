@@ -141,6 +141,35 @@ primaryexpr(struct scope *s)
 	default:
 		if (tok.kind >= TIDENT) {
 			d = scopegetdecl(s, tokenstr(tok.kind), 1);
+			if (d && d->kind == DECLNAMESPACE) {
+				/* C++ namespace-qualified name, possibly multi-level:
+				 * `ns1::ns2::name`. */
+				struct scope *nss = d->u.ns;
+				struct decl *md = NULL;
+				next(); /* consume namespace name */
+				for (;;) {
+					if (tok.kind != TCOLONCOLON)
+						error(&tok.loc, "expected '::' after namespace name");
+					next(); /* consume '::' */
+					if (tok.kind < TIDENT)
+						error(&tok.loc, "expected name after '::'");
+					md = scopegetdecl(nss, tokenstr(tok.kind), 1);
+					if (!md)
+						error(&tok.loc, "no member named '%s' in namespace '%s'",
+						      tokenstr(tok.kind), d->name);
+					next();
+					if (md->kind != DECLNAMESPACE)
+						break;
+					nss = md->u.ns;
+				}
+				e = mkexpr(EXPRIDENT, md->type, NULL);
+				e->qual = md->qual;
+				e->lvalue = md->kind == DECLOBJECT;
+				e->u.ident.decl = md;
+				if (md->kind != DECLBUILTIN)
+					e = decay(e);
+				break;
+			}
 			if (!d) {
 				/* C++ method body: a bare class-member name resolves
 				 * to `(*this).name` (or a member call). */

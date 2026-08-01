@@ -43,6 +43,8 @@ static struct cpp_method_ctx {
 static const char *g_cpp_qual_class;
 
 static void cpp_emit_base_ctor(struct func *f);
+static bool cpp_class_decl(struct scope *s);
+static void cpp_namespace_decl(struct scope *s);
 
 void
 cpp_set_qual_class(const char *tag)
@@ -105,7 +107,7 @@ cpp_member_ident(struct scope *s, const char *name)
 		if (!cpp_is_member_function(t, name))
 			return NULL;
 		cpp_mangled_name(t, name, mname, sizeof mname);
-		fd = scopegetdecl(s, mname, 1);
+		fd = scopegetdecl(t->scope ? t->scope : s, mname, 1);
 		if (!fd || fd->kind != DECLFUNC)
 			return NULL;
 		e = mkexpr(EXPRIDENT, fd->type, NULL);
@@ -209,6 +211,7 @@ cpp_class_decl(struct scope *s)
 		error(&tok.loc, "redefinition of class '%s'", tag);
 	if (base && base->incomplete)
 		error(&tok.loc, "base class '%s' has incomplete type", base->u.structunion.tag);
+	t->scope = s; /* member symbols are registered here */
 	next(); /* consume '{' */
 
 	b.type = t;
@@ -265,6 +268,52 @@ cpp_class_decl(struct scope *s)
 	return true;
 }
 
+/* Parse a C++ `namespace NAME { ... }` block.  Inner declarations are
+ * registered in a fresh scope named NAME; the namespace itself is
+ * registered in the enclosing scope as a DECLNAMESPACE so `NAME::symbol`
+ * can be resolved (single-level for now).  The namespace scope outlives
+ * parsing (never delscope'd) so qualified lookups keep working. */
+static void
+cpp_namespace_decl(struct scope *s)
+{
+	struct scope *ns;
+	struct decl *nd;
+	const char *name;
+
+	next(); /* consume 'namespace' */
+	if (tok.kind < TIDENT)
+		error(&tok.loc, "expected namespace name");
+	name = tokenstr(tok.kind);
+	next();
+	expect(TLBRACE, "after namespace name");
+
+	ns = mkscope(s);
+	ns->name = name;
+	nd = mkdecl((char *)name, DECLNAMESPACE, NULL, QUALNONE, LINKNONE);
+	nd->u.ns = ns;
+	scopeputdecl(s, nd);
+
+	while (tok.kind != TRBRACE && tok.kind != TEOF) {
+		enum cpp_tokenkind k = cpp_tok_kind();
+		if (k == CPP_TNAMESPACE) {
+			cpp_namespace_decl(ns);
+			continue;
+		}
+		if (k == CPP_TCLASS) {
+			cpp_class_decl(ns);
+			continue;
+		}
+		if (tok.kind == TSEMICOLON) {
+			next();
+			continue;
+		}
+		if (!decl(ns, NULL))
+			error(&tok.loc, "expected declaration in namespace body");
+	}
+	next(); /* consume '}' */
+	/* deliberately keep ns alive for later NAME::name lookups */
+}
+
 /* Parse a C++ translation unit: top-level declaration loop.
  * C++ grammar is layered over the C parser; `class` declarations with
  * access control are handled here (cpp_class_decl), and C-compatible
@@ -280,6 +329,10 @@ cpp_parse_translation_unit(void)
 		enum cpp_tokenkind k = cpp_tok_kind();
 		if (k == CPP_TCLASS) {
 			cpp_class_decl(&filescope);
+			continue;
+		}
+		if (k == CPP_TNAMESPACE) {
+			cpp_namespace_decl(&filescope);
 			continue;
 		}
 
@@ -387,21 +440,26 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname,
 		++mtype->u.func.nparam;
 	}
 
-	/* Register the mangled function symbol in the current scope so the
-	 * call lowering (postfixexpr TPERIOD) can resolve it. */
-	d = scopegetdecl(s, mangled, false);
-	if (d && d->kind != DECLFUNC)
-		error(&tok.loc, "'%s' redeclared with different kind", mangled);
-	if (d && d->type && !typecompatible(mtype, d->type))
-		error(&tok.loc, "'%s' redeclared with incompatible type", mangled);
-	if (d && d->defined)
-		error(&tok.loc, "redefinition of member function '%s'", mangled);
-	if (!d) {
-		d = mkdecl(pmangled, DECLFUNC, mtype, QUALNONE, LINKEXTERN);
-		scopeputdecl(s, d);
-	} else {
-		d->type = typecomposite(mtype, d->type);
-		free(pmangled);
+	/* Register the mangled function symbol in the class's scope (the
+	 * namespace scope for `namespace n { class C { ... }; }`) so the
+	 * call lowering (postfixexpr TPERIOD) can resolve it from the
+	 * object's class type. */
+	{
+		struct scope *ms = classt->scope ? classt->scope : s;
+		d = scopegetdecl(ms, mangled, false);
+		if (d && d->kind != DECLFUNC)
+			error(&tok.loc, "'%s' redeclared with different kind", mangled);
+		if (d && d->type && !typecompatible(mtype, d->type))
+			error(&tok.loc, "'%s' redeclared with incompatible type", mangled);
+		if (d && d->defined)
+			error(&tok.loc, "redefinition of member function '%s'", mangled);
+		if (!d) {
+			d = mkdecl(pmangled, DECLFUNC, mtype, QUALNONE, LINKEXTERN);
+			scopeputdecl(ms, d);
+		} else {
+			d->type = typecomposite(mtype, d->type);
+			free(pmangled);
+		}
 	}
 	d->value = mkglobal(d);
 
@@ -529,7 +587,7 @@ cpp_emit_default_ctor(struct func *f, struct decl *d)
 	if (!cpp_has_ctor(t, tag))
 		return false;
 	snprintf(mname, sizeof mname, "%s_%s", tag, tag);
-	fd = scopegetdecl(&filescope, mname, false);
+	fd = scopegetdecl(t->scope ? t->scope : &filescope, mname, true);
 	if (!fd || fd->kind != DECLFUNC)
 		return false;
 
@@ -573,7 +631,7 @@ cpp_emit_base_ctor(struct func *f)
 		if (!bt || !bt->u.structunion.tag || !cpp_has_ctor(bt, bt->u.structunion.tag))
 			continue;
 		snprintf(mname, sizeof mname, "%s_%s", bt->u.structunion.tag, bt->u.structunion.tag);
-		fd = scopegetdecl(&filescope, mname, false);
+		fd = scopegetdecl(bt->scope ? bt->scope : &filescope, mname, true);
 		if (!fd || fd->kind != DECLFUNC)
 			continue;
 		fn = mkexpr(EXPRIDENT, fd->type, NULL);

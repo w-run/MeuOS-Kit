@@ -53,11 +53,16 @@ declcommon(struct scope *s, enum declkind kind, char *name, char *asmname, struc
 	struct decl *d;
 	enum linkage linkage;
 	const char *kindstr = kind == DECLFUNC ? "function" : "object";
+	/* A C++ namespace scope is a file-level context for linkage: a
+	 * namespace-global `int x;` gets external linkage like a file-scope
+	 * one (otherwise it would be treated as auto and funcinit(NULL)
+	 * would crash on the tentative definition). */
+	bool fscope = s == &filescope || s->name != NULL;
 
 	if (prior) {
 		if (prior->linkage == LINKNONE)
 			error(&tok.loc, "%s '%s' with no linkage redeclared", kindstr, name);
-		linkage = getlinkage(kind, sc, prior, s == &filescope);
+		linkage = getlinkage(kind, sc, prior, fscope);
 		if (prior->linkage != linkage)
 			error(&tok.loc, "%s '%s' redeclared with different linkage", kindstr, name);
 		if (!typecompatible(t, prior->type) || tq != prior->qual)
@@ -69,7 +74,7 @@ declcommon(struct scope *s, enum declkind kind, char *name, char *asmname, struc
 	}
 	if (s->parent)
 		prior = scopegetdecl(s->parent, name, true);
-	linkage = getlinkage(kind, sc, prior, s == &filescope);
+	linkage = getlinkage(kind, sc, prior, fscope);
 	if (linkage != LINKNONE && s->parent) {
 		/* XXX: should maintain map of identifiers with linkage to their declaration, and use that */
 		if (s->parent != &filescope)

@@ -178,7 +178,9 @@ postfixexpr(struct scope *s, struct expr *r)
 				struct decl *fd;
 				if (cpp_is_member_function(t, m->name)) {
 					cpp_mangled_name(t, m->name, mname, sizeof mname);
-					fd = scopegetdecl(s, mname, 1);
+					/* member symbols live in the class's declaration
+					 * scope (namespace scope for `namespace n { class C }`) */
+					fd = scopegetdecl(t->scope ? t->scope : s, mname, 1);
 					if (fd && fd->kind == DECLFUNC) {
 						e = mkexpr(EXPRIDENT, fd->type, NULL);
 						e->u.ident.decl = fd;

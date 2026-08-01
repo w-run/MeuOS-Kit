@@ -112,6 +112,9 @@ struct type {
 	struct value *value;  /* used by the backend */
 	struct type *base;
 	struct list link;  /* used only during construction of type */
+	/* C++: the scope the class was declared in (namespace scope for
+	 * `namespace n { class C {}; }`); member symbols live there. */
+	struct scope *scope;
 	/* qualifiers of the base type */
 	enum typequal qual;
 	bool incomplete;
@@ -146,6 +149,7 @@ enum declkind {
 	DECLFUNC,
 	DECLCONST,
 	DECLBUILTIN,
+	DECLNAMESPACE,
 };
 
 enum linkage {
@@ -212,6 +216,7 @@ struct decl {
 		} func;
 		unsigned long long enumconst;
 		enum builtinkind builtin;
+		struct scope *ns; /* DECLNAMESPACE: the namespace's scope */
 	} u;
 };
 
@@ -222,6 +227,8 @@ struct scope {
 	struct block *continuelabel;
 	struct switchcases *switchcases;
 	struct scope *parent;
+	/* C++ namespace name (NULL for ordinary scopes). */
+	const char *name;
 };
 
 enum exprkind {
