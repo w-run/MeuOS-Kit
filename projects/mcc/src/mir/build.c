@@ -211,6 +211,14 @@ void mfn_free(MFn *fn)
 		free(fn->val[i]);
 	}
 	free(fn->val);
+	/* physical register values (machine layer): live in fn->reg[], outside
+	 * the SSA val table */
+	for (uint32_t i = 0; i < fn->nreg; i++)
+		if (fn->reg && fn->reg[i]) {
+			free((void *)fn->reg[i]->name);
+			free(fn->reg[i]);
+		}
+	free(fn->reg);
 	/* constants are arena-allocated; the arena is freed below */
 	free(fn->con);
 	for (uint32_t i = 0; i < fn->ntyp; i++) {

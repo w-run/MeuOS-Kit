@@ -267,6 +267,16 @@ check-mir-passes: $(MIR_SRCS)
 	$(HOST_CC) $(CFLAGS) -Iinclude -o build/mir_pass_test $^ test/mir/pass_test.c
 	./build/mir_pass_test
 
+# P1 machine layer: physical registers as MVal, addressing modes, machine
+# opcodes (MMOP), machine functions/blocks/instructions (MFnM/MBlkM/MInsM).
+# Independent of the LIR/QBE pipeline — links mir/ sources only.
+check-mir-machine: $(MIR_SRCS)
+	@mkdir -p build
+	$(HOST_CC) $(CFLAGS) -Iinclude -o build/machine_test \
+		test/mir/machine_test.c src/mir/build.c src/mir/mir_util.c \
+		src/mir/machine.c src/mir/print.c
+	./build/machine_test
+
 # MIR → LIR bridge end-to-end: build a fib MFn, run MIR passes, bridge to
 # the LIR Fn, run the LIR pipeline and emit x86-64 asm.  Assemble+link+run
 # the output to verify the emitted code actually works.
@@ -286,7 +296,7 @@ check-mir-bridge: $(BIN)
 	@$(HOST_CC) -o /tmp/bridge_fib /tmp/bridge_main.o /tmp/bridge_fib.s
 	@/tmp/bridge_fib; echo "bridge exit=$$? (0 = fib(5)==5)"
 
-check-mir: check-mir-types check-mir-passes check-mir-bridge
+check-mir: check-mir-types check-mir-passes check-mir-machine check-mir-bridge
 
 # m++ C++ lexer unit tests (C.1.2: keyword classification).
 CPP_SRCS := $(wildcard src/cpp/lex/*.c)
@@ -297,7 +307,7 @@ check-cpp-lex: $(CPP_SRCS)
 
 check-cpp: check-cpp-lex
 
-.PHONY: all clean check check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-bridge check-mir check-cpp-lex check-cpp
+.PHONY: all clean check check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-bridge check-mir check-cpp-lex check-cpp
 
 # chibicc community functional test suite (C11/C23 conformance).
 # Runs test/community/chibicc/run.sh against the MeuOS sysroot.

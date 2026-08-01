@@ -77,6 +77,9 @@ static void print_val(FILE *f, MVal *v)
 	case MV_LABEL:
 		fprintf(f, "&%s", v->defblk && v->defblk->name ? v->defblk->name : "?");
 		break;
+	case MV_REG:
+		fprintf(f, "%%%s", v->name ? v->name : mreg_name((MReg)v->reg));
+		break;
 	default:
 		fprintf(f, "?");
 		break;

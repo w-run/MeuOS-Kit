@@ -36,6 +36,12 @@ typedef struct MIns MIns;
 typedef struct MPhi MPhi;
 typedef struct MRef MRef;
 
+/* Machine layer (P1+, x86-64 first).  Independent structures so the MIR
+ * backend is MIR-native: no QBE Fn/Ins/Ref representation. */
+typedef struct MInsM MInsM;
+typedef struct MBlkM MBlkM;
+typedef struct MFnM MFnM;
+
 /* ---- Scalar types -------------------------------------------------------
  * MT_AGG is the marker type for aggregates; the actual layout lives in a
  * MTypeDesc.  Signedness is carried by the opcode (MOP_DIV vs MOP_UDIV),
@@ -124,6 +130,7 @@ typedef enum MValKind {
 	MV_CONST,      /* constant, see MConst */
 	MV_TYPE,       /* reference to an aggregate MTypeDesc */
 	MV_LABEL,      /* block label */
+	MV_REG,        /* physical register (MVal.reg), machine layer */
 } MValKind;
 
 typedef struct MUse {
@@ -148,6 +155,8 @@ typedef struct MVal {
 	int32_t slot;
 	/* lowering hint (LIR): preferred register class/reg, -1 none */
 	int32_t hint;
+	/* MV_REG: physical register id (MREG_*), MREG_NONE otherwise */
+	int32_t reg;
 	const char *name;
 	/* global symbol payload */
 	const char *sym;
@@ -310,6 +319,8 @@ struct MFn {
 	MVal **param;        /* parameter values (entry block MOP_PARs) */
 	uint32_t nparam;
 	int *paramty;        /* per-parameter aggregate typ[] index, -1 if scalar */
+	MVal **reg;          /* physical register table (indexed by MReg), NULL until first mfn_reg() */
+	uint32_t nreg;       /* capacity of reg[] (MREG_NREG once allocated) */
 	int32_t slot;        /* total stack slot bytes */
 	int32_t salign;      /* stack alignment */
 	bool vararg;
@@ -372,5 +383,185 @@ struct Fn *lir_bridge(MFn *mfn);
 void *m_alloc(MFn *fn, size_t size);
 void m_arena_free(MFn *fn);
 char *mx_strdup(const char *s);
+
+/* =====================================================================
+ * Machine layer (P1+).  MIR-native backend structures: physical
+ * registers as MVal, addressing modes, machine opcodes, machine
+ * functions/blocks/instructions.  No QBE Fn/Ins/Ref anywhere.
+ * =================================================================== */
+
+/* ---- Physical registers (x86-64 first) ------------------------------ */
+
+typedef enum MRegCls {
+	MRC_GPR,         /* general purpose (64-bit) */
+	MRC_FPR,         /* floating point / SIMD (XMM) */
+} MRegCls;
+
+typedef enum MReg {
+	MREG_NONE = 0,
+	/* general purpose, caller-saved */
+	MREG_RAX, MREG_RCX, MREG_RDX, MREG_RSI, MREG_RDI,
+	MREG_R8, MREG_R9, MREG_R10, MREG_R11,
+	/* general purpose, callee-saved */
+	MREG_RBX, MREG_R12, MREG_R13, MREG_R14, MREG_R15,
+	/* frame / stack (never allocated by the register allocator) */
+	MREG_RBP, MREG_RSP,
+	/* floating point (XMM), caller-saved under SysV */
+	MREG_XMM0, MREG_XMM1, MREG_XMM2, MREG_XMM3,
+	MREG_XMM4, MREG_XMM5, MREG_XMM6, MREG_XMM7,
+	MREG_XMM8, MREG_XMM9, MREG_XMM10, MREG_XMM11,
+	MREG_XMM12, MREG_XMM13, MREG_XMM14, MREG_XMM15,
+	MREG_NREG,
+} MReg;
+
+typedef struct MRegInfo {
+	const char *name;      /* assembler name: "rax", "xmm0", ... */
+	MRegCls cls;
+	bool caller_saved;
+	bool callee_saved;
+	bool sysv_arg;         /* SysV integer/SSE argument register */
+} MRegInfo;
+
+extern const MRegInfo mreg_info[MREG_NREG];
+const char *mreg_name(MReg r);
+
+/* Return the MVal for a physical register, creating it on first use.
+ * Register values live in fn->reg[] (outside the SSA val table). */
+MVal *mfn_reg(MFn *fn, MReg r);
+
+/* ---- Addressing modes ------------------------------------------------ */
+
+typedef struct MAddr {
+	MVal *base;          /* base register, may be NULL */
+	MVal *index;         /* index register, may be NULL */
+	uint8_t scale;       /* index scale: 1, 2, 4 or 8 */
+	int64_t off;         /* displacement */
+	MConst *offcon;      /* symbol-relative displacement (relocation), else NULL */
+} MAddr;
+
+MAddr maddr(MVal *base, MVal *index, uint8_t scale, int64_t off);
+MAddr maddr_sym(MVal *base, MConst *offcon, int64_t off);
+
+/* ---- Machine opcodes ------------------------------------------------- */
+
+typedef enum MMOP {
+	MMOP_NONE,
+	/* data movement */
+	MMOP_MOV,              /* dst = src (reg / imm / mem via addr) */
+	MMOP_MOVSX,            /* sign-extending move, src width in dtype/src */
+	MMOP_MOVZX,            /* zero-extending move */
+	MMOP_LEA,              /* dst = &addr */
+	MMOP_PUSH, MMOP_POP,
+	/* integer arithmetic */
+	MMOP_ADD, MMOP_SUB, MMOP_MUL, MMOP_AND, MMOP_OR, MMOP_XOR,
+	MMOP_SHL, MMOP_SHR, MMOP_SAR,
+	MMOP_NEG, MMOP_NOT,
+	MMOP_DIV, MMOP_UDIV, MMOP_REM, MMOP_UREM,  /* RAX/RDX implicit pair */
+	/* floating point arithmetic (dtype distinguishes f32/f64) */
+	MMOP_FADD, MMOP_FSUB, MMOP_FMUL, MMOP_FDIV,
+	MMOP_FNEG, MMOP_FSQRT,
+	/* conversions */
+	MMOP_CVTSI2SS, MMOP_CVTSI2SD, MMOP_CVTSS2SD, MMOP_CVTSD2SS,
+	MMOP_CVTTSS2SI, MMOP_CVTTSD2SI,
+	/* memory */
+	MMOP_LOAD,             /* width from dtype; operand = addr */
+	MMOP_LOAD_S8, MMOP_LOAD_S16, MMOP_LOAD_S32,   /* sign-extending loads */
+	MMOP_LOAD_Z8, MMOP_LOAD_Z16, MMOP_LOAD_Z32,   /* zero-extending loads */
+	MMOP_STORE,            /* src[0] = value; operand = addr */
+	MMOP_BLIT,             /* aggregate copy: dst ptr, src ptr, cst = size */
+	MMOP_ALLOCA4, MMOP_ALLOCA8, MMOP_ALLOCA16,
+	MMOP_SALLOC,           /* dynamic stack allocation */
+	/* flags */
+	MMOP_CMP,              /* compare src[0] vs src[1], set flags */
+	MMOP_TEST,             /* and src[0], src[1], set flags */
+	MMOP_SETCC,            /* dst = flags.cc ? 1 : 0 */
+	/* control flow */
+	MMOP_JMP,              /* terminator; target via MBlkM.s1 */
+	MMOP_JCC,              /* terminator; cc + s1(taken)/s2(fallthrough) */
+	MMOP_CALL,             /* src[0] = callee */
+	MMOP_RET,              /* src[0] = return value, or none */
+	MMOP_NOP,
+} MMOP;
+
+const char *mmop_name(MMOP op);
+
+/* ---- Condition codes -------------------------------------------------- */
+
+typedef enum MCC {
+	MCC_NONE,
+	MCC_E,  MCC_NE,     /* equal / not-equal (int; fp ordered) */
+	MCC_L,  MCC_LE,     /* signed less / less-or-equal */
+	MCC_G,  MCC_GE,     /* signed greater / greater-or-equal */
+	MCC_B,  MCC_BE,     /* unsigned (and fp unordered) less / less-or-equal */
+	MCC_A,  MCC_AE,     /* unsigned (and fp unordered) greater / greater-or-equal */
+	MCC_NCC,
+} MCC;
+
+const char *mcc_name(MCC cc);
+
+/* ---- Machine functions / blocks / instructions ------------------------ */
+
+struct MInsM {
+	uint32_t id;
+	MMOP op;
+	MType dtype;           /* result / memory width */
+	MVal *dst;             /* result value (register or temp) */
+	MVal *src[3];          /* source values (registers/temps) */
+	MConst *cst;           /* immediate / symbol constant, else NULL */
+	MAddr addr;            /* addressing mode (LOAD/STORE/LEA/BLIT) */
+	MCC cc;                /* condition code (SETCC / JCC terminator) */
+	uint64_t extra;        /* extension word (C++ frontend) */
+	struct MBlkM *blk;     /* owning machine block */
+};
+
+struct MBlkM {
+	uint32_t id;
+	char *name;
+	MInsM *ins;            /* instruction array (terminator excluded) */
+	uint32_t nins, cins;
+	MInsM term;            /* terminator: MMOP_JMP/JCC/RET/CALL */
+	MBlkM *s1;             /* JMP: target; JCC: taken target */
+	MBlkM *s2;             /* JCC: fallthrough target */
+	MBlkM *link;           /* function block list */
+};
+
+struct MFnM {
+	const char *name;
+	MFn *host;             /* owning MIR function: register table, const pool, arena */
+	MBlkM *start;          /* entry block */
+	MBlkM *link;           /* block list head */
+	uint32_t nblk;
+	int32_t slot;          /* stack frame size (bytes); filled by regalloc/spill */
+	int32_t salign;        /* frame alignment */
+	uint64_t regsused;     /* bitmask of used physical registers (bit = MReg) */
+	uint32_t nspill;       /* number of stack spill slots */
+};
+
+/* ---- Machine construction API (src/mir/machine.c) --------------------- */
+
+MFnM *mfnm_new(MFn *host, const char *name);
+MBlkM *mblkm_new(MFnM *fm, const char *name);
+void mfnm_addblk(MFnM *fm, MBlkM *b);
+
+/* generic instruction builders: 0/1/2/3 source operands */
+MInsM *maddm(MFnM *fm, MBlkM *b, MMOP op, MType dtype, MVal *dst,
+             MVal *s0, MVal *s1);
+MInsM *maddm3(MFnM *fm, MBlkM *b, MMOP op, MType dtype, MVal *dst,
+              MVal *s0, MVal *s1, MVal *s2);
+MInsM *maddm_addr(MFnM *fm, MBlkM *b, MMOP op, MType dtype, MVal *dst,
+                  MAddr a, MVal *s0);
+MInsM *maddm_cst(MFnM *fm, MBlkM *b, MMOP op, MType dtype, MVal *dst,
+                 MVal *s0, MConst *cst);
+MInsM *maddm_cc(MFnM *fm, MBlkM *b, MMOP op, MType dtype, MVal *dst,
+                MVal *s0, MVal *s1, MCC cc);
+MInsM *maddm_blit(MFnM *fm, MBlkM *b, MVal *dstptr, MVal *srcptr,
+                  MConst *size);
+
+/* block terminator */
+void mfnm_term(MFnM *fm, MBlkM *b, MMOP op, MVal *s0, MBlkM *s1, MBlkM *s2,
+               MCC cc);
+
+void mfnm_dump(MFnM *fm, FILE *out);
+void mfnm_free(MFnM *fm);
 
 #endif /* MCC_MIR_H */
