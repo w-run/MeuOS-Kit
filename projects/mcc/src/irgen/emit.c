@@ -26,7 +26,7 @@
 
 extern int emit_debug;  /* from emit/emit.c */
 extern void emitdbgloc(uint, uint, FILE *);  /* from emit/emit.c */
-extern void mfnm_backend_x86_64(struct MFn *);  /* x86_64_mbe.c (P2 parallel backend) */
+extern bool mfnm_backend_x86_64(struct MFn *);  /* x86_64_mbe.c (P3b machine backend) */
 
 /* B.4.2 MIR-first switch: when nonzero, emitfunc lowers the frontend tree
  * to MIR (func_to_mir), runs the MIR passes, bridges to LIR, and runs the
@@ -300,11 +300,14 @@ emitfunc(struct func *f, bool global)
 				fprintf(stderr, "\n> MIR (post-pass) %s:\n", f->name);
 				mfn_dump(mf, stderr);
 			}
-			/* P2 parallel validation: run the MIR machine backend (MFnM
-			 * conversion + ABI lowering) on this function; bridge stays
-			 * the asm producer. */
-			if (g_use_mir_backend)
-				mfnm_backend_x86_64(mf);
+			/* P3b MIR-native backend: when MCC_MIR_BACKEND=1, the machine
+			 * backend emits the assembly for functions in scope (scalar);
+			 * otherwise (aggregate/varargs) it falls back to the bridge. */
+			if (g_use_mir_backend && mfnm_backend_x86_64(mf)) {
+				freeall();
+				mfn_free(mf);
+				return;
+			}
 			fn = lir_bridge(mf);
 			if (emit_debug) {
 				fprintf(stderr, "\n> LIR (bridged) %s:\n", f->name);

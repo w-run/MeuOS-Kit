@@ -45,8 +45,13 @@ void mabi_typclass(MAClass *a, MTypeDesc *td);
  * register-usage code used for varargs bookkeeping. */
 int mabi_argsclass(MFnM *fm, MInsM *m, int n, MAClass *ac, MAClass *aret);
 
-/* P2 parallel-validation entry: lower a whole MFn to MFnM, run the SysV
- * ABI lowering, and dump the result (bridge still produces the asm). */
-void mfnm_backend_x86_64(MFn *mf);
+/* P3b backend entry: lower a whole MFn to MFnM, run the SysV ABI lowering,
+ * and emit x86-64 assembly to stdout.  Returns false when the function is
+ * outside the machine backend's scope (aggregate/varargs/etc.) and the
+ * caller must fall back to the bridge path. */
+bool mfnm_backend_x86_64(MFn *mf);
+
+/* P3b: emit a lowered MFnM as x86-64 AT&T assembly. */
+void mfnm_emit_x86_64(MFnM *fm, FILE *out);
 
 #endif /* MCC_X86_64_M_H */
