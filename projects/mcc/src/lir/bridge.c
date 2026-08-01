@@ -346,6 +346,22 @@ lir_bridge(MFn *mfn)
 				                .arg = {a0, R}};
 				continue;
 			}
+			/* alloca: the frontend builds align pre-padding chains
+			 * (`add size, align-16`) that can fold to a negative constant
+			 * (the object's align is 0 in statement-expression temporaries
+			 * until the frontend fixes it).  LIR's salloc() rejects
+			 * constant negative sizes; clamp to 0 so the allocation is a
+			 * (correctly-aligned, possibly 0-byte) no-op like the direct
+			 * path's runtime computation. */
+			if (in->op == MOP_ALLOCA) {
+				Ref to = in->dst ? valref(mfn, in->dst, fn) : R;
+				Ref a0 = refval(mfn, in->src[0], fn);
+				if (rtype(a0) == RCon && fn->con[a0.val].bits.i <= 0)
+					a0 = getcon(0, fn);
+				*curi++ = (Ins){.op = Oalloc16, .cls = Kl, .to = to,
+				                .arg = {a0, R}};
+				continue;
+			}
 			Ref to = in->dst ? valref(mfn, in->dst, fn) : R;
 			Ref a0 = refval(mfn, in->src[0], fn);
 			Ref a1 = refval(mfn, in->src[1], fn);

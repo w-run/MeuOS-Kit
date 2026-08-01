@@ -317,24 +317,6 @@ defined_outside(MFn *fn, MVal *v, MBlk *b)
 	return v->def != 0;
 }
 
-/* Check whether a value is used as an alloca size operand.  The frontend
- * builds alloca size chains as `add size, align-16` etc.; folding such a
- * chain to a negative constant would make the LIR salloc() reject it. */
-static bool
-used_by_alloc(MFn *fn, MVal *v, MBlk *b)
-{
-	(void)fn;
-	(void)b;
-	if (!v || v->kind != MV_TEMP)
-		return false;
-	for (uint32_t i = 0; i < v->nuse; i++) {
-		MUse *u = &v->use[i];
-		if (u->ins && u->ins->op == MOP_ALLOCA)
-			return true;
-	}
-	return false;
-}
-
 /* Rewrite a block: apply constant folding and algebraic simplification,
  * dropping instructions whose result is unused or simplified away.
  * Returns the number of instructions removed. */
@@ -358,7 +340,7 @@ msimp_block(MFn *fn, MBlk *b)
 		 * an alloca size) */
 		if (in->dst && a0.con && (in->op < MOP_JMP || in->op > MOP_CALL) &&
 		    !used_outside(fn, in->dst, b) &&
-		    !used_by_alloc(fn, in->dst, b)) {
+		    true) {
 			int w = (in->dtype == MT_I64 || in->dtype == MT_PTR);
 			MConst cr;
 			MConst *cl = a0.con;
@@ -409,8 +391,7 @@ msimp_block(MFn *fn, MBlk *b)
 		 * SSA dependency structure for promote/ssa. */
 		if (in->dst && in->op < MOP_JMP &&
 		    !used_outside(fn, in->dst, b) &&
-		    !used_by_alloc(fn, in->dst, b) &&
-		    !defined_outside(fn, a0.val, b) &&
+		    		    !defined_outside(fn, a0.val, b) &&
 		    !defined_outside(fn, a1.val, b)) {
 			switch (in->op) {
 			case MOP_ADD:
