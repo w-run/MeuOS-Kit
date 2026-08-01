@@ -114,6 +114,11 @@ static struct {
 	{ Oloadub,  Ki, "movzb%k %M0, %=" },
 	{ Oextsw,   Kl, "movslq %W0, %L=" },
 	{ Oextuw,   Kl, "movl %W0, %W=" },
+	/* the frontend can emit a same-width zext/sext of an i32 value
+	 * (e.g. a bool result widened to int and used in a branch); a 32→32
+	 * extend is a plain move, so accept the Kw class too. */
+	{ Oextsw,   Kw, "movl %W0, %W=" },
+	{ Oextuw,   Kw, "movl %W0, %W=" },
 	{ Oextsh,   Ki, "movsw%k %H0, %=" },
 	{ Oextuh,   Ki, "movzw%k %H0, %=" },
 	{ Oextsb,   Ki, "movsb%k %B0, %=" },

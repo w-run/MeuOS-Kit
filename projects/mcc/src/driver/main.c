@@ -312,10 +312,8 @@ mcc_main(int argc, char *argv[])
 			depmode = 2;
 		} else if (strcmp(a, "-MD") == 0) {
 			depmode = 3;
-			depfile = ARGVAL("");
 		} else if (strcmp(a, "-MMD") == 0) {
 			depmode = 4;
-			depfile = ARGVAL("");
 		} else if (strncmp(a, "-MF", 3) == 0) {
 			depfile = ARGVAL(a + 3);
 		} else if (strncmp(a, "-MT", 3) == 0 ||
@@ -718,6 +716,9 @@ mcc_main(int argc, char *argv[])
 		if (depmode == 3 || depmode == 4) {
 			const char *tgt = output ? output :
 				default_out_name(first_input, ".o");
+			if (!depfile)
+				depfile = default_out_name(
+					output ? output : first_input, ".d");
 			FILE *df = fopen(depfile, "w");
 			if (!df)
 				fatal("open %s:", depfile);
