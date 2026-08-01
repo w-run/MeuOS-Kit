@@ -282,7 +282,7 @@ emitfunc(struct func *f, bool global)
 	 * against real C workloads; the default remains the direct-LIR path
 	 * until the migration completes). */
 	if (g_use_mir) {
-		MFn *mf = func_to_mir(f, opt_level);
+		MFn *mf = func_to_mir(f, opt_level, global);
 		if (mf) {
 			if (emit_debug) {
 				fprintf(stderr, "\n> MIR (pre-pass) %s:\n", f->name);

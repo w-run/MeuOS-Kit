@@ -245,7 +245,7 @@ fe_ref(MFn *fn, struct value *v, MVal **tab)
 
 /* Main entry: translate a whole frontend function into a MIR MFn. */
 MFn *
-func_to_mir(struct func *f, int optlevel)
+func_to_mir(struct func *f, int optlevel, bool export)
 {
 	MFn *fn;
 	MVal **tab;
@@ -256,6 +256,7 @@ func_to_mir(struct func *f, int optlevel)
 	uint32_t nblk = 0, bi = 0;
 
 	fn = mfn_new(f->name, optlevel);
+	fn->export = export;
 	fn->rettype = MT_NONE;
 	if (f->type->base && f->type->base->kind == TYPEVOID)
 		fn->rettype = MT_VOID;

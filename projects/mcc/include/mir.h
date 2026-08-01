@@ -312,6 +312,7 @@ struct MFn {
 	int32_t slot;        /* total stack slot bytes */
 	int32_t salign;      /* stack alignment */
 	bool vararg;
+	bool export;         /* external linkage (true) or local/static (false) */
 	int optlevel;        /* 0=O0, 1=O1, 2=O2 (default), 3=O3 */
 	bool emitted;        /* codegen already run */
 };

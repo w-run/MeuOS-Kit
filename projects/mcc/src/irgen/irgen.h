@@ -164,6 +164,6 @@ struct lvalue funclval(struct func *f, struct expr *e);
  * Part of the B.4.2 MIR-first migration: emitfunc lowers to MIR, runs MIR
  * passes, then bridges to the LIR Fn. */
 struct MFn;
-struct MFn *func_to_mir(struct func *f, int optlevel);
+struct MFn *func_to_mir(struct func *f, int optlevel, bool export);
 
 #endif /* MCC_IRGEN_H */

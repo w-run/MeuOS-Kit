@@ -208,7 +208,7 @@ lir_bridge(MFn *mfn)
 
 	fn->name = mfn->name ? (char *)mfn->name : "";
 	fn->lnk = (Lnk){0};
-	fn->lnk.export = 1;
+	fn->lnk.export = mfn->export;
 	fn->leaf = 1;
 	fn->vararg = mfn->vararg;
 	fn->optlevel = mfn->optlevel;
