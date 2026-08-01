@@ -90,6 +90,19 @@ postfixexpr(struct scope *s, struct expr *r)
 			e->u.call.nargs = 0;
 			p = t->u.func.params;
 			end = &e->u.call.args;
+			/* C++ member call: prepend the this object as the first
+			 * argument (lowered from `obj.meth(...)`). */
+			{
+				extern struct expr *g_cpp_member_this;
+				if (g_cpp_member_this) {
+					*end = g_cpp_member_this;
+					end = &(*end)->next;
+					++e->u.call.nargs;
+					g_cpp_member_this = NULL;
+					if (p)
+						p = p->next;
+				}
+			}
 			while (tok.kind != TRPAREN) {
 				if (e->u.call.args)
 					expect(TCOMMA, "or ')' after function call argument");
@@ -129,6 +142,31 @@ postfixexpr(struct scope *s, struct expr *r)
 			m = typemember(t, tokenstr(tok.kind), &offset);
 			if (!m)
 				error(&tok.loc, "struct/union has no member named '%s'", tok.lit);
+			/* C++ member function call: `obj.meth` lowers to a call of
+			 * `Class_meth` with the object address as the implicit this
+			 * argument.  We build an identifier referencing the mangled
+			 * free function and remember the this object so the call
+			 * lowering (TLPAREN) can prepend it as an argument. */
+			if (m->type && m->type->kind == TYPEFUNC) {
+				extern bool cpp_is_member_function(struct type *,
+				    const char *);
+				extern const char *cpp_mangled_name(struct type *,
+				    const char *, char *, size_t);
+				extern struct expr *g_cpp_member_this;
+				char mname[256];
+				struct decl *fd;
+				if (cpp_is_member_function(t, m->name)) {
+					cpp_mangled_name(t, m->name, mname, sizeof mname);
+					fd = scopegetdecl(s, mname, 1);
+					if (fd && fd->kind == DECLFUNC) {
+						e = mkexpr(EXPRIDENT, fd->type, NULL);
+						e->u.ident.decl = fd;
+						g_cpp_member_this = r; /* &obj */
+						next();
+						break;
+					}
+				}
+			}
 			r = mkbinaryexpr(&tok.loc, TADD, exprconvert(r, &typeulong), mkconstexpr(&typeulong, offset));
 			r->type = mkpointertype(m->type, tq | m->qual);
 			r = mkunaryexpr(TMUL, r);

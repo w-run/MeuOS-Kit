@@ -24,6 +24,9 @@
 /* Current class tag being parsed (set by cpp_class_decl), used to mangle
  * member-function names as ClassName_method. */
 static const char *cpp_current_class;
+/* Pending `this` object for the next member-function call
+ * (set by the postfix `.`/`->` lowering, consumed by TLPAREN). */
+struct expr *g_cpp_member_this;
 void cpp_define_method(struct scope *s, struct type *funct,
                               const char *mname);
 
