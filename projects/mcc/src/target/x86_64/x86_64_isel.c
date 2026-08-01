@@ -607,8 +607,19 @@ seljmp(Blk *b, Fn *fn)
 		return;
 	assert(b->jmp.type == Jjnz);
 	r = b->jmp.arg;
-	t = &fn->tmp[r.val];
 	b->jmp.arg = R;
+	/* Constant conditions can reach target lowering as RCon when GVN
+	 * is skipped (-O0); fold to an unconditional jump.  Mirrors the
+	 * i386 seljmp guard. */
+	if (rtype(r) == RCon) {
+		int nonzero = fn->con[r.val].type == CBits
+		           && fn->con[r.val].bits.i != 0;
+		b->jmp.type = Jjmp;
+		b->s1 = nonzero ? b->s1 : b->s2;
+		b->s2 = 0;
+		return;
+	}
+	t = &fn->tmp[r.val];
 	assert(rtype(r) == RTmp);
 	if (b->s1 == b->s2) {
 		chuse(r, -1, fn);
