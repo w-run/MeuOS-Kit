@@ -29,7 +29,17 @@ enum cpp_tokenkind cpp_tok_kind(void);
 bool cpp_is_member_function(struct type *t, const char *name);
 const char *cpp_mangled_name(struct type *t, const char *name,
     char *buf, size_t bufsz);
+void cpp_mangled_name_args(struct type *t, const char *name,
+    struct expr *args, char *buf, size_t bufsz);
 struct expr *cpp_member_ident(struct scope *s, const char *name);
+extern struct type *g_cpp_member_class;
+extern const char *g_cpp_member_name;
+extern int g_cpp_postfix_depth;
+void cpp_pending_record_depth(void);
+void cpp_pending_clear_at_depth(int depth);
+void cpp_pending_set_placeholder(void);
+bool cpp_pending_was_placeholder(void);
+bool cpp_pending_is_mine(int depth);
 bool cpp_has_ctor(struct type *t, const char *tag);
 bool cpp_emit_default_ctor(struct func *f, struct decl *d);
 bool cpp_has_dtor(struct type *t);

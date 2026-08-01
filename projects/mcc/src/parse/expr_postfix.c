@@ -52,21 +52,24 @@ postfixexpr(struct scope *s, struct expr *r)
 	enum typequal tq;
 	enum tokenkind op;
 	bool lvalue;
-	bool firstarg;
 
 	/* C++ member-call lowering: `obj.meth(...)` records the object here
-	 * and the call lowering (TLPAREN) prepends it as the this argument. */
+	 * and the call lowering (TLPAREN) prepends it as the this argument.
+	 * A pending member call is cleared when THIS postfixexpr level exits
+	 * without calling it (nested argument expressions run their own
+	 * postfixexpr and must not clear an outer pending call). */
 	extern struct expr *g_cpp_member_this;
+	extern struct type *g_cpp_member_class;
+	extern const char *g_cpp_member_name;
+	extern int g_cpp_postfix_depth;
+	extern void cpp_pending_clear_at_depth(int);
+	extern void cpp_pending_set_placeholder(void);
+	extern bool cpp_pending_was_placeholder(void);
 
+	++g_cpp_postfix_depth;
 	if (!r)
 		r = primaryexpr(s);
 	for (;;) {
-		/* A pending member-this is only consumed by the call's own
-		 * TLPAREN; if the member expression is not actually called
-		 * (`obj.meth` alone), drop it so it cannot leak into a later
-		 * unrelated function call. */
-		if (g_cpp_member_this && tok.kind != TLPAREN)
-			g_cpp_member_this = NULL;
 		switch (tok.kind) {
 		case TLBRACK:  /* subscript */
 			next();
@@ -95,45 +98,82 @@ postfixexpr(struct scope *s, struct expr *r)
 			}
 			if (r->type->kind != TYPEPOINTER || r->type->base->kind != TYPEFUNC)
 				error(&tok.loc, "called object is not a function");
-		t = r->type->base;
-		e = mkexpr(EXPRCALL, t->base, r);
-		e->u.call.args = NULL;
-		e->u.call.nargs = 0;
-		p = t->u.func.params;
-		end = &e->u.call.args;
-		/* C++ member call: prepend the this object as the first
-		 * argument (lowered from `obj.meth(...)`).  firstarg tracks
-		 * whether the next source token is the first explicit argument:
-		 * this prepend must not force a comma before it. */
-		firstarg = true;
-		if (g_cpp_member_this) {
-			*end = g_cpp_member_this;
-			end = &(*end)->next;
-			++e->u.call.nargs;
-			g_cpp_member_this = NULL;
-			if (p)
-				p = p->next;
-		}
-		while (tok.kind != TRPAREN) {
-			if (!firstarg)
-				expect(TCOMMA, "or ')' after function call argument");
-			firstarg = false;
-			if (!p && !t->u.func.isvararg)
-				error(&tok.loc, "too many arguments for function call");
-			*end = assignexpr(s);
-			if (t->u.func.isvararg && !p)
-				*end = exprpromote(*end);
-			else
-				*end = exprassign(*end, p->type);
-			end = &(*end)->next;
-			++e->u.call.nargs;
-			if (p)
-				p = p->next;
-		}
-		if (p && !t->u.func.isvararg)
-			error(&tok.loc, "not enough arguments for function call");
-		e = decay(e);
-			next();
+			{
+				/* Collect the argument expressions first so a C++ member
+				 * call can resolve overloads from the actual argument
+				 * types before building the EXPRCALL. */
+				struct expr *arglist = NULL;
+				struct expr **ae = &arglist;
+				struct expr *a, *an;
+
+				while (tok.kind != TRPAREN) {
+					if (arglist)
+						expect(TCOMMA, "or ')' after function call argument");
+					*ae = assignexpr(s);
+					ae = &(*ae)->next;
+				}
+				next(); /* consume ')' */
+				/* C++ overload resolution: re-resolve the member
+				 * function from the argument types. */
+				{
+					extern struct type *g_cpp_member_class;
+					extern const char *g_cpp_member_name;
+					if (g_cpp_member_class && g_cpp_member_name) {
+						extern void cpp_mangled_name_args(struct type *,
+						    const char *, struct expr *, char *, size_t);
+						char mname2[256];
+						struct decl *fd2;
+						cpp_mangled_name_args(g_cpp_member_class,
+						    g_cpp_member_name, arglist, mname2,
+						    sizeof mname2);
+						fd2 = scopegetdecl(g_cpp_member_class->scope
+						    ? g_cpp_member_class->scope : s, mname2, 1);
+						if (!fd2 || fd2->kind != DECLFUNC)
+							error(&tok.loc,
+							    "no matching member function for '%s'",
+							    g_cpp_member_name);
+						t = fd2->type;
+						r = mkexpr(EXPRIDENT, fd2->type, NULL);
+						r->u.ident.decl = fd2;
+						r = decay(r); /* &Class_method_i */
+					}
+					g_cpp_member_class = NULL;
+					g_cpp_member_name = NULL;
+				}
+				t = r->type->base;
+				e = mkexpr(EXPRCALL, t->base, r);
+				e->u.call.args = NULL;
+				e->u.call.nargs = 0;
+				p = t->u.func.params;
+				end = &e->u.call.args;
+				/* C++ member call: prepend the this object. */
+				if (g_cpp_member_this) {
+					*end = g_cpp_member_this;
+					end = &(*end)->next;
+					++e->u.call.nargs;
+					g_cpp_member_this = NULL;
+					if (p)
+						p = p->next;
+				}
+				for (a = arglist; a; a = an) {
+					an = a->next; /* exprassign may replace the node */
+					if (!p && !t->u.func.isvararg)
+						error(&tok.loc,
+						    "too many arguments for function call");
+					if (t->u.func.isvararg && !p)
+						*end = exprpromote(a);
+					else
+						*end = exprassign(a, p->type);
+					end = &(*end)->next;
+					++e->u.call.nargs;
+					if (p)
+						p = p->next;
+				}
+				if (p && !t->u.func.isvararg)
+					error(&tok.loc,
+					    "not enough arguments for function call");
+			}
+			e = decay(e);
 			break;
 		case TPERIOD:
 			r = mkunaryexpr(TBAND, r);
@@ -174,6 +214,9 @@ postfixexpr(struct scope *s, struct expr *r)
 				extern const char *cpp_mangled_name(struct type *,
 				    const char *, char *, size_t);
 				extern struct expr *g_cpp_member_this;
+				extern struct type *g_cpp_member_class;
+				extern const char *g_cpp_member_name;
+				extern void cpp_pending_record_depth(void);
 				char mname[256];
 				struct decl *fd;
 				if (cpp_is_member_function(t, m->name)) {
@@ -185,10 +228,23 @@ postfixexpr(struct scope *s, struct expr *r)
 						e = mkexpr(EXPRIDENT, fd->type, NULL);
 						e->u.ident.decl = fd;
 						e = decay(e); /* &Class_method */
-						g_cpp_member_this = r; /* &obj */
-						next();
-						break;
+					} else {
+						/* overloaded member: symbols are argument-encoded
+						 * (`Class_method_i`); the call lowering resolves
+						 * them from the argument types, so use the member's
+						 * own function type as a placeholder */
+						e = mkexpr(EXPRIDENT, m->type, NULL);
+						e->u.ident.decl = NULL;
+						e = decay(e);
 					}
+					g_cpp_member_this = r; /* &obj */
+					g_cpp_member_class = t;
+					g_cpp_member_name = m->name;
+					cpp_pending_record_depth();
+					if (fd == NULL || fd->kind != DECLFUNC)
+						cpp_pending_set_placeholder();
+					next();
+					break;
 				}
 			}
 			r = mkbinaryexpr(&tok.loc, TADD, exprconvert(r, &typeulong), mkconstexpr(&typeulong, offset));
@@ -210,6 +266,18 @@ postfixexpr(struct scope *s, struct expr *r)
 			next();
 			break;
 		default:
+			/* this postfixexpr level is done: a pending member call that
+			 * was not followed by '(' is dropped (no leak into a later
+			 * unrelated call) */
+			{
+				extern bool cpp_pending_is_mine(int);
+				if (g_cpp_member_this && cpp_pending_is_mine(g_cpp_postfix_depth)
+				    && cpp_pending_was_placeholder())
+					error(&tok.loc,
+					    "address of overloaded member function is ambiguous (use an explicit cast)");
+			}
+			cpp_pending_clear_at_depth(g_cpp_postfix_depth);
+			--g_cpp_postfix_depth;
 			return r;
 		}
 		r = e;

@@ -26,6 +26,52 @@
 /* Pending `this` object for the next member-function call
  * (set by the postfix `.`/`->` lowering, consumed by TLPAREN). */
 struct expr *g_cpp_member_this;
+/* The class and method name of the pending member call, used by TLPAREN
+ * to resolve overloads from the actual argument types. */
+struct type *g_cpp_member_class;
+const char *g_cpp_member_name;
+/* postfixexpr nesting depth (set by expr_postfix.c); a pending member
+ * call records the depth it was created at so nested argument expressions
+ * (which run their own postfixexpr) don't clear it prematurely. */
+int g_cpp_postfix_depth;
+static int g_cpp_pending_depth;
+static bool g_cpp_pending_placeholder;
+
+void
+cpp_pending_record_depth(void)
+{
+	g_cpp_pending_depth = g_cpp_postfix_depth;
+	g_cpp_pending_placeholder = false;
+}
+
+void
+cpp_pending_set_placeholder(void)
+{
+	g_cpp_pending_placeholder = true;
+}
+
+bool
+cpp_pending_was_placeholder(void)
+{
+	return g_cpp_pending_placeholder;
+}
+
+void
+cpp_pending_clear_at_depth(int depth)
+{
+	if (g_cpp_pending_depth == depth) {
+		g_cpp_member_this = NULL;
+		g_cpp_member_class = NULL;
+		g_cpp_member_name = NULL;
+		g_cpp_pending_placeholder = false;
+	}
+}
+
+bool
+cpp_pending_is_mine(int depth)
+{
+	return g_cpp_pending_depth == depth;
+}
 void cpp_define_method(struct scope *s, struct type *funct,
                               const char *mname, const char *class_tag);
 
@@ -43,6 +89,7 @@ static struct cpp_method_ctx {
 static const char *g_cpp_qual_class;
 
 static void cpp_emit_base_ctor(struct func *f);
+static void cpp_mangle_type(struct type *t, char *buf, size_t bufsz);
 
 /* Pending constructor-call arguments collected by declarator() for
  * `Point p(3, 4);` (vexing parse: the args are expressions, not a
@@ -156,13 +203,28 @@ cpp_member_ident(struct scope *s, const char *name)
 			return NULL;
 		cpp_mangled_name(t, name, mname, sizeof mname);
 		fd = scopegetdecl(t->scope ? t->scope : s, mname, 1);
-		if (!fd || fd->kind != DECLFUNC)
-			return NULL;
+		if (!fd || fd->kind != DECLFUNC) {
+			/* overloaded: symbol is argument-encoded; the call lowering
+			 * resolves it from the argument types.  Placeholder uses the
+			 * member's own function type. */
+			e = mkexpr(EXPRIDENT, m->type, NULL);
+			e->u.ident.decl = NULL;
+			e = decay(e); /* &Class_method */
+			g_cpp_member_this = cpp_this_expr();
+			g_cpp_member_class = t;
+			g_cpp_member_name = name;
+			cpp_pending_record_depth();
+			cpp_pending_set_placeholder();
+			return e;
+		}
 		e = mkexpr(EXPRIDENT, fd->type, NULL);
 		e->qual = fd->qual;
 		e->u.ident.decl = fd;
 		e = decay(e); /* &Class_method */
 		g_cpp_member_this = cpp_this_expr();
+		g_cpp_member_class = t;
+		g_cpp_member_name = name;
+		cpp_pending_record_depth();
 		return e;
 	}
 	/* data member: (*this).name — mirror postfixexpr()'s TPERIOD
@@ -456,6 +518,13 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname,
 		error(&tok.loc, "'%s' is not a class type", class_tag);
 
 	snprintf(mangled, sizeof mangled, "%s_%s", class_tag, mname);
+	/* overload resolution: append the encoded explicit parameter types
+	 * (`Class_method_ii`); no-arg methods keep the bare mangled name */
+	for (cur = funct->u.func.params; cur; cur = cur->next) {
+		char code[64];
+		cpp_mangle_type(cur->type, code, sizeof code);
+		strncat(mangled, code, sizeof mangled - strlen(mangled) - 1);
+	}
 	/* mkdecl/scopeputdecl keep the name pointer; persist it off the
 	 * stack (the C parser's token strings are stable, ours is not). */
 	pmangled = xmalloc(strlen(mangled) + 1);
@@ -797,7 +866,12 @@ cpp_emit_ctor_call(struct func *f, struct decl *d, struct expr *args)
 		error(&tok.loc, "no matching constructor for object '%s'", d->name);
 		return;
 	}
-	snprintf(mname, sizeof mname, "%s_%s", tag, tag);
+	/* overload resolution: append the encoded argument types */
+	{
+		char code[256];
+		cpp_mangled_name_args(t, tag, args, code, sizeof code);
+		snprintf(mname, sizeof mname, "%s", code);
+	}
 	fd = scopegetdecl(t->scope ? t->scope : &filescope, mname, true);
 	if (!fd || fd->kind != DECLFUNC) {
 		error(&tok.loc, "no matching constructor for object '%s'", d->name);
@@ -825,6 +899,77 @@ cpp_emit_ctor_call(struct func *f, struct decl *d, struct expr *args)
 	}
 	(void)n;
 	funcexpr(f, call);
+}
+
+/* Append the mangling code for one type into buf (NUL-terminated). */
+static void
+cpp_mangle_type(struct type *t, char *buf, size_t bufsz)
+{
+	char *p = buf;
+	char *end = buf + bufsz - 1;
+
+	if (!t) {
+		*p++ = 'v';
+		goto out;
+	}
+	switch (t->kind) {
+	case TYPEVOID:     *p++ = 'v'; break;
+	case TYPEBOOL:     *p++ = 'b'; break;
+	case TYPECHAR:     *p++ = t->u.arith.issigned ? 'c' : 'C'; break;
+	case TYPESHORT:    *p++ = t->u.arith.issigned ? 's' : 'S'; break;
+	case TYPEINT:      *p++ = t->u.arith.issigned ? 'i' : 'u'; break;
+	case TYPELONG:     *p++ = t->u.arith.issigned ? 'l' : 'L'; break;
+	case TYPELLONG:    *p++ = t->u.arith.issigned ? 'j' : 'J'; break;
+	case TYPEFLOAT:    *p++ = 'f'; break;
+	case TYPEDOUBLE:   *p++ = 'd'; break;
+	case TYPELDOUBLE:  *p++ = 'e'; break;
+	case TYPEPOINTER:  *p++ = 'p'; break;
+	case TYPEENUM:     *p++ = 'E'; break;
+	case TYPEARRAY:    *p++ = 'A'; break;
+	case TYPENULLPTR:  *p++ = 'n'; break;
+	case TYPESTRUCT:
+	case TYPEUNION:
+		*p++ = 'o';
+		if (t->u.structunion.tag) {
+			size_t n = strlen(t->u.structunion.tag);
+			if (p + n <= end) {
+				memcpy(p, t->u.structunion.tag, n);
+				p += n;
+			}
+		}
+		break;
+	default:           *p++ = 'x'; break;
+	}
+out:
+	*p = '\0';
+}
+
+/* Mangled name of method `name` of class `t`, with the given argument
+ * expressions' types appended for overload resolution:
+ * `Class_method_ii` etc.  Returns the name in buf. */
+void
+cpp_mangled_name_args(struct type *t, const char *name, struct expr *args,
+                      char *buf, size_t bufsz)
+{
+	struct type *owner = NULL;
+	size_t n;
+
+	if (cpp_method_member(t, name, &owner) && owner)
+		t = owner;
+	snprintf(buf, bufsz, "%s_%s",
+	         (t && t->u.structunion.tag) ? t->u.structunion.tag : "anon",
+	         name);
+	n = strlen(buf);
+	for (; args; args = args->next) {
+		char code[64];
+		size_t cl;
+		cpp_mangle_type(args->type, code, sizeof code);
+		cl = strlen(code);
+		if (n + cl < bufsz) {
+			memcpy(buf + n, code, cl + 1);
+			n += cl;
+		}
+	}
 }
 
 const char *
