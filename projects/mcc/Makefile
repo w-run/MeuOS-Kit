@@ -60,7 +60,7 @@ CFLAGS += -DMCC_DEFAULT_TARGET=\"$(DEFAULT_TARGET)\"
 # language-agnostic). Stage A of the libmcc migration: BE objects are
 # archived into libmcc.a so a future m++ binary can link the same archive.
 # util/ is shared (utf/warn/xmalloc are used by both FE and BE).
-FE_DIRS := src/driver src/lex src/parse src/sema src/irgen
+FE_DIRS := src/driver src/cpp src/lex src/parse src/sema src/irgen
 BE_DIRS := src/mir src/lir src/ir src/opt src/abi src/emit src/target src/util
 
 FE_SRCS := $(shell find $(FE_DIRS) -name '*.c' | sort)

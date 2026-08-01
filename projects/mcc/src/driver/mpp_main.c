@@ -17,12 +17,14 @@
 #include <stdlib.h>
 
 int mcc_main(int, char **);
+extern int g_lang;
 
 int
 main(int argc, char *argv[])
 {
-	/* Future: set a language hint consumed by the shared driver to
-	 * dispatch to the C++ frontend for .cc/.cpp inputs.  For now m++
-	 * behaves as a C compiler (C++ frontend is under construction). */
+	/* m++ defaults to the C++ frontend.  C++ constructs are layered over
+	 * the C parser incrementally (C.1.3+); until then C-compatible input
+	 * is parsed by the shared C parser. */
+	g_lang = 1;
 	return mcc_main(argc, argv);
 }

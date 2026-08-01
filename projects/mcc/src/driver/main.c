@@ -54,6 +54,11 @@ static const char *arm_mcpu   = NULL;
 static const char *arm_mfpu   = "vfpv3-d16";
 static const char *arm_mfloat_abi = "hard";
 
+/* Language selection: 0 = C (mcc default), 1 = C++ (m++ default).
+ * Set by mpp_main before calling mcc_main, or via MCC_LANG for testing;
+ * the input loop may also switch to C++ on .cc/.cpp suffixes. */
+int g_lang;
+
 /* Global target features bitmask (MT_FEATURE_*), set by -march=native or
  * -march=x86-64-vN. 0 = baseline only. Used by backend emit to gate ISA
  * levels (second phase); for now it records the user's intent. */
@@ -120,6 +125,13 @@ mcc_main(int argc, char *argv[])
 	 * the new MIR layer (frontend tree -> MFn -> MIR passes -> LIR). */
 	extern int g_use_mir;
 	g_use_mir = getenv("MCC_USE_MIR") ? atoi(getenv("MCC_USE_MIR")) : 0;
+
+	/* Language: 0 = C (default for mcc), 1 = C++ (default for m++).
+	 * The m++ driver sets g_lang=1 before calling mcc_main; file suffix
+	 * detection (.cc/.cpp) also switches to C++ in the input loop. */
+	extern int g_lang;
+	if (getenv("MCC_LANG"))
+		g_lang = atoi(getenv("MCC_LANG"));
 
 	/* Normalize argv: gcc/clang compatibility allows single-dash
 	 * multi-letter options (-static, -shared, ...) which we rewrite
@@ -654,11 +666,18 @@ mcc_main(int argc, char *argv[])
 		scopeinit();
 		if (emit_debug && first_input)
 			emitdbgfile(first_input, stdout);
-		while (tok.kind != TEOF) {
-			if (!decl(&filescope, NULL)) {
-				if (tok.kind == TSEMICOLON)
-					error(&tok.loc, "unexpected ';' at top-level");
-				error(&tok.loc, "expected declaration or function definition");
+		if (g_lang == 1) {
+			/* C++ translation unit: the C++ frontend parser drives the
+			 * declaration loop (C++ grammar layered over the C parser). */
+			extern void cpp_parse_translation_unit(void);
+			cpp_parse_translation_unit();
+		} else {
+			while (tok.kind != TEOF) {
+				if (!decl(&filescope, NULL)) {
+					if (tok.kind == TSEMICOLON)
+						error(&tok.loc, "unexpected ';' at top-level");
+					error(&tok.loc, "expected declaration or function definition");
+				}
 			}
 		}
 		emittentativedefns();
