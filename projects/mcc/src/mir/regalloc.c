@@ -38,6 +38,7 @@ typedef struct MRegCtx {
 	uint32_t npos;
 	MBlkM **order;         /* forward block order */
 	uint32_t nblk;
+	uint32_t *blkbase;     /* first position of each block (by id) */
 } MRegCtx;
 
 static MRegInterval *
@@ -68,11 +69,53 @@ mreg_pos(MFnM *fm, MRegCtx *ctx)
 	uint32_t pos = 0;
 	for (i = 0; i < ctx->nblk; i++) {
 		MBlkM *b = ctx->order[i];
+		ctx->blkbase[b->id] = pos;
 		for (uint32_t j = 0; j < b->nins; j++)
 			b->ins[j].pos = pos++;
 		b->term.pos = pos++;
 	}
 	ctx->npos = pos;
+}
+
+/* Extend intervals across back edges.  A value defined before a loop and
+ * used anywhere inside it (header or body) must keep its register for the
+ * whole loop, otherwise a loop-internal temp may reuse it and clobber the
+ * value on a later iteration. */
+static void
+mreg_loop_extend(MFnM *fm, MRegCtx *ctx)
+{
+	/* for each back edge src -> dst, find the loop extent [dst, src] */
+	for (uint32_t i = 0; i < ctx->nblk; i++) {
+		MBlkM *src = ctx->order[i];
+		MBlkM *succ[2] = { src->s1, src->s2 };
+		for (int k = 0; k < 2; k++) {
+			if (!succ[k] || succ[k]->id >= ctx->nblk)
+				continue;
+			uint32_t dstbase = ctx->blkbase[succ[k]->id];
+			if (dstbase >= ctx->blkbase[src->id])
+				continue;   /* not a back edge */
+			uint32_t srclast = src->term.pos;
+			/* every block between the header and the back-edge source */
+			for (uint32_t j = 0; j < ctx->nblk; j++) {
+				MBlkM *b = ctx->order[j];
+				uint32_t bbase = ctx->blkbase[b->id];
+				if (bbase < dstbase || bbase > ctx->blkbase[src->id])
+					continue;
+				for (uint32_t m = 0; m < b->nins; m++) {
+					MInsM *in = &b->ins[m];
+					MVal *ops[5] = { in->src[0], in->src[1], in->src[2],
+					                 in->addr.base, in->addr.index };
+					for (int x = 0; x < 5; x++) {
+						MRegInterval *iv =
+							ops[x] ? mreg_intv(ctx, ops[x]) : 0;
+						if (iv && iv->start < dstbase &&
+						    iv->end < srclast)
+							iv->end = srclast;
+					}
+				}
+			}
+		}
+	}
 }
 
 /* Build the live interval of every MV_TEMP used by the function.  Machine
@@ -111,21 +154,16 @@ mreg_intervals(MFnM *fm, MRegCtx *ctx)
 
 /* MRegSlots is declared in mir.h. */
 
-/* Allocate a stack slot, returning the negative rbp offset.  Inherits the
- * QBE spill.c double-cursor invariant (slot8 absorbs slot4 so an 8-byte
- * value never straddles a 4-byte slot's alignment). */
+/* Allocate a stack slot, returning the negative rbp offset.  All slots are
+ * 8-byte aligned: the emitter uses movq for values regardless of width, so
+ * a 4-byte value in a 4-byte slot would overrun.  (The slot4/slot8 packing
+ * refinement is deferred until the emitter is width-aware.) */
 int32_t
 mreg_slot_alloc(MRegSlots *s, MType t)
 {
-	bool is8 = t == MT_I64 || t == MT_PTR || t == MT_F64;
-	int32_t u;
-	if (is8)
-		u = s->slot8 += 2;
-	else
-		u = s->slot4 += 1;
-	if (s->slot4 > s->slot8)
-		s->slot8 = s->slot4;
-	return -u * 4;
+	(void)t;
+	s->slot8 += 2;
+	return -s->slot8 * 4;
 }
 
 int32_t
@@ -182,19 +220,23 @@ intv_cmp_start(const void *a, const void *b)
 	return x->v->id < y->v->id ? -1 : 1;
 }
 
-/* Build the caller-saved (px) and callee-saved (pc) pools per class. */
+/* Build the caller-saved (px) and callee-saved (pc) pools per class.
+ * Excludes rglob (frame regs), reserved and scratch (emitter temps). */
 static void
 mreg_pool_build(const MTargetM *mt, MRegPool *pc, MRegPool *px)
 {
+	uint64_t no = mt->rglob | mt->reserved | mt->scratch;
 	for (int r = mt->gpr0; r < mt->gpr0 + mt->ngpr; r++) {
-		if ((mt->rglob >> r) & 1)
-			continue;   /* rbp/rsp */
+		if ((no >> r) & 1)
+			continue;
 		if (mt->regs[r].callee_saved)
 			pc[0].regs[pc[0].nreg++] = r;
 		else
 			px[0].regs[px[0].nreg++] = r;
 	}
 	for (int r = mt->fpr0; r < mt->fpr0 + mt->nfpr; r++) {
+		if ((no >> r) & 1)
+			continue;
 		if (mt->regs[r].callee_saved)
 			pc[1].regs[pc[1].nreg++] = r;
 		else
@@ -287,6 +329,7 @@ mreg_scan(MFnM *fm, MRegCtx *ctx)
 			/* phi-edge destinations stay in slots (parallel-move safety) */
 			if (chosen >= 0 && !iv->phislot && nact < 256) {
 				iv->reg = chosen;
+				fm->regsused |= 1ull << chosen;   /* remember for prologue */
 				busy[chosen] = true;
 				act[nact].end = e;
 				act[nact].reg = chosen;
@@ -302,10 +345,19 @@ mreg_scan(MFnM *fm, MRegCtx *ctx)
 		for (uint32_t i = 0; i < ncand; i++)
 			if (cand[i].reg >= 0)
 				cand[i].v->reg = cand[i].reg;
-		for (uint32_t r = 0; r < 64; r++)
-			if (busy[r])
-				fm->regsused |= 1ull << r;
-		fm->slot = mreg_slot_total(&slots);
+
+		/* Shift spill slots below the callee-saved save area so the
+		 * emitter's prologue pushes do not overlap them. */
+		int savesz = 0;
+		for (int r = mt->gpr0; r < mt->gpr0 + mt->ngpr; r++)
+			if (mt->regs[r].callee_saved && ((fm->regsused >> r) & 1))
+				savesz += 8;
+		if (savesz)
+			for (uint32_t i = 0; i < ctx->nval; i++)
+				if (ctx->intv[i].v && ctx->intv[i].v->slot != -1)
+					ctx->intv[i].v->slot -= savesz;
+
+		fm->slot = mreg_slot_total(&slots) + savesz;
 		free(cand);
 	}
 	for (uint32_t r = 0; r < 64; r++)
@@ -321,6 +373,7 @@ mfnm_regalloc(MFnM *fm)
 	ctx.nblk = fm->nblk;
 	ctx.nval = fm->host ? fm->host->nval : 0;
 	ctx.intv = calloc(ctx.nval ? ctx.nval : 1, sizeof *ctx.intv);
+	ctx.blkbase = calloc(ctx.nblk ? ctx.nblk : 1, sizeof *ctx.blkbase);
 	for (uint32_t i = 0; i < ctx.nval; i++) {
 		MVal *v = fm->host->val[i];
 		if (v && v->kind == MV_TEMP) {
@@ -331,6 +384,7 @@ mfnm_regalloc(MFnM *fm)
 
 	mreg_pos(fm, &ctx);
 	mreg_intervals(fm, &ctx);
+	mreg_loop_extend(fm, &ctx);
 	mreg_scan(fm, &ctx);
 
 	if (getenv("MCC_DEBUG_MBE")) {
@@ -345,5 +399,6 @@ mfnm_regalloc(MFnM *fm)
 	}
 
 	free(ctx.order);
+	free(ctx.blkbase);
 	free(ctx.intv);
 }

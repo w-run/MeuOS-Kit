@@ -426,6 +426,7 @@ typedef struct MTargetM {
 	uint16_t fpr0, nfpr;       /* FPR range (may be empty, e.g. i386 x87) */
 	uint64_t rglob;            /* registers never allocated (SP/FP/...), bitmask */
 	uint64_t reserved;         /* implicit scratch registers, bitmask */
+	uint64_t scratch;          /* emitter temporaries excluded from regalloc, bitmask */
 	/* ABI */
 	const int *argreg;         /* argument registers in ABI order, -1 end */
 	const int *rsave;          /* caller-saved registers, -1 end */

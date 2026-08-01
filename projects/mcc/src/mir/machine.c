@@ -100,6 +100,13 @@ const MTargetM mtarget_x86_64 = {
 	.kl_in_reg = true,
 	.feat = MTF_SCALE_INDEX,
 	.abi = mfnm_abi_x86_64,
+	/* emitter temporaries: rax (accumulator), rcx (divisor/shift), rdx
+	 * (division remainder), r9 (large immediates), r10/r11 (addressing),
+	 * xmm0 (float accumulator) — never handed to the allocator. */
+	.scratch = (1ull << X64MREG_RAX) | (1ull << X64MREG_RCX) |
+	           (1ull << X64MREG_RDX) | (1ull << X64MREG_R9) |
+	           (1ull << X64MREG_R10) | (1ull << X64MREG_R11) |
+	           (1ull << X64MREG_XMM0),
 };
 
 const char *

@@ -557,6 +557,7 @@ mabi_block(MFnM *fm, MBlkM *b, uint32_t start, MOut *o)
 		o->ins[o->nins - 1].cst = in->cst;
 		o->ins[o->nins - 1].cc = in->cc;
 		o->ins[o->nins - 1].td = in->td;
+		o->ins[o->nins - 1].extra = in->extra;   /* phi-edge marker */
 	}
 	free(args);
 

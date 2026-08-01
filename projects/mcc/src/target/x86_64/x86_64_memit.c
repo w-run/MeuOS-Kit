@@ -52,40 +52,66 @@ cc_suffix(MCC cc)
 	}
 }
 
+static const MTargetM *g_mt;
+static int g_alloca_cur;   /* frame-relative cursor for static allocas */
+
+static int
+alloca_size(MMOP op)
+{
+	switch (op) {
+	case MMOP_ALLOCA4:  return 4;
+	case MMOP_ALLOCA8:  return 8;
+	default:            return 16;
+	}
+}
+
+/* total bytes reserved for static allocas */
+static int
+alloca_total(MFnM *fm)
+{
+	int t = 0;
+	for (MBlkM *b = fm->link; b; b = b->link)
+		for (uint32_t i = 0; i < b->nins; i++) {
+			MMOP op = b->ins[i].op;
+			if (op == MMOP_ALLOCA4 || op == MMOP_ALLOCA8 ||
+			    op == MMOP_ALLOCA16)
+				t += alloca_size(op);
+		}
+	return t;
+}
+
 /* ---- stack slot assignment ---------------------------------------------- */
 
-/* Assign an 8-byte stack slot to every virtual value (MV_TEMP) used by the
- * function.  Returns the frame size. */
+/* Regalloc assigns MVal.reg (physical) or MVal.slot (spill); this pass
+ * only backstops values the allocator missed (defensive; normally none),
+ * below the callee-saved save area.  Returns the extra frame bytes. */
 static int
-assign_slots(MFnM *fm)
+assign_extra_slots(MFnM *fm)
 {
-	int off = 0;
+	int savesz = 0;
+	for (int i = 0; g_mt->rclob && g_mt->rclob[i] >= 0; i++)
+		if ((fm->regsused >> g_mt->rclob[i]) & 1)
+			savesz += 8;
+	int off = savesz;
+	MVal *ops[8];
 	for (MBlkM *b = fm->link; b; b = b->link) {
 		for (uint32_t i = 0; i < b->nins; i++) {
 			MInsM *in = &b->ins[i];
-			MVal *ops[6] = { in->dst, in->src[0], in->src[1], in->src[2],
-			                 in->addr.base, in->addr.index };
-			for (int k = 0; k < 6; k++) {
+			ops[0] = in->dst; ops[1] = in->src[0]; ops[2] = in->src[1];
+			ops[3] = in->src[2]; ops[4] = in->addr.base;
+			ops[5] = in->addr.index;
+			ops[6] = b->term.src[0]; ops[7] = b->term.addr.base;
+			for (int k = 0; k < 8; k++) {
 				MVal *v = ops[k];
-				if (v && v->kind == MV_TEMP && v->slot == -1) {
+				if (v && v->kind == MV_TEMP && v->reg < 0 &&
+				    v->slot == -1) {
 					off -= 8;
-					v->slot = off;
+					v->slot = -off;
 				}
 			}
 		}
-		if (b->term.src[0] && b->term.src[0]->kind == MV_TEMP &&
-		    b->term.src[0]->slot == -1) {
-			off -= 8;
-			b->term.src[0]->slot = off;
-		}
-		if (b->term.addr.base && b->term.addr.base->kind == MV_TEMP &&
-		    b->term.addr.base->slot == -1) {
-			off -= 8;
-			b->term.addr.base->slot = off;
-		}
 	}
-	fm->slot = -off;
-	return fm->slot;
+	return off - savesz;
 }
 
 /* ---- float constant pool (per emitted function) -------------------------- */
@@ -168,7 +194,10 @@ emit_mval(FILE *f, MVal *v)
 		fprintf(f, "%%%s", v->name ? v->name : "rax");
 		break;
 	case MV_TEMP:
-		fprintf(f, "%d(%%rbp)", v->slot);
+		if (v->reg >= 0)
+			fprintf(f, "%%%s", mreg_name(g_mt, v->reg));
+		else
+			fprintf(f, "%d(%%rbp)", v->slot);
 		break;
 	case MV_GLOBAL:
 		fprintf(f, "%s(%%rip)", v->sym ? v->sym : "0");
@@ -378,19 +407,17 @@ emit_ins(FILE *f, MInsM *in)
 			rax_to_dst(f, d);
 			return;
 		}
+		/* load the value into %rax first, then extend from its low bits
+		 * (movz/movs need byte/word/32-bit register or memory sources) */
+		mov_to_rax(f, s0, 0);
 		if (st == MT_I8)
-			fputs(zx ? "\tmovzbq\t" : "\tmovsbq\t", f);
+			fputs(zx ? "\tmovzbq\t%al, %rax\n" : "\tmovsbq\t%al, %rax\n", f);
 		else if (st == MT_I16)
-			fputs(zx ? "\tmovzwq\t" : "\tmovswq\t", f);
+			fputs(zx ? "\tmovzwq\t%ax, %rax\n" : "\tmovswq\t%ax, %rax\n", f);
 		else if (!zx)
-			fputs("\tmovslq\t", f);
+			fputs("\tmovslq\t%eax, %rax\n", f);
 		else
-			fputs("\tmovl\t", f);   /* i32 zero-extend */
-		emit_mval(f, s0);
-		if (st == MT_I32 && zx)
-			fputs(", %eax\n", f);
-		else
-			fputs(", %rax\n", f);
+			fputs("\tmovl\t%eax, %eax\n", f);   /* i32 zero-extend */
 		rax_to_dst(f, d);
 		return;
 	}
@@ -463,14 +490,12 @@ emit_ins(FILE *f, MInsM *in)
 		bool is32 = in->dtype == MT_I32;
 		bool isf = in->op == MMOP_UDIV || in->op == MMOP_UREM;
 		/* dividend into rax: sign/zero extend to 64 bits */
-		if (is32 && isf) {
-			fputs("\tmovl\t", f);
-			emit_mval(f, s0);
-			fputs(", %eax\n", f);
-		} else if (is32) {
-			fputs("\tmovslq\t", f);
-			emit_mval(f, s0);
-			fputs(", %rax\n", f);
+		if (is32) {
+			mov_to_rax(f, s0, 0);
+			if (isf)
+				fputs("\tmovl\t%eax, %eax\n", f);   /* zero-extend */
+			else
+				fputs("\tmovslq\t%eax, %rax\n", f);  /* sign-extend */
 		} else {
 			mov_to_rax(f, s0, 0);
 		}
@@ -596,10 +621,10 @@ emit_ins(FILE *f, MInsM *in)
 	case MMOP_ALLOCA4:
 	case MMOP_ALLOCA8:
 	case MMOP_ALLOCA16: {
-		/* static alloca: use a frame slot offset; sizes are dynamic in
-		 * general, so fall back to a sub from %rsp tracked via %rax */
-		fputs("\tsubq\t$16, %rsp\n", f);
-		fputs("\tmovq\t%rsp, %rax\n", f);
+		/* static alloca: address a reserved frame slot below the spill
+		 * area (never touch %rsp: it must stay balanced at calls) */
+		g_alloca_cur -= alloca_size(in->op);
+		fprintf(f, "\tleaq\t%d(%%rbp), %%rax\n", g_alloca_cur);
 		rax_to_dst(f, d);
 		return;
 	}
@@ -701,16 +726,26 @@ emit_ins(FILE *f, MInsM *in)
 void
 mfnm_emit_x86_64(MFnM *fm, FILE *f)
 {
-	int framesize = assign_slots(fm);
+	g_mt = fm->mt;
+	int extra = assign_extra_slots(fm);
 	nfp = 0;   /* fresh float pool per function */
+	g_alloca_cur = -(fm->slot + extra);   /* allocas go below spill slots */
+
+	int framesize = (fm->slot + extra + alloca_total(fm) + 15) & ~15;
 
 	fprintf(f, ".text\n");
 	if (fm->name)
 		fprintf(f, ".globl %s\n%s:\n", fm->name, fm->name);
 	fputs("\tpushq\t%rbp\n", f);
 	fputs("\tmovq\t%rsp, %rbp\n", f);
+	/* save callee-saved registers used by the allocator */
+	for (int i = 0; fm->mt->rclob && fm->mt->rclob[i] >= 0; i++) {
+		int r = fm->mt->rclob[i];
+		if ((fm->regsused >> r) & 1)
+			fprintf(f, "\tpushq\t%%%s\n", mreg_name(fm->mt, r));
+	}
 	if (framesize > 0)
-		fprintf(f, "\tsubq\t$%d, %%rsp\n", (framesize + 15) & ~15);
+		fprintf(f, "\tsubq\t$%d, %%rsp\n", framesize);
 	/* blocks are emitted in link order (reversed); jump to the real entry */
 	if (fm->start)
 		fprintf(f, "\tjmp\t.L%s.bb%u\n", fm->name ? fm->name : "f",
@@ -735,7 +770,20 @@ mfnm_emit_x86_64(MFnM *fm, FILE *f)
 			        b->s2 ? b->s2->id : 0);
 			break;
 		case MMOP_RET:
-			fputs("\tleave\n\tret\n", f);
+			if (framesize > 0)
+				fprintf(f, "\taddq\t$%d, %%rsp\n", framesize);
+			/* restore callee-saved registers in reverse push order */
+			{
+				int used[16], n = 0;
+				for (int i = 0; fm->mt->rclob && fm->mt->rclob[i] >= 0 &&
+				     n < 16; i++)
+					if ((fm->regsused >> fm->mt->rclob[i]) & 1)
+						used[n++] = fm->mt->rclob[i];
+				while (n > 0)
+					fprintf(f, "\tpopq\t%%%s\n",
+					        mreg_name(fm->mt, used[--n]));
+			}
+			fputs("\tpopq\t%rbp\n\tret\n", f);
 			break;
 		default:
 			break;
