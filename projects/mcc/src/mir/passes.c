@@ -358,8 +358,11 @@ msimp_block(MFn *fn, MBlk *b)
 				if (mfold_const(&cr, in->op, w, cl, z) == 0)
 					folded = true;
 			} else {
-				if (!cright)
-					cright = mconst_int(fn, in->dtype, 0);
+				/* Both operands must be constant to fold.  Treating a
+				 * missing right operand as 0 would wrongly collapse
+				 * e.g. `or c, load` into `or c, 0 = c`, dropping a
+				 * memory read (bitfield stores broke exactly this
+				 * way). */
 				if (cright && mfold_const(&cr, in->op, w, cl, cright) == 0)
 					folded = true;
 			}

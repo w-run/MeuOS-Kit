@@ -121,10 +121,11 @@ mcc_main(int argc, char *argv[])
 	char *depfile = NULL;
 	int i;
 
-	/* B.4.2 MIR-first switch: MCC_USE_MIR=1 routes compilation through
-	 * the new MIR layer (frontend tree -> MFn -> MIR passes -> LIR). */
+	/* B.4.2 MIR-first: compilation now routes through the MIR layer by
+	 * default (frontend tree -> MFn -> MIR passes -> bridge -> LIR).
+	 * MCC_USE_MIR=0 reverts to the legacy direct-LIR path. */
 	extern int g_use_mir;
-	g_use_mir = getenv("MCC_USE_MIR") ? atoi(getenv("MCC_USE_MIR")) : 0;
+	g_use_mir = getenv("MCC_USE_MIR") ? atoi(getenv("MCC_USE_MIR")) : 1;
 
 	/* Language: 0 = C (default for mcc), 1 = C++ (default for m++).
 	 * The m++ driver sets g_lang=1 before calling mcc_main; file suffix
