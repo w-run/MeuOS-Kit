@@ -667,7 +667,14 @@ static int is_builtin(const char *name) {
         || !strcmp(name, "trap") || !strcmp(name, "source")
         || !strcmp(name, ".") || !strcmp(name, "msh")
         || !strcmp(name, "[[")
-        || !strcmp(name, "complete") || !strcmp(name, "compgen");
+        || !strcmp(name, "complete") || !strcmp(name, "compgen")
+        || !strcmp(name, "shift") || !strcmp(name, "return")
+        || !strcmp(name, "break") || !strcmp(name, "continue")
+        || !strcmp(name, "alias") || !strcmp(name, "unalias")
+        || !strcmp(name, "local") || !strcmp(name, "getopts")
+        || !strcmp(name, "umask") || !strcmp(name, "hash")
+        || !strcmp(name, "let") || !strcmp(name, "declare")
+        || !strcmp(name, "typeset");
 }
 
 int msh_run_builtin(ast_t *ast, int argc, char **argv) {
@@ -910,6 +917,134 @@ int msh_run_builtin(ast_t *ast, int argc, char **argv) {
         int rc = msh_builtin_compgen(argc, argv);
         msh_last_status = rc;
         return rc;
+    }
+    /* === 循环控制 === */
+    if (!strcmp(name, "break")) {
+        int n = argc > 1 ? atoi(argv[1]) : 1;
+        msh_break_flag = n;
+        return 0;
+    }
+    if (!strcmp(name, "continue")) {
+        int n = argc > 1 ? atoi(argv[1]) : 1;
+        msh_continue_flag = n;
+        return 0;
+    }
+    if (!strcmp(name, "return")) {
+        int rc = argc > 1 ? atoi(argv[1]) : msh_last_status;
+        msh_return_flag = 1;
+        msh_return_value = rc;
+        return rc;
+    }
+    /* === shift === */
+    if (!strcmp(name, "shift")) {
+        int n = argc > 1 ? atoi(argv[1]) : 1;
+        /* 获取 $# */
+        const char *cnt = getenv("#");
+        int total = cnt ? atoi(cnt) : 0;
+        if (n > total) { fprintf(stderr, "msh: shift: %d: shift count out of range\n", n); return 1; }
+        /* 移动 $1..$(total-n) = $(n+1)..$total */
+        for (int i = 1; i <= total - n; i++) {
+            char vn_old[16], vn_new[16];
+            snprintf(vn_new, sizeof(vn_new), "%d", i);
+            snprintf(vn_old, sizeof(vn_old), "%d", i + n);
+            const char *v = getenv(vn_old);
+            if (v) setenv(vn_new, v, 1);
+            else unsetenv(vn_new);
+        }
+        /* 清除尾部 */
+        for (int i = total - n + 1; i <= total; i++) {
+            char vn[16];
+            snprintf(vn, sizeof(vn), "%d", i);
+            unsetenv(vn);
+        }
+        /* 更新 $# */
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%d", total - n);
+        setenv("#", buf, 1);
+        return 0;
+    }
+    /* === alias / unalias === */
+    if (!strcmp(name, "alias")) {
+        if (argc == 1) { msh_alias_list(); return 0; }
+        int rc = 0;
+        for (int i = 1; i < argc; i++) {
+            char *eq = strchr(argv[i], '=');
+            if (eq) {
+                *eq = '\0';
+                msh_alias_add(argv[i], eq + 1);
+                *eq = '=';
+            } else {
+                const char *v = msh_alias_lookup(argv[i]);
+                if (v) printf("alias %s='%s'\n", argv[i], v);
+                else { fprintf(stderr, "msh: alias: %s: not found\n", argv[i]); rc = 1; }
+            }
+        }
+        return rc;
+    }
+    if (!strcmp(name, "unalias")) {
+        for (int i = 1; i < argc; i++)
+            msh_alias_remove(argv[i]);
+        return 0;
+    }
+    /* === local (简化：等同普通赋值) === */
+    if (!strcmp(name, "local") || !strcmp(name, "declare") || !strcmp(name, "typeset")) {
+        for (int i = 1; i < argc; i++) {
+            char *eq = strchr(argv[i], '=');
+            if (eq) {
+                *eq = '\0';
+                setenv(argv[i], eq + 1, 1);
+                *eq = '=';
+            }
+        }
+        return 0;
+    }
+    /* === getopts === */
+    if (!strcmp(name, "getopts")) {
+        return msh_builtin_getopts(argc, argv);
+    }
+    /* === umask === */
+    if (!strcmp(name, "umask")) {
+        if (argc == 1) {
+            mode_t old = umask(0);
+            umask(old);
+            printf("%03o\n", (unsigned)old);
+            return 0;
+        }
+        /* 解析八进制或符号 */
+        char *end;
+        long m = strtol(argv[1], &end, 8);
+        if (*end == '\0') {
+            umask((mode_t)m);
+        } else {
+            /* 符号模式简化：直接用数字 */
+            fprintf(stderr, "msh: umask: %s: invalid mask\n", argv[1]);
+            return 1;
+        }
+        return 0;
+    }
+    /* === hash === */
+    if (!strcmp(name, "hash")) {
+        /* 简化：无命令哈希缓存，仅打印 "hash table is empty" */
+        if (argc > 1 && !strcmp(argv[1], "-r")) return 0;  /* -r: 清除 */
+        printf("hash commands table is empty\n");
+        return 0;
+    }
+    /* === let === */
+    if (!strcmp(name, "let")) {
+        /* 简化：将参数拼接后求值 */
+        char expr[1024] = "";
+        for (int i = 1; i < argc; i++) {
+            if (i > 1) strncat(expr, " ", sizeof(expr) - strlen(expr) - 1);
+            strncat(expr, argv[i], sizeof(expr) - strlen(expr) - 1);
+        }
+        /* 简化求值：仅支持整数运算 */
+        long result = 0;
+        char *p = expr;
+        /* 非常简化的表达式解析：a op b */
+        /* TODO: 调用 expr 工具或实现完整的算术求值 */
+        (void)p; (void)result;
+        msh_last_status = (result != 0) ? 0 : 1;
+        return msh_last_status;
     }
     (void)ast;
     return 0;
@@ -1359,6 +1494,8 @@ int msh_eval(ast_t *ast) {
     }
     if (ast->type == AST_LIST) {
         int rc = msh_eval(ast->left);
+        /* 检查控制流标志：return/break/continue 后不执行后续命令 */
+        if (msh_return_flag || msh_break_flag || msh_continue_flag) return rc;
         int proceed = 1;
         int saved = msh_in_cond; msh_in_cond = 1;
         if (ast->list_op == TOK_AND && rc != 0) proceed = 0;
@@ -1378,43 +1515,66 @@ int msh_eval(ast_t *ast) {
     if (ast->type == AST_WHILE) {
         int rc = 0;
         int saved = msh_in_cond; msh_in_cond = 1;
+        msh_loop_depth++;
         while (msh_eval(ast->cond) == 0) {
             msh_in_cond = saved;
+            if (msh_return_flag) break;
             rc = msh_eval(ast->body);
-            if (msh_last_status == 256 + SIGINT) break;  /* Ctrl-C 退出循环（简化） */
+            msh_in_cond = saved;
+            if (msh_return_flag) break;
+            if (msh_break_flag) { msh_break_flag--; break; }
+            if (msh_continue_flag) { msh_continue_flag--; continue; }
+            if (msh_last_status == 256 + SIGINT) break;
         }
+        msh_loop_depth--;
         return rc;
     }
     if (ast->type == AST_UNTIL) {
         int rc = 0;
         int saved = msh_in_cond; msh_in_cond = 1;
+        msh_loop_depth++;
         while (msh_eval(ast->cond) != 0) {
             msh_in_cond = saved;
+            if (msh_return_flag) break;
             rc = msh_eval(ast->body);
+            msh_in_cond = saved;
+            if (msh_return_flag) break;
+            if (msh_break_flag) { msh_break_flag--; break; }
+            if (msh_continue_flag) { msh_continue_flag--; continue; }
         }
+        msh_loop_depth--;
         return rc;
     }
     if (ast->type == AST_FOR) {
         int rc = 0;
         char varname[64];
         snprintf(varname, sizeof(varname), "%s", ast->str_val ? ast->str_val : "i");
-        /* 若有 in wordlist 用之；否则遍历 $1..（简化为空） */
+        msh_loop_depth++;
         if (ast->npatterns > 0) {
             for (int i = 0; i < ast->npatterns; i++) {
                 setenv(varname, ast->patterns[i], 1);
+                if (msh_return_flag) break;
                 rc = msh_eval(ast->body);
+                if (msh_return_flag) break;
+                if (msh_break_flag) { msh_break_flag--; break; }
+                if (msh_continue_flag) { msh_continue_flag--; continue; }
             }
         } else {
-            /* 无 in：遍历 $@ = $1..$# */
             const char *cnt = getenv("#");
             int n = cnt ? atoi(cnt) : 0;
             for (int i = 1; i <= n; i++) {
                 char vn[16];
                 snprintf(vn, sizeof(vn), "%d", i);
                 const char *v = getenv(vn);
-                if (v) { setenv(varname, v, 1); rc = msh_eval(ast->body); }
+                if (v) { setenv(varname, v, 1); }
+                if (msh_return_flag) break;
+                if (v) { rc = msh_eval(ast->body); }
+                if (msh_return_flag) break;
+                if (msh_break_flag) { msh_break_flag--; break; }
+                if (msh_continue_flag) { msh_continue_flag--; continue; }
             }
         }
+        msh_loop_depth--;
         return rc;
     }
     if (ast->type == AST_FUNC) {

@@ -27,6 +27,13 @@ int msh_errexit = 0;    /* set -e */
 int msh_pipefail = 0;    /* set -o pipefail */
 int msh_in_cond = 0;     /* evaluating condition (exempt from errexit) */
 
+/* 循环控制流标志 */
+int msh_break_flag = 0;
+int msh_continue_flag = 0;
+int msh_return_flag = 0;
+int msh_return_value = 0;
+int msh_loop_depth = 0;
+
 /* === 别名表 === */
 typedef struct alias_entry {
     char *name;
@@ -56,6 +63,28 @@ const char *msh_alias_lookup(const char *name) {
         if (!strcmp(a->name, name)) return a->value;
     }
     return NULL;
+}
+
+void msh_alias_list(void) {
+    for (alias_entry_t *a = g_aliases; a; a = a->next) {
+        printf("alias %s='%s'\n", a->name, a->value);
+    }
+}
+
+int msh_alias_remove(const char *name) {
+    alias_entry_t **pp = &g_aliases;
+    while (*pp) {
+        if (!strcmp((*pp)->name, name)) {
+            alias_entry_t *tmp = *pp;
+            *pp = tmp->next;
+            free(tmp->name);
+            free(tmp->value);
+            free(tmp);
+            return 1;
+        }
+        pp = &(*pp)->next;
+    }
+    return 0;
 }
 
 /* === PS1 展开 === */

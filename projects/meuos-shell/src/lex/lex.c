@@ -335,6 +335,72 @@ int msh_lex_next(lexer_t *lx, char **out_text) {
                 lx->in_word = 1;
                 continue;
             }
+            /* $'...' ANSI-C quoting：处理转义序列，输出实际字符 */
+            if (next_c == '\'') {
+                next(lx);  /* 消费 ' */
+                int ch;
+                while ((ch = next(lx)) != -1 && ch != '\'') {
+                    if (ch == '\\') {
+                        int esc = next(lx);
+                        switch (esc) {
+                        case 'n': word_append(lx, '\n'); break;
+                        case 't': word_append(lx, '\t'); break;
+                        case 'r': word_append(lx, '\r'); break;
+                        case '\\': word_append(lx, '\\'); break;
+                        case '\'': word_append(lx, '\''); break;
+                        case '"': word_append(lx, '"'); break;
+                        case 'a': word_append(lx, '\a'); break;
+                        case 'b': word_append(lx, '\b'); break;
+                        case 'f': word_append(lx, '\f'); break;
+                        case 'v': word_append(lx, '\v'); break;
+                        case '0': case '1': case '2': case '3':
+                        case '4': case '5': case '6': case '7': {
+                            int val = esc - '0';
+                            int d2 = peek(lx);
+                            if (d2 >= '0' && d2 <= '7') {
+                                val = val * 8 + (d2 - '0');
+                                next(lx);
+                                int d3 = peek(lx);
+                                if (d3 >= '0' && d3 <= '7') {
+                                    val = val * 8 + (d3 - '0');
+                                    next(lx);
+                                }
+                            }
+                            word_append(lx, (char)val);
+                            break;
+                        }
+                        case 'x': {
+                            int val = 0;
+                            int hx = peek(lx);
+                            for (int k = 0; k < 2 && hx != -1; k++) {
+                                int dv = -1;
+                                if (hx >= '0' && hx <= '9') dv = hx - '0';
+                                else if (hx >= 'a' && hx <= 'f') dv = hx - 'a' + 10;
+                                else if (hx >= 'A' && hx <= 'F') dv = hx - 'A' + 10;
+                                if (dv < 0) break;
+                                val = val * 16 + dv;
+                                next(lx);
+                                hx = peek(lx);
+                            }
+                            word_append(lx, (char)val);
+                            break;
+                        }
+                        case 'e': word_append(lx, '\033'); break;
+                        case -1: break;
+                        default: word_append(lx, (char)esc); break;
+                        }
+                    } else {
+                        word_append(lx, (char)ch);
+                    }
+                }
+                if (ch != '\'') {
+                    fprintf(stderr, "msh: unterminated $'...' near line %d\n", lx->lineno);
+                    return TOK_EOF;
+                }
+                lx->in_word = 1;
+                lx->was_quoted = 2;
+                continue;
+            }
             /* 普通 $VAR / $? / $1 等：原样保留 $ 与后续字符，让 expand 期处理 */
             word_append(lx, '$');
             lx->in_word = 1;
