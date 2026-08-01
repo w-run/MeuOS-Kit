@@ -168,6 +168,7 @@ structdecl(struct scope *s, struct structbuilder *b)
 	char *name;
 	unsigned long long width;
 	int align;
+	enum storageclass sc;
 
 	if (staticassert(s))
 		return;
@@ -203,15 +204,15 @@ structdecl(struct scope *s, struct structbuilder *b)
 			width = -1;
 			{
 				extern void cpp_define_method(struct scope *,
-				    struct type *, const char *, const char *, bool);
-				cpp_define_method(s, ct, "dtor", tag, false);
+				    struct type *, const char *, const char *, bool, bool);
+				cpp_define_method(s, ct, "dtor", tag, false, false);
 			}
 			addmember(b, mt, name, align, width);
 			return;
 		}
 		error(&tok.loc, "expected class name after '~'");
 	}
-	base = declspecs(s, NULL, NULL, &align);
+	base = declspecs(s, &sc, NULL, &align);
 	if (!base.type)
 		error(&tok.loc, "no type in struct member declaration");
 	/* C++ constructor: `ClassName(...) { ... }`.  declspecs parsed the
@@ -253,8 +254,8 @@ structdecl(struct scope *s, struct structbuilder *b)
 		width = -1;
 		{
 			extern void cpp_define_method(struct scope *,
-			    struct type *, const char *, const char *, bool);
-			cpp_define_method(s, ct, tag, tag, false);
+			    struct type *, const char *, const char *, bool, bool);
+			cpp_define_method(s, ct, tag, tag, false, false);
 		}
 		addmember(b, mt, name, align, width);
 		return;
@@ -266,7 +267,7 @@ structdecl(struct scope *s, struct structbuilder *b)
 	if (g_lang == 1 && cpp_tok_kind() == CPP_TOPERATOR) {
 		extern const char *cpp_op_mangle(enum tokenkind);
 		extern void cpp_define_method(struct scope *, struct type *,
-		    const char *, const char *, bool);
+		    const char *, const char *, bool, bool);
 		const char *opcode;
 		struct type *ft;
 		struct decl *pd, **pend;
@@ -305,7 +306,8 @@ structdecl(struct scope *s, struct structbuilder *b)
 		}
 		mname = xmalloc(strlen(opcode) + 10);
 		sprintf(mname, "operator_%s", opcode);
-		cpp_define_method(s, ft, mname, b->type->u.structunion.tag, is_const);
+		cpp_define_method(s, ft, mname, b->type->u.structunion.tag,
+		                  is_const, false);
 		addmember(b, (struct qualtype){ft, QUALNONE, NULL}, mname, 0, -1);
 		return;
 	}
@@ -331,16 +333,17 @@ structdecl(struct scope *s, struct structbuilder *b)
 			extern int g_lang;
 			if (g_lang == 1 && mt.type->kind == TYPEFUNC) {
 				extern void cpp_define_method(struct scope *,
-				    struct type *, const char *, const char *, bool);
+				    struct type *, const char *, const char *, bool, bool);
 				/* const member function: `void get() const {...}` */
 				bool is_const = false;
 				if (tok.kind == TCONST) {
 					is_const = true;
 					next();
 				}
+				bool is_static = (sc & SCSTATIC) != 0;
 				/* class tag for name mangling (Class_method) */
 				cpp_define_method(s, mt.type, name,
-				    b->type->u.structunion.tag, is_const);
+				    b->type->u.structunion.tag, is_const, is_static);
 				/* register the function member for call lowering */
 				addmember(b, mt, name, align, width);
 				/* leave the following token (class-body '}' or next

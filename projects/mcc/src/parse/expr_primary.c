@@ -161,6 +161,83 @@ primaryexpr(struct scope *s)
 							if (e)
 								break;
 							tok = saved;
+						} else if (tok.kind == TCOLONCOLON) {
+							/* `Class::static_method(args)` — no this */
+							extern void cpp_mangled_name_args(
+							    struct type *, const char *,
+							    struct expr *, char *, size_t);
+							next(); /* consume '::' */
+							if (tok.kind < TIDENT)
+								error(&tok.loc,
+								    "expected member name after '::'");
+							{
+								const char *m = tokenstr(tok.kind);
+								struct expr *args = NULL, **ae = &args;
+								char mname[256], mangled[288];
+								struct decl *sfd;
+								next(); /* consume member name */
+								if (tok.kind == TLPAREN) {
+									next(); /* consume '(' */
+									while (tok.kind != TRPAREN) {
+										if (args)
+											expect(TCOMMA,
+											    "or ')' after static call argument");
+										*ae = assignexpr(s);
+										ae = &(*ae)->next;
+									}
+									next(); /* consume ')' */
+								}
+								cpp_mangled_name_args(ct, m, args,
+								    mname, sizeof mname);
+								snprintf(mangled, sizeof mangled,
+								    "%sS", mname);
+								sfd = scopegetdecl(
+								    ct->scope ? ct->scope : s,
+								    mangled, 1);
+								if (sfd && sfd->kind == DECLFUNC) {
+									extern struct expr *decay(
+									    struct expr *);
+									extern struct expr *exprassign(
+									    struct expr *, struct type *);
+									struct expr *fn, *call, *a, **end;
+									struct decl *pp;
+									fn = mkexpr(EXPRIDENT,
+									    sfd->type, NULL);
+									fn->u.ident.decl = sfd;
+									fn = decay(fn);
+									call = mkexpr(EXPRCALL,
+									    sfd->type->base, fn);
+									call->u.call.args = NULL;
+									call->u.call.nargs = 0;
+									end = &call->u.call.args;
+									pp = sfd->type->u.func.params;
+									for (a = args; a; a = a->next) {
+										if (!pp && !sfd->type->u.func.isvararg)
+											error(&tok.loc,
+											    "too many arguments for function call");
+										if (sfd->type->u.func.isvararg && !pp)
+											*end = exprpromote(a);
+										else
+											*end = exprassign(a,
+											    pp->type);
+										end = &(*end)->next;
+										++call->u.call.nargs;
+										if (pp)
+											pp = pp->next;
+									}
+									if (pp && !sfd->type->u.func.isvararg)
+										error(&tok.loc,
+										    "not enough arguments for function call");
+									e = call;
+									break;
+								}
+								/* not a static method: restore */
+							}
+							{
+								struct token cur = tok;
+								tokpush(&cur, 1);
+								tok = saved;
+							}
 						} else {
 							struct token cur = tok;
 							tokpush(&cur, 1);

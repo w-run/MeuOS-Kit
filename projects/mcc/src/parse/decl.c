@@ -290,7 +290,7 @@ decl(struct scope *s, struct func *f)
 			{
 				extern const char *cpp_take_qual_class(void);
 				extern void cpp_define_method(struct scope *,
-				    struct type *, const char *, const char *, bool);
+				    struct type *, const char *, const char *, bool, bool);
 				const char *qclass = cpp_take_qual_class();
 				if (qclass) {
 					const char *mname = name + strlen(qclass) + 1;
@@ -299,7 +299,8 @@ decl(struct scope *s, struct func *f)
 						mc = true;
 						next();
 					}
-					cpp_define_method(s, t, mname, qclass, mc);
+					cpp_define_method(s, t, mname, qclass, mc,
+					    (sc & SCSTATIC) != 0);
 					return true;
 				}
 			}

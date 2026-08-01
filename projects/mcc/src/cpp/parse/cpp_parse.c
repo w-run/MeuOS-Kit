@@ -76,7 +76,7 @@ cpp_pending_is_mine(int depth)
 }
 void cpp_define_method(struct scope *s, struct type *funct,
                               const char *mname, const char *class_tag,
-                              bool is_const);
+                              bool is_const, bool is_static);
 
 /* Method-body context: while parsing a member-function body, bare member
  * identifiers (`count`) lower to `(*this).count` via cpp_member_ident,
@@ -617,6 +617,7 @@ struct cpp_pending_method {
 	struct decl *thisd;      /* implicit this parameter decl */
 	struct decl *d;          /* mangled function decl */
 	struct scope *s;         /* class's declaration scope */
+	bool is_static;          /* static member: no `this` */
 	struct cpp_pending_method *next;
 };
 
@@ -644,9 +645,9 @@ cpp_parse_method_body(struct cpp_pending_method *pm)
 	for (nd = pm->mtype->u.func.params; nd; nd = nd->next)
 		scopeputdecl(fs, nd);
 
-	g_cpp_method.class_type = pm->classt;
-	g_cpp_method.this_decl = pm->thisd;
-	g_cpp_method.active = true;
+	g_cpp_method.class_type = pm->is_static ? NULL : pm->classt;
+	g_cpp_method.this_decl = pm->is_static ? NULL : pm->thisd;
+	g_cpp_method.active = !pm->is_static;
 
 	f = mkfunc(pm->d, pm->d->name, pm->d->type, fs);
 	/* constructor: run base-class constructors before the body */
@@ -670,7 +671,7 @@ cpp_parse_method_body(struct cpp_pending_method *pm)
 static void
 buffer_method_body(struct scope *s, struct type *classt, struct type *mtype,
                    struct decl *thisd, struct decl *d,
-                   const char *mname, const char *tag)
+                   const char *mname, const char *tag, bool is_static)
 {
 	struct cpp_pending_method *pm;
 	size_t cap = 0;
@@ -686,6 +687,7 @@ buffer_method_body(struct scope *s, struct type *classt, struct type *mtype,
 	pm->thisd = thisd;
 	pm->d = d;
 	pm->s = s;
+	pm->is_static = is_static;
 	pm->next = NULL;
 
 	do {
@@ -880,7 +882,7 @@ cpp_member_accessible(struct type *t, struct member *m)
  * member names resolve to `(*this).name` via cpp_member_ident. */
 void
 cpp_define_method(struct scope *s, struct type *funct, const char *mname,
-                  const char *class_tag, bool is_const)
+                  const char *class_tag, bool is_const, bool is_static)
 {
 	extern struct decl *mkdecl(char *, enum declkind, struct type *,
 	    enum typequal, enum linkage);
@@ -912,16 +914,21 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname,
 		cpp_mangle_type(cur->type, code, sizeof code);
 		strncat(mangled, code, sizeof mangled - strlen(mangled) - 1);
 	}
+	/* static members get a distinct mangled name (no `this`); the S goes
+	 * after the parameter encoding to match cpp_mangled_name_args + "S" */
+	if (is_static)
+		strncat(mangled, "S", sizeof mangled - strlen(mangled) - 1);
 	/* mkdecl/scopeputdecl keep the name pointer; persist it off the
 	 * stack (the C parser's token strings are stable, ours is not). */
 	pmangled = xmalloc(strlen(mangled) + 1);
 	strcpy(pmangled, mangled);
 
 	/* Build the mangled function type:
-	 * `Class_method(Class *this, args...) -> funct->base`.  The
-	 * declarator already parsed the explicit params into funct; we
-	 * copy those decls so funct (kept in the member list for call
-	 * lowering) and mtype don't share the same decl chain. */
+	 * `Class_method(Class *this, args...) -> funct->base` (or just
+	 * `Class_method(args...)` for a static member).  The declarator
+	 * already parsed the explicit params into funct; we copy those decls
+	 * so funct (kept in the member list for call lowering) and mtype
+	 * don't share the same decl chain. */
 	mtype = mktype(TYPEFUNC, 0);
 	mtype->base = funct->base;
 	mtype->qual = funct->qual;
@@ -930,13 +937,17 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname,
 	mtype->u.func.isvararg = funct->u.func.isvararg;
 	mtype->u.func.params = NULL;
 	mtype->u.func.nparam = 0;
-	thisd = mkdecl("this", DECLOBJECT,
-	               mkpointertype(classt, is_const ? QUALCONST : QUALNONE),
-	               QUALNONE, LINKNONE);
-	thisd->u.obj.storage = SDAUTO;
-	mtype->u.func.params = thisd;
-	end = &thisd->next;
-	++mtype->u.func.nparam;
+	thisd = NULL;
+	end = &mtype->u.func.params;
+	if (!is_static) {
+		thisd = mkdecl("this", DECLOBJECT,
+		               mkpointertype(classt, is_const ? QUALCONST : QUALNONE),
+		               QUALNONE, LINKNONE);
+		thisd->u.obj.storage = SDAUTO;
+		*end = thisd;
+		end = &thisd->next;
+		++mtype->u.func.nparam;
+	}
 	for (cur = funct->u.func.params; cur; cur = cur->next) {
 		nd = mkdecl(cur->name, DECLOBJECT, cur->type, cur->qual, LINKNONE);
 		nd->u.obj.storage = SDAUTO;
@@ -978,7 +989,8 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname,
 	 * yet, so buffer the body tokens and parse it after the class closes
 	 * (two-phase: method bodies may use members declared later). */
 	if (g_cpp_class_parsing) {
-		buffer_method_body(s, classt, mtype, thisd, d, mname, class_tag);
+		buffer_method_body(s, classt, mtype, thisd, d, mname, class_tag,
+		                   is_static);
 		return;
 	}
 	{
@@ -992,6 +1004,7 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname,
 		pm.thisd = thisd;
 		pm.d = d;
 		pm.s = s;
+		pm.is_static = is_static;
 		cpp_parse_method_body(&pm);
 	}
 }
