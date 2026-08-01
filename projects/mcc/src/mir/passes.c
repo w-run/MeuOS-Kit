@@ -457,6 +457,7 @@ msimp_block(MFn *fn, MBlk *b)
 				if (a1.con && a1.con->kind == MC_INT && a1.con->u.i > 0) {
 					uint64_t v = (uint64_t)a1.con->u.i;
 					if ((v & (v - 1)) == 0) {
+						uint64_t orig = v; /* keep the divisor for the rem mask */
 						/* portable ctzll (mcc has no __builtin_*) */
 						int n = 0;
 						while (!(v & 1)) {
@@ -478,8 +479,13 @@ msimp_block(MFn *fn, MBlk *b)
 							in->src[1] = sh;
 							a1 = sh;
 						} else {
-							/* rem by 2^n -> and (n-1), in place */
-							MRef msk = MREF_CON(mconst_int(fn, in->dtype, v - 1));
+							/* rem by 2^n -> and (n-1), in place.  v was
+							 * consumed by the ctz loop above (64 -> 1), so
+							 * build the mask from the original divisor:
+							 * `x % 64` must become `x & 63`, not `x & 0`
+							 * (which made BSet's bsiter clear only bit 0
+							 * and loop forever on any multi-bit set). */
+							MRef msk = MREF_CON(mconst_int(fn, in->dtype, orig - 1));
 							in->op = MOP_AND;
 							in->src[0] = a0;
 							in->src[1] = msk;

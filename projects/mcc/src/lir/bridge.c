@@ -119,9 +119,9 @@ valref(MFn *fn, MVal *v, Fn *lir)
 			return getcon(v->con->u.i, lir);
 		return CON_Z;
 	case MV_TYPE:
-		if (v->td)
-			return TYPE(v->td->id);
-		return R;
+		/* id carries the frontend/LIR typ[] index (set by func_to_mir),
+		 * which TYPE() indexes directly into fn->typ. */
+		return TYPE(v->id);
 	default:
 		return R;
 	}
@@ -269,8 +269,19 @@ lir_bridge(MFn *mfn)
 				MVal *p = mfn->param[k];
 				if (!p)
 					continue;
-				*curi++ = (Ins){.op = Opar, .cls = mir_to_cls(p->type),
-				                .to = valref(mfn, p, fn), .arg = {R, R}};
+				if (mfn->paramty && mfn->paramty[k] >= 0) {
+					/* aggregate parameter: Oparc lowers to a stack
+					 * copy the callee addresses by value.  arg[0]
+					 * carries TYPE(idx) (read by argsclass); the
+					 * param temp (a Kl pointer) is the stack pad. */
+					*curi++ = (Ins){.op = Oparc, .cls = Kl,
+					                .to = valref(mfn, p, fn),
+					                .arg = {TYPE(mfn->paramty[k]), R}};
+				} else {
+					*curi++ = (Ins){.op = Opar, .cls = mir_to_cls(p->type),
+					                .to = valref(mfn, p, fn),
+					                .arg = {R, R}};
+				}
 			}
 		}
 
@@ -302,17 +313,42 @@ lir_bridge(MFn *mfn)
 				 * it in the block.  The terminator of the block holds
 				 * the actual control-flow exit. */
 				Ref callee = refval(mfn, in->src[0], fn);
-				int call_cls = mir_to_cls(in->dtype);
 				Ref result = in->dst ? valref(mfn, in->dst, fn) : R;
-				*curi++ = (Ins){.op = Ocall, .cls = call_cls, .to = result,
-				                .arg = {callee, R}};
+				if (in->src[1].val &&
+				    in->src[1].val->kind == MV_TYPE) {
+					/* aggregate return: Ocall carries TYPE(idx);
+					 * selcall classifies it and lowers to SysV
+					 * (RAX:RDX for ≤16 bytes, hidden sret pointer
+					 * otherwise).  The result is a Kl pointer to
+					 * the return pad. */
+					*curi++ = (Ins){.op = Ocall, .cls = Kl,
+					                .to = result,
+					                .arg = {callee,
+					                        refval(mfn, in->src[1], fn)}};
+				} else {
+					int call_cls = mir_to_cls(in->dtype);
+					*curi++ = (Ins){.op = Ocall, .cls = call_cls,
+					                .to = result,
+					                .arg = {callee, R}};
+				}
 				fn->leaf = 0;
 				continue;
 			}
 			if (in->op == MOP_ARG) {
-				*curi++ = (Ins){.op = Oarg, .cls = mir_to_cls(in->dtype),
-				                .to = R,
-				                .arg = {refval(mfn, in->src[0], fn), R}};
+				if (in->src[0].val &&
+				    in->src[0].val->kind == MV_TYPE) {
+					/* aggregate argument: Oargc copies from the
+					 * source pointer; selpar lowers to stack copy
+					 * or argument registers per SysV. */
+					*curi++ = (Ins){.op = Oargc, .cls = Kl,
+					                .to = R,
+					                .arg = {refval(mfn, in->src[0], fn),
+					                        refval(mfn, in->src[1], fn)}};
+				} else {
+					*curi++ = (Ins){.op = Oarg, .cls = mir_to_cls(in->dtype),
+					                .to = R,
+					                .arg = {refval(mfn, in->src[0], fn), R}};
+				}
 				continue;
 			}
 			int qop = mir_to_op(in->op);
@@ -495,8 +531,15 @@ lir_bridge(MFn *mfn)
 			break;
 		case MOP_RET:
 			if (mb->term.src[0].val || mb->term.src[0].con) {
-				int rty = mir_to_cls(mfn->rettype);
-				qb->jmp.type = Jretw + (rty >= 0 ? rty : 0);
+				if (mfn->retty >= 0) {
+					/* aggregate return: Jretc uses the typ[] entry at
+					 * fn->retty; selret lowers the copy-out (RAX:RDX
+					 * pack or hidden sret write). */
+					qb->jmp.type = Jretc;
+				} else {
+					int rty = mir_to_cls(mfn->rettype);
+					qb->jmp.type = Jretw + (rty >= 0 ? rty : 0);
+				}
 				qb->jmp.arg = refval(mfn, mb->term.src[0], fn);
 			} else {
 				qb->jmp.type = Jret0;

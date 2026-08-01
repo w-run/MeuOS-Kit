@@ -309,6 +309,7 @@ struct MFn {
 	MType rettype;       /* scalar return type */
 	MVal **param;        /* parameter values (entry block MOP_PARs) */
 	uint32_t nparam;
+	int *paramty;        /* per-parameter aggregate typ[] index, -1 if scalar */
 	int32_t slot;        /* total stack slot bytes */
 	int32_t salign;      /* stack alignment */
 	bool vararg;

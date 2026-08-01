@@ -207,6 +207,11 @@ fe_val(MFn *fn, struct value *v, MVal **tab)
 	case VALUE_TYPE:
 		m = mval_new(fn, MV_TYPE, MT_AGG, 0,
 		             v->u.name ? v->u.name : "type");
+		/* carry the frontend/LIR typ[] index so the bridge can emit
+		 * TYPE(idx) for Ocall/Oargc/Oparc/Jretc — amd64_sysv_abi
+		 * classifies the aggregate and lowers to SysV (RAX:RDX for
+		 * ≤16-byte returns, hidden sret pointer otherwise). */
+		m->id = v->id;
 		break;
 	case VALUE_LABEL:
 		m = mval_new(fn, MV_LABEL, MT_NONE, 0,
@@ -260,7 +265,13 @@ func_to_mir(struct func *f, int optlevel, bool export)
 	fn->rettype = MT_NONE;
 	if (f->type->base && f->type->base->kind == TYPEVOID)
 		fn->rettype = MT_VOID;
-	else if (f->type->base && !f->type->base->value) {
+	else if (f->type->base && f->type->base->value) {
+		/* aggregate return: MT_AGG + the typ[] index.  The bridge
+		 * emits Jretc and selret packs the value into RAX:RDX (or
+		 * copies to the hidden sret pointer) per SysV. */
+		fn->rettype = MT_AGG;
+		fn->retty = f->type->base->value->id;
+	} else if (f->type->base && !f->type->base->value) {
 		struct irtype qt = irtype(f->type->base);
 		MType t = fe_cls_to_mtype(qt.base);
 		if (t != MT_NONE)
@@ -286,18 +297,32 @@ func_to_mir(struct func *f, int optlevel, bool export)
 	}
 
 	/* parameters */
+	fn->paramty = xmalloc((f->type->u.func.nparam + 1) * sizeof *fn->paramty);
+	{
+		uint32_t pi = 0;
 	for (p = f->type->u.func.params, v = f->paramtemps;
 	     p; p = p->next, ++v) {
 		if (v->kind == VALUE_NONE)
 			continue;
 		MVal *mv = fe_val(fn, v, tab);
-		struct irtype qt = irtype(p->type);
-		MType t = fe_cls_to_mtype(qt.base);
-		if (mv && t != MT_NONE)
-			mv->type = t;
+		fn->paramty[pi] = -1;
+		if (p->type->value) {
+			/* aggregate parameter: the param temp is a Kl pointer to
+			 * a stack pad; Oparc copies it in.  Record the typ[]
+			 * index for the bridge. */
+			mv->type = MT_AGG;
+			fn->paramty[pi] = p->type->value->id;
+		} else {
+			struct irtype qt = irtype(p->type);
+			MType t = fe_cls_to_mtype(qt.base);
+			if (mv && t != MT_NONE)
+				mv->type = t;
+		}
 		fn->param = realloc(fn->param,
 		                    (fn->nparam + 1) * sizeof *fn->param);
 		fn->param[fn->nparam++] = mv;
+		pi++;
+	}
 	}
 
 	/* entry block: emit MOP_PAR for parameters */
@@ -351,10 +376,23 @@ func_to_mir(struct func *f, int optlevel, bool export)
 				while (argp != instend) {
 					struct inst *ai = *argp;
 					if (ai->kind == IARG) {
-						madd1(fn, mb, MOP_ARG,
-						      fe_cls_to_mtype(ai->class),
-						      0,
-						      fe_ref(fn, ai->arg[0], tab));
+						if (ai->arg[1] &&
+						    (ai->arg[1]->kind & 0xf) == VALUE_TYPE) {
+							/* aggregate argument: MOP_ARG carries the
+							 * typ[] index in src[0] and the source
+							 * pointer in src[1]; the bridge emits
+							 * Oargc (selpar copies into the callee's
+							 * stack pad or argument registers). */
+							MVal *ty = fe_val(fn, ai->arg[1], tab);
+							madd(fn, mb, MOP_ARG, MT_AGG, 0,
+							     MREF_VAL(ty),
+							     fe_ref(fn, ai->arg[0], tab));
+						} else {
+							madd1(fn, mb, MOP_ARG,
+							      fe_cls_to_mtype(ai->class),
+							      0,
+							      fe_ref(fn, ai->arg[0], tab));
+						}
 					} else if (ai->kind == IVARARG) {
 						madd0(fn, mb, MOP_VARARG,
 						      MT_NONE, 0);
@@ -365,10 +403,23 @@ func_to_mir(struct func *f, int optlevel, bool export)
 				}
 				MVal *res = in->res.kind ?
 					fe_val(fn, &in->res, tab) : 0;
-				MType rt = in->class ?
-					fe_cls_to_mtype(in->class) : MT_NONE;
-				madd1(fn, mb, MOP_CALL, rt, res,
-				      MREF_VAL(callee));
+				if (in->arg[1] &&
+				    (in->arg[1]->kind & 0xf) == VALUE_TYPE) {
+					/* aggregate return: MOP_CALL carries the typ[]
+					 * index in src[1]; the bridge emits Ocall with
+					 * TYPE(idx) and selcall lowers to SysV (result
+					 * is a Kl pointer to the return pad). */
+					MVal *ty = fe_val(fn, in->arg[1], tab);
+					if (res)
+						res->type = MT_PTR;
+					madd(fn, mb, MOP_CALL, MT_AGG, res,
+					     MREF_VAL(callee), MREF_VAL(ty));
+				} else {
+					MType rt = in->class ?
+						fe_cls_to_mtype(in->class) : MT_NONE;
+					madd1(fn, mb, MOP_CALL, rt, res,
+					      MREF_VAL(callee));
+				}
 				instp = argp - 1;
 				continue;
 			}
