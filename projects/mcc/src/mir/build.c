@@ -112,8 +112,10 @@ static MIns *ins_alloc(MFn *fn, MBlk *b, MOP op, MType dtype, MVal *dst)
 	in->dtype = dtype;
 	in->dst = dst;
 	in->blk = b;
-	if (dst && dst->kind == MV_TEMP)
+	if (dst && dst->kind == MV_TEMP) {
 		dst->def = in;
+		dst->defblk = b;
+	}
 	return in;
 }
 

@@ -300,6 +300,23 @@ used_outside(MFn *fn, MVal *v, MBlk *b)
 	return false;
 }
 
+/* Check whether a value is defined outside the given block.  Folding an
+ * instruction whose operand comes from another block would substitute a
+ * cross-block value into this block's computation, changing the SSA
+ * dependency structure (promote/ssa then sees a load reading a cross-block
+ * alloca result with no phi). */
+static bool
+defined_outside(MFn *fn, MVal *v, MBlk *b)
+{
+	(void)fn;
+	if (!v || v->kind != MV_TEMP)
+		return false;
+	if (v->defblk)
+		return v->defblk != b;
+	/* no def block recorded: conservatively treat as cross-block */
+	return v->def != 0;
+}
+
 /* Rewrite a block: apply constant folding and algebraic simplification,
  * dropping instructions whose result is unused or simplified away.
  * Returns the number of instructions removed. */
@@ -366,8 +383,14 @@ msimp_block(MFn *fn, MBlk *b)
 			}
 		}
 
-		/* algebraic simplifications on non-constant operands */
-		if (in->dst && in->op < MOP_JMP && !used_outside(fn, in->dst, b)) {
+		/* algebraic simplifications on non-constant operands.  Only when
+		 * the result is used in-block AND the operands are also defined
+		 * in-block: substituting a cross-block operand would change the
+		 * SSA dependency structure for promote/ssa. */
+		if (in->dst && in->op < MOP_JMP &&
+		    !used_outside(fn, in->dst, b) &&
+		    !defined_outside(fn, a0.val, b) &&
+		    !defined_outside(fn, a1.val, b)) {
 			switch (in->op) {
 			case MOP_ADD:
 				if (a1.con && a1.con->kind == MC_INT && a1.con->u.i == 0) {
