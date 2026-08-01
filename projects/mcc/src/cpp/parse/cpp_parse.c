@@ -224,8 +224,22 @@ cpp_member_ident(struct scope *s, const char *name)
 	if (!t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
 		return NULL;
 	m = typemember(t, name, &offset);
-	if (!m)
+	if (!m) {
+		/* static data member? `count` -> Class_count */
+		char sm[256];
+		struct decl *sd;
+		snprintf(sm, sizeof sm, "%s_%s",
+		    t->u.structunion.tag ? t->u.structunion.tag : "anon", name);
+		sd = scopegetdecl(t->scope ? t->scope : s, sm, 1);
+		if (sd && sd->kind == DECLOBJECT) {
+			e = mkexpr(EXPRIDENT, sd->type, NULL);
+			e->qual = sd->qual;
+			e->lvalue = true;
+			e->u.ident.decl = sd;
+			return e;
+		}
 		return NULL;
+	}
 	if (m->type && m->type->kind == TYPEFUNC) {
 		/* member-function call: mangled free function + this */
 		if (!cpp_is_member_function(t, name))
@@ -439,6 +453,10 @@ cpp_class_decl(struct scope *s)
 		t->align = 0;
 	if (t->size)
 		t->size = ALIGNUP(t->size, t->align);
+	else
+		t->size = 1; /* C++ empty class is 1 byte (distinct addresses) */
+	if (!t->align)
+		t->align = 1;
 	t->incomplete = false;
 
 	/* Phase two: layout is fixed, parse the buffered method bodies. */
@@ -645,9 +663,9 @@ cpp_parse_method_body(struct cpp_pending_method *pm)
 	for (nd = pm->mtype->u.func.params; nd; nd = nd->next)
 		scopeputdecl(fs, nd);
 
-	g_cpp_method.class_type = pm->is_static ? NULL : pm->classt;
+	g_cpp_method.class_type = pm->classt;
 	g_cpp_method.this_decl = pm->is_static ? NULL : pm->thisd;
-	g_cpp_method.active = !pm->is_static;
+	g_cpp_method.active = true;
 
 	f = mkfunc(pm->d, pm->d->name, pm->d->type, fs);
 	/* constructor: run base-class constructors before the body */
@@ -754,6 +772,45 @@ cpp_op_mangle(enum tokenkind op)
 	case TXOR:     return "er";
 	case TLNOT:    return "nt";
 	default:       return NULL;
+	}
+}
+
+/* Define a static data member out-of-line: `int Class::count = 0;`.  The
+ * declarator already mangled the name to `Class_count`; find the in-class
+ * declaration and emit its storage. */
+void
+cpp_define_static_data(struct scope *s, const char *qclass, const char *name)
+{
+	extern struct scope filescope;
+	extern struct init *parseinit(struct scope *, struct type *);
+	extern void emitdata(struct decl *, struct init *);
+
+	struct type *ct;
+	struct decl *d;
+	struct init *init = NULL;
+
+	ct = scopegettag(s, qclass, true);
+	if (!ct || (ct->kind != TYPESTRUCT && ct->kind != TYPEUNION))
+		error(&tok.loc, "'%s' is not a class type", qclass);
+	d = scopegetdecl(ct->scope ? ct->scope : &filescope, name, 1);
+	if (!d || d->kind != DECLOBJECT) {
+		error(&tok.loc, "no static data member '%s' in class '%s'",
+		      name, qclass);
+		return;
+	}
+	if (tok.kind == TASSIGN) {
+		next();
+		init = parseinit(s, d->type);
+	} else if (!d->defined && !d->tentative) {
+		/* `int Class::count;` without initializer is a tentative
+		 * definition; defer to the normal sweep. */
+		d->tentative = true;
+	}
+	if (tok.kind == TSEMICOLON)
+		next();
+	if (init || !d->tentative) {
+		emitdata(d, init);
+		d->defined = true;
 	}
 }
 

@@ -65,5 +65,7 @@ void cpp_set_qual_class(const char *tag);
 const char *cpp_take_qual_class(void);
 void cpp_set_qual_ns(struct scope *ns);
 struct scope *cpp_take_qual_ns(void);
+void cpp_define_static_data(struct scope *s, const char *qclass,
+    const char *name);
 
 #endif /* MCC_CPP_H */

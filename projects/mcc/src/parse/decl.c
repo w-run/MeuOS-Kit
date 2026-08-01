@@ -207,6 +207,14 @@ decl(struct scope *s, struct func *f)
 			extern const char *cpp_take_qual_class(void);
 			if (g_lang == 1 && kind != DECLFUNC) {
 				const char *qclass = cpp_take_qual_class();
+				/* C++ static data member definition:
+				 * `int Class::count = 0;` */
+				if (qclass && kind == DECLOBJECT) {
+					extern void cpp_define_static_data(struct scope *,
+					    const char *, const char *);
+					cpp_define_static_data(s, qclass, name);
+					return true;
+				}
 				if (qclass)
 					error(&tok.loc, "qualified name in non-function declaration is not supported yet");
 			}

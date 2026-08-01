@@ -350,7 +350,27 @@ structdecl(struct scope *s, struct structbuilder *b)
 				 * member) unconsumed for the caller's loop */
 				return;
 			}
-			addmember(b, mt, name, align, width);
+			/* C++ static data member: declare `Class_member` as a file
+			 * symbol; it occupies no per-object storage. */
+			extern int g_lang;
+			if (g_lang == 1 && (sc & SCSTATIC) && name) {
+				struct decl *sd;
+				char mangled[256];
+				char *pm;
+				struct scope *cs = b->type->scope ? b->type->scope : s;
+				snprintf(mangled, sizeof mangled, "%s_%s",
+				    b->type->u.structunion.tag, name);
+				pm = xmalloc(strlen(mangled) + 1);
+				strcpy(pm, mangled);
+				sd = mkdecl(pm, DECLOBJECT, mt.type, mt.qual, LINKEXTERN);
+				sd->u.obj.storage = SDSTATIC;
+				sd->value = mkglobal(sd); /* symbol slot exists before
+				                             the out-of-line definition */
+				scopeputdecl(cs, sd);
+				/* skip addmember: no layout space */
+			} else {
+				addmember(b, mt, name, align, width);
+			}
 		}
 		if (tok.kind == TSEMICOLON)
 			break;

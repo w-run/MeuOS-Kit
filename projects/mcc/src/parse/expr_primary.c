@@ -231,7 +231,26 @@ primaryexpr(struct scope *s)
 									e = call;
 									break;
 								}
-								/* not a static method: restore */
+								/* static data member access:
+								 * `Class::count` -> Class_count */
+								{
+									char dmangled[256];
+									struct decl *dd;
+									snprintf(dmangled, sizeof dmangled,
+									    "%s_%s", ct->u.structunion.tag, m);
+									dd = scopegetdecl(
+									    ct->scope ? ct->scope : s,
+									    dmangled, 1);
+									if (dd && dd->kind == DECLOBJECT) {
+										e = mkexpr(EXPRIDENT,
+										    dd->type, NULL);
+										e->qual = dd->qual;
+										e->lvalue = true;
+										e->u.ident.decl = dd;
+										break;
+									}
+								}
+								/* not a static member: restore */
 							}
 							{
 								struct token cur = tok;
