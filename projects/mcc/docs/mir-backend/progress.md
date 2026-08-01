@@ -27,7 +27,10 @@
 | P4b | regalloc：槽分配（mreg_slots，slot4/8 打包） | ✅ | dc0de61 |
 | P4c | regalloc：线性扫描（mreg_scan，调用点双池+fixed 占用） | ✅ | 75a5d15 |
 | P4d | regalloc：phi 边移动（phi 值强制 spill 避免并行移动覆盖） | ✅ | 7c93bcd |
-| P4e | regalloc 接管 emit（寄存器感知 + callee-saved 保存 + 静态 alloca） | ✅ | 待提交 |
+| P4e | regalloc 接管 emit（寄存器感知 + callee-saved 保存 + 静态 alloca） | ✅ | 2664766 |
+| P4fix | Bug 1/2 边界修复（浮点 isel + 栈传参寻址） | ✅ | d6483d5, 3ce88c0 |
+| P5a | postra 冗余 mov 消除 + slot4/8 双游标复采 | ✅ | 待提交 |
+| P5b | hint 优先级（regalloc-design.md 2.5） | ⏳ | — |
 | P4c | regalloc：线性扫描（mreg_scan，调用点双池） | ⏳ | — |
 | P4d | regalloc：phi 边移动（机器层 phi 已降级为 pred copy） | ⏳ | — |
 | P4e | regalloc 接管 emit（寄存器感知 + prologue/epilogue 保存 callee-saved） | ⏳ | — |

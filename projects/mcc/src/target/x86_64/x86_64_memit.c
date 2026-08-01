@@ -422,14 +422,14 @@ emit_mov(FILE *f, MVal *dst, MVal *src, MConst *c, MType dtype)
 		return;   /* same-register copy is a no-op */
 	}
 	if (src && src->kind == MV_REG && dst && dst->kind == MV_TEMP &&
-	    dst->type != MT_I32) {
+	    (dst->type != MT_I32 || dst->reg >= 0)) {
 		fprintf(f, "\tmovq\t%%%s, ", src->name);
 		emit_mval(f, dst);
 		fputs("\n", f);
 		return;
 	}
 	if (src && src->kind == MV_TEMP && dst && dst->kind == MV_REG &&
-	    src->type != MT_I32) {
+	    (src->type != MT_I32 || src->reg >= 0)) {
 		fputs("\tmovq\t", f);
 		emit_mval(f, src);
 		fprintf(f, ", %%%s\n", dst->name);
