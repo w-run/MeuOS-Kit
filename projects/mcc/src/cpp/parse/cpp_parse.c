@@ -164,21 +164,11 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname)
 {
 	extern struct decl *mkdecl(char *, enum declkind, struct type *,
 	    enum typequal, enum linkage);
-	extern struct func *mkfunc(struct decl *, char *, struct type *,
-	    struct scope *);
-	extern void stmt(struct func *, struct scope *);
-	extern void emitfunc(struct func *, bool);
-	extern void delfunc(struct func *);
-	extern struct scope *delscope(struct scope *);
-	extern void funchlt(struct func *);
-	extern struct scope *mkscope(struct scope *);
-	extern void scopeputdecl(struct scope *, struct decl *);
 
 	char mangled[256];
 	struct decl *d;
-	struct func *f;
-	struct scope *fs;
 
+	(void)s;
 	if (!cpp_current_class || !mname)
 		return;
 	snprintf(mangled, sizeof mangled, "%s_%s", cpp_current_class, mname);
@@ -190,18 +180,20 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname)
 			next();
 		return; /* declaration only */
 	}
-	/* Create the function body scope and register the parameters so the
-	 * body can reference them.  (The implicit `this` parameter and
-	 * member-name resolution are added in the next stage.) */
-	fs = mkscope(s);
-	for (struct decl *p = funct->u.func.params; p; p = p->next)
-		scopeputdecl(fs, p);
-	f = mkfunc(d, mangled, funct, fs);
-	stmt(f, fs);
-	if (d->u.func.isnoreturn)
-		funchlt(f);
-	emitfunc(f, d->linkage == LINKEXTERN);
-	fs = delscope(fs);
-	delfunc(f);
+	/* Stage C.2.3: the member function is lowered to an out-of-line
+	 * `Class_method` symbol; this-pointer lowering and in-body member
+	 * access are implemented next stage, so the body is consumed without
+	 * parsing. */
+	if (tok.kind == TLBRACE) {
+		int bd = 1;
+		next();
+		while (bd && tok.kind != TEOF) {
+			if (tok.kind == TLBRACE) bd++;
+			else if (tok.kind == TRBRACE) bd--;
+			next();
+		}
+	} else if (tok.kind == TSEMICOLON) {
+		next();
+	}
 	d->defined = true;
 }

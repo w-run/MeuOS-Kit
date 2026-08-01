@@ -40,24 +40,29 @@ addmember(struct structbuilder *b, struct qualtype mt, char *name, int align, un
 		t->prop |= PROPFLEX;
 	}
 	if (mt.type->kind == TYPEFUNC) {
-		/* C++ member function: `void inc() { ... }` or `void inc();`.
-		 * The C parser has no member functions; in C++ mode we consume
-		 * the function body (or the ';') and skip the member so the class
-		 * parses cleanly.  Lowering to an out-of-line `Class_inc` with a
-		 * this parameter is implemented in the C++ frontend (C.2.3). */
+		/* C++ member function: register it in the member list (so member
+		 * calls can be lowered to `Class_name(&obj, ...)`), then consume
+		 * the body (lowered to an out-of-line function by the C++ frontend
+		 * via structdecl's TYPEFUNC path).  In C++ mode we add the member
+		 * and return; the body itself is consumed by structdecl. */
 		extern int g_lang;
 		if (g_lang == 1) {
-			if (tok.kind == TLBRACE) {
-				int depth = 1;
-				next();
-				while (depth && tok.kind != TEOF) {
-					if (tok.kind == TLBRACE) depth++;
-					else if (tok.kind == TRBRACE) depth--;
-					next();
-				}
-			} else if (tok.kind == TSEMICOLON) {
-				next();
+			/* register the function-typed member for call lowering */
+			if (name) {
+				struct member *mf = xmalloc(sizeof(*mf));
+				mf->type = mt.type;
+				mf->qual = mt.qual;
+				mf->name = name;
+				mf->next = NULL;
+				mf->offset = 0;
+				mf->bits.before = mf->bits.after = 0;
+				if (b->last)
+					*b->last = mf;
+				else
+					b->type->u.structunion.members = mf;
+				b->last = &mf->next;
 			}
+			/* the body is consumed by structdecl's TYPEFUNC branch */
 			return;
 		}
 		error(&tok.loc, "struct member '%s' has function type", name);
@@ -191,6 +196,8 @@ structdecl(struct scope *s, struct structbuilder *b)
 				extern void cpp_define_method(struct scope *,
 				    struct type *, const char *);
 				cpp_define_method(s, mt.type, name);
+				/* register the function member for call lowering */
+				addmember(b, mt, name, align, width);
 				/* leave the following token (class-body '}' or next
 				 * member) unconsumed for the caller's loop */
 				return;
