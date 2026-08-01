@@ -1,0 +1,354 @@
+/* bridge.c — MIR → LIR translation layer (MIR/LIR split transition).
+ *
+ * Converts a fully-built MFn (MIR) into the existing QBE-derived Fn (the
+ * LIR layer), so the existing opt + target backends run unchanged.  This
+ * is the *only* cross-layer translation point during the transition:
+ * the C frontend produces MIR (B.4), MIR passes optimize it (B.2), then
+ * this bridge lowers it to Fn for instruction selection / regalloc / emit.
+ *
+ * The Fn construction mirrors src/irgen/emit.c:emitfunc()'s pattern
+ * (forward writes into the shared insb, Opar at entry, Phi nodes, jump
+ * translation) but reads from MFn instead of the frontend struct func.
+ *
+ * Call lowering follows the emitfunc convention:
+ *   MOP_ARG sequence -> Oarg* (+ Oargc for aggregates, Oargv for varargs)
+ *   then MOP_CALL terminator -> Ocall.
+ */
+#include <assert.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "mir.h"
+#include "ir.h"
+
+/* Translate a MIR scalar type to an IR class (Kw/Kl/Ks/Kd). */
+static int
+mir_to_cls(MType t)
+{
+	switch (t) {
+	case MT_I8:
+	case MT_I16:
+	case MT_I32:
+	case MT_PTR: return Kw;
+	case MT_I64: return Kl;
+	case MT_F32: return Ks;
+	case MT_F64: return Kd;
+	default:     return Kx;
+	}
+}
+
+static int
+mir_to_op(MOP op)
+{
+	switch (op) {
+	case MOP_ADD:  return Oadd;
+	case MOP_SUB:  return Osub;
+	case MOP_MUL:  return Omul;
+	case MOP_DIV:  return Odiv;
+	case MOP_UDIV: return Oudiv;
+	case MOP_REM:  return Orem;
+	case MOP_UREM: return Ourem;
+	case MOP_NEG:  return Oneg;
+	case MOP_AND:  return Oand;
+	case MOP_OR:   return Oor;
+	case MOP_XOR:  return Oxor;
+	case MOP_SHL:  return Oshl;
+	case MOP_SHR:  return Oshr;
+	case MOP_SAR:  return Osar;
+
+	case MOP_CEQ:  return Oceqw;
+	case MOP_CNE:  return Ocnew;
+	case MOP_CSLT: return Ocsltw;
+	case MOP_CSLE: return Ocslew;
+	case MOP_CSGT: return Ocsgtw;
+	case MOP_CSGE: return Ocsgew;
+	case MOP_CULT: return Ocultw;
+	case MOP_CULE: return Oculew;
+	case MOP_CUGT: return Ocugtw;
+	case MOP_CUGE: return Ocugew;
+
+	case MOP_CFEQ: return Oceqs;
+	case MOP_CFNE: return Ocnes;
+	case MOP_CFLT: return Oclts;
+	case MOP_CFLE: return Ocles;
+	case MOP_CFGT: return Ocgts;
+	case MOP_CFGE: return Ocges;
+
+	case MOP_SEXT:  return Oextsb;
+	case MOP_ZEXT:  return Oextub;
+	case MOP_TRUNC: return Oextuw;
+	case MOP_CAST:  return Ocast;
+	case MOP_F2I:   return Ostosi;
+	case MOP_I2F:   return Oswtof;
+	case MOP_FEXT:  return Oexts;
+	case MOP_FTRUNC:return Otruncd;
+
+	case MOP_LOAD:   return Oload;
+	case MOP_STORE:  return Ostorel;
+	case MOP_ALLOCA: return Oalloc8;
+
+	case MOP_COPY:    return Ocopy;
+	case MOP_VASTART: return Ovastart;
+	case MOP_VAARG:   return Ovaarg;
+	case MOP_SALLOC:  return Osalloc;
+
+	default: return Onop;
+	}
+}
+
+/* Map a MIR value to an IR Ref. */
+static Ref
+valref(MFn *fn, MVal *v, Fn *lir)
+{
+	if (!v)
+		return R;
+	switch (v->kind) {
+	case MV_TEMP:
+		assert(v->lirtmp >= 0 && "bridge: temp not pre-allocated");
+		return TMP(v->lirtmp);
+	case MV_GLOBAL: {
+		Con c = {.type = CAddr};
+		c.sym.id = intern(v->sym ? v->sym : "");
+		c.sym.type = v->hint ? SExt : SGlo;
+		return newcon(&c, lir);
+	}
+	case MV_CONST:
+		if (v->con)
+			return getcon(v->con->u.i, lir);
+		return CON_Z;
+	case MV_TYPE:
+		if (v->td)
+			return TYPE(v->td->id);
+		return R;
+	default:
+		return R;
+	}
+}
+
+/* Translate an MRef (val or const) to an IR Ref. */
+static Ref
+refval(MFn *fn, MRef r, Fn *lir)
+{
+	if (r.con)
+		switch (r.con->kind) {
+		case MC_INT:
+			return getcon(r.con->u.i, lir);
+		case MC_FLT: {
+			Con c = {.type = CBits};
+			if (r.con->type == MT_F32) {
+				c.bits.s = r.con->u.s;
+				c.flt = 1;
+			} else {
+				c.bits.d = r.con->u.d;
+				c.flt = 2;
+			}
+			return newcon(&c, lir);
+		}
+		case MC_ADDR: {
+			Con c = {.type = CAddr};
+			c.sym.id = intern(r.con->u.addr.sym ? r.con->u.addr.sym : "");
+			c.sym.type = r.con->u.addr.isext ? SExt : SGlo;
+			if (r.con->u.addr.tls)
+				c.sym.type |= SThr;
+			c.bits.i = r.con->u.addr.off;
+			return newcon(&c, lir);
+		}
+		default:
+			return CON_Z;
+		}
+	if (r.val)
+		return valref(fn, r.val, lir);
+	return R;
+}
+
+/* Build a forward-ordered array of blocks (mfn->link is reversed). */
+static MBlk **
+blk_order(MFn *mfn, uint32_t *n)
+{
+	uint32_t cnt = mfn->nblk;
+	MBlk **o = alloc(cnt * sizeof *o);
+	uint32_t i = cnt;
+	for (MBlk *b = mfn->link; b; b = b->link)
+		o[--i] = b;
+	*n = cnt;
+	return o;
+}
+
+/* Main entry: translate a whole MFn to a LIR Fn. */
+Fn *
+lir_bridge(MFn *mfn)
+{
+	Fn *fn;
+	MBlk **order;
+	Blk **lirblk;
+	uint32_t nblk;
+
+	fn = alloc(sizeof *fn);
+	fn->ntmp = 0;
+	fn->ncon = 2;
+	fn->nmem = 0;
+	fn->tmp = vnew(fn->ntmp, sizeof fn->tmp[0], PFn);
+	fn->con = vnew(fn->ncon, sizeof fn->con[0], PFn);
+	fn->mem = vnew(0, sizeof fn->mem[0], PFn);
+	for (int i = 0; i < Tmp0; i++) {
+		if (T.fpr0 <= i && i < T.fpr0 + T.nfpr)
+			newtmp(0, Kd, fn);
+		else
+			newtmp(0, Kl, fn);
+	}
+	fn->con[0].type = CBits;
+	fn->con[0].bits.i = 0xdeaddead;
+	fn->con[1].type = CBits;
+	fn->con[1].bits.i = 0;
+
+	fn->name = (char *)mfn->name;
+	fn->lnk = (Lnk){0};
+	fn->lnk.export = 1;
+	fn->leaf = 1;
+	fn->vararg = mfn->vararg;
+	fn->optlevel = mfn->optlevel;
+	fn->warnlevel = WARN_ALL;
+	fn->slot = 0;
+	fn->salign = 0;
+	fn->dynalloc = 0;
+	fn->retr = R;
+
+	if (mfn->rettype == MT_VOID)
+		fn->retty = -1;
+	else if (mfn->retty >= 0)
+		fn->retty = mfn->retty;
+	else
+		fn->retty = -1;
+
+	/* pre-allocate MVal temps; record the LIR temp index per value */
+	for (uint32_t i = 0; i < mfn->nval; i++) {
+		MVal *v = mfn->val[i];
+		if (v->kind == MV_TEMP) {
+			Ref tr = newtmp(v->name ? v->name : 0,
+			                mir_to_cls(v->type), fn);
+			v->lirtmp = tr.val;
+		}
+	}
+
+	/* pass 1: create Blk per MBlk, store mapping */
+	order = blk_order(mfn, &nblk);
+	lirblk = alloc(nblk * sizeof *lirblk);
+	{
+		Blk *prev = NULL;
+		for (uint32_t i = 0; i < nblk; i++) {
+			MBlk *mb = order[i];
+			Blk *qb = newblk();
+			qb->id = i;
+			qb->name = strf(PFn, "%s", mb->name ? mb->name : "");
+			qb->loop = 0;
+			qb->link = NULL;
+			lirblk[i] = qb;
+			if (prev)
+				prev->link = qb;
+			prev = qb;
+		}
+		fn->nblk = nblk;
+		fn->start = lirblk[0];
+		fn->rpo = vnew(nblk, sizeof fn->rpo[0], PFn);
+	}
+
+	/* pass 2: translate instructions, phis, jumps */
+	curi = insb;
+	for (uint32_t i = 0; i < nblk; i++) {
+		MBlk *mb = order[i];
+		Blk *qb = lirblk[i];
+
+		/* entry block: emit Opar for parameters */
+		if (mb == mfn->start) {
+			for (uint32_t k = 0; k < mfn->nparam; k++) {
+				MVal *p = mfn->param[k];
+				if (!p)
+					continue;
+				*curi++ = (Ins){.op = Opar, .cls = mir_to_cls(p->type),
+				                .to = valref(mfn, p, fn), .arg = {R, R}};
+			}
+		}
+
+		/* phis */
+		for (MPhi *p = mb->phi; p; p = p->link) {
+			Phi *phi = alloc(sizeof *phi);
+			phi->to = valref(mfn, p->dst, fn);
+			phi->cls = mir_to_cls(p->dtype);
+			phi->visit = 0;
+			phi->narg = p->narg;
+			phi->arg = vnew(p->narg ? p->narg : 1, sizeof phi->arg[0], PFn);
+			phi->blk = vnew(p->narg ? p->narg : 1, sizeof phi->blk[0], PFn);
+			for (uint32_t k = 0; k < p->narg; k++) {
+				phi->arg[k] = p->arg[k] ? valref(mfn, p->arg[k], fn) : CON_Z;
+				phi->blk[k] = p->blk[k] ? lirblk[p->blk[k]->id] : qb;
+			}
+			phi->link = NULL;
+			qb->phi = phi;
+		}
+
+		/* instructions (calls lowered here; terminator handles control) */
+		for (uint32_t k = 0; k < mb->nins; k++) {
+			MIns *in = &mb->ins[k];
+			if (in->op == MOP_PAR)
+				continue; /* entry block Opar emitted above */
+			if (in->op == MOP_CALL) {
+				/* Oarg* sequence then Ocall.  In MIR, the MOP_ARG
+				 * instructions that belong to this call appear before
+				 * it in the block.  The terminator of the block holds
+				 * the actual control-flow exit. */
+				Ref callee = refval(mfn, in->src[0], fn);
+				int call_cls = mir_to_cls(in->dtype);
+				Ref result = in->dst ? valref(mfn, in->dst, fn) : R;
+				*curi++ = (Ins){.op = Ocall, .cls = call_cls, .to = result,
+				                .arg = {callee, R}};
+				fn->leaf = 0;
+				continue;
+			}
+			if (in->op == MOP_ARG) {
+				*curi++ = (Ins){.op = Oarg, .cls = mir_to_cls(in->dtype),
+				                .to = R,
+				                .arg = {refval(mfn, in->src[0], fn), R}};
+				continue;
+			}
+			int qop = mir_to_op(in->op);
+			int cls = mir_to_cls(in->dtype);
+			Ref to = in->dst ? valref(mfn, in->dst, fn) : R;
+			Ref a0 = refval(mfn, in->src[0], fn);
+			Ref a1 = refval(mfn, in->src[1], fn);
+			*curi++ = (Ins){.op = qop, .cls = cls, .to = to, .arg = {a0, a1}};
+		}
+
+		idup(qb, insb, curi - insb);
+		curi = insb;
+
+		/* terminator */
+		switch (mb->term.op) {
+		case MOP_JMP:
+			qb->jmp.type = Jjmp;
+			qb->s1 = lirblk[mb->s1->id];
+			break;
+		case MOP_JNZ:
+			qb->jmp.type = Jjnz;
+			qb->jmp.arg = refval(mfn, mb->term.src[0], fn);
+			qb->s1 = lirblk[mb->s1->id];
+			qb->s2 = lirblk[mb->s2->id];
+			break;
+		case MOP_RET:
+			if (mb->term.src[0].val || mb->term.src[0].con) {
+				int rty = mir_to_cls(mfn->rettype);
+				qb->jmp.type = Jretw + (rty >= 0 ? rty : 0);
+				qb->jmp.arg = refval(mfn, mb->term.src[0], fn);
+			} else {
+				qb->jmp.type = Jret0;
+			}
+			break;
+		default:
+			qb->jmp.type = Jret0;
+			break;
+		}
+	}
+
+	free(order);
+	free(lirblk);
+	return fn;
+}

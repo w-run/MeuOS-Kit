@@ -154,6 +154,8 @@ typedef struct MVal {
 	int32_t symref;            /* LIR sym id, -1 unset */
 	/* constant payload (MV_CONST) */
 	struct MConst *con;
+	/* LIR temp index (bridge): -1 until lir_bridge assigns it */
+	int32_t lirtmp;
 } MVal;
 
 typedef enum MConstKind {
@@ -356,6 +358,11 @@ enum MIRPass {
 uint32_t run_mir_pass(MFn *fn, enum MIRPass pass);
 void run_mir_passes(MFn *fn, int optlevel);
 void build_uses(MFn *fn);
+
+/* ---- MIR → LIR bridge (src/lir/bridge.c) ------------------------------ */
+
+struct Fn;
+struct Fn *lir_bridge(MFn *mfn);
 
 /* arena helpers (mir_util.c) */
 void *m_alloc(MFn *fn, size_t size);

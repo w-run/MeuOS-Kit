@@ -31,6 +31,7 @@ MBlk *mblk_new(MFn *fn, const char *name)
 
 void mfn_addblk(MFn *fn, MBlk *b)
 {
+	b->id = fn->nblk;
 	if (fn->nblk == 0)
 		fn->start = b;
 	b->link = fn->link;
@@ -59,6 +60,7 @@ MVal *mval_new(MFn *fn, MValKind kind, MType t, MTypeDesc *td,
 	v->name = name ? strdup(name) : 0;
 	v->slot = -1;
 	v->hint = -1;
+	v->lirtmp = -1;
 	fn->val = realloc(fn->val, (fn->nval + 1) * sizeof *fn->val);
 	fn->val[fn->nval++] = v;
 	return v;

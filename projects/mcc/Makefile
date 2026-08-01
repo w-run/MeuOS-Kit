@@ -61,7 +61,7 @@ CFLAGS += -DMCC_DEFAULT_TARGET=\"$(DEFAULT_TARGET)\"
 # archived into libmcc.a so a future m++ binary can link the same archive.
 # util/ is shared (utf/warn/xmalloc are used by both FE and BE).
 FE_DIRS := src/driver src/lex src/parse src/sema src/irgen
-BE_DIRS := src/mir src/ir src/opt src/abi src/emit src/target src/util
+BE_DIRS := src/mir src/lir src/ir src/opt src/abi src/emit src/target src/util
 
 FE_SRCS := $(shell find $(FE_DIRS) -name '*.c' | sort)
 BE_SRCS := $(shell find $(BE_DIRS) -name '*.c' | sort)
@@ -253,9 +253,28 @@ check-mir-passes: $(MIR_SRCS)
 	$(HOST_CC) $(CFLAGS) -Iinclude -o build/mir_pass_test $^ test/mir/pass_test.c
 	./build/mir_pass_test
 
-check-mir: check-mir-types check-mir-passes
+# MIR → LIR bridge end-to-end: build a fib MFn, run MIR passes, bridge to
+# the LIR Fn, run the LIR pipeline and emit x86-64 asm.  Assemble+link+run
+# the output to verify the emitted code actually works.
+check-mir-bridge: $(BIN)
+	@mkdir -p build
+	$(HOST_CC) $(CFLAGS) -Iinclude -o build/bridge_test \
+		test/mir/bridge_test.c src/mir/build.c src/mir/mir_util.c \
+		src/mir/passes.c src/mir/print.c src/lir/bridge.c \
+		build/libmcc.a -L../meuos-sysroot/build -lmsys
+	@./build/bridge_test > /tmp/bridge_fib.s 2>&1
+	@echo "=== 生成的 fib 汇编 ==="
+	@head -40 /tmp/bridge_fib.s
+	@# assemble a driver + the emitted asm, run it
+	@printf 'extern int fib(int); int main(void){ return fib(5)==5 ? 0 : 1; }\n' \
+		> /tmp/bridge_main.c
+	@$(HOST_CC) -c -o /tmp/bridge_main.o /tmp/bridge_main.c
+	@$(HOST_CC) -o /tmp/bridge_fib /tmp/bridge_main.o /tmp/bridge_fib.s
+	@/tmp/bridge_fib; echo "bridge exit=$$? (0 = fib(5)==5)"
 
-.PHONY: all clean check check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir
+check-mir: check-mir-types check-mir-passes check-mir-bridge
+
+.PHONY: all clean check check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-bridge check-mir
 
 # chibicc community functional test suite (C11/C23 conformance).
 # Runs test/community/chibicc/run.sh against the MeuOS sysroot.

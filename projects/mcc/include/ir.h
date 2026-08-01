@@ -1,3 +1,6 @@
+#ifndef MCC_IR_H
+#define MCC_IR_H
+
 #include <assert.h>
 #include <inttypes.h>
 #include <limits.h>
@@ -687,3 +690,7 @@ void elf_emitfnfin(char *, FILE *);
 void elf_emitfin(FILE *);
 void macho_emitfin(FILE *);
 void pe_emitfin(FILE *);
+/* run the full LIR pass pipeline (abi0..rega..postra) on a function */
+void run_passes(Fn *);
+
+#endif /* MCC_IR_H */
