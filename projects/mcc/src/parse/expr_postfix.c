@@ -52,10 +52,21 @@ postfixexpr(struct scope *s, struct expr *r)
 	enum typequal tq;
 	enum tokenkind op;
 	bool lvalue;
+	bool firstarg;
+
+	/* C++ member-call lowering: `obj.meth(...)` records the object here
+	 * and the call lowering (TLPAREN) prepends it as the this argument. */
+	extern struct expr *g_cpp_member_this;
 
 	if (!r)
 		r = primaryexpr(s);
 	for (;;) {
+		/* A pending member-this is only consumed by the call's own
+		 * TLPAREN; if the member expression is not actually called
+		 * (`obj.meth` alone), drop it so it cannot leak into a later
+		 * unrelated function call. */
+		if (g_cpp_member_this && tok.kind != TLPAREN)
+			g_cpp_member_this = NULL;
 		switch (tok.kind) {
 		case TLBRACK:  /* subscript */
 			next();
@@ -84,43 +95,44 @@ postfixexpr(struct scope *s, struct expr *r)
 			}
 			if (r->type->kind != TYPEPOINTER || r->type->base->kind != TYPEFUNC)
 				error(&tok.loc, "called object is not a function");
-			t = r->type->base;
-			e = mkexpr(EXPRCALL, t->base, r);
-			e->u.call.args = NULL;
-			e->u.call.nargs = 0;
-			p = t->u.func.params;
-			end = &e->u.call.args;
-			/* C++ member call: prepend the this object as the first
-			 * argument (lowered from `obj.meth(...)`). */
-			{
-				extern struct expr *g_cpp_member_this;
-				if (g_cpp_member_this) {
-					*end = g_cpp_member_this;
-					end = &(*end)->next;
-					++e->u.call.nargs;
-					g_cpp_member_this = NULL;
-					if (p)
-						p = p->next;
-				}
-			}
-			while (tok.kind != TRPAREN) {
-				if (e->u.call.args)
-					expect(TCOMMA, "or ')' after function call argument");
-				if (!p && !t->u.func.isvararg)
-					error(&tok.loc, "too many arguments for function call");
-				*end = assignexpr(s);
-				if (t->u.func.isvararg && !p)
-					*end = exprpromote(*end);
-				else
-					*end = exprassign(*end, p->type);
-				end = &(*end)->next;
-				++e->u.call.nargs;
-				if (p)
-					p = p->next;
-			}
-			if (p && !t->u.func.isvararg)
-				error(&tok.loc, "not enough arguments for function call");
-			e = decay(e);
+		t = r->type->base;
+		e = mkexpr(EXPRCALL, t->base, r);
+		e->u.call.args = NULL;
+		e->u.call.nargs = 0;
+		p = t->u.func.params;
+		end = &e->u.call.args;
+		/* C++ member call: prepend the this object as the first
+		 * argument (lowered from `obj.meth(...)`).  firstarg tracks
+		 * whether the next source token is the first explicit argument:
+		 * this prepend must not force a comma before it. */
+		firstarg = true;
+		if (g_cpp_member_this) {
+			*end = g_cpp_member_this;
+			end = &(*end)->next;
+			++e->u.call.nargs;
+			g_cpp_member_this = NULL;
+			if (p)
+				p = p->next;
+		}
+		while (tok.kind != TRPAREN) {
+			if (!firstarg)
+				expect(TCOMMA, "or ')' after function call argument");
+			firstarg = false;
+			if (!p && !t->u.func.isvararg)
+				error(&tok.loc, "too many arguments for function call");
+			*end = assignexpr(s);
+			if (t->u.func.isvararg && !p)
+				*end = exprpromote(*end);
+			else
+				*end = exprassign(*end, p->type);
+			end = &(*end)->next;
+			++e->u.call.nargs;
+			if (p)
+				p = p->next;
+		}
+		if (p && !t->u.func.isvararg)
+			error(&tok.loc, "not enough arguments for function call");
+		e = decay(e);
 			next();
 			break;
 		case TPERIOD:
@@ -161,6 +173,7 @@ postfixexpr(struct scope *s, struct expr *r)
 					if (fd && fd->kind == DECLFUNC) {
 						e = mkexpr(EXPRIDENT, fd->type, NULL);
 						e->u.ident.decl = fd;
+						e = decay(e); /* &Class_method */
 						g_cpp_member_this = r; /* &obj */
 						next();
 						break;

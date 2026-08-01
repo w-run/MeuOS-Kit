@@ -14,21 +14,104 @@
  * and namespaces are added incrementally in later stages.
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "util.h"
 #include "mcc.h"
 #include "cpp.h"
 #include "../../parse/decl_internal.h"
+#include "../../parse/expr_internal.h"
 
-/* Current class tag being parsed (set by cpp_class_decl), used to mangle
- * member-function names as ClassName_method. */
-static const char *cpp_current_class;
 /* Pending `this` object for the next member-function call
  * (set by the postfix `.`/`->` lowering, consumed by TLPAREN). */
 struct expr *g_cpp_member_this;
 void cpp_define_method(struct scope *s, struct type *funct,
-                              const char *mname);
+                              const char *mname, const char *class_tag);
+
+/* Method-body context: while parsing a member-function body, bare member
+ * identifiers (`count`) lower to `(*this).count` via cpp_member_ident,
+ * and the implicit `this` parameter is available in scope. */
+static struct cpp_method_ctx {
+	struct type *class_type; /* enclosing class of the method being parsed */
+	struct decl *this_decl;  /* the implicit `this` parameter decl */
+	bool active;
+} g_cpp_method;
+
+/* Build the expression for the implicit `this` pointer of the method
+ * body currently being parsed (NULL outside a method body). */
+static struct expr *
+cpp_this_expr(void)
+{
+	struct expr *e;
+
+	if (!g_cpp_method.active || !g_cpp_method.this_decl)
+		return NULL;
+	e = mkexpr(EXPRIDENT, g_cpp_method.this_decl->type, NULL);
+	e->qual = g_cpp_method.this_decl->qual;
+	e->lvalue = true;
+	e->u.ident.decl = g_cpp_method.this_decl;
+	return e;
+}
+
+/* Resolve a bare class-member name inside a method body.  Called by the
+ * C parser's primary-expression path when scopegetdecl fails; C++
+ * semantics say member names shadow nothing here but resolve to the
+ * object member of the implicit this.  Data members lower to the
+ * lvalue `(*this).name`; function members lower to the mangled free
+ * function `Class_method` with the this object pending for the call
+ * lowering (TLPAREN) to prepend as the first argument.  Returns NULL
+ * when `name` is not a member of the current method's class. */
+struct expr *
+cpp_member_ident(struct scope *s, const char *name)
+{
+	struct type *t;
+	struct member *m;
+	unsigned long long offset = 0;
+	struct expr *thise, *base, *e;
+	char mname[256];
+	struct decl *fd;
+
+	if (!g_cpp_method.active)
+		return NULL;
+	t = g_cpp_method.class_type;
+	if (!t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
+		return NULL;
+	m = typemember(t, name, &offset);
+	if (!m)
+		return NULL;
+	if (m->type && m->type->kind == TYPEFUNC) {
+		/* member-function call: mangled free function + this */
+		if (!cpp_is_member_function(t, name))
+			return NULL;
+		cpp_mangled_name(t, name, mname, sizeof mname);
+		fd = scopegetdecl(s, mname, 1);
+		if (!fd || fd->kind != DECLFUNC)
+			return NULL;
+		e = mkexpr(EXPRIDENT, fd->type, NULL);
+		e->qual = fd->qual;
+		e->u.ident.decl = fd;
+		e = decay(e); /* &Class_method */
+		g_cpp_member_this = cpp_this_expr();
+		return e;
+	}
+	/* data member: (*this).name — mirror postfixexpr()'s TPERIOD
+	 * lowering of `obj.member`. */
+	thise = cpp_this_expr();
+	if (!thise)
+		return NULL;
+	base = mkbinaryexpr(&tok.loc, TADD, exprconvert(thise, &typeulong),
+	                    mkconstexpr(&typeulong, offset));
+	base->type = mkpointertype(m->type, m->qual);
+	e = mkunaryexpr(TMUL, base);
+	e->lvalue = true;
+	if (m->bits.before || m->bits.after) {
+		e = mkexpr(EXPRBITFIELD, e->type, e);
+		e->lvalue = true;
+		e->u.bitfield.bits = m->bits;
+	}
+	return e;
+}
 
 /* Classify the current token as a C++ keyword, if any.  Wired to the C++
  * lexer's keyword table; the C lexer tokenizes identifiers, and this
@@ -64,7 +147,6 @@ cpp_class_decl(struct scope *s)
 		error(&tok.loc, "expected class name");
 	tag = tokenstr(tok.kind);
 	next();
-	cpp_current_class = tag; /* for member-function name mangling */
 
 	/* create or look up the aggregate type */
 	t = scopegettag(s, tag, tok.kind != TLBRACE && tok.kind != TSEMICOLON);
@@ -156,49 +238,119 @@ cpp_parse_translation_unit(void)
 /* --- member function lowering (C.2.3) -------------------------------- */
 
 /* Define a member function as an out-of-line free function named
- * `ClassName_method`.  Reuses the C function-definition machinery
- * (mkdecl/mkfunc/stmt) via a small clone of decl()'s DECLFUNC path.
- * The implicit `this` parameter and in-body member access (`count` ->
- * this->count) are added in the next stage; for now the function body is
- * parsed with no implicit this, so member access inside the body will
- * fail to resolve until that stage lands. */
+ * `ClassName_method` (class_tag is the enclosing struct/class tag).
+ * Reuses the C function-definition machinery (mkdecl/mkfunc/stmt) via a
+ * small clone of decl()'s DECLFUNC path.  The implicit `this` parameter
+ * (Class *) is prepended to the mangled signature; inside the body, bare
+ * member names resolve to `(*this).name` via cpp_member_ident. */
 void
-cpp_define_method(struct scope *s, struct type *funct, const char *mname)
+cpp_define_method(struct scope *s, struct type *funct, const char *mname,
+                  const char *class_tag)
 {
 	extern struct decl *mkdecl(char *, enum declkind, struct type *,
 	    enum typequal, enum linkage);
+	extern struct func *mkfunc(struct decl *, char *, struct type *,
+	    struct scope *);
+	extern void delfunc(struct func *);
+	extern void stmt(struct func *, struct scope *);
+	extern void emitfunc(struct func *, bool);
+	extern void funchlt(struct func *);
+	extern struct scope *delscope(struct scope *);
 
 	char mangled[256];
-	struct decl *d;
+	char *pmangled;
+	struct type *mtype, *classt;
+	struct decl *d, *thisd, *cur, *nd, **end;
+	struct scope *fs;
+	struct func *f;
 
-	(void)s;
-	if (!cpp_current_class || !mname)
+	if (!class_tag || !mname)
 		return;
-	snprintf(mangled, sizeof mangled, "%s_%s", cpp_current_class, mname);
 
-	d = mkdecl(mangled, DECLFUNC, funct, QUALNONE, LINKEXTERN);
+	classt = scopegettag(s, class_tag, true);
+	if (!classt || (classt->kind != TYPESTRUCT && classt->kind != TYPEUNION))
+		error(&tok.loc, "'%s' is not a class type", class_tag);
+
+	snprintf(mangled, sizeof mangled, "%s_%s", class_tag, mname);
+	/* mkdecl/scopeputdecl keep the name pointer; persist it off the
+	 * stack (the C parser's token strings are stable, ours is not). */
+	pmangled = xmalloc(strlen(mangled) + 1);
+	strcpy(pmangled, mangled);
+
+	/* Build the mangled function type:
+	 * `Class_method(Class *this, args...) -> funct->base`.  The
+	 * declarator already parsed the explicit params into funct; we
+	 * copy those decls so funct (kept in the member list for call
+	 * lowering) and mtype don't share the same decl chain. */
+	mtype = mktype(TYPEFUNC, 0);
+	mtype->base = funct->base;
+	mtype->qual = funct->qual;
+	mtype->prop |= funct->prop;
+	mtype->align = funct->align;
+	mtype->u.func.isvararg = funct->u.func.isvararg;
+	mtype->u.func.params = NULL;
+	mtype->u.func.nparam = 0;
+	thisd = mkdecl("this", DECLOBJECT, mkpointertype(classt, QUALNONE),
+	               QUALNONE, LINKNONE);
+	thisd->u.obj.storage = SDAUTO;
+	mtype->u.func.params = thisd;
+	end = &thisd->next;
+	++mtype->u.func.nparam;
+	for (cur = funct->u.func.params; cur; cur = cur->next) {
+		nd = mkdecl(cur->name, DECLOBJECT, cur->type, cur->qual, LINKNONE);
+		nd->u.obj.storage = SDAUTO;
+		*end = nd;
+		end = &nd->next;
+		++mtype->u.func.nparam;
+	}
+
+	/* Register the mangled function symbol in the current scope so the
+	 * call lowering (postfixexpr TPERIOD) can resolve it. */
+	d = scopegetdecl(s, mangled, false);
+	if (d && d->kind != DECLFUNC)
+		error(&tok.loc, "'%s' redeclared with different kind", mangled);
+	if (d && d->type && !typecompatible(mtype, d->type))
+		error(&tok.loc, "'%s' redeclared with incompatible type", mangled);
+	if (d && d->defined)
+		error(&tok.loc, "redefinition of member function '%s'", mangled);
+	if (!d) {
+		d = mkdecl(pmangled, DECLFUNC, mtype, QUALNONE, LINKEXTERN);
+		scopeputdecl(s, d);
+	} else {
+		d->type = typecomposite(mtype, d->type);
+		free(pmangled);
+	}
 	d->value = mkglobal(d);
+
 	if (tok.kind != TLBRACE) {
 		if (tok.kind == TSEMICOLON)
 			next();
 		return; /* declaration only */
 	}
-	/* Stage C.2.3: the member function is lowered to an out-of-line
-	 * `Class_method` symbol; this-pointer lowering and in-body member
-	 * access are implemented next stage, so the body is consumed without
-	 * parsing. */
-	if (tok.kind == TLBRACE) {
-		int bd = 1;
-		next();
-		while (bd && tok.kind != TEOF) {
-			if (tok.kind == TLBRACE) bd++;
-			else if (tok.kind == TRBRACE) bd--;
-			next();
-		}
-	} else if (tok.kind == TSEMICOLON) {
-		next();
-	}
+
+	/* Function definition: open a fresh scope seeded with this + the
+	 * copied params, exactly as declarator's func branch + decl()'s
+	 * DECLFUNC path set up funcscope. */
+	fs = mkscope(s);
+	for (nd = mtype->u.func.params; nd; nd = nd->next)
+		scopeputdecl(fs, nd);
+
+	g_cpp_method.class_type = classt;
+	g_cpp_method.this_decl = thisd;
+	g_cpp_method.active = true;
+
+	f = mkfunc(d, pmangled, d->type, fs);
+	stmt(f, fs);
+	if (d->u.func.isnoreturn)
+		funchlt(f);
+	emitfunc(f, d->linkage == LINKEXTERN);
+	delscope(fs);
+	delfunc(f);
 	d->defined = true;
+
+	g_cpp_method.active = false;
+	g_cpp_method.this_decl = NULL;
+	g_cpp_method.class_type = NULL;
 }
 
 /* C++ member-function lookup helpers.  A function member is registered in

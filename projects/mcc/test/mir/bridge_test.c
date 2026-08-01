@@ -32,6 +32,7 @@ static MFn *
 build_fib(void)
 {
 	MFn *fn = mfn_new("fib", 2);
+	fn->export = true; /* test driver links against the emitted symbol */
 	MBlk *entry = mblk_new(fn, "entry");
 	MBlk *base = mblk_new(fn, "base");
 	MBlk *rec = mblk_new(fn, "rec");

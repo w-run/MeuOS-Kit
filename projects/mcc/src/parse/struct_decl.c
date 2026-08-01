@@ -194,8 +194,10 @@ structdecl(struct scope *s, struct structbuilder *b)
 			extern int g_lang;
 			if (g_lang == 1 && mt.type->kind == TYPEFUNC) {
 				extern void cpp_define_method(struct scope *,
-				    struct type *, const char *);
-				cpp_define_method(s, mt.type, name);
+				    struct type *, const char *, const char *);
+				/* class tag for name mangling (Class_method) */
+				cpp_define_method(s, mt.type, name,
+				    b->type->u.structunion.tag);
 				/* register the function member for call lowering */
 				addmember(b, mt, name, align, width);
 				/* leave the following token (class-body '}' or next

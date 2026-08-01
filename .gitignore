@@ -63,3 +63,6 @@ sysroot/
 
 # Reference projects (cloned for study, not part of the build)
 reference/
+
+# Reference source-tree symlink (points to the main checkout)
+reference

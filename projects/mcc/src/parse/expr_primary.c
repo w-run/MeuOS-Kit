@@ -141,8 +141,18 @@ primaryexpr(struct scope *s)
 	default:
 		if (tok.kind >= TIDENT) {
 			d = scopegetdecl(s, tokenstr(tok.kind), 1);
-			if (!d)
+			if (!d) {
+				/* C++ method body: a bare class-member name resolves
+				 * to `(*this).name` (or a member call). */
+				extern struct expr *cpp_member_ident(struct scope *,
+				    const char *);
+				e = cpp_member_ident(s, tokenstr(tok.kind));
+				if (e) {
+					next();
+					break;
+				}
 				error(&tok.loc, "undeclared identifier: %s", tokenstr(tok.kind));
+			}
 			e = mkexpr(EXPRIDENT, d->type, NULL);
 			e->qual = d->qual;
 			e->lvalue = d->kind == DECLOBJECT;
