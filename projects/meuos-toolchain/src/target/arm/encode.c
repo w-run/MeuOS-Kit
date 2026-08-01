@@ -551,12 +551,17 @@ int arm_encode_insn(const struct mt_target *target,
 		int rd; if (reg_num(ops[0], &rd) < 0) return -1;
 		const char *op = ops[1];
 		if (op[0] == '#' && op[1] == ':') {
-			/* Symbol modifier: #:lower16:sym → R_ARM_MOVW_ABS_NC */
+			/* Symbol modifier: #:lower16:sym → R_ARM_MOVW_ABS_NC.
+			 * Match the exact ":lower16:" prefix — the old char-set
+			 * skip (which included 'r','e','1','6') would eat leading
+			 * characters of the symbol itself, e.g. `remfn` became
+			 * `mfn` and `r1` (a valid symbol name on arm, which also
+			 * names a register) was mis-parsed. */
 			const char *sym = op + 2;
-			while (*sym == ':' || *sym == 'l' || *sym == 'o' || *sym == 'w'
-			       || *sym == 'e' || *sym == 'r' || *sym == '1' || *sym == '6')
-				sym++;
-			if (*sym == ':') sym++;
+			if (strncmp(sym, "lower16:", 8) == 0)
+				sym += 8;
+			else
+				return -1;
 			out->fixed = 0;
 			out->reloc_type = 43; /* R_ARM_MOVW_ABS_NC */
 			set_fixup(out, 0, 4, 43, sym, 0);
@@ -577,12 +582,13 @@ int arm_encode_insn(const struct mt_target *target,
 		int rd; if (reg_num(ops[0], &rd) < 0) return -1;
 		const char *op = ops[1];
 		if (op[0] == '#' && op[1] == ':') {
-			/* Symbol modifier: #:upper16:sym → R_ARM_MOVT_ABS */
+			/* Symbol modifier: #:upper16:sym → R_ARM_MOVT_ABS.
+			 * Exact ":upper16:" prefix match (see movw above). */
 			const char *sym = op + 2;
-			while (*sym == ':' || *sym == 'u' || *sym == 'p' || *sym == 'e'
-			       || *sym == 'r' || *sym == '1' || *sym == '6')
-				sym++;
-			if (*sym == ':') sym++;
+			if (strncmp(sym, "upper16:", 8) == 0)
+				sym += 8;
+			else
+				return -1;
 			out->fixed = 0;
 			out->reloc_type = 44; /* R_ARM_MOVT_ABS */
 			set_fixup(out, 0, 4, 44, sym, 0);
@@ -837,8 +843,13 @@ ldr_mem:
 			if (reg_num(ops[0], &rd) < 0) return -1;
 			if (reg_num(ops[1], &rn) < 0) return -1;
 			if (reg_num(ops[2], &rm) < 0) return -1;
+			/* ARM SDIV/UDIV bit fields: Rd = Rn / Rm with
+			 *   Rd: bits 19-16, Rm: bits 11-8, Rn: bits 3-0.
+			 * Division is NOT commutative, so Rn and Rm must land in
+			 * the right fields (unlike mul where the operands could
+			 * be swapped without changing the result). */
 			uint32_t base = (mnemonic[0] == 's') ? 0xE710F010 : 0xE730F010;
-			emit32(out->bytes, base | (rd<<16) | (rn<<8) | rm);
+			emit32(out->bytes, base | (rd<<16) | (rm<<8) | rn);
 			return 0;
 		}
 	}
@@ -1119,7 +1130,9 @@ ldr_mem:
 	if (nops >= 4 && strcmp(mnemonic, "mls") == 0) {
 		int rd, rn, rm, ra;
 		if (reg_num(ops[0],&rd)<0||reg_num(ops[1],&rn)<0||reg_num(ops[2],&rm)<0||reg_num(ops[3],&ra)<0) return -1;
-		emit32(out->bytes, 0xE0600090 | (rd<<16) | (ra<<12) | (rn<<8) | rm);
+		/* MLS bit fields: Rd = Ra - Rn*Rm with
+		 *   Rd: bits 19-16, Ra: bits 15-12, Rm: bits 11-8, Rn: bits 3-0. */
+		emit32(out->bytes, 0xE0600090 | (rd<<16) | (ra<<12) | (rm<<8) | rn);
 		return 0;
 	}
 

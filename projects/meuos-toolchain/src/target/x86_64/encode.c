@@ -1007,7 +1007,12 @@ x86_64_encode_insn(const struct mt_target *target,
 		if (n == 2 && (strcmp(base, "ucomiss") == 0 ||
 		                strcmp(base, "ucomisd") == 0)) {
 			unsigned pfx = (strcmp(base, "ucomisd") == 0) ? 0x66 : 0;
-			if (!is_xmm(&op[0]) || !is_xmm(&op[1]))
+			/* UCOMISS/UCOMISD compare a scalar SSE operand against
+			 * %xmmDst; the source may be a register or memory
+			 * (e.g. 'ucomisd .Lfp(%rip), %xmm0' emitted by mcc for
+			 * float compares).  GNU as encodes mem/xmm sources with
+			 * the same 0F 2E /r opcode. */
+			if (!is_xmm(&op[1]))
 				goto unsupported;
 			emit_sse(out->bytes, &out->size, out, pfx, 0x2E,
 			         op[1].reg, &op[0], 0, R_X86_64_PC32, -4);
