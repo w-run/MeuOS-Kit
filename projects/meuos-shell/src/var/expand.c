@@ -24,6 +24,7 @@
 #include "msh/expand.h"
 #include "msh/lex.h"
 #include "msh/parse.h"
+#include "msh/array.h"
 
 /* === 动态字符串 === */
 typedef struct {
@@ -77,6 +78,15 @@ static const char *get_var(const char *name) {
         static char buf[32];
         snprintf(buf, sizeof(buf), "%d", msh_last_status);
         return buf;
+    }
+    if (!strcmp(name, "$")) {
+        static char buf[32];
+        snprintf(buf, sizeof(buf), "%d", (int)getpid());
+        return buf;
+    }
+    if (!strcmp(name, "!")) {
+        /* 最后后台作业 PID（简化：返回 0 表示无） */
+        return "0";
     }
     if (!strcmp(name, "@") || !strcmp(name, "*")) {
         static char buf[4096];
@@ -217,6 +227,57 @@ static char *subst_first(const char *val, const char *pat, const char *repl) {
 
 /* 处理 ${...} 修饰符 */
 static void handle_brace(sbuf_t *out, const char *body) {
+    /* bash array: ${arr[@]} ${arr[*]} ${arr[N]} ${#arr[@]} */
+    {
+        /* Check for ${#arr[@]} - array count */
+        if (body[0] == '#' && body[1] != '\0') {
+            const char *lb = strchr(body + 1, '[');
+            if (lb && strcmp(lb, "[@]") == 0) {
+                char aname[128];
+                size_t nl = lb - body - 1;
+                if (nl >= sizeof(aname)) nl = sizeof(aname) - 1;
+                memcpy(aname, body + 1, nl);
+                aname[nl] = '\0';
+                char buf[32];
+                snprintf(buf, sizeof(buf), "%d", msh_array_count(aname));
+                sbuf_pushs(out, buf);
+                return;
+            }
+        }
+        /* Check for ${arr[...]} - array access */
+        const char *lb = strchr(body, '[');
+        if (lb && lb != body) {
+            const char *rb = strrchr(body, ']');
+            if (rb && rb > lb) {
+                char aname[128];
+                size_t nl = lb - body;
+                if (nl >= sizeof(aname)) nl = sizeof(aname) - 1;
+                memcpy(aname, body, nl);
+                aname[nl] = '\0';
+                
+                /* Content inside [] */
+                size_t ilen = rb - lb - 1;
+                if (strcmp(lb, "[@]") == 0 || strcmp(lb, "[*]") == 0) {
+                    /* All elements */
+                    const char *sep = (lb[1] == '@') ? " " : " ";
+                    char *all = msh_array_get_all(aname, sep);
+                    sbuf_pushs(out, all);
+                    free(all);
+                    return;
+                } else {
+                    /* Specific index: arr[N] */
+                    char idxbuf[32];
+                    if (ilen >= sizeof(idxbuf)) ilen = sizeof(idxbuf) - 1;
+                    memcpy(idxbuf, lb + 1, ilen);
+                    idxbuf[ilen] = '\0';
+                    int idx = atoi(idxbuf);
+                    const char *elem = msh_array_get(aname, idx);
+                    if (elem) sbuf_pushs(out, elem);
+                    return;
+                }
+            }
+        }
+    }
     /* 长度 ${#VAR} */
     if (body[0] == '#' && body[1] != '\0') {
         const char *v = get_var(body + 1);
@@ -414,7 +475,7 @@ char *msh_expand(const char *s) {
                 i = j;
                 continue;
             }
-            if (isdigit((unsigned char)n) || n == '@' || n == '*' || n == '#' || n == '?') {
+            if (isdigit((unsigned char)n) || n == '@' || n == '*' || n == '#' || n == '?' || n == '$' || n == '!') {
                 char nm[2] = { n, 0 };
                 const char *v = get_var(nm);
                 sbuf_pushs(&out, v);

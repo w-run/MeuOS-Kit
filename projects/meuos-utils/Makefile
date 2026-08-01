@@ -16,6 +16,11 @@ AR ?= ar
 
 BUILD := build
 
+# meuos-compress 库路径
+MZ_DIR := ../meuos-compress
+MZ_LIB := $(MZ_DIR)/build/libmz.a
+MZ_INC := -I$(MZ_DIR)/include
+
 # 公共编译选项
 BASE_CFLAGS := -Iinclude -Isrc
 
@@ -30,7 +35,16 @@ TOOL_BINS := $(patsubst src/utils/%.c,$(BUILD)/%,$(TOOL_SRCS))
 
 .PHONY: all check clean install
 
-all: $(LIBUTILS_LIB) $(TOOL_BINS)
+all: $(LIBUTILS_LIB) $(TOOL_BINS) $(BUILD)/mz
+
+# mz 工具：依赖 libmz
+$(BUILD)/mz: src/utils/mz.c $(LIBUTILS_LIB) $(MZ_LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(BASE_CFLAGS) $(MZ_INC) -o $@ $< $(LIBUTILS_LIB) $(MZ_LIB) -ldl
+
+# libmz 依赖
+$(MZ_LIB):
+	$(MAKE) -C $(MZ_DIR)
 
 # libutils.a
 $(LIBUTILS_LIB): $(LIBUTILS_OBJS)
@@ -45,6 +59,11 @@ $(BUILD)/libutils/%.o: src/libutils/%.c
 $(BUILD)/%: src/utils/%.c $(LIBUTILS_LIB)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(BASE_CFLAGS) -o $@ $< $(LIBUTILS_LIB)
+
+# awk: -O2 optimization exposes UB in parser; use -O0 until fixed
+$(BUILD)/awk: src/utils/awk.c $(LIBUTILS_LIB)
+	@mkdir -p $(dir $@)
+	$(CC) -O0 -g $(BASE_CFLAGS) -o $@ $< $(LIBUTILS_LIB) -lm
 
 # 检查
 check: all

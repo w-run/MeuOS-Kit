@@ -22,6 +22,7 @@ void msh_lexer_init(lexer_t *lx, const char *src, size_t len) {
     lx->in_word = 0;
     lx->pending_op = 0;
     lx->at_cmd_start = 1;  /* 文件起始视为命令起始 */
+    lx->was_quoted = 0;
 }
 
 void msh_lexer_free(lexer_t *lx) {
@@ -62,7 +63,8 @@ static int is_op_char(int c) {
 }
 
 static char *take_word(lexer_t *lx) {
-    if (lx->word_len == 0) return NULL;
+    /* word_len==0 且 in_word==0 表示没有词；in_word==1 表示空引号（""）→ 返回空串 */
+    if (lx->word_len == 0 && !lx->in_word) return NULL;
     char *r = malloc(lx->word_len + 1);
     memcpy(r, lx->word_buf, lx->word_len + 1);
     word_reset(lx);
@@ -90,6 +92,8 @@ static int classify_word(const char *s) {
     if (!strcmp(s, "{"))       return TOK_LBRACE;
     if (!strcmp(s, "}"))       return TOK_RBRACE;
     if (!strcmp(s, "!"))       return TOK_BANG;
+    if (!strcmp(s, "[["))      return TOK_DLBRACK;
+    if (!strcmp(s, "]]"))      return TOK_DRBRACK;
     return TOK_WORD;
 }
 
@@ -102,7 +106,15 @@ static void word_done(lexer_t *lx, int tok, const char *text) {
         || tok == TOK_THEN || (text && strcmp(text, "then") == 0)
         || tok == TOK_DO || (text && strcmp(text, "do") == 0)
         || tok == TOK_ELSE || (text && strcmp(text, "else") == 0)
-        || tok == TOK_ELIF || (text && strcmp(text, "elif") == 0)) {
+        || tok == TOK_ELIF || (text && strcmp(text, "elif") == 0)
+        || tok == TOK_IF || (text && strcmp(text, "if") == 0)
+        || tok == TOK_WHILE || (text && strcmp(text, "while") == 0)
+        || tok == TOK_UNTIL || (text && strcmp(text, "until") == 0)
+        || tok == TOK_FOR || (text && strcmp(text, "for") == 0)
+        || tok == TOK_LPAREN
+        || tok == TOK_AND || tok == TOK_OR
+        || tok == TOK_SEMI || tok == TOK_NEWLINE
+        || tok == TOK_PIPE) {
         lx->at_cmd_start = 1;
     } else {
         lx->at_cmd_start = 0;
@@ -144,6 +156,58 @@ static void scan_balanced(lexer_t *lx, char open, char close) {
         else if (c == close) depth--;
     }
     /* 闭合符已追加进 word_buf */
+}
+
+/* here-doc 扫描：从当前位置扫描到delimiter行，返回收集的内容（malloc）。
+ * 成功返回内容（可能为空串），lx->pos 推进到 delimiter 行尾下一个位置。
+ * 失败（未找到 delimiter）返回 NULL。
+ * 注意：本函数不处理 delimiter 的引号剥离或内容展开，由调用者决定。 */
+char *msh_lex_heredoc(lexer_t *lx, const char *delimiter) {
+    if (!delimiter || !*delimiter) return NULL;
+    size_t dlen = strlen(delimiter);
+    size_t cap = 256, len = 0;
+    char *buf = malloc(cap);
+    if (!buf) return NULL;
+    buf[0] = '\0';
+
+    while (lx->pos < lx->len) {
+        /* 行首 */
+        size_t line_start = lx->pos;
+        /* 扫描到行尾（\n 或 EOF） */
+        size_t j = lx->pos;
+        while (j < lx->len && lx->src[j] != '\n') j++;
+        size_t line_len = j - lx->pos;  /* 不含 \n */
+
+        /* 检查是否匹配 delimiter（整行恰好是 delimiter） */
+        if (line_len == dlen && memcmp(lx->src + lx->pos, delimiter, dlen) == 0) {
+            /* 跳过 delimiter 行 + 换行 */
+            lx->pos = j;
+            if (lx->pos < lx->len && lx->src[lx->pos] == '\n') {
+                lx->pos++;
+                lx->lineno++;
+            }
+            return buf;
+        }
+
+        /* 不是 delimiter：追加本行 + 换行 */
+        while (len + line_len + 2 >= cap) {
+            cap *= 2;
+            buf = realloc(buf, cap);
+        }
+        memcpy(buf + len, lx->src + line_start, line_len);
+        len += line_len;
+        buf[len++] = '\n';
+        buf[len] = '\0';
+        lx->pos = j;
+        if (lx->pos < lx->len && lx->src[lx->pos] == '\n') {
+            lx->pos++;
+            lx->lineno++;
+        }
+    }
+    /* 未找到 delimiter */
+    free(buf);
+    fprintf(stderr, "msh: warning: heredoc delimited by EOF (looking for %s)\n", delimiter);
+    return NULL;
 }
 
 /* 主词法入口 */
@@ -221,6 +285,7 @@ int msh_lex_next(lexer_t *lx, char **out_text) {
                 return TOK_EOF;
             }
             lx->in_word = 1;
+            lx->was_quoted = 1;  /* 单引号 */
             continue;
         }
         if (c == '"') {
@@ -238,6 +303,7 @@ int msh_lex_next(lexer_t *lx, char **out_text) {
                 return TOK_EOF;
             }
             lx->in_word = 1;
+            lx->was_quoted = 2;  /* 双引号 */
             continue;
         }
         if (c == '$') {
@@ -290,6 +356,23 @@ int msh_lex_next(lexer_t *lx, char **out_text) {
             continue;
         }
         if (is_op_char(c)) {
+            /* bash array: if word ends with = and c is '(', include balanced () */
+            if (c == '(' && lx->in_word && lx->word_len > 0 &&
+                lx->word_buf[lx->word_len - 1] == '=') {
+                word_append(lx, '(');
+                int paren_depth = 1;
+                int nc;
+                while ((nc = next(lx)) != -1) {
+                    word_append(lx, (char)nc);
+                    if (nc == '(') paren_depth++;
+                    else if (nc == ')') {
+                        paren_depth--;
+                        if (paren_depth == 0) break;
+                    }
+                }
+                lx->in_word = 1;
+                continue;
+            }
             if (lx->in_word) {
                 char *w = take_word(lx);
                 int tok = TOK_WORD;
@@ -308,8 +391,15 @@ int msh_lex_next(lexer_t *lx, char **out_text) {
                     break;
                 case ';': lx->pending_op = TOK_SEMI; break;
                 case '<':
-                    if (n2 == '<') { next(lx); lx->pending_op = TOK_HEREDOC; }
-                    else if (n2 == '&') { next(lx); lx->pending_op = TOK_REDIR_DUP_IN; }
+                    if (n2 == '<') {
+                        next(lx);  /* consume second < */
+                        if (peek(lx) == '<') {
+                            next(lx);  /* consume third < */
+                            lx->pending_op = TOK_HERESTRING;
+                        } else {
+                            lx->pending_op = TOK_HEREDOC;
+                        }
+                    } else if (n2 == '&') { next(lx); lx->pending_op = TOK_REDIR_DUP_IN; }
                     else lx->pending_op = TOK_REDIR_IN;
                     break;
                 case '>':
@@ -338,7 +428,16 @@ int msh_lex_next(lexer_t *lx, char **out_text) {
                 lx->at_cmd_start = 1;
                 return TOK_SEMI;
             case '<':
-                if (n2 == '<') { next(lx); lx->at_cmd_start = 0; return TOK_HEREDOC; }
+                if (n2 == '<') {
+                    next(lx);  /* consume second < */
+                    if (peek(lx) == '<') {
+                        next(lx);  /* consume third < */
+                        lx->at_cmd_start = 0;
+                        return TOK_HERESTRING;
+                    }
+                    lx->at_cmd_start = 0;
+                    return TOK_HEREDOC;
+                }
                 if (n2 == '&') { next(lx); lx->at_cmd_start = 0; return TOK_REDIR_DUP_IN; }
                 lx->at_cmd_start = 0;
                 return TOK_REDIR_IN;
@@ -359,6 +458,7 @@ int msh_lex_next(lexer_t *lx, char **out_text) {
         }
         word_append(lx, (char)c);
         lx->in_word = 1;
+        lx->was_quoted = 0;  /* 普通字符，无引号 */
     }
 
     char *w = take_word(lx);

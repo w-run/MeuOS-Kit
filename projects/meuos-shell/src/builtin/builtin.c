@@ -72,22 +72,56 @@ int msh_builtin_unset(int argc, char **argv) {
 }
 
 int msh_builtin_set(int argc, char **argv) {
+    /* set -e / set +e / set -o pipefail */
+    if (argc >= 2) {
+        for (int i = 1; i < argc; i++) {
+            if (strcmp(argv[i], "-e") == 0) {
+                extern int msh_errexit;
+                msh_errexit = 1;
+            } else if (strcmp(argv[i], "+e") == 0) {
+                extern int msh_errexit;
+                msh_errexit = 0;
+            } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
+                if (strcmp(argv[i+1], "pipefail") == 0) {
+                    extern int msh_pipefail;
+                    msh_pipefail = 1;
+                    i++;
+                } else if (strcmp(argv[i+1], "errexit") == 0) {
+                    extern int msh_errexit;
+                    msh_errexit = 1;
+                    i++;
+                } else {
+                    i++; /* skip unknown -o option */
+                }
+            } else if (strcmp(argv[i], "+o") == 0 && i + 1 < argc) {
+                if (strcmp(argv[i+1], "pipefail") == 0) {
+                    extern int msh_pipefail;
+                    msh_pipefail = 0;
+                    i++;
+                } else if (strcmp(argv[i+1], "errexit") == 0) {
+                    extern int msh_errexit;
+                    msh_errexit = 0;
+                    i++;
+                } else {
+                    i++;
+                }
+            } else {
+                /* 简化：`set VAR=val` 形式 */
+                char *eq = strchr(argv[i], '=');
+                if (eq) {
+                    *eq = '\0';
+                    setenv(argv[i], eq + 1, 1);
+                    *eq = '=';
+                }
+            }
+        }
+        return 0;
+    }
     (void)argv;
     if (argc == 1) {
         extern char **environ;
         for (char **e = environ; *e; e++) puts(*e);
         return 0;
-    }
-    /* 简化：`set VAR=val` 形式 */
-    for (int i = 1; i < argc; i++) {
-        char *eq = strchr(argv[i], '=');
-        if (eq) {
-            *eq = '\0';
-            setenv(argv[i], eq + 1, 1);
-            *eq = '=';
-        } else {
-            fprintf(stderr, "msh: set: %s: not a name=value\n", argv[i]);
-        }
     }
     return 0;
 }

@@ -232,35 +232,111 @@ meow / msh / 工具链 / sysroot
 
 ## 10. 路线图
 
-### Phase 7A — 骨架 + 现代核心（当前）
+### Phase 7A — 骨架 + 现代核心（✅ 完成）
 - ✅ 骨架阶段烟雾测试 5 工具通过
-- 🟡 libutils.a 现代化（color/progress/icons/table/json/config/syntax/hash）
-- 🟡 现代 ls/cat/find/grep/diff/cp/mv/rm + tree
-- 🟡 剩余 coreutils（wc/head/tail/sort/uniq/tr/cut/tee）
-- 🟡 GNU `--classic` 兼容层
+- ✅ libutils.a 现代化（xmalloc/getopt/progname/version/human/pathname）
+- ✅ 现代 ls/cat/find/grep/diff/cp/mv/rm + tree（均含 `--classic` 兼容）
+- ✅ 剩余 coreutils（wc/head/tail/sort/uniq/tr/cut/tee/seq/printf/env/dd/stat/test/cmp/chmod/echo/true/false/yes/mkdir/rmdir/ln/touch/xargs）
+- ✅ sed（POSIX 子集：s/d/p/a/i/c/q/y/=/w/r + 地址匹配）
+- ✅ GNU `--classic` 兼容层（ls/cat/find/grep/diff/cp/mv/rm 等）
 
-### Phase 7B — 文本处理深水区
-- sed（POSIX sed，复杂）
-- awk（POSIX awk 子集，复杂）
-- locate + 数据库构建
-- tar + 压缩工具
-- 用户请求的网络/高级工具
+### Phase 7B — 文本处理深水区（✅ 完成）
+- ✅ sed（POSIX sed 子集，已完成）
+- ✅ awk（POSIX awk 子集：BEGIN/END/模式-动作/字段/正则/控制流/数组/gsub/sub/split/printf/重定向/管道/隐式拼接）
+- ✅ locate + 数据库构建（子串/正则/大小写/计数/限制）
+- ✅ tar（pax 格式创建/解包/列表 + gzip 透传 + 长名支持）
+- ✅ gzip（DEFLATE 解压全块类型 + stored 压缩 + CRC32 + 系统 gzip 互操作）
+- ✅ patch（unified diff 应用 + 反向 + -p/-R/--dry-run）
+- ✅ diff 扩展（unified `@@ ... @@` + context `***`/`---` 格式 + `-c`/`-u`/`-C N`/`-U N`）
 
 ### Phase 7C — 优化
-- 并行化（sort -jN/grep -jN）
-- mmap 大文件处理
-- SIMD 加速（grep 字节搜索等）
+- ✅ **mz 工具集成 libmz** — 封装 `meuos-compress` 库，提供 `.mz` 压缩/解压 + `.mxa` 归档创建/列表/提取/测试
+- ⏳ 并行化（sort -jN/grep -jN）
+- ⏳ mmap 大文件处理
+- ⏳ SIMD 加速（grep 字节搜索等）
 
-## 11. 实施笔记
+### Phase 7D — 压缩统一架构（规划中）
+> **架构决策**：将所有压缩/解压算法收归 `meuos-compress` 库，
+> `gzip`/`unzip`/`tar` 等工具变为薄壳调用 libmz。
 
-### 11.1 为什么先做现代核心
+- ⏳ 在 `meuos-compress` 中新增 DEFLATE codec（`MZ_CODEC_DEFLATE`），使 gzip/unzip 可直接调用 libz 而非自带 DEFLATE 实现
+- ⏳ 在 `meuos-compress` 中新增 PKZIP 容器格式，使 unzip 可直接调用 mxa API
+- ⏳ gzip.c 重构为薄壳：gzip header/footer + `mz_decompress(MZ_CODEC_DEFLATE)`
+- ⏳ unzip.c 重构为薄壳：PKZIP 解析 + `mxa_read_file` / `mz_decompress`
+- ⏳ tar.c 增加 `-Z` 选项：两步模式（tar 打包 → mz 压缩）或流式 pipe
+
+## 11. 当前能力矩阵
+
+| 工具 | 状态 | 已实现特性 | 待实现 |
+|------|------|-----------|--------|
+| ls | ✅ | 彩色+图标+human+树视图+`--classic`+`--json` | — |
+| cat | ✅ | 行号+语法着色+JSON pretty+`--classic` | — |
+| find | ✅ | regex+跳过 VCS+`--classic` | — |
+| grep | ✅ | 递归+着色+`--classic` | — |
+| diff | ✅ | unified+context格式+着色+`-c`/`-u`/`-C N`/`-U N` | — |
+| cp | ✅ | 进度+原子+`--classic` | — |
+| mv | ✅ | rename 优先+`--classic` | — |
+| rm | ✅ | trash 安全层+`--classic` | — |
+| tree | ✅ | 彩色+深度控制+`--classic` | — |
+| wc | ✅ | 字/行/字节/字符统计 | — |
+| head/tail | ✅ | 字节/行模式 | tail -f |
+| sort | ✅ | 智能数字/版本+`--classic` | — |
+| uniq | ✅ | 计数+重复/唯一筛选 | — |
+| cut | ✅ | 字段/字节/字符+delimiter | — |
+| tr | ✅ | 字符映射+删除+压缩 | — |
+| tee | ✅ | 多文件输出+追加模式 | — |
+| seq | ✅ | 数字序列+步进+格式化 | — |
+| printf | ✅ | 格式化输出+转义 | — |
+| env | ✅ | 环境变量操作+清环境运行 | — |
+| dd | ✅ | 块级复制+转换+进度 | — |
+| stat | ✅ | 文件信息+`--classic`+`--json` | — |
+| test | ✅ | POSIX `[` 测试+文件/字符串/整数 | — |
+| cmp | ✅ | 字节比较+静默+偏移 | — |
+| chmod | ✅ | 符号/八进制权限 | — |
+| echo | ✅ | 转义控制+`-n` | — |
+| true/false/yes | ✅ | 标准退出码 | — |
+| mkdir/rmdir | ✅ | 递归创建+权限 | — |
+| ln | ✅ | 硬链接+软链接+强制 | — |
+| touch | ✅ | 创建/更新+`-c` | — |
+| xargs | ✅ | 参数分批+替换+并行占位 | — |
+| sed | ✅ | s/d/p/a/i/c/q/y/=/w/r+地址 | 多行模式 |
+| awk | ✅ | BEGIN/END/模式-动作/字段/NR/NF/FS/OFS/正则/控制流/数组/gsub/sub/split/printf/重定向/管道 | 变量赋值gsub |
+| locate | ✅ | 数据库构建+子串/正则/大小写/计数/限制 | — |
+| tar | ✅ | pax格式创建/解包/列表+gzip透传+长名 | xz/zstd |
+| gzip | ✅ | DEFLATE解压(全块类型)+stored压缩+CRC32+互操作 | LZ77压缩 |
+| patch | ✅ | unified diff应用+反向+-p/-R/--dry-run | context格式 |
+| chown | ✅ | 用户名/数字UID:GID+递归+--reference | — |
+| unzip | ✅ | PKZIP解压+stored/deflate+CRC32+列表+测试 | zip创建 |
+| **mz** | ✅ | libmz封装：.mz压缩/解压(L1-L9)+.mxa归档创建/列表/提取/测试 | — |
+
+## 12. 实施笔记
+
+### 12.1 为什么先做现代核心
 
 如果先实现 GNU 兼容版再改现代化，会不可避免地带上 GNU 的历史包袱（POSIX 边界、GNU extension 命名冲突）。我们直接做现代化核心，**GNU 兼容**是后续加的兼容层，**不会影响核心实现**。
 
-### 11.2 关于"不模仿 GNU"的几条具体规则
+### 12.2 关于"不模仿 GNU"的几条具体规则
 
 1. **不抄 GNU 工具名**：cp/mv/rm 等核心命令保留（POSIX 必需），但 GUI/UX 行为按 MeuOS 风格
 2. **不抄 GNU 选项名**：使用现代常见的命名（`--human-readable` vs `-h`、`--no-color` vs `--color=never`）
 3. **不抄 GNU 错误格式**：`ls: cannot access 'foo': No such file or directory` → `<tool>: foo (ERRNO=2): not found` 或类似现代化风格
 4. **不抄 GNU 默认行为**：如 sort 默认行为按 locale（GNU 默认按 LC_COLLATE）vs 我方默认 UTF-8 字节序 + 智能数字/版本排序
 5. **不抄 GNU 长短选项**：发现 GNU 不合理的设计就重做（如 GNU `rm` 缺 trash，是公认的落后设计）
+
+### 12.3 压缩外包架构决策（2026-08-02）
+
+**决策**：所有压缩/解压算法统一收归 `meuos-compress`（libmz）库，`gzip`/`unzip`/`tar` 等工具不再各自实现压缩算法，变为薄壳调用 libmz。
+
+**理由**：
+1. 消除重复代码：gzip.c 和 unzip.c 各自携带 ~250 行 DEFLATE 解压实现
+2. 统一算法入口：所有压缩/解压通过 `mz_compress()` / `mz_decompress()` 统一 API
+3. 可维护性：算法升级只需改 libmz 一处
+
+**实施路径**：
+1. 在 libmz 中新增 `MZ_CODEC_DEFLATE`（标准 RFC 1951），使 gzip 能调用 libmz 处理 .gz 文件
+2. 在 libmz 中新增 PKZIP 容器格式（类似 mxa），使 unzip 能调用 mxa API
+3. gzip.c 重构：仅保留 gzip header/footer 封装，DEFLATE 部分调用 libmz
+4. unzip.c 重构：仅保留 PKZIP 中央目录解析，解压部分调用 libmz
+5. tar.c 增加 `-Z` 选项支持 .mz 格式
+
+**当前状态**：mz 工具已完成（Phase 7C），其余为后续实现。

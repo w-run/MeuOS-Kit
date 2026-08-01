@@ -23,6 +23,9 @@
 #include "msh/msh.h"
 
 int msh_mode_classic = 0;
+int msh_errexit = 0;    /* set -e */
+int msh_pipefail = 0;    /* set -o pipefail */
+int msh_in_cond = 0;     /* evaluating condition (exempt from errexit) */
 
 /* === 别名表 === */
 typedef struct alias_entry {

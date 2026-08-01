@@ -37,6 +37,15 @@ void msh_die(const char *fmt, ...) __attribute__((noreturn, format(printf, 1, 2)
  * classic 模式下：关颜色、不读 rc、不展别名、朴素 $ 提示符。
  */
 extern int msh_mode_classic;
+extern int msh_errexit;    /* set -e */
+extern int msh_pipefail;   /* set -o pipefail */
+extern int msh_in_cond;    /* evaluating condition (exempt from errexit) */
+
+/* compctl: completion script system */
+int msh_builtin_complete(int argc, char **argv);
+int msh_builtin_compgen(int argc, char **argv);
+int msh_compctl_lookup(const char *cmd, int *type, const char **func);
+int msh_compctl_load_dir(const char *dirpath);
 
 /* 别名表：msh_alias_add / msh_alias_lookup */
 void msh_alias_add(const char *name, const char *value);
@@ -47,6 +56,17 @@ char *msh_prompt_expand(const char *ps1);
 
 /* 加载 YAML 配置（~/.config/msh/config.yaml）。启动时调用。 */
 void msh_load_config(const char *rcfile);
+
+/* 一次性执行字符串（公开给 trap/eval 使用）。 */
+int msh_run_string(const char *s, size_t len);
+
+/* === trap 内建支持 === */
+/* trap 内建命令。返回 0 成功，2 用法错误。 */
+int msh_builtin_trap(int argc, char **argv);
+/* 检查并执行 pending trap。每次读命令前调用。 */
+void msh_trap_check(void);
+/* 执行 EXIT trap（shell 退出时调用）。 */
+void msh_trap_exit(void);
 
 #ifdef __cplusplus
 }

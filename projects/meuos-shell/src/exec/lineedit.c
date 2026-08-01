@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 #include "msh/history.h"
+#include "msh/complete.h"
 
 /* 读取一个编辑好的行。prompt 非 NULL 时先输出 prompt。
  * 返回 malloc 字符串（不含换行），EOF 返回 NULL。 */
@@ -46,8 +47,9 @@ char *msh_readline(const char *prompt) {
     size_t cap = 256;
     size_t len = 0;      /* 当前行长度 */
     size_t cur = 0;      /* 光标位置 */
-    int hist_pos = msh_history_count();  /* 当前历史游标（1 表示最旧...这里用 n 表示 new） */
+    (void)0; /* hist_pos removed - history navigation uses hist_index directly */
     int hist_index = -1; /* -1 表示不在历史中 */
+    int prev_was_tab = 0; /* 上一次按键是否是 Tab */
 
     if (prompt) { fputs(prompt, stdout); fflush(stdout); }
 
@@ -192,6 +194,25 @@ char *msh_readline(const char *prompt) {
             }
             continue;
         }
+        if (c == 9) {  /* Tab 补全 */
+            if (len + 256 >= cap) {
+                cap = cap * 2 + 256;
+                buf = realloc(buf, cap);
+            }
+            int rc = msh_complete(buf, &cur, &len, cap, prev_was_tab);
+            if (rc > 0) {
+                fprintf(stdout, "\033[2K\r");
+                if (prompt) fputs(prompt, stdout);
+                fputs(buf, stdout);
+                if (cur < len) {
+                    fputs("\033[", stdout);
+                    printf("%zuD", len - cur);
+                }
+                fflush(stdout);
+            }
+            prev_was_tab = 1;
+            continue;
+        }
         if (c == 127 || c == 8) {  /* Backspace */
             if (cur > 0) {
                 memmove(buf + cur - 1, buf + cur, len - cur + 1);
@@ -241,9 +262,10 @@ char *msh_readline(const char *prompt) {
             }
             continue;
         }
-        if (iscntrl((unsigned char)c)) continue;
+        if (iscntrl((unsigned char)c)) { prev_was_tab = 0; continue; }
 
         /* 普通字符插入 */
+        prev_was_tab = 0;
         if (len + 1 >= cap) {
             cap *= 2;
             buf = realloc(buf, cap);

@@ -10,88 +10,102 @@
 
 ## P0 — 骨架（必做，当前）
 
-- [ ] **utils-skeleton** — `projects/meuos-utils/` 骨架建立（Makefile + ARCHITECTURE.md + src/common/ + include/ + 占位 main.c）
-- [ ] **shell-skeleton** — `projects/meuos-shell/` 骨架建立（Makefile + ARCHITECTURE.md + src/ + include/msh/msh.h + 占位 main.c + --version）
-- [ ] **doc-sync** — AGENTS.md §10.2 状态从「⏳ 待启动」改成「🟡 骨架完成」+ README.md 同步
+- [x] **utils-skeleton** — `projects/meuos-utils/` 骨架建立（Makefile + ARCHITECTURE.md + src/common/ + include/ + 占位 main.c）
+- [x] **shell-skeleton** — `projects/meuos-shell/` 骨架建立（Makefile + ARCHITECTURE.md + src/ + include/msh/msh.h + 占位 main.c + --version）
+- [x] **doc-sync** — AGENTS.md §10.2 状态从「⏳ 待启动」改成「🟡 骨架完成」+ README.md 同步
 
 ## P1 — coreutils 之「最小 IO 集」
 
-- [ ] **utils-cat** — `cat` 完整实现（stdin/多文件/- 选项/--help/--version）
-- [ ] **utils-echo** — `echo` 完整实现（-n/-e/-E、POSIX 退格转义）
-- [ ] **utils-true** — `true` 空命令（也作 libutils.a 的烟雾测试入口）
-- [ ] **utils-false** — `false` 空命令
-- [ ] **utils-yes** — `yes [str]` 无限输出
-- [ ] **utils-test** — `test`/`[` 命令（POSIX 实现常用表达式）
+- [x] **utils-cat** — `cat` 完整实现（stdin/多文件/- 选项/--help/--version）
+- [x] **utils-echo** — `echo` 完整实现（-n/-e/-E、POSIX 退格转义）
+- [x] **utils-true** — `true` 空命令（也作 libutils.a 的烟雾测试入口）
+- [x] **utils-false** — `false` 空命令
+- [x] **utils-yes** — `yes [str]` 无限输出
+- [x] **utils-test** — `test`/`[` 命令（POSIX 实现常用表达式）
 
 ## P2 — fileutils / coreutils 之「文件操作」
 
-- [ ] **utils-cp** — `cp` 文件/目录复制（-r/-p/-f）
-- [ ] **utils-mv** — `mv` 移动/重命名
-- [ ] **utils-rm** — `rm` 删除（-r/-f）
-- [ ] **utils-mkdir** — `mkdir` 创建目录（-p）
-- [ ] **utils-rmdir** — `rmdir` 删除空目录
-- [ ] **utils-ln** — `ln` 硬链接/符号链接（-s）
-- [ ] **utils-touch** — `touch` 创建/更新时间戳
-- [ ] **utils-ls** — `ls` 列目录（-l/-a/-h 等 GNU 子集）
-- [ ] **utils-chmod** — `chmod` 改权限（符号 + 八进制）
-- [ ] **utils-chown** — `chown` 改属主（可选，依赖 getpwnam）
+- [x] **utils-cp** — `cp` 文件/目录复制（-r/-p/-f）
+- [x] **utils-mv** — `mv` 移动/重命名
+- [x] **utils-rm** — `rm` 删除（-r/-f）
+- [x] **utils-mkdir** — `mkdir` 创建目录（-p）
+- [x] **utils-rmdir** — `rmdir` 删除空目录
+- [x] **utils-ln** — `ln` 硬链接/符号链接（-s）
+- [x] **utils-touch** — `touch` 创建/更新时间戳
+- [x] **utils-ls** — `ls` 列目录（-l/-a/-h 等 GNU 子集）
+- [x] **utils-chmod** — `chmod` 改权限（符号 + 八进制）
+- [x] **utils-chown** — `chown` 改属主（用户名/数字UID:GID + 递归 + --reference）
 
 ## P3 — coreutils 之「文本处理基础」
 
-- [ ] **utils-head** — `head` 前 N 行（-n/-c）
-- [ ] **utils-tail** — `tail` 后 N 行（-n/-c/-f）
-- [ ] **utils-wc** — `wc` 字节/行/词统计（-l/-w/-c/-m）
-- [ ] **utils-sort** — `sort` 行排序（-r/-n/-u/-k）
-- [ ] **utils-uniq** — `uniq` 去重（-c/-d/-u）
-- [ ] **utils-cut** — `cut` 字段/字符切割（-d/-f/-c）
-- [ ] **utils-tr** — `tr` 字符替换/删除（-d/-s）
-- [ ] **utils-tee** — `tee` 双重输出（-a）
-- [ ] **utils-dd** — `dd` 块复制（bs=/count=/skip=/conv=）
+- [x] **utils-head** — `head` 前 N 行（-n/-c）
+- [x] **utils-tail** — `tail` 后 N 行（-n/-c/-f）
+- [x] **utils-wc** — `wc` 字节/行/词统计（-l/-w/-c/-m）
+- [x] **utils-sort** — `sort` 行排序（-r/-n/-u/-k）
+- [x] **utils-uniq** — `uniq` 去重（-c/-d/-u）
+- [x] **utils-cut** — `cut` 字段/字符切割（-d/-f/-c）
+- [x] **utils-tr** — `tr` 字符替换/删除（-d/-s）
+- [x] **utils-tee** — `tee` 双重输出（-a）
+- [x] **utils-dd** — `dd` 块复制（bs=/count=/skip=/conv=）
 
 ## P4 — diffutils / findutils / 文本处理
 
-- [ ] **utils-diff** — `diff` 行对比（POSIX 子集）
-- [ ] **utils-cmp** — `cmp` 字节对比
-- [ ] **utils-patch** — `patch` 应用补丁
-- [ ] **utils-find** — `find` 递归查找（-name/-type/-exec/-print 等）
-- [ ] **utils-xargs** — `xargs` 参数化执行命令
-- [ ] **utils-grep** — `grep` 模式匹配（POSIX BRE + 可选 ERE）
+- [x] **utils-diff** — `diff` 行对比（POSIX 子集）
+- [x] **utils-cmp** — `cmp` 字节对比
+- [x] **utils-patch** — `patch` 应用补丁（unified diff + 反向 + -p/-R/--dry-run）
+- [x] **utils-find** — `find` 递归查找（-name/-type/-exec/-print 等）
+- [x] **utils-xargs** — `xargs` 参数化执行命令
+- [x] **utils-grep** — `grep` 模式匹配（POSIX BRE + 可选 ERE）
+- [x] **utils-locate** — `locate` 数据库构建+查询（-u/-i/-r/-c/-l/-d）
 
 ## P5 — 归档 / 压缩
 
-- [ ] **utils-tar** — `tar` 创建/解包（POSIX pax 格式 + gzip 选项）
-- [ ] **utils-gzip** — `gzip`/`gunzip` 压缩（基于 mz 库的 LZ77 或自主实现 DEFLATE）
+- [x] **utils-tar** — `tar` 创建/解包/列表（POSIX pax 格式 + gzip 透传 + 长名支持）
+- [x] **utils-gzip** — `gzip`/`gunzip` 压缩（DEFLATE 解压全块类型 + stored 压缩 + CRC32 + 系统互操作）
+- [x] **utils-mz** — `mz` 原生压缩工具（封装 libmz：.mz 压缩/解压 L1-L9 + .mxa 归档创建/列表/提取/测试）
 - [ ] **utils-xz** — `xz`/`unxz` 压缩（如 MeOS 不实现则标记 stalled）
 - [ ] **utils-zstd** — `zstd` 压缩（可选）
-- [ ] **utils-zip** — `unzip` 解压（PKZIP，POSIX unzip 子集）
+- [x] **utils-unzip** — `unzip` 解压（PKZIP 格式 + stored/deflate + CRC32 + 列表/测试）
 
 ## P6 — msh POSIX sh 核心
 
-- [ ] **msh-lex** — 词法：标识符/关键字/操作符/引号/转义/注释
-- [ ] **msh-parse** — 语法：命令 + 管道 + 列表 + 复合命令
-- [ ] **msh-exec** — 执行：execvp 集成 + 简单命令
-- [ ] **msh-var** — 变量：定位参数 / `VAR=val` / `$VAR` `${VAR}` 展开
-- [ ] **msh-expand** — 展开：glob（`?` `*` `[...]`）/ tilde / 命令替换 `$(...)` / 算术展开 `$((...))`
-- [ ] **msh-redir** — 重定向：`>` `>>` `<` `2>` `&>`
-- [ ] **msh-builtin** — 内建：`cd` `echo` `pwd` `export` `unset` `set` `exit` `:` `.` `exec` `read` `eval` `trap` `wait` `jobs`
-- [ ] **msh-flow** — 控制流：`if`/`then`/`else`/`elif`/`fi` + `case`/`esac` + `for`/`while`/`until`
-- [ ] **msh-func** — 函数定义与调用
+- [x] **msh-lex** — 词法：标识符/关键字/操作符/引号/转义/注释
+- [x] **msh-parse** — 语法：命令 + 管道 + 列表 + 复合命令
+- [x] **msh-exec** — 执行：execvp 集成 + 简单命令
+- [x] **msh-var** — 变量：定位参数 / `VAR=val` / `$VAR` `${VAR}` 展开
+- [x] **msh-expand** — 展开：glob（`?` `*` `[...]`）/ tilde / 命令替换 `$(...)` / 算术展开 `$((...))`
+- [x] **msh-redir** — 重定向：`>` `>>` `<` `2>` `&>`
+- [x] **msh-builtin** — 内建：`cd` `echo` `pwd` `export` `unset` `set` `exit` `:` `.` `exec` `read` `eval` `trap` `wait` `jobs`
+- [x] **msh-flow** — 控制流：`if`/`then`/`else`/`elif`/`fi` + `case`/`esac` + `for`/`while`/`until`
+- [x] **msh-func** — 函数定义与调用
 
 ## P7 — msh 交互层
 
-- [ ] **msh-prompt** — PS1/PS2 提示符（含基本转义）
-- [ ] **msh-history** — 历史记录（持久化 ~/.msh_history）
-- [ ] **msh-lineedit** — 行编辑（vi/emacs 模式 + 字符级操作 + 删除/移动）
-- [ ] **msh-tab** — Tab 补全（命令 + 路径 + 变量）
-- [ ] **msh-job** — 作业控制（前台/后台 & + jobs/fg/bg）
-- [ ] **msh-signal** — 信号处理（Ctrl-C → 终止前台，Ctrl-D → EOF）
+- [x] **msh-prompt** — PS1/PS2 提示符（含基本转义）
+- [x] **msh-history** — 历史记录（持久化 ~/.msh_history）
+- [x] **msh-lineedit** — 行编辑（vi/emacs 模式 + 字符级操作 + 删除/移动）
+- [x] **msh-tab** — Tab 补全（命令 + 路径 + 变量）
+- [x] **msh-job** — 作业控制（前台/后台 & + jobs/fg/bg）
+- [x] **msh-signal** — 信号处理（Ctrl-C → 终止前台，Ctrl-D → EOF）
 
 ## P8 — msh 可选扩展
 
-- [ ] **msh-bashcompat** — bash 兼容层（数组 `${arr[@]}` / `[[]]` / `source` / `set -e`）
-- [ ] **msh-zsh-plugin** — zsh 风格插件/主题（可选，依赖 zsh 生态或自主实现）
-- [ ] **msh-completion-script** — 补全脚本加载（compctl/compgen）
-- [ ] **msh-arrays** — bash 风格数组支持
+- [x] **msh-arrays** — bash 风格数组支持（`arr=(a b c)` / `${arr[0]}` / `${arr[@]}` / `${#arr[@]}` / `arr[i]=val`）
+- [x] **msh-zsh-plugin** — zsh 风格插件/主题系统（`msh plugin list/load/enable/disable/theme` + 3 内置主题 minimal/colorful/powerline + 文件主题加载）
+- [x] **msh-bashcompat** — bash 兼容补充（`[[]]` 条件测试 / `set -e` / `set -o pipefail` 已实现）
+- [x] **msh-completion-script** — 补全脚本加载（complete/compgen 内建命令 + 规则注册 + 脚本目录加载）
+
+## P9 — 压缩统一架构（规划中）
+
+> **架构决策**：将所有压缩/解压算法收归 `meuos-compress`（libmz）库，
+> `gzip`/`unzip`/`tar` 等工具变为薄壳调用 libmz。
+
+- [x] **utils-mz** — mz 工具封装 libmz（已完成）
+- [ ] **mz-deflate-codec** — 在 libmz 中新增 `MZ_CODEC_DEFLATE`（标准 RFC 1951）
+- [ ] **mz-pkzip-container** — 在 libmz 中新增 PKZIP 容器格式
+- [ ] **gzip-thin-shell** — gzip.c 重构为薄壳（gzip header + libmz DEFLATE）
+- [ ] **unzip-thin-shell** — unzip.c 重构为薄壳（PKZIP 解析 + libmz 解压）
+- [ ] **tar-mz-support** — tar.c 增加 `-Z` 选项支持 .mz 格式
 
 ---
 

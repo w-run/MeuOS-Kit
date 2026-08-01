@@ -27,6 +27,8 @@
 #include "msh/job.h"
 #include "msh/msh.h"
 #include "msh/parse.h"
+#include "msh/array.h"
+#include "msh/plugin.h"
 
 /* === AST 构造 === */
 
@@ -236,9 +238,24 @@ static int is_assignment(const char *s) {
     if (!s || !*s || *s == '=') return 0;
     const char *eq = strchr(s, '=');
     if (!eq || eq == s) return 0;
+    /* Check for bash array syntax: arr[0]=val or arr=(...) */
     for (const char *p = s; p < eq; p++) {
+        if (p[0] == '[' && p < eq) {
+            /* arr[idx]=val */
+            const char *rb = strchr(p, ']');
+            if (rb && rb < eq) {
+                /* validate name before [ */
+                for (const char *q = s; q < p; q++) {
+                    if (!isalnum((unsigned char)*q) && *q != '_') return 0;
+                }
+                return 1;
+            }
+            return 0;
+        }
         if (!isalnum((unsigned char)*p) && *p != '_') return 0;
     }
+    /* Check for arr=(...) array creation */
+    if (eq[1] == '(') return 1;
     return 1;
 }
 
@@ -462,6 +479,30 @@ static ast_t *parse_func(parser_t *p) {
 }
 
 /* parse_compound：识别命令起始位置的保留字，否则委托 parse_command */
+/* parse_dbracket: bash [[ expr ]] conditional */
+static ast_t *parse_dbracket(parser_t *p) {
+    consume_token(p); /* consume TOK_DLBRACK */
+    
+    ast_t *node = ast_new(AST_CMD);
+    ast_push_arg(node, "[[");
+    
+    /* Collect words until ]] (may be TOK_DRBRACK or TOK_WORD "]]") */
+    while (p->cur.tok != TOK_EOF && p->cur.tok != TOK_NEWLINE) {
+        if (p->cur.tok == TOK_DRBRACK) break;
+        if (p->cur.tok == TOK_WORD && p->cur.text && strcmp(p->cur.text, "]]") == 0)
+            break;
+        if (p->cur.text) {
+            ast_push_arg(node, p->cur.text);
+        }
+        consume_token(p);
+    }
+    
+    /* Consume ]] */
+    consume_token(p);
+    
+    return node;
+}
+
 static ast_t *parse_compound(parser_t *p) {
     switch (p->cur.tok) {
     case TOK_IF:       return parse_if(p);
@@ -472,7 +513,10 @@ static ast_t *parse_compound(parser_t *p) {
     case TOK_LBRACE:   return parse_brace_group(p);
     case TOK_LPAREN:   return parse_subshell(p);
     case TOK_FUNCTION: return parse_func(p);
+    case TOK_DLBRACK:  return parse_dbracket(p);
     case TOK_WORD:
+        /* [[ bash conditional (fallback when not at cmd_start) */
+        if (p->cur.text && strcmp(p->cur.text, "[[") == 0) return parse_dbracket(p);
         /* 2-lookahead：name() { ... } 形式的函数定义 */
         if (peek_tok(p) == TOK_LPAREN) return parse_func(p);
         return parse_command(p);
@@ -507,6 +551,7 @@ static ast_t *parse_command(parser_t *p) {
     /* 后随的重定向 */
     while (p->cur.tok == TOK_REDIR_IN || p->cur.tok == TOK_REDIR_OUT
            || p->cur.tok == TOK_REDIR_APPEND || p->cur.tok == TOK_HEREDOC
+           || p->cur.tok == TOK_HERESTRING
            || p->cur.tok == TOK_REDIR_DUP_IN || p->cur.tok == TOK_REDIR_DUP_OUT) {
         int op = p->cur.tok;
         consume_token(p);
@@ -515,6 +560,14 @@ static ast_t *parse_command(parser_t *p) {
         r->op = op;
         r->target = strdup(p->cur.text);  /* 原始，待 exec 时展开 */
         consume_token(p);
+        /* heredoc：扫描后续行直到 delimiter */
+        if (op == TOK_HEREDOC) {
+            /* 词法器已剥离引号；通过 was_quoted 判断 delimiter 是否被引号包裹。
+             * 引号 delimiter → 内容不展开；无引号 → 展开变量/命令替换。*/
+            int quoted = p->lx->was_quoted;  /* 1=单引号, 2=双引号, 0=无引号 */
+            r->heredoc = msh_lex_heredoc(p->lx, r->target);
+            r->fd = quoted;  /* 复用 fd 字段为 quoted 标志 */
+        }
         r->next = cmd->redir;
         cmd->redir = r;
     }
@@ -610,17 +663,103 @@ static int is_builtin(const char *name) {
         || !strcmp(name, "read") || !strcmp(name, "eval")
         || !strcmp(name, "type") || !strcmp(name, "exec")
         || !strcmp(name, "jobs") || !strcmp(name, "fg")
-        || !strcmp(name, "bg") || !strcmp(name, "wait");
+        || !strcmp(name, "bg") || !strcmp(name, "wait")
+        || !strcmp(name, "trap") || !strcmp(name, "source")
+        || !strcmp(name, ".") || !strcmp(name, "msh")
+        || !strcmp(name, "[[")
+        || !strcmp(name, "complete") || !strcmp(name, "compgen");
 }
 
 int msh_run_builtin(ast_t *ast, int argc, char **argv) {
     const char *name = argv[0];
+    
+    /* [[ ... ]] bash conditional expression */
+    if (strcmp(name, "[[") == 0) {
+        /* Evaluate expression: argc-2 args (skip "[[" and last "]]" not included) */
+        /* Build test-like argv for our test implementation */
+        char **targv = malloc(sizeof(char*) * (argc + 1));
+        targv[0] = "test";
+        for (int i = 1; i < argc; i++) targv[i] = argv[i];
+        targv[argc] = NULL;
+        
+        /* Use the test builtin logic (reuse from utils test.c) */
+        /* Simple evaluation for common cases */
+        int result = 1; /* default false */
+        
+        if (argc == 2) {
+            /* [[ str ]] — true if non-empty */
+            result = (strlen(argv[1]) > 0) ? 0 : 1;
+        } else if (argc == 3) {
+            /* [[ -flag str ]] */
+            const char *op = argv[1];
+            const char *arg = argv[2];
+            if (strcmp(op, "-z") == 0) result = (strlen(arg) == 0) ? 0 : 1;
+            else if (strcmp(op, "-n") == 0) result = (strlen(arg) > 0) ? 0 : 1;
+            else if (strcmp(op, "-f") == 0) {
+                struct stat st;
+                result = (stat(arg, &st) == 0 && S_ISREG(st.st_mode)) ? 0 : 1;
+            }
+            else if (strcmp(op, "-d") == 0) {
+                struct stat st;
+                result = (stat(arg, &st) == 0 && S_ISDIR(st.st_mode)) ? 0 : 1;
+            }
+            else if (strcmp(op, "-e") == 0) {
+                result = (access(arg, F_OK) == 0) ? 0 : 1;
+            }
+            else if (strcmp(op, "-r") == 0) {
+                result = (access(arg, R_OK) == 0) ? 0 : 1;
+            }
+            else if (strcmp(op, "-w") == 0) {
+                result = (access(arg, W_OK) == 0) ? 0 : 1;
+            }
+            else if (strcmp(op, "-x") == 0) {
+                result = (access(arg, X_OK) == 0) ? 0 : 1;
+            }
+            else if (strcmp(op, "!") == 0) {
+                /* [[ ! str ]] — negate non-empty test */
+                result = (strlen(arg) == 0) ? 0 : 1;
+            }
+        } else if (argc == 4) {
+            /* [[ a op b ]] */
+            const char *a = argv[1];
+            const char *op = argv[2];
+            const char *b = argv[3];
+            
+            if (strcmp(op, "==") == 0 || strcmp(op, "=") == 0)
+                result = (strcmp(a, b) == 0) ? 0 : 1;
+            else if (strcmp(op, "!=") == 0)
+                result = (strcmp(a, b) != 0) ? 0 : 1;
+            else if (strcmp(op, "-eq") == 0)
+                result = (atoi(a) == atoi(b)) ? 0 : 1;
+            else if (strcmp(op, "-ne") == 0)
+                result = (atoi(a) != atoi(b)) ? 0 : 1;
+            else if (strcmp(op, "-lt") == 0)
+                result = (atoi(a) < atoi(b)) ? 0 : 1;
+            else if (strcmp(op, "-le") == 0)
+                result = (atoi(a) <= atoi(b)) ? 0 : 1;
+            else if (strcmp(op, "-gt") == 0)
+                result = (atoi(a) > atoi(b)) ? 0 : 1;
+            else if (strcmp(op, "-ge") == 0)
+                result = (atoi(a) >= atoi(b)) ? 0 : 1;
+            else if (strcmp(op, "=~") == 0) {
+                /* regex match — simplified */
+                result = (strstr(a, b) != NULL) ? 0 : 1;
+            }
+        }
+        
+        free(targv);
+        msh_last_status = result;
+        return result;
+    }
+    
+    if (argc == 0) { return 0; }
     if (!strcmp(name, ":")) return 0;
     if (!strcmp(name, "true")) return 0;
     if (!strcmp(name, "false")) return 1;
     if (!strcmp(name, "exit")) {
         int rc = argc > 1 ? atoi(argv[1]) : 0;
         msh_set_exit(rc);
+        msh_trap_exit();
         exit(rc);
     }
     if (!strcmp(name, "echo")) {
@@ -696,6 +835,82 @@ int msh_run_builtin(ast_t *ast, int argc, char **argv) {
         if (id == 0) { msh_job_reap(); return 0; }
         return msh_job_fg(id);
     }
+    if (!strcmp(name, "trap")) {
+        return msh_builtin_trap(argc, argv);
+    }
+    if (!strcmp(name, "source") || !strcmp(name, ".")) {
+        /* source / . ：在当前 shell 执行脚本文件 */
+        if (argc < 2) {
+            fprintf(stderr, "msh: %s: filename argument required\n", name);
+            return 2;
+        }
+        /* 仅第一个参数是文件，后续参数作为位置参数 */
+        FILE *fp = fopen(argv[1], "r");
+        if (!fp) {
+            fprintf(stderr, "msh: %s: %s: %s\n", name, argv[1], strerror(errno));
+            return 1;
+        }
+        char *buf = NULL;
+        size_t cap = 4096, len = 0;
+        buf = malloc(cap);
+        for (;;) {
+            if (len + 4096 >= cap) { cap *= 2; buf = realloc(buf, cap); }
+            size_t n = fread(buf + len, 1, cap - len - 1, fp);
+            len += n;
+            if (n == 0) break;
+        }
+        buf[len] = '\0';
+        fclose(fp);
+        /* 保存/恢复位置参数 */
+        int saved_argc = 0;
+        char *saved_args[64] = {NULL};
+        for (int j = 1; j < 64; j++) {
+            char vn[16];
+            snprintf(vn, sizeof(vn), "%d", j);
+            const char *v = getenv(vn);
+            if (v) { saved_args[j-1] = strdup(v); saved_argc = j; }
+            else break;
+        }
+        /* 设置新的位置参数（source 的后续参数） */
+        for (int j = 1; j < 64; j++) {
+            char vn[16];
+            snprintf(vn, sizeof(vn), "%d", j);
+            if (j + 1 < argc) {
+                setenv(vn, argv[j + 1], 1);
+            } else {
+                unsetenv(vn);
+            }
+        }
+        int rc = msh_run_string(buf, len);
+        free(buf);
+        /* 恢复位置参数 */
+        for (int j = 1; j < 64; j++) {
+            char vn[16];
+            snprintf(vn, sizeof(vn), "%d", j);
+            if (j <= saved_argc) {
+                setenv(vn, saved_args[j-1], 1);
+                free(saved_args[j-1]);
+            } else {
+                unsetenv(vn);
+            }
+        }
+        msh_last_status = rc;
+        return msh_last_status;
+    }
+    if (!strcmp(name, "msh")) {
+        /* msh meta-builtin: plugin/theme management */
+        return msh_plugin_builtin(argc, argv);
+    }
+    if (!strcmp(name, "complete")) {
+        int rc = msh_builtin_complete(argc, argv);
+        msh_last_status = rc;
+        return rc;
+    }
+    if (!strcmp(name, "compgen")) {
+        int rc = msh_builtin_compgen(argc, argv);
+        msh_last_status = rc;
+        return rc;
+    }
     (void)ast;
     return 0;
 }
@@ -741,9 +956,65 @@ static int run_simple_cmd(ast_t *cmd) {
     /* 应用重定向（含展开目标） */
     int saved_in = -1, saved_out = -1, saved_err = -1;
     int did_redirect = 0;
+    int heredoc_pipe[2] = { -1, -1 };
     for (redirect_t *r = cmd->redir; r; r = r->next) {
         char *target = expand_string(r->target);
         int fd = -1;
+        if (r->op == TOK_HERESTRING) {
+            /* here-string：target 展开后作为 stdin */
+            char *hcontent = expand_string(r->target);
+            /* 追加换行（bash 行为） */
+            size_t hlen = strlen(hcontent);
+            char *with_nl = malloc(hlen + 2);
+            memcpy(with_nl, hcontent, hlen);
+            with_nl[hlen] = '\n';
+            with_nl[hlen + 1] = '\0';
+            free(hcontent);
+            if (pipe(heredoc_pipe) < 0) {
+                perror("pipe"); free(target); free(with_nl); free_argv(argv); return 1;
+            }
+            write(heredoc_pipe[1], with_nl, hlen + 1);
+            free(with_nl);
+            close(heredoc_pipe[1]);
+            if (saved_in < 0) saved_in = dup(0);
+            if (dup2(heredoc_pipe[0], 0) < 0) { perror("dup2"); close(heredoc_pipe[0]); free(target); free_argv(argv); return 1; }
+            close(heredoc_pipe[0]);
+            heredoc_pipe[0] = -1;
+            free(target);
+            did_redirect = 1;
+            continue;
+        }
+        if (r->op == TOK_HEREDOC && r->heredoc) {
+            /* heredoc：创建管道，写入内容，读端作为 stdin */
+            if (pipe(heredoc_pipe) < 0) {
+                perror("pipe"); free(target); free_argv(argv); return 1;
+            }
+            /* 非引号 delimiter 时展开变量/命令替换 */
+            char *hcontent = r->heredoc;
+            char *hexpanded = NULL;
+            if (!r->fd) {
+                hexpanded = expand_string(hcontent);
+                hcontent = hexpanded;
+            }
+            /* 写heredoc内容（可能很大，这里简化为一次性写入） */
+            size_t hlen = strlen(hcontent);
+            if (hlen > 0) {
+                ssize_t written = write(heredoc_pipe[1], hcontent, hlen);
+                if (written < 0) perror("write heredoc");
+            }
+            free(hexpanded);
+            close(heredoc_pipe[1]);  /* 写完关闭写端 */
+            fd = heredoc_pipe[0];    /* 读端作为重定向 stdin */
+            r->op = TOK_REDIR_IN;    /* 接下来当作 < 处理 */
+            free(target);
+            /* 立即应用 stdin 重定向 */
+            if (saved_in < 0) saved_in = dup(0);
+            if (dup2(fd, 0) < 0) { perror("dup2"); close(fd); free_argv(argv); return 1; }
+            close(fd);
+            heredoc_pipe[0] = -1;
+            did_redirect = 1;
+            continue;
+        }
         switch (r->op) {
         case TOK_REDIR_IN:     fd = open(target, O_RDONLY); break;
         case TOK_REDIR_OUT:    fd = open(target, O_WRONLY | O_CREAT | O_TRUNC, 0644); break;
@@ -935,6 +1206,8 @@ static int run_pipeline(ast_t *ast) {
 
 int msh_eval(ast_t *ast) {
     if (!ast) return 0;
+    /* 每次进入 eval 时检查 pending trap（命令间隙执行 trap）。*/
+    msh_trap_check();
     if (ast->type == AST_ASSIGN) {
         /* 执行前导赋值 */
         for (ast_t *cur = ast; cur; cur = cur->right) {
@@ -945,6 +1218,18 @@ int msh_eval(ast_t *ast) {
             if (!cur->argv || !cur->argv[0]) continue;
             char *eq = strchr(cur->argv[0], '=');
             if (!eq) continue;
+            /* Check for bash array syntax: arr=(...) or arr[idx]=val */
+            if (eq[1] == '(') {
+                /* arr=(elem1 elem2 ...) */
+                msh_array_parse_assign(cur->argv[0]);
+                continue;
+            }
+            /* Check for arr[idx]=val */
+            const char *lb = strchr(cur->argv[0], '[');
+            if (lb && lb < eq) {
+                msh_array_parse_indexed(cur->argv[0]);
+                continue;
+            }
             /* 注意：函数体 AST 可能被多个嵌套调用共享，不能原地修改 argv[0]。
              * 用 strndup 拷贝 name 和 RHS。 */
             size_t name_len = (size_t)(eq - cur->argv[0]);
@@ -1057,28 +1342,44 @@ int msh_eval(ast_t *ast) {
             }
             free_argv(argv);
         }
-        return run_simple_cmd(ast);
+        int rc = run_simple_cmd(ast);
+        if (msh_errexit && !msh_in_cond && rc != 0) {
+            fprintf(stderr, "msh: set -e: command failed (exit %d)\n", rc);
+            exit(rc);
+        }
+        return rc;
     }
     if (ast->type == AST_PIPE) {
-        return run_pipeline(ast);
+        int rc = run_pipeline(ast);
+        if (msh_errexit && !msh_in_cond && rc != 0) {
+            fprintf(stderr, "msh: set -e: pipeline failed (exit %d)\n", rc);
+            exit(rc);
+        }
+        return rc;
     }
     if (ast->type == AST_LIST) {
         int rc = msh_eval(ast->left);
         int proceed = 1;
+        int saved = msh_in_cond; msh_in_cond = 1;
         if (ast->list_op == TOK_AND && rc != 0) proceed = 0;
         if (ast->list_op == TOK_OR && rc == 0) proceed = 0;
+        msh_in_cond = saved;
         if (!proceed) return rc;
         return msh_eval(ast->right);
     }
     if (ast->type == AST_IF) {
+        int saved = msh_in_cond; msh_in_cond = 1;
         int rc = msh_eval(ast->cond);
+        msh_in_cond = saved;
         if (rc == 0) return msh_eval(ast->then_body);
         if (ast->else_body) return msh_eval(ast->else_body);
         return rc;
     }
     if (ast->type == AST_WHILE) {
         int rc = 0;
+        int saved = msh_in_cond; msh_in_cond = 1;
         while (msh_eval(ast->cond) == 0) {
+            msh_in_cond = saved;
             rc = msh_eval(ast->body);
             if (msh_last_status == 256 + SIGINT) break;  /* Ctrl-C 退出循环（简化） */
         }
@@ -1086,7 +1387,9 @@ int msh_eval(ast_t *ast) {
     }
     if (ast->type == AST_UNTIL) {
         int rc = 0;
+        int saved = msh_in_cond; msh_in_cond = 1;
         while (msh_eval(ast->cond) != 0) {
+            msh_in_cond = saved;
             rc = msh_eval(ast->body);
         }
         return rc;

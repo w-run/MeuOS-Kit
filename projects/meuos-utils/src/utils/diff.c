@@ -1,7 +1,16 @@
-/* diff — 现代化 unified diff（MeuOS Next 版）
+/* diff — unified/context diff 工具
  *
- * 内部使用 Myers diff 算法（O(ND)），简单实现。
- * 默认 unified + 彩色；--classic 切到 plain。
+ * 使用 LCS DP 算法计算差异，输出标准 unified 或 context 格式。
+ *
+ * 用法：
+ *   diff [options] FILE1 FILE2
+ *   -u           unified 格式（默认）
+ *   -c           context 格式
+ *   -C N         context 格式，N 行上下文
+ *   -U N         unified 格式，N 行上下文
+ *   --no-color   禁用彩色
+ *   --classic    纯文本
+ *   --help / --version
  */
 
 #define _DEFAULT_SOURCE
@@ -12,178 +21,308 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "meuos/color.h"
 #include "meuos/utils.h"
 
-#define MAX_LINES 4096
+#define MAX_LINES 8192
 
-static char *read_file(const char *path, int *n_lines) {
+/* === File reading === */
+static char **read_lines(const char *path, int *n_out) {
     FILE *fp = stdin;
     if (strcmp(path, "-") != 0) {
         fp = fopen(path, "r");
         if (!fp) { perror(path); return NULL; }
     }
-    char *buf = xmalloc(1);
-    size_t cap = 1, len = 0;
-    int c;
-    while ((c = fgetc(fp)) != EOF) {
-        if (len + 1 >= cap) {
-            cap *= 2;
-            buf = xrealloc(buf, cap);
-        }
-        buf[len++] = (char)c;
-    }
-    buf[len] = '\0';
-    if (fp != stdin) fclose(fp);
-    *n_lines = 0;
-    for (size_t i = 0; i < len; i++) if (buf[i] == '\n') (*n_lines)++;
-    return buf;
-}
-
-/* Myers diff 计算 LCS 长度表 */
-static void myers_diff(char **A, int n, char **B, int m, int **out_lcs) {
-    int V[2 * MAX_LINES + 1];
-    int *dp = xmalloc((m + 1) * (n + 1) * sizeof(int));
-    /* 简化：O(N*M) DP 而非真正的 Myers */
-    for (int i = 0; i <= n; i++) dp[i * (m + 1)] = 0;
-    for (int j = 0; j <= m; j++) dp[j] = 0;
-    for (int i = 1; i <= n; i++) {
-        for (int j = 1; j <= m; j++) {
-            if (strcmp(A[i-1], B[j-1]) == 0) {
-                dp[i * (m + 1) + j] = dp[(i-1) * (m + 1) + (j-1)] + 1;
-            } else {
-                int a = dp[(i-1) * (m + 1) + j];
-                int b = dp[i * (m + 1) + (j-1)];
-                dp[i * (m + 1) + j] = (a > b ? a : b);
-            }
-        }
-    }
-    *out_lcs = dp;
-    (void)V;
-}
-
-static char **split_lines(const char *buf, int *n_lines_out) {
-    static char *lines[MAX_LINES];
+    char **lines = xmalloc(sizeof(char*) * MAX_LINES);
     int n = 0;
-    const char *p = buf;
-    while (*p && n < MAX_LINES) {
-        const char *e = strchr(p, '\n');
-        size_t len = e ? (size_t)(e - p) : strlen(p);
-        char *line = xmalloc(len + 1);
-        memcpy(line, p, len);
-        line[len] = '\0';
-        lines[n++] = line;
-        if (!e) break;
-        p = e + 1;
+    char *line = NULL;
+    size_t lcap = 0;
+    ssize_t len;
+    while ((len = getline(&line, &lcap, fp)) > 0 && n < MAX_LINES) {
+        /* Strip trailing newline */
+        if (len > 0 && line[len - 1] == '\n') line[--len] = '\0';
+        lines[n++] = xstrdup(line);
     }
-    *n_lines_out = n;
+    free(line);
+    if (fp != stdin) fclose(fp);
+    *n_out = n;
     return lines;
 }
 
-static void print_color(const char *line, const char *color) {
-    if (color && color_enabled) fputs(color, stdout);
-    puts(line);
-    if (color && color_enabled) fputs(color_reset(), stdout);
+static void free_lines(char **lines, int n) {
+    for (int i = 0; i < n; i++) free(lines[i]);
+    free(lines);
 }
 
-static void diff_files(const char *path_a, const char *path_b, int colored) {
-    int na = 0, nb = 0;
-    char *buf_a = read_file(path_a, &na);
-    char *buf_b = read_file(path_b, &nb);
-    if (!buf_a || !buf_b) return;
-    char **A = split_lines(buf_a, &na);
-    char **B = split_lines(buf_b, &nb);
+/* === LCS DP diff === */
+typedef struct {
+    char type;  /* '=', '-', '+' */
+    char *line;
+    int a_line; /* 1-based line number in A (for '=' and '-') */
+    int b_line; /* 1-based line number in B (for '=' and '+') */
+} diff_op_t;
 
-    /* 朴素逐行对比：仅输出 + / - 行（含文件头） */
-    /* 简化演示：先打印文件头，再走 LCS 回溯（仅输出 - / +） */
-    printf("--- %s\n", path_a);
-    printf("+++ %s\n", path_b);
-    int *lcs = NULL;
-    myers_diff(A, na, B, nb, &lcs);
-    /* 回溯：构造编辑脚本 */
+static diff_op_t *compute_diff(char **A, int na, char **B, int nb, int *nops) {
+    /* DP table: dp[i][j] = LCS length of A[0..i-1] and B[0..j-1] */
+    int *dp = xmalloc((size_t)(na + 1) * (nb + 1) * sizeof(int));
+    for (int i = 0; i <= na; i++) dp[i * (nb + 1)] = 0;
+    for (int j = 0; j <= nb; j++) dp[j] = 0;
+    
+    for (int i = 1; i <= na; i++) {
+        for (int j = 1; j <= nb; j++) {
+            if (strcmp(A[i-1], B[j-1]) == 0)
+                dp[i * (nb + 1) + j] = dp[(i-1) * (nb + 1) + (j-1)] + 1;
+            else {
+                int a = dp[(i-1) * (nb + 1) + j];
+                int b = dp[i * (nb + 1) + (j-1)];
+                dp[i * (nb + 1) + j] = (a > b ? a : b);
+            }
+        }
+    }
+    
+    /* Backtrack to build edit script */
+    diff_op_t *ops = xmalloc(sizeof(diff_op_t) * (na + nb + 1));
+    int n = 0;
     int i = na, j = nb;
-    /* 我们只关心 deleted（A 中有 B 中无）和 added（B 中有 A 中无） */
-    /* 使用栈收集操作 */
-    struct op { char type; char *line; } ops[MAX_LINES * 2 + 16];
-    int nops = 0;
     while (i > 0 || j > 0) {
         if (i > 0 && j > 0 && strcmp(A[i-1], B[j-1]) == 0) {
-            ops[nops++] = (struct op){'=', A[i-1]};
-            i--; j--;
-        } else if (j > 0 && (i == 0 || lcs[(i) * (nb + 1) + (j-1)] >= lcs[(i-1) * (nb + 1) + (j)])) {
-            ops[nops++] = (struct op){'+', B[j-1]};
-            j--;
+            ops[n].type = '=';
+            ops[n].line = A[i-1];
+            ops[n].a_line = i;
+            ops[n].b_line = j;
+            n++; i--; j--;
+        } else if (j > 0 && (i == 0 || dp[i * (nb + 1) + (j-1)] >= dp[(i-1) * (nb + 1) + j])) {
+            ops[n].type = '+';
+            ops[n].line = B[j-1];
+            ops[n].a_line = 0;
+            ops[n].b_line = j;
+            n++; j--;
         } else if (i > 0) {
-            ops[nops++] = (struct op){'-', A[i-1]};
-            i--;
-        } else if (j > 0) {
-            ops[nops++] = (struct op){'+', B[j-1]};
-            j--;
+            ops[n].type = '-';
+            ops[n].line = A[i-1];
+            ops[n].a_line = i;
+            ops[n].b_line = 0;
+            n++; i--;
         } else break;
     }
-    /* 反向输出合并 hunk（简化：全部输出） */
-    int skipped = 0;
-    for (int k = nops - 1; k >= 0; k--) {
-        struct op *o = &ops[k];
-        if (o->type == '=') {
-            if (skipped < 3) {
-                print_color(o->line, NULL);
-            } else if (k < nops - 4) {
-                puts("...");
-                print_color(o->line, NULL);
-                skipped = 0;
-            } else {
-                skipped++;
-            }
-            continue;
-        }
-        skipped = 0;
-        if (o->type == '-') print_color(o->line, colored ? color_named(1) : NULL);
-        else if (o->type == '+') print_color(o->line, colored ? color_named(2) : NULL);
+    
+    /* Reverse */
+    for (int k = 0; k < n / 2; k++) {
+        diff_op_t tmp = ops[k]; ops[k] = ops[n-1-k]; ops[n-1-k] = tmp;
     }
-    free(lcs);
-    free(buf_a); free(buf_b);
+    
+    free(dp);
+    *nops = n;
+    return ops;
 }
 
+/* === Unified diff output === */
+static void output_unified(diff_op_t *ops, int nops,
+                           const char *path_a, const char *path_b,
+                           int context, int colored) {
+    printf("--- %s\n", path_a);
+    printf("+++ %s\n", path_b);
+    
+    int k = 0;
+    while (k < nops) {
+        /* Skip equal lines at the beginning */
+        while (k < nops && ops[k].type == '=') k++;
+        if (k >= nops) break;
+        
+        /* Find the end of this change block */
+        int start = k;
+        /* Include context lines before */
+        int ctx_start = (start - context > 0) ? start - context : 0;
+        /* Adjust to skip leading context that's already been output */
+        while (ctx_start < start && ops[ctx_start].type == '=') ctx_start++;
+        if (ctx_start < start) ctx_start = start - context;
+        if (ctx_start < 0) ctx_start = 0;
+        
+        int end = k;
+        while (end < nops && ops[end].type != '=') end++;
+        
+        /* Include context lines after */
+        int ctx_end = end + context;
+        if (ctx_end > nops) ctx_end = nops;
+        
+        /* Calculate line numbers for hunk header */
+        int old_start = 0, old_count = 0;
+        int new_start = 0, new_count = 0;
+        
+        for (int p = ctx_start; p < ctx_end; p++) {
+            if (ops[p].type == '=' || ops[p].type == '-') {
+                if (old_start == 0) old_start = ops[p].a_line;
+                old_count++;
+            }
+            if (ops[p].type == '=' || ops[p].type == '+') {
+                if (new_start == 0) new_start = ops[p].b_line;
+                new_count++;
+            }
+        }
+        if (old_start == 0) { old_start = 1; old_count = 0; }
+        if (new_start == 0) { new_start = 1; new_count = 0; }
+        
+        printf("@@ -%d,%d +%d,%d @@\n", old_start, old_count, new_start, new_count);
+        
+        for (int p = ctx_start; p < ctx_end; p++) {
+            if (ops[p].type == '=') {
+                printf(" %s\n", ops[p].line);
+            } else if (ops[p].type == '-') {
+                if (colored) fputs(color_named(1), stdout);
+                printf("-%s\n", ops[p].line);
+                if (colored) fputs(color_reset(), stdout);
+            } else if (ops[p].type == '+') {
+                if (colored) fputs(color_named(2), stdout);
+                printf("+%s\n", ops[p].line);
+                if (colored) fputs(color_reset(), stdout);
+            }
+        }
+        
+        k = ctx_end;
+    }
+}
+
+/* === Context diff output === */
+static void output_context(diff_op_t *ops, int nops,
+                           const char *path_a, const char *path_b,
+                           int context, int colored) {
+    printf("*** %s\n", path_a);
+    printf("--- %s\n", path_b);
+    
+    int k = 0;
+    while (k < nops) {
+        while (k < nops && ops[k].type == '=') k++;
+        if (k >= nops) break;
+        
+        int start = k;
+        int ctx_start = (start - context > 0) ? start - context : 0;
+        if (ctx_start < 0) ctx_start = 0;
+        
+        int end = k;
+        while (end < nops && ops[end].type != '=') end++;
+        int ctx_end = end + context;
+        if (ctx_end > nops) ctx_end = nops;
+        
+        int old_start = 0, old_count = 0;
+        int new_start = 0, new_count = 0;
+        
+        for (int p = ctx_start; p < ctx_end; p++) {
+            if (ops[p].type == '=' || ops[p].type == '-') {
+                if (old_start == 0) old_start = ops[p].a_line;
+                old_count++;
+            }
+            if (ops[p].type == '=' || ops[p].type == '+') {
+                if (new_start == 0) new_start = ops[p].b_line;
+                new_count++;
+            }
+        }
+        if (old_start == 0) { old_start = 1; old_count = 0; }
+        if (new_start == 0) { new_start = 1; new_count = 0; }
+        
+        printf("***************\n");
+        printf("*** %d,%d\n", old_start, old_start + old_count - 1);
+        
+        for (int p = ctx_start; p < ctx_end; p++) {
+            if (ops[p].type == '=') {
+                printf("  %s\n", ops[p].line);
+            } else if (ops[p].type == '-') {
+                if (colored) fputs(color_named(1), stdout);
+                printf("- %s\n", ops[p].line);
+                if (colored) fputs(color_reset(), stdout);
+            }
+            /* '+' lines not shown in old file section */
+        }
+        
+        printf("--- %d,%d\n", new_start, new_start + new_count - 1);
+        
+        for (int p = ctx_start; p < ctx_end; p++) {
+            if (ops[p].type == '=') {
+                printf("  %s\n", ops[p].line);
+            } else if (ops[p].type == '+') {
+                if (colored) fputs(color_named(2), stdout);
+                printf("+ %s\n", ops[p].line);
+                if (colored) fputs(color_reset(), stdout);
+            }
+            /* '-' lines not shown in new file section */
+        }
+        
+        k = ctx_end;
+    }
+}
+
+/* === Main === */
 static void usage(void) {
     printf("Usage: %s [OPTIONS] FILE1 FILE2\n", program_name);
     printf("\n");
-    printf("Modern unified diff with color highlight.\n\n");
-    printf("  --no-color           disable color\n");
-    printf("  --classic            plain text (no color, no hunk header)\n");
-    printf("      --help           show this help\n");
-    printf("      --version        show version\n");
+    printf("Diff tool with unified and context format.\n\n");
+    printf("  -u              unified format (default)\n");
+    printf("  -c              context format\n");
+    printf("  -C N             context format with N lines of context\n");
+    printf("  -U N             unified format with N lines of context\n");
+    printf("      --no-color  disable color\n");
+    printf("      --classic   plain text\n");
+    printf("      --help      show this help\n");
+    printf("      --version   show version\n");
 }
 
 int main(int argc, char **argv) {
     set_program_name(argv[0]);
     color_enable();
+    
+    int format = 0;  /* 0=unified, 1=context */
+    int context = 3; /* default 3 lines of context */
     int colored = 1;
-    int classic = 0;
-
+    
     static const struct option longopts[] = {
         { "no-color",  no_argument, NULL, 1000 },
-        { "classic",   no_argument, NULL, 1001 },
-        { "help",      no_argument, NULL, 'h' },
-        { "version",   no_argument, NULL, 'V' },
+        { "classic",  no_argument, NULL, 1001 },
+        { "help",     no_argument, NULL, 'h' },
+        { "version",  no_argument, NULL, 'V' },
         { NULL, 0, NULL, 0 },
     };
+    
     int opt;
-    while ((opt = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "ucC:U:h", longopts, NULL)) != -1) {
         switch (opt) {
+        case 'u': format = 0; break;
+        case 'c': format = 1; break;
+        case 'C': format = 1; context = atoi(optarg); break;
+        case 'U': format = 0; context = atoi(optarg); break;
         case 1000: color_disable(); colored = 0; break;
-        case 1001: classic = 1; colored = 0; break;
-        case 'h': usage(); break;
-        case 'V': version(); break;
+        case 1001: colored = 0; break;
+        case 'h': usage(); return 0;
+        case 'V': version(); return 0;
         default: return 2;
         }
     }
+    
     if (optind + 2 != argc) {
         fprintf(stderr, "%s: need exactly 2 files\n", program_name);
         usage();
         return 2;
     }
-    diff_files(argv[optind], argv[optind + 1], colored);
+    
+    const char *path_a = argv[optind];
+    const char *path_b = argv[optind + 1];
+    
+    int na = 0, nb = 0;
+    char **A = read_lines(path_a, &na);
+    char **B = read_lines(path_b, &nb);
+    if (!A || !B) return 1;
+    
+    int nops = 0;
+    diff_op_t *ops = compute_diff(A, na, B, nb, &nops);
+    
+    if (format == 0)
+        output_unified(ops, nops, path_a, path_b, context, colored);
+    else
+        output_context(ops, nops, path_a, path_b, context, colored);
+    
+    free(ops);
+    free_lines(A, na);
+    free_lines(B, nb);
+    
     return 0;
 }

@@ -39,6 +39,8 @@ typedef struct lexer {
     int pending_op;
     /* 命令起始位置标记：1 表示下一个 WORD 可能是保留字 */
     int at_cmd_start;
+    /* 上一个返回的 word token 是否来自引号。0=无引号, 1=单引号, 2=双引号 */
+    int was_quoted;
 } lexer_t;
 
 void msh_lexer_init(lexer_t *lx, const char *src, size_t len);
@@ -81,11 +83,18 @@ enum {
     TOK_LBRACE,    /* { */
     TOK_RBRACE,    /* } */
     TOK_BANG,      /* ! (pipeline 取反) */
+    TOK_DLBRACK,   /* [[ bash conditional */
+    TOK_DRBRACK,   /* ]] bash conditional */
 };
 
 /* 推进一步 token。返回 token 类型；如 token 有文本，通过 *out_text 返回
  * （调用者 free()）。out_text 可为 NULL。 */
 int msh_lex_next(lexer_t *lx, char **out_text);
+
+/* 扫描 heredoc 内容直到 delimiter 行（不含行尾换行）。返回 malloc 内容串，
+ * 并将 lx 的扫描位置推进到 delimiter 行之后。未找到 delimiter 返回 NULL。
+ * delimiter 不做展开，按字面匹配整行。 */
+char *msh_lex_heredoc(lexer_t *lx, const char *delimiter);
 
 #ifdef __cplusplus
 }

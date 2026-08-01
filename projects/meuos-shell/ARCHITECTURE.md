@@ -79,11 +79,14 @@ meuos-shell/
 | 历史/行编辑 | ✅ | 裸 termios，`~/.msh_history`（限 1MB） |
 | YAML 配置 | ✅ | `~/.config/msh/config.yaml`（ps1/aliases/env/features） |
 | 兼容 3 路递进 | ✅ | `--classic` > `MSH_CLASSIC` env > yaml features |
-| Tab 补全 | ❌ | P7C |
-| here-doc `<<EOF` | ❌ | P7C |
-| trap 内建 | ❌ | P7C |
-| bash 数组/`[[]]`/`source` | ❌ | P8（可选） |
-| zsh 插件/主题 | ❌ | P8（可选） |
+| Tab 补全 | ✅ | 命令+路径+变量三模式 + complete/compgen |
+| here-doc `<<EOF` | ✅ | 含引号 delimiter 不展开 |
+| here-string `<<<` | ✅ | bash 兼容 |
+| trap 内建 | ✅ | EXIT/INT/TERM/HUP 等 |
+| source/. | ✅ | 含位置参数支持 |
+| `$$`/`$!` 特殊变量 | ✅ | |
+| bash 数组/`[[]]` | ✅ | P8（数组+`[[]]`+set -e/pipefail 已实现） |
+| zsh 插件/主题 | ✅ | P8（plugin/theme 系统 + 3 内置主题） |
 
 ### 骨架运作原理
 
@@ -118,7 +121,7 @@ execvp 自己处理 PATH 解析（man execvp：`如果 file 含斜杠视为路�
 
 ## 5. 路线图
 
-### Phase 7A — 骨架 + 基本 IO（当前）
+### Phase 7A — 骨架 + 基本 IO（已完成）
 
 **已完成**：
 - ✅ 入口 + argv 解析 + `--version`/`--help`
@@ -128,7 +131,7 @@ execvp 自己处理 PATH 解析（man execvp：`如果 file 含斜杠视为路�
 - ✅ 模块化目录结构 + 公共 API 头文件
 - ✅ 烟雾测试 3 项全过
 
-### Phase 7B — POSIX sh 核心（P6 任务集）
+### Phase 7B — POSIX sh 核心（已完成）
 
 按模块逐个实现：
 
@@ -142,7 +145,7 @@ execvp 自己处理 PATH 解析（man execvp：`如果 file 含斜杠视为路�
 8. **msh-flow**（2-3 周）— 控制流：`if`/`case`/`for`/`while`/`until`/`function`
 9. **msh-posix-test**（持续）— POSIX sh 烟雾测试集扩展
 
-### Phase 7C — 交互层（P7 任务集）
+### Phase 7C — 交互层（已完成）
 
 1. **msh-prompt** — PS1/PS2 提示符（基本转义）
 2. **msh-history** — 历史记录（持久化 `~/.msh_history`）
@@ -151,12 +154,14 @@ execvp 自己处理 PATH 解析（man execvp：`如果 file 含斜杠视为路�
 5. **msh-job** — 作业控制（前台/后台 `&` + `jobs`/`fg`/`bg`）
 6. **msh-signal** — 信号处理（Ctrl-C → 终止前台，Ctrl-D → EOF）
 
-### Phase 7D — 扩展（P8 任务集）
+### Phase 7D — 扩展（部分完成）
 
 1. **msh-bashcompat** — bash 兼容层（数组 `${arr[@]}` / `[[]]` / `source` / `set -e`）
 2. **msh-zsh-plugin** — zsh 风格插件/主题（参考 zsh 的 oh-my-zsh 生态）
 3. **msh-arrays** — bash 风格数组支持
 4. **msh-completion-script** — 补全脚本加载（`compctl`/`compgen`）
+5. **msh-trap** — trap 内建（EXIT/INT/TERM/HUP/ERR 信号捕获 + 列表/恢复）
+6. **编译质量** — 零警告编译（`-Wall -Wextra -Wpedantic`，array.c/plugin.c/complete.c 警告全部修复）
 
 ## 6. 编译路径
 

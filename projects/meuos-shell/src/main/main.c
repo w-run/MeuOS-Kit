@@ -63,8 +63,8 @@ void msh_die(const char *fmt, ...) {
     exit(2);
 }
 
-/* 一次性执行字符串：parse + eval */
-static int run_string(const char *s, size_t len) {
+/* 一次性执行字符串：parse + eval。公开给 trap 使用。 */
+int msh_run_string(const char *s, size_t len) {
     lexer_t lx;
     msh_lexer_init(&lx, s, len);
     ast_t *ast = msh_parse(&lx);
@@ -107,7 +107,7 @@ static int run_file(const char *path) {
     size_t sz = 0;
     char *buf = read_all(fp, &sz);
     fclose(fp);
-    int rc = run_string(buf, sz);
+    int rc = msh_run_string(buf, sz);
     free(buf);
     return rc;
 }
@@ -130,8 +130,9 @@ static int run_repl(void) {
     size_t cap = 0;
     ssize_t n;
     while (1) {
-        /* prompt 前回收已完成的后台作业 */
+        /* prompt 前回收已完成的后台作业 + 执行 pending trap */
         msh_job_reap();
+        msh_trap_check();
         /* 提示符：--classic 用朴素 $；否则用配置的 PS1（或默认） */
         char *ps1 = NULL;
         if (msh_mode_classic) {
@@ -183,6 +184,7 @@ static int run_repl(void) {
         line = NULL;
     }
     free(line);
+    msh_trap_exit();
     return msh_last_status;
 }
 
@@ -225,7 +227,8 @@ int main(int argc, char **argv) {
     while ((opt = getopt_long(argc, argv, "+c:hVi", longopts, NULL)) != -1) {
         switch (opt) {
         case 'c':
-            msh_last_status = run_string(optarg, strlen(optarg));
+            msh_last_status = msh_run_string(optarg, strlen(optarg));
+            msh_trap_exit();
             return msh_last_status;
         case 'h': usage(); break;
         case 'V': msh_version_exit(); break;
@@ -251,6 +254,7 @@ int main(int argc, char **argv) {
             int rc = run_file(argv[i]);
             msh_last_status = rc;
         }
+        msh_trap_exit();
         return msh_last_status;
     }
     return run_repl();
