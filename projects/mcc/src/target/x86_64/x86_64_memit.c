@@ -634,18 +634,16 @@ emit_ins(FILE *f, MInsM *in)
 			mov_to_rax(f, s0, 0);
 			fputs("\tcall\t*%rax\n", f);
 		}
-		if (g_salloc) {
-			/* caller cleans up the stack-argument space */
-			fprintf(f, "\taddq\t$%d, %%rsp\n", g_salloc);
-			g_salloc = 0;
-		}
 		return;
 	}
 	case MMOP_SALLOC: {
-		/* dynamic stack adjustment (stack arguments): the ABI lowering
-		 * emits +size before the call and -size after (caller cleanup) */
+		/* stack-argument reservation: the ABI lowering emits +size before
+		 * the call and -size after (paired caller cleanup) */
 		int64_t n = c ? c->u.i : 16;
-		fprintf(f, "\tsubq\t$%lld, %%rsp\n", (long long)n);
+		if (n >= 0)
+			fprintf(f, "\tsubq\t$%lld, %%rsp\n", (long long)n);
+		else
+			fprintf(f, "\taddq\t$%lld, %%rsp\n", (long long)-n);
 		return;
 	}
 	case MMOP_ALLOCA4:
@@ -781,7 +779,6 @@ mfnm_emit_x86_64(MFnM *fm, FILE *f)
 	g_mt = fm->mt;
 	int extra = assign_extra_slots(fm);
 	nfp = 0;   /* fresh float pool per function */
-	g_salloc = 0;   /* fresh stack-argument reservation tracker */
 	g_alloca_cur = -(fm->slot + extra);   /* allocas go below spill slots */
 
 	int framesize = (fm->slot + extra + alloca_total(fm) + 15) & ~15;

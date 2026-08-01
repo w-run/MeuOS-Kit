@@ -55,9 +55,20 @@ check-mir 全绿；bridge 路径 0 回归。
 
 ## 当前工作点
 
-- **P4 regalloc 全部完成（A-E）**。P5（自举/深度验证）待 team-lead 指示。
+- **P4 regalloc 全部完成（A-E）**；isel-debug 验证发现的 P3b 遗留 2 个边界
+  bug（浮点参数/运算、>6 参数栈传参）已在 P4 后修复并验证。P5（自举回归
+  check-sysroot-static）进行中。
 - MCC_MIR_BACKEND=1：标量函数走完整新后端（isel + ABI + regalloc + emit），
   聚合/varargs/TLS/VLA 动态 alloca fallback 到 bridge。
+
+## Bug 修复记录（isel-debug 验证发现）
+
+- **Bug 1 浮点**：isel 层浮点 ADD/SUB/MUL/DIV/NEG 选浮点 MMOP（FADD..FNEG，
+  之前用整数）；emit 的 FNEG 用 0.0-x；MOVSX/MOVZX 从 rax 低位扩展；
+  i32 除法从 eax 扩展。验证 fadd=9.0/fdiv=3.5/fneg=-7.0。
+- **Bug 2 栈传参**：emit_addr 的 AT&T 格式错误（disp 应在括号外、base 前
+  无逗号）导致 `(,%rsp)` 非法寻址；selcall 生成配对的 ±SALLOC（caller
+  cleanup），emit 按正负 subq/addq。验证 printf 7 参数正确。
 
 ## 关键决策/发现
 
