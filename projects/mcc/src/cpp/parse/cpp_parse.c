@@ -38,6 +38,24 @@ static struct cpp_method_ctx {
 	bool active;
 } g_cpp_method;
 
+/* Pending qualified-class name from a `Class::method` declarator; consumed
+ * by decl()'s DECLFUNC path to route out-of-line method definitions. */
+static const char *g_cpp_qual_class;
+
+void
+cpp_set_qual_class(const char *tag)
+{
+	g_cpp_qual_class = tag;
+}
+
+const char *
+cpp_take_qual_class(void)
+{
+	const char *tag = g_cpp_qual_class;
+	g_cpp_qual_class = NULL;
+	return tag;
+}
+
 /* Build the expression for the implicit `this` pointer of the method
  * body currently being parsed (NULL outside a method body). */
 static struct expr *
@@ -370,7 +388,7 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname,
 	g_cpp_method.this_decl = thisd;
 	g_cpp_method.active = true;
 
-	f = mkfunc(d, pmangled, d->type, fs);
+	f = mkfunc(d, d->name, d->type, fs);
 	stmt(f, fs);
 	if (d->u.func.isnoreturn)
 		funchlt(f);

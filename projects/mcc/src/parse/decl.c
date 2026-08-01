@@ -176,6 +176,20 @@ decl(struct scope *s, struct func *f)
 		prior = scopegetdecl(s, name, false);
 		if (prior && prior->kind != kind)
 			error(&tok.loc, "'%s' redeclared with different kind", name);
+		/* C++ `Class::name` qualified declarator: consumed by the
+		 * DECLFUNC path (out-of-line method definition); anything else
+		 * (static data members, typedefs) is not supported yet.  Only
+		 * take the qualifier here for non-function kinds — DECLFUNC
+		 * consumes it itself. */
+		{
+			extern int g_lang;
+			extern const char *cpp_take_qual_class(void);
+			if (g_lang == 1 && kind != DECLFUNC) {
+				const char *qclass = cpp_take_qual_class();
+				if (qclass)
+					error(&tok.loc, "qualified name in non-function declaration is not supported yet");
+			}
+		}
 		switch (kind) {
 		case DECLTYPE:
 			if (align)
@@ -240,6 +254,22 @@ decl(struct scope *s, struct func *f)
 				error(&tok.loc, "function '%s' declared with alignment specifier", name);
 			if (f && sc && sc != SCEXTERN)  /* 6.7.1p7 */
 				error(&tok.loc, "function '%s' with block scope may only have storage class 'extern'", name);
+			/* C++ out-of-line member-function definition:
+			 * `void Class::method(...) { ... }`.  The declarator mangled
+			 * the name to `Class_method`; route through cpp_define_method
+			 * so the implicit `this` parameter and in-body member access
+			 * work exactly as for in-class definitions. */
+			{
+				extern const char *cpp_take_qual_class(void);
+				extern void cpp_define_method(struct scope *,
+				    struct type *, const char *, const char *);
+				const char *qclass = cpp_take_qual_class();
+				if (qclass) {
+					const char *mname = name + strlen(qclass) + 1;
+					cpp_define_method(s, t, mname, qclass);
+					return true;
+				}
+			}
 			d = declcommon(s, kind, name, asmname, t, tq, sc, prior);
 			d->value = mkglobal(d);
 			d->u.func.inlinedefn = d->linkage == LINKEXTERN && fs & FUNCINLINE && !(sc & SCEXTERN) && (!prior || prior->u.func.inlinedefn);

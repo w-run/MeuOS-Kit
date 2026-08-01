@@ -34,5 +34,7 @@ bool cpp_has_ctor(struct type *t, const char *tag);
 bool cpp_emit_default_ctor(struct func *f, struct decl *d);
 bool cpp_same_class_context(struct type *t);
 bool cpp_member_accessible(struct type *t, struct member *m);
+void cpp_set_qual_class(const char *tag);
+const char *cpp_take_qual_class(void);
 
 #endif /* MCC_CPP_H */

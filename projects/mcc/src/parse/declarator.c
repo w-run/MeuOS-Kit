@@ -66,6 +66,24 @@ declaratortypes(struct scope *s, struct list *result, char **name, int *align, s
 				error(&tok.loc, "identifier not allowed in abstract declarator");
 			*name = tokenstr(tok.kind);
 			next();
+			/* C++ qualified method name: `Class::method` lowers to the
+			 * same mangled `Class_method` symbol used by in-class
+			 * definitions, so out-of-line definitions match the in-class
+			 * declaration.  Single-level qualifier only for now. */
+			extern int g_lang;
+			if (g_lang == 1 && tok.kind == TCOLONCOLON) {
+				const char *qclass = *name;
+				char *mname;
+				next(); /* consume '::' */
+				if (tok.kind < TIDENT)
+					error(&tok.loc, "expected member name after '::'");
+				mname = xmalloc(strlen(qclass) + strlen(tokenstr(tok.kind)) + 2);
+				sprintf(mname, "%s_%s", qclass, tokenstr(tok.kind));
+				*name = mname;
+				extern void cpp_set_qual_class(const char *);
+				cpp_set_qual_class(qclass);
+				next();
+			}
 		} else if (!allowabstract) {
 			error(&tok.loc, "expected '(' or identifier");
 		}
