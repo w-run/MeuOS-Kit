@@ -101,6 +101,8 @@ struct member {
 	/* C++ access control (ACC_PUBLIC for C aggregates): enforced on
 	 * `obj.member` / `obj->member` access outside the member's class. */
 	unsigned char access;
+	/* C++ mutable member: writable even through a const this pointer. */
+	bool is_mutable;
 	struct member *next;
 };
 

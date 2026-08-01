@@ -58,6 +58,7 @@ addmember(struct structbuilder *b, struct qualtype mt, char *name, int align, un
 				mf->offset = 0;
 				mf->bits.before = mf->bits.after = 0;
 				mf->access = b->access;
+				mf->is_mutable = false;
 				if (b->last)
 					*b->last = mf;
 				else
@@ -79,6 +80,7 @@ addmember(struct structbuilder *b, struct qualtype mt, char *name, int align, un
 		m->name = name;
 		m->next = NULL;
 		m->access = b->access;
+		m->is_mutable = b->member_mutable;
 		*b->last = m;
 		b->last = &m->next;
 	} else {
@@ -173,6 +175,13 @@ structdecl(struct scope *s, struct structbuilder *b)
 	if (staticassert(s))
 		return;
 	attr(NULL, 0);
+	b->member_mutable = false;
+	/* C++ `mutable` storage: writable via const this. */
+	extern int g_lang;
+	if (g_lang == 1 && cpp_tok_kind() == CPP_TMUTABLE) {
+		b->member_mutable = true;
+		next();
+	}
 	/* C++ destructor: `~Class() { ... }`.  Detect it before declspecs
 	 * (which does not understand '~').  Lowered to `Class_dtor` via
 	 * cpp_define_method; the member is registered under a `~Class` marker

@@ -292,6 +292,8 @@ cpp_member_ident(struct scope *s, const char *name)
 	{
 		enum typequal thisq = g_cpp_method.this_decl
 		    ? g_cpp_method.this_decl->type->qual : QUALNONE;
+		if (m->is_mutable)
+			thisq &= ~QUALCONST;
 		base = mkbinaryexpr(&tok.loc, TADD, exprconvert(thise, &typeulong),
 		                    mkconstexpr(&typeulong, offset));
 		base->type = mkpointertype(m->type, m->qual | thisq);

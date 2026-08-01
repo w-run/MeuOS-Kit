@@ -71,6 +71,8 @@ struct structbuilder {
 	/* current C++ access level for members added from here on
 	 * (ACC_PUBLIC in C mode; class defaults to ACC_PRIVATE) */
 	int access;
+	/* current member is C++ `mutable` (writable via const this) */
+	bool member_mutable;
 };
 
 /* Tentative-definition list: tracked in decl.c but drained by
