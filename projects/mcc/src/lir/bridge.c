@@ -224,7 +224,7 @@ lir_bridge(MFn *mfn)
 	for (uint32_t i = 0; i < mfn->nval; i++) {
 		MVal *v = mfn->val[i];
 		if (v->kind == MV_TEMP) {
-			Ref tr = newtmp(v->name ? v->name : 0,
+			Ref tr = newtmp(v->name ? (char *)v->name : 0,
 			                mir_to_cls(v->type), fn);
 			v->lirtmp = tr.val;
 		}

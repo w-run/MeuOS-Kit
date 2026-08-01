@@ -101,10 +101,15 @@ void m_arena_free(MFn *fn)
 	arena_free_all(fn);
 }
 
-char *m_strdup(MFn *fn, const char *s)
+/* Standard-heap string copy (mcc's libc may not export strdup during
+ * bootstrap, so roll our own). */
+char *
+mx_strdup(const char *s)
 {
 	size_t n = strlen(s) + 1;
-	char *p = m_alloc(fn, n);
+	char *p = malloc(n);
+	if (!p)
+		abort();
 	memcpy(p, s, n);
 	return p;
 }
@@ -239,7 +244,7 @@ MConst *mconst_addr(MFn *fn, const char *sym, int64_t off,
 MTypeDesc *mtd_new(const char *name, bool is_union)
 {
 	MTypeDesc *td = calloc(1, sizeof *td);
-	td->name = name ? strdup(name) : 0;
+	td->name = name ? mx_strdup(name) : 0;
 	td->is_union = is_union;
 	return td;
 }
@@ -268,7 +273,7 @@ void mtd_add_field(MTypeDesc *td, const char *name, MType t,
 	MField *f = &td->field[td->nfield++];
 	f->type = t;
 	f->sub = sub;
-	f->name = name ? strdup(name) : 0;
+	f->name = name ? mx_strdup(name) : 0;
 	f->offset = off;
 	f->bitoff = bitoff;
 	f->bits = bits;

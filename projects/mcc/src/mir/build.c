@@ -6,14 +6,14 @@
 #include "mir.h"
 
 void *m_alloc(MFn *, size_t);
-char *m_strdup(MFn *, const char *);
+char *mx_strdup(const char *);
 
 /* ---- functions --------------------------------------------------------- */
 
 MFn *mfn_new(const char *name, int optlevel)
 {
 	MFn *fn = calloc(1, sizeof *fn);
-	fn->name = name ? strdup(name) : 0;
+	fn->name = name ? mx_strdup(name) : 0;
 	fn->optlevel = optlevel;
 	fn->retty = -1;
 	fn->slot = 0;
@@ -24,7 +24,7 @@ MBlk *mblk_new(MFn *fn, const char *name)
 {
 	MBlk *b = calloc(1, sizeof *b);
 	b->id = fn->nblk;
-	b->name = name ? strdup(name) : 0;
+	b->name = name ? mx_strdup(name) : 0;
 	b->term.op = MOP_NONE;
 	return b;
 }
@@ -57,7 +57,7 @@ MVal *mval_new(MFn *fn, MValKind kind, MType t, MTypeDesc *td,
 	v->kind = kind;
 	v->type = t;
 	v->td = td;
-	v->name = name ? strdup(name) : 0;
+	v->name = name ? mx_strdup(name) : 0;
 	v->slot = -1;
 	v->hint = -1;
 	v->lirtmp = -1;
@@ -77,7 +77,7 @@ MVal *mval_const(MFn *fn, MType t, MConst *c)
 MVal *mval_global(MFn *fn, const char *sym, bool isext)
 {
 	MVal *v = mval_new(fn, MV_GLOBAL, MT_PTR, 0, sym);
-	v->sym = strdup(sym);
+	v->sym = mx_strdup(sym);
 	v->hint = isext ? 1 : 0;
 	return v;
 }

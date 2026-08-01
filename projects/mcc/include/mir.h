@@ -366,7 +366,7 @@ struct Fn *lir_bridge(MFn *mfn);
 
 /* arena helpers (mir_util.c) */
 void *m_alloc(MFn *fn, size_t size);
-char *m_strdup(MFn *fn, const char *s);
 void m_arena_free(MFn *fn);
+char *mx_strdup(const char *s);
 
 #endif /* MCC_MIR_H */

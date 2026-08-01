@@ -355,7 +355,12 @@ msimp_block(MFn *fn, MBlk *b)
 				if (a1.con && a1.con->kind == MC_INT && a1.con->u.i > 0) {
 					uint64_t v = (uint64_t)a1.con->u.i;
 					if ((v & (v - 1)) == 0) {
-						int n = __builtin_ctzll(v);
+						/* portable ctzll (mcc has no __builtin_*) */
+						int n = 0;
+						while (!(v & 1)) {
+							v >>= 1;
+							n++;
+						}
 						MRef sh = MREF_CON(mconst_int(fn, MT_I32, n));
 						if (in->op == MOP_UDIV || in->op == MOP_DIV) {
 							MOP shf = (in->op == MOP_UDIV) ? MOP_SHR : MOP_SAR;
