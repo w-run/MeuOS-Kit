@@ -15,78 +15,134 @@
 #include <string.h>
 
 #include "mir.h"
+#include "x86_64_m.h"
 
-/* ---- physical register table (x86-64, System V ABI) ------------------- */
+/* ---- x86-64 machine target (register descriptions) --------------------- */
 
-const MRegInfo mreg_info[MREG_NREG] = {
+static const MRegInfo x64_regs[X64MREG_NREG] = {
 	/* GPR, caller-saved */
-	[MREG_RAX] = { "rax", MRC_GPR, true,  false, false },
-	[MREG_RCX] = { "rcx", MRC_GPR, true,  false, true  }, /* 4th int arg */
-	[MREG_RDX] = { "rdx", MRC_GPR, true,  false, true  }, /* 3rd int arg */
-	[MREG_RSI] = { "rsi", MRC_GPR, true,  false, true  }, /* 2nd int arg */
-	[MREG_RDI] = { "rdi", MRC_GPR, true,  false, true  }, /* 1st int arg */
-	[MREG_R8]  = { "r8",  MRC_GPR, true,  false, true  }, /* 5th int arg */
-	[MREG_R9]  = { "r9",  MRC_GPR, true,  false, true  }, /* 6th int arg */
-	[MREG_R10] = { "r10", MRC_GPR, true,  false, false },
-	[MREG_R11] = { "r11", MRC_GPR, true,  false, false },
+	[X64MREG_RAX] = { "rax", MRC_GPR, true,  false, false },
+	[X64MREG_RCX] = { "rcx", MRC_GPR, true,  false, true  }, /* 4th int arg */
+	[X64MREG_RDX] = { "rdx", MRC_GPR, true,  false, true  }, /* 3rd int arg */
+	[X64MREG_RSI] = { "rsi", MRC_GPR, true,  false, true  }, /* 2nd int arg */
+	[X64MREG_RDI] = { "rdi", MRC_GPR, true,  false, true  }, /* 1st int arg */
+	[X64MREG_R8]  = { "r8",  MRC_GPR, true,  false, true  }, /* 5th int arg */
+	[X64MREG_R9]  = { "r9",  MRC_GPR, true,  false, true  }, /* 6th int arg */
+	[X64MREG_R10] = { "r10", MRC_GPR, true,  false, false },
+	[X64MREG_R11] = { "r11", MRC_GPR, true,  false, false },
 	/* GPR, callee-saved */
-	[MREG_RBX] = { "rbx", MRC_GPR, false, true,  false },
-	[MREG_R12] = { "r12", MRC_GPR, false, true,  false },
-	[MREG_R13] = { "r13", MRC_GPR, false, true,  false },
-	[MREG_R14] = { "r14", MRC_GPR, false, true,  false },
-	[MREG_R15] = { "r15", MRC_GPR, false, true,  false },
+	[X64MREG_RBX] = { "rbx", MRC_GPR, false, true,  false },
+	[X64MREG_R12] = { "r12", MRC_GPR, false, true,  false },
+	[X64MREG_R13] = { "r13", MRC_GPR, false, true,  false },
+	[X64MREG_R14] = { "r14", MRC_GPR, false, true,  false },
+	[X64MREG_R15] = { "r15", MRC_GPR, false, true,  false },
 	/* frame / stack */
-	[MREG_RBP] = { "rbp", MRC_GPR, false, false, false },
-	[MREG_RSP] = { "rsp", MRC_GPR, false, false, false },
+	[X64MREG_RBP] = { "rbp", MRC_GPR, false, false, false },
+	[X64MREG_RSP] = { "rsp", MRC_GPR, false, false, false },
 	/* XMM, caller-saved under SysV */
-	[MREG_XMM0]  = { "xmm0",  MRC_FPR, true, false, true  },
-	[MREG_XMM1]  = { "xmm1",  MRC_FPR, true, false, true  },
-	[MREG_XMM2]  = { "xmm2",  MRC_FPR, true, false, true  },
-	[MREG_XMM3]  = { "xmm3",  MRC_FPR, true, false, true  },
-	[MREG_XMM4]  = { "xmm4",  MRC_FPR, true, false, true  },
-	[MREG_XMM5]  = { "xmm5",  MRC_FPR, true, false, true  },
-	[MREG_XMM6]  = { "xmm6",  MRC_FPR, true, false, true  },
-	[MREG_XMM7]  = { "xmm7",  MRC_FPR, true, false, true  },
-	[MREG_XMM8]  = { "xmm8",  MRC_FPR, true, false, false },
-	[MREG_XMM9]  = { "xmm9",  MRC_FPR, true, false, false },
-	[MREG_XMM10] = { "xmm10", MRC_FPR, true, false, false },
-	[MREG_XMM11] = { "xmm11", MRC_FPR, true, false, false },
-	[MREG_XMM12] = { "xmm12", MRC_FPR, true, false, false },
-	[MREG_XMM13] = { "xmm13", MRC_FPR, true, false, false },
-	[MREG_XMM14] = { "xmm14", MRC_FPR, true, false, false },
-	[MREG_XMM15] = { "xmm15", MRC_FPR, true, false, false },
+	[X64MREG_XMM0]  = { "xmm0",  MRC_FPR, true, false, true  },
+	[X64MREG_XMM1]  = { "xmm1",  MRC_FPR, true, false, true  },
+	[X64MREG_XMM2]  = { "xmm2",  MRC_FPR, true, false, true  },
+	[X64MREG_XMM3]  = { "xmm3",  MRC_FPR, true, false, true  },
+	[X64MREG_XMM4]  = { "xmm4",  MRC_FPR, true, false, true  },
+	[X64MREG_XMM5]  = { "xmm5",  MRC_FPR, true, false, true  },
+	[X64MREG_XMM6]  = { "xmm6",  MRC_FPR, true, false, true  },
+	[X64MREG_XMM7]  = { "xmm7",  MRC_FPR, true, false, true  },
+	[X64MREG_XMM8]  = { "xmm8",  MRC_FPR, true, false, false },
+	[X64MREG_XMM9]  = { "xmm9",  MRC_FPR, true, false, false },
+	[X64MREG_XMM10] = { "xmm10", MRC_FPR, true, false, false },
+	[X64MREG_XMM11] = { "xmm11", MRC_FPR, true, false, false },
+	[X64MREG_XMM12] = { "xmm12", MRC_FPR, true, false, false },
+	[X64MREG_XMM13] = { "xmm13", MRC_FPR, true, false, false },
+	[X64MREG_XMM14] = { "xmm14", MRC_FPR, true, false, false },
+	[X64MREG_XMM15] = { "xmm15", MRC_FPR, true, false, false },
+};
+
+/* SysV argument order: 6 integer (rdi rsi rdx rcx r8 r9), 8 SSE (xmm0-7) */
+static const int x64_argreg[] = {
+	X64MREG_RDI, X64MREG_RSI, X64MREG_RDX, X64MREG_RCX,
+	X64MREG_R8, X64MREG_R9,
+	X64MREG_XMM0, X64MREG_XMM1, X64MREG_XMM2, X64MREG_XMM3,
+	X64MREG_XMM4, X64MREG_XMM5, X64MREG_XMM6, X64MREG_XMM7,
+	-1
+};
+static const int x64_rsave[] = {
+	X64MREG_RAX, X64MREG_RCX, X64MREG_RDX, X64MREG_RSI, X64MREG_RDI,
+	X64MREG_R8, X64MREG_R9, X64MREG_R10, X64MREG_R11,
+	X64MREG_XMM0, X64MREG_XMM1, X64MREG_XMM2, X64MREG_XMM3,
+	X64MREG_XMM4, X64MREG_XMM5, X64MREG_XMM6, X64MREG_XMM7,
+	X64MREG_XMM8, X64MREG_XMM9, X64MREG_XMM10, X64MREG_XMM11,
+	X64MREG_XMM12, X64MREG_XMM13, X64MREG_XMM14, X64MREG_XMM15,
+	-1
+};
+static const int x64_rclob[] = {
+	X64MREG_RBX, X64MREG_R12, X64MREG_R13, X64MREG_R14, X64MREG_R15, -1
+};
+
+const MTargetM mtarget_x86_64 = {
+	.name = "x86_64",
+	.nreg = X64MREG_NREG,
+	.regs = x64_regs,
+	.gpr0 = X64MREG_RAX,
+	.ngpr = X64MREG_RSP - X64MREG_RAX + 1,   /* 16 GPR incl. rbp/rsp */
+	.fpr0 = X64MREG_XMM0,
+	.nfpr = 16,
+	.rglob = (1ull << X64MREG_RBP) | (1ull << X64MREG_RSP),
+	.reserved = 0,
+	.argreg = x64_argreg,
+	.rsave = x64_rsave,
+	.rclob = x64_rclob,
+	.ptrsize = 8,
+	.stackalign = 16,
+	.kl_in_reg = true,
+	.feat = MTF_SCALE_INDEX,
 };
 
 const char *
-mreg_name(MReg r)
+mreg_name(const MTargetM *mt, MReg r)
 {
-	if (r <= MREG_NONE || r >= MREG_NREG)
+	if (!mt || r < 0 || r >= mt->nreg)
 		return "?";
-	return mreg_info[r].name;
+	return mt->regs[r].name;
 }
 
-/* Return the MVal for a physical register, creating it on first use.
- * Register values live in fn->reg[] and stay OUT of the SSA val table
- * (they carry no def/use chains).  id == MReg so dumps stay readable. */
-MVal *
-mfn_reg(MFn *fn, MReg r)
+int
+mreg_id(const MTargetM *mt, const char *name)
 {
-	if (r <= MREG_NONE || r >= MREG_NREG)
+	if (!mt || !name)
+		return -1;
+	for (uint32_t i = 0; i < mt->nreg; i++)
+		if (mt->regs[i].name && strcmp(mt->regs[i].name, name) == 0)
+			return (int)i;
+	return -1;
+}
+
+/* Return the MVal for a physical register of `mt`, creating it on first
+ * use.  Register values live in fn->reg[] and stay OUT of the SSA val
+ * table (they carry no def/use chains).  id == MReg so dumps stay
+ * readable. */
+MVal *
+mfn_reg(MFn *fn, const MTargetM *mt, MReg r)
+{
+	if (!mt || r < 0 || r >= mt->nreg)
 		return 0;
 	if (!fn->reg) {
-		fn->reg = calloc(MREG_NREG, sizeof *fn->reg);
-		fn->nreg = MREG_NREG;
+		fn->reg = calloc(mt->nreg, sizeof *fn->reg);
+		fn->nreg = mt->nreg;
 	}
 	if (!fn->reg[r]) {
 		MVal *v = calloc(1, sizeof *v);
 		v->id = (uint32_t)r;
 		v->kind = MV_REG;
-		v->type = mreg_info[r].cls == MRC_FPR ? MT_F64 : MT_I64;
-		v->reg = (int32_t)r;
+		/* machine word type follows the target pointer width: i386/arm
+		 * (ILP32) registers are 32-bit, LP64 targets are 64-bit. */
+		v->type = mt->regs[r].cls == MRC_FPR ? MT_F64 :
+		          (mt->ptrsize == 4 ? MT_I32 : MT_I64);
+		v->reg = r;
 		v->slot = -1;
 		v->hint = -1;
 		v->lirtmp = -1;
-		v->name = mx_strdup(mreg_info[r].name);
+		v->name = mx_strdup(mt->regs[r].name);
 		fn->reg[r] = v;
 	}
 	return fn->reg[r];
@@ -171,6 +227,8 @@ mmop_name(MMOP op)
 		[MMOP_CMP]      = "cmp",
 		[MMOP_TEST]     = "test",
 		[MMOP_SETCC]    = "setcc",
+		[MMOP_PARM]     = "parm",
+		[MMOP_ARG]      = "arg",
 		[MMOP_JMP]      = "jmp",
 		[MMOP_JCC]      = "jcc",
 		[MMOP_CALL]     = "call",
@@ -184,11 +242,14 @@ mcc_name(MCC cc)
 {
 	static const char *names[MCC_NCC] = {
 		[MCC_NONE] = "none",
-		[MCC_E]  = "e",   [MCC_NE] = "ne",
-		[MCC_L]  = "l",   [MCC_LE] = "le",
-		[MCC_G]  = "g",   [MCC_GE] = "ge",
-		[MCC_B]  = "b",   [MCC_BE] = "be",
-		[MCC_A]  = "a",   [MCC_AE] = "ae",
+		[MCC_EQ]  = "eq",  [MCC_NE] = "ne",
+		[MCC_CS]  = "cs",  [MCC_CC] = "cc",
+		[MCC_MI]  = "mi",  [MCC_PL] = "pl",
+		[MCC_VS]  = "vs",  [MCC_VC] = "vc",
+		[MCC_HI]  = "hi",  [MCC_LS] = "ls",
+		[MCC_GE]  = "ge",  [MCC_LT] = "lt",
+		[MCC_GT]  = "gt",  [MCC_LE] = "le",
+		[MCC_AL]  = "al",
 	};
 	return (unsigned)cc < MCC_NCC ? names[cc] : "?";
 }
@@ -196,10 +257,11 @@ mcc_name(MCC cc)
 /* ---- machine function / block construction ----------------------------- */
 
 MFnM *
-mfnm_new(MFn *host, const char *name)
+mfnm_new(MFn *host, const MTargetM *mt, const char *name)
 {
 	MFnM *fm = calloc(1, sizeof *fm);
 	fm->name = name ? mx_strdup(name) : 0;
+	fm->mt = mt ? mt : &mtarget_x86_64;
 	fm->host = host;
 	return fm;
 }
@@ -343,7 +405,7 @@ print_mval(FILE *f, MVal *v)
 	}
 	switch (v->kind) {
 	case MV_REG:
-		fprintf(f, "%%%s", v->name ? v->name : mreg_name((MReg)v->reg));
+		fprintf(f, "%%%s", v->name ? v->name : "reg");
 		break;
 	case MV_TEMP:
 		fprintf(f, "%%v%u", v->id);
@@ -404,7 +466,7 @@ print_maddr(FILE *f, MAddr a)
 		print_mval(f, a.base);
 	}
 	if (a.index) {
-		fprintf(f, "+%s*%u", mreg_name((MReg)a.index->reg), a.scale);
+		fprintf(f, "+%s*%u", a.index->name ? a.index->name : "idx", a.scale);
 	}
 	fputs("]", f);
 }

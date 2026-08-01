@@ -390,44 +390,61 @@ char *mx_strdup(const char *s);
  * functions/blocks/instructions.  No QBE Fn/Ins/Ref anywhere.
  * =================================================================== */
 
-/* ---- Physical registers (x86-64 first) ------------------------------ */
+/* ---- Physical registers (target-parameterized) ------------------------ */
 
 typedef enum MRegCls {
-	MRC_GPR,         /* general purpose (64-bit) */
-	MRC_FPR,         /* floating point / SIMD (XMM) */
+	MRC_GPR,         /* general purpose register file */
+	MRC_FPR,         /* floating point / SIMD register file */
 } MRegCls;
 
-typedef enum MReg {
-	MREG_NONE = 0,
-	/* general purpose, caller-saved */
-	MREG_RAX, MREG_RCX, MREG_RDX, MREG_RSI, MREG_RDI,
-	MREG_R8, MREG_R9, MREG_R10, MREG_R11,
-	/* general purpose, callee-saved */
-	MREG_RBX, MREG_R12, MREG_R13, MREG_R14, MREG_R15,
-	/* frame / stack (never allocated by the register allocator) */
-	MREG_RBP, MREG_RSP,
-	/* floating point (XMM), caller-saved under SysV */
-	MREG_XMM0, MREG_XMM1, MREG_XMM2, MREG_XMM3,
-	MREG_XMM4, MREG_XMM5, MREG_XMM6, MREG_XMM7,
-	MREG_XMM8, MREG_XMM9, MREG_XMM10, MREG_XMM11,
-	MREG_XMM12, MREG_XMM13, MREG_XMM14, MREG_XMM15,
-	MREG_NREG,
-} MReg;
-
 typedef struct MRegInfo {
-	const char *name;      /* assembler name: "rax", "xmm0", ... */
+	const char *name;      /* assembler name: "rax", "xmm0", "r0", ... */
 	MRegCls cls;
 	bool caller_saved;
 	bool callee_saved;
-	bool sysv_arg;         /* SysV integer/SSE argument register */
+	bool arg;              /* argument register under the target ABI */
 } MRegInfo;
 
-extern const MRegInfo mreg_info[MREG_NREG];
-const char *mreg_name(MReg r);
+/* Register id is target-defined: 0..mt->nreg-1.  Register counts differ
+ * per architecture (i386 8 GPRs, arm 16 GPRs + 32 D regs, aarch64/
+ * riscv64/loongarch64 31+ GPRs + 32 FPRs, x86_64 16 GPRs + 16 XMM). */
+typedef int32_t MReg;
 
-/* Return the MVal for a physical register, creating it on first use.
- * Register values live in fn->reg[] (outside the SSA val table). */
-MVal *mfn_reg(MFn *fn, MReg r);
+/* Per-architecture machine target description.  The MIR backend is
+ * target-parameterized through this structure (mirrors the existing
+ * struct Target abstraction, but MIR-native). */
+typedef struct MTargetM {
+	const char *name;          /* "x86_64", "aarch64", ... */
+	/* register file */
+	uint16_t nreg;             /* total register count */
+	const MRegInfo *regs;      /* per-register descriptions, nreg entries */
+	uint16_t gpr0, ngpr;       /* GPR range [gpr0, gpr0+ngpr) */
+	uint16_t fpr0, nfpr;       /* FPR range (may be empty, e.g. i386 x87) */
+	uint64_t rglob;            /* registers never allocated (SP/FP/...), bitmask */
+	uint64_t reserved;         /* implicit scratch registers, bitmask */
+	/* ABI */
+	const int *argreg;         /* argument registers in ABI order, -1 end */
+	const int *rsave;          /* caller-saved registers, -1 end */
+	const int *rclob;          /* callee-saved registers, -1 end */
+	int ptrsize;               /* 8 (LP64) or 4 (ILP32: i386/arm) */
+	int stackalign;            /* stack alignment in bytes */
+	bool kl_in_reg;            /* 64-bit ints may live in GPRs (0 for i386/arm) */
+	uint32_t feat;             /* MTF_* feature bits */
+} MTargetM;
+
+/* machine target feature bits (isel/emit guidance) */
+#define MTF_SCALE_INDEX (1u<<0)  /* base+index*scale addressing (x86/i386) */
+#define MTF_COND_EXEC   (1u<<1)  /* every instruction predicated (arm) */
+
+extern const MTargetM mtarget_x86_64;   /* x86_64 first; others follow per-arch */
+
+const char *mreg_name(const MTargetM *mt, MReg r);
+/* Look up a register by assembler name; returns -1 if not found. */
+int mreg_id(const MTargetM *mt, const char *name);
+
+/* Return the MVal for a physical register of `mt`, creating it on first
+ * use.  Register values live in fn->reg[] (outside the SSA val table). */
+MVal *mfn_reg(MFn *fn, const MTargetM *mt, MReg r);
 
 /* ---- Addressing modes ------------------------------------------------ */
 
@@ -475,11 +492,14 @@ typedef enum MMOP {
 	MMOP_CMP,              /* compare src[0] vs src[1], set flags */
 	MMOP_TEST,             /* and src[0], src[1], set flags */
 	MMOP_SETCC,            /* dst = flags.cc ? 1 : 0 */
+	/* parameter passing (pre-ABI markers consumed by the ABI lowering) */
+	MMOP_PARM,             /* function parameter (entry block); td = agg type */
+	MMOP_ARG,              /* call argument; td = agg type for aggregates */
 	/* control flow */
 	MMOP_JMP,              /* terminator; target via MBlkM.s1 */
 	MMOP_JCC,              /* terminator; cc + s1(taken)/s2(fallthrough) */
-	MMOP_CALL,             /* src[0] = callee */
-	MMOP_RET,              /* src[0] = return value, or none */
+	MMOP_CALL,             /* src[0] = callee; td = agg return type */
+	MMOP_RET,              /* src[0] = return value, or none; td = agg ret type */
 	MMOP_NOP,
 } MMOP;
 
@@ -487,13 +507,22 @@ const char *mmop_name(MMOP op);
 
 /* ---- Condition codes -------------------------------------------------- */
 
+/* Semantic condition codes shared by all targets (x86 setcc/jcc, arm/
+ * aarch64 predicates, riscv64/loongarch64 branch+set mappings):
+ *   EQ/NE  ==/!=   CS/CC  unsigned >=/< (carry set/clear)
+ *   MI/PL  negative/zero-or-positive   VS/VC  overflow set/clear
+ *   HI/LS  unsigned >/<=   GE/LT/GT/LE  signed   AL  always
+ * The emitter maps each MCC to the target's mnemonic (x86: b=CC, be=LS,
+ * a=HI, ae=CS; arm/aarch64: identical names). */
 typedef enum MCC {
 	MCC_NONE,
-	MCC_E,  MCC_NE,     /* equal / not-equal (int; fp ordered) */
-	MCC_L,  MCC_LE,     /* signed less / less-or-equal */
-	MCC_G,  MCC_GE,     /* signed greater / greater-or-equal */
-	MCC_B,  MCC_BE,     /* unsigned (and fp unordered) less / less-or-equal */
-	MCC_A,  MCC_AE,     /* unsigned (and fp unordered) greater / greater-or-equal */
+	MCC_EQ,  MCC_NE,
+	MCC_CS,  MCC_CC,
+	MCC_MI,  MCC_PL,
+	MCC_VS,  MCC_VC,
+	MCC_HI,  MCC_LS,
+	MCC_GE,  MCC_LT,  MCC_GT,  MCC_LE,
+	MCC_AL,
 	MCC_NCC,
 } MCC;
 
@@ -510,6 +539,7 @@ struct MInsM {
 	MConst *cst;           /* immediate / symbol constant, else NULL */
 	MAddr addr;            /* addressing mode (LOAD/STORE/LEA/BLIT) */
 	MCC cc;                /* condition code (SETCC / JCC terminator) */
+	MTypeDesc *td;         /* aggregate type (PARM/ARG/CALL/RET), else NULL */
 	uint64_t extra;        /* extension word (C++ frontend) */
 	struct MBlkM *blk;     /* owning machine block */
 };
@@ -527,19 +557,20 @@ struct MBlkM {
 
 struct MFnM {
 	const char *name;
-	MFn *host;             /* owning MIR function: register table, const pool, arena */
-	MBlkM *start;          /* entry block */
-	MBlkM *link;           /* block list head */
+	const MTargetM *mt;      /* target this machine function is lowered for */
+	MFn *host;               /* owning MIR function: const pool, arena */
+	MBlkM *start;            /* entry block */
+	MBlkM *link;             /* block list head */
 	uint32_t nblk;
-	int32_t slot;          /* stack frame size (bytes); filled by regalloc/spill */
-	int32_t salign;        /* frame alignment */
-	uint64_t regsused;     /* bitmask of used physical registers (bit = MReg) */
-	uint32_t nspill;       /* number of stack spill slots */
+	int32_t slot;            /* stack frame size (bytes); filled by regalloc/spill */
+	int32_t salign;          /* frame alignment */
+	uint64_t regsused;       /* bitmask of used physical registers (bit = MReg) */
+	uint32_t nspill;         /* number of stack spill slots */
 };
 
 /* ---- Machine construction API (src/mir/machine.c) --------------------- */
 
-MFnM *mfnm_new(MFn *host, const char *name);
+MFnM *mfnm_new(MFn *host, const MTargetM *mt, const char *name);
 MBlkM *mblkm_new(MFnM *fm, const char *name);
 void mfnm_addblk(MFnM *fm, MBlkM *b);
 
