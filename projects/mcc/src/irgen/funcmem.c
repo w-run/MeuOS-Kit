@@ -49,6 +49,9 @@ funcalloc(struct func *f, struct decl *d)
 		assert(d->type->u.array.size);
 		v = d->type->u.array.size;
 	}
+	if (d->type->kind == TYPESTRUCT && d->type->u.structunion.tag &&
+	    strcmp(d->type->u.structunion.tag, "va_list") == 0)
+		v = mkintconst(32);   /* SysV va_list needs 24B + pad */
 	align = d->u.obj.align;
 	switch (align) {
 	case 1:

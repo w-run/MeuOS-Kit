@@ -132,6 +132,12 @@ mreg_intervals(MFnM *fm, MRegCtx *ctx)
 				iv->start = in->pos;
 				if (in->extra == 1)
 					iv->phislot = true;   /* phi-edge copy dest */
+				/* varargs: keep va_list / stack-pad addresses in slots so
+				 * vastart/va_arg never depend on a register that an
+				 * emitted temporary could clobber */
+				if ((fm->host && fm->host->vararg) &&
+				    in->op == MMOP_ALLOCA16)
+					iv->phislot = true;
 			}
 			for (int k = 0; k < 3; k++)
 				mreg_scan_use(ctx, in->src[k], in->pos);

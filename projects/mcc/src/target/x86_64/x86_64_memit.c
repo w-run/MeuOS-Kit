@@ -65,6 +65,19 @@ alloca_size(MMOP op)
 	}
 }
 
+/* per-instruction alloca size: honour an explicit const size (e.g. the
+ * 32-byte pad for a SysV va_list) and 16-align it */
+static int
+alloca_size_ins(const MInsM *in)
+{
+	if (in->src[0] && in->src[0]->kind == MV_CONST && in->src[0]->con &&
+	    in->src[0]->con->kind == MC_INT && in->src[0]->con->u.i > 0)
+		return (int)((in->src[0]->con->u.i + 15) & ~15);
+	if (in->cst && in->cst->kind == MC_INT && in->cst->u.i > 0)
+		return (int)((in->cst->u.i + 15) & ~15);
+	return alloca_size(in->op);
+}
+
 /* total bytes reserved for static allocas */
 static int
 alloca_total(MFnM *fm)
@@ -75,7 +88,7 @@ alloca_total(MFnM *fm)
 			MMOP op = b->ins[i].op;
 			if (op == MMOP_ALLOCA4 || op == MMOP_ALLOCA8 ||
 			    op == MMOP_ALLOCA16)
-				t += alloca_size(op);
+				t += alloca_size_ins(&b->ins[i]);
 		}
 	return t;
 }
@@ -118,6 +131,7 @@ assign_extra_slots(MFnM *fm)
 
 static MConst **fp_pool;
 static uint32_t nfp, cfp;
+static const char *g_fname;   /* current function, for unique .LC labels */
 
 /* find or add a float constant, returning its .rodata label index */
 static uint32_t
@@ -146,7 +160,7 @@ fp_pool_emit(FILE *f)
 	fputs(".section .rodata\n", f);
 	for (uint32_t i = 0; i < nfp; i++) {
 		MConst *c = fp_pool[i];
-		fprintf(f, ".LC%u:\n", i);
+		fprintf(f, ".L%s.lc%u:\n", g_fname ? g_fname : "f", i);
 		if (c->type == MT_F32) {
 			union { float s; uint32_t u; } x = { .s = c->u.s };
 			fprintf(f, "\t.long %u\n", x.u);
@@ -171,7 +185,8 @@ emit_const(FILE *f, MConst *c)
 		fprintf(f, "$%lld", (long long)c->u.i);
 		break;
 	case MC_FLT:
-		fprintf(f, ".LC%u(%%rip)", fp_label(c));
+		fprintf(f, ".L%s.lc%u(%%rip)", g_fname ? g_fname : "f",
+		        fp_label(c));
 		break;
 	case MC_ADDR:
 		fprintf(f, "%s(%%rip)", c->u.addr.sym ? c->u.addr.sym : "0");
@@ -702,7 +717,7 @@ emit_ins(FILE *f, MInsM *in)
 	case MMOP_ALLOCA16: {
 		/* static alloca: address a reserved frame slot below the spill
 		 * area (never touch %rsp: it must stay balanced at calls) */
-		g_alloca_cur -= alloca_size(in->op);
+		g_alloca_cur -= alloca_size_ins(in);
 		fprintf(f, "\tleaq\t%d(%%rbp), %%rax\n", g_alloca_cur);
 		rax_to_dst(f, d);
 		return;
@@ -871,6 +886,7 @@ mfnm_emit_x86_64(MFnM *fm, FILE *f)
 	g_mt = fm->mt;
 	int extra = assign_extra_slots(fm);
 	nfp = 0;   /* fresh float pool per function */
+	g_fname = fm->name;
 	/* allocas go below spill slots and (for varargs) the reg_save_area */
 	g_alloca_cur = -(fm->slot + extra +
 	                 ((fm->host && fm->host->vararg) ? 176 : 0));
@@ -882,17 +898,17 @@ mfnm_emit_x86_64(MFnM *fm, FILE *f)
 	 * == 8, but libc enters main with rsp % 16 == 0). */
 	int framesize = fm->slot + extra + alloca_total(fm) +
 	                ((fm->host && fm->host->vararg) ? 176 : 0);
+	framesize = (framesize + 15) & ~15;
 	int csaves = 0;
 	for (int i = 0; fm->mt->rclob && fm->mt->rclob[i] >= 0; i++)
 		if ((fm->regsused >> fm->mt->rclob[i]) & 1)
 			csaves++;
-	/* callers leave rsp % 16 == 8 after pushing the return address;
-	 * libc enters main with rsp % 16 == 0 */
-	bool ismain = fm->name && strcmp(fm->name, "main") == 0;
-	int entryoff = ismain ? 16 : 8;
+	/* this backend observes every function (including main, as launched
+	 * by the host runtime) entering with rsp % 16 == 8 */
+	int entryoff = 8;
 	int postpush = (entryoff - 8 * (csaves + 1)) & 15;   /* after pushes */
 	int align = (16 - postpush) & 15;
-	framesize = (framesize + align + 15) & ~15;
+	framesize += align;   /* align must survive: subq restores %16 */
 
 	fprintf(f, ".text\n");
 	if (fm->name)

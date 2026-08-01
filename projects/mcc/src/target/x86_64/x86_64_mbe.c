@@ -150,7 +150,6 @@ mbe_supported(MFn *mf)
 			     in->src[0].val->kind == MV_TYPE) ||
 			    (in->op == MOP_CALL && in->src[1].val &&
 			     in->src[1].val->kind == MV_TYPE) ||
-			    in->op == MOP_VASTART || in->op == MOP_VAARG ||
 			    in->op == MOP_SALLOC ||
 			    /* dynamic alloca (VLAs): size is a runtime value */
 			    (in->op == MOP_ALLOCA && in->src[0].val))
