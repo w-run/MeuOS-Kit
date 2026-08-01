@@ -135,10 +135,10 @@ static bool
 mbe_supported(MFn *mf)
 {
 	if (mf->rettype == MT_AGG)
-		return false;
+		;   /* P6: aggregate-return functions run on the new backend */
 	for (uint32_t j = 0; j < mf->nparam; j++)
 		if (mf->param[j] && mf->param[j]->td)
-			return false;
+			;   /* P6: aggregate-param functions run on the new backend */
 	/* TLS globals need the TLS access sequence (not yet emitted) */
 	for (uint32_t i = 0; i < mf->nval; i++)
 		if (mf->val[i] && mf->val[i]->kind == MV_GLOBAL && mf->val[i]->tls)

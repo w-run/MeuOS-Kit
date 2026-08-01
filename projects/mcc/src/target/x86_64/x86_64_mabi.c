@@ -274,12 +274,19 @@ mabi_selpar(MFnM *fm, MOut *o, MInsM *parms, int n, uint32_t *vafa)
 	MAClass aret;
 	MAClass *pa = 0;
 	int ni = 0, ns = 0;
-	int off = 8;   /* caller-pushed stack args start at rsp+8 */
+	/* caller-pushed stack args start at rbp+16 (after push rbp + the
+	 * return address); the frame pointer is stable once the prologue runs */
+	int off = 16;
 
 	if (fm->retty) {
 		mabi_typclass(&aret, fm->retty);
-		if (aret.inmem)
-			(void)rarg(fm, &ni, &ns, false);   /* RDI = hidden sret pad */
+		if (aret.inmem) {
+			/* RDI = hidden sret pad; preserve it across the body so the
+			 * return blit in selret cannot be clobbered by regalloc */
+			MVal *rdi = rarg(fm, &ni, &ns, false);
+			fm->sret_rdi = true;   /* RDI is the sret buffer; pin it for regalloc */
+			(void)rdi;
+		}
 		pa = &aret;
 	}
 
@@ -292,11 +299,14 @@ mabi_selpar(MFnM *fm, MOut *o, MInsM *parms, int n, uint32_t *vafa)
 			if (ac[i].inmem) {
 				/* caller pushed the aggregate; dst addresses it */
 				mout_addr(o, MMOP_LEA, MT_PTR, dst,
-				          maddr(reg(fm, X64MREG_RSP), 0, 1, off), 0);
+				          maddr(reg(fm, X64MREG_RBP), 0, 1, off), 0);
 				off += ac[i].size;
 				continue;
 			}
 			if (ac[i].cls[0] != MT_NONE) {
+				/* register-passed aggregate: dst must point at a pad; a
+				 * static alloca reserves it in the caller's frame */
+				mout(o, MMOP_ALLOCA16, MT_PTR, dst, 0, 0);
 				MVal *r0 = rarg(fm, &ni, &ns, ac[i].cls[0] == MT_F64);
 				if (r0)
 					mout_addr(o, MMOP_STORE,
@@ -316,7 +326,7 @@ mabi_selpar(MFnM *fm, MOut *o, MInsM *parms, int n, uint32_t *vafa)
 		bool isf = p->dtype == MT_F32 || p->dtype == MT_F64;
 		if (isf ? ns >= 8 : ni >= 6) {
 			mout_addr(o, MMOP_LOAD, p->dtype, dst,
-			          maddr(reg(fm, X64MREG_RSP), 0, 1, off), 0);
+			          maddr(reg(fm, X64MREG_RBP), 0, 1, off), 0);
 			off += 8;
 			continue;
 		}
@@ -452,7 +462,11 @@ mabi_selret(MFnM *fm, MOut *o, MInsM *term)
 		MAClass aret;
 		mabi_typclass(&aret, term->td);
 		if (aret.inmem) {
-			mout(o, MMOP_MOV, MT_PTR, reg(fm, X64MREG_RAX), term->src[0], 0);
+			/* sret: copy the aggregate into the hidden return buffer
+			 * (RDI, pinned by regalloc via fm->sret_rdi), then return it */
+			mout_blit(fm, o, reg(fm, X64MREG_RDI), term->src[0], aret.size);
+			mout(o, MMOP_MOV, MT_PTR, reg(fm, X64MREG_RAX),
+			     reg(fm, X64MREG_RDI), 0);
 		} else {
 			if (aret.cls[0] != MT_NONE) {
 				bool isf = aret.cls[0] == MT_F64;

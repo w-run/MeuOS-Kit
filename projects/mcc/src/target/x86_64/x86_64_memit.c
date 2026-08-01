@@ -620,6 +620,15 @@ emit_ins(FILE *f, MInsM *in)
 	case MMOP_LOAD: {
 		/* width + zero-extension for sub-32 loads */
 		emit_addr_loads(f, in->addr);
+		/* 8-byte register destination: load straight there so a second
+		 * load (e.g. selret's RAX+RDX chunks) does not clobber %rax */
+		if (d && d->kind == MV_REG &&
+		    (in->dtype == MT_I64 || in->dtype == MT_PTR)) {
+			fputs("\tmovq\t", f);
+			emit_addr(f, in->addr);
+			fprintf(f, ", %%%s\n", d->name);
+			return;
+		}
 		if (in->dtype == MT_I8)
 			fprintf(f, "\tmovzbl\t");
 		else if (in->dtype == MT_I16)
@@ -698,10 +707,51 @@ emit_ins(FILE *f, MInsM *in)
 		rax_to_dst(f, d);
 		return;
 	}
-	case MMOP_BLIT:
-		/* aggregate copy: dst, src pointers + size (P4 handles inline) */
-		fputs("\t# blit (P4)\n", f);
+	case MMOP_BLIT: {
+		/* aggregate copy: src[1] -> src[0], cst bytes.  Expand as
+		 * 8/4/2/1-byte moves through %rax with base/index in r10/r11
+		 * (scratch; never clobbers allocated registers). */
+		int64_t sz = c ? c->u.i : 0;
+		MVal *dp = s0, *sp = s1;
+		if (dp && dp->kind == MV_REG)
+			fprintf(f, "\tmovq\t%%%s, %%r10\n", dp->name);
+		else {
+			fputs("\tmovq\t", f);
+			emit_mval(f, dp);
+			fputs(", %r10\n", f);
+		}
+		if (sp && sp->kind == MV_REG)
+			fprintf(f, "\tmovq\t%%%s, %%r11\n", sp->name);
+		else {
+			fputs("\tmovq\t", f);
+			emit_mval(f, sp);
+			fputs(", %r11\n", f);
+		}
+		int64_t off = 0;
+		while (sz >= 8) {
+			fprintf(f, "\tmovq\t%lld(%%r11), %%rax\n", (long long)off);
+			fprintf(f, "\tmovq\t%%rax, %lld(%%r10)\n", (long long)off);
+			off += 8;
+			sz -= 8;
+		}
+		if (sz >= 4) {
+			fprintf(f, "\tmovl\t%lld(%%r11), %%eax\n", (long long)off);
+			fprintf(f, "\tmovl\t%%eax, %lld(%%r10)\n", (long long)off);
+			off += 4;
+			sz -= 4;
+		}
+		if (sz >= 2) {
+			fprintf(f, "\tmovw\t%lld(%%r11), %%ax\n", (long long)off);
+			fprintf(f, "\tmovw\t%%ax, %lld(%%r10)\n", (long long)off);
+			off += 2;
+			sz -= 2;
+		}
+		if (sz >= 1) {
+			fprintf(f, "\tmovb\t%lld(%%r11), %%al\n", (long long)off);
+			fprintf(f, "\tmovb\t%%al, %lld(%%r10)\n", (long long)off);
+		}
 		return;
+	}
 	case MMOP_FADD: case MMOP_FSUB: case MMOP_FMUL: case MMOP_FDIV: {
 		const char *op;
 		switch (in->op) {

@@ -573,6 +573,7 @@ struct MFnM {
 	MBlkM *link;             /* block list head */
 	uint32_t nblk;
 	MTypeDesc *retty;        /* aggregate return type, NULL for scalar/void */
+	bool sret_rdi;           /* sret: RDI holds the return buffer (pin it) */
 	uint32_t vafa;           /* varargs: packed arg-register usage (selpar) */
 	int32_t slot;            /* stack frame size (bytes); filled by regalloc/spill */
 	int32_t salign;          /* frame alignment */
