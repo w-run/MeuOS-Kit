@@ -21,6 +21,12 @@
 #include "cpp.h"
 #include "../../parse/decl_internal.h"
 
+/* Current class tag being parsed (set by cpp_class_decl), used to mangle
+ * member-function names as ClassName_method. */
+static const char *cpp_current_class;
+void cpp_define_method(struct scope *s, struct type *funct,
+                              const char *mname);
+
 /* Classify the current token as a C++ keyword, if any.  Wired to the C++
  * lexer's keyword table; the C lexer tokenizes identifiers, and this
  * re-interprets them as C++ keywords for the parser.  Identifier names
@@ -55,6 +61,7 @@ cpp_class_decl(struct scope *s)
 		error(&tok.loc, "expected class name");
 	tag = tokenstr(tok.kind);
 	next();
+	cpp_current_class = tag; /* for member-function name mangling */
 
 	/* create or look up the aggregate type */
 	t = scopegettag(s, tag, tok.kind != TLBRACE && tok.kind != TSEMICOLON);
@@ -141,4 +148,60 @@ cpp_parse_translation_unit(void)
 		}
 	}
 	emittentativedefns();
+}
+
+/* --- member function lowering (C.2.3) -------------------------------- */
+
+/* Define a member function as an out-of-line free function named
+ * `ClassName_method`.  Reuses the C function-definition machinery
+ * (mkdecl/mkfunc/stmt) via a small clone of decl()'s DECLFUNC path.
+ * The implicit `this` parameter and in-body member access (`count` ->
+ * this->count) are added in the next stage; for now the function body is
+ * parsed with no implicit this, so member access inside the body will
+ * fail to resolve until that stage lands. */
+void
+cpp_define_method(struct scope *s, struct type *funct, const char *mname)
+{
+	extern struct decl *mkdecl(char *, enum declkind, struct type *,
+	    enum typequal, enum linkage);
+	extern struct func *mkfunc(struct decl *, char *, struct type *,
+	    struct scope *);
+	extern void stmt(struct func *, struct scope *);
+	extern void emitfunc(struct func *, bool);
+	extern void delfunc(struct func *);
+	extern struct scope *delscope(struct scope *);
+	extern void funchlt(struct func *);
+	extern struct scope *mkscope(struct scope *);
+	extern void scopeputdecl(struct scope *, struct decl *);
+
+	char mangled[256];
+	struct decl *d;
+	struct func *f;
+	struct scope *fs;
+
+	if (!cpp_current_class || !mname)
+		return;
+	snprintf(mangled, sizeof mangled, "%s_%s", cpp_current_class, mname);
+
+	d = mkdecl(mangled, DECLFUNC, funct, QUALNONE, LINKEXTERN);
+	d->value = mkglobal(d);
+	if (tok.kind != TLBRACE) {
+		if (tok.kind == TSEMICOLON)
+			next();
+		return; /* declaration only */
+	}
+	/* Create the function body scope and register the parameters so the
+	 * body can reference them.  (The implicit `this` parameter and
+	 * member-name resolution are added in the next stage.) */
+	fs = mkscope(s);
+	for (struct decl *p = funct->u.func.params; p; p = p->next)
+		scopeputdecl(fs, p);
+	f = mkfunc(d, mangled, funct, fs);
+	stmt(f, fs);
+	if (d->u.func.isnoreturn)
+		funchlt(f);
+	emitfunc(f, d->linkage == LINKEXTERN);
+	fs = delscope(fs);
+	delfunc(f);
+	d->defined = true;
 }

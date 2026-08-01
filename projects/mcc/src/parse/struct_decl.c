@@ -181,22 +181,16 @@ structdecl(struct scope *s, struct structbuilder *b)
 		} else {
 			mt = declarator(s, base, &name, &align, NULL, false);
 			width = consume(TCOLON) ? intconstexpr(s, false) : -1;
-			/* C++ member function: skip the body/declaration and end the
-			 * member.  (C++-mode gating is in addmember; here we just
-			 * handle the token after the declarator.) */
+			/* C++ member function: define it as an out-of-line free
+			 * function `ClassName_method` (this-pointer lowering and
+			 * in-body member access are handled by the C++ frontend).
+			 * In C++ mode we consume the body via cpp_define_method and
+			 * end the member. */
 			extern int g_lang;
 			if (g_lang == 1 && mt.type->kind == TYPEFUNC) {
-				if (tok.kind == TLBRACE) {
-					int fd = 1;
-					next();
-					while (fd && tok.kind != TEOF) {
-						if (tok.kind == TLBRACE) fd++;
-						else if (tok.kind == TRBRACE) fd--;
-						next();
-					}
-				} else if (tok.kind == TSEMICOLON) {
-					next();
-				}
+				extern void cpp_define_method(struct scope *,
+				    struct type *, const char *);
+				cpp_define_method(s, mt.type, name);
 				/* leave the following token (class-body '}' or next
 				 * member) unconsumed for the caller's loop */
 				return;
