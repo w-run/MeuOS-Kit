@@ -61,7 +61,7 @@ CFLAGS += -DMCC_DEFAULT_TARGET=\"$(DEFAULT_TARGET)\"
 # archived into libmcc.a so a future m++ binary can link the same archive.
 # util/ is shared (utf/warn/xmalloc are used by both FE and BE).
 FE_DIRS := src/driver src/lex src/parse src/sema src/irgen
-BE_DIRS := src/ir src/opt src/abi src/emit src/target src/util
+BE_DIRS := src/mir src/ir src/opt src/abi src/emit src/target src/util
 
 FE_SRCS := $(shell find $(FE_DIRS) -name '*.c' | sort)
 BE_SRCS := $(shell find $(BE_DIRS) -name '*.c' | sort)
@@ -238,7 +238,17 @@ check-sysroot-static: $(BIN)
 # Compatibility alias for existing scripts.
 check-la64: check-loongarch64
 
-.PHONY: all clean check check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community
+# MIR core unit tests (B.1: types/aggregates/values/instructions/consts).
+# The mir/ sources are backend-side and belong to the libmcc BE_DIRS, but
+# they compile standalone here so the MIR core can be validated before it
+# is wired into the C frontend (see the MIR-first task line in .issues/).
+MIR_SRCS := $(wildcard src/mir/*.c)
+check-mir-types: $(MIR_SRCS)
+	@mkdir -p build
+	$(HOST_CC) $(CFLAGS) -Iinclude -o build/mir_test $^ test/mir/mir_test.c
+	./build/mir_test
+
+.PHONY: all clean check check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types
 
 # chibicc community functional test suite (C11/C23 conformance).
 # Runs test/community/chibicc/run.sh against the MeuOS sysroot.
