@@ -172,6 +172,51 @@ structdecl(struct scope *s, struct structbuilder *b)
 	base = declspecs(s, NULL, NULL, &align);
 	if (!base.type)
 		error(&tok.loc, "no type in struct member declaration");
+	/* C++ constructor: `ClassName(...) { ... }`.  declspecs parsed the
+	 * class tag as a bare type name; a following '(' means it was really
+	 * the constructor name (which has no return type).  Parse the
+	 * parameter list by hand — declarator() cannot because the name was
+	 * consumed — and define it as `Class_Class` like any other method. */
+	extern int g_lang;
+	if (g_lang == 1 && tok.kind == TLPAREN &&
+	    base.type->kind == TYPESTRUCT && base.type->u.structunion.tag &&
+	    b->type->u.structunion.tag &&
+	    strcmp(base.type->u.structunion.tag, b->type->u.structunion.tag) == 0) {
+		struct type *ct;
+		struct decl *pd, **pend;
+		const char *tag = base.type->u.structunion.tag;
+
+		ct = mktype(TYPEFUNC, 0);
+		ct->qual = QUALNONE;
+		ct->base = &typevoid; /* constructor has no return type */
+		ct->u.func.isvararg = false;
+		ct->u.func.params = NULL;
+		ct->u.func.nparam = 0;
+		pend = &ct->u.func.params;
+		next(); /* consume '(' */
+		while (tok.kind != TRPAREN) {
+			pd = parameter(s);
+			*pend = pd;
+			pend = &pd->next;
+			++ct->u.func.nparam;
+			if (tok.kind == TRPAREN)
+				break;
+			expect(TCOMMA, "or ')' after constructor parameter");
+		}
+		next(); /* consume ')' */
+		mt.type = ct;
+		mt.qual = QUALNONE;
+		mt.expr = NULL;
+		name = (char *)tag;
+		width = -1;
+		{
+			extern void cpp_define_method(struct scope *,
+			    struct type *, const char *, const char *);
+			cpp_define_method(s, ct, tag, tag);
+		}
+		addmember(b, mt, name, align, width);
+		return;
+	}
 	if (tok.kind == TSEMICOLON) {
 		if ((base.type->kind != TYPESTRUCT && base.type->kind != TYPEUNION) || base.type->u.structunion.tag)
 			error(&tok.loc, "struct declaration must declare at least one member");

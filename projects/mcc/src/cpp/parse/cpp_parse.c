@@ -369,6 +369,60 @@ cpp_is_member_function(struct type *t, const char *name)
 	return false;
 }
 
+/* Does class `t` (tag `tag`) define a constructor?  A constructor is a
+ * function member whose name equals the class tag (lowered to
+ * `Class_Class`). */
+bool
+cpp_has_ctor(struct type *t, const char *tag)
+{
+	if (!t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION) || !tag)
+		return false;
+	return cpp_is_member_function(t, tag);
+}
+
+/* Emit a call to the default constructor of class-typed local `d` after
+ * its storage is laid out (`Counter c;` -> `Counter_Class(&c)`).  No-op
+ * for non-class types, classes without a constructor, or global objects
+ * (static init is a later stage).  Returns whether a call was emitted. */
+bool
+cpp_emit_default_ctor(struct func *f, struct decl *d)
+{
+	extern struct value *funcexpr(struct func *, struct expr *);
+	extern struct scope filescope;
+
+	struct type *t = d->type;
+	const char *tag;
+	char mname[256];
+	struct decl *fd;
+	struct expr *fn, *obj, *call;
+
+	if (!f || !d || d->u.obj.storage != SDAUTO)
+		return false;
+	tag = t ? t->u.structunion.tag : NULL;
+	if (!cpp_has_ctor(t, tag))
+		return false;
+	snprintf(mname, sizeof mname, "%s_%s", tag, tag);
+	fd = scopegetdecl(&filescope, mname, false);
+	if (!fd || fd->kind != DECLFUNC)
+		return false;
+
+	fn = mkexpr(EXPRIDENT, fd->type, NULL);
+	fn->u.ident.decl = fd;
+	fn = decay(fn); /* &Class_Class */
+
+	obj = mkexpr(EXPRIDENT, d->type, NULL);
+	obj->qual = d->qual;
+	obj->lvalue = true;
+	obj->u.ident.decl = d;
+	obj = mkunaryexpr(TBAND, obj); /* &obj */
+
+	call = mkexpr(EXPRCALL, &typevoid, fn);
+	call->u.call.args = obj;
+	call->u.call.nargs = 1;
+	funcexpr(f, call);
+	return true;
+}
+
 const char *
 cpp_mangled_name(struct type *t, const char *name, char *buf, size_t bufsz)
 {

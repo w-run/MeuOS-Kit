@@ -224,6 +224,16 @@ decl(struct scope *s, struct func *f)
 				break;
 			}
 			defineobj(d, init, hasinit, f);
+			/* C++: a class-typed local with a user constructor gets a
+			 * default-construction call after its storage is laid out
+			 * (`Counter c;` -> `Counter_Class(&c)`). */
+			{
+				extern int g_lang;
+				extern bool cpp_emit_default_ctor(struct func *,
+				    struct decl *);
+				if (g_lang == 1)
+					cpp_emit_default_ctor(f, d);
+			}
 			break;
 		case DECLFUNC:
 			if (align)

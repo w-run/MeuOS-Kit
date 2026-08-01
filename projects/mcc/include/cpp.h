@@ -30,5 +30,7 @@ bool cpp_is_member_function(struct type *t, const char *name);
 const char *cpp_mangled_name(struct type *t, const char *name,
     char *buf, size_t bufsz);
 struct expr *cpp_member_ident(struct scope *s, const char *name);
+bool cpp_has_ctor(struct type *t, const char *tag);
+bool cpp_emit_default_ctor(struct func *f, struct decl *d);
 
 #endif /* MCC_CPP_H */
