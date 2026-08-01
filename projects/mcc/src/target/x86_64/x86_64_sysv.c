@@ -399,7 +399,19 @@ selcall(Fn *fn, Ins *i0, Ins *i1, RAlloc **rap)
 				emit(Oload, a->cls[1], r2, r, R);
 				emit(Oadd, Kl, r, i->arg[1], getcon(8, fn));
 			}
-			emit(Oload, a->cls[0], r1, i->arg[1], R);
+			/* classify() reports every integer struct field as
+			 * Kl, so a small aggregate (e.g. a 4-byte Ref) would
+			 * otherwise be loaded as 8 bytes.  For the last
+			 * element of an array (seladdr's Num tree) that reads
+			 * 4 bytes past the allocation; use the actual struct
+			 * width so the load stays in bounds.  The value is
+			 * passed in the low 32 bits of the argument register;
+			 * selpar copies it into an 8-byte slot and the callee
+			 * only reads the low word. */
+			int lcls = a->cls[0];
+			if (a->type->size <= 4)
+				lcls = KBASE(lcls) == 0 ? Kw : Ks;
+			emit(Oload, lcls, r1, i->arg[1], R);
 		} else
 			emit(Ocopy, i->cls, r1, i->arg[0], R);
 	}
