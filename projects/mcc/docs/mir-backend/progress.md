@@ -23,8 +23,9 @@
 | P2 | x86-64 SysV ABI 移植（typclass/selpar/selcall/selret/va） | ✅ | a6c64e7 |
 | P3a | MIR 类型系统：func_to_mir 建 MTypeDesc，MV_TYPE 双轨(id+td) | ✅ | 0b07fa8 |
 | P3b | 完整 isel + emit：MFnM→x86-64 asm，可运行 | ✅ | eca97b7 |
-| P4a | regalloc：活跃区间构造（mreg_intervals） | 🔄 进行中 | — |
-| P4b | regalloc：槽分配（mreg_slots，slot4/8 打包） | ⏳ | — |
+| P4a | regalloc：活跃区间构造（mreg_intervals） | ✅ | 5e87cce |
+| P4b | regalloc：槽分配（mreg_slots，slot4/8 打包） | ✅ | 待提交 |
+| P4c | regalloc：线性扫描（mreg_scan，调用点双池） | 🔄 进行中 | — |
 | P4c | regalloc：线性扫描（mreg_scan，调用点双池） | ⏳ | — |
 | P4d | regalloc：phi 边移动（机器层 phi 已降级为 pred copy） | ⏳ | — |
 | P4e | regalloc 接管 emit（寄存器感知 + prologue/epilogue 保存 callee-saved） | ⏳ | — |

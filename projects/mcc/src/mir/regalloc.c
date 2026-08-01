@@ -104,6 +104,33 @@ mreg_intervals(MFnM *fm, MRegCtx *ctx)
 	}
 }
 
+/* ---- Phase B: spill slot packing (slot4/slot8) ---------------------------- */
+
+/* MRegSlots is declared in mir.h. */
+
+/* Allocate a stack slot, returning the negative rbp offset.  Inherits the
+ * QBE spill.c double-cursor invariant (slot8 absorbs slot4 so an 8-byte
+ * value never straddles a 4-byte slot's alignment). */
+int32_t
+mreg_slot_alloc(MRegSlots *s, MType t)
+{
+	bool is8 = t == MT_I64 || t == MT_PTR || t == MT_F64;
+	int32_t u;
+	if (is8)
+		u = s->slot8 += 2;
+	else
+		u = s->slot4 += 1;
+	if (s->slot4 > s->slot8)
+		s->slot8 = s->slot4;
+	return -u * 4;
+}
+
+int32_t
+mreg_slot_total(const MRegSlots *s)
+{
+	return s->slot8 * 4;   /* 4-byte units -> bytes (caller aligns to 16) */
+}
+
 /* ---- allocation entry ------------------------------------------------------ */
 
 void
@@ -124,7 +151,7 @@ mfnm_regalloc(MFnM *fm)
 	mreg_pos(fm, &ctx);
 	mreg_intervals(fm, &ctx);
 
-	/* P4a: intervals built; register/slot assignment lands in B/C. */
+	/* P4b: slot packing is available (Phase C uses it for spills). */
 
 	if (getenv("MCC_DEBUG_MBE")) {
 		fprintf(stderr, "> intervals %s:\n", fm->name ? fm->name : "?");

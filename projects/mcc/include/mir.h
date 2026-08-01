@@ -608,6 +608,17 @@ void mfnm_free(MFnM *fm);
 
 /* ---- Register allocation (P4) -------------------------------------------- */
 
+/* Spill-slot packing (P4b): slot4/slot8 double cursor. */
+typedef struct MRegSlots {
+	int32_t slot4;   /* 4-byte units cursor */
+	int32_t slot8;   /* 4-byte units cursor */
+} MRegSlots;
+
+/* Allocate a stack slot; returns the negative rbp offset. */
+int32_t mreg_slot_alloc(MRegSlots *s, MType t);
+/* Total frame bytes for the slots, 16-aligned. */
+int32_t mreg_slot_total(const MRegSlots *s);
+
 /* Linear-scan register allocation for a lowered MFnM (post-ABI, pre-emit).
  * Fills MVal.reg (physical register) or MVal.slot (spill), plus fm->slot /
  * fm->regsused for frame emission. */
