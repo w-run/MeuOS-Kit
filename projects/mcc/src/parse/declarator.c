@@ -92,23 +92,63 @@ declaratortypes(struct scope *s, struct list *result, char **name, int *align, s
 				error(&tok.loc, "identifier not allowed in abstract declarator");
 			*name = tokenstr(tok.kind);
 			next();
-			/* C++ qualified method name: `Class::method` lowers to the
-			 * same mangled `Class_method` symbol used by in-class
-			 * definitions, so out-of-line definitions match the in-class
-			 * declaration.  Single-level qualifier only for now. */
+			/* C++ qualified method name: `Class::method` or
+			 * `ns::Class::method` lowers to the same mangled
+			 * `Class_method` symbol used by in-class definitions, so
+			 * out-of-line definitions match the in-class declaration. */
 			extern int g_lang;
 			if (g_lang == 1 && tok.kind == TCOLONCOLON) {
-				const char *qclass = *name;
-				char *mname;
-				next(); /* consume '::' */
-				if (tok.kind < TIDENT)
-					error(&tok.loc, "expected member name after '::'");
-				mname = xmalloc(strlen(qclass) + strlen(tokenstr(tok.kind)) + 2);
-				sprintf(mname, "%s_%s", qclass, tokenstr(tok.kind));
-				*name = mname;
 				extern void cpp_set_qual_class(const char *);
-				cpp_set_qual_class(qclass);
-				next();
+				extern void cpp_set_qual_ns(struct scope *);
+				struct decl *nsd = scopegetdecl(s, *name, 1);
+				if (nsd && nsd->kind == DECLNAMESPACE) {
+					/* namespace-qualified: ns::Class::method */
+					struct scope *cur = nsd->u.ns;
+					next(); /* consume first '::' */
+					for (;;) {
+						struct decl *d;
+						struct type *ct;
+						const char *comp;
+						if (tok.kind < TIDENT)
+							error(&tok.loc, "expected name after '::'");
+						comp = tokenstr(tok.kind);
+						d = scopegetdecl(cur, comp, 1);
+						ct = scopegettag(cur, comp, 1);
+						if (d && d->kind == DECLNAMESPACE) {
+							cur = d->u.ns;
+							next();
+							expect(TCOLONCOLON, "after namespace name");
+							continue;
+						}
+						if (ct && (ct->kind == TYPESTRUCT || ct->kind == TYPEUNION)) {
+							char *mname;
+							const char *qclass = ct->u.structunion.tag;
+							next(); /* consume class name */
+							expect(TCOLONCOLON, "after class name");
+							if (tok.kind < TIDENT)
+								error(&tok.loc, "expected member name after '::'");
+							mname = xmalloc(strlen(qclass) + strlen(tokenstr(tok.kind)) + 2);
+							sprintf(mname, "%s_%s", qclass, tokenstr(tok.kind));
+							*name = mname;
+							cpp_set_qual_class(qclass);
+							cpp_set_qual_ns(cur);
+							next();
+							break;
+						}
+						error(&tok.loc, "'%s' is not a class or namespace", comp);
+					}
+				} else {
+					const char *qclass = *name;
+					char *mname;
+					next(); /* consume '::' */
+					if (tok.kind < TIDENT)
+						error(&tok.loc, "expected member name after '::'");
+					mname = xmalloc(strlen(qclass) + strlen(tokenstr(tok.kind)) + 2);
+					sprintf(mname, "%s_%s", qclass, tokenstr(tok.kind));
+					*name = mname;
+					cpp_set_qual_class(qclass);
+					next();
+				}
 			}
 		} else if (!allowabstract) {
 			error(&tok.loc, "expected '(' or identifier");

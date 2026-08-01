@@ -90,6 +90,9 @@ static struct cpp_method_ctx {
 /* Pending qualified-class name from a `Class::method` declarator; consumed
  * by decl()'s DECLFUNC path to route out-of-line method definitions. */
 static const char *g_cpp_qual_class;
+/* Namespace the qualified class lives in (`ns::Class::method`), or NULL
+ * for a plain file-scope `Class::method`. */
+static struct scope *g_cpp_qual_ns;
 
 static void cpp_emit_base_ctor(struct func *f);
 static void cpp_mangle_type(struct type *t, char *buf, size_t bufsz);
@@ -165,6 +168,20 @@ cpp_take_qual_class(void)
 	const char *tag = g_cpp_qual_class;
 	g_cpp_qual_class = NULL;
 	return tag;
+}
+
+void
+cpp_set_qual_ns(struct scope *ns)
+{
+	g_cpp_qual_ns = ns;
+}
+
+struct scope *
+cpp_take_qual_ns(void)
+{
+	struct scope *ns = g_cpp_qual_ns;
+	g_cpp_qual_ns = NULL;
+	return ns;
 }
 
 /* Build the expression for the implicit `this` pointer of the method
@@ -830,7 +847,10 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname,
 	if (!class_tag || !mname)
 		return;
 
-	classt = scopegettag(s, class_tag, true);
+	{
+		struct scope *qns = cpp_take_qual_ns();
+		classt = scopegettag(qns ? qns : s, class_tag, true);
+	}
 	if (!classt || (classt->kind != TYPESTRUCT && classt->kind != TYPEUNION))
 		error(&tok.loc, "'%s' is not a class type", class_tag);
 

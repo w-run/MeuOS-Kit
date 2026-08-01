@@ -62,5 +62,7 @@ bool cpp_member_accessible(struct type *t, struct member *m);
 bool cpp_is_derived(struct type *t, struct type *base);
 void cpp_set_qual_class(const char *tag);
 const char *cpp_take_qual_class(void);
+void cpp_set_qual_ns(struct scope *ns);
+struct scope *cpp_take_qual_ns(void);
 
 #endif /* MCC_CPP_H */
