@@ -1,0 +1,3 @@
+/tmp/mxx-t/leak.cc:12:10: error: address of overloaded member function is ambiguous (use an explicit cast)
+        f.set;            /* obj.meth without call — must not leak this */
+             ^

@@ -1,0 +1,1 @@
+/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c99_flex_array_member.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c99/flex_array_member.c

@@ -53,6 +53,9 @@ reference/
 *.s
 *.so
 *.so.*
+# Exception: P0 MIR-backend oracle baselines (compiled assembly outputs) are
+# tracked so the bridge path can be asm-diffed against the MIR backend.
+!projects/mcc/docs/mir-backend/asm/*.s
 sources/
 *.ssa
 stage/

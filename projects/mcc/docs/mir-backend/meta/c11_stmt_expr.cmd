@@ -1,0 +1,1 @@
+/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c11_stmt_expr.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11 -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11/stmt_expr.c

@@ -1,0 +1,1 @@
+/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/rep_fib.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mir-backend-base/gen/fib.c

@@ -1,0 +1,1 @@
+/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/abi_bitfield_aggregate.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/abi/bitfield_aggregate.c
