@@ -39,8 +39,29 @@ addmember(struct structbuilder *b, struct qualtype mt, char *name, int align, un
 		*/
 		t->prop |= PROPFLEX;
 	}
-	if (mt.type->kind == TYPEFUNC)
+	if (mt.type->kind == TYPEFUNC) {
+		/* C++ member function: `void inc() { ... }` or `void inc();`.
+		 * The C parser has no member functions; in C++ mode we consume
+		 * the function body (or the ';') and skip the member so the class
+		 * parses cleanly.  Lowering to an out-of-line `Class_inc` with a
+		 * this parameter is implemented in the C++ frontend (C.2.3). */
+		extern int g_lang;
+		if (g_lang == 1) {
+			if (tok.kind == TLBRACE) {
+				int depth = 1;
+				next();
+				while (depth && tok.kind != TEOF) {
+					if (tok.kind == TLBRACE) depth++;
+					else if (tok.kind == TRBRACE) depth--;
+					next();
+				}
+			} else if (tok.kind == TSEMICOLON) {
+				next();
+			}
+			return;
+		}
 		error(&tok.loc, "struct member '%s' has function type", name);
+	}
 	if (mt.type->prop & PROPVM)
 		error(&tok.loc, "struct member '%s' has variably modified type", name);
 	assert(mt.type->align > 0);
@@ -160,6 +181,26 @@ structdecl(struct scope *s, struct structbuilder *b)
 		} else {
 			mt = declarator(s, base, &name, &align, NULL, false);
 			width = consume(TCOLON) ? intconstexpr(s, false) : -1;
+			/* C++ member function: skip the body/declaration and end the
+			 * member.  (C++-mode gating is in addmember; here we just
+			 * handle the token after the declarator.) */
+			extern int g_lang;
+			if (g_lang == 1 && mt.type->kind == TYPEFUNC) {
+				if (tok.kind == TLBRACE) {
+					int fd = 1;
+					next();
+					while (fd && tok.kind != TEOF) {
+						if (tok.kind == TLBRACE) fd++;
+						else if (tok.kind == TRBRACE) fd--;
+						next();
+					}
+				} else if (tok.kind == TSEMICOLON) {
+					next();
+				}
+				/* leave the following token (class-body '}' or next
+				 * member) unconsumed for the caller's loop */
+				return;
+			}
 			addmember(b, mt, name, align, width);
 		}
 		if (tok.kind == TSEMICOLON)
