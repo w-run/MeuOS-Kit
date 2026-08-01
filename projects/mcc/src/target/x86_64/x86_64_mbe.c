@@ -32,15 +32,16 @@ blk_order(MFn *mf, uint32_t *n)
 }
 
 static MMOP
-map_op(MOP op)
+map_op(MOP op, bool isf)
 {
 	switch (op) {
-	case MOP_ADD:  return MMOP_ADD;
-	case MOP_SUB:  return MMOP_SUB;
-	case MOP_MUL:  return MMOP_MUL;
-	case MOP_DIV:  return MMOP_DIV;
-	case MOP_UDIV: return MMOP_UDIV;
+	case MOP_ADD:  return isf ? MMOP_FADD : MMOP_ADD;
+	case MOP_SUB:  return isf ? MMOP_FSUB : MMOP_SUB;
+	case MOP_MUL:  return isf ? MMOP_FMUL : MMOP_MUL;
+	case MOP_DIV:  return isf ? MMOP_FDIV : MMOP_DIV;
+	case MOP_NEG:  return isf ? MMOP_FNEG : MMOP_NEG;
 	case MOP_REM:  return MMOP_REM;
+	case MOP_UDIV: return MMOP_UDIV;
 	case MOP_UREM: return MMOP_UREM;
 	case MOP_AND:  return MMOP_AND;
 	case MOP_OR:   return MMOP_OR;
@@ -48,7 +49,6 @@ map_op(MOP op)
 	case MOP_SHL:  return MMOP_SHL;
 	case MOP_SHR:  return MMOP_SHR;
 	case MOP_SAR:  return MMOP_SAR;
-	case MOP_NEG:  return MMOP_NEG;
 	case MOP_COPY: return MMOP_MOV;
 	case MOP_CAST: return MMOP_MOV;
 	case MOP_SEXT: return MMOP_MOVSX;
@@ -205,6 +205,10 @@ mfnm_backend_x86_64(MFn *mf)
 				break;
 			}
 			case MOP_CALL: {
+				/* func_to_mir leaves the result MVal untyped; the regalloc
+				 * needs it to pick the FPR pool for float returns. */
+				if (dst && dst->type == MT_NONE)
+					dst->type = in->dtype;
 				MInsM *mi = maddm(fm, b, MMOP_CALL, in->dtype, dst,
 				                  mval_of_ref(mf, in->src[0]), 0);
 				if (in->src[1].val && in->src[1].val->kind == MV_TYPE)
@@ -255,7 +259,8 @@ mfnm_backend_x86_64(MFn *mf)
 					}
 					break;
 				}
-				MMOP mo = map_op(in->op);
+				MMOP mo = map_op(in->op,
+				                in->dtype == MT_F32 || in->dtype == MT_F64);
 				if (mo == MMOP_NONE)
 					break;
 				MInsM *mi = maddm(fm, b, mo, in->dtype, dst,

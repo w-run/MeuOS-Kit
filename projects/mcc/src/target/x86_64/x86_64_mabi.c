@@ -411,6 +411,10 @@ mabi_selcall(MFnM *fm, MOut *o, MInsM *args, int n, MInsM *call)
 	/* the call itself */
 	mout(o, MMOP_CALL, call->dtype, call->dst, call->src[0], 0);
 	o->ins[o->nins - 1].td = call->td;
+	/* caller cleanup: restore the stack-argument space reserved above */
+	if (stk)
+		mout_cst(o, MMOP_SALLOC, MT_PTR, 0, reg(fm, X64MREG_RSP),
+		         imm(fm, MT_I64, -(int64_t)stk));
 
 	/* results */
 	if (pa) {

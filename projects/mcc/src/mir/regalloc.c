@@ -392,9 +392,9 @@ mfnm_regalloc(MFnM *fm)
 		for (uint32_t i = 0; i < ctx.nval; i++) {
 			MRegInterval *iv = &ctx.intv[i];
 			if (iv->v)
-				fprintf(stderr, "  %s [%u,%u) reg=%d slot=%d\n",
+				fprintf(stderr, "  %s [%u,%u) t=%d reg=%d slot=%d\n",
 				        iv->v->name ? iv->v->name : "?", iv->start, iv->end,
-				        iv->v->reg, iv->v->slot);
+				        (int)iv->v->type, iv->v->reg, iv->v->slot);
 		}
 	}
 

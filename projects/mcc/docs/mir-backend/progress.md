@@ -35,11 +35,23 @@
 ## 验证结果（截至 P3b）
 
 - `make check-mir`：mir_test / pass_test / machine_test(86) / mabi_test(43) /
-  bridge 全过。
+  regalloc_test(44) / bridge 全过。
 - `test/c99 + test/c11` 在 `MCC_MIR_BACKEND=1` 下编译 + 运行 **0 失败**。
 - 123 测试 bridge 路径 `.s` 与 P2 oracle **0 差异**（硬性回归标准）。
 - 新后端运行正确：hello（printf）、fib(10)=55（递归+分支）、gcd/sumsq/浮点/
   extern/complex 均过。
+
+## 边界 bug 修复（isel-debug P3b 独立验证，2026-08-02）
+
+1. **浮点参数读取错误**：emit_addr 的 disp 错放括号内（`(8%rsp)`→`8(%rsp)`）、
+   emit_mov 浮点经 xmm0 中转覆盖 ABI 参数寄存器（改直接 movsd，mem→mem 经 r10）、
+   func_to_mir 未设 CALL 返回值 MVal.type（regalloc 误分 GPR，isel 补设）。
+2. **>6 参数栈传参非法寻址**：selcall 的栈参数空间（SALLOC +stk）未恢复 →
+   补 caller 清理 SALLOC -stk；emit 的 SALLOC 直接 subq $n（n 可负）。
+3. **浮点指令选择**：map_op 按 dtype 选 FADD/FSUB/FMUL/FDIV/FNEG（isel 层）。
+
+修复验证：fadd/fdiv/fneg 浮点参数、printf 7 参数全过；c99/c11 仍全过；
+check-mir 全绿；bridge 路径 0 回归。
 
 ## 当前工作点
 

@@ -239,11 +239,13 @@ emit_addr_loads(FILE *f, MAddr a)
 	}
 }
 
-/* Print the AT&T memory operand: disp(base, index, scale). */
+/* Print the AT&T memory operand: disp(base, index, scale).  The base
+ * follows the displacement without a comma (`8(%rsp)`); a comma separates
+ * base from index, and the index always carries a scale. */
 static void
 emit_addr(FILE *f, MAddr a)
 {
-	fputc('(', f);
+	/* AT&T: disp is written before the parens: 8(%rsp) */
 	if (a.offcon) {
 		fprintf(f, "%s", a.offcon->u.addr.sym ? a.offcon->u.addr.sym : "0");
 		if (a.off)
@@ -251,8 +253,8 @@ emit_addr(FILE *f, MAddr a)
 	} else if (a.off) {
 		fprintf(f, "%lld", (long long)a.off);
 	}
+	fputc('(', f);
 	if (a.base) {
-		fputc(',', f);
 		if (a.base->kind == MV_REG)
 			emit_mval(f, a.base);
 		else
@@ -356,19 +358,35 @@ emit_mov(FILE *f, MVal *dst, MVal *src, MConst *c, MType dtype)
 {
 	if (dtype == MT_F32 || dtype == MT_F64) {
 		const char *sd = dtype == MT_F64 ? "sd" : "ss";
+		/* direct move: x86 movss/movsd handles reg<->mem; do NOT route
+		 * through %xmm0 (it may be an ABI argument/return register) */
 		if (c && c->kind == MC_FLT) {
-			fprintf(f, "\tmov%s\t", sd);
-			emit_const(f, c);
-			fprintf(f, ", %%xmm0\n");
+			if (dst) {
+				fprintf(f, "\tmov%s\t", sd);
+				emit_const(f, c);
+				fputs(", ", f);
+				emit_mval(f, dst);
+				fputs("\n", f);
+			}
 		} else if (src) {
-			fprintf(f, "\tmov%s\t", sd);
-			emit_mval(f, src);
-			fprintf(f, ", %%xmm0\n");
-		}
-		if (dst) {
-			fprintf(f, "\tmov%s\t%%xmm0, ", sd);
-			emit_mval(f, dst);
-			fputs("\n", f);
+			bool smem = src->kind == MV_TEMP || src->kind == MV_GLOBAL;
+			bool dmem = dst && (dst->kind == MV_TEMP ||
+			                    dst->kind == MV_GLOBAL);
+			if (smem && dmem) {
+				/* mem->mem: bit-copy via r10 */
+				fputs("\tmovq\t", f);
+				emit_mval(f, src);
+				fputs(", %r10\n", f);
+				fputs("\tmovq\t%r10, ", f);
+				emit_mval(f, dst);
+				fputs("\n", f);
+			} else if (dst) {
+				fprintf(f, "\tmov%s\t", sd);
+				emit_mval(f, src);
+				fputs(", ", f);
+				emit_mval(f, dst);
+				fputs("\n", f);
+			}
 		}
 		return;
 	}
@@ -616,6 +634,18 @@ emit_ins(FILE *f, MInsM *in)
 			mov_to_rax(f, s0, 0);
 			fputs("\tcall\t*%rax\n", f);
 		}
+		if (g_salloc) {
+			/* caller cleans up the stack-argument space */
+			fprintf(f, "\taddq\t$%d, %%rsp\n", g_salloc);
+			g_salloc = 0;
+		}
+		return;
+	}
+	case MMOP_SALLOC: {
+		/* dynamic stack adjustment (stack arguments): the ABI lowering
+		 * emits +size before the call and -size after (caller cleanup) */
+		int64_t n = c ? c->u.i : 16;
+		fprintf(f, "\tsubq\t$%lld, %%rsp\n", (long long)n);
 		return;
 	}
 	case MMOP_ALLOCA4:
@@ -632,8 +662,7 @@ emit_ins(FILE *f, MInsM *in)
 		/* aggregate copy: dst, src pointers + size (P4 handles inline) */
 		fputs("\t# blit (P4)\n", f);
 		return;
-	case MMOP_FADD: case MMOP_FSUB: case MMOP_FMUL: case MMOP_FDIV:
-	case MMOP_FNEG: case MMOP_FSQRT: {
+	case MMOP_FADD: case MMOP_FSUB: case MMOP_FMUL: case MMOP_FDIV: {
 		const char *op;
 		switch (in->op) {
 		case MMOP_FADD: op = "add"; break;
@@ -644,11 +673,34 @@ emit_ins(FILE *f, MInsM *in)
 		fprintf(f, "\tmov%s\t", w == 'd' ? "sd" : "ss");
 		emit_mval(f, s0);
 		fprintf(f, ", %%xmm0\n");
-		if (in->op >= MMOP_FADD && in->op <= MMOP_FDIV) {
-			fprintf(f, "\t%s%s\t", op, w == 'd' ? "sd" : "ss");
-			emit_mval(f, s1);
-			fputs(", %xmm0\n", f);
+		fprintf(f, "\t%s%s\t", op, w == 'd' ? "sd" : "ss");
+		emit_mval(f, s1);
+		fputs(", %xmm0\n", f);
+		if (d) {
+			fprintf(f, "\tmov%s\t%%xmm0, ", w == 'd' ? "sd" : "ss");
+			emit_mval(f, d);
+			fputs("\n", f);
 		}
+		return;
+	}
+	case MMOP_FNEG: {
+		/* negate: 0.0 - x */
+		fputs("\tpxor\t%xmm0, %xmm0\n", f);
+		fprintf(f, "\tsub%s\t", w == 'd' ? "sd" : "ss");
+		emit_mval(f, s0);
+		fputs(", %xmm0\n", f);
+		if (d) {
+			fprintf(f, "\tmov%s\t%%xmm0, ", w == 'd' ? "sd" : "ss");
+			emit_mval(f, d);
+			fputs("\n", f);
+		}
+		return;
+	}
+	case MMOP_FSQRT: {
+		fprintf(f, "\tmov%s\t", w == 'd' ? "sd" : "ss");
+		emit_mval(f, s0);
+		fprintf(f, ", %%xmm0\n");
+		fprintf(f, "\tsqrt%s\t%%xmm0, %%xmm0\n", w == 'd' ? "sd" : "ss");
 		if (d) {
 			fprintf(f, "\tmov%s\t%%xmm0, ", w == 'd' ? "sd" : "ss");
 			emit_mval(f, d);
@@ -729,6 +781,7 @@ mfnm_emit_x86_64(MFnM *fm, FILE *f)
 	g_mt = fm->mt;
 	int extra = assign_extra_slots(fm);
 	nfp = 0;   /* fresh float pool per function */
+	g_salloc = 0;   /* fresh stack-argument reservation tracker */
 	g_alloca_cur = -(fm->slot + extra);   /* allocas go below spill slots */
 
 	int framesize = (fm->slot + extra + alloca_total(fm) + 15) & ~15;
