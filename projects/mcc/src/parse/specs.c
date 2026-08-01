@@ -328,6 +328,29 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 			}
 			struct type *ct = scopegettag(s, tokenstr(tok.kind), 1);
 			if (ct && (ct->kind == TYPESTRUCT || ct->kind == TYPEUNION)) {
+				/* C++ nested-class type: `Outer::Inner`.  The inner
+				 * class is registered in the current scope. */
+				struct token saved = tok;
+				next();
+				if (tok.kind == TCOLONCOLON) {
+					struct type *it;
+					next();
+					if (tok.kind < TIDENT)
+						error(&tok.loc, "expected type name after '::'");
+					it = scopegettag(s, tokenstr(tok.kind), 1);
+					if (it && (it->kind == TYPESTRUCT || it->kind == TYPEUNION)) {
+						t = it;
+						++ntypes;
+						next();
+						break;
+					}
+				}
+				/* not a nested-class reference: restore */
+				{
+					struct token cur = tok;
+					tokpush(&cur, 1);
+					tok = saved;
+				}
 				t = ct;
 				++ntypes;
 				next();

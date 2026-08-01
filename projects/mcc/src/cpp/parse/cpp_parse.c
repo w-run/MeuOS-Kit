@@ -400,51 +400,61 @@ cpp_class_decl(struct scope *s)
 	}
 	t->scope = s; /* member symbols are registered here */
 	next(); /* consume '{' */
-	g_cpp_class_parsing = true; /* buffer method bodies for phase two */
-
-	b.type = t;
-	b.last = &t->u.structunion.members;
-	b.bits = 0;
-	b.pack = false;
-	b.access = is_class ? ACC_PRIVATE : ACC_PUBLIC;
-
-	/* Each base-class subobject is registered as an anonymous member so
-	 * typemember()'s recursive search and the layout computation see
-	 * them like ordinary members (first base at offset 0). */
 	{
-		int bi;
-		for (bi = 0; bi < nbases; ++bi) {
-			struct qualtype bq;
-			bq.type = bases[bi];
-			bq.qual = QUALNONE;
-			bq.expr = NULL;
-			addmember(&b, bq, NULL, 0, -1);
-		}
-	}
+		/* Two-phase buffering nests: an inner class body buffers its own
+		 * methods, and the outer class's parsing flag must be restored. */
+		bool saved_parsing = g_cpp_class_parsing;
+		g_cpp_class_parsing = true;
 
-	for (;;) {
-		/* access-control labels: public: private: protected: */
-		enum cpp_tokenkind k = cpp_tok_kind();
-		if (k == CPP_TPUBLIC || k == CPP_TPRIVATE || k == CPP_TPROTECTED) {
-			b.access = k == CPP_TPUBLIC ? ACC_PUBLIC
-			         : k == CPP_TPROTECTED ? ACC_PROTECTED
-			         : ACC_PRIVATE;
-			next(); /* consume the keyword */
-			if (tok.kind == TCOLON)
-				next(); /* consume ':' */
-			continue;
+		b.type = t;
+		b.last = &t->u.structunion.members;
+		b.bits = 0;
+		b.pack = false;
+		b.access = is_class ? ACC_PRIVATE : ACC_PUBLIC;
+
+		/* Each base-class subobject is registered as an anonymous member
+		 * so typemember()'s recursive search and the layout computation
+		 * see them like ordinary members (first base at offset 0). */
+		{
+			int bi;
+			for (bi = 0; bi < nbases; ++bi) {
+				struct qualtype bq;
+				bq.type = bases[bi];
+				bq.qual = QUALNONE;
+				bq.expr = NULL;
+				addmember(&b, bq, NULL, 0, -1);
+			}
 		}
-		if (tok.kind == TCOLON) {
-			/* stray colon */
-			next();
-			continue;
+
+		for (;;) {
+			/* access-control labels: public: private: protected: */
+			enum cpp_tokenkind k = cpp_tok_kind();
+			if (k == CPP_TPUBLIC || k == CPP_TPRIVATE || k == CPP_TPROTECTED) {
+				b.access = k == CPP_TPUBLIC ? ACC_PUBLIC
+				         : k == CPP_TPROTECTED ? ACC_PROTECTED
+				         : ACC_PRIVATE;
+				next(); /* consume the keyword */
+				if (tok.kind == TCOLON)
+					next(); /* consume ':' */
+				continue;
+			}
+			if (tok.kind == TCOLON) {
+				/* stray colon */
+				next();
+				continue;
+			}
+			if (k == CPP_TCLASS) {
+				/* nested class definition */
+				cpp_class_decl(s);
+				continue;
+			}
+			if (tok.kind == TRBRACE)
+				break;
+			structdecl(s, &b);
 		}
-		if (tok.kind == TRBRACE)
-			break;
-		structdecl(s, &b);
+		next(); /* consume '}' */
+		g_cpp_class_parsing = saved_parsing;
 	}
-	next(); /* consume '}' */
-	g_cpp_class_parsing = false;
 
 	/* Finalize the layout BEFORE parsing method bodies: method bodies may
 	 * construct objects of this class (temporary `Vec(...)`) or use
