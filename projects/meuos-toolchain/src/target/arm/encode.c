@@ -989,26 +989,32 @@ ldr_mem:
 			return 0;
 		}
 		if ((a0 == 's' || a0 == 'd') && a1 == 'r') {
-			/* vmov sN, rM — core -> single.  (A lone core register
-			 * cannot move into a double; use the 3-operand MCRR
-			 * form above.) */
+			/* vmov sN, rM — core -> single.  A double operand means
+			 * the LOW half (dN aliases s(2N)); the two-operand
+			 * `vmov dN, rM` moves a core register into that half. */
 			int vd, rm;
 			if (reg_num(ops[0], &vd) < 0 || reg_num(ops[1], &rm) < 0) return -1;
+			int sn;
 			if (a0 == 'd')
-				return -1; /* double needs two core registers; not emitted */
-			int sn = sp_reg(vd);
+				sn = 2 * vd;   /* dN low half = s(2N); reg_num(dN) == N */
+			else
+				sn = sp_reg(vd);
 			uint32_t base = 0xEE000A10 | ((uint32_t)(sn >> 1) << 16)
 			              | ((uint32_t)(sn & 1) << 7) | ((uint32_t)rm << 12);
 			emit32(out->bytes, base);
 			return 0;
 		}
 		if (a0 == 'r' && (a1 == 's' || a1 == 'd')) {
-			/* vmov rM, sN — single -> core. */
+			/* vmov rM, sN — single -> core.  A double operand reads
+			 * the LOW half (dN aliases s(2N)); the two-operand
+			 * `vmov rM, dN` moves that half into a core register. */
 			int rd, vd;
 			if (reg_num(ops[0], &rd) < 0 || reg_num(ops[1], &vd) < 0) return -1;
+			int sn;
 			if (a1 == 'd')
-				return -1; /* double needs two core registers; not emitted */
-			int sn = sp_reg(vd);
+				sn = 2 * vd;   /* dN low half = s(2N); reg_num(dN) == N */
+			else
+				sn = sp_reg(vd);
 			uint32_t base = 0xEE100A10 | ((uint32_t)(sn >> 1) << 16)
 			              | ((uint32_t)(sn & 1) << 7) | ((uint32_t)rd << 12);
 			emit32(out->bytes, base);
