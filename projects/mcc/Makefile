@@ -248,7 +248,14 @@ check-mir-types: $(MIR_SRCS)
 	$(HOST_CC) $(CFLAGS) -Iinclude -o build/mir_test $^ test/mir/mir_test.c
 	./build/mir_test
 
-.PHONY: all clean check check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types
+check-mir-passes: $(MIR_SRCS)
+	@mkdir -p build
+	$(HOST_CC) $(CFLAGS) -Iinclude -o build/mir_pass_test $^ test/mir/pass_test.c
+	./build/mir_pass_test
+
+check-mir: check-mir-types check-mir-passes
+
+.PHONY: all clean check check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir
 
 # chibicc community functional test suite (C11/C23 conformance).
 # Runs test/community/chibicc/run.sh against the MeuOS sysroot.

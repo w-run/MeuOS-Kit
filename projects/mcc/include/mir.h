@@ -344,6 +344,19 @@ MVal *mphi_add(MFn *fn, MBlk *b, MType dtype, MVal *dst);
 void mfn_dump(MFn *fn, FILE *out);
 void mfn_free(MFn *fn);
 
+/* ---- optimization passes (src/mir/passes.c) ---------------------------- */
+
+enum MIRPass {
+	MIR_PASS_USES,   /* build use chains */
+	MIR_PASS_FOLD,   /* constant folding + algebraic simplification */
+	MIR_PASS_DCE,    /* dead code elimination */
+	MIR_PASS_N,
+};
+
+uint32_t run_mir_pass(MFn *fn, enum MIRPass pass);
+void run_mir_passes(MFn *fn, int optlevel);
+void build_uses(MFn *fn);
+
 /* arena helpers (mir_util.c) */
 void *m_alloc(MFn *fn, size_t size);
 char *m_strdup(MFn *fn, const char *s);
