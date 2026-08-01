@@ -94,6 +94,9 @@ static const char *g_cpp_qual_class;
 static void cpp_emit_base_ctor(struct func *f);
 static void cpp_mangle_type(struct type *t, char *buf, size_t bufsz);
 static void flush_pending_methods(void);
+static void emit_base_ctors_for(struct func *f, struct type *classt,
+                                struct expr *thisp);
+static bool has_base(struct type *t);
 
 /* Two-phase class parsing: while a class body is being collected, method
  * bodies are buffered (tokens) and replayed after the class layout is
@@ -236,6 +239,13 @@ cpp_member_ident(struct scope *s, const char *name)
 		e->u.ident.decl = fd;
 		e = decay(e); /* &Class_method */
 		g_cpp_member_this = cpp_this_expr();
+		if (offset) {
+			struct expr *tp = mkbinaryexpr(&tok.loc, TADD,
+			    exprconvert(g_cpp_member_this, &typeulong),
+			    mkconstexpr(&typeulong, offset));
+			tp->type = mkpointertype(t, QUALNONE);
+			g_cpp_member_this = tp;
+		}
 		g_cpp_member_class = t;
 		g_cpp_member_name = name;
 		g_cpp_member_const = this_const;
@@ -283,16 +293,16 @@ cpp_tok_kind(void)
 /* Parse a C++ `class`/`struct`/`union` declaration with access-control
  * sections (public:/private:/protected:).  Reuses the C type machinery
  * (mktype + addmember + structdecl) but skips access-specifier labels,
- * which the C parser does not understand.  Currently handles the
- * data-member subset; member functions, inheritance, and templates are
- * added later. */
+ * which the C parser does not understand. */
 static bool
 cpp_class_decl(struct scope *s)
 {
-	struct type *t, *base = NULL;
+	struct type *t;
+	struct type *bases[8];
 	char *tag;
 	struct structbuilder b;
 	bool is_class;
+	int nbases = 0;
 
 	/* class defaults to private access, struct/union to public (C++). */
 	is_class = cpp_tok_kind() == CPP_TCLASS;
@@ -304,20 +314,31 @@ cpp_class_decl(struct scope *s)
 	tag = tokenstr(tok.kind);
 	next();
 
-	/* base-class list: `class Derived : public Base {` (single
-	 * inheritance for now; virtual bases and multiple bases later). */
+	/* base-class list: `class Derived : public A, protected B { ... }`.
+	 * Each base becomes an anonymous member (subobject) at its position;
+	 * access specifiers are recorded for later access checking. */
 	if (tok.kind == TCOLON) {
 		next(); /* consume ':' */
-		/* optional access specifier: public/private/protected */
-		enum cpp_tokenkind bk = cpp_tok_kind();
-		if (bk == CPP_TPUBLIC || bk == CPP_TPRIVATE || bk == CPP_TPROTECTED)
+		for (;;) {
+			enum cpp_tokenkind bk = cpp_tok_kind();
+			if (bk == CPP_TPUBLIC || bk == CPP_TPRIVATE || bk == CPP_TPROTECTED)
+				next();
+			if (tok.kind < TIDENT)
+				error(&tok.loc, "expected base class name after ':'");
+			if (nbases >= (int)countof(bases))
+				error(&tok.loc, "too many base classes");
+			bases[nbases] = scopegettag(s, tokenstr(tok.kind), true);
+			if (!bases[nbases] ||
+			    (bases[nbases]->kind != TYPESTRUCT && bases[nbases]->kind != TYPEUNION))
+				error(&tok.loc, "'%s' is not a class type", tokenstr(tok.kind));
+			++nbases;
 			next();
-		if (tok.kind < TIDENT)
-			error(&tok.loc, "expected base class name after ':'");
-		base = scopegettag(s, tokenstr(tok.kind), true);
-		if (!base || (base->kind != TYPESTRUCT && base->kind != TYPEUNION))
-			error(&tok.loc, "'%s' is not a class type", tokenstr(tok.kind));
-		next();
+			if (tok.kind == TCOMMA) {
+				next();
+				continue;
+			}
+			break;
+		}
 	}
 
 	/* create or look up the aggregate type */
@@ -339,8 +360,13 @@ cpp_class_decl(struct scope *s)
 		return true; /* forward declaration */
 	if (!t->incomplete)
 		error(&tok.loc, "redefinition of class '%s'", tag);
-	if (base && base->incomplete)
-		error(&tok.loc, "base class '%s' has incomplete type", base->u.structunion.tag);
+	{
+		int bi;
+		for (bi = 0; bi < nbases; ++bi)
+			if (bases[bi]->incomplete)
+				error(&tok.loc, "base class '%s' has incomplete type",
+				      bases[bi]->u.structunion.tag);
+	}
 	t->scope = s; /* member symbols are registered here */
 	next(); /* consume '{' */
 	g_cpp_class_parsing = true; /* buffer method bodies for phase two */
@@ -351,15 +377,18 @@ cpp_class_decl(struct scope *s)
 	b.pack = false;
 	b.access = is_class ? ACC_PRIVATE : ACC_PUBLIC;
 
-	/* The base-class subobject occupies offset 0 of the derived class:
-	 * register it as an anonymous member so typemember()'s recursive
-	 * search and the layout computation see it like any other member. */
-	if (base) {
-		struct qualtype bq;
-		bq.type = base;
-		bq.qual = QUALNONE;
-		bq.expr = NULL;
-		addmember(&b, bq, NULL, 0, -1);
+	/* Each base-class subobject is registered as an anonymous member so
+	 * typemember()'s recursive search and the layout computation see
+	 * them like ordinary members (first base at offset 0). */
+	{
+		int bi;
+		for (bi = 0; bi < nbases; ++bi) {
+			struct qualtype bq;
+			bq.type = bases[bi];
+			bq.qual = QUALNONE;
+			bq.expr = NULL;
+			addmember(&b, bq, NULL, 0, -1);
+		}
 	}
 
 	for (;;) {
@@ -840,8 +869,23 @@ cpp_emit_default_ctor(struct func *f, struct decl *d)
 	if (!f || !d || d->u.obj.storage != SDAUTO)
 		return false;
 	tag = t ? t->u.structunion.tag : NULL;
-	if (!cpp_has_ctor(t, tag))
+	if (!tag)
 		return false;
+
+	obj = mkexpr(EXPRIDENT, d->type, NULL);
+	obj->qual = d->qual;
+	obj->lvalue = true;
+	obj->u.ident.decl = d;
+	obj = mkunaryexpr(TBAND, obj); /* &obj */
+
+	/* A class with no user constructor of its own still needs its base
+	 * subobjects constructed. */
+	if (!cpp_has_ctor(t, tag)) {
+		if (has_base(t))
+			emit_base_ctors_for(f, t, obj);
+		return has_base(t);
+	}
+
 	snprintf(mname, sizeof mname, "%s_%s", tag, tag);
 	fd = scopegetdecl(t->scope ? t->scope : &filescope, mname, true);
 	if (!fd || fd->kind != DECLFUNC)
@@ -851,12 +895,6 @@ cpp_emit_default_ctor(struct func *f, struct decl *d)
 	fn->u.ident.decl = fd;
 	fn = decay(fn); /* &Class_Class */
 
-	obj = mkexpr(EXPRIDENT, d->type, NULL);
-	obj->qual = d->qual;
-	obj->lvalue = true;
-	obj->u.ident.decl = d;
-	obj = mkunaryexpr(TBAND, obj); /* &obj */
-
 	call = mkexpr(EXPRCALL, &typevoid, fn);
 	call->u.call.args = obj;
 	call->u.call.nargs = 1;
@@ -864,12 +902,10 @@ cpp_emit_default_ctor(struct func *f, struct decl *d)
 	return true;
 }
 
-/* Emit implicit base-class construction at the start of a derived-class
- * constructor: `class D : B { D() {...} }` first runs `B_B(&this)` for
- * each direct base with a user default constructor (base subobject lives
- * at offset 0, so `this` already points at it). */
+/* Emit calls to the user default constructors of the direct base
+ * subobjects of `classt` (each at its layout offset from `thisp`). */
 static void
-cpp_emit_base_ctor(struct func *f)
+emit_base_ctors_for(struct func *f, struct type *classt, struct expr *thisp)
 {
 	extern struct value *funcexpr(struct func *, struct expr *);
 	extern struct scope filescope;
@@ -878,9 +914,9 @@ cpp_emit_base_ctor(struct func *f)
 	struct type *bt;
 	char mname[256];
 	struct decl *fd;
-	struct expr *fn, *call, *thisp;
+	struct expr *fn, *call, *call_this;
 
-	for (m = g_cpp_method.class_type->u.structunion.members; m; m = m->next) {
+	for (m = classt->u.structunion.members; m; m = m->next) {
 		if (m->name)
 			continue; /* only anonymous members are base subobjects */
 		bt = m->type;
@@ -893,12 +929,44 @@ cpp_emit_base_ctor(struct func *f)
 		fn = mkexpr(EXPRIDENT, fd->type, NULL);
 		fn->u.ident.decl = fd;
 		fn = decay(fn); /* &Base_Base */
-		thisp = cpp_this_expr();
+		if (m->offset) {
+			/* this + subobject offset points at this base's subobject;
+			 * always relative to the original `this` */
+			call_this = mkbinaryexpr(&tok.loc, TADD,
+			    exprconvert(thisp, &typeulong),
+			    mkconstexpr(&typeulong, m->offset));
+			call_this->type = mkpointertype(bt, QUALNONE);
+		} else {
+			call_this = thisp;
+		}
 		call = mkexpr(EXPRCALL, &typevoid, fn);
-		call->u.call.args = thisp;
+		call->u.call.args = call_this;
 		call->u.call.nargs = 1;
 		funcexpr(f, call);
 	}
+}
+
+/* Emit implicit base-class construction at the start of a derived-class
+ * constructor: `class D : B { D() {...} }` first runs `B_B(&this)` for
+ * each direct base with a user default constructor. */
+static void
+cpp_emit_base_ctor(struct func *f)
+{
+	emit_base_ctors_for(f, g_cpp_method.class_type, cpp_this_expr());
+}
+
+/* Does `t` have at least one direct base class (anonymous subobject)? */
+static bool
+has_base(struct type *t)
+{
+	struct member *m;
+
+	if (!t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
+		return false;
+	for (m = t->u.structunion.members; m; m = m->next)
+		if (!m->name)
+			return true;
+	return false;
 }
 
 /* Does class `t` define a destructor?  Destructors are registered under a

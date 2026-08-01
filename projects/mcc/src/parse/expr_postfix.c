@@ -234,6 +234,7 @@ postfixexpr(struct scope *s, struct expr *r)
 				if (cpp_is_member_function(t, m->name)) {
 					extern bool g_cpp_member_const;
 					bool obj_const = (tq & QUALCONST) != 0;
+					struct expr *thisp;
 					cpp_mangled_name(t, m->name, mname, sizeof mname);
 					if (obj_const)
 						strncat(mname, "K", sizeof mname - strlen(mname) - 1);
@@ -261,7 +262,16 @@ postfixexpr(struct scope *s, struct expr *r)
 						e->u.ident.decl = NULL;
 						e = decay(e);
 					}
-					g_cpp_member_this = r; /* &obj */
+					/* inherited method: this must point at the defining
+					 * base's subobject (offset reported by typemember) */
+					thisp = r;
+					if (offset) {
+						thisp = mkbinaryexpr(&tok.loc, TADD,
+						    exprconvert(r, &typeulong),
+						    mkconstexpr(&typeulong, offset));
+						thisp->type = mkpointertype(t, tq);
+					}
+					g_cpp_member_this = thisp; /* &subobject */
 					g_cpp_member_class = t;
 					g_cpp_member_name = m->name;
 					g_cpp_member_const = obj_const;
