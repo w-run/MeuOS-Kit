@@ -1211,10 +1211,13 @@ emit_base_ctors_for(struct func *f, struct type *classt, struct expr *thisp)
 	struct expr *fn, *call, *call_this;
 
 	for (m = classt->u.structunion.members; m; m = m->next) {
-		if (m->name)
-			continue; /* only anonymous members are base subobjects */
+		/* destructor marker members are not objects */
+		if (m->name && m->name[0] == '~')
+			continue;
 		bt = m->type;
-		if (!bt || !bt->u.structunion.tag || !cpp_has_ctor(bt, bt->u.structunion.tag))
+		if (!bt || (bt->kind != TYPESTRUCT && bt->kind != TYPEUNION))
+			continue;
+		if (!bt->u.structunion.tag || !cpp_has_ctor(bt, bt->u.structunion.tag))
 			continue;
 		snprintf(mname, sizeof mname, "%s_%s", bt->u.structunion.tag, bt->u.structunion.tag);
 		fd = scopegetdecl(bt->scope ? bt->scope : &filescope, mname, true);
@@ -1224,8 +1227,9 @@ emit_base_ctors_for(struct func *f, struct type *classt, struct expr *thisp)
 		fn->u.ident.decl = fd;
 		fn = decay(fn); /* &Base_Base */
 		if (m->offset) {
-			/* this + subobject offset points at this base's subobject;
-			 * always relative to the original `this` */
+			/* this + subobject offset points at this base's subobject
+			 * (or class-type member object), always relative to the
+			 * original `this` */
 			call_this = mkbinaryexpr(&tok.loc, TADD,
 			    exprconvert(thisp, &typeulong),
 			    mkconstexpr(&typeulong, m->offset));
