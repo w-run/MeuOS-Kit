@@ -42,6 +42,8 @@ static struct cpp_method_ctx {
  * by decl()'s DECLFUNC path to route out-of-line method definitions. */
 static const char *g_cpp_qual_class;
 
+static void cpp_emit_base_ctor(struct func *f);
+
 void
 cpp_set_qual_class(const char *tag)
 {
@@ -155,7 +157,7 @@ cpp_tok_kind(void)
 static bool
 cpp_class_decl(struct scope *s)
 {
-	struct type *t;
+	struct type *t, *base = NULL;
 	char *tag;
 	struct structbuilder b;
 	bool is_class;
@@ -169,6 +171,22 @@ cpp_class_decl(struct scope *s)
 		error(&tok.loc, "expected class name");
 	tag = tokenstr(tok.kind);
 	next();
+
+	/* base-class list: `class Derived : public Base {` (single
+	 * inheritance for now; virtual bases and multiple bases later). */
+	if (tok.kind == TCOLON) {
+		next(); /* consume ':' */
+		/* optional access specifier: public/private/protected */
+		enum cpp_tokenkind bk = cpp_tok_kind();
+		if (bk == CPP_TPUBLIC || bk == CPP_TPRIVATE || bk == CPP_TPROTECTED)
+			next();
+		if (tok.kind < TIDENT)
+			error(&tok.loc, "expected base class name after ':'");
+		base = scopegettag(s, tokenstr(tok.kind), true);
+		if (!base || (base->kind != TYPESTRUCT && base->kind != TYPEUNION))
+			error(&tok.loc, "'%s' is not a class type", tokenstr(tok.kind));
+		next();
+	}
 
 	/* create or look up the aggregate type */
 	t = scopegettag(s, tag, tok.kind != TLBRACE && tok.kind != TSEMICOLON);
@@ -189,6 +207,8 @@ cpp_class_decl(struct scope *s)
 		return true; /* forward declaration */
 	if (!t->incomplete)
 		error(&tok.loc, "redefinition of class '%s'", tag);
+	if (base && base->incomplete)
+		error(&tok.loc, "base class '%s' has incomplete type", base->u.structunion.tag);
 	next(); /* consume '{' */
 
 	b.type = t;
@@ -196,6 +216,17 @@ cpp_class_decl(struct scope *s)
 	b.bits = 0;
 	b.pack = false;
 	b.access = is_class ? ACC_PRIVATE : ACC_PUBLIC;
+
+	/* The base-class subobject occupies offset 0 of the derived class:
+	 * register it as an anonymous member so typemember()'s recursive
+	 * search and the layout computation see it like any other member. */
+	if (base) {
+		struct qualtype bq;
+		bq.type = base;
+		bq.qual = QUALNONE;
+		bq.expr = NULL;
+		addmember(&b, bq, NULL, 0, -1);
+	}
 
 	for (;;) {
 		/* access-control labels: public: private: protected: */
@@ -275,13 +306,16 @@ cpp_same_class_context(struct type *t)
 }
 
 /* Enforce C++ access control on `obj.member` / `obj->member` access:
- * private/protected members are only reachable from within the member's
- * own class (friend/inheritance are later stages).  Returns true when
- * the access is allowed. */
+ * private members are only reachable from within the member's own class;
+ * protected members additionally from derived classes (friend and
+ * virtual inheritance are later stages).  Returns true when the access
+ * is allowed. */
 bool
 cpp_member_accessible(struct type *t, struct member *m)
 {
 	if (!m || m->access == ACC_PUBLIC)
+		return true;
+	if (m->access == ACC_PROTECTED && cpp_is_derived(g_cpp_method.class_type, t))
 		return true;
 	return cpp_same_class_context(t);
 }
@@ -389,6 +423,9 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname,
 	g_cpp_method.active = true;
 
 	f = mkfunc(d, d->name, d->type, fs);
+	/* constructor: run base-class constructors before the body */
+	if (strcmp(mname, class_tag) == 0)
+		cpp_emit_base_ctor(f);
 	stmt(f, fs);
 	if (d->u.func.isnoreturn)
 		funchlt(f);
@@ -404,17 +441,58 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname,
 
 /* C++ member-function lookup helpers.  A function member is registered in
  * the struct/union member list by addmember (C++ mode); these helpers let
- * the postfix-expression lowering detect and mangle member calls. */
+ * the postfix-expression lowering detect and mangle member calls.  The
+ * lookup recurses through anonymous members, so inherited members (the
+ * base-class subobject is an anonymous member at offset 0) resolve to
+ * their defining class. */
+
+/* Find the function member `name` in `t`, optionally reporting the class
+ * that defines it (`*owner`).  Recurses into anonymous (base-class)
+ * members. */
+static struct member *
+cpp_method_member(struct type *t, const char *name, struct type **owner)
+{
+	struct member *m, *sub;
+
+	if (!t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
+		return NULL;
+	for (m = t->u.structunion.members; m; m = m->next) {
+		if (m->name && strcmp(m->name, name) == 0) {
+			if (m->type && m->type->kind == TYPEFUNC) {
+				if (owner)
+					*owner = t;
+				return m;
+			}
+		} else if (!m->name) {
+			sub = cpp_method_member(m->type, name, owner);
+			if (sub)
+				return sub;
+		}
+	}
+	return NULL;
+}
+
 bool
 cpp_is_member_function(struct type *t, const char *name)
 {
+	return cpp_method_member(t, name, NULL) != NULL;
+}
+
+/* Is class `t` derived from (or identical to) class `base`?  The base
+ * subobject appears as an anonymous member of the derived class. */
+bool
+cpp_is_derived(struct type *t, struct type *base)
+{
 	struct member *m;
-	if (!t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
+
+	if (!t || !base || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
 		return false;
-	for (m = t->u.structunion.members; m; m = m->next)
-		if (m->name && strcmp(m->name, name) == 0 &&
-		    m->type && m->type->kind == TYPEFUNC)
+	if (t == base)
+		return true;
+	for (m = t->u.structunion.members; m; m = m->next) {
+		if (!m->name && cpp_is_derived(m->type, base))
 			return true;
+	}
 	return false;
 }
 
@@ -472,9 +550,52 @@ cpp_emit_default_ctor(struct func *f, struct decl *d)
 	return true;
 }
 
+/* Emit implicit base-class construction at the start of a derived-class
+ * constructor: `class D : B { D() {...} }` first runs `B_B(&this)` for
+ * each direct base with a user default constructor (base subobject lives
+ * at offset 0, so `this` already points at it). */
+static void
+cpp_emit_base_ctor(struct func *f)
+{
+	extern struct value *funcexpr(struct func *, struct expr *);
+	extern struct scope filescope;
+
+	struct member *m;
+	struct type *bt;
+	char mname[256];
+	struct decl *fd;
+	struct expr *fn, *call, *thisp;
+
+	for (m = g_cpp_method.class_type->u.structunion.members; m; m = m->next) {
+		if (m->name)
+			continue; /* only anonymous members are base subobjects */
+		bt = m->type;
+		if (!bt || !bt->u.structunion.tag || !cpp_has_ctor(bt, bt->u.structunion.tag))
+			continue;
+		snprintf(mname, sizeof mname, "%s_%s", bt->u.structunion.tag, bt->u.structunion.tag);
+		fd = scopegetdecl(&filescope, mname, false);
+		if (!fd || fd->kind != DECLFUNC)
+			continue;
+		fn = mkexpr(EXPRIDENT, fd->type, NULL);
+		fn->u.ident.decl = fd;
+		fn = decay(fn); /* &Base_Base */
+		thisp = cpp_this_expr();
+		call = mkexpr(EXPRCALL, &typevoid, fn);
+		call->u.call.args = thisp;
+		call->u.call.nargs = 1;
+		funcexpr(f, call);
+	}
+}
+
 const char *
 cpp_mangled_name(struct type *t, const char *name, char *buf, size_t bufsz)
 {
+	struct type *owner = NULL;
+
+	/* inherited methods mangle under the defining base class, so
+	 * `d.base_method()` resolves to `Base_base_method` */
+	if (cpp_method_member(t, name, &owner) && owner)
+		t = owner;
 	snprintf(buf, bufsz, "%s_%s",
 	         (t && t->u.structunion.tag) ? t->u.structunion.tag : "anon",
 	         name);
