@@ -52,9 +52,19 @@ build_uses_block(MFn *fn, MBlk *b)
 	if (b->term.src[0].val)
 		mark_use(fn, b->term.src[0].val, &b->term, 0);
 	for (MPhi *p = b->phi; p; p = p->link)
-		for (uint32_t i = 0; i < p->narg; i++)
-			if (p->arg[i])
-				p->arg[i]->nuse++; /* phi use count only; no MUse slot */
+		for (uint32_t i = 0; i < p->narg; i++) {
+			MVal *v = p->arg[i];
+			if (!v || v->kind != MV_TEMP)
+				continue;
+			if (v->nuse == v->cuse) {
+				v->cuse = v->cuse ? v->cuse * 2 : 4;
+				v->use = realloc(v->use, v->cuse * sizeof *v->use);
+			}
+			v->use[v->nuse].ins = 0;
+			v->use[v->nuse].phi = p;
+			v->use[v->nuse].argn = -1;
+			v->nuse++;
+		}
 }
 
 static void
@@ -106,7 +116,19 @@ mfold_const(MConst *res, MOP op, int w, MConst *cl, MConst *cr)
 			} else {
 				return 1;
 			}
-			eq = dl == dr; lt = dl < dr; gt = dl > dr;
+			switch (op) {
+			case MOP_CFEQ: x = dl == dr; break;
+			case MOP_CFNE: x = dl != dr; break;
+			case MOP_CFLT: x = dl < dr;  break;
+			case MOP_CFLE: x = dl <= dr; break;
+			case MOP_CFGT: x = dl > dr;  break;
+			case MOP_CFGE: x = dl >= dr; break;
+			default: return 1;
+			}
+			res->kind = MC_INT;
+			res->type = MT_I32;
+			res->u.i = (int64_t)x;
+			return 0;
 		} else {
 			if (!con_is_bits(cl, &w) || !con_is_bits(cr, &w))
 				return 1;
@@ -195,6 +217,23 @@ mfold_const(MConst *res, MOP op, int w, MConst *cl, MConst *cr)
 		return 0;
 	}
 
+	/* single-operand int<->float conversions */
+	if (op == MOP_I2F && cl && cl->kind == MC_INT) {
+		res->kind = MC_FLT;
+		res->type = MT_F64;
+		res->u.d = (double)cl->u.i;
+		return 0;
+	}
+	if (op == MOP_F2I && cl && cl->kind == MC_FLT) {
+		res->kind = MC_INT;
+		res->type = MT_I32;
+		if (cl->type == MT_F32)
+			res->u.i = (int32_t)cl->u.s;
+		else
+			res->u.i = (int32_t)cl->u.d;
+		return 0;
+	}
+
 	return 1;
 }
 
@@ -241,6 +280,26 @@ map_resolve(MSimpMap **tab, MRef r)
 	return r;
 }
 
+/* Check whether a value is used outside the given block (including by a
+ * phi).  Folding/simplification that removes the defining instruction is
+ * only safe when every use stays within the same block — otherwise the
+ * value's uses in other blocks would become undefined. */
+static bool
+used_outside(MFn *fn, MVal *v, MBlk *b)
+{
+	(void)fn;
+	if (!v || v->kind != MV_TEMP)
+		return false;
+	for (uint32_t i = 0; i < v->nuse; i++) {
+		MUse *u = &v->use[i];
+		if (u->phi)
+			return true;
+		if (u->ins && u->ins->blk != b)
+			return true;
+	}
+	return false;
+}
+
 /* Rewrite a block: apply constant folding and algebraic simplification,
  * dropping instructions whose result is unused or simplified away.
  * Returns the number of instructions removed. */
@@ -260,8 +319,9 @@ msimp_block(MFn *fn, MBlk *b)
 		a0 = map_resolve(tab, a0);
 		a1 = map_resolve(tab, a1);
 
-		/* constant folding */
-		if (in->dst && a0.con && (in->op < MOP_JMP || in->op > MOP_CALL)) {
+		/* constant folding (skip if dst is used outside this block) */
+		if (in->dst && a0.con && (in->op < MOP_JMP || in->op > MOP_CALL) &&
+		    !used_outside(fn, in->dst, b)) {
 			int w = (in->dtype == MT_I64 || in->dtype == MT_PTR);
 			MConst cr;
 			MConst *cl = a0.con;
@@ -293,7 +353,7 @@ msimp_block(MFn *fn, MBlk *b)
 		}
 
 		/* algebraic simplifications on non-constant operands */
-		if (in->dst && in->op < MOP_JMP) {
+		if (in->dst && in->op < MOP_JMP && !used_outside(fn, in->dst, b)) {
 			switch (in->op) {
 			case MOP_ADD:
 				if (a1.con && a1.con->kind == MC_INT && a1.con->u.i == 0) {
@@ -362,26 +422,21 @@ msimp_block(MFn *fn, MBlk *b)
 							n++;
 						}
 						MRef sh = MREF_CON(mconst_int(fn, MT_I32, n));
-						if (in->op == MOP_UDIV || in->op == MOP_DIV) {
-							MOP shf = (in->op == MOP_UDIV) ? MOP_SHR : MOP_SAR;
-							MVal *nv = mval_new(fn, MV_TEMP, in->dtype, 0, "shr");
-							MIns *nn = madd(fn, b, shf, in->dtype, nv, a0, sh);
-							nn->src[0] = a0;
-							nn->src[1] = sh;
-							map_set(tab, in->dst, MREF_VAL(nv));
-							removed++;
-							continue;
-						} else {
-							/* rem by 2^n -> and (n-1) */
-							MRef msk = MREF_CON(mconst_int(fn, in->dtype, v - 1));
-							MVal *nv = mval_new(fn, MV_TEMP, in->dtype, 0, "and");
-							MIns *nn = madd(fn, b, MOP_AND, in->dtype, nv, a0, msk);
-							nn->src[0] = a0;
-							nn->src[1] = msk;
-							map_set(tab, in->dst, MREF_VAL(nv));
-							removed++;
-							continue;
-						}
+							if (in->op == MOP_UDIV || in->op == MOP_DIV) {
+								/* rewrite in place to a shift so the definition stays
+								 * at the original position (SSA order preserved; madd
+								 * would move the def past its uses). */
+								MOP shf = (in->op == MOP_UDIV) ? MOP_SHR : MOP_SAR;
+								in->op = shf;
+								in->src[0] = a0;
+								in->src[1] = sh;
+							} else {
+								/* rem by 2^n -> and (n-1), in place */
+								MRef msk = MREF_CON(mconst_int(fn, in->dtype, v - 1));
+								in->op = MOP_AND;
+								in->src[0] = a0;
+								in->src[1] = msk;
+							}
 					}
 				}
 				break;
@@ -452,6 +507,7 @@ run_mir_pass(MFn *fn, enum MIRPass pass)
 		return 0;
 	case MIR_PASS_FOLD: {
 		uint32_t r = 0;
+		build_uses(fn); /* used_outside needs the use chains */
 		for (MBlk *b = fn->link; b; b = b->link)
 			r += msimp_block(fn, b);
 		return r;

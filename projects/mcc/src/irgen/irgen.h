@@ -160,4 +160,10 @@ struct value *funcload(struct func *f, struct type *t, struct lvalue lval);
 /* branch.c */
 struct lvalue funclval(struct func *f, struct expr *e);
 
+/* func_to_mir.c — translate the frontend struct func tree into MIR (MFn).
+ * Part of the B.4.2 MIR-first migration: emitfunc lowers to MIR, runs MIR
+ * passes, then bridges to the LIR Fn. */
+struct MFn;
+struct MFn *func_to_mir(struct func *f, int optlevel);
+
 #endif /* MCC_IRGEN_H */

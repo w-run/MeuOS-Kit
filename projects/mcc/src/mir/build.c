@@ -141,6 +141,7 @@ void mterm(MFn *fn, MBlk *b, MOP op, MRef a0, MBlk *s1, MBlk *s2)
 	(void)fn;
 	b->term.op = op;
 	b->term.src[0] = a0;
+	b->term.blk = b;
 	b->s1 = s1;
 	b->s2 = s2;
 	if (s1)
@@ -152,6 +153,7 @@ void mret(MFn *fn, MBlk *b, MRef a0)
 	(void)fn;
 	b->term.op = MOP_RET;
 	b->term.src[0] = a0;
+	b->term.blk = b;
 }
 
 void mretvoid(MFn *fn, MBlk *b)
@@ -159,6 +161,7 @@ void mretvoid(MFn *fn, MBlk *b)
 	(void)fn;
 	b->term.op = MOP_RET;
 	b->term.src[0] = (MRef){0};
+	b->term.blk = b;
 }
 
 MVal *mphi_add(MFn *fn, MBlk *b, MType dtype, MVal *dst)

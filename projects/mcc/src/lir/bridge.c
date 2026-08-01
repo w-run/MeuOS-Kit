@@ -161,12 +161,15 @@ refval(MFn *fn, MRef r, Fn *lir)
 	return R;
 }
 
-/* Build a forward-ordered array of blocks (mfn->link is reversed). */
+/* Build a forward-ordered array of blocks (mfn->link is reversed).
+ * The array is PHeap (emalloc) so callers may free() it; the Fn and its
+ * per-block Blk objects stay in the PFn pool and are reclaimed by
+ * freeall() (do NOT free() those). */
 static MBlk **
 blk_order(MFn *mfn, uint32_t *n)
 {
 	uint32_t cnt = mfn->nblk;
-	MBlk **o = alloc(cnt * sizeof *o);
+	MBlk **o = emalloc(cnt * sizeof *o);
 	uint32_t i = cnt;
 	for (MBlk *b = mfn->link; b; b = b->link)
 		o[--i] = b;
@@ -201,7 +204,7 @@ lir_bridge(MFn *mfn)
 	fn->con[1].type = CBits;
 	fn->con[1].bits.i = 0;
 
-	fn->name = (char *)mfn->name;
+	fn->name = mfn->name ? (char *)mfn->name : "";
 	fn->lnk = (Lnk){0};
 	fn->lnk.export = 1;
 	fn->leaf = 1;
@@ -232,7 +235,7 @@ lir_bridge(MFn *mfn)
 
 	/* pass 1: create Blk per MBlk, store mapping */
 	order = blk_order(mfn, &nblk);
-	lirblk = alloc(nblk * sizeof *lirblk);
+	lirblk = emalloc(nblk * sizeof *lirblk);
 	{
 		Blk *prev = NULL;
 		for (uint32_t i = 0; i < nblk; i++) {
@@ -312,6 +315,35 @@ lir_bridge(MFn *mfn)
 			}
 			int qop = mir_to_op(in->op);
 			int cls = mir_to_cls(in->dtype);
+			/* float<->int conversions: the LIR opcode encodes the source
+			 * precision (Ostosi = f32->int, Odtosi = f64->int, etc.), but
+			 * MIR's MOP_F2I/MOP_I2F carry the precision in the source
+			 * operand's type.  Select the correct LIR opcode here. */
+			if (in->op == MOP_F2I) {
+				bool is64 = in->src[0].val ?
+					(in->src[0].val->type == MT_F64) :
+					(in->src[0].con && in->src[0].con->type == MT_F64);
+				qop = is64 ? Odtosi : Ostosi;
+				Ref to = in->dst ? valref(mfn, in->dst, fn) : R;
+				Ref a0 = refval(mfn, in->src[0], fn);
+				*curi++ = (Ins){.op = qop, .cls = cls, .to = to,
+				                .arg = {a0, R}};
+				continue;
+			}
+			if (in->op == MOP_I2F) {
+				/* source width selects the LIR op; dst width the class */
+				bool src64 = in->src[0].val &&
+					in->src[0].val->type == MT_I64;
+				bool is64 = in->dtype == MT_F64;
+				qop = src64 ? (is64 ? Osltof : Oultof)
+				             : (is64 ? Oswtof : Ouwtof);
+				cls = is64 ? Kd : Ks;
+				Ref to = in->dst ? valref(mfn, in->dst, fn) : R;
+				Ref a0 = refval(mfn, in->src[0], fn);
+				*curi++ = (Ins){.op = qop, .cls = cls, .to = to,
+				                .arg = {a0, R}};
+				continue;
+			}
 			Ref to = in->dst ? valref(mfn, in->dst, fn) : R;
 			Ref a0 = refval(mfn, in->src[0], fn);
 			Ref a1 = refval(mfn, in->src[1], fn);

@@ -112,6 +112,11 @@ main(int argc, char *argv[])
 	char *depfile = NULL;
 	int i;
 
+	/* B.4.2 MIR-first switch: MCC_USE_MIR=1 routes compilation through
+	 * the new MIR layer (frontend tree -> MFn -> MIR passes -> LIR). */
+	extern int g_use_mir;
+	g_use_mir = getenv("MCC_USE_MIR") ? atoi(getenv("MCC_USE_MIR")) : 0;
+
 	/* Normalize argv: gcc/clang compatibility allows single-dash
 	 * multi-letter options (-static, -shared, ...) which we rewrite
 	 * to the standard double-dash form (--static, --shared, ...).

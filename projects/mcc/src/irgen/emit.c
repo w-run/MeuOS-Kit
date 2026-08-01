@@ -22,9 +22,15 @@
  * references. Bit-fields and wide strings are deferred to later phases. */
 #include <ctype.h>
 #include "irgen.h"
+#include "mir.h"
 
 extern int emit_debug;  /* from emit/emit.c */
 extern void emitdbgloc(uint, uint, FILE *);  /* from emit/emit.c */
+
+/* B.4.2 MIR-first switch: when nonzero, emitfunc lowers the frontend tree
+ * to MIR (func_to_mir), runs the MIR passes, bridges to LIR, and runs the
+ * LIR pipeline.  Set from MCC_USE_MIR in main.c at startup. */
+int g_use_mir;
 
 /* Translate a frontend class char ('w','l','s','d') to IR's class enum. */
 static int
@@ -268,6 +274,39 @@ emitfunc(struct func *f, bool global)
 		if (strcmp(f->name, "main") == 0 && f->type->base == &typeint)
 			v = mkintconst(0);
 		funcret(f, v);
+	}
+
+	/* B.4.2 MIR-first path: lower the frontend tree to MIR, run the MIR
+	 * passes, bridge to the LIR Fn, and run the LIR pipeline.  Enabled by
+	 * MCC_USE_MIR=1 (kept opt-in while the MIR layer is being validated
+	 * against real C workloads; the default remains the direct-LIR path
+	 * until the migration completes). */
+	if (g_use_mir) {
+		MFn *mf = func_to_mir(f, opt_level);
+		if (mf) {
+			if (emit_debug) {
+				fprintf(stderr, "\n> MIR (pre-pass) %s:\n", f->name);
+				mfn_dump(mf, stderr);
+			}
+			run_mir_passes(mf, opt_level);
+			if (emit_debug) {
+				fprintf(stderr, "\n> MIR (post-pass) %s:\n", f->name);
+				mfn_dump(mf, stderr);
+			}
+			fn = lir_bridge(mf);
+			if (emit_debug) {
+				fprintf(stderr, "\n> LIR (bridged) %s:\n", f->name);
+				printfn(fn, stderr);
+			}
+			run_passes(fn);
+			if (emit_debug)
+				emitdbgloc(1, 0, stdout);
+			T.emitfn(fn, stdout);
+			freeall();
+			mfn_free(mf);
+			return;
+		}
+		/* fall through to direct-LIR path if MIR lowering failed */
 	}
 
 	/* Allocate Fn per the qbe parse.c L910-932 init pattern. */
