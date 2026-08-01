@@ -401,6 +401,29 @@ lir_bridge(MFn *mfn)
 				continue;
 			}
 
+			/* stores: the MIR dtype (from the frontend store opcode)
+			 * selects the LIR width (Ostoreb/Ostoreh/Ostorew/Ostorel/
+			 * Ostores/Ostored). */
+			if (in->op == MOP_STORE) {
+				Ref a0 = refval(mfn, in->src[0], fn);
+				Ref a1 = refval(mfn, in->src[1], fn);
+				int sop = Ostorel;
+				switch (in->dtype) {
+				case MT_I8:  sop = Ostoreb; break;
+				case MT_I16: sop = Ostoreh; break;
+				case MT_I32: sop = Ostorew; break;
+				case MT_I64: sop = Ostorel; break;
+				case MT_F32: sop = Ostores; break;
+				case MT_F64: sop = Ostored; break;
+				default:     sop = Ostorel; break;
+				}
+				int scls = in->dtype == MT_F32 ? Ks :
+				           in->dtype == MT_F64 ? Kd : Kw;
+				*curi++ = (Ins){.op = sop, .cls = scls, .to = R,
+				                .arg = {a0, a1}};
+				continue;
+			}
+
 			Ref to = in->dst ? valref(mfn, in->dst, fn) : R;
 			Ref a0 = refval(mfn, in->src[0], fn);
 			Ref a1 = refval(mfn, in->src[1], fn);

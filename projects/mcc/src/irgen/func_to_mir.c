@@ -405,6 +405,20 @@ func_to_mir(struct func *f, int optlevel, bool export)
 			default: break;
 			}
 
+			/* stores/loads: the frontend emits the width in the opcode
+			 * (ISTOREB/H/W/L/S/D, ILOAD*) and passes class 0 to the store
+			 * (no result).  Derive the MIR dtype from the opcode so the
+			 * bridge emits the correct-width LIR store/load. */
+			switch (in->kind) {
+			case ISTOREB: case ILOADUB: case ILOADSB: dt = MT_I8; break;
+			case ISTOREH: case ILOADUH: case ILOADSH: dt = MT_I16; break;
+			case ISTOREW: case ILOADW:                 dt = MT_I32; break;
+			case ISTOREL: case ILOADL:                 dt = MT_I64; break;
+			case ISTORES: case ILOADS:                 dt = MT_F32; break;
+			case ISTORED: case ILOADD:                 dt = MT_F64; break;
+			default: break;
+			}
+
 			if (op == MOP_STORE) {
 				madd(fn, mb, op, dt, 0, a0, a1);
 			} else if (a1.val || a1.con) {
