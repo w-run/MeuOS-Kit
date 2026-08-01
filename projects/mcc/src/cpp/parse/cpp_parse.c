@@ -478,6 +478,76 @@ cpp_namespace_decl(struct scope *s)
 	/* deliberately keep ns alive for later NAME::name lookups */
 }
 
+/* Namespaces made visible by `using namespace NAME;` directives.  Lookups
+ * that fail in the current scope consult these before giving up. */
+static struct scope *g_cpp_visible_ns[16];
+static int g_cpp_nvisible_ns;
+
+static void
+cpp_add_visible_ns(struct scope *ns)
+{
+	if (g_cpp_nvisible_ns >= (int)countof(g_cpp_visible_ns))
+		return;
+	g_cpp_visible_ns[g_cpp_nvisible_ns++] = ns;
+}
+
+/* Resolve `name` in the visible (`using namespace`) namespaces. */
+struct decl *
+cpp_lookup_visible(struct scope *s, const char *name)
+{
+	int i;
+
+	(void)s;
+	for (i = 0; i < g_cpp_nvisible_ns; i++) {
+		struct decl *d = scopegetdecl(g_cpp_visible_ns[i], name, 1);
+		if (d)
+			return d;
+	}
+	return NULL;
+}
+
+/* `using namespace NAME;` or `using NAME::member;`. */
+static void
+cpp_using_decl(struct scope *s)
+{
+	next(); /* consume 'using' */
+	if (cpp_tok_kind() == CPP_TNAMESPACE) {
+		struct decl *nsd;
+		next(); /* consume 'namespace' */
+		if (tok.kind < TIDENT)
+			error(&tok.loc, "expected namespace name after 'using namespace'");
+		nsd = scopegetdecl(s, tokenstr(tok.kind), 1);
+		if (!nsd || nsd->kind != DECLNAMESPACE)
+			error(&tok.loc, "'%s' is not a namespace", tokenstr(tok.kind));
+		cpp_add_visible_ns(nsd->u.ns);
+		next();
+		expect(TSEMICOLON, "after using directive");
+		return;
+	}
+	/* using NAME::member; */
+	{
+		struct decl *nsd;
+		if (tok.kind < TIDENT)
+			error(&tok.loc, "expected namespace name in using declaration");
+		nsd = scopegetdecl(s, tokenstr(tok.kind), 1);
+		next();
+		expect(TCOLONCOLON, "after namespace name in using declaration");
+		if (tok.kind < TIDENT)
+			error(&tok.loc, "expected member name after '::'");
+		if (!nsd || nsd->kind != DECLNAMESPACE)
+			error(&tok.loc, "'%s' is not a namespace", nsd ? nsd->name : "?");
+		{
+			struct decl *md = scopegetdecl(nsd->u.ns, tokenstr(tok.kind), 1);
+			if (!md)
+				error(&tok.loc, "no member named '%s' in namespace '%s'",
+				      tokenstr(tok.kind), nsd->name);
+			scopeputdecl(s, md);
+		}
+		next();
+		expect(TSEMICOLON, "after using declaration");
+	}
+}
+
 /* Parse a C++ translation unit: top-level declaration loop.
  * C++ grammar is layered over the C parser; `class` declarations with
  * access control are handled here (cpp_class_decl), and C-compatible
@@ -497,6 +567,10 @@ cpp_parse_translation_unit(void)
 		}
 		if (k == CPP_TNAMESPACE) {
 			cpp_namespace_decl(&filescope);
+			continue;
+		}
+		if (k == CPP_TUSING) {
+			cpp_using_decl(&filescope);
 			continue;
 		}
 

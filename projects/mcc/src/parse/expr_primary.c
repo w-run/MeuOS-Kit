@@ -141,6 +141,14 @@ primaryexpr(struct scope *s)
 	default:
 		if (tok.kind >= TIDENT) {
 			d = scopegetdecl(s, tokenstr(tok.kind), 1);
+			if (!d) {
+				/* `using namespace foo;` makes foo's members visible */
+				extern struct decl *cpp_lookup_visible(struct scope *,
+				    const char *);
+				extern int g_lang;
+				if (g_lang == 1)
+					d = cpp_lookup_visible(s, tokenstr(tok.kind));
+			}
 			if (d && d->kind == DECLNAMESPACE) {
 				/* C++ namespace-qualified name, possibly multi-level:
 				 * `ns1::ns2::name`. */
