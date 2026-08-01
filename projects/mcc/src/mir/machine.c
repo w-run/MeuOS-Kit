@@ -66,6 +66,9 @@ static const int x64_argreg[] = {
 	X64MREG_XMM4, X64MREG_XMM5, X64MREG_XMM6, X64MREG_XMM7,
 	-1
 };
+
+/* P2 ABI lowering for x86_64 SysV (src/target/x86_64/x86_64_mabi.c). */
+extern void mfnm_abi_x86_64(MFnM *fm);
 static const int x64_rsave[] = {
 	X64MREG_RAX, X64MREG_RCX, X64MREG_RDX, X64MREG_RSI, X64MREG_RDI,
 	X64MREG_R8, X64MREG_R9, X64MREG_R10, X64MREG_R11,
@@ -96,6 +99,7 @@ const MTargetM mtarget_x86_64 = {
 	.stackalign = 16,
 	.kl_in_reg = true,
 	.feat = MTF_SCALE_INDEX,
+	.abi = mfnm_abi_x86_64,
 };
 
 const char *
@@ -224,6 +228,8 @@ mmop_name(MMOP op)
 		[MMOP_ALLOCA8]  = "alloca8",
 		[MMOP_ALLOCA16] = "alloca16",
 		[MMOP_SALLOC]   = "salloc",
+		[MMOP_VASTART]  = "vastart",
+		[MMOP_VAARG]    = "vaarg",
 		[MMOP_CMP]      = "cmp",
 		[MMOP_TEST]     = "test",
 		[MMOP_SETCC]    = "setcc",

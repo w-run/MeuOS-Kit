@@ -430,6 +430,8 @@ typedef struct MTargetM {
 	int stackalign;            /* stack alignment in bytes */
 	bool kl_in_reg;            /* 64-bit ints may live in GPRs (0 for i386/arm) */
 	uint32_t feat;             /* MTF_* feature bits */
+	/* machine backend entry points (per-arch, filled progressively) */
+	void (*abi)(MFnM *);       /* ABI lowering: selpar/selcall/selret (P2) */
 } MTargetM;
 
 /* machine target feature bits (isel/emit guidance) */
@@ -488,6 +490,8 @@ typedef enum MMOP {
 	MMOP_BLIT,             /* aggregate copy: dst ptr, src ptr, cst = size */
 	MMOP_ALLOCA4, MMOP_ALLOCA8, MMOP_ALLOCA16,
 	MMOP_SALLOC,           /* dynamic stack allocation */
+	MMOP_VASTART,          /* initialize va_list (src[0] = ap ptr) */
+	MMOP_VAARG,            /* dst = va_arg(src[0] = ap ptr, dtype) */
 	/* flags */
 	MMOP_CMP,              /* compare src[0] vs src[1], set flags */
 	MMOP_TEST,             /* and src[0], src[1], set flags */
@@ -562,6 +566,8 @@ struct MFnM {
 	MBlkM *start;            /* entry block */
 	MBlkM *link;             /* block list head */
 	uint32_t nblk;
+	MTypeDesc *retty;        /* aggregate return type, NULL for scalar/void */
+	uint32_t vafa;           /* varargs: packed arg-register usage (selpar) */
 	int32_t slot;            /* stack frame size (bytes); filled by regalloc/spill */
 	int32_t salign;          /* frame alignment */
 	uint64_t regsused;       /* bitmask of used physical registers (bit = MReg) */

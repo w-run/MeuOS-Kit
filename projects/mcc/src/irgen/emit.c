@@ -26,11 +26,18 @@
 
 extern int emit_debug;  /* from emit/emit.c */
 extern void emitdbgloc(uint, uint, FILE *);  /* from emit/emit.c */
+extern void mfnm_backend_x86_64(struct MFn *);  /* x86_64_mbe.c (P2 parallel backend) */
 
 /* B.4.2 MIR-first switch: when nonzero, emitfunc lowers the frontend tree
  * to MIR (func_to_mir), runs the MIR passes, bridges to LIR, and runs the
  * LIR pipeline.  Set from MCC_USE_MIR in main.c at startup. */
 int g_use_mir;
+
+/* P2+ MIR-native backend switch: when nonzero, each function is additionally
+ * run through the MIR machine backend (convert to MFnM, ABI-lower, dump).
+ * The bridge path stays the default producer of assembly; this is a
+ * parallel-validation hook until P3-P5 supply isel/regalloc/emit. */
+int g_use_mir_backend;
 
 /* Translate a frontend class char ('w','l','s','d') to IR's class enum. */
 static int
@@ -293,6 +300,11 @@ emitfunc(struct func *f, bool global)
 				fprintf(stderr, "\n> MIR (post-pass) %s:\n", f->name);
 				mfn_dump(mf, stderr);
 			}
+			/* P2 parallel validation: run the MIR machine backend (MFnM
+			 * conversion + ABI lowering) on this function; bridge stays
+			 * the asm producer. */
+			if (g_use_mir_backend)
+				mfnm_backend_x86_64(mf);
 			fn = lir_bridge(mf);
 			if (emit_debug) {
 				fprintf(stderr, "\n> LIR (bridged) %s:\n", f->name);

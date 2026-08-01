@@ -329,6 +329,8 @@ void mtd_finalize(MTypeDesc *td)
 		}
 		return;
 	}
-	/* align whole aggregate up to member alignment */
-	td->size = (td->size + td->align - 1) / td->align * td->align;
+	/* align whole aggregate up to member alignment (empty aggregates keep
+	 * size 0 / align 0 and are classified as in-memory by the ABI) */
+	if (td->align > 0)
+		td->size = (td->size + td->align - 1) / td->align * td->align;
 }

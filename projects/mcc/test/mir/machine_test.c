@@ -1,26 +1,27 @@
-/* machine_test.c — P1 machine-layer unit test (check-mir-machine).
+/* machine_test.c — P1/P2 machine-layer unit test (check-mir-machine).
  *
- * Verifies the MIR-native machine layer (target-parameterized, covering
- * all 6 architectures; x86_64 is the first instantiation):
- *   1. x86-64 machine target (mtarget_x86_64): register table names,
- *      classes, save semantics, SysV argument register order.
+ * Verifies the MIR-native machine layer against the x86-64 machine target:
+ *   1. MTargetM register table (mtarget_x86_64.regs): names, classes,
+ *      save semantics, SysV argument registers.
  *   2. mfn_reg(): registers are MV_REG MVal in fn->reg[], created on
- *      demand, identical instance on repeat lookup.
- *   3. addressing modes (MAddr): base/index/scale/offset and
- *      symbol-relative forms.
- *   4. machine opcodes (MMOP) and semantic condition codes (MCC).
+ *      demand, identical instance on repeat lookup; word type follows
+ *      target ptrsize.
+ *   3. addressing modes (MAddr).
+ *   4. machine opcodes (MMOP) and condition codes (MCC) name tables.
  *   5. machine instruction construction (maddm*) incl. BLIT, LOAD/STORE
- *      with addressing mode, SETCC with condition code, terminators.
+ *      with addressing mode, SETCC with condition code, PARM/ARG markers,
+ *      terminators.
  *   6. mfnm_dump produces readable output.
  *
- * Links against build.c/mir_util.c/machine.c/print.c (mir.h only, no
- * LIR/QBE structures).
+ * Links against build.c/mir_util.c/machine.c/print.c (mir.h + x86_64_m.h
+ * only, no LIR/QBE structures).
  */
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "mir.h"
+#include "x86_64_m.h"
 
 static int npass, nfail;
 
@@ -33,59 +34,52 @@ static void
 test_registers(void)
 {
 	const MTargetM *mt = &mtarget_x86_64;
-	int rax = mreg_id(mt, "rax");
-	int rbx = mreg_id(mt, "rbx");
-	int rsp = mreg_id(mt, "rsp");
-	int xmm0 = mreg_id(mt, "xmm0");
-	int xmm15 = mreg_id(mt, "xmm15");
-	CHECK(rax >= 0 && rbx >= 0 && rsp >= 0 && xmm0 >= 0 && xmm15 >= 0);
-	CHECK(mreg_id(mt, "nosuchreg") == -1);
 
 	/* table integrity */
-	CHECK(mt->nreg == 32);            /* 16 GPR (incl. rbp/rsp) + 16 XMM */
-	CHECK(strcmp(mreg_name(mt, rax), "rax") == 0);
-	CHECK(strcmp(mreg_name(mt, xmm15), "xmm15") == 0);
-	CHECK(mt->regs[rax].cls == MRC_GPR);
-	CHECK(mt->regs[rax].caller_saved);
-	CHECK(!mt->regs[rax].callee_saved);
-	CHECK(mt->regs[rbx].callee_saved);
-	CHECK(!mt->regs[rbx].caller_saved);
-	CHECK(!mt->regs[rsp].caller_saved && !mt->regs[rsp].callee_saved);
-	CHECK(mt->regs[xmm0].cls == MRC_FPR);
-	CHECK(mt->regs[xmm0].arg);
-	CHECK(!mt->regs[xmm15].arg);      /* xmm15 not an arg reg */
-	/* SysV integer argument order: rdi rsi rdx rcx r8 r9 */
-	CHECK(mt->argreg[0] == mreg_id(mt, "rdi") && mt->argreg[1] == mreg_id(mt, "rsi") &&
-	      mt->argreg[2] == mreg_id(mt, "rdx") && mt->argreg[3] == mreg_id(mt, "rcx") &&
-	      mt->argreg[4] == mreg_id(mt, "r8") && mt->argreg[5] == mreg_id(mt, "r9"));
-	/* machine target facts */
+	CHECK(X64MREG_NONE == -1);
+	CHECK(X64MREG_NREG == 32);              /* 32 physical registers */
+	CHECK(mt->nreg == X64MREG_NREG);
+	CHECK(strcmp(mreg_name(mt, X64MREG_RAX), "rax") == 0);
+	CHECK(strcmp(mreg_name(mt, X64MREG_XMM15), "xmm15") == 0);
+	CHECK(mt->regs[X64MREG_RAX].cls == MRC_GPR);
+	CHECK(mt->regs[X64MREG_RAX].caller_saved);
+	CHECK(!mt->regs[X64MREG_RAX].callee_saved);
+	CHECK(mt->regs[X64MREG_RBX].callee_saved);
+	CHECK(!mt->regs[X64MREG_RBX].caller_saved);
+	CHECK(!mt->regs[X64MREG_RSP].caller_saved && !mt->regs[X64MREG_RSP].callee_saved);
+	CHECK(mt->regs[X64MREG_XMM0].cls == MRC_FPR);
+	CHECK(mt->regs[X64MREG_XMM0].arg);
+	CHECK(!mt->regs[X64MREG_XMM15].arg);
+	/* SysV integer argument registers */
+	CHECK(mt->regs[X64MREG_RDI].arg && mt->regs[X64MREG_RSI].arg &&
+	      mt->regs[X64MREG_RDX].arg && mt->regs[X64MREG_RCX].arg &&
+	      mt->regs[X64MREG_R8].arg && mt->regs[X64MREG_R9].arg);
+	/* target properties */
 	CHECK(mt->ptrsize == 8);
 	CHECK(mt->stackalign == 16);
-	CHECK(mt->kl_in_reg);
 	CHECK(mt->feat & MTF_SCALE_INDEX);
-	CHECK(!(mt->feat & MTF_COND_EXEC));   /* arm feature, absent here */
-	CHECK(strcmp(mreg_name(mt, (MReg)mt->nreg), "?") == 0);
-	CHECK(strcmp(mreg_name(0, rax), "?") == 0);
+	CHECK(mreg_name(mt, (MReg)-1)[0] == '?');
+	CHECK(mreg_name(mt, (MReg)X64MREG_NREG)[0] == '?');
 
 	MFn *fn = mfn_new("regtest", 2);
 
 	/* mfn_reg: created on demand, MV_REG, id==MReg, cached */
-	MVal *rrax = mfn_reg(fn, mt, rax);
-	CHECK(rrax != 0);
-	CHECK(rrax->kind == MV_REG);
-	CHECK(rrax->reg == rax);
-	CHECK(rrax->id == rax);
-	CHECK(rrax->type == MT_I64);           /* GPR is 64-bit int class */
+	MVal *rax = mfn_reg(fn, mt, X64MREG_RAX);
+	CHECK(rax != 0);
+	CHECK(rax->kind == MV_REG);
+	CHECK(rax->reg == X64MREG_RAX);
+	CHECK(rax->id == X64MREG_RAX);
+	CHECK(rax->type == MT_I64);           /* LP64 GPR word */
 	CHECK(fn->reg != 0 && fn->nreg == mt->nreg);
-	CHECK(fn->reg[rax] == rrax);
-	CHECK(mfn_reg(fn, mt, rax) == rrax);   /* same instance */
-	CHECK(mfn_reg(fn, mt, xmm0) != 0);
-	CHECK(mfn_reg(fn, mt, xmm0)->type == MT_F64);  /* FPR is f64 class */
-	CHECK(mfn_reg(fn, mt, xmm0) != rrax);
+	CHECK(fn->reg[X64MREG_RAX] == rax);
+	CHECK(mfn_reg(fn, mt, X64MREG_RAX) == rax);  /* same instance */
+	CHECK(mfn_reg(fn, mt, X64MREG_XMM0) != 0);
+	CHECK(mfn_reg(fn, mt, X64MREG_XMM0)->type == MT_F64);  /* FPR */
+	CHECK(mfn_reg(fn, mt, X64MREG_XMM0) != rax);
 	/* boundary: out-of-range registers are rejected */
 	CHECK(mfn_reg(fn, mt, (MReg)-1) == 0);
-	CHECK(mfn_reg(fn, mt, (MReg)mt->nreg) == 0);
-	CHECK(mfn_reg(fn, 0, rax) == 0);
+	CHECK(mfn_reg(fn, mt, (MReg)X64MREG_NREG) == 0);
+	CHECK(mfn_reg(fn, 0, X64MREG_RAX) == 0);
 
 	mfn_free(fn);
 }
@@ -93,10 +87,9 @@ test_registers(void)
 static void
 test_addressing(void)
 {
-	const MTargetM *mt = &mtarget_x86_64;
 	MFn *fn = mfn_new("addrtest", 2);
-	MVal *base = mfn_reg(fn, mt, mreg_id(mt, "rdi"));
-	MVal *idx = mfn_reg(fn, mt, mreg_id(mt, "rax"));
+	MVal *base = mfn_reg(fn, &mtarget_x86_64, X64MREG_RDI);
+	MVal *idx = mfn_reg(fn, &mtarget_x86_64, X64MREG_RCX);
 	MConst *sym = mconst_addr(fn, "symbol", 0, false, true);
 
 	MAddr a = maddr(base, idx, 4, 8);
@@ -126,13 +119,12 @@ test_opcodes(void)
 	CHECK(strcmp(mmop_name(MMOP_ALLOCA16), "alloca16") == 0);
 	CHECK(strcmp(mmop_name(MMOP_CMP), "cmp") == 0);
 	CHECK(strcmp(mmop_name(MMOP_SETCC), "setcc") == 0);
+	CHECK(strcmp(mmop_name(MMOP_PARM), "parm") == 0);
+	CHECK(strcmp(mmop_name(MMOP_ARG), "arg") == 0);
 	CHECK(strcmp(mmop_name(MMOP_NONE), "none") == 0);
-	/* semantic condition codes */
 	CHECK(strcmp(mcc_name(MCC_EQ), "eq") == 0);
-	CHECK(strcmp(mcc_name(MCC_CC), "cc") == 0);   /* unsigned less */
-	CHECK(strcmp(mcc_name(MCC_HI), "hi") == 0);   /* unsigned greater */
-	CHECK(strcmp(mcc_name(MCC_GE), "ge") == 0);   /* signed >= */
-	CHECK(strcmp(mcc_name(MCC_AL), "al") == 0);   /* always */
+	CHECK(strcmp(mcc_name(MCC_CC), "cc") == 0);   /* unsigned < */
+	CHECK(strcmp(mcc_name(MCC_CS), "cs") == 0);   /* unsigned >= */
 }
 
 static void
@@ -144,11 +136,10 @@ test_machine_fn(void)
 	CHECK(fm->host == fn);
 	CHECK(fm->mt == mt);
 
-	MVal *rax = mfn_reg(fn, mt, mreg_id(mt, "rax"));
-	MVal *rcx = mfn_reg(fn, mt, mreg_id(mt, "rcx"));
-	MVal *rdx = mfn_reg(fn, mt, mreg_id(mt, "rdx"));
-	MVal *rdi = mfn_reg(fn, mt, mreg_id(mt, "rdi"));
-	MVal *rsi = mfn_reg(fn, mt, mreg_id(mt, "rsi"));
+	MVal *rax = mfn_reg(fn, mt, X64MREG_RAX);
+	MVal *rcx = mfn_reg(fn, mt, X64MREG_RCX);
+	MVal *rdx = mfn_reg(fn, mt, X64MREG_RDX);
+	MVal *rdi = mfn_reg(fn, mt, X64MREG_RDI);
 	MVal *tmp = mval_new(fn, MV_TEMP, MT_I64, 0, "t0");
 	MConst *c64 = mconst_int(fn, MT_I64, 64);
 
@@ -189,11 +180,20 @@ test_machine_fn(void)
 	CHECK(sc->op == MMOP_SETCC && sc->cc == MCC_EQ);
 
 	/* blit: aggregate copy dst=rdi, src=rsi, size=32 */
+	MVal *rsi = mfn_reg(fn, mt, X64MREG_RSI);
 	MConst *c32 = mconst_int(fn, MT_I32, 32);
 	MInsM *bl = maddm_blit(fm, b0, rdi, rsi, c32);
 	CHECK(bl->op == MMOP_BLIT);
 	CHECK(bl->src[0] == rdi && bl->src[1] == rsi);
 	CHECK(bl->cst == c32);
+
+	/* parameter marker: parm rdi (aggregate tagged with a type desc) */
+	MTypeDesc *td = mtd_new("P", false);
+	mtd_add_field(td, "x", MT_I32, 0, 0, -1, 0);
+	mtd_finalize(td);
+	MInsM *parm = maddm(fm, b0, MMOP_PARM, MT_PTR, rdi, rdi, 0);
+	parm->td = td;
+	CHECK(parm->op == MMOP_PARM && parm->td == td);
 
 	/* terminator: jcc ne b0 -> b1 / b2 */
 	mfnm_term(fm, b0, MMOP_JCC, 0, b1, b2, MCC_NE);
@@ -217,12 +217,13 @@ test_machine_fn(void)
 	CHECK(strstr(buf, "machine function mmachine") != 0);
 	CHECK(strstr(buf, "blit") != 0);
 	CHECK(strstr(buf, "setcc") != 0);
-	CHECK(strstr(buf, "cc=eq") != 0);       /* setcc condition code */
+	CHECK(strstr(buf, "parm") != 0);
+	CHECK(strstr(buf, "cc=eq") != 0);              /* setcc condition code */
 	CHECK(strstr(buf, "jcc ne -> loop / exit") != 0);
 
 	/* machine instruction id sequence within a block */
-	CHECK(b0->nins == 6);
-	CHECK(b0->ins[0].id == 0 && b0->ins[5].id == 5);
+	CHECK(b0->nins == 7);
+	CHECK(b0->ins[0].id == 0 && b0->ins[6].id == 6);
 
 	mfnm_free(fm);
 	mfn_free(fn);

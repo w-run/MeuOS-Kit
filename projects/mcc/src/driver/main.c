@@ -127,6 +127,13 @@ mcc_main(int argc, char *argv[])
 	extern int g_use_mir;
 	g_use_mir = getenv("MCC_USE_MIR") ? atoi(getenv("MCC_USE_MIR")) : 1;
 
+	/* P2+ MIR-native backend: when set, each function is additionally run
+	 * through the machine backend (MFnM + ABI lowering) as a parallel
+	 * validation of the ported ABI rules.  The bridge path remains the
+	 * default asm producer until P3-P5 replace it. */
+	extern int g_use_mir_backend;
+	g_use_mir_backend = getenv("MCC_MIR_BACKEND") ? atoi(getenv("MCC_MIR_BACKEND")) : 0;
+
 	/* Language: 0 = C (default for mcc), 1 = C++ (default for m++).
 	 * The m++ driver sets g_lang=1 before calling mcc_main; file suffix
 	 * detection (.cc/.cpp) also switches to C++ in the input loop. */

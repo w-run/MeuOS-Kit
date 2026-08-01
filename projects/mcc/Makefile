@@ -257,25 +257,38 @@ check-la64: check-loongarch64
 # they compile standalone here so the MIR core can be validated before it
 # is wired into the C frontend (see the MIR-first task line in .issues/).
 MIR_SRCS := $(wildcard src/mir/*.c)
-check-mir-types: $(MIR_SRCS)
+# machine.c references mtarget_x86_64.abi (mfnm_abi_x86_64), so every
+# standalone link of the mir/ sources also needs the x86_64 machine ABI.
+MABI_SRC := src/target/x86_64/x86_64_mabi.c
+check-mir-types: $(MIR_SRCS) $(MABI_SRC)
 	@mkdir -p build
 	$(HOST_CC) $(CFLAGS) -Iinclude -o build/mir_test $^ test/mir/mir_test.c
 	./build/mir_test
 
-check-mir-passes: $(MIR_SRCS)
+check-mir-passes: $(MIR_SRCS) $(MABI_SRC)
 	@mkdir -p build
 	$(HOST_CC) $(CFLAGS) -Iinclude -o build/mir_pass_test $^ test/mir/pass_test.c
 	./build/mir_pass_test
 
 # P1 machine layer: physical registers as MVal, addressing modes, machine
 # opcodes (MMOP), machine functions/blocks/instructions (MFnM/MBlkM/MInsM).
-# Independent of the LIR/QBE pipeline — links mir/ sources only.
-check-mir-machine: $(MIR_SRCS)
+# Independent of the LIR/QBE pipeline — links mir/ sources only (plus the
+# x86_64 machine ABI, which mtarget_x86_64.abi points at).
+check-mir-machine: $(MIR_SRCS) src/target/x86_64/x86_64_mabi.c
 	@mkdir -p build
 	$(HOST_CC) $(CFLAGS) -Iinclude -o build/machine_test \
 		test/mir/machine_test.c src/mir/build.c src/mir/mir_util.c \
-		src/mir/machine.c src/mir/print.c
+		src/mir/machine.c src/mir/print.c src/target/x86_64/x86_64_mabi.c
 	./build/machine_test
+
+# P2 x86-64 SysV ABI lowering on MIR-native data: eightbyte classification
+# (mabi_typclass/mabi_argsclass) + selpar/selcall/selret lowering.
+check-mir-abi: $(MIR_SRCS) src/target/x86_64/x86_64_mabi.c
+	@mkdir -p build
+	$(HOST_CC) $(CFLAGS) -Iinclude -o build/mabi_test \
+		test/mir/mabi_test.c src/mir/build.c src/mir/mir_util.c \
+		src/mir/machine.c src/mir/print.c src/target/x86_64/x86_64_mabi.c
+	./build/mabi_test
 
 # MIR → LIR bridge end-to-end: build a fib MFn, run MIR passes, bridge to
 # the LIR Fn, run the LIR pipeline and emit x86-64 asm.  Assemble+link+run
@@ -296,7 +309,7 @@ check-mir-bridge: $(BIN)
 	@$(HOST_CC) -o /tmp/bridge_fib /tmp/bridge_main.o /tmp/bridge_fib.s
 	@/tmp/bridge_fib; echo "bridge exit=$$? (0 = fib(5)==5)"
 
-check-mir: check-mir-types check-mir-passes check-mir-machine check-mir-bridge
+check-mir: check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir-bridge
 
 # m++ C++ lexer unit tests (C.1.2: keyword classification).
 CPP_SRCS := $(wildcard src/cpp/lex/*.c)
@@ -307,7 +320,7 @@ check-cpp-lex: $(CPP_SRCS)
 
 check-cpp: check-cpp-lex
 
-.PHONY: all clean check check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-bridge check-mir check-cpp-lex check-cpp
+.PHONY: all clean check check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir-bridge check-mir check-cpp-lex check-cpp
 
 # chibicc community functional test suite (C11/C23 conformance).
 # Runs test/community/chibicc/run.sh against the MeuOS sysroot.
