@@ -333,9 +333,28 @@ mabi_selpar(MFnM *fm, MOut *o, MInsM *parms, int n, uint32_t *vafa)
 		mout(o, MMOP_MOV, p->dtype, dst, rarg(fm, &ni, &ns, isf), 0);
 	}
 
-	/* record varargs register usage for selvastart */
+	/* varargs: spill every possible argument register into the
+	 * reg_save_area (rbp-176) so va_arg can read them later */
+	if (fm->host && fm->host->vararg) {
+		MVal *rbp = reg(fm, X64MREG_RBP);
+		static const int gprs[6] = {
+			X64MREG_RDI, X64MREG_RSI, X64MREG_RDX, X64MREG_RCX,
+			X64MREG_R8, X64MREG_R9,
+		};
+		for (int i = 0; i < 6; i++)
+			mout_addr(o, MMOP_STORE, MT_I64, 0,
+			          maddr(rbp, 0, 1, -176 + i * 8),
+			          reg(fm, gprs[i]));
+		for (int i = 0; i < 8; i++)
+			mout_addr(o, MMOP_STORE, MT_F64, 0,
+			          maddr(rbp, 0, 1, -176 + 48 + i * 16),
+			          reg(fm, X64MREG_XMM0 + i));
+	}
+
+	/* record varargs register usage for selvastart: packed offsets of
+	 * the first unused GPR/XMM (counts of registers already consumed) */
 	(void)pa;
-	*vafa = ((6 - ni) << 4) | ((8 - ns) << 8);
+	*vafa = (ni << 4) | (ns << 8);
 	free(ac);
 }
 
@@ -586,16 +605,23 @@ mabi_block(MFnM *fm, MBlkM *b, uint32_t start, MOut *o)
 void
 mfnm_abi_x86_64(MFnM *fm)
 {
-	for (MBlkM *b = fm->link; b; b = b->link) {
+	/* lower the entry block first: selpar computes fm->vafa which the
+	 * varargs vastart expansion in later blocks depends on */
+	if (fm->start) {
+		MBlkM *b = fm->start;
 		MOut o = {.b = b};
 		uint32_t start = 0;
-
-		if (b == fm->start) {
-			while (start < b->nins && b->ins[start].op == MMOP_PARM)
-				start++;
-			mabi_selpar(fm, &o, b->ins, start, &fm->vafa);
-		}
+		while (start < b->nins && b->ins[start].op == MMOP_PARM)
+			start++;
+		mabi_selpar(fm, &o, b->ins, start, &fm->vafa);
 		mabi_block(fm, b, start, &o);
+		mout_end(&o);
+	}
+	for (MBlkM *b = fm->link; b; b = b->link) {
+		if (b == fm->start)
+			continue;
+		MOut o = {.b = b};
+		mabi_block(fm, b, 0, &o);
 		mout_end(&o);
 	}
 }

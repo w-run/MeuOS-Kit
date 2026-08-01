@@ -163,11 +163,19 @@ int32_t
 mreg_slot_alloc(MRegSlots *s, MType t)
 {
 	if (t == MT_I32 || t == MT_F32) {
+		/* 4-byte slot: never inside an 8-byte slot (8-byte slots occupy
+		 * two units); place it strictly below the deepest 8-byte slot */
 		s->slot4 += 1;
-		if (s->slot4 > s->slot8)
-			s->slot8 = s->slot4;
+		if (s->slot4 <= s->slot8)
+			s->slot4 = s->slot8 + 1;
 		return -s->slot4 * 4;
 	}
+	/* 8-byte slot: two units, aligned even, always deeper than the
+	 * 4-byte cursor */
+	if (s->slot8 < s->slot4)
+		s->slot8 = s->slot4;
+	if (s->slot8 & 1)
+		s->slot8 += 1;
 	s->slot8 += 2;
 	return -s->slot8 * 4;
 }
@@ -175,7 +183,8 @@ mreg_slot_alloc(MRegSlots *s, MType t)
 int32_t
 mreg_slot_total(const MRegSlots *s)
 {
-	return s->slot8 * 4;   /* 4-byte units -> bytes (caller aligns to 16) */
+	int32_t d = s->slot8 > s->slot4 ? s->slot8 : s->slot4;
+	return d * 4;   /* bytes (caller aligns to 16) */
 }
 
 /* ---- Phase C: linear scan ------------------------------------------------ */
@@ -264,6 +273,7 @@ mreg_scan(MFnM *fm, MRegCtx *ctx)
 {
 	const MTargetM *mt = fm->mt;
 	MRegSlots slots = { 0 };
+	bool vararg = fm->host && fm->host->vararg;
 	MRegPool pc[2] = { 0 }, px[2] = { 0 };
 	mreg_pool_build(mt, pc, px);
 
@@ -343,7 +353,9 @@ mreg_scan(MFnM *fm, MRegCtx *ctx)
 							continue;
 						chosen = r;
 					}
-				if (chosen < 0)
+				/* varargs keep the rbp-176 reg_save_area clean: no
+				 * callee-saved registers, call-crossing values spill */
+				if (chosen < 0 && !vararg)
 					for (uint32_t p = 0; p < pc[cls].nreg && chosen < 0; p++) {
 						int r = pc[cls].regs[p];
 						if (busy[r] || fixed_conflict(&fixed[r], s, e))
@@ -361,8 +373,9 @@ mreg_scan(MFnM *fm, MRegCtx *ctx)
 				act[nact].v = iv->v;
 				nact++;
 			} else {
-				/* spill to a stack slot */
-				iv->v->slot = mreg_slot_alloc(&slots, iv->v->type);
+				/* spill to a stack slot below the reg_save_area */
+				iv->v->slot = mreg_slot_alloc(&slots, iv->v->type) -
+				              (vararg ? 176 : 0);
 				iv->v->reg = -1;
 			}
 		}

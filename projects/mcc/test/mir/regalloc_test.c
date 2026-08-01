@@ -78,17 +78,19 @@ static void
 test_slots(void)
 {
 	MRegSlots s = { 0 };
-	/* slot4/slot8 double cursor: 4-byte values pack into slot4 slots */
-	int32_t a = mreg_slot_alloc(&s, MT_I64);   /* 8B -> -8   (slot8=2) */
-	int32_t b = mreg_slot_alloc(&s, MT_I32);   /* 4B -> -4   (slot4=1) */
-	int32_t c = mreg_slot_alloc(&s, MT_I64);   /* 8B -> -16  (slot8=4) */
-	int32_t d = mreg_slot_alloc(&s, MT_F32);   /* 4B -> -8   (slot4=2) */
+	/* 4-byte slots always sit strictly below the deepest 8-byte slot */
+	int32_t a = mreg_slot_alloc(&s, MT_I64);   /* 8B -> -8  (units 2,1) */
+	int32_t b = mreg_slot_alloc(&s, MT_I32);   /* 4B -> -12 (below a) */
+	int32_t c = mreg_slot_alloc(&s, MT_I64);   /* 8B -> -24 (units 6,5) */
+	int32_t d = mreg_slot_alloc(&s, MT_F32);   /* 4B -> -28 (below c) */
 	CHECK(a == -8);
-	CHECK(b == -4);
-	CHECK(c == -16);
-	CHECK(d == -8);
-	CHECK(s.slot4 <= s.slot8);                 /* invariant */
-	CHECK(mreg_slot_total(&s) == 16);
+	CHECK(b == -12);
+	CHECK(c == -24);
+	CHECK(d == -28);
+	/* 4-byte slots never share a range with an 8-byte slot */
+	CHECK(!(b >= c - 8 && b < c));            /* b not inside c's slot */
+	CHECK(!(d >= a - 8 && d < a));            /* d not inside a's slot */
+	CHECK(mreg_slot_total(&s) == 28);
 
 	/* 8-byte only: contiguous downward */
 	MRegSlots s2 = { 0 };

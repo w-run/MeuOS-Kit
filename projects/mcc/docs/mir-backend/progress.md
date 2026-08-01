@@ -32,7 +32,8 @@
 | P5a | postra 冗余 mov 消除 + slot4/8 双游标复采 | ✅ | 33385f9, ab12b95, 5581557 |
 | P5b | hint 优先级（ABI 边界寄存器倾向） | ✅ | ab12b95 |
 | P6a | 聚合函数新后端（去 fallback：BLIT/sret/参数 pad） | ✅ | 待提交 |
-| P6b | varargs 新后端（selvaarg/selvastart 机器层） | 🔄 进行中 | — |
+| P6b | varargs 新后端（基础 vastart/vaarg 已实现，fallback 保留待调） | 🔄 WIP | — |
+| P6c | 通用修复：slot4/8 无重叠打包 + 帧 rsp 16 对齐 | ✅ | 并入 P6a |
 | P4c | regalloc：线性扫描（mreg_scan，调用点双池） | ⏳ | — |
 | P4d | regalloc：phi 边移动（机器层 phi 已降级为 pred copy） | ⏳ | — |
 | P4e | regalloc 接管 emit（寄存器感知 + prologue/epilogue 保存 callee-saved） | ⏳ | — |

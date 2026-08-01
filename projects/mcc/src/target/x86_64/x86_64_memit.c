@@ -871,9 +871,27 @@ mfnm_emit_x86_64(MFnM *fm, FILE *f)
 	g_mt = fm->mt;
 	int extra = assign_extra_slots(fm);
 	nfp = 0;   /* fresh float pool per function */
-	g_alloca_cur = -(fm->slot + extra);   /* allocas go below spill slots */
+	/* allocas go below spill slots and (for varargs) the reg_save_area */
+	g_alloca_cur = -(fm->slot + extra +
+	                 ((fm->host && fm->host->vararg) ? 176 : 0));
 
-	int framesize = (fm->slot + extra + alloca_total(fm) + 15) & ~15;
+	/* frame covers spill slots + allocas, plus (for varargs) the 176-byte
+	 * reg_save_area that the allocas sit below.  Align so that every call
+	 * sees rsp % 16 == 0: after push rbp + the callee-saved pushes the
+	 * stack offset depends on the entry alignment (callers leave rsp % 16
+	 * == 8, but libc enters main with rsp % 16 == 0). */
+	int framesize = fm->slot + extra + alloca_total(fm) +
+	                ((fm->host && fm->host->vararg) ? 176 : 0);
+	int csaves = 0;
+	for (int i = 0; fm->mt->rclob && fm->mt->rclob[i] >= 0; i++)
+		if ((fm->regsused >> fm->mt->rclob[i]) & 1)
+			csaves++;
+	/* every function (including main, as launched by the host runtime)
+	 * enters with rsp % 16 == 8 after the call pushed the return address */
+	int entryoff = 8;
+	int postpush = (entryoff - 8 * (csaves + 1)) & 15;   /* after pushes */
+	int align = (16 - postpush) & 15;
+	framesize = (framesize + align + 15) & ~15;
 
 	fprintf(f, ".text\n");
 	if (fm->name)
