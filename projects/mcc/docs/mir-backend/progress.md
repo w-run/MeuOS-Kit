@@ -62,7 +62,10 @@ check-mir 全绿；bridge 路径 0 回归。
 - **P5 第二步完成**：hello 走 MCC_MIR_BACKEND=1 新后端独立编译运行正确。
 - **P5 第三步（postra）完成**：emit_mov 直接 mov（reg↔reg、reg↔mem 不经
   %rax 中转、同寄存器 no-op），add 指令量下降。
-- **P5 第四步（hint + slot4/8 复采）**：进行中。
+- **P5 第四步（hint + slot4/8 复采）完成**：slot4/slot8 双游标恢复
+  （i32/f32 用 4 字节槽，emit 对 4 字节槽用 movl/movss），栈帧缩小；
+  regalloc 分配优先 MVal.hint 寄存器（机制就位，暂未设置 hint 源）。
+- **P5 全部完成**。MIR 新后端独立可用（hello 走 MCC_MIR_BACKEND=1）。
 - MCC_MIR_BACKEND=1：标量函数走完整新后端（isel + ABI + regalloc + emit），
   聚合/varargs/TLS/VLA 动态 alloca fallback 到 bridge。
 

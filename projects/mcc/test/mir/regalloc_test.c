@@ -78,17 +78,17 @@ static void
 test_slots(void)
 {
 	MRegSlots s = { 0 };
-	/* all slots are 8-byte aligned (movq-accessed) */
-	int32_t a = mreg_slot_alloc(&s, MT_I64);   /* -> -8 */
-	int32_t b = mreg_slot_alloc(&s, MT_I32);   /* -> -16 */
-	int32_t c = mreg_slot_alloc(&s, MT_I64);   /* -> -24 */
-	int32_t d = mreg_slot_alloc(&s, MT_F32);   /* -> -32 */
+	/* slot4/slot8 double cursor: 4-byte values pack into slot4 slots */
+	int32_t a = mreg_slot_alloc(&s, MT_I64);   /* 8B -> -8   (slot8=2) */
+	int32_t b = mreg_slot_alloc(&s, MT_I32);   /* 4B -> -4   (slot4=1) */
+	int32_t c = mreg_slot_alloc(&s, MT_I64);   /* 8B -> -16  (slot8=4) */
+	int32_t d = mreg_slot_alloc(&s, MT_F32);   /* 4B -> -8   (slot4=2) */
 	CHECK(a == -8);
-	CHECK(b == -16);
-	CHECK(c == -24);
-	CHECK(d == -32);
+	CHECK(b == -4);
+	CHECK(c == -16);
+	CHECK(d == -8);
 	CHECK(s.slot4 <= s.slot8);                 /* invariant */
-	CHECK(mreg_slot_total(&s) == 32);
+	CHECK(mreg_slot_total(&s) == 16);
 
 	/* 8-byte only: contiguous downward */
 	MRegSlots s2 = { 0 };

@@ -154,14 +154,19 @@ mreg_intervals(MFnM *fm, MRegCtx *ctx)
 
 /* MRegSlots is declared in mir.h. */
 
-/* Allocate a stack slot, returning the negative rbp offset.  All slots are
- * 8-byte aligned: the emitter uses movq for values regardless of width, so
- * a 4-byte value in a 4-byte slot would overrun.  (The slot4/slot8 packing
- * refinement is deferred until the emitter is width-aware.) */
+/* Allocate a stack slot, returning the negative rbp offset.  4-byte values
+ * (i32/f32) get slot4 slots accessed with movl/movss; everything else gets
+ * 8-byte slot8 slots.  The slot8 cursor absorbs slot4 so an 8-byte value
+ * never straddles a 4-byte slot's alignment (QBE spill.c invariant). */
 int32_t
 mreg_slot_alloc(MRegSlots *s, MType t)
 {
-	(void)t;
+	if (t == MT_I32 || t == MT_F32) {
+		s->slot4 += 1;
+		if (s->slot4 > s->slot8)
+			s->slot8 = s->slot4;
+		return -s->slot4 * 4;
+	}
 	s->slot8 += 2;
 	return -s->slot8 * 4;
 }
@@ -310,8 +315,22 @@ mreg_scan(MFnM *fm, MRegCtx *ctx)
 			bool cross = interval_crosses_call(s, e, calls, ncalls);
 			int chosen = -1;
 			if (!iv->phislot) {
+				/* hinted register first (MVal.hint, e.g. ABI boundaries) */
+				int hint = iv->v->hint;
+				if (hint >= 0 && !busy[hint] &&
+				    !fixed_conflict(&fixed[hint], s, e)) {
+					bool inpool = false;
+					for (uint32_t p = 0; p < px[cls].nreg; p++)
+						if (px[cls].regs[p] == hint)
+							inpool = true;
+					for (uint32_t p = 0; p < pc[cls].nreg; p++)
+						if (pc[cls].regs[p] == hint)
+							inpool = true;
+					if (inpool)
+						chosen = hint;
+				}
 				/* caller-saved pool first for non-call-crossing values */
-				if (!cross)
+				if (chosen < 0 && !cross)
 					for (uint32_t p = 0; p < px[cls].nreg && chosen < 0; p++) {
 						int r = px[cls].regs[p];
 						if (busy[r] || fixed_conflict(&fixed[r], s, e))
@@ -364,6 +383,96 @@ mreg_scan(MFnM *fm, MRegCtx *ctx)
 		free(fixed[r].pos);
 }
 
+/* ---- postra: redundant-move elimination ---------------------------------- */
+
+static bool
+mval_is_src(MVal *v, MInsM *in)
+{
+	return v && (in->src[0] == v || in->src[1] == v || in->src[2] == v ||
+	             in->addr.base == v || in->addr.index == v);
+}
+
+/* Is v used by anything other than the skipped positions pi/ci of curb? */
+static bool
+mval_used_anywhere(MFnM *fm, MBlkM *curb, uint32_t pi, uint32_t ci, MVal *v)
+{
+	for (MBlkM *b = fm->link; b; b = b->link) {
+		for (uint32_t j = 0; j < b->nins; j++) {
+			if (b == curb && (j == pi || j == ci))
+				continue;
+			if (mval_is_src(v, &b->ins[j]))
+				return true;
+		}
+		if (b->term.src[0] == v || b->term.addr.base == v ||
+		    b->term.addr.index == v)
+			return true;
+	}
+	return false;
+}
+
+static bool
+same_mov_loc(MVal *a, MVal *b)
+{
+	if (!a || !b)
+		return false;
+	int reg_a = -1, reg_b = -1, slot_a = -1, slot_b = -1;
+	if ((a->kind == MV_TEMP && a->reg >= 0) || a->kind == MV_REG)
+		reg_a = a->reg;
+	else if (a->kind == MV_TEMP && a->slot != -1)
+		slot_a = a->slot;
+	if ((b->kind == MV_TEMP && b->reg >= 0) || b->kind == MV_REG)
+		reg_b = b->reg;
+	else if (b->kind == MV_TEMP && b->slot != -1)
+		slot_b = b->slot;
+	if (reg_a >= 0 && reg_b >= 0)
+		return reg_a == reg_b;
+	if (slot_a != -1 && slot_b != -1)
+		return slot_a == slot_b;
+	return false;
+}
+
+/* Drop redundant MOVs after allocation: same-location moves, dead
+ * destinations, and a -> b ; c -> b chains (b used only by the second). */
+static bool
+mreg_postra(MFnM *fm)
+{
+	bool changed = false;
+	for (MBlkM *b = fm->link; b; b = b->link) {
+		uint32_t w = 0;
+		for (uint32_t i = 0; i < b->nins; i++) {
+			MInsM *in = &b->ins[i];
+			bool drop = false;
+			if (in->op == MMOP_MOV && in->dst && in->src[0]) {
+				MVal *d = in->dst, *s = in->src[0];
+				if (same_mov_loc(d, s)) {
+					drop = true;   /* mov %r, %r */
+				} else if (w > 0 && b->ins[w - 1].op == MMOP_MOV &&
+				           b->ins[w - 1].dst == s &&
+				           b->ins[w - 1].src[0] != d &&
+				           !mval_used_anywhere(fm, b, w - 1, i, s)) {
+					/* chain: b = a; c = b  ->  c = a */
+					in->src[0] = b->ins[w - 1].src[0];
+					w--;
+					changed = true;
+					if (same_mov_loc(d, in->src[0]))
+						drop = true;
+				} else if (d->kind == MV_TEMP && d->reg >= 0 &&
+				           !mval_used_anywhere(fm, b, i, i, d)) {
+					/* destination never read again */
+					drop = true;
+				}
+			}
+			if (drop) {
+				changed = true;
+				continue;
+			}
+			b->ins[w++] = *in;
+		}
+		b->nins = w;
+	}
+	return changed;
+}
+
 /* ---- allocation entry ------------------------------------------------------ */
 
 void
@@ -386,6 +495,7 @@ mfnm_regalloc(MFnM *fm)
 	mreg_intervals(fm, &ctx);
 	mreg_loop_extend(fm, &ctx);
 	mreg_scan(fm, &ctx);
+	mreg_postra(fm);
 
 	if (getenv("MCC_DEBUG_MBE")) {
 		fprintf(stderr, "> regalloc %s:\n", fm->name ? fm->name : "?");

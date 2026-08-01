@@ -303,20 +303,37 @@ mov_to_rax(FILE *f, MVal *v, MConst *c)
 	case MV_CONST:
 		mov_to_rax(f, 0, v->con);
 		break;
+	case MV_TEMP:
+		if (v->type == MT_I32 && v->reg < 0) {
+			/* 4-byte spill slot: movl zero-extends */
+			fputs("\tmovl\t", f);
+			emit_mval(f, v);
+			fputs(", %eax\n", f);
+		} else {
+			fputs("\tmovq\t", f);
+			emit_mval(f, v);
+			fputs(", %rax\n", f);
+		}
+		break;
 	default:
-		fputs("\tmovq\t", f);
-		emit_mval(f, v);
-		fputs(", %rax\n", f);
+		fputs("\tmovq\t$0, %rax\n", f);
 		break;
 	}
 }
 
-/* Store %rax to dst (register or virtual slot). */
+/* Store %rax to dst (register or virtual slot).  4-byte values use movl
+ * so a slot4 spill slot is not overrun. */
 static void
 rax_to_dst(FILE *f, MVal *dst)
 {
 	if (!dst)
 		return;
+	if (dst->kind == MV_TEMP && dst->type == MT_I32 && dst->reg < 0) {
+		fputs("\tmovl\t%eax, ", f);
+		emit_mval(f, dst);
+		fputs("\n", f);
+		return;
+	}
 	if (dst->kind == MV_REG)
 		fprintf(f, "\tmovq\t%%rax, %%%s\n", dst->name);
 	else if (dst->kind == MV_TEMP) {
@@ -404,13 +421,15 @@ emit_mov(FILE *f, MVal *dst, MVal *src, MConst *c, MType dtype)
 			fprintf(f, "\tmovq\t%%%s, %%%s\n", src->name, dst->name);
 		return;   /* same-register copy is a no-op */
 	}
-	if (src && src->kind == MV_REG && dst && dst->kind == MV_TEMP) {
+	if (src && src->kind == MV_REG && dst && dst->kind == MV_TEMP &&
+	    dst->type != MT_I32) {
 		fprintf(f, "\tmovq\t%%%s, ", src->name);
 		emit_mval(f, dst);
 		fputs("\n", f);
 		return;
 	}
-	if (src && src->kind == MV_TEMP && dst && dst->kind == MV_REG) {
+	if (src && src->kind == MV_TEMP && dst && dst->kind == MV_REG &&
+	    src->type != MT_I32) {
 		fputs("\tmovq\t", f);
 		emit_mval(f, src);
 		fprintf(f, ", %%%s\n", dst->name);
