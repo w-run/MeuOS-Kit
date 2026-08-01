@@ -171,6 +171,45 @@ structdecl(struct scope *s, struct structbuilder *b)
 	if (staticassert(s))
 		return;
 	attr(NULL, 0);
+	/* C++ destructor: `~Class() { ... }`.  Detect it before declspecs
+	 * (which does not understand '~').  Lowered to `Class_dtor` via
+	 * cpp_define_method; the member is registered under a `~Class` marker
+	 * name so cpp_has_dtor can find it without colliding with a user
+	 * method literally named `dtor`. */
+	extern int g_lang;
+	if (g_lang == 1 && tok.kind == TBNOT) {
+		const char *tag = b->type->u.structunion.tag;
+		next(); /* consume '~' */
+		if (tok.kind >= TIDENT && tag &&
+		    strcmp(tokenstr(tok.kind), tag) == 0) {
+			struct type *ct;
+			char *marker;
+			next(); /* consume the class name */
+			expect(TLPAREN, "after destructor name");
+			ct = mktype(TYPEFUNC, 0);
+			ct->qual = QUALNONE;
+			ct->base = &typevoid;
+			ct->u.func.isvararg = false;
+			ct->u.func.params = NULL;
+			ct->u.func.nparam = 0;
+			expect(TRPAREN, "after destructor parameters");
+			marker = xmalloc(strlen(tag) + 2);
+			sprintf(marker, "~%s", tag);
+			mt.type = ct;
+			mt.qual = QUALNONE;
+			mt.expr = NULL;
+			name = marker;
+			width = -1;
+			{
+				extern void cpp_define_method(struct scope *,
+				    struct type *, const char *, const char *);
+				cpp_define_method(s, ct, "dtor", tag);
+			}
+			addmember(b, mt, name, align, width);
+			return;
+		}
+		error(&tok.loc, "expected class name after '~'");
+	}
 	base = declspecs(s, NULL, NULL, &align);
 	if (!base.type)
 		error(&tok.loc, "no type in struct member declaration");

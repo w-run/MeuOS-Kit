@@ -645,6 +645,87 @@ cpp_emit_base_ctor(struct func *f)
 	}
 }
 
+/* Does class `t` define a destructor?  Destructors are registered under a
+ * `~Class` marker member name (see structdecl's TILDE branch). */
+bool
+cpp_has_dtor(struct type *t)
+{
+	struct member *m;
+
+	if (!t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
+		return false;
+	for (m = t->u.structunion.members; m; m = m->next)
+		if (m->name && m->name[0] == '~' &&
+		    m->type && m->type->kind == TYPEFUNC)
+			return true;
+	return false;
+}
+
+/* Emit a call to the destructor of local class-typed `d` at end of scope
+ * (`Class_dtor(&obj)`).  No-op for non-class types or classes without a
+ * destructor.  Returns whether a call was emitted. */
+bool
+cpp_emit_dtor(struct func *f, struct decl *d)
+{
+	extern struct value *funcexpr(struct func *, struct expr *);
+	extern struct scope filescope;
+
+	struct type *t = d->type;
+	const char *tag;
+	char mname[256];
+	struct decl *fd;
+	struct expr *fn, *obj, *call;
+
+	if (!f || !d || d->u.obj.storage != SDAUTO)
+		return false;
+	tag = t ? t->u.structunion.tag : NULL;
+	if (!tag || !cpp_has_dtor(t))
+		return false;
+	snprintf(mname, sizeof mname, "%s_dtor", tag);
+	fd = scopegetdecl(t->scope ? t->scope : &filescope, mname, true);
+	if (!fd || fd->kind != DECLFUNC)
+		return false;
+
+	fn = mkexpr(EXPRIDENT, fd->type, NULL);
+	fn->u.ident.decl = fd;
+	fn = decay(fn); /* &Class_dtor */
+
+	obj = mkexpr(EXPRIDENT, d->type, NULL);
+	obj->qual = d->qual;
+	obj->lvalue = true;
+	obj->u.ident.decl = d;
+	obj = mkunaryexpr(TBAND, obj); /* &obj */
+
+	call = mkexpr(EXPRCALL, &typevoid, fn);
+	call->u.call.args = obj;
+	call->u.call.nargs = 1;
+	funcexpr(f, call);
+	d->dtor_done = true;
+	return true;
+}
+
+/* Emit destructor calls for all local class objects declared in scope `s`
+ * when a block exits (reverse declaration order not yet implemented).
+ * Called by stmt()'s compound-statement branch before delscope. */
+void
+cpp_emit_scope_dtors(struct func *f, struct scope *s)
+{
+	size_t i;
+
+	if (!f || !s)
+		return;
+	/* len is zero-initialized by mkscope; cap/keys/vals are uninitialized
+	 * until the first scopeputdecl (mapinit), so an empty scope must not
+	 * be swept by cap. */
+	if (s->decls.len == 0)
+		return;
+	for (i = 0; i < s->decls.cap; i++) {
+		struct decl *d = s->decls.keys[i].str ? s->decls.vals[i].p : NULL;
+		if (d && d->kind == DECLOBJECT && !d->dtor_done)
+			cpp_emit_dtor(f, d);
+	}
+}
+
 const char *
 cpp_mangled_name(struct type *t, const char *name, char *buf, size_t bufsz)
 {

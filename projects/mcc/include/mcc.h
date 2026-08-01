@@ -201,6 +201,9 @@ struct decl {
 	char *asmname;
 	bool defined;
 	bool tentative;
+	/* C++: destructor already emitted for this local object (so a
+	 * return-statement run and the block-exit run don't double-destroy). */
+	bool dtor_done;
 	struct decl *next;
 
 	union {

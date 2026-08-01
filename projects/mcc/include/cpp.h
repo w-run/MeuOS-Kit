@@ -32,6 +32,9 @@ const char *cpp_mangled_name(struct type *t, const char *name,
 struct expr *cpp_member_ident(struct scope *s, const char *name);
 bool cpp_has_ctor(struct type *t, const char *tag);
 bool cpp_emit_default_ctor(struct func *f, struct decl *d);
+bool cpp_has_dtor(struct type *t);
+bool cpp_emit_dtor(struct func *f, struct decl *d);
+void cpp_emit_scope_dtors(struct func *f, struct scope *s);
 bool cpp_same_class_context(struct type *t);
 bool cpp_member_accessible(struct type *t, struct member *m);
 bool cpp_is_derived(struct type *t, struct type *base);

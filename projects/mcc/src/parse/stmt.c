@@ -138,6 +138,14 @@ stmt(struct func *f, struct scope *s)
 			if (!label(f, s) && !decl(s, f))
 				stmt(f, s);
 		}
+		/* C++: run destructors for local class objects on block exit. */
+		{
+			extern int g_lang;
+			extern void cpp_emit_scope_dtors(struct func *,
+			    struct scope *);
+			if (g_lang == 1)
+				cpp_emit_scope_dtors(f, s);
+		}
 		s = delscope(s);
 		next();
 		break;
@@ -395,6 +403,16 @@ stmt(struct func *f, struct scope *s)
 			delexpr(e);
 		} else {
 			v = NULL;
+		}
+		/* C++: run destructors of this scope's local class objects before
+		 * returning (they are marked dtor_done so the block-exit sweep
+		 * does not run them again). */
+		{
+			extern int g_lang;
+			extern void cpp_emit_scope_dtors(struct func *,
+			    struct scope *);
+			if (g_lang == 1)
+				cpp_emit_scope_dtors(f, s);
 		}
 		funcret(f, v);
 		expect(TSEMICOLON, "after 'return' statement");
