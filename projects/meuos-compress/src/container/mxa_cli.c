@@ -1,4 +1,5 @@
-/* mxa_cli.c — mz mxa CLI 工具 */
+/* mxa_cli.c — mz CLI 工具 (mxa 归档 + hash 校验和) */
+#include "mz.h"
 #include "mxa.h"
 #include "mz_ed25519.h"
 #include <stdio.h>
@@ -8,7 +9,13 @@
 
 static void usage(const char *prog) { (void)prog; fprintf(stderr,
     "\n"
-    "Commands:\n"
+    "Top-level commands:\n"
+    "  mxa <subcommand> [options]       MxA 归档操作\n"
+    "  hash <algo> <files...>           计算校验和\n"
+    "    algo: crc32 | adler32\n"
+    "    无文件参数时从 stdin 读取\n"
+    "\n"
+    "MxA subcommands:\n"
     "  create  <archive.mxa> <files...>  创建 MxA 归档\n"
     "    -l, --level N     压缩级别 (1-9, 默认 6)\n"
     "    -k, --key HEX     加密密钥 (64 hex 字符, 启用加密)\n"
@@ -454,6 +461,107 @@ static int cmd_keygen(int argc, char *argv[]) {
     return 0;
 }
 
+/* ---- hash 子命令 ---- */
+
+static int
+hash_file_stream(const char *path, int algo, int check_mode)
+{
+    FILE *f;
+    int is_stdin = 0;
+
+    if (!path || strcmp(path, "-") == 0) {
+        f = stdin;
+        is_stdin = 1;
+    } else {
+        f = fopen(path, "rb");
+        if (!f) {
+            fprintf(stderr, "mz: cannot open '%s': %s\n", path, strerror(errno));
+            return 1;
+        }
+    }
+
+    /* 增量式计算 */
+    uint8_t buf[65536];
+    size_t n;
+    uint32_t result;
+
+    if (algo == 0) {
+        /* CRC32 */
+        uint32_t crc = mz_crc32_init();
+        while ((n = fread(buf, 1, sizeof(buf), f)) > 0)
+            crc = mz_crc32_update(crc, buf, n);
+        result = mz_crc32_final(crc);
+    } else {
+        /* Adler32 */
+        uint32_t adler = mz_adler32_init();
+        while ((n = fread(buf, 1, sizeof(buf), f)) > 0)
+            adler = mz_adler32_update(adler, buf, n);
+        result = mz_adler32_final(adler);
+    }
+
+    if (!is_stdin) fclose(f);
+
+    const char *algo_name = (algo == 0) ? "crc32" : "adler32";
+    const char *display = is_stdin ? "-" : (path ? path : "-");
+
+    if (check_mode) {
+        /* BSD-style: algo(sum) = filename */
+        printf("%s(%08x) = %s\n", algo_name, result, display);
+    } else {
+        /* GNU-style: sum  filename */
+        printf("%08x  %s\n", result, display);
+    }
+    return 0;
+}
+
+static int cmd_hash(int argc, char *argv[]) {
+    if (argc < 1) {
+        fprintf(stderr, "usage: mz hash <crc32|adler32> [files...]\n"
+                        "       (no files → read from stdin)\n");
+        return 1;
+    }
+
+    const char *algo = argv[0];
+    int algo_id;
+
+    if (strcmp(algo, "crc32") == 0 || strcmp(algo, "CRC32") == 0)
+        algo_id = 0;
+    else if (strcmp(algo, "adler32") == 0 || strcmp(algo, "Adler32") == 0)
+        algo_id = 1;
+    else {
+        fprintf(stderr, "mz hash: unknown algorithm '%s'\n", algo);
+        fprintf(stderr, "available: crc32, adler32\n");
+        return 1;
+    }
+
+    int check_mode = 0;
+    int file_start = 1;
+
+    /* Parse options */
+    while (file_start < argc && argv[file_start][0] == '-') {
+        if (strcmp(argv[file_start], "--tag") == 0) {
+            check_mode = 1;
+            file_start++;
+        } else if (strcmp(argv[file_start], "-") == 0) {
+            break; /* stdin marker */
+        } else {
+            fprintf(stderr, "mz hash: unknown option '%s'\n", argv[file_start]);
+            return 1;
+        }
+    }
+
+    int nfiles = argc - file_start;
+    if (nfiles == 0)
+        return hash_file_stream(NULL, algo_id, check_mode);
+
+    int rc = 0;
+    for (int i = file_start; i < argc; i++) {
+        int r = hash_file_stream(argv[i], algo_id, check_mode);
+        if (r != 0) rc = r;
+    }
+    return rc;
+}
+
 int mxa_cli_main(int argc, char *argv[]) {
     if (argc < 2) { usage(argv[0]); return 1; }
 
@@ -488,9 +596,12 @@ int main(int argc, char *argv[]) {
         usage(argv[0]);
         return 0;
     }
-    if (strcmp(argv[1], "mxa") != 0) {
-        fprintf(stderr, "Try '%s --help' for more info.\n", argv[0]);
-        return 1;
+    if (strcmp(argv[1], "mxa") == 0) {
+        return mxa_cli_main(argc - 1, argv + 1);
     }
-    return mxa_cli_main(argc - 1, argv + 1);
+    if (strcmp(argv[1], "hash") == 0) {
+        return cmd_hash(argc - 2, argv + 2);
+    }
+    fprintf(stderr, "Try '%s --help' for more info.\n", argv[0]);
+    return 1;
 }

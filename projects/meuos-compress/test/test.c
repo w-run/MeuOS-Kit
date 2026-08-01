@@ -216,7 +216,7 @@ int main(void)
         free(text);
     }
 
-        /* Test 6: Error handling */
+    /* Test 6: Error handling */
     uint8_t bad_data[4] = {0, 0, 0, 0};
     ret = mz_decompress(bad_data, 4, &decompressed, &decomp_len,
                         MZ_CODEC_LZ77);
@@ -224,7 +224,110 @@ int main(void)
 
     ret = mz_compress(text, text_len, &compressed, &comp_len, 999, 1);
     TEST("bad codec returns error", ret == MZ_ERR_CODEC);
-    
+
+    /* Test 7: CRC-32 checksum — known test vectors */
+    {
+        /* CRC-32 of empty string = 0 */
+        uint32_t crc = mz_crc32("", 0);
+        TEST("crc32(empty)=0", crc == 0x00000000u);
+
+        /* CRC-32 of "123456789" = 0xCBF43926 (IEEE 802.3, zlib test vector) */
+        crc = mz_crc32("123456789", 9);
+        TEST("crc32('123456789')=0xCBF43926", crc == 0xCBF43926u);
+
+        /* CRC-32 of "abc" = 0x352441C2 */
+        crc = mz_crc32("abc", 3);
+        TEST("crc32('abc')=0x352441C2", crc == 0x352441C2u);
+
+        /* CRC-32 of "a" = 0xE8B7BE43 */
+        crc = mz_crc32("a", 1);
+        TEST("crc32('a')=0xE8B7BE43", crc == 0xE8B7BE43u);
+
+        /* Incremental vs one-shot consistency */
+        const char *long_str =
+            "The quick brown fox jumps over the lazy dog. "
+            "Lorem ipsum dolor sit amet, consectetur adipiscing elit.";
+        size_t slen = strlen(long_str);
+        uint32_t crc_one = mz_crc32(long_str, slen);
+
+        uint32_t crc_inc = mz_crc32_init();
+        /* Feed in chunks of 16 bytes */
+        size_t off = 0;
+        while (off < slen) {
+            size_t chunk = slen - off > 16 ? 16 : slen - off;
+            crc_inc = mz_crc32_update(crc_inc, long_str + off, chunk);
+            off += chunk;
+        }
+        crc_inc = mz_crc32_final(crc_inc);
+        TEST("crc32 incremental == one-shot", crc_inc == crc_one);
+
+        /* Split at arbitrary boundary */
+        size_t mid = slen / 3;
+        crc_inc = mz_crc32_init();
+        crc_inc = mz_crc32_update(crc_inc, long_str, mid);
+        crc_inc = mz_crc32_update(crc_inc, long_str + mid, slen - mid);
+        crc_inc = mz_crc32_final(crc_inc);
+        TEST("crc32 split boundary == one-shot", crc_inc == crc_one);
+
+        printf("  crc32('123456789') = %08x (expected CBF43926)\n", mz_crc32("123456789", 9));
+    }
+
+    /* Test 8: Adler-32 checksum — known test vectors */
+    {
+        /* Adler-32 of empty string = 1 (s1=1, s2=0) */
+        uint32_t adler = mz_adler32("", 0);
+        TEST("adler32(empty)=1", adler == 0x00000001u);
+
+        /* Adler-32 of "Wikipedia" = 0x11E60398 */
+        adler = mz_adler32("Wikipedia", 9);
+        TEST("adler32('Wikipedia')=0x11E60398", adler == 0x11E60398u);
+
+        /* Adler-32 of "123456789" */
+        adler = mz_adler32("123456789", 9);
+        TEST("adler32('123456789')=0x091E01DE", adler == 0x091E01DEu);
+
+        /* Incremental vs one-shot consistency */
+        const char *long_str =
+            "The quick brown fox jumps over the lazy dog. "
+            "Lorem ipsum dolor sit amet, consectetur adipiscing elit.";
+        size_t slen = strlen(long_str);
+        uint32_t adler_one = mz_adler32(long_str, slen);
+
+        uint32_t adler_inc = mz_adler32_init();
+        size_t off = 0;
+        while (off < slen) {
+            size_t chunk = slen - off > 16 ? 16 : slen - off;
+            adler_inc = mz_adler32_update(adler_inc, long_str + off, chunk);
+            off += chunk;
+        }
+        adler_inc = mz_adler32_final(adler_inc);
+        TEST("adler32 incremental == one-shot", adler_inc == adler_one);
+
+        /* Large data wrap test — ensure NMAX boundary is correct */
+        {
+            size_t big_sz = 60000;  /* > NMAX (5552) */
+            uint8_t *big = (uint8_t *)malloc(big_sz);
+            for (size_t i = 0; i < big_sz; i++)
+                big[i] = (uint8_t)(i & 0xFF);
+
+            uint32_t a_one = mz_adler32(big, big_sz);
+            uint32_t a_inc = mz_adler32_init();
+            off = 0;
+            while (off < big_sz) {
+                size_t chunk = big_sz - off > 5552 ? 5552 : big_sz - off;
+                a_inc = mz_adler32_update(a_inc, big + off, chunk);
+                off += chunk;
+            }
+            a_inc = mz_adler32_final(a_inc);
+            TEST("adler32 large NMAX boundary == one-shot", a_inc == a_one);
+
+            free(big);
+        }
+
+        printf("  adler32('Wikipedia') = %08x (expected 11E60398)\n",
+               mz_adler32("Wikipedia", 9));
+    }
+
     printf("\n%d test(s) FAILED\n", failures);
     return failures > 0 ? 1 : 0;
 }

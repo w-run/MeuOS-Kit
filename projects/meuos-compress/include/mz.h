@@ -111,4 +111,23 @@ int mz_solid_start(struct mz_solid_ctx **ctx, int level);
 int mz_solid_add(struct mz_solid_ctx *ctx, const void *data, size_t len,
                  void *output, size_t *out_len);
 void mz_solid_finish(struct mz_solid_ctx *ctx);
+
+/* ===================================================================
+ * Checksum / Hash — CRC-32 (IEEE 802.3) / Adler-32 (RFC 1950)
+ * =================================================================== */
+
+/* 一次性计算 */
+uint32_t mz_crc32(const void *data, size_t len);
+uint32_t mz_adler32(const void *data, size_t len);
+
+/* 增量式 CRC-32 */
+uint32_t mz_crc32_init(void);
+uint32_t mz_crc32_update(uint32_t crc, const void *data, size_t len);
+uint32_t mz_crc32_final(uint32_t crc);
+
+/* 增量式 Adler-32 */
+uint32_t mz_adler32_init(void);
+uint32_t mz_adler32_update(uint32_t adler, const void *data, size_t len);
+uint32_t mz_adler32_final(uint32_t adler);
+
 #endif
