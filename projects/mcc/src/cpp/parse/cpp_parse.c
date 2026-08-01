@@ -197,3 +197,28 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname)
 	}
 	d->defined = true;
 }
+
+/* C++ member-function lookup helpers.  A function member is registered in
+ * the struct/union member list by addmember (C++ mode); these helpers let
+ * the postfix-expression lowering detect and mangle member calls. */
+bool
+cpp_is_member_function(struct type *t, const char *name)
+{
+	struct member *m;
+	if (!t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
+		return false;
+	for (m = t->u.structunion.members; m; m = m->next)
+		if (m->name && strcmp(m->name, name) == 0 &&
+		    m->type && m->type->kind == TYPEFUNC)
+			return true;
+	return false;
+}
+
+const char *
+cpp_mangled_name(struct type *t, const char *name, char *buf, size_t bufsz)
+{
+	snprintf(buf, bufsz, "%s_%s",
+	         (t && t->u.structunion.tag) ? t->u.structunion.tag : "anon",
+	         name);
+	return buf;
+}

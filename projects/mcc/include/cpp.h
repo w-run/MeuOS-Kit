@@ -21,3 +21,10 @@ void cpp_parse_translation_unit(void);
 enum cpp_tokenkind cpp_tok_kind(void);
 
 #endif /* MCC_CPP_H */
+
+/* C++ member-function lowering helpers (src/cpp/parse/cpp_parse.c).
+ * cpp_is_member_function: is `name` a function member of struct `t`?
+ * cpp_mangled_name: returns `Class_method` mangled name in buf. */
+bool cpp_is_member_function(struct type *t, const char *name);
+const char *cpp_mangled_name(struct type *t, const char *name,
+    char *buf, size_t bufsz);
