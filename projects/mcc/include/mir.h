@@ -321,6 +321,10 @@ struct MFn {
 	int *paramty;        /* per-parameter aggregate typ[] index, -1 if scalar */
 	MVal **reg;          /* physical register table (indexed by MReg), NULL until first mfn_reg() */
 	uint32_t nreg;       /* capacity of reg[] (MREG_NREG once allocated) */
+	MTypeDesc *rettyd;   /* aggregate return MTypeDesc (func_to_mir), NULL if scalar */
+	void **tdkey;        /* frontend struct type* -> MTypeDesc cache (fe_to_mtd) */
+	MTypeDesc **tdcache;
+	uint32_t ntdc;
 	int32_t slot;        /* total stack slot bytes */
 	int32_t salign;      /* stack alignment */
 	bool vararg;

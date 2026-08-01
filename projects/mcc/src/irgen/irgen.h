@@ -132,6 +132,9 @@ ptrclass(void)
  */
 static inline void emitname(struct value *v) { (void)v; }
 void emittype(struct type *t);
+/* reverse map: VALUE_TYPE value id (LIR typ[] index) -> frontend type
+ * (registered by emittype; used by func_to_mir's fe_to_mtd) */
+struct type *typeforvalue(unsigned id);
 
 /* --- Internal helpers shared across irgen/*.c --------------------------- */
 

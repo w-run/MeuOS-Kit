@@ -232,6 +232,8 @@ void mfn_free(MFn *fn)
 	}
 	free(fn->typ);
 	free(fn->param);
+	free(fn->tdkey);
+	free(fn->tdcache);
 	free((char *)fn->name);
 	m_arena_free(fn);
 	free(fn);

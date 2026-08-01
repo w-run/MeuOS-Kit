@@ -25,6 +25,19 @@
  * `typ[idx]`, never `ntyp`, so a private counter is fine. */
 static ulong ntyp;
 
+/* Reverse mapping: VALUE_TYPE value id (== typ[] index) -> frontend struct
+ * type*.  The MIR type system (func_to_mir's fe_to_mtd) needs the frontend
+ * type to build a MTypeDesc when it sees an MV_TYPE value; the forward
+ * pointer lives here (emittype sets t->value = v).  Same lifetime as ntyp. */
+static struct type **typebyid;
+static ulong ntypebyid, ctypebyid;
+
+struct type *
+typeforvalue(unsigned id)
+{
+	return id < ntypebyid ? typebyid[id] : 0;
+}
+
 /* Map a frontend `data` class char ('b','h','w','l','s','d') to a IR Field
  * type enum. These match parsefields' switch in qbe/parse.c L977-983. */
 static int
@@ -119,6 +132,16 @@ emittype(struct type *t)
 	idx = ntyp;            /* save: typ[] may be realloc'd by recursion below */
 	ntyp++;                /* reserve the slot */
 	t->value = v;
+
+	/* record the reverse mapping for func_to_mir's MIR type system */
+	if ((ulong)v->id >= ctypebyid) {
+		ulong nn = (v->id + 16) & ~15UL;
+		typebyid = realloc(typebyid, nn * sizeof *typebyid);
+		while (ctypebyid < nn)
+			typebyid[ctypebyid++] = 0;
+	}
+	typebyid[v->id] = t;
+	ntypebyid = ntyp;
 
 	/* recursively register nested aggregate members BEFORE building this
 	 * type's fields, so FTyp indices are valid. C disallows a struct

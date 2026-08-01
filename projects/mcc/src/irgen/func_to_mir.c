@@ -37,6 +37,101 @@ fe_cls_to_mtype(int c)
 	}
 }
 
+/* ---- P3a: frontend aggregate type -> MTypeDesc -------------------------
+ * Builds the MIR aggregate type tree (MField with explicit offsets, arrays
+ * as MTypeDesc::is_array, nested aggregates recursed) so the MIR machine
+ * layer can run the SysV ABI without the LIR typ[] table.  The MV_TYPE
+ * value keeps its id (frontend/LIR typ[] index) for the bridge. */
+
+/* frontend scalar type -> MIR scalar MType (array wrappers already peeled) */
+static MType
+fe_scalar_mtype(struct type *t)
+{
+	switch (t->kind) {
+	case TYPEBOOL:
+	case TYPECHAR:    return MT_I8;
+	case TYPESHORT:   return MT_I16;
+	case TYPEINT:
+	case TYPEENUM:    return MT_I32;
+	case TYPELONG:
+	case TYPELLONG:   return MT_I64;
+	case TYPEPOINTER:
+	case TYPENULLPTR: return MT_PTR;
+	case TYPEFLOAT:   return MT_F32;
+	case TYPEDOUBLE:  return MT_F64;
+	default:          return MT_NONE;
+	}
+}
+
+static MTypeDesc *
+fe_to_mtd(MFn *fn, struct type *t)
+{
+	/* cache: same frontend type shares one MTypeDesc (also bounds the
+	 * recursion for nested aggregates) */
+	for (uint32_t i = 0; i < fn->ntdc; i++)
+		if (fn->tdkey[i] == t)
+			return fn->tdcache[i];
+
+	MTypeDesc *td;
+	if (t->kind == TYPEARRAY) {
+		struct type *el = t->base;
+		uint64_t esz = el->size ? el->size : 1;
+		uint64_t nelem = t->size / esz;
+		if (el->kind == TYPESTRUCT || el->kind == TYPEUNION ||
+		    el->kind == TYPEARRAY) {
+			td = mtd_array(fe_to_mtd(fn, el), nelem);
+		} else {
+			/* scalar element: manual desc carrying elem_type */
+			td = calloc(1, sizeof *td);
+			td->is_array = true;
+			td->elem_type = fe_scalar_mtype(el);
+			td->nelem = nelem;
+			td->size = t->size;
+			td->align = el->align ? el->align : 1;
+		}
+	} else {
+		td = mtd_new(t->u.structunion.tag, t->kind == TYPEUNION);
+		td->size = t->size;
+		td->align = t->align ? t->align : 1;
+		td->is_incomplete = t->incomplete;
+		for (struct member *m = t->u.structunion.members; m; m = m->next) {
+			struct type *sub = m->type;
+			if (!sub || sub->kind == TYPEFUNC)
+				continue;   /* C++ member functions occupy no storage */
+			if (sub->kind == TYPEARRAY ||
+			    sub->kind == TYPESTRUCT || sub->kind == TYPEUNION) {
+				/* array or nested aggregate member */
+				mtd_add_field(td, m->name, MT_AGG,
+				              fe_to_mtd(fn, sub),
+				              (int64_t)m->offset, -1, 0);
+			} else {
+				MType st = fe_scalar_mtype(sub);
+				if (st == MT_NONE)
+					continue;
+				if (m->bits.before || m->bits.after) {
+					/* bit-field: storage unit type + bit offset/width */
+					int unitbits = (int)(sub->size * 8);
+					int width = unitbits - m->bits.before - m->bits.after;
+					mtd_add_field(td, m->name, st, 0,
+					              (int64_t)m->offset,
+					              m->bits.before, width);
+				} else {
+					mtd_add_field(td, m->name, st, 0,
+					              (int64_t)m->offset, -1, 0);
+				}
+			}
+		}
+	}
+	mtd_finalize(td);
+	mfn_addtype(fn, td);
+	fn->tdkey = realloc(fn->tdkey, (fn->ntdc + 1) * sizeof *fn->tdkey);
+	fn->tdcache = realloc(fn->tdcache, (fn->ntdc + 1) * sizeof *fn->tdcache);
+	fn->tdkey[fn->ntdc] = t;
+	fn->tdcache[fn->ntdc] = td;
+	fn->ntdc++;
+	return td;
+}
+
 /* Translate a frontend op (enum instkind) to a MIR MOP. */
 static MOP
 fe_to_mir_op(int op)
@@ -204,15 +299,17 @@ fe_val(MFn *fn, struct value *v, MVal **tab)
 		m = mval_const(fn, MT_F64, c);
 		break;
 	}
-	case VALUE_TYPE:
-		m = mval_new(fn, MV_TYPE, MT_AGG, 0,
+	case VALUE_TYPE: {
+		/* the id stays the frontend/LIR typ[] index (bridge emits
+		 * TYPE(idx)); td carries the MIR MTypeDesc for the machine
+		 * layer (P3a). */
+		struct type *ft = typeforvalue(v->id);
+		m = mval_new(fn, MV_TYPE, MT_AGG,
+		             ft ? fe_to_mtd(fn, ft) : 0,
 		             v->u.name ? v->u.name : "type");
-		/* carry the frontend/LIR typ[] index so the bridge can emit
-		 * TYPE(idx) for Ocall/Oargc/Oparc/Jretc — amd64_sysv_abi
-		 * classifies the aggregate and lowers to SysV (RAX:RDX for
-		 * ≤16-byte returns, hidden sret pointer otherwise). */
 		m->id = v->id;
 		break;
+	}
 	case VALUE_LABEL:
 		m = mval_new(fn, MV_LABEL, MT_NONE, 0,
 		             v->u.name ? v->u.name : "label");
@@ -268,9 +365,11 @@ func_to_mir(struct func *f, int optlevel, bool export)
 	else if (f->type->base && f->type->base->value) {
 		/* aggregate return: MT_AGG + the typ[] index.  The bridge
 		 * emits Jretc and selret packs the value into RAX:RDX (or
-		 * copies to the hidden sret pointer) per SysV. */
+		 * copies to the hidden sret pointer) per SysV.  rettyd carries
+		 * the MIR MTypeDesc for the machine-layer backend. */
 		fn->rettype = MT_AGG;
 		fn->retty = f->type->base->value->id;
+		fn->rettyd = fe_to_mtd(fn, f->type->base);
 	} else if (f->type->base && !f->type->base->value) {
 		struct irtype qt = irtype(f->type->base);
 		MType t = fe_cls_to_mtype(qt.base);
@@ -309,8 +408,10 @@ func_to_mir(struct func *f, int optlevel, bool export)
 		if (p->type->value) {
 			/* aggregate parameter: the param temp is a Kl pointer to
 			 * a stack pad; Oparc copies it in.  Record the typ[]
-			 * index for the bridge. */
+			 * index for the bridge and the MTypeDesc for the machine
+			 * layer. */
 			mv->type = MT_AGG;
+			mv->td = fe_to_mtd(fn, p->type);
 			fn->paramty[pi] = p->type->value->id;
 		} else {
 			struct irtype qt = irtype(p->type);

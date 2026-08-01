@@ -70,34 +70,8 @@ mref_val(MRef r)
 void
 mfnm_backend_x86_64(MFn *mf)
 {
-	/* Aggregate parameter/return types are carried in func_to_mir only as
-	 * frontend type ids (MV_TYPE.id = LIR typ[] index); the MIR value
-	 * table has no MTypeDesc for them yet (func_to_mir does not fill
-	 * mf->typ).  The machine ABI needs MField layouts, so aggregate
-	 * functions are skipped here until P3 wires MTypeDesc into the MIR
-	 * type system.  Scalar functions run the full convert + ABI path. */
-	bool agg = mf->rettype == MT_AGG;
-	if (!agg)
-		for (uint32_t j = 0; j < mf->nparam && !agg; j++)
-			if (mf->paramty && mf->paramty[j] >= 0)
-				agg = true;
-	if (!agg)
-		for (MBlk *mb = mf->link; mb && !agg; mb = mb->link)
-			for (uint32_t k = 0; k < mb->nins && !agg; k++) {
-				MIns *in = &mb->ins[k];
-				if ((in->op == MOP_ARG && in->src[0].val &&
-				     in->src[0].val->kind == MV_TYPE) ||
-				    (in->op == MOP_CALL && in->src[1].val &&
-				     in->src[1].val->kind == MV_TYPE))
-					agg = true;
-			}
-	if (agg) {
-		fprintf(stderr, "[mbe] skip %s (aggregate; MIR type info is P3)\n",
-		        mf->name);
-		return;
-	}
 	MFnM *fm = mfnm_new(mf, &mtarget_x86_64, mf->name);
-	fm->retty = 0;
+	fm->retty = mf->rettyd;   /* aggregate return type (P3a) */
 
 	/* blocks in forward order */
 	uint32_t nblk = 0;
@@ -118,25 +92,19 @@ mfnm_backend_x86_64(MFn *mf)
 
 			switch (in->op) {
 			case MOP_PAR: {
-				/* locate the aggregate marker: paramty[k] */
-				int pty = -1;
-				for (uint32_t j = 0; j < mf->nparam; j++)
-					if (mf->param[j] == dst) {
-						pty = mf->paramty ? mf->paramty[j] : -1;
-						break;
-					}
+				/* dst->td carries the aggregate MTypeDesc (P3a) */
 				MInsM *mi = maddm(fm, b, MMOP_PARM, dst ? dst->type : MT_NONE,
 				                  dst, 0, 0);
-				if (pty >= 0)
-					mi->td = mf->typ[pty];
+				mi->td = dst ? dst->td : 0;
 				break;
 			}
 			case MOP_ARG: {
 				MInsM *mi = maddm(fm, b, MMOP_ARG, in->dtype,
 				                  mref_val(in->src[0]), 0, 0);
 				if (in->src[0].val && in->src[0].val->kind == MV_TYPE) {
-					/* aggregate: src[1] is the source pointer */
-					mi->td = mf->typ[in->src[0].val->id];
+					/* aggregate: src[1] is the source pointer; td is
+					 * the MV_TYPE's MTypeDesc (P3a) */
+					mi->td = in->src[0].val->td;
 					mi->src[0] = mref_val(in->src[1]);
 				}
 				break;
@@ -145,7 +113,7 @@ mfnm_backend_x86_64(MFn *mf)
 				MInsM *mi = maddm(fm, b, MMOP_CALL, in->dtype, dst,
 				                  mref_val(in->src[0]), 0);
 				if (in->src[1].val && in->src[1].val->kind == MV_TYPE)
-					mi->td = mf->typ[in->src[1].val->id];
+					mi->td = in->src[1].val->td;
 				break;
 			}
 			case MOP_LOAD: {
