@@ -97,6 +97,7 @@ static struct scope *g_cpp_qual_ns;
 static void cpp_emit_base_ctor(struct func *f);
 static void cpp_mangle_type(struct type *t, char *buf, size_t bufsz);
 static void flush_pending_methods(void);
+static void cpp_emit_global_ctors(void);
 static void emit_base_ctors_for(struct func *f, struct type *classt,
                                 struct expr *thisp);
 static bool has_base(struct type *t);
@@ -629,6 +630,7 @@ cpp_parse_translation_unit(void)
 		}
 	}
 	emittentativedefns();
+	cpp_emit_global_ctors();
 }
 
 /* --- member function lowering (C.2.3) -------------------------------- */
@@ -654,6 +656,82 @@ struct cpp_pending_method {
 static struct cpp_pending_method *g_cpp_pending_methods;
 static struct cpp_pending_method **g_cpp_pending_methods_end =
     &g_cpp_pending_methods;
+
+/* Global class-typed objects with user constructors; their construction
+ * calls are collected and emitted into __mxx_global_var_init (wired to
+ * the .init_array section so the runtime runs them before main). */
+struct cpp_global_ctor {
+	struct decl *d;
+	struct cpp_global_ctor *next;
+};
+static struct cpp_global_ctor *g_cpp_global_ctors;
+static struct cpp_global_ctor **g_cpp_global_ctors_end =
+    &g_cpp_global_ctors;
+
+void
+cpp_record_global_ctor(struct decl *d)
+{
+	struct cpp_global_ctor *g;
+	const char *tag;
+
+	if (!d || !d->type || (d->type->kind != TYPESTRUCT && d->type->kind != TYPEUNION))
+		return;
+	tag = d->type->u.structunion.tag;
+	if (!tag || !cpp_has_ctor(d->type, tag))
+		return;
+	g = xmalloc(sizeof *g);
+	g->d = d;
+	g->next = NULL;
+	*g_cpp_global_ctors_end = g;
+	g_cpp_global_ctors_end = &g->next;
+}
+
+/* Emit `void __mxx_global_var_init(void)` that runs every recorded
+ * global constructor, then place its address in .init_array. */
+static void
+cpp_emit_global_ctors(void)
+{
+	extern struct scope filescope;
+	extern struct decl *mkdecl(char *, enum declkind, struct type *,
+	    enum typequal, enum linkage);
+	extern struct func *mkfunc(struct decl *, char *, struct type *,
+	    struct scope *);
+	extern void delfunc(struct func *);
+	extern void emitfunc(struct func *, bool);
+	extern void funcret(struct func *, struct value *);
+	extern struct scope *delscope(struct scope *);
+	extern void tokpush(struct token *, size_t);
+
+	struct cpp_global_ctor *g;
+	struct decl *d;
+	struct scope *fs;
+	struct func *f;
+	struct type *vt;
+
+	if (!g_cpp_global_ctors)
+		return;
+
+	vt = mktype(TYPEFUNC, 0);
+	vt->base = &typevoid;
+	vt->u.func.params = NULL;
+	vt->u.func.nparam = 0;
+
+	d = mkdecl("__mxx_global_var_init", DECLFUNC, vt, QUALNONE, LINKEXTERN);
+	d->value = mkglobal(d);
+	fs = mkscope(&filescope);
+	f = mkfunc(d, d->name, vt, fs);
+	for (g = g_cpp_global_ctors; g; g = g->next)
+		cpp_emit_ctor_call(f, g->d, NULL);
+	funcret(f, NULL);
+	emitfunc(f, true);
+	delfunc(f);
+	delscope(fs);
+
+	/* register in .init_array so the runtime calls it before main */
+	printf(".section .init_array,\"aw\"\n");
+	printf(".balign 8\n");
+	printf(".quad __mxx_global_var_init\n");
+}
 
 /* Parse one method body (replayed token stream is positioned at '{'). */
 static void
@@ -1366,7 +1444,7 @@ cpp_emit_ctor_call(struct func *f, struct decl *d, struct expr *args)
 	struct expr *fn, *obj, *call, *a, **end;
 	size_t n = 0;
 
-	if (!f || !d || d->u.obj.storage != SDAUTO)
+	if (!f || !d)
 		return;
 	tag = t ? t->u.structunion.tag : NULL;
 	if (!tag || !cpp_has_ctor(t, tag)) {

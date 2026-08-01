@@ -260,6 +260,12 @@ decl(struct scope *s, struct func *f)
 				break;
 			} else if (d->linkage != LINKNONE && d->u.obj.storage == SDSTATIC) {
 				if (!d->defined && !d->tentative) {
+					/* C++ global class object: defer construction to
+					 * __mxx_global_var_init (runs before main). */
+					extern int g_lang;
+					extern void cpp_record_global_ctor(struct decl *);
+					if (g_lang == 1)
+						cpp_record_global_ctor(d);
 					d->tentative = true;
 					*tentativedefnsend = d;
 					tentativedefnsend = &d->next;
@@ -277,9 +283,15 @@ decl(struct scope *s, struct func *f)
 				    struct decl *);
 				extern void cpp_emit_ctor_call(struct func *,
 				    struct decl *, struct expr *);
+				extern void cpp_record_global_ctor(struct decl *);
 				if (g_lang == 1) {
 					if (ctor_call)
 						cpp_emit_ctor_call(f, d, ctor_args);
+					else if (d->u.obj.storage == SDSTATIC &&
+					    d->defined && !f)
+						/* global object with a ctor: defer the
+						 * construction call to __mxx_global_var_init */
+						cpp_record_global_ctor(d);
 					else
 						cpp_emit_default_ctor(f, d);
 				}
