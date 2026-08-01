@@ -140,6 +140,35 @@ primaryexpr(struct scope *s)
 		break;
 	default:
 		if (tok.kind >= TIDENT) {
+			/* C++ temporary-object construction: `Vec(expr)`.  A class
+			 * tag followed by '(' is a constructor call (the tag can't be
+			 * a function name). */
+			{
+				extern int g_lang;
+				extern struct expr *cpp_temp_construct(struct scope *,
+				    struct type *);
+				if (g_lang == 1) {
+					struct type *ct = scopegettag(s,
+					    tokenstr(tok.kind), 1);
+					if (ct && (ct->kind == TYPESTRUCT ||
+					           ct->kind == TYPEUNION)) {
+						struct token saved = tok;
+						next();
+						if (tok.kind == TLPAREN) {
+							/* tok is '(' already; the constructor
+							 * lowering consumes it */
+							e = cpp_temp_construct(s, ct);
+							if (e)
+								break;
+							tok = saved;
+						} else {
+							struct token cur = tok;
+							tokpush(&cur, 1);
+							tok = saved;
+						}
+					}
+				}
+			}
 			d = scopegetdecl(s, tokenstr(tok.kind), 1);
 			if (!d) {
 				/* `using namespace foo;` makes foo's members visible */

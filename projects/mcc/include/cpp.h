@@ -36,6 +36,7 @@ void cpp_mangled_name_args(struct type *t, const char *name,
     struct expr *args, char *buf, size_t bufsz);
 struct expr *cpp_member_ident(struct scope *s, const char *name);
 struct decl *cpp_lookup_visible(struct scope *s, const char *name);
+struct expr *cpp_temp_construct(struct scope *s, struct type *ct);
 extern struct type *g_cpp_member_class;
 extern const char *g_cpp_member_name;
 extern bool g_cpp_member_const;

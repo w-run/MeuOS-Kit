@@ -432,16 +432,17 @@ cpp_class_decl(struct scope *s)
 	next(); /* consume '}' */
 	g_cpp_class_parsing = false;
 
-	/* Phase two: layout is fixed, parse the buffered method bodies. */
-	flush_pending_methods();
-
-	/* Finalize: align the aggregate size up to its member alignment and
-	 * mark it complete, mirroring tagspec()'s struct branch. */
+	/* Finalize the layout BEFORE parsing method bodies: method bodies may
+	 * construct objects of this class (temporary `Vec(...)`) or use
+	 * members, so the type must be complete and sized. */
 	if (t->align < 0)
 		t->align = 0;
 	if (t->size)
 		t->size = ALIGNUP(t->size, t->align);
 	t->incomplete = false;
+
+	/* Phase two: layout is fixed, parse the buffered method bodies. */
+	flush_pending_methods();
 
 	/* trailing ';' after the class body */
 	if (tok.kind == TSEMICOLON)
@@ -798,6 +799,51 @@ cpp_try_operator_call(struct scope *s, struct expr *l, enum tokenkind op,
 	}
 	*out = call;
 	return true;
+}
+
+/* Construct a temporary class object: `Vec(expr)` lowers to allocating an
+ * anonymous temporary, running the constructor, and yielding the
+ * temporary as an lvalue expression.  Returns the expression (the
+ * temporary's value), or NULL if the class has no matching constructor. */
+struct expr *
+cpp_temp_construct(struct scope *s, struct type *ct)
+{
+	extern struct func *curfunc;
+	extern struct decl *mkdecl(char *, enum declkind, struct type *,
+	    enum typequal, enum linkage);
+	extern void funcinit(struct func *, struct decl *, struct init *,
+	    bool);
+
+	struct expr *args = NULL, **ae = &args;
+	struct expr *e;
+	struct decl *tmp;
+
+	if (!ct || (ct->kind != TYPESTRUCT && ct->kind != TYPEUNION))
+		return NULL;
+
+	next(); /* consume '(' */
+	while (tok.kind != TRPAREN) {
+		if (args)
+			expect(TCOMMA, "or ')' after constructor argument");
+		*ae = assignexpr(s);
+		ae = &(*ae)->next;
+	}
+	next(); /* consume ')' */
+
+	if (!curfunc)
+		return NULL;
+
+	/* anonymous temporary */
+	tmp = mkdecl("tmp", DECLOBJECT, ct, QUALNONE, LINKNONE);
+	tmp->u.obj.storage = SDAUTO;
+	funcinit(curfunc, tmp, NULL, false); /* allocate storage */
+	cpp_emit_ctor_call(curfunc, tmp, args);
+
+	e = mkexpr(EXPRIDENT, ct, NULL);
+	e->qual = QUALNONE;
+	e->lvalue = true;
+	e->u.ident.decl = tmp;
+	return e;
 }
 
 /* Is `t` the class whose method body is currently being parsed?  Inside a
