@@ -175,9 +175,37 @@ static uint32_t hash_bytes(const void *p, size_t n)
 
 static MConst *con_pool_find(MFn *fn, MConst *key)
 {
-	for (uint32_t i = 0; i < fn->ncon; i++)
-		if (fn->con[i]->hash == key->hash)
-			return fn->con[i];
+	for (uint32_t i = 0; i < fn->ncon; i++) {
+		MConst *c = fn->con[i];
+		if (c->hash != key->hash)
+			continue;
+		if (c->kind != key->kind || c->type != key->type)
+			continue;
+		switch (c->kind) {
+		case MC_INT:
+			if (c->u.i == key->u.i)
+				return c;
+			break;
+		case MC_FLT:
+			if (c->type == MT_F32) {
+				if (c->u.s == key->u.s)
+					return c;
+			} else {
+				if (c->u.d == key->u.d)
+					return c;
+			}
+			break;
+		case MC_ADDR:
+			if (c->u.addr.sym == key->u.addr.sym &&
+			    c->u.addr.off == key->u.addr.off &&
+			    c->u.addr.tls == key->u.addr.tls &&
+			    c->u.addr.isext == key->u.addr.isext)
+				return c;
+			break;
+		default:
+			return c;
+		}
+	}
 	return 0;
 }
 

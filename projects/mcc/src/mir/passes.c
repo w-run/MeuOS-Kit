@@ -105,6 +105,33 @@ mfold_const(MConst *res, MOP op, int w, MConst *cl, MConst *cr)
 	int64_t ls, rs;
 	uint64_t lu, ru;
 
+	/* single-operand int<->float conversions (before the integer branch,
+	 * which would otherwise intercept I2F since its source is MC_INT). */
+	if (op == MOP_I2F && cl && cl->kind == MC_INT) {
+		res->kind = MC_FLT;
+		res->type = MT_F64;
+		res->u.d = (double)cl->u.i;
+		return 0;
+	}
+	if (op == MOP_F2I && cl && cl->kind == MC_FLT) {
+		res->kind = MC_INT;
+		res->type = MT_I32;
+		if (cl->type == MT_F32)
+			res->u.i = (int32_t)cl->u.s;
+		else
+			res->u.i = (int32_t)cl->u.d;
+		return 0;
+	}
+	if (op == MOP_NEG && cl && cl->kind == MC_FLT) {
+		res->kind = MC_FLT;
+		res->type = cl->type;
+		if (cl->type == MT_F32)
+			res->u.s = -cl->u.s;
+		else
+			res->u.d = -cl->u.d;
+		return 0;
+	}
+
 	if (op >= MOP_CEQ && op <= MOP_CFGE) {
 		/* comparisons produce i32 0/1 */
 		int eq, lt, gt;
@@ -207,33 +234,6 @@ mfold_const(MConst *res, MOP op, int w, MConst *cl, MConst *cr)
 		return 0;
 	}
 
-	if (op == MOP_NEG && cl->kind == MC_FLT) {
-		res->kind = MC_FLT;
-		res->type = cl->type;
-		if (cl->type == MT_F32)
-			res->u.s = -cl->u.s;
-		else
-			res->u.d = -cl->u.d;
-		return 0;
-	}
-
-	/* single-operand int<->float conversions */
-	if (op == MOP_I2F && cl && cl->kind == MC_INT) {
-		res->kind = MC_FLT;
-		res->type = MT_F64;
-		res->u.d = (double)cl->u.i;
-		return 0;
-	}
-	if (op == MOP_F2I && cl && cl->kind == MC_FLT) {
-		res->kind = MC_INT;
-		res->type = MT_I32;
-		if (cl->type == MT_F32)
-			res->u.i = (int32_t)cl->u.s;
-		else
-			res->u.i = (int32_t)cl->u.d;
-		return 0;
-	}
-
 	return 1;
 }
 
@@ -326,27 +326,41 @@ msimp_block(MFn *fn, MBlk *b)
 			MConst cr;
 			MConst *cl = a0.con;
 			MConst *cright = a1.con;
-			if (!cright && in->op != MOP_NEG)
-				cright = mconst_int(fn, in->dtype, 0);
-			if (in->op == MOP_NEG && cl->kind == MC_FLT) {
-				if (mfold_const(&cr, MOP_NEG, w, cl, 0) == 0) {
-					map_set(tab, in->dst, (MRef){0});
-					map_set(tab, in->dst, MREF_CON(mconst_int(fn, cr.type, cr.u.i)));
-					removed++;
-					continue;
-				}
+			bool folded = false;
+			MRef fr;
+
+			if (in->op == MOP_NEG) {
+				MConst *z = mconst_int(fn, cl->type, 0);
+				if (mfold_const(&cr, MOP_NEG, w, cl, z) == 0)
+					folded = true;
+			} else if (in->op == MOP_I2F || in->op == MOP_F2I) {
+				/* single-operand conversions */
+				MConst *z = mconst_int(fn, MT_I64, 0);
+				if (mfold_const(&cr, in->op, w, cl, z) == 0)
+					folded = true;
+			} else {
+				if (!cright)
+					cright = mconst_int(fn, in->dtype, 0);
+				if (cright && mfold_const(&cr, in->op, w, cl, cright) == 0)
+					folded = true;
 			}
-			if (cright && mfold_const(&cr, in->op, w, cl, cright) == 0) {
+			if (folded) {
+				/* I2F folding produces a double; if the MIR destination
+				 * is f32, narrow the folded constant accordingly. */
+				if (in->op == MOP_I2F && cr.kind == MC_FLT &&
+				    in->dtype == MT_F32) {
+					cr.u.s = (float)cr.u.d;
+					cr.type = MT_F32;
+				}
 				/* folded: map dst -> constant */
-				MRef r;
 				if (cr.kind == MC_ADDR)
-					r = MREF_CON(mconst_addr(fn, cr.u.addr.sym, cr.u.addr.off,
+					fr = MREF_CON(mconst_addr(fn, cr.u.addr.sym, cr.u.addr.off,
 					                         cr.u.addr.tls, cr.u.addr.isext));
 				else if (cr.kind == MC_FLT)
-					r = MREF_CON(mconst_flt(fn, cr.type, cr.type == MT_F32 ? cr.u.s : cr.u.d));
+					fr = MREF_CON(mconst_flt(fn, cr.type, cr.type == MT_F32 ? cr.u.s : cr.u.d));
 				else
-					r = MREF_CON(mconst_int(fn, cr.type, cr.u.i));
-				map_set(tab, in->dst, r);
+					fr = MREF_CON(mconst_int(fn, cr.type, cr.u.i));
+				map_set(tab, in->dst, fr);
 				removed++;
 				continue;
 			}

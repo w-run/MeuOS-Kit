@@ -85,7 +85,7 @@ mir_to_op(MOP op)
 
 	case MOP_LOAD:   return Oload;
 	case MOP_STORE:  return Ostorel;
-	case MOP_ALLOCA: return Oalloc8;
+	case MOP_ALLOCA: return Oalloc16;
 
 	case MOP_COPY:    return Ocopy;
 	case MOP_VASTART: return Ovastart;
