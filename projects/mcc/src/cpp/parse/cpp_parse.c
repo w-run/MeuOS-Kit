@@ -635,6 +635,80 @@ flush_pending_methods(void)
 	g_cpp_pending_methods_end = &g_cpp_pending_methods;
 }
 
+/* Operator-overload mangling code for a punctuation token: `operator+`
+ * lowers to the method name `operator_pl`, mangled `Class_operator_pl`.
+ * Returns NULL for operators without a user-overloadable spelling. */
+const char *
+cpp_op_mangle(enum tokenkind op)
+{
+	switch (op) {
+	case TADD:     return "pl";
+	case TSUB:     return "mi";
+	case TMUL:     return "ml";
+	case TDIV:     return "dv";
+	case TMOD:     return "rm";
+	case TEQL:     return "eq";
+	case TNEQ:     return "ne";
+	case TLESS:    return "lt";
+	case TLEQ:     return "le";
+	case TGREATER: return "gt";
+	case TGEQ:     return "ge";
+	case TINC:     return "pp";
+	case TDEC:     return "mm";
+	case TBAND:    return "ad";
+	case TBOR:     return "or";
+	case TXOR:     return "er";
+	case TLNOT:    return "nt";
+	default:       return NULL;
+	}
+}
+
+/* Lower `l op r` to a member operator call `l.operator_pl(r)` when the
+ * left operand is a class type with that operator overloaded.  Returns
+ * true and sets *out on success (caller keeps normal arithmetic). */
+bool
+cpp_try_operator_call(struct scope *s, struct expr *l, enum tokenkind op,
+                      struct expr *r, struct expr **out)
+{
+	extern struct scope filescope;
+
+	struct type *t = l ? l->type : NULL;
+	const char *opcode;
+	char mname[64], mangled[256];
+	struct decl *fd;
+	struct expr *fn, *obj, *call, **end;
+
+	opcode = cpp_op_mangle(op);
+	if (!opcode || !t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
+		return false;
+	snprintf(mname, sizeof mname, "operator_%s", opcode);
+	if (!cpp_is_member_function(t, mname))
+		return false;
+	cpp_mangled_name_args(t, mname, r, mangled, sizeof mangled);
+	fd = scopegetdecl(t->scope ? t->scope : &filescope, mangled, 1);
+	if (!fd || fd->kind != DECLFUNC)
+		return false;
+
+	fn = mkexpr(EXPRIDENT, fd->type, NULL);
+	fn->u.ident.decl = fd;
+	fn = decay(fn); /* &Class_operator_pl */
+
+	obj = mkunaryexpr(TBAND, l); /* &l */
+	obj->type = mkpointertype(t, l->qual);
+
+	call = mkexpr(EXPRCALL, fd->type->base, fn);
+	call->u.call.args = obj;
+	call->u.call.nargs = 1;
+	end = &obj->next;
+	if (r) {
+		*end = exprassign(r, fd->type->u.func.params->next->type);
+		end = &(*end)->next;
+		++call->u.call.nargs;
+	}
+	*out = call;
+	return true;
+}
+
 /* Is `t` the class whose method body is currently being parsed?  Inside a
  * method body, bare member names resolve (cpp_member_ident) and direct
  * member access is allowed regardless of access level. */

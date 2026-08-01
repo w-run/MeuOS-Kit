@@ -27,6 +27,9 @@ enum cpp_tokenkind cpp_tok_kind(void);
  * body (`count` -> `(*this).count`, `reset()` -> `Class_reset(this)`);
  * returns NULL when `name` is not a member of the current method class. */
 bool cpp_is_member_function(struct type *t, const char *name);
+const char *cpp_op_mangle(enum tokenkind op);
+bool cpp_try_operator_call(struct scope *s, struct expr *l,
+    enum tokenkind op, struct expr *r, struct expr **out);
 const char *cpp_mangled_name(struct type *t, const char *name,
     char *buf, size_t bufsz);
 void cpp_mangled_name_args(struct type *t, const char *name,

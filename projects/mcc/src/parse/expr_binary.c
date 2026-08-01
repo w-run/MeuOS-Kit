@@ -74,7 +74,19 @@ binaryexpr(struct scope *s, struct expr *l, int i)
 		r = castexpr(s);
 		while ((k = precedence(tok.kind)) > j)
 			r = binaryexpr(s, r, k);
-		l = mkbinaryexpr(&loc, op, l, r);
+		/* C++ operator overloading: `a + b` lowers to `a.operator+(b)`
+		 * when the left operand is a class with that operator. */
+		{
+			extern int g_lang;
+			extern bool cpp_try_operator_call(struct scope *,
+			    struct expr *, enum tokenkind, struct expr *,
+			    struct expr **);
+			struct expr *ocall = NULL;
+			if (g_lang == 1 && cpp_try_operator_call(s, l, op, r, &ocall))
+				l = ocall;
+			else
+				l = mkbinaryexpr(&loc, op, l, r);
+		}
 	}
 	return l;
 }

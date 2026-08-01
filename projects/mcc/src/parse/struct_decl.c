@@ -17,6 +17,7 @@
 #include "util.h"
 #include "mcc.h"
 #include "decl_internal.h"
+#include "cpp/cpp_tokens.h"
 
 void
 addmember(struct structbuilder *b, struct qualtype mt, char *name, int align, unsigned long long width)
@@ -256,6 +257,56 @@ structdecl(struct scope *s, struct structbuilder *b)
 			cpp_define_method(s, ct, tag, tag, false);
 		}
 		addmember(b, mt, name, align, width);
+		return;
+	}
+	/* C++ operator overload: `Vec operator+(const Vec &o) {...}`.  The
+	 * return type was parsed by declspecs; parse the operator token and
+	 * parameter list by hand and lower it to `Class_operator_pl`. */
+	extern int g_lang;
+	if (g_lang == 1 && cpp_tok_kind() == CPP_TOPERATOR) {
+		extern const char *cpp_op_mangle(enum tokenkind);
+		extern void cpp_define_method(struct scope *, struct type *,
+		    const char *, const char *, bool);
+		const char *opcode;
+		struct type *ft;
+		struct decl *pd, **pend;
+		char *mname;
+		bool is_const = false;
+
+		next(); /* consume 'operator' */
+		opcode = cpp_op_mangle(tok.kind);
+		if (!opcode)
+			error(&tok.loc, "unsupported operator for overloading");
+		next(); /* consume the operator token */
+
+		ft = mktype(TYPEFUNC, 0);
+		ft->qual = QUALNONE;
+		ft->base = base.type; /* return type */
+		ft->u.func.isvararg = false;
+		ft->u.func.params = NULL;
+		ft->u.func.nparam = 0;
+		pend = &ft->u.func.params;
+		if (tok.kind == TLPAREN) {
+			next();
+			while (tok.kind != TRPAREN) {
+				pd = parameter(s);
+				*pend = pd;
+				pend = &pd->next;
+				++ft->u.func.nparam;
+				if (tok.kind == TRPAREN)
+					break;
+				expect(TCOMMA, "or ')' after operator parameter");
+			}
+			next(); /* consume ')' */
+		}
+		if (tok.kind == TCONST) {
+			is_const = true;
+			next();
+		}
+		mname = xmalloc(strlen(opcode) + 10);
+		sprintf(mname, "operator_%s", opcode);
+		cpp_define_method(s, ft, mname, b->type->u.structunion.tag, is_const);
+		addmember(b, (struct qualtype){ft, QUALNONE, NULL}, mname, 0, -1);
 		return;
 	}
 	if (tok.kind == TSEMICOLON) {

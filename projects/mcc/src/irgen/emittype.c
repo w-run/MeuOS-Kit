@@ -164,6 +164,10 @@ emittype(struct type *t)
 		ty->fields = vnew(1, sizeof ty->fields[0], PHeap);
 		f = ty->fields[0];
 		for (m = t->u.structunion.members; m; m = m->next) {
+			/* C++ function members occupy no object storage and must not
+			 * contribute to the IR layout. */
+			if (m->type && m->type->kind == TYPEFUNC)
+				continue;
 			unsigned long long end = m->offset + m->type->size;
 			int bitfield = m->bits.before || m->bits.after;
 
