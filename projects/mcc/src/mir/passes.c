@@ -463,22 +463,28 @@ msimp_block(MFn *fn, MBlk *b)
 							v >>= 1;
 							n++;
 						}
-						MRef sh = MREF_CON(mconst_int(fn, MT_I32, n));
-							if (in->op == MOP_UDIV || in->op == MOP_DIV) {
-								/* rewrite in place to a shift so the definition stays
-								 * at the original position (SSA order preserved; madd
-								 * would move the def past its uses). */
-								MOP shf = (in->op == MOP_UDIV) ? MOP_SHR : MOP_SAR;
-								in->op = shf;
-								in->src[0] = a0;
-								in->src[1] = sh;
-							} else {
-								/* rem by 2^n -> and (n-1), in place */
-								MRef msk = MREF_CON(mconst_int(fn, in->dtype, v - 1));
-								in->op = MOP_AND;
-								in->src[0] = a0;
-								in->src[1] = msk;
-							}
+					MRef sh = MREF_CON(mconst_int(fn, MT_I32, n));
+						if (in->op == MOP_UDIV || in->op == MOP_DIV) {
+							/* rewrite in place to a shift so the definition stays
+							 * at the original position (SSA order preserved; madd
+							 * would move the def past its uses).  a1 must track
+							 * the new shift amount: the copy at the end of the
+							 * loop rewrites src[1] from a1, and a stale a1 would
+							 * clobber the rewritten shift amount back to the
+							 * divisor (x/8 turned into x>>8 instead of x>>3). */
+							MOP shf = (in->op == MOP_UDIV) ? MOP_SHR : MOP_SAR;
+							in->op = shf;
+							in->src[0] = a0;
+							in->src[1] = sh;
+							a1 = sh;
+						} else {
+							/* rem by 2^n -> and (n-1), in place */
+							MRef msk = MREF_CON(mconst_int(fn, in->dtype, v - 1));
+							in->op = MOP_AND;
+							in->src[0] = a0;
+							in->src[1] = msk;
+							a1 = msk;
+						}
 					}
 				}
 				break;

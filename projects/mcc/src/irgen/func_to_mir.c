@@ -419,8 +419,29 @@ func_to_mir(struct func *f, int optlevel, bool export)
 			default: break;
 			}
 
+			/* A byte/halfword load result must carry the *data* width,
+			 * not the frontend's widened class ('w'): a later SEXT of
+			 * the loaded value (e.g. `(signed char)buf[0]`) selects the
+			 * LIR opcode from the source operand's type, and an i32
+			 * source would produce Oextsw — skipping the byte
+			 * sign-extension entirely (the load's zero-extended 0xff
+			 * stayed 255 instead of becoming -1). */
+			if (op == MOP_LOAD && res && res->kind == MV_TEMP)
+				res->type = dt;
+
 			if (op == MOP_STORE) {
 				madd(fn, mb, op, dt, 0, a0, a1);
+			} else if (in->kind == ILOADSB || in->kind == ILOADSH) {
+				/* MIR loads are width-only (the bridge emits the
+				 * zero-extending opcode); the frontend's signed load
+				 * opcodes carry sign extension in their meaning
+				 * (ILOADSB = load byte + sign-extend), so materialize
+				 * the byte/halfword load into a temp and append an
+				 * explicit SEXT to the result width. */
+				MVal *tmp = mval_new(fn, MV_TEMP, dt, 0, 0);
+				madd1(fn, mb, MOP_LOAD, dt, tmp, a0);
+				MType rty = fe_cls_to_mtype(in->class);
+				madd1(fn, mb, MOP_SEXT, rty, res, MREF_VAL(tmp));
 			} else if (a1.val || a1.con) {
 				madd(fn, mb, op, dt, res, a0, a1);
 			} else {

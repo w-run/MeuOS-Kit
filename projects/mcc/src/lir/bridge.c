@@ -346,6 +346,28 @@ lir_bridge(MFn *mfn)
 				                .arg = {a0, R}};
 				continue;
 			}
+			/* sign/zero extensions: the MIR dst dtype sets the result class,
+			 * but the LIR opcode must be selected from the *source* operand's
+			 * width.  The opcode table maps both MOP_SEXT/MOP_ZEXT to a fixed
+			 * byte-extend, so sext(i64) of an i32 constant like 256 became
+			 * `extsb 256` — byte-extended to 0, silently dropping the value
+			 * (a ternary with a 64-bit result broke this way). */
+			if (in->op == MOP_SEXT || in->op == MOP_ZEXT) {
+				MType st = in->src[0].val ? in->src[0].val->type :
+				           (in->src[0].con ? in->src[0].con->type : MT_I32);
+				bool s64 = in->dtype == MT_I64;
+				int eop = in->op == MOP_SEXT
+					? (st == MT_I8 ? Oextsb :
+					   st == MT_I16 ? Oextsh : Oextsw)
+					: (st == MT_I8 ? Oextub :
+					   st == MT_I16 ? Oextuh : Oextuw);
+				int ecls = s64 ? Kl : Kw;
+				Ref to = in->dst ? valref(mfn, in->dst, fn) : R;
+				Ref a0 = refval(mfn, in->src[0], fn);
+				*curi++ = (Ins){.op = eop, .cls = ecls, .to = to,
+				                .arg = {a0, R}};
+				continue;
+			}
 			/* alloca: the frontend builds align pre-padding chains
 			 * (`add size, align-16`) that can fold to a negative constant
 			 * (the object's align is 0 in statement-expression temporaries
@@ -401,9 +423,35 @@ lir_bridge(MFn *mfn)
 				continue;
 			}
 
-			/* stores: the MIR dtype (from the frontend store opcode)
-			 * selects the LIR width (Ostoreb/Ostoreh/Ostorew/Ostorel/
-			 * Ostores/Ostored). */
+			if (in->op == MOP_LOAD) {
+				/* the MIR dtype is the *data* width; the LIR opcode
+				 * must be selected from it (byte/halfword loads use
+				 * the sign/zero-extending forms).  Previously every
+				 * load mapped to Oload with cls from the data width,
+				 * so `a[0] != '-'` (a char load) read 4 bytes and
+				 * only options whose first word happened to equal 0x2d
+				 * were recognized.  MIR loads are width-only: signed
+				 * byte/halfword loads are lowered by func_to_mir to
+				 * load + explicit SEXT, so here we use the
+				 * zero-extending opcodes. */
+				Ref to = in->dst ? valref(mfn, in->dst, fn) : R;
+				Ref a0 = refval(mfn, in->src[0], fn);
+				int lop = Oload;
+				/* result width from the destination's MIR type */
+				int lcls = (in->dst && in->dst->type != MT_NONE)
+					? mir_to_cls(in->dst->type)
+					: (in->dtype == MT_I64 ? Kl :
+					   in->dtype == MT_F32 ? Ks :
+					   in->dtype == MT_F64 ? Kd : Kw);
+				switch (in->dtype) {
+				case MT_I8:  lop = Oloadub; break;
+				case MT_I16: lop = Oloaduh; break;
+				default:     break;  /* i32/i64/f32/f64 use Oload + cls */
+				}
+				*curi++ = (Ins){.op = lop, .cls = lcls, .to = to,
+				                .arg = {a0, R}};
+				continue;
+			}
 			if (in->op == MOP_STORE) {
 				Ref a0 = refval(mfn, in->src[0], fn);
 				Ref a1 = refval(mfn, in->src[1], fn);
