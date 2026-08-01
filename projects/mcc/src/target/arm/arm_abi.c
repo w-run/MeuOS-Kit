@@ -52,8 +52,35 @@ arm32_selpar(Fn *fn, Ins *i0, Ins *i1)
 		int k = i->cls;
 		if (i->op == Oargv || i->op == Opare)
 			continue;
-		if (i->op == Oparc)
-			continue; /* struct params unsupported (call side too) */
+		if (i->op == Oparc) {
+			/* aggregate (struct) parameter passed by value: va_list
+			 * is a 4-byte struct { void *__p; } (one GPR word), a
+			 * larger struct (e.g. cookie_io_functions_t, 16 bytes)
+			 * spans several consecutive words.  The Kl-typed temp
+			 * i->to gets a reserved frame slot large enough for the
+			 * whole object; each incoming word is stored into it. */
+			int need = (typ[i->arg[0].val].size + 3) / 4;
+			/* reserve `need` slots (rounded up to an even count so
+			 * the frame stays 8-aligned) in the frame for the
+			 * struct, ahead of spill.c's own allocation. */
+			int t = i->to.val;
+			if (fn->tmp[t].slot == -1) {
+				fn->tmp[t].slot = fn->slot;
+				fn->slot += (need + 1) & -2;
+			}
+			for (int w = 0; w < need; w++) {
+				Ref dst = SLOT(fn->tmp[t].slot + w);
+				if (ngp + w >= 4) {
+					int kw = ngp - 4;   /* stack word index */
+					emit(Ostorew, Kw, R, TMP(R10), dst);
+					emit(Ocopy, Kw, TMP(R10), SLOT(-(kw + w + 1)), R);
+				} else {
+					emit(Ostorew, Kw, R, TMP(gpreg[ngp + w]), dst);
+				}
+			}
+			ngp += need;
+			continue;
+		}
 		if (KBASE(k) == 1 && nfp < 8)
 			emit(Ocopy, k, i->to, TMP(fpreg[nfp++]), R);
 		else if (KBASE(k) == 0) {
@@ -144,6 +171,8 @@ struct Armcall {
 	int va;           /* forward index of the first vararg, or -1 */
 	int acls[64];     /* IR class of each Oarg/Oargc */
 	int isva[64];     /* true for varargs */
+	int isargc[64];   /* true for Oargc (aggregate/struct) args */
+	int aggsz[64];    /* Oargc struct size in 32-bit words */
 	int gp[64];       /* GPR word index (0..3), or -1 */
 	int fp[64];       /* VFP register index (0..7), or -1 */
 	int stackoff[64]; /* caller-stack byte offset, or -1 */
@@ -186,6 +215,14 @@ arm32_callclass(Ins *call, int nargs, Ins *lim, struct Armcall *c)
 		}
 		c->acls[j] = argp->cls;
 		c->isva[j] = c->va >= 0 && j >= c->va;
+		if (argp->op == Oargc) {
+			/* aggregate (struct) argument passed by value: the word
+			 * count comes from the struct's type, not from the IR
+			 * class (isel marks every Oargc as Kl).  va_list — a
+			 * 4-byte struct { void *__p; } — is one word. */
+			c->isargc[j] = 1;
+			c->aggsz[j] = (typ[argp->arg[0].val].size + 3) / 4;
+		}
 		argp++;
 	}
 
@@ -220,13 +257,18 @@ arm32_callclass(Ins *call, int nargs, Ins *lim, struct Armcall *c)
 					g++;	/* even-align 8-byte values */
 			} else if (c->va >= 0) {
 				need = 1;	/* named arg of a variadic call */
+			} else if (c->isargc[j]) {
+				need = c->aggsz[j];	/* struct arg: its own word count */
 			} else {
 				need = (k == Kl) ? 2 : 1;
 			}
 			if (g + need > 4) {
 				/* Words past the fourth go on the caller stack,
-				 * for both variadic and non-variadic calls. */
-				if (need == 2)
+				 * for both variadic and non-variadic calls.
+				 * An aggregate (struct) argument never splits: if it
+				 * does not fit in the remaining GPR words, the whole
+				 * object goes on the stack (AAPCS), 8-byte aligned. */
+				if (c->isargc[j] || need == 2)
 					c->stack = (c->stack + 7) & -8;
 				c->stackoff[j] = c->stack;
 				c->stack += 4 * need;
@@ -298,7 +340,21 @@ emit_call_args(Ins *call, int nargs, Fn *fn, struct Armcall *c, Ins *lim)
 			reg = fpreg[c->fp[j]];
 		if (reg < 0)
 			continue;
-		if (c->gp[j] >= 0 && k == Kd) {
+		if (c->isargc[j]) {
+			/* aggregate (struct) argument passed by value: load its
+			 * word(s) from the source pointer (arg[1]) into the
+			 * assigned GPR word(s).  va_list is a 4-byte struct (one
+			 * word); a larger struct spans several consecutive GPRs. */
+			for (int w = 0; w < c->aggsz[j]; w++) {
+				Ref src = argp->arg[1];
+				if (w > 0) {
+					Ref bt = newtmp("abi", Kw, fn);
+					emit(Oadd, Kw, bt, argp->arg[1], getcon(4 * w, fn));
+					src = bt;
+				}
+				emit(Oload, Kw, TMP(gpreg[c->gp[j] + w]), src, R);
+			}
+		} else if (c->gp[j] >= 0 && k == Kd) {
 			/* vararg double → GPR pair (vmov rN, rN+1, dM) */
 			emit(Ocopy, Kd, TMP(reg), argp->arg[0], R);
 		} else if (c->gp[j] >= 0 && k == Ks) {
@@ -343,7 +399,25 @@ emit_call_args(Ins *call, int nargs, Fn *fn, struct Armcall *c, Ins *lim)
 		 * already-set integer argument (the caller stack stores run
 		 * AFTER the GPR argument copies in forward order). */
 		Ref addr = TMP(R12);
-		if (k == Kd) {
+		if (c->isargc[j]) {
+			/* struct argument on the caller stack: load its word(s)
+			 * from the source pointer, then store them.  R10/R12 are
+			 * the emitter scratches (never allocated by rega), so
+			 * they cannot clobber a set GPR argument.  emit() is
+			 * reverse, so iterate the words from high to low to keep
+			 * them in ascending stack order. */
+			for (int w = c->aggsz[j] - 1; w >= 0; w--) {
+				emit(Ostorew, Kw, R, TMP(R10), addr);
+				if (w == 0) {
+					emit(Oload, Kw, TMP(R10), argp->arg[1], R);
+				} else {
+					Ref bt = newtmp("abi", Kw, fn);
+					emit(Oload, Kw, TMP(R10), bt, R);
+					emit(Oadd, Kw, bt, argp->arg[1], getcon(4 * w, fn));
+				}
+				emit(Oadd, Kw, addr, stk, getcon(c->stackoff[j] + 4 * w, fn));
+			}
+		} else if (k == Kd) {
 			emit(Ostored, Kd, R, argp->arg[0], addr);
 		} else if (k == Ks) {
 			emit(Ostores, Ks, R, argp->arg[0], addr);

@@ -1513,8 +1513,34 @@ arm32_emitfn(Fn *fn, FILE *f)
 			 * mov/movle sequence for comparisons doesn't leave a usable
 			 * condition code, so compare the value explicitly.  When s1
 			 * falls through, invert to beq s2; otherwise emit bne s1 and
-			 * a fallthrough b to s2. */
-			fprintf(f, "\tcmp\t%s, #0\n", rname(b->jmp.arg.val, Kw));
+			 * a fallthrough b to s2.
+			 *
+			 * The condition may be a spilled Kl temp (arm keeps Kl
+			 * values in slots, kl_in_reg == 0, so a Kl value used as a
+			 * branch condition arrives as a slot reference): load the
+			 * low word, and when the slot belongs to a Kl temp also OR
+			 * in the high word so a value like 1<<32 tests non-zero. */
+			if (rtype(b->jmp.arg) == RSlot) {
+				int js = rsval(b->jmp.arg);
+				uint64_t off = slot(b->jmp.arg, fn, 0);
+				int iskl = 0;
+				for (int tt = Tmp0; tt < fn->ntmp; tt++)
+					if (fn->tmp[tt].slot == js && fn->tmp[tt].cls == Kl) {
+						iskl = 1;
+						break;
+					}
+				fprintf(f, "\tldr\t%s, [r11, #%" PRIu64 "]\n",
+					rname(R10, Kw), off);
+				if (iskl) {
+					fprintf(f, "\tldr\t%s, [r11, #%" PRIu64 "]\n",
+						rname(R12, Kw), off + 4);
+					fprintf(f, "\torr\t%s, %s, %s\n",
+						rname(R10, Kw), rname(R10, Kw), rname(R12, Kw));
+				}
+				fprintf(f, "\tcmp\t%s, #0\n", rname(R10, Kw));
+			} else {
+				fprintf(f, "\tcmp\t%s, #0\n", rname(b->jmp.arg.val, Kw));
+			}
 			if (b->s1 != b->link) {
 				fprintf(f, "\tbne\t%s%d\n", T.asloc, id0 + b->s1->id);
 				if (b->s2 != b->link)
