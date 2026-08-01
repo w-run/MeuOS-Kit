@@ -56,8 +56,10 @@ check-mir 全绿；bridge 路径 0 回归。
 ## 当前工作点
 
 - **P4 regalloc 全部完成（A-E）**；isel-debug 验证发现的 P3b 遗留 2 个边界
-  bug（浮点参数/运算、>6 参数栈传参）已在 P4 后修复并验证。P5（自举回归
-  check-sysroot-static）进行中。
+  bug（浮点参数/运算、>6 参数栈传参）已修复并验证（提交 d6483d5 + 3ce88c0）。
+- **P5 第一步完成**：`make check-sysroot-static` 自举回归通过（退出 0，
+  MIR 新后端改动不影响默认自举链路）。P5 后续（自举产物验证/深度优化）
+  待 team-lead 指示。
 - MCC_MIR_BACKEND=1：标量函数走完整新后端（isel + ABI + regalloc + emit），
   聚合/varargs/TLS/VLA 动态 alloca fallback 到 bridge。
 
