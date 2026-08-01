@@ -159,9 +159,25 @@ decl(struct scope *s, struct func *f)
 		return true;
 	}
 	for (;;) {
+		/* C++ constructor-call declarator: `Point p(3, 4);` */
+		bool ctor_call = false;
+		struct expr *ctor_args = NULL;
+
 		qt = declarator(s, base, &name, NULL, &funcscope, false);
 		t = qt.type;
 		tq = qt.qual;
+		if (qt.expr == (struct expr *)1) {
+			/* declarator consumed `(args)`; the object type is the
+			 * base (class) type, and the args are in the cpp module */
+			extern int g_lang;
+			extern struct expr *cpp_ctor_args_take(void);
+			if (g_lang == 1) {
+				ctor_call = true;
+				ctor_args = cpp_ctor_args_take();
+				t = base.type;
+				tq = base.qual;
+			}
+		}
 		if (consume(T__ASM__)) {
 			struct stringlit lit;
 
@@ -244,14 +260,21 @@ decl(struct scope *s, struct func *f)
 			}
 			defineobj(d, init, hasinit, f);
 			/* C++: a class-typed local with a user constructor gets a
-			 * default-construction call after its storage is laid out
-			 * (`Counter c;` -> `Counter_Class(&c)`). */
+			 * construction call after its storage is laid out:
+			 * `Counter c;` -> `Counter_Class(&c)`, or with arguments
+			 * `Point p(3, 4);` -> `Point_Point(&p, 3, 4)`. */
 			{
 				extern int g_lang;
 				extern bool cpp_emit_default_ctor(struct func *,
 				    struct decl *);
-				if (g_lang == 1)
-					cpp_emit_default_ctor(f, d);
+				extern void cpp_emit_ctor_call(struct func *,
+				    struct decl *, struct expr *);
+				if (g_lang == 1) {
+					if (ctor_call)
+						cpp_emit_ctor_call(f, d, ctor_args);
+					else
+						cpp_emit_default_ctor(f, d);
+				}
 			}
 			break;
 		case DECLFUNC:

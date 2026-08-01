@@ -18,6 +18,32 @@
 #include "util.h"
 #include "mcc.h"
 #include "decl_internal.h"
+#include "expr_internal.h"
+
+/* Does the current token start a C++ constructor-call argument list
+ * rather than a function parameter declaration?  `Point p(3)` — a numeric
+ * literal (or any expression token that cannot begin a parameter
+ * declaration) means object construction, not a function declarator. */
+static bool
+is_ctor_expr_start(struct scope *s)
+{
+	switch (tok.kind) {
+	case TNUMBER:
+	case TSTRINGLIT:
+	case TCHARCONST:
+	case TLPAREN:
+	case TSUB:
+	case TBNOT:
+	case TLNOT:
+	case TMUL:
+	case TBAND:
+		return true;
+	case TIDENT:
+		return !istypename(s, tokenstr(tok.kind));
+	default:
+		return false;
+	}
+}
 
 void
 declaratortypes(struct scope *s, struct list *result, char **name, int *align, struct scope **funcscope, bool allowabstract)
@@ -98,6 +124,32 @@ declaratortypes(struct scope *s, struct list *result, char **name, int *align, s
 		switch (tok.kind) {
 		case TLPAREN:  /* function declarator */
 			next();
+			/* C++ constructor-call arguments: `Point p(3, 4);` — the
+			 * name was already parsed and the parenthesized list starts
+			 * with an expression, not a parameter declaration.  Collect
+			 * the argument expressions and signal decl() to build an
+			 * object instead of a function; the base type must be a
+			 * class (decl() verifies). */
+			extern int g_lang;
+			if (g_lang == 1 && tok.kind != TRPAREN && is_ctor_expr_start(s)) {
+				struct expr *arge;
+				extern void cpp_ctor_args_begin(void);
+				extern void cpp_ctor_args_add(struct expr *);
+				extern void cpp_ctor_set_active(void);
+				cpp_ctor_args_begin();
+				while (tok.kind != TRPAREN) {
+					arge = assignexpr(s);
+					cpp_ctor_args_add(arge);
+					if (tok.kind == TRPAREN)
+						break;
+					expect(TCOMMA, "or ')' after constructor argument");
+				}
+				next(); /* consume ')' */
+				cpp_ctor_set_active();
+				/* leave result empty: declarator() returns the base
+				 * (class) type as an object declaration */
+				return;
+			}
 		func:
 			t = mktype(TYPEFUNC, 0);
 			t->qual = QUALNONE;
@@ -241,6 +293,18 @@ declarator(struct scope *s, struct qualtype base, char **name, int *align, struc
 		}
 		base.type = t;
 		base.qual = tq;
+	}
+
+	/* C++ constructor-call declarator: the base (class) type is the
+	 * object type; flag it to decl() with a sentinel expr. */
+	extern int g_lang;
+	if (g_lang == 1) {
+		extern bool cpp_ctor_is_active(void);
+		extern void cpp_ctor_clear_active(void);
+		if (cpp_ctor_is_active()) {
+			base.expr = (struct expr *)1; /* ctor-call sentinel */
+			cpp_ctor_clear_active();
+		}
 	}
 
 	return base;

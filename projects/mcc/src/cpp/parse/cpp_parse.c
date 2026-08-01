@@ -43,6 +43,54 @@ static struct cpp_method_ctx {
 static const char *g_cpp_qual_class;
 
 static void cpp_emit_base_ctor(struct func *f);
+
+/* Pending constructor-call arguments collected by declarator() for
+ * `Point p(3, 4);` (vexing parse: the args are expressions, not a
+ * parameter declaration).  Consumed by decl()'s DECLOBJECT path. */
+static struct expr *g_cpp_ctor_args;
+static struct expr **g_cpp_ctor_args_end;
+static bool g_cpp_ctor_active;
+
+void
+cpp_ctor_args_begin(void)
+{
+	g_cpp_ctor_args = NULL;
+	g_cpp_ctor_args_end = &g_cpp_ctor_args;
+}
+
+void
+cpp_ctor_args_add(struct expr *e)
+{
+	*g_cpp_ctor_args_end = e;
+	g_cpp_ctor_args_end = &e->next;
+}
+
+struct expr *
+cpp_ctor_args_take(void)
+{
+	struct expr *r = g_cpp_ctor_args;
+	g_cpp_ctor_args = NULL;
+	g_cpp_ctor_args_end = &g_cpp_ctor_args;
+	return r;
+}
+
+void
+cpp_ctor_set_active(void)
+{
+	g_cpp_ctor_active = true;
+}
+
+bool
+cpp_ctor_is_active(void)
+{
+	return g_cpp_ctor_active;
+}
+
+void
+cpp_ctor_clear_active(void)
+{
+	g_cpp_ctor_active = false;
+}
 static bool cpp_class_decl(struct scope *s);
 static void cpp_namespace_decl(struct scope *s);
 
@@ -724,6 +772,59 @@ cpp_emit_scope_dtors(struct func *f, struct scope *s)
 		if (d && d->kind == DECLOBJECT && !d->dtor_done)
 			cpp_emit_dtor(f, d);
 	}
+}
+
+/* Emit a constructor call with explicit arguments for `Point p(3, 4);`
+ * (`Point_Point(&p, 3, 4)`).  `args` is the expression list collected by
+ * declarator(); the this address is prepended. */
+void
+cpp_emit_ctor_call(struct func *f, struct decl *d, struct expr *args)
+{
+	extern struct value *funcexpr(struct func *, struct expr *);
+	extern struct scope filescope;
+
+	struct type *t = d->type;
+	const char *tag;
+	char mname[256];
+	struct decl *fd;
+	struct expr *fn, *obj, *call, *a, **end;
+	size_t n = 0;
+
+	if (!f || !d || d->u.obj.storage != SDAUTO)
+		return;
+	tag = t ? t->u.structunion.tag : NULL;
+	if (!tag || !cpp_has_ctor(t, tag)) {
+		error(&tok.loc, "no matching constructor for object '%s'", d->name);
+		return;
+	}
+	snprintf(mname, sizeof mname, "%s_%s", tag, tag);
+	fd = scopegetdecl(t->scope ? t->scope : &filescope, mname, true);
+	if (!fd || fd->kind != DECLFUNC) {
+		error(&tok.loc, "no matching constructor for object '%s'", d->name);
+		return;
+	}
+
+	fn = mkexpr(EXPRIDENT, fd->type, NULL);
+	fn->u.ident.decl = fd;
+	fn = decay(fn); /* &Point_Point */
+
+	obj = mkexpr(EXPRIDENT, d->type, NULL);
+	obj->qual = d->qual;
+	obj->lvalue = true;
+	obj->u.ident.decl = d;
+	obj = mkunaryexpr(TBAND, obj); /* &p */
+
+	call = mkexpr(EXPRCALL, &typevoid, fn);
+	call->u.call.args = obj;
+	call->u.call.nargs = 1;
+	end = &obj->next;
+	for (a = args; a; a = a->next) {
+		*end = a;
+		end = &a->next;
+		++call->u.call.nargs;
+	}
+	(void)n;
+	funcexpr(f, call);
 }
 
 const char *
