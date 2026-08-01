@@ -83,8 +83,18 @@ MSYS_DIR  := $(abspath ../meuos-sysroot)
 $(MSYS_LIB):
 	$(MAKE) -C $(MSYS_DIR)
 
-# mcc = C frontend objects + libmcc.a (shared backend archive)
+# mcc = C frontend objects + libmcc.a (shared backend archive).
+# mpp_main.o (in FE_OBJS) provides main() (-> mcc_main) so mcc and m++
+# share the driver; the m++ binary (target `mpp`) will link the C++
+# frontend objects instead of the C frontend objects (dual-binary
+# shared-backend design, see C.1).
 $(BIN): $(FE_OBJS) $(LIB)
+	$(HOST_CC) $(CFLAGS) $(LDFLAGS) -o $@ $(FE_OBJS) $(LIB) $(LDLIBS) -L../meuos-sysroot/build -lmsys
+
+# m++ (C++ compiler) — stage C.1: same driver, C++ frontend under
+# construction (falls back to the shared C driver for now).
+MPP_BIN := m++
+$(MPP_BIN): $(FE_OBJS) $(LIB)
 	$(HOST_CC) $(CFLAGS) $(LDFLAGS) -o $@ $(FE_OBJS) $(LIB) $(LDLIBS) -L../meuos-sysroot/build -lmsys
 
 # libmcc.a = backend objects (language-agnostic, future m++ shares this)

@@ -1,11 +1,17 @@
-/* usage.c - --version / --help text for the mcc driver. */
+/* usage.c - --version / --help text for the mcc/m++ driver. */
 #include <stdio.h>
+#include <string.h>
 #include "driver_internal.h"
 
 void
 print_version(void)
 {
-	printf("mcc (MeuOS C Compiler) %s\n", MCC_VERSION);
+	extern char *argv0;
+	const char *p = argv0 ? argv0 : "mcc";
+	if (strcmp(p, "m++") == 0 || strcmp(p, "mpp") == 0)
+		printf("m++ (MeuOS C++ Compiler) %s\n", MCC_VERSION);
+	else
+		printf("mcc (MeuOS C Compiler) %s\n", MCC_VERSION);
 }
 
 void
@@ -23,7 +29,7 @@ void
 usage_long(void)
 {
 	printf(
-"usage: mcc [options] file...\n"
+"usage: %s [options] file...\n"
 "\n"
 "Output control:\n"
 "  -o <file>          output file\n"
@@ -75,6 +81,7 @@ usage_long(void)
 "  -v                 verbose (print executed commands)\n"
 "  -pipe              use pipes (recorded)\n"
 "  -pedantic          pedantic (recorded)\n"
-"  -specs=<file>      specs file (recorded)\n");
+"  -specs=<file>      specs file (recorded)\n",
+		argv0);
 	exit(0);
 }

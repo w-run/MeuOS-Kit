@@ -97,8 +97,12 @@ static void arm_set_target_defines(void) {
 	free(arch_num);
 }
 
+/* mcc_main is the shared compiler driver, invoked by both the mcc binary
+ * (default language: C) and the m++ binary (default language: C++ via the
+ * C++ frontend under construction).  Renamed from main() so the m++ entry
+ * point (mpp_main.c) can wrap it without symbol conflicts. */
 int
-main(int argc, char *argv[])
+mcc_main(int argc, char *argv[])
 {
 	struct array inputs = {0}, incdirs = {0}, libdirs = {0}, libs = {0};
 	struct array defines = {0}, undefs = {0};
