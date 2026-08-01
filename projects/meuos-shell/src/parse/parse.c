@@ -1031,20 +1031,7 @@ int msh_run_builtin(ast_t *ast, int argc, char **argv) {
     }
     /* === let === */
     if (!strcmp(name, "let")) {
-        /* 简化：将参数拼接后求值 */
-        char expr[1024] = "";
-        for (int i = 1; i < argc; i++) {
-            if (i > 1) strncat(expr, " ", sizeof(expr) - strlen(expr) - 1);
-            strncat(expr, argv[i], sizeof(expr) - strlen(expr) - 1);
-        }
-        /* 简化求值：仅支持整数运算 */
-        long result = 0;
-        char *p = expr;
-        /* 非常简化的表达式解析：a op b */
-        /* TODO: 调用 expr 工具或实现完整的算术求值 */
-        (void)p; (void)result;
-        msh_last_status = (result != 0) ? 0 : 1;
-        return msh_last_status;
+        return msh_builtin_let(argc, argv);
     }
     (void)ast;
     return 0;

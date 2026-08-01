@@ -88,6 +88,10 @@ int msh_builtin_getopts(int argc, char **argv);
 /* 打印/管理命令哈希表 */
 int msh_builtin_hash(int argc, char **argv);
 
+/* === let 内建 === */
+/* 算术表达式求值。支持 + - * / % ** << >> & | ^ ~ ! < > <= >= == != && || ?: = += 等。*/
+int msh_builtin_let(int argc, char **argv);
+
 #ifdef __cplusplus
 }
 #endif
