@@ -125,6 +125,68 @@ then
 echo y
 fi"
 
+### 循环控制流: break/continue/return ###
+assert_output "break in while" "0
+1" "i=0; while [ \$i -lt 10 ]; do echo \$i; i=\$((i+1)); if [ \$i -ge 2 ]; then break; fi; done"
+assert_output "break in for" "a
+b" "for x in a b c d e; do if [ \"\$x\" = c ]; then break; fi; echo \$x; done"
+assert_output "continue in for" "a
+b
+d
+e" "for x in a b c d e; do if [ \"\$x\" = c ]; then continue; fi; echo \$x; done"
+assert_output "continue in while" "1
+3" "i=0; while [ \$i -lt 5 ]; do i=\$((i+1)); if [ \$((i%2)) -eq 1 ]; then continue; fi; echo \$((i-1)); done"
+assert_output "nested break" "a0
+a1
+b0
+b1" "for x in a b; do for y in 0 1 2; do if [ \"\$y\" = 2 ]; then break; fi; echo \$x\$y; done; done"
+assert_output "nested break N" "outer-done" "for x in a b; do for y in 0 1; do break 2; done; done; echo outer-done"
+assert_output "return in func" "before
+ret" "f() { echo before; return 0; echo after; }; f; echo ret"
+assert_output "return value" "42" "f() { return 42; }; f; echo \$?"
+
+### ANSI-C quoting (\$'...') ###
+assert_output "ansic basic" "hello" "echo \$'hello'"
+assert_output "ansic newline" "a
+b" "echo \$'a\\nb'"
+assert_output "ansic tab" "a	b" "echo \$'a\\tb'"
+assert_output "ansic null in string" "" "echo \$'\\x00x'"
+assert_output "ansic hex escape" "A" "echo \$'\\x41'"
+
+### let 内建命令 ###
+assert_output "let basic" "15" "let x=15; echo \$x"
+assert_output "let arithmetic" "14" "let 'x=2+3*4'; echo \$x"
+assert_output "let power" "1024" "let 'x=2**10'; echo \$x"
+assert_output "let hex" "255" "let 'x=0xFF'; echo \$x"
+assert_output "let ternary" "100" "let 'x=5>3?100:200'; echo \$x"
+assert_output "let compound assign" "6" "let 'a=1'; let 'a+=5'; echo \$a"
+assert_output "let bitwise" "255" "let 'x=0xF0|0x0F'; echo \$x"
+assert_output "let modulo" "1" "let 'x=10%3'; echo \$x"
+assert_output "let shift" "16" "let 'x=1<<4'; echo \$x"
+assert_output "let multi expr" "13" "let x=5 y=x+3 z=x+y; echo \$z"
+assert_rc "let returns 0 if nonzero" 0 "let '1+1'"
+assert_rc "let returns 1 if zero" 1 "let '1-1'"
+
+### getopts 内建 ###
+assert_rc "getopts no error" 0 "OPTIND=1; getopts ab: opt -a"
+
+### shift 内建 (in function context where positional params work) ###
+assert_output "shift basic" "2
+3" "f() { shift; echo \$1; echo \$2; }; f 1 2 3"
+assert_output "shift by N" "c" "f() { shift 2; echo \$1; }; f a b c"
+
+### alias/unalias ###
+assert_output "alias expansion" "aliased" "alias ll='echo aliased'; ll"
+assert_output "alias list" "alias ll='echo test'" "alias ll='echo test'; alias ll"
+
+### umask ###
+assert_output "umask set" "022" "umask 022; umask"
+
+### declare/typeset/local ###
+assert_output "declare basic" "hello" "declare x=hello; echo \$x"
+assert_output "typeset basic" "world" "typeset x=world; echo \$x"
+assert_output "local basic" "localval" "f() { local x=localval; echo \$x; }; f"
+
 echo ""
 echo "=== POSIX smoke: $pass PASS / $fail FAIL ==="
 [ "$fail" -eq 0 ]

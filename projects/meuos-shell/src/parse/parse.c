@@ -1446,6 +1446,11 @@ int msh_eval(ast_t *ast) {
                 snprintf(buf, sizeof(buf), "%d", new_argc - 1);
                 setenv("#", buf, 1);
                 int rc = msh_eval(fn);
+                /* 函数返回后重置 return 标志，防止上层 AST_LIST 误中断 */
+                if (msh_return_flag) {
+                    rc = msh_return_value;
+                    msh_return_flag = 0;
+                }
                 /* 还原旧位置参数 */
                 for (int i = 1; i <= saved_n; i++) {
                     char vn[16];
@@ -1460,11 +1465,13 @@ int msh_eval(ast_t *ast) {
                 for (int i = 0; i < saved_n; i++) free(saved[i]);
                 free(saved);
                 free_argv(argv);
+                msh_last_status = rc;
                 return rc;
             }
             free_argv(argv);
         }
         int rc = run_simple_cmd(ast);
+        msh_last_status = rc;
         if (msh_errexit && !msh_in_cond && rc != 0) {
             fprintf(stderr, "msh: set -e: command failed (exit %d)\n", rc);
             exit(rc);
