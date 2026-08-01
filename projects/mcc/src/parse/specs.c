@@ -22,6 +22,7 @@
 #include "util.h"
 #include "mcc.h"
 #include "decl_internal.h"
+#include "cpp/cpp_tokens.h"
 #include <limits.h>
 
 int
@@ -164,8 +165,28 @@ tagspec(struct scope *s)
 		b.last = &t->u.structunion.members;
 		b.bits = 0;
 		b.pack = a.kind & ATTRPACKED;
-		do structdecl(s, &b);
-		while (tok.kind != TRBRACE);
+		b.access = ACC_PUBLIC; /* C default; C++ struct is public too */
+		do {
+			/* C++: access-control labels inside struct/union bodies
+			 * (`struct V { private: ... }`).  declspecs() does not
+			 * understand them, so skip + record here. */
+			extern int g_lang;
+			if (g_lang == 1) {
+				extern enum cpp_tokenkind cpp_tok_kind(void);
+				enum cpp_tokenkind ck = cpp_tok_kind();
+				if (ck == CPP_TPUBLIC || ck == CPP_TPRIVATE ||
+				    ck == CPP_TPROTECTED) {
+					b.access = ck == CPP_TPUBLIC ? ACC_PUBLIC
+					         : ck == CPP_TPROTECTED ? ACC_PROTECTED
+					         : ACC_PRIVATE;
+					next();
+					if (tok.kind == TCOLON)
+						next();
+					continue;
+				}
+			}
+			structdecl(s, &b);
+		} while (tok.kind != TRBRACE);
 		if (!t->u.structunion.members)
 			error(&tok.loc, "struct/union has no members");
 		next();

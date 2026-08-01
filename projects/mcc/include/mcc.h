@@ -84,12 +84,23 @@ struct bitfield {
 	short after;   /* number of bits in the storage unit after the bit-field */
 };
 
+/* C++ member access control.  Stored in struct member.access (and the
+ * struct builder's current level); C aggregates are ACC_PUBLIC. */
+enum member_access {
+	ACC_PUBLIC = 0,
+	ACC_PRIVATE,
+	ACC_PROTECTED,
+};
+
 struct member {
 	char *name;
 	struct type *type;
 	enum typequal qual;
 	unsigned long long offset;
 	struct bitfield bits;
+	/* C++ access control (ACC_PUBLIC for C aggregates): enforced on
+	 * `obj.member` / `obj->member` access outside the member's class. */
+	unsigned char access;
 	struct member *next;
 };
 

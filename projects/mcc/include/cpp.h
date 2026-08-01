@@ -32,5 +32,7 @@ const char *cpp_mangled_name(struct type *t, const char *name,
 struct expr *cpp_member_ident(struct scope *s, const char *name);
 bool cpp_has_ctor(struct type *t, const char *tag);
 bool cpp_emit_default_ctor(struct func *f, struct decl *d);
+bool cpp_same_class_context(struct type *t);
+bool cpp_member_accessible(struct type *t, struct member *m);
 
 #endif /* MCC_CPP_H */

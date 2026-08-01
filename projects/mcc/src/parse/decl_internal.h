@@ -68,6 +68,9 @@ struct structbuilder {
 	struct member **last;
 	unsigned bits;
 	bool pack;
+	/* current C++ access level for members added from here on
+	 * (ACC_PUBLIC in C mode; class defaults to ACC_PRIVATE) */
+	int access;
 };
 
 /* Tentative-definition list: tracked in decl.c but drained by

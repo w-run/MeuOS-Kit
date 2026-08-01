@@ -56,6 +56,7 @@ addmember(struct structbuilder *b, struct qualtype mt, char *name, int align, un
 				mf->next = NULL;
 				mf->offset = 0;
 				mf->bits.before = mf->bits.after = 0;
+				mf->access = b->access;
 				if (b->last)
 					*b->last = mf;
 				else
@@ -76,6 +77,7 @@ addmember(struct structbuilder *b, struct qualtype mt, char *name, int align, un
 		m->qual = mt.qual;
 		m->name = name;
 		m->next = NULL;
+		m->access = b->access;
 		*b->last = m;
 		b->last = &m->next;
 	} else {

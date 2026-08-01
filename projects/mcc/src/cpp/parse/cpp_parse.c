@@ -140,6 +140,10 @@ cpp_class_decl(struct scope *s)
 	struct type *t;
 	char *tag;
 	struct structbuilder b;
+	bool is_class;
+
+	/* class defaults to private access, struct/union to public (C++). */
+	is_class = cpp_tok_kind() == CPP_TCLASS;
 
 	/* class/struct/union keyword consumed here */
 	next();
@@ -173,11 +177,15 @@ cpp_class_decl(struct scope *s)
 	b.last = &t->u.structunion.members;
 	b.bits = 0;
 	b.pack = false;
+	b.access = is_class ? ACC_PRIVATE : ACC_PUBLIC;
 
 	for (;;) {
-		/* skip access-control labels: public: private: protected: */
+		/* access-control labels: public: private: protected: */
 		enum cpp_tokenkind k = cpp_tok_kind();
 		if (k == CPP_TPUBLIC || k == CPP_TPRIVATE || k == CPP_TPROTECTED) {
+			b.access = k == CPP_TPUBLIC ? ACC_PUBLIC
+			         : k == CPP_TPROTECTED ? ACC_PROTECTED
+			         : ACC_PRIVATE;
 			next(); /* consume the keyword */
 			if (tok.kind == TCOLON)
 				next(); /* consume ':' */
@@ -236,6 +244,29 @@ cpp_parse_translation_unit(void)
 }
 
 /* --- member function lowering (C.2.3) -------------------------------- */
+
+/* Is `t` the class whose method body is currently being parsed?  Inside a
+ * method body, bare member names resolve (cpp_member_ident) and direct
+ * member access is allowed regardless of access level. */
+bool
+cpp_same_class_context(struct type *t)
+{
+	if (!g_cpp_method.active || !g_cpp_method.class_type)
+		return false;
+	return g_cpp_method.class_type == t;
+}
+
+/* Enforce C++ access control on `obj.member` / `obj->member` access:
+ * private/protected members are only reachable from within the member's
+ * own class (friend/inheritance are later stages).  Returns true when
+ * the access is allowed. */
+bool
+cpp_member_accessible(struct type *t, struct member *m)
+{
+	if (!m || m->access == ACC_PUBLIC)
+		return true;
+	return cpp_same_class_context(t);
+}
 
 /* Define a member function as an out-of-line free function named
  * `ClassName_method` (class_tag is the enclosing struct/class tag).

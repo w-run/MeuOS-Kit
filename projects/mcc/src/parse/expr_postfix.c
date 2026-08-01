@@ -154,6 +154,15 @@ postfixexpr(struct scope *s, struct expr *r)
 			m = typemember(t, tokenstr(tok.kind), &offset);
 			if (!m)
 				error(&tok.loc, "struct/union has no member named '%s'", tok.lit);
+			/* C++ access control: private/protected members are only
+			 * reachable from within the member's own class. */
+			{
+				extern int g_lang;
+				extern bool cpp_member_accessible(struct type *,
+				    struct member *);
+				if (g_lang == 1 && !cpp_member_accessible(t, m))
+					error(&tok.loc, "'%s' is not accessible from this context (member is private/protected)", tokenstr(tok.kind));
+			}
 			/* C++ member function call: `obj.meth` lowers to a call of
 			 * `Class_meth` with the object address as the implicit this
 			 * argument.  We build an identifier referencing the mangled
