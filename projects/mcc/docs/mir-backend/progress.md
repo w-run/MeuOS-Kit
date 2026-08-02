@@ -32,7 +32,9 @@
 | P5a | postra 冗余 mov 消除 + slot4/8 双游标复采 | ✅ | 33385f9, ab12b95, 5581557 |
 | P5b | hint 优先级（ABI 边界寄存器倾向） | ✅ | ab12b95 |
 | P6a | 聚合函数新后端（去 fallback：BLIT/sret/参数 pad） | ✅ | 待提交 |
-| P6b | varargs 新后端（去 fallback：ap alloca 32B/帧对齐/常量池标签） | ✅ | 待提交 |
+| P6b | varargs 新后端（去 fallback：ap alloca 32B/帧对齐/常量池标签） | ✅ | f9b9c34 |
+| P6d | 切换前验证：123 一致性 0 diff（shift/.globl/sret 修复 daab688） | ✅ | daab688 |
+| P6e | 自举验证：104 源新后端编译/链接成功；self-mcc 运行崩（mcc_main 寄存器 bug） | 🔄 待调 | — |
 | P6c | 通用修复：slot4/8 无重叠打包 + 帧 rsp 16 对齐 | ✅ | 并入 P6a |
 | P4c | regalloc：线性扫描（mreg_scan，调用点双池） | ⏳ | — |
 | P4d | regalloc：phi 边移动（机器层 phi 已降级为 pred copy） | ⏳ | — |
