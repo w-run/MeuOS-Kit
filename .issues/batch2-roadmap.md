@@ -89,6 +89,55 @@ cfeadf9  m++: operator[] P2128（+引用返回写穿）
 dca1620  m++: G1 constexpr 语句解释器
 55499d6  m++: G2 if consteval
 b4ecfdc  m++: 引用返回成员方法修复（cfeadf9 回归）
+da9e2bf  m++: operator[] const 重载决议修复（P0，§3 登记缺陷闭环）
+9d8d2bb  docs: template operator[] 支持范围澄清（部分支持，登记限制）
+3dbc68a  docs: batch2 裁判产出（G2 审查 + 路线图状态表）
 ```
 
 （worker-judge 维护；下一版本更新：operator[] const 决议修复、G3 合入后。）
+
+---
+
+## 7. 会话收尾快照（2026-08-03，重建衔接用）
+
+> 团队因资源切换重建，本快照记录会话结束时全部状态，供重建后无缝衔接。重建后先读本节 + `batch2-g2-review.md`，再核对工作树/stash。
+
+### 7.1 已合入进度（worktree-mxx-work HEAD=9d8d2bb，与 origin 同步）
+
+| 项 | 哈希 | 内容 |
+|:-----|:-----|:-----|
+| operator[] P2128 | `cfeadf9` | 多维 operator[] + 引用返回写穿 + 非成员回退 |
+| 引用返回修复 | `b4ecfdc` | cfeadf9 引入的引用成员解析回归闭环（`int &r;`/`int &at()`） |
+| **operator[] const 决议** | `da9e2bf` | §3 登记 P0 缺陷闭环（const 对象正确选 const 重载） |
+| **template operator[] 限制** | `9d8d2bb` | 支持范围澄清登记（部分支持，非全量） |
+| G1 constexpr 解释器 | `dca1620` | 语句解释器（局部/if/循环/多 return），步数上限 10 万 |
+| G2 if consteval | `55499d6` | P1938，g_cpp_cexpr_depth 判别，G1 联动 |
+| cpp-10 登记 | `a80b0ce` | constexpr 模板体 sizeof(T) 常量求值 undeclared T |
+| 裁判审核产出 | `3dbc68a` | batch2-g2-review.md + batch2-roadmap.md |
+
+### 7.2 在途未收敛（重建衔接重点）
+
+- **G3 deducing this（P0847）**：worker-cpp23 在途，**工作树未提交**：
+  - `projects/mcc/include/cpp.h`（+7：`g_cpp_member_rvalue`、`cpp_explicit_obj_begin/set/take`）
+  - `projects/mcc/src/cpp/parse/cpp_parse.c`（+97/-30：显式对象参数解析）
+  - **收敛结果以 worker-cpp23 回报为准**：若已提交补记哈希；若 stash 记 stash 编号（当前 stash@{0}/@{1} 为既有项，勿混淆）。工作树当前含上述未提交修改，重建团队须先确认归属再决定提交/stash/恢复。
+- **会话结束前未收到 worker-cpp23 的收敛哈希**——重建后第一步：向 worker-cpp23 确认 G3 提交/stash 状态。
+
+### 7.3 遗留队列（重建后按序处理）
+
+1. **cpp-10**（constexpr 模板体 `sizeof(T)` 常量求值 undeclared T，a80b0ce 登记）待修。
+2. **#54**（引用成员变量访问未解引用——`int &r;` 声明已支持，但访问 `obj.r` 的解引用语义待核）。
+3. **G3 按值形态**（`this X self`）：依赖类按值传参基线（cpp23-gaps.md 记录），引用形态（X&/const X&/X&&）优先。
+4. **consteval 函数体内 if consteval** 测试补充（batch2-g2-review §3.6）。
+5. **verify-all.sh 纳入 `check-c-mir`** 门禁（第一批遗留缺口，P2）。
+
+### 7.4 待办后续（更远期）
+
+- C++20 缺口：requires 表达式、NTTP（非类型模板参数）、consteval 即时调用。
+- 性能优化（编译期速度/内存，G1 解释器步数上限监控）。
+
+### 7.5 交接注意事项
+
+- **文件纪律**：G3 在途修改在 cpp.h/cpp_parse.c，重建后勿 `git add -A`/`reset --hard`（共享 index 环境）。
+- **审核结论索引**：G2 if consteval 的完整审查见 `batch2-g2-review.md`（13 项 canary 实测、方案 §2.3 表述瑕疵、残余风险清单）。
+- **编号**：operator[] const 决议（da9e2bf 闭环）在 §3；template operator[] 限制（9d8d2bb）在 §3 关联登记。
