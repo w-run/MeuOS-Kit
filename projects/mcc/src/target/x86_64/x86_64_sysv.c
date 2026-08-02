@@ -60,6 +60,7 @@ static void
 typclass(AClass *a, Typ *t)
 {
 	uint sz, al;
+	int n;
 
 	sz = t->size;
 	al = 1u << t->align;
@@ -89,6 +90,17 @@ typclass(AClass *a, Typ *t)
 	a->cls[1] = Kx;
 	a->inmem = 0;
 	classify(a, t, 0);
+	/* An eightbyte that classify() left untouched (no scalar/float field
+	 * lands in it) is INTEGER per the SysV psABI — e.g. a size-0 C++
+	 * class with no data members (Empty{}) or a struct whose trailing
+	 * padding fills the whole chunk.  Leaving it Kx made KBASE() classify
+	 * it as SSE: retr() indexed retreg[-1] (memory corruption, the
+	 * compile-time crash on `Empty make()`), and argsclass() sent the
+	 * value to XMM0 while the frontend's `movss 0` read address 0 (the
+	 * runtime SEGV on by-value empty-class parameters). */
+	for (n = 0; (uint)n * 8 < sz; n++)
+		if (a->cls[n] == Kx)
+			a->cls[n] = Kl;
 }
 
 static int
