@@ -51,6 +51,16 @@ main(void)
 	check("%.6g", v, "3.14159");
 	check("%.10g", v, "3.141592654");
 	check("%.17g", v, "3.1415926535897931");
+	/* %a/%A hex floats */
+	check("%a", v, "0x1.921fb54442d18p+1");
+	check("%A", v, "0X1.921FB54442D18P+1");
+	check("%.3a", v, "0x1.922p+1");
+	check("%a", 0x1.91eb851eb851fp+1, "0x1.91eb851eb851fp+1");	/* 3.14 */
+	check("%#a", 0x1.91eb851eb851fp+1, "0x1.91eb851eb851fp+1");
+	check("%a", 0x0p+0, "0x0p+0");
+	check("%a", -0x1.8p+0, "-0x1.8p+0");		/* -1.5, trailing zeros stripped */
+	check("%a", 0x1.b7cdfd9d7bdbbp-34, "0x1.b7cdfd9d7bdbbp-34");	/* 1e-10 */
+	check("%+a", 0x1p+1, "+0x1p+1");
 
 	/* 123456.789 -- rounding at %.0f and %.2f */
 	v = 0x1.e240c9fbe76c9p+16;

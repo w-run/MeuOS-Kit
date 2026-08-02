@@ -263,14 +263,16 @@ __meuos_vformat(struct __meuos_print_sink *sink, const char *format, va_list arg
 		case 'e':
 		case 'E':
 		case 'g':
-		case 'G':
+		case 'G': {
+			double dv = va_arg(arguments, double);
+			if (__meuos_fmt_fp(sink, dv, conversion, width, precision, flags) < 0)
+				return -1;
+			break;
+		}
 		case 'a':
 		case 'A': {
-			/* %a/%A (hex float) not implemented; degrade to %g/%G. */
 			double dv = va_arg(arguments, double);
-			int fc = (conversion == 'a') ? 'g' :
-			         (conversion == 'A') ? 'G' : conversion;
-			if (__meuos_fmt_fp(sink, dv, fc, width, precision, flags) < 0)
+			if (__meuos_fmt_hexfp(sink, dv, conversion, width, precision, flags) < 0)
 				return -1;
 			break;
 		}

@@ -522,3 +522,164 @@ __meuos_fmt_fp(struct __meuos_print_sink *sink, double value, int conv,
 
 	return 0;
 }
+
+/* printf %a/%A: C99 hexadecimal floating-point conversion (7.19.6.1).
+ *
+ * Outputs "[-]0x1.<hexdigits>p<±exp>": a hex fraction mantissa followed
+ * by a binary (power-of-two) exponent.  Normal doubles print the
+ * implicit '1' before the point; zero and subnormals print '0'.  The
+ * precision counts hex fractional digits (default 13, enough to
+ * represent any double exactly; subnormals pad with leading zeroes).
+ * NaN/Inf and the width/flags layout mirror __meuos_fmt_fp. */
+static int
+hexnib(unsigned long long v)
+{
+	return (int)(v & 0xF);
+}
+
+static int
+hexval(char c)
+{
+	if (c >= '0' && c <= '9')
+		return c - '0';
+	if (c >= 'a' && c <= 'f')
+		return c - 'a' + 10;
+	return c - 'A' + 10;
+}
+
+int
+__meuos_fmt_hexfp(struct __meuos_print_sink *sink, double value, int conv,
+	int width, int precision, int flags)
+{
+	union { double d; unsigned long long u; } un;
+	static const char hexdig[] = "0123456789abcdef";
+	const char *hexch = (conv == 'A') ? "0123456789ABCDEF" : hexdig;
+	char digits[16];
+	char sign_char = 0;
+	int ndig = 0, e2 = 0, i, lead;
+	int left  = flags & 1;
+	int plus  = flags & 2;
+	int space = flags & 4;
+	int alt   = flags & 8;
+	int zero  = flags & 16;
+	int upper = (conv == 'A');
+	int body_len, content_len, pad, ea;
+	int was_default_precision = (precision < 0);
+
+	/* ---- Sign ---- */
+	if (sign_bit(value)) {
+		value = -value;
+		sign_char = '-';
+	} else if (plus) {
+		sign_char = '+';
+	} else if (space) {
+		sign_char = ' ';
+	}
+
+	/* ---- NaN / Inf ---- */
+	if (is_nan(value) || is_inf(value)) {
+		const char *body = is_nan(value) ? (upper ? "NAN" : "nan")
+		                                  : (upper ? "INF" : "inf");
+		content_len = (sign_char != 0) + 3;
+		pad = width > content_len ? width - content_len : 0;
+		if (!left && !zero)
+			if (__meuos_sink_repeat(sink, ' ', pad) < 0) return -1;
+		if (sign_char) EMIT(sign_char);
+		if (zero && !left)
+			if (__meuos_sink_repeat(sink, '0', pad) < 0) return -1;
+		for (i = 0; i < 3; i++) EMIT(body[i]);
+		if (left)
+			if (__meuos_sink_repeat(sink, ' ', pad) < 0) return -1;
+		return 0;
+	}
+
+	/* ---- Extract mantissa digits and binary exponent ---- */
+	if (precision < 0) {
+		/* default: emit exactly as many hex digits as needed */
+		precision = 13;
+	} else if (precision > 13) {
+		precision = 13;
+	}
+
+	if (value == 0.0) {
+		e2 = 0;
+		ndig = 0;
+		lead = '0';
+	} else {
+		un.d = value;
+		int eb = (int)((un.u >> 52) & 0x7ff);
+		unsigned long long mant = un.u & 0xfffffffffffffULL;
+		if (eb == 0) {
+			e2 = -1022;		/* subnormal: 0.mant * 2^-1022 */
+			lead = '0';
+		} else {
+			mant |= 1ULL << 52;
+			e2 = eb - 1023;
+			lead = '1';
+		}
+		/* 52 mantissa bits -> 13 hex digits, high nibble first */
+		for (i = 12; i >= 0; i--)
+			digits[12 - i] = hexch[hexnib(mant >> (i * 4))];
+		ndig = 13;
+		/* round half-up at the requested precision (extra digit >= 8) */
+		if (precision < ndig && digits[precision] >= '8') {
+			int j = precision - 1;
+			while (j >= 0 && digits[j] == 'f') { digits[j] = '0'; j--; }
+			if (j >= 0) {
+				digits[j] = hexch[hexval(digits[j]) + 1];
+			} else if (lead == '1') {
+				/* carry out: 0x1.fff -> 0x1.000 p+1 */
+				lead = '1';
+				e2++;
+				for (i = 0; i < precision; i++) digits[i] = '0';
+			} else {
+				/* subnormal rounding across the boundary */
+				lead = '1';
+				e2 = -1021;
+				for (i = 0; i < precision; i++) digits[i] = '0';
+			}
+		}
+		/* strip trailing zeroes for the default precision */
+		if (was_default_precision && precision > 0) {
+			while (precision > 0 && digits[precision - 1] == '0')
+				precision--;
+		}
+	}
+	if (value == 0.0 && was_default_precision)
+		precision = 0;
+
+	/* ---- Layout: [pad][sign][0x][lead][.digits][p][±][exp][pad] ---- */
+	ea = e2 < 0 ? -e2 : e2;
+	{
+		int has_dot = (precision > 0) || alt;
+		body_len = 2 /*0x*/ + 1 /*lead*/ + (has_dot ? 1 + precision : 0)
+			+ 1 /*p*/ + 1 /*sign*/ + (ea >= 100 ? 3 : ea >= 10 ? 2 : 1);
+		content_len = (sign_char != 0) + body_len;
+		pad = width > content_len ? width - content_len : 0;
+		if (!left && !zero)
+			if (__meuos_sink_repeat(sink, ' ', pad) < 0) return -1;
+		if (sign_char) EMIT(sign_char);
+		if (zero && !left)
+			if (__meuos_sink_repeat(sink, '0', pad) < 0) return -1;
+		EMIT('0');
+		EMIT(upper ? 'X' : 'x');
+		EMIT(lead);
+		if (has_dot) {
+			EMIT('.');
+			for (i = 0; i < precision; i++)
+				EMIT(i < ndig ? digits[i] : '0');
+		}
+		EMIT(upper ? 'P' : 'p');
+		EMIT(e2 < 0 ? '-' : '+');
+		{
+			char ebuf[8];
+			int ei = 0, tmp = ea;
+			if (tmp == 0) ebuf[ei++] = '0';
+			while (tmp) { ebuf[ei++] = (char)('0' + tmp % 10); tmp /= 10; }
+			while (ei-- > 0) EMIT(ebuf[ei]);
+		}
+		if (left)
+			if (__meuos_sink_repeat(sink, ' ', pad) < 0) return -1;
+	}
+	return 0;
+}

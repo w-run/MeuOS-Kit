@@ -71,4 +71,8 @@ int __meuos_vformat(struct __meuos_print_sink *sink, const char *format, va_list
 int __meuos_fmt_fp(struct __meuos_print_sink *sink, double value, int conv,
     int width, int precision, int flags);
 
+/* Hexadecimal float (%a/%A) conversion; conv is 'a' or 'A'. */
+int __meuos_fmt_hexfp(struct __meuos_print_sink *sink, double value, int conv,
+    int width, int precision, int flags);
+
 #endif
