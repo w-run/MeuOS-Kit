@@ -1504,11 +1504,16 @@ aarch64_encode_insn(const struct mt_target *target,
 	/* cset rd, cond */
 	if (strcmp(mnemonic, "cset") == 0 && nops == 2 &&
 	    ops[0].kind == 'r') {
+		/* CSET Wd, cond aliases CSINC Wd, WZR, WZR, invert(cond);
+		 * the encoded condition is the *inverse* of the mnemonic's
+		 * condition code.  The table below holds the inverted codes,
+		 * so `cset w0, eq` emits the csinc with the ne condition
+		 * (0x1A9F17E0), matching binutils. */
 		static const struct { const char *name; unsigned cond; } conds[] = {
-			{"eq", 0}, {"ne", 1}, {"cs", 2}, {"cc", 3},
-			{"mi", 4}, {"pl", 5}, {"vs", 6}, {"vc", 7},
-			{"hi", 8}, {"ls", 9}, {"ge", 10}, {"lt", 11},
-			{"gt", 12}, {"le", 13}, {"hs", 2}, {"lo", 3},
+			{"eq", 1}, {"ne", 0}, {"cs", 3}, {"cc", 2},
+			{"mi", 5}, {"pl", 4}, {"vs", 7}, {"vc", 6},
+			{"hi", 9}, {"ls", 8}, {"ge", 11}, {"lt", 10},
+			{"gt", 13}, {"le", 12}, {"hs", 3}, {"lo", 2},
 			{NULL, 0}
 		};
 		const char *cname = opbuf[1];
@@ -1552,7 +1557,12 @@ aarch64_encode_insn(const struct mt_target *target,
 		if (!found) return -1;
 		int rd = ops[0].reg, rn = ops[1].reg, rm = ops[2].reg;
 		int is64 = (ops[0].wreg == XREG);
+		/* CSINC: the conditional-select family op2 field (bits 11:10)
+		 * is 01 for CSINC (CSEL=00, CSINV=10, CSNEG=11).  Emitting the
+		 * bare CSEL base produced csel instead of csinc, which broke
+		 * cset's sibling instruction. */
 		emit32(out, &off, (is64 ? 0x9A800000 : 0x1A800000) |
+		       0x400 |
 		       (((unsigned)rm & 0x1F) << 16) |
 		       ((cond & 0xF) << 12) |
 		       (((unsigned)rn & 0x1F) << 5) |
