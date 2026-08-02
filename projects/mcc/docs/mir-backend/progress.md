@@ -40,7 +40,7 @@
 | P6e | regalloc：hint 跨 call 检查（caller-saved 拒绝） | ✅ | 已提交 da6aee4 |
 | P6f | regalloc：calls 数组去 64 上限（超大函数漏 call） | ✅ | 已提交 9718e44 |
 | P6g | Bug B 修复：selcall sret 分配 pad（qualtype 24B） | ✅ | 已提交 eccf7ae |
-| P6h | Bug C 定位：mark_use 带参函数崩溃（[r12]=0x18） | 🔄 | 调查中 |
+| P6h | Bug C 修复：meuos-libc strtod 不支持 hex float（0x1p63）→ self-mcc 编译 eval.c 崩溃。已修复并全量自举 105/105 | ✅ | 已提交 f412f75 |
 | P4c | regalloc：线性扫描（mreg_scan，调用点双池） | ⏳ | — |
 | P4d | regalloc：phi 边移动（机器层 phi 已降级为 pred copy） | ⏳ | — |
 | P4e | regalloc 接管 emit（寄存器感知 + prologue/epilogue 保存 callee-saved） | ⏳ | — |
@@ -199,3 +199,35 @@ check-mir 全绿；bridge 路径 0 回归。
 **结论**：P4 的两个阻断性缺陷（g_salloc 未定义、参数传递段错误）在
 P5/P6 已彻底修复；regalloc（线性扫描，依据 regalloc-design.md）真实
 分配寄存器；P4/P5 可靠，默认切换（MCC_MIR_BACKEND 接管）可评估。
+
+## Bug C 修复记录（P6h，2026-08-02）
+
+### 现象
+- self-mcc（MIR 编译的静态链接产物）编译 `src/sema/eval.c` 崩溃，
+  MIR dump 中断于 `$c336(i64)113` 附近（mark_use 阶段误报为崩溃点）。
+- host mcc 编译同一文件成功；self-mcc 报
+  `invalid floating constant suffix 'x1p63'`。
+
+### 根因
+- self-mcc 静态链接 **meuos-libc**（`--sysroot=... --nostdlib --static`），
+  其 `strtod`（src/stdlib/convert.c）不支持 C99 hex float（6.4.4.2）。
+- eval.c 含 `0x1p63`/`0x1p64` 字面量：meuos-libc strtod 解析 `0` 后把
+  `x1p63` 留给 expr_primary.c 判定为非法后缀 → 编译失败。
+- host mcc 动态链接 glibc，glibc strtod 支持 hex float → 正常。
+- "mark_use 带参函数崩溃" 是误诊：崩溃是 eval.c 编译失败的连锁表现。
+
+### 修复（f412f75）
+- meuos-libc strtod 增加 C99 hex float 解析（parse_hex_float：mantissa
+  精确二进制累积 + p 指数 2^exp 缩放）+ 纯 hex 整数回退（`0x10` → 16）。
+- 十进制路径不变；与 glibc 对照验证（0x1p63/0x1.8p3/0x1p-2/-0x1p4 全等）。
+
+### 验证
+- self-mcc 编译 eval.c（含 hex float）exit=0，产物与 host 相同（5416B）。
+- self-mcc 全量编译 mcc 自身源码 **105/105 通过**（此前 104/105，唯一失败 eval.c）。
+- hello 经 self-mcc 编译运行返回正确值。
+
+### 教训
+- 自举产物的 libc 依赖与 host 不同：静态链接 meuos-libc 的程序会暴露
+  libc 缺失特性，而 host 动态链接 glibc 掩盖。自举回归是 libc 完备性的
+  第一道防线。
+
