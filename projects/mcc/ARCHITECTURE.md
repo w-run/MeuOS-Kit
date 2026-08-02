@@ -318,14 +318,17 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
 |---|---|---|
 | A-N | 历史缺陷全队列（含 B 聚合 varargs、C 继承析构链、E ns 限制、F MIR fold、K concept 深度、M 未命名参数、N 数组 new stride） | ✅ 全闭环（详见 `.issues/0802.md`；N=754b437、M=4d93a66、K=2755fe3） |
 | J | slotmerge 自举破坏（长期项，已禁用 97c8541；二期见 worker-slot2） | 🚫 长期禁用 |
-| Q | `delete nullptr`/`delete[] nullptr` 运行期段错误（应 no-op） | 🔄 open（worker-q） |
-| R | concept 形参名 ≠ `T` 时被误判 undeclared | 🔄 open（worker-r） |
+| Q | `delete nullptr`/`delete[] nullptr` 运行期段错误（应 no-op） | ✅ closed（f8f0044，判空守卫 + 回归用例） |
+| R | concept 形参名 ≠ `T` 时被误判 undeclared | ✅ closed（93ab4b4，按模板参数表折叠形参） |
 | S | lambda 按值捕获类对象不调用拷贝构造 | 🔄 open（worker-lambda） |
 | T | 嵌套 lambda 无法再捕获外层已捕获变量 | 🔄 open（worker-lambda） |
 | U | 无数据成员类按值传参段错误（size-0 by-value SEGV，0802.md 记录纠错） | 🔄 open（待分配） |
-| V | MIR msimp pow2 强度削减误编译有符号 div/rem（负数错误，`-7/2=-4` 应 -3） | 🔄 open（worker-fold 修复在途） |
+| V | MIR msimp pow2 强度削减误编译有符号 div/rem（负数错误，`-7/2=-4` 应 -3） | ✅ closed（随 93ab4b4 夹带；pass_test 3b + test/c99/signed_div_pow2.c 回归） |
+| W | `u8"..."` 字面量元素类型为 `unsigned char`，应为 `char`（C11 §6.4.5p6） | 🔄 open（worker-mir-tests 发现） |
+| X | `inline` 定义 + `extern` 声明未产生外部定义（C99 §6.7.4p7） | 🔄 open（worker-mir-tests 发现） |
 
 > 状态规则：缺陷状态只标 open/pending；修复提交 push 后由 worker-doc 周期 pull 补记 closed + 哈希。C++ 覆盖状态见上表（C++98~23 收官 ✅，2026-08-02）。
+> MIR/LIR 双路径门禁：`make check-c-mir`（`test/mir_matrix.sh`），c99/c11/c23 用例在 `MCC_USE_MIR=1/0` 下编译+退出码+stdout 三重一致，基线 69/69 全绿。
 
 ## 8. Progressive Cleanup Notes
 

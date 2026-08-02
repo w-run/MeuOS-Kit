@@ -9,8 +9,8 @@
 ### 第一批 worker（缺陷修复 + 文档）
 | Worker | 任务 | 缺陷 |
 |---|---|---|
-| worker-q | delete/delete[] nullptr 段错误修复 | Q（open） |
-| worker-r | concept 形参名 ≠ T 误判 undeclared 修复 | R（open） |
+| worker-q | delete/delete[] nullptr 段错误修复 | Q（✅ closed，f8f0044） |
+| worker-r | concept 形参名 ≠ T 误判 undeclared 修复 | R（✅ closed，93ab4b4） |
 | worker-lambda | lambda 捕获（拷贝 ctor + 嵌套捕获） | S+T（open） |
 | worker-doc | 文档同步（.issues/docs/ARCHITECTURE，只改 .md） | — |
 
@@ -20,15 +20,19 @@
 | worker-test | 测试回归（verify-all 保持绿 + canary 回归） |
 | worker-judge | reasoning 裁判整合 |
 | worker-va | MIR va_list 溢出路径 |
-| worker-fold | MIR fold 优化专项 |
+| worker-fold | MIR fold 优化专项（F 闭环验证 ✅ + 发现缺陷 V） |
 | worker-slot2 | slotmerge 二期方案（J 项替代） |
 | worker-cpp20/23 | C++20/23 缺口调研 |
 | worker-selfhost | 自举门禁（mcc 自编译 m++） |
-| worker-mir-tests | MIR/C 测试缺口 |
+| worker-mir-tests | MIR/C 测试缺口（发现缺陷 W/X） |
 
 ### 缺陷队列（2026-08-03）
-A-N ✅ 全闭环（J 长期项禁用）；Q/R/S/T/U/V 🔄 open。状态只标 open/pending，修复 push 后由 worker-doc 周期 pull 补记 closed + 哈希。
-- V：MIR msimp pow2 强度削减误编译有符号 div/rem（worker-fold 复检缺陷 F 时发现，修复在途）
+A-N ✅ 全闭环（J 长期项禁用）；Q/R/V ✅ closed；S/T/U/W/X 🔄 open。状态只标 open/pending，修复 push 后由 worker-doc 周期 pull 补记 closed + 哈希。
+- Q：f8f0044（delete/delete[] nullptr 判空守卫 + new_delete_nullptr.cc 回归）
+- R：93ab4b4（concept 按模板参数表折叠形参）
+- V：随 93ab4b4 夹带（MIR msimp 有符号 div/rem；pass_test 3b + test/c99/signed_div_pow2.c 回归）
+- W：u8 字面量元素类型应为 char（open）
+- X：inline+extern 未发外部定义（open）
 
 ## 团队架构（语义化管理）
 
