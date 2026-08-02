@@ -3762,8 +3762,11 @@ cpp_tmpl_member_instantiate(struct scope *s, struct expr *thisp,
 	 * declaration with the method token renamed to the mangled name.
 	 * The declaration is parsed with declspecs/declarator and routed to
 	 * cpp_define_method (which adds the implicit `this` parameter), so
-	 * the replayed `T get_i() {...}` defines `Wrapper_get_i`. */
-	bs = mkscope(s);
+	 * the replayed `T get_i() {...}` defines `Wrapper_get_i`.
+	 * Scope base: the owner class's declaration scope (not the call-site
+	 * scope `s`) so the method body resolves captures/members via the
+	 * class (cpp_member_ident) instead of seeing the caller's locals. */
+	bs = mkscope(owner->scope ? owner->scope : s);
 	for (p = tmpl->params, i = 0; p; p = p->next, ++i) {
 		td = mkdecl((char *)p->name, DECLTYPE, types[i], QUALNONE, LINKNONE);
 		scopeputdecl(bs, td);
