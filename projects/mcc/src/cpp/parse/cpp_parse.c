@@ -2445,8 +2445,131 @@ cpp_parse_new_expr(struct scope *s)
 	t = base.type;
 	if (t->incomplete)
 		error(&tok.loc, "'new' on incomplete type");
-	if (tok.kind == TLBRACK)
-		error(&tok.loc, "'new T[n]' (array allocation) is not supported yet");
+	if (tok.kind == TLBRACK) {
+		/* new T[n]: malloc(sizeof(size_t) + n*sizeof(T)), store n as a
+		 * cookie before the array, then default-construct each element
+		 * (for a class with a constructor) in a loop. */
+		struct expr *cnt;
+		next(); /* '[' */
+		cnt = assignexpr(s);
+		expect(TRBRACK, "after array size in 'new'");
+		if (!curfunc)
+			error(&tok.loc, "'new' outside of a function body is not supported");
+		pt = mkpointertype(t, QUALNONE);
+		tmp = mkdecl("tmp", DECLOBJECT, pt, QUALNONE, LINKNONE);
+		tmp->u.obj.storage = SDAUTO;
+		funcinit(curfunc, tmp, NULL, false);
+		ident = mkexpr(EXPRIDENT, pt, NULL);
+		ident->qual = QUALNONE;
+		ident->lvalue = true;
+		ident->u.ident.decl = tmp;
+		{
+			struct decl *rawd, *nd;
+			struct expr *rawe, *ne, *sz, *tot, *castc, *deref, *cp;
+			/* n = cnt (evaluate the size once) */
+			nd = mkdecl("__nw_n", DECLOBJECT, &typeulong, QUALNONE, LINKNONE);
+			nd->u.obj.storage = SDAUTO;
+			funcinit(curfunc, nd, NULL, false);
+			ne = mkexpr(EXPRIDENT, &typeulong, NULL);
+			ne->lvalue = true;
+			ne->u.ident.decl = nd;
+			funcexpr(curfunc, mkassignexpr(ne,
+			    mkexpr(EXPRCAST, &typeulong, cnt)));
+			/* raw = malloc(sizeof(size_t) + n * sizeof(T)) */
+			rawd = mkdecl("__nw_raw", DECLOBJECT,
+			    mkpointertype(&typevoid, QUALNONE), QUALNONE, LINKNONE);
+			rawd->u.obj.storage = SDAUTO;
+			funcinit(curfunc, rawd, NULL, false);
+			rawe = mkexpr(EXPRIDENT, mkpointertype(&typevoid, QUALNONE), NULL);
+			rawe->lvalue = true;
+			rawe->u.ident.decl = rawd;
+			sz = mkexpr(EXPRBINARY, &typeulong, NULL);
+			sz->op = TMUL;
+			sz->u.binary.l = ne;
+			sz->u.binary.r = mkconstexpr(&typeulong, t->size);
+			tot = mkexpr(EXPRBINARY, &typeulong, NULL);
+			tot->op = TADD;
+			tot->u.binary.l = mkconstexpr(&typeulong, sizeof(size_t));
+			tot->u.binary.r = sz;
+			funcexpr(curfunc, mkassignexpr(rawe, cpp_malloc_expr(tot)));
+			/* *(size_t*)raw = n (array-length cookie) */
+			castc = mkexpr(EXPRCAST, mkpointertype(&typeulong, QUALNONE), rawe);
+			deref = mkexpr(EXPRUNARY, &typeulong, castc);
+			deref->op = TMUL;
+			deref->lvalue = true;
+			funcexpr(curfunc, mkassignexpr(deref, ne));
+			/* tmp = (T*)((char*)raw + sizeof(size_t)) */
+			cp = mkexpr(EXPRBINARY, mkpointertype(&typechar, QUALNONE), NULL);
+			cp->op = TADD;
+			cp->u.binary.l = mkexpr(EXPRCAST,
+			    mkpointertype(&typechar, QUALNONE), rawe);
+			cp->u.binary.r = mkconstexpr(&typeulong, sizeof(size_t));
+			funcexpr(curfunc, mkassignexpr(ident,
+			    mkexpr(EXPRCAST, pt, cp)));
+			/* value-construct each element for a class with a ctor */
+			if (t->kind == TYPESTRUCT || t->kind == TYPEUNION) {
+				if (cpp_has_ctor(t, t->u.structunion.tag)) {
+					struct decl *iv;
+					struct expr *ie, *lt, *ptr, *inc;
+					struct block *bloop, *bbody, *bdone;
+					extern struct block *mkblock(char *);
+					extern void funclabel(struct func *, struct block *);
+					extern void funcjmp(struct func *, struct block *);
+					extern struct value *funcbranch(struct func *,
+					    struct expr *, struct block *, struct block *);
+					iv = mkdecl("__nw_i", DECLOBJECT, &typeint,
+					    QUALNONE, LINKNONE);
+					iv->u.obj.storage = SDAUTO;
+					funcinit(curfunc, iv, NULL, false);
+					ie = mkexpr(EXPRIDENT, &typeint, NULL);
+					ie->lvalue = true;
+					ie->u.ident.decl = iv;
+					funcexpr(curfunc, mkassignexpr(ie,
+					    mkconstexpr(&typeint, 0)));
+					bloop = mkblock("loop");
+					bbody = mkblock("body");
+					bdone = mkblock("done");
+					funclabel(curfunc, bloop);
+					lt = mkexpr(EXPRBINARY, &typeint, NULL);
+					lt->op = TLESS;
+					lt->u.binary.l = ie;
+					lt->u.binary.r = mkexpr(EXPRCAST, &typeint, ne);
+					funcbranch(curfunc, lt, bbody, bdone);
+					funclabel(curfunc, bbody);
+					/* ctor(&tmp[i]) — tmp + i */
+					ptr = mkexpr(EXPRBINARY, pt, NULL);
+					ptr->op = TADD;
+					ptr->u.binary.l = ident;
+					ptr->u.binary.r = ie;
+					ctor = cpp_ctor_expr(t, ptr, NULL);
+					if (!ctor)
+						error(&tok.loc,
+						    "no matching constructor for 'new %s[]'",
+						    t->u.structunion.tag);
+					funcexpr(curfunc, ctor);
+					inc = mkexpr(EXPRBINARY, &typeint, NULL);
+					inc->op = TADD;
+					inc->u.binary.l = ie;
+					inc->u.binary.r = mkconstexpr(&typeint, 1);
+					funcexpr(curfunc, mkassignexpr(ie, inc));
+					funcjmp(curfunc, bloop);
+					funclabel(curfunc, bdone);
+				} else if (args) {
+					error(&tok.loc,
+					    "'%s' has no constructor for 'new' with arguments",
+					    t->u.structunion.tag);
+				}
+			} else if (args) {
+				error(&tok.loc,
+				    "'new' with arguments requires a class type");
+			}
+		}
+		e = mkexpr(EXPRIDENT, pt, NULL);
+		e->qual = QUALNONE;
+		e->lvalue = true;
+		e->u.ident.decl = tmp;
+		return e;
+	}
 	if (tok.kind == TLPAREN) {
 		next();
 		while (tok.kind != TRPAREN) {
@@ -2516,8 +2639,95 @@ cpp_parse_delete_expr(struct scope *s)
 	struct decl *fd;
 
 	next(); /* consume 'delete' */
-	if (tok.kind == TLBRACK)
-		error(&tok.loc, "'delete[]' (array deallocation) is not supported yet");
+	if (tok.kind == TLBRACK) {
+		/* delete[] p: read the array-length cookie stored by `new T[n]`,
+		 * destruct each element (for a class with a destructor) in a
+		 * loop, then free the raw allocation. */
+		struct expr *ne, *cp, *castc, *deref, *fp;
+		struct decl *nd;
+		next(); /* consume '[' */
+		expect(TRBRACK, "after 'delete['");
+		e = unaryexpr(s);
+		if (!e || e->type->kind != TYPEPOINTER)
+			error(&tok.loc, "delete operand must be a pointer");
+		t = e->type->base;
+		/* n = *(size_t*)((char*)p - sizeof(size_t)) */
+		nd = mkdecl("__dl_n", DECLOBJECT, &typeulong, QUALNONE, LINKNONE);
+		nd->u.obj.storage = SDAUTO;
+		funcinit(curfunc, nd, NULL, false);
+		ne = mkexpr(EXPRIDENT, &typeulong, NULL);
+		ne->lvalue = true;
+		ne->u.ident.decl = nd;
+		cp = mkexpr(EXPRBINARY, mkpointertype(&typechar, QUALNONE), NULL);
+		cp->op = TSUB;
+		cp->u.binary.l = mkexpr(EXPRCAST, mkpointertype(&typechar, QUALNONE), e);
+		cp->u.binary.r = mkconstexpr(&typeulong, sizeof(size_t));
+		castc = mkexpr(EXPRCAST, mkpointertype(&typeulong, QUALNONE), cp);
+		deref = mkexpr(EXPRUNARY, &typeulong, castc);
+		deref->op = TMUL;
+		deref->lvalue = true;
+		funcexpr(curfunc, mkassignexpr(ne, deref));
+		/* destruct each element for a class with a destructor */
+		if (t && (t->kind == TYPESTRUCT || t->kind == TYPEUNION) &&
+		    (tag = t->u.structunion.tag) && cpp_has_dtor(t)) {
+			struct decl *iv;
+			struct expr *ie, *lt, *ptr, *inc, *dn;
+			struct block *bloop, *bbody, *bdone;
+			extern struct block *mkblock(char *);
+			extern void funclabel(struct func *, struct block *);
+			extern void funcjmp(struct func *, struct block *);
+			extern struct value *funcbranch(struct func *,
+			    struct expr *, struct block *, struct block *);
+			iv = mkdecl("__dl_i", DECLOBJECT, &typeint, QUALNONE, LINKNONE);
+			iv->u.obj.storage = SDAUTO;
+			funcinit(curfunc, iv, NULL, false);
+			ie = mkexpr(EXPRIDENT, &typeint, NULL);
+			ie->lvalue = true;
+			ie->u.ident.decl = iv;
+			funcexpr(curfunc, mkassignexpr(ie, mkconstexpr(&typeint, 0)));
+			bloop = mkblock("loop");
+			bbody = mkblock("body");
+			bdone = mkblock("done");
+			funclabel(curfunc, bloop);
+			lt = mkexpr(EXPRBINARY, &typeint, NULL);
+			lt->op = TLESS;
+			lt->u.binary.l = ie;
+			lt->u.binary.r = mkexpr(EXPRCAST, &typeint, ne);
+			funcbranch(curfunc, lt, bbody, bdone);
+			funclabel(curfunc, bbody);
+			/* dtor(&p[i]) — p + i */
+			snprintf(mname, sizeof mname, "%s_dtor", tag);
+			fd = scopegetdecl(t->scope ? t->scope : &filescope, mname, true);
+			if (fd && fd->kind == DECLFUNC) {
+				struct expr *thp;
+				thp = mkexpr(EXPRBINARY, e->type, NULL);
+				thp->op = TADD;
+				thp->u.binary.l = e;
+				thp->u.binary.r = ie;
+				fn = mkexpr(EXPRIDENT, fd->type, NULL);
+				fn->u.ident.decl = fd;
+				fn = decay(fn);
+				dn = mkexpr(EXPRCALL, &typevoid, fn);
+				dn->u.call.args = thp;
+				dn->u.call.nargs = 1;
+				funcexpr(curfunc, dn);
+			}
+			inc = mkexpr(EXPRBINARY, &typeint, NULL);
+			inc->op = TADD;
+			inc->u.binary.l = ie;
+			inc->u.binary.r = mkconstexpr(&typeint, 1);
+			funcexpr(curfunc, mkassignexpr(ie, inc));
+			funcjmp(curfunc, bloop);
+			funclabel(curfunc, bdone);
+		}
+		/* free((char*)p - sizeof(size_t)) */
+		fp = mkexpr(EXPRBINARY, mkpointertype(&typechar, QUALNONE), NULL);
+		fp->op = TSUB;
+		fp->u.binary.l = mkexpr(EXPRCAST, mkpointertype(&typechar, QUALNONE), e);
+		fp->u.binary.r = mkconstexpr(&typeulong, sizeof(size_t));
+		return cpp_free_expr(mkexpr(EXPRCAST,
+		    mkpointertype(&typevoid, QUALNONE), fp));
+	}
 	e = unaryexpr(s);
 	if (!e || e->type->kind != TYPEPOINTER)
 		error(&tok.loc, "delete operand must be a pointer");
