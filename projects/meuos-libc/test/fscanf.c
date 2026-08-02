@@ -11,7 +11,7 @@
 int
 main(void)
 {
-	char buf[] = "77 5f tail";
+	char buf[32] = "77 5f tail";
 	FILE *stream;
 	int decimal = 0, hexadecimal = 0;
 	char word[16];
@@ -49,6 +49,21 @@ main(void)
 			return 11;
 		if (fclose(stream) != 0)
 			return 12;
+	}
+
+	/* base-detecting and unsigned integer conversions */
+	{
+		int iv;
+		unsigned u1, u2;
+		strcpy(buf, "0x1f 010 42");
+		stream = fmemopen(buf, sizeof buf, "r");
+		if (!stream)
+			return 13;
+		if (fscanf(stream, "%i %o %u", &iv, &u1, &u2) != 3
+		 || iv != 31 || u1 != 8u || u2 != 42u)
+			return 14;
+		if (fclose(stream) != 0)
+			return 15;
 	}
 
 	/* EOF on an empty stream (/dev/null reads EOF immediately) */

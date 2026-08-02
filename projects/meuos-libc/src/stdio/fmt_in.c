@@ -67,16 +67,42 @@ vsscanf(const char *input, const char *format, va_list arguments)
 			++format;
 			continue;
 		}
-		if (*format == 'd' || *format == 'x') {
-			int base = *format == 'x' ? 16 : 10, negative = 0, digits = 0;
+		if (*format == 'd' || *format == 'i' || *format == 'o'
+		 || *format == 'u' || *format == 'x' || *format == 'X') {
+			int base;
+			int is_signed = (*format == 'd' || *format == 'i');
+			int negative = 0, digits = 0;
 			int overflow = 0;
 			unsigned value = 0;
 			unsigned limit;
-			int *out = va_arg(arguments, int *);
+			if (*format == 'i')
+				base = 0;		/* auto-detect */
+			else if (*format == 'o')
+				base = 8;
+			else if (*format == 'x' || *format == 'X')
+				base = 16;
+			else
+				base = 10;
 			if (*input == '-') { negative = 1; ++input; }
 			else if (*input == '+') ++input;
+			if (base == 0) {
+				/* %i: 0x/0X -> 16, leading 0 -> 8, else 10 */
+				base = 10;
+				if (*input == '0') {
+					base = 8;
+					if (input[1] == 'x' || input[1] == 'X') {
+						base = 16;
+						input += 2;
+						digits += 2;
+					}
+				}
+			} else if (base == 16 && input[0] == '0'
+			 && (input[1] == 'x' || input[1] == 'X')) {
+				input += 2;
+				digits += 2;
+			}
 			/* Clamp target: the most negative int is INT_MAX+1. */
-			limit = negative ? (unsigned)INT_MAX + 1u : (unsigned)INT_MAX;
+			limit = (is_signed && negative) ? (unsigned)INT_MAX + 1u : (unsigned)INT_MAX;
 			while (*input && (width == 0 || digits < width)) {
 				int digit = *input >= '0' && *input <= '9' ? *input - '0'
 					: (*input >= 'a' && *input <= 'f' ? *input - 'a' + 10
@@ -92,12 +118,18 @@ vsscanf(const char *input, const char *format, va_list arguments)
 				++input;
 			}
 			if (!digits) break;
-			if (overflow)
-				*out = negative ? INT_MIN : INT_MAX;
-			else if (negative)
-				*out = value > (unsigned)INT_MAX ? INT_MIN : -(int)value;
-			else
-				*out = value > (unsigned)INT_MAX ? INT_MAX : (int)value;
+			if (is_signed) {
+				int *out = va_arg(arguments, int *);
+				if (overflow)
+					*out = negative ? INT_MIN : INT_MAX;
+				else if (negative)
+					*out = value > (unsigned)INT_MAX ? INT_MIN : -(int)value;
+				else
+					*out = value > (unsigned)INT_MAX ? INT_MAX : (int)value;
+			} else {
+				unsigned *out = va_arg(arguments, unsigned *);
+				*out = value;
+			}
 			++assigned;
 			++format;
 			continue;
