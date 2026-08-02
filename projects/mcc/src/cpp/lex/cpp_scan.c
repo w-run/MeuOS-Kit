@@ -39,6 +39,7 @@ static const struct cpp_kw cpp_kws[] = {
 	{ "concept", CPP_TCONCEPT },
 	{ "const", CPP_TCONST },
 	{ "const_cast", CPP_TCONST_CAST },
+	{ "consteval", CPP_TCONSTEVAL },
 	{ "constexpr", CPP_TCONSTEXPR },
 	{ "continue", CPP_TCONTINUE },
 	{ "decltype", CPP_TDECLTYPE },

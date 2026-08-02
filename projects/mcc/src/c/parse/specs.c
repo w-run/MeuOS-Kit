@@ -67,7 +67,20 @@ typequal(enum typequal *tq)
 	case TCONSTEXPR:
 		*tq |= QUALCONST | QUALCONSTEXPR;  /* C23 constexpr */
 		break;
-	default: return 0;
+	default:
+		/* C++20 `consteval` (immediate function): the C lexer treats it
+		 * as an identifier; reuse the constexpr machinery (isconstexpr
+		 * + the compile-time evaluator), which for a minimal set makes
+		 * consteval behave like a strict constexpr. */
+		if (tok.kind >= TIDENT) {
+			extern int g_lang;
+			const char *nm = tokenstr(tok.kind);
+			if (g_lang == 1 && strcmp(nm, "consteval") == 0) {
+				*tq |= QUALCONST | QUALCONSTEXPR;
+				break;
+			}
+		}
+		return 0;
 	}
 	next();
 
@@ -81,7 +94,19 @@ funcspec(enum funcspec *fs)
 	switch (tok.kind) {
 	case TINLINE:    new = FUNCINLINE;   break;
 	case T_NORETURN: new = FUNCNORETURN; break;
-	default: return 0;
+	default:
+		/* C++20 consteval is a C++ keyword (identifier in the C lexer) */
+		if (tok.kind >= TIDENT) {
+			extern int g_lang;
+			extern enum cpp_tokenkind cpp_tok_kind(void);
+			if (g_lang == 1 && cpp_tok_kind() == CPP_TCONSTEVAL)
+				new = FUNCCONSTEVAL;
+			else
+				return 0;
+		} else {
+			return 0;
+		}
+		break;
 	}
 	if (!fs)
 		error(&tok.loc, "function specifier not allowed in this declaration");

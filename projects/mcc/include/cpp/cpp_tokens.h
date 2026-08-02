@@ -82,6 +82,7 @@ enum cpp_tokenkind {
 	CPP_TTHREAD_LOCAL,     /* C++11 thread_local */
 	CPP_TSTATIC_ASSERT,    /* C++11 static_assert */
 	CPP_TCONSTEXPR,        /* C++11 constexpr */
+	CPP_TCONSTEVAL,        /* C++20 consteval */
 	CPP_TNOEXCEPT,         /* C++11 noexcept */
 	CPP_TNULLPTR_T,        /* C++11 nullptr_t */
 

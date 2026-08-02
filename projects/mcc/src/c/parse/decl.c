@@ -517,6 +517,10 @@ decl(struct scope *s, struct func *f)
 					 * by the typequal() handling of the `constexpr` keyword */
 					if (g_lang == 1 && (base.qual & QUALCONSTEXPR))
 						d->u.func.isconstexpr = true;
+					/* C++20 consteval (immediate) function: like constexpr,
+					 * but every call must be evaluated at compile time */
+					if (g_lang == 1 && (fs & FUNCCONSTEVAL))
+						d->u.func.isconstexpr = true;
 				}
 				if (tok.kind == TLBRACE) {
 					if (!allowfunc)

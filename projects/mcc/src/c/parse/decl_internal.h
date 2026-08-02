@@ -62,6 +62,7 @@ enum funcspec {
 	FUNCINLINE   = 1<<1,
 	FUNCNORETURN = 1<<2,
 	FUNCCONSTEXPR = 1<<3,   /* C++ constexpr function */
+	FUNCCONSTEVAL = 1<<4,   /* C++20 consteval (immediate) function */
 };
 
 struct structbuilder {
