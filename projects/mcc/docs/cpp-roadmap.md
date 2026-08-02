@@ -93,7 +93,7 @@
 - **CTAD**（a76e7ff）：`Vec v(a, b)` — declspecs 记录待推导模板名，decl() 从构造参数按位置推导实例化；token 重放修复（尾部 `;` + tokctx_rewind）。
 - **结构化绑定**（70890fa）：`auto [x, y] = p` — 隐藏对象 + 逐成员拷贝绑定（值绑定）。
 - **内联变量**（70890fa）：`inline static int x` — 成员声明允许 inline，无初始化 inline static 是定义（零初始化）。
-- concepts/requires：**未做**（依赖约束求值，放最后）。
+- **concepts/requires**（8e07d08，C++20 最小集）：`template <typename T> concept Name = expr;` 概念定义 + `requires Concept<T>` requires-clause。实例化时重放概念体（参数类型替换）+ 常量折叠，不满足报错。**限制**：约束须命名概念；概念体为 T 的布尔表达式（sizeof/==/&&），概念组合（概念引用概念）未支持。
 
 ---
 
