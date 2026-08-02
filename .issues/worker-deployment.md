@@ -4,17 +4,17 @@
 
 ## 团队架构（语义化管理）
 
-当前团队：`_auto_ad39aaae`（本会话活跃团队）。worker 按角色分型：
+当前团队：`mcc-mxx-cont`（mcc/m++ 重构团队，接管双覆盖收官；原 `_auto_ad39aaae` 已完成前序里程碑）。worker 按角色分型：
 
 | Worker 名 | 角色 | 职责 | 状态 |
 |---|---|---|---|
 | planner | 规划型 | 参考实现探索 + 社区调研 + 可行性分析 | ✅ 完成（cpp-roadmap.md e745f17） |
 | auditor | 验收检查型 | 代码验证 + 质量检测 + 审计 | ✅ 首轮闭环（25254fe→6003f47） |
-| worker-cpp | 工作型（m++ 前端） | C++ 特性实现 | ✅ constexpr 完成（3ac233b）+ B/C/D/E 缺陷修复 |
-| worker-toolchain | 工作型（6 架构/mt-as） | 架构后端 + 汇编器修复 | 🔄 arm c99-float 在途已 stash |
+| worker-cpp | 工作型（m++ 前端） | C++ 特性实现 + m++ 边界补全 + P2 spill slot 复用 | 🔄 m++ 边界 4 项完成（40d46f2/1eb76da/35a6ede/ecc42cf），P2 slotmerge 实施中 |
+| worker-toolchain | 工作型（6 架构/mt-as） | 架构后端 + 汇编器修复 | ✅ 本团队前序完成（C23 补全/验收基线，已移交） |
 | worker-libc | 专项（libc 补全） | C99 标准库缺口 | ✅ C99 面完成（11 提交） |
-| worker-test | 专项（测试矩阵） | 测试扩充 + 缺陷发现 | ✅ 6 批完成 |
-| doc-sync | 文档型 | docs/.issues/ARCHITECTURE 同步 | ✅ 持续维护 |
+| worker-test | 专项（测试矩阵） | 测试扩充 + 缺陷发现 | ✅ 6 批完成（本团队新加入，后续可扩充回归用例） |
+| doc-sync | 文档型 | docs/.issues/ARCHITECTURE 同步 | 🔄 本团队新加入，0802 里程碑收尾同步中 |
 | worker-verify | 工作型（后备） | 验收门禁 verify-all | ✅ 完成（c940c34） |
 
 ## 早期 worker 名与角色映射（无法改名，按角色引用）

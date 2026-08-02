@@ -288,8 +288,15 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
 | 变参模板/包展开 | ✅ | `typename... Args` 包参数 + `f(args...)` 转发 + `sizeof...(Args)` + 空包（df0c489） |
 | lambda（匿名类降级） | ✅ | 闭包合成文件作用域 `__lambdaN` 类，值捕获=成员+合成构造、体=operator()、`obj(args)` 降级（877beed） |
 | constexpr 求值器 | ✅ | constexpr 函数体 token 缓冲回放 + 编译期折叠、constexpr 变量常量初值捕获、static_assert 编译期求值（3ac233b；阶段 1 + 阶段 2 的 static_assert 部分） |
+| 移动语义（右值引用） | ✅ | `T&&` + 引用折叠 + lvalue/rvalue 值类别重载（4491a27） |
+| C++14/17 五项 | ✅ | 泛型 lambda（a28b0f5）、if constexpr（11d919d）、CTAD（a76e7ff）、结构化绑定+内联变量（70890fa） |
+| C++20 三项 | ✅ | 三向比较 `<=>`（34d0566）、consteval 立即函数（e698f37）、concepts/requires（8e07d08）——**C++ 98~23 覆盖收官** |
+| m++ 边界 4 项 | ✅ | override/final（40d46f2）、ctor 初始化列表（1eb76da）、限定成员调用 `Base::get()`（35a6ede）、new/delete（ecc42cf） |
 | 6 架构 MIR 路径 | ✅ | varargs 全打通，扩展矩阵全 PASS（109a3ff） |
+| C 覆盖达成 | ✅ | C99/C11/C23 全部实现：__VA_OPT__/__has_c_attribute（c60874d）、C23 constexpr 函数求值（753df8a）——**C 90~23 目标达成** |
 | 验收门禁 | ✅ | `test/verify-all.sh` + `make check-all`（c940c34） |
+| 全面验收基线 | ✅ | verify-all 6/6 + 自举产物 + 6 架构 qemu 矩阵（b5dcc8d，docs/acceptance.md） |
+| P2 spill slot 复用 | 📋 方案定稿 | rega/spill 长期专项，spill slot 生命周期复用方案（c84555f，p2-spill-slot-reuse.md）；实施中 |
 
 ### m++ 已知限制（截至 2026-08-02）
 

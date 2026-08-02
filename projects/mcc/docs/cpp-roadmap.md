@@ -1,7 +1,7 @@
 # m++ C++ 前端路线图（cpp-roadmap.md）
 
-> 状态：规划文档（planner 产出，2026-08-02；成员模板 c93d5f7、auto/decltype 160e2a2、变参模板 df0c489、lambda 877beed、constexpr 3ac233b 已完成）。
-> 用途：为 m++ 未实现特性（移动语义 → C++14/17/20）提供实现顺序、参考源与降级策略的决策依据。
+> 状态：规划文档（planner 产出，2026-08-02；**路线全量完成**：成员模板 c93d5f7、auto/decltype 160e2a2、变参模板 df0c489、lambda 877beed、constexpr 3ac233b、移动语义 4491a27、C++14/17 a28b0f5/11d919d/a76e7ff/70890fa、C++20 concepts 8e07d08）。
+> 用途：m++ 特性实现顺序、参考源与降级策略的决策依据（全特性已落地，转为完成记录）。
 > 约束：不写代码；报告事实均来自实际文件/搜索，标注参考源路径。
 
 ## 0. 调研结论摘要
@@ -25,9 +25,9 @@
 | 2 | **变参模板 / 包展开** ✅（已完成，df0c489） | C.2.8 模板 token 回放 | 高（STL/现代代码基础） | 中高 |
 | 3 | **lambda（匿名类降级）** ✅（已完成，877beed） | 类/构造/捕获；auto（可后补） | 高 | 中 |
 | 4 | **constexpr 求值器** ✅（已完成，3ac233b） | 常量折叠/表达式树；变参模板可选 | 高（编译期计算） | 高 |
-| 5 | **移动语义（右值引用）** | 重载决议 + 构造/析构 | 中高（性能） | 高 |
-| 6 | C++14/17（泛型 lambda/if constexpr/CTAD/结构化绑定） | 上面全部 | 渐进 | 递进 |
-| 7 | concepts/requires | 模板 + 重载完备 | 中 | 高 |
+| 5 | **移动语义（右值引用）** ✅（已完成，4491a27） | 重载决议 + 构造/析构 | 中高（性能） | 高 |
+| 6 | C++14/17（泛型 lambda/if constexpr/CTAD/结构化绑定/内联变量） ✅（已完成，a28b0f5/11d919d/a76e7ff/70890fa） | 上面全部 | 渐进 | 递进 |
+| 7 | concepts/requires ✅（已完成，8e07d08） | 模板 + 重载完备 | 中 | 高 |
 
 > 建议的**迭代骨架**：「移动语义」（成员模板 c93d5f7、auto/decltype 160e2a2、变参模板 df0c489、lambda 877beed、constexpr 3ac233b 已完成，从骨架移除）。此顺序的理由见 §4 对任务给定路线的具体分析。
 
@@ -123,7 +123,7 @@
 
 ### 修正后的推荐路线
 ```
-✅成员模板(c93d5f7) → ✅auto/decltype(160e2a2) → ✅变参模板/包展开(df0c489) → ✅lambda(877beed) → constexpr 求值器 → 移动语义 → C++14/17 → concepts
+✅成员模板(c93d5f7) → ✅auto/decltype(160e2a2) → ✅变参模板/包展开(df0c489) → ✅lambda(877beed) → ✅constexpr 求值器(3ac233b) → ✅移动语义(4491a27) → ✅C++14/17(泛型 lambda/if constexpr/CTAD/结构化绑定) → ✅concepts(8e07d08) → C++98~23 覆盖收官
 ```
 每步验收（对接现有 `test/cpp/` + Makefile `check-cpp-*`）：
 1. auto：`auto x = 42; auto s = f();` 编译运行。✅（auto_decl.cc 16 断言，160e2a2）
