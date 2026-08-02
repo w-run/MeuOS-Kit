@@ -614,8 +614,10 @@ mabi_vaarg(MFnM *fm, MOut *o, MInsM *in)
 	/* dst = *addr */
 	mout_addr(o, MMOP_LOAD, in->dtype, dst, maddr(addr, 0, 1, 0), 0);
 
-	/* advance: reg path bumps the offset field, overflow path bumps the
-	 * overflow_arg_area pointer (in_reg -> mask is -1, else 0) */
+	/* advance: reg path bumps the offset field by oinc (reg_save_area
+	 * slot width: 8 GP / 16 FP); overflow path bumps overflow_arg_area
+	 * by the SysV stack slot width (8 for all classes — x86_64 passes
+	 * every stack argument in an 8-byte slot).  in_reg -> mask is -1. */
 	MVal *incr = tmp(fm, MT_I64, "va");
 	mout_cst(o, MMOP_AND, MT_I64, incr, mask, imm(fm, MT_I64, oinc));
 	MVal *nof = tmp(fm, MT_I64, "va");
@@ -623,7 +625,7 @@ mabi_vaarg(MFnM *fm, MOut *o, MInsM *in)
 	mout_addr(o, MMOP_STORE, MT_I32, 0, maddr(ap, 0, 1, ooff), nof);
 	MVal *nstk = tmp(fm, MT_I64, "va");
 	mout(o, MMOP_NOT, MT_I64, nstk, mask, 0);
-	mout_cst(o, MMOP_AND, MT_I64, nstk, nstk, imm(fm, MT_I64, oinc));
+	mout_cst(o, MMOP_AND, MT_I64, nstk, nstk, imm(fm, MT_I64, 8));
 	MVal *nsp = tmp(fm, MT_PTR, "va");
 	mout(o, MMOP_ADD, MT_PTR, nsp, stkp, nstk);
 	mout_addr(o, MMOP_STORE, MT_PTR, 0, maddr(ap, 0, 1, 8), nsp);
