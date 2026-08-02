@@ -107,4 +107,12 @@ struct expr *cpp_make_vcall(struct expr *thisp, struct type *owner,
 /* Emit every polymorphic class's vtable data (called at end of TU). */
 void cpp_emit_vtables(void);
 
+/* C++ function templates (C.2.8): instantiate-on-first-use.  primaryexpr
+ * consults cpp_tmpl_lookup / cpp_tmpl_placeholder for an undeclared callee;
+ * the TLPAREN lowering calls cpp_tmpl_instantiate once the argument types
+ * are known. */
+const char *cpp_tmpl_lookup(const char *name);
+struct expr *cpp_tmpl_placeholder(const char *name);
+struct expr *cpp_tmpl_instantiate(struct scope *s, struct expr *arglist);
+
 #endif /* MCC_CPP_H */

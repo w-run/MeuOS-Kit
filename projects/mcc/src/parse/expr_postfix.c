@@ -167,6 +167,16 @@ postfixexpr(struct scope *s, struct expr *r)
 					g_cpp_member_class = NULL;
 					g_cpp_member_name = NULL;
 				}
+				/* C++ function template call: instantiate the template
+				 * from the argument types (pending callee was recorded by
+				 * cpp_tmpl_placeholder). */
+				{
+					extern struct expr *cpp_tmpl_instantiate(struct scope *,
+					    struct expr *);
+					struct expr *nf = cpp_tmpl_instantiate(s, arglist);
+					if (nf)
+						r = nf;
+				}
 				t = r->type->base;
 				e = mkexpr(EXPRCALL, t->base, r);
 				e->u.call.args = NULL;

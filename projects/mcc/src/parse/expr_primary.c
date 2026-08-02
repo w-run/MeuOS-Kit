@@ -313,6 +313,17 @@ primaryexpr(struct scope *s)
 					next();
 					break;
 				}
+				/* C++ function template: `max(...)` — the identifier is
+				 * undeclared but names a template; the TLPAREN lowering
+				 * instantiates it from the argument types. */
+				extern int g_lang;
+				extern const char *cpp_tmpl_lookup(const char *);
+				extern struct expr *cpp_tmpl_placeholder(const char *);
+				if (g_lang == 1 && cpp_tmpl_lookup(tokenstr(tok.kind))) {
+					e = cpp_tmpl_placeholder(tokenstr(tok.kind));
+					next();
+					break;
+				}
 				error(&tok.loc, "undeclared identifier: %s", tokenstr(tok.kind));
 			}
 			e = mkexpr(EXPRIDENT, d->type, NULL);

@@ -109,6 +109,9 @@ static void cpp_init_vptrs(struct func *f, struct type *t,
                            struct expr *thisp);
 static bool cpp_find_final(struct type *d, const char *key,
                            struct type **owner, struct member **outm);
+static void cpp_template_decl(struct scope *s);
+static struct decl *cpp_tmpl_find_or_instantiate(struct scope *s,
+    const char *name, struct expr *arglist);
 /* Set by cpp_define_method when the method just defined is effectively
  * virtual (explicit `virtual` or an override of a base virtual); consumed
  * by structdecl to flag the member. */
@@ -667,6 +670,10 @@ cpp_parse_translation_unit(void)
 		}
 		if (k == CPP_TUSING) {
 			cpp_using_decl(&filescope);
+			continue;
+		}
+		if (k == CPP_TTEMPLATE) {
+			cpp_template_decl(&filescope);
 			continue;
 		}
 
@@ -2529,4 +2536,343 @@ cpp_find_unique_member(struct type *t, const char *name,
 		return found;
 	}
 	return NULL;
+}
+
+/* --- C.2.8 function templates (instantiate-on-first-use) --------------- */
+
+/* One template parameter (`T` in `template <typename T> ...`).  The
+ * concrete type binding is filled in during instantiation. */
+struct cpp_tmpl_param {
+	const char *name;
+	struct cpp_tmpl_param *next;
+};
+
+/* A concrete instantiation of a function template (`max<int>`). */
+struct cpp_tmpl_inst {
+	char key[128];       /* mangled function name, e.g. "max_i" */
+	struct decl *fn;
+	struct cpp_tmpl_inst *next;
+};
+
+/* A function template declaration.  `toks` holds the declaration tokens
+ * after the `template <...>` header (return type .. body); it is replayed
+ * with each concrete parameter binding to define the instantiation. */
+struct cpp_template {
+	const char *name;
+	int nparams;
+	struct cpp_tmpl_param *params;
+	struct token *toks;
+	size_t ntoks;
+	struct cpp_tmpl_inst *insts;
+	struct cpp_tmpl_inst **insts_end;
+	struct cpp_template *next;
+};
+
+static struct cpp_template *g_cpp_templates;
+static struct cpp_template **g_cpp_templates_end = &g_cpp_templates;
+/* Pending template-call names, set by cpp_tmpl_placeholder in primaryexpr
+ * and consumed by the TLPAREN lowering after the arguments are known.  A
+ * stack so nested template calls in arguments (e.g. f(g(...))) each keep
+ * their own pending name. */
+static const char *g_cpp_tmpl_stack[64];
+static int g_cpp_tmpl_depth;
+
+const char *
+cpp_tmpl_lookup(const char *name)
+{
+	struct cpp_template *t;
+
+	for (t = g_cpp_templates; t; t = t->next)
+		if (strcmp(t->name, name) == 0)
+			return t->name;
+	return NULL;
+}
+
+/* Dummy function-pointer type + decl for the template-call placeholder
+ * expression (satisfies the TLPAREN "called object" checks until the real
+ * instantiation replaces it). */
+static struct decl *
+cpp_tmpl_dummy_callee(void)
+{
+	static struct type *fn;
+	static struct decl *d;
+
+	if (!d) {
+		fn = mktype(TYPEFUNC, 0);
+		fn->base = &typevoid;
+		fn->u.func.isvararg = false;
+		fn->u.func.params = NULL;
+		fn->u.func.nparam = 0;
+		d = mkdecl("__tmpl", DECLFUNC, fn, QUALNONE, LINKNONE);
+		d->value = mkglobal(d);
+	}
+	return d;
+}
+
+/* primaryexpr helper: `name` is an undeclared identifier that names a
+ * function template.  Record the pending template call and return a
+ * placeholder callee; the TLPAREN lowering performs the instantiation
+ * once the argument types are known. */
+struct expr *
+cpp_tmpl_placeholder(const char *name)
+{
+	struct expr *e;
+
+	if (g_cpp_tmpl_depth >= 64)
+		error(&tok.loc, "template call nesting too deep");
+	g_cpp_tmpl_stack[g_cpp_tmpl_depth++] = name;
+	e = mkexpr(EXPRIDENT, mkpointertype(cpp_tmpl_dummy_callee()->type, QUALNONE),
+	           NULL);
+	e->u.ident.decl = cpp_tmpl_dummy_callee();
+	e->lvalue = false;
+	return e;
+}
+
+/* Parse `template < typename T, class U, ... >` and buffer the following
+ * declaration.  Nothing is defined yet; instantiation happens on first
+ * use with concrete type arguments. */
+static void
+cpp_template_decl(struct scope *s)
+{
+	struct cpp_template *tmpl;
+	struct cpp_tmpl_param *p, **pe;
+	struct token *toks;
+	size_t ntoks = 0, cap = 0;
+	int bd = 0;
+	bool param;
+
+	next(); /* consume 'template' */
+	expect(TLESS, "after 'template'");
+	tmpl = xmalloc(sizeof(*tmpl));
+	tmpl->name = NULL;
+	tmpl->nparams = 0;
+	tmpl->params = NULL;
+	tmpl->toks = NULL;
+	tmpl->ntoks = 0;
+	tmpl->insts = NULL;
+	tmpl->insts_end = &tmpl->insts;
+	tmpl->next = NULL;
+	pe = &tmpl->params;
+
+	/* template parameter list: `typename T` / `class T`, comma separated */
+	for (;;) {
+		enum cpp_tokenkind k = cpp_tok_kind();
+		if (k != CPP_TTYPENAME && k != CPP_TCLASS)
+			error(&tok.loc, "expected 'typename' or 'class' in template parameter list");
+		next(); /* consume typename/class */
+		if (tok.kind < TIDENT)
+			error(&tok.loc, "expected template parameter name");
+		p = xmalloc(sizeof(*p));
+		p->name = xmalloc(strlen(tokenstr(tok.kind)) + 1);
+		strcpy((char *)p->name, tokenstr(tok.kind));
+		p->next = NULL;
+		*pe = p;
+		pe = &p->next;
+		++tmpl->nparams;
+		next();
+		if (tok.kind == TGREATER)
+			break;
+		expect(TCOMMA, "',' or '>' in template parameter list");
+	}
+	next(); /* consume '>' */
+
+	/* buffer the rest of the declaration (return type .. body / ';') */
+	toks = NULL;
+	for (;;) {
+		/* declaration-only template: stop at the ';' */
+		if (bd == 0 && tok.kind == TSEMICOLON) {
+			next();
+			break;
+		}
+		if (ntoks >= cap) {
+			cap = cap ? cap * 2 : 128;
+			toks = xreallocarray(toks, cap, sizeof *toks);
+		}
+		toks[ntoks++] = tok;
+		if (tok.kind == TLBRACE)
+			++bd;
+		else if (tok.kind == TRBRACE)
+			--bd;
+		next();
+		/* end of a function body: the closing brace brought bd back to 0 */
+		if (bd == 0 && toks[ntoks - 1].kind == TRBRACE)
+			break;
+		if (tok.kind == TEOF)
+			break;
+	}
+	tmpl->toks = toks;
+	tmpl->ntoks = ntoks;
+
+	/* the function name: first plain identifier (not a C++ keyword, not a
+	 * template parameter name) in the buffered declaration.  Identifier
+	 * tokens carry their spelling in the interned token table (tokenstr
+	 * of the kind); `lit` points at the scanner's reused buffer and is
+	 * not stable for identifiers. */
+	for (size_t i = 0; i < ntoks; ++i) {
+		const char *nm;
+		if (toks[i].kind < TIDENT)
+			continue;
+		nm = tokenstr(toks[i].kind);
+		if (cpp_classify_ident(nm, strlen(nm)) != CPP_TNONE)
+			continue; /* keyword */
+		param = false;
+		for (p = tmpl->params; p; p = p->next)
+			if (strcmp(p->name, nm) == 0) {
+				param = true;
+				break;
+			}
+		if (!param) {
+			tmpl->name = xmalloc(strlen(nm) + 1);
+			strcpy((char *)tmpl->name, nm);
+			break;
+		}
+	}
+	if (!tmpl->name)
+		error(&tok.loc, "unable to determine template function name");
+
+	*g_cpp_templates_end = tmpl;
+	g_cpp_templates_end = &tmpl->next;
+}
+
+/* Deduce template arguments from the call-site argument list: parameter i
+ * takes the type of argument i (positional; sufficient for the common
+ * `T f(T a, T b)` / `T f(T a, U b)` forms). */
+static bool
+cpp_tmpl_deduce(struct cpp_template *tmpl, struct expr *arglist,
+                struct type **out, int *nout)
+{
+	struct expr *a;
+	int i = 0;
+
+	for (a = arglist; a; a = a->next) {
+		if (i < tmpl->nparams)
+			out[i] = a->type;
+		++i;
+	}
+	if (i < tmpl->nparams)
+		return false; /* too few arguments */
+	*nout = tmpl->nparams;
+	return true;
+}
+
+/* Find the DECLFUNC for the instantiation of template `name` with the
+ * given call-site arguments, instantiating it (replaying the buffered
+ * declaration with each parameter bound to a concrete type) on first use. */
+static struct decl *
+cpp_tmpl_find_or_instantiate(struct scope *s, const char *name,
+                             struct expr *arglist)
+{
+	struct cpp_template *tmpl;
+	struct cpp_tmpl_inst *inst;
+	struct cpp_tmpl_param *p;
+	struct type *types[16];
+	char key[128], fnname[128];
+	struct scope *bs;
+	struct decl *fd, *td;
+	struct token cur;
+	int i, nt = 0;
+	bool found;
+
+	for (tmpl = g_cpp_templates; tmpl; tmpl = tmpl->next)
+		if (strcmp(tmpl->name, name) == 0)
+			break;
+	if (!tmpl)
+		return NULL;
+	if (tmpl->nparams > 16)
+		error(&tok.loc, "template '%s' has too many parameters", name);
+	if (!cpp_tmpl_deduce(tmpl, arglist, types, &nt))
+		error(&tok.loc, "too few arguments for template '%s'", name);
+
+	/* mangled name: name + "_" + type codes (e.g. max_i) */
+	snprintf(key, sizeof key, "%s", name);
+	for (i = 0; i < tmpl->nparams; ++i) {
+		char code[64];
+		cpp_mangle_type(types[i], code, sizeof code);
+		strncat(key, "_", sizeof key - strlen(key) - 1);
+		strncat(key, code, sizeof key - strlen(key) - 1);
+	}
+	snprintf(fnname, sizeof fnname, "%s", key);
+
+	for (inst = tmpl->insts; inst; inst = inst->next)
+		if (strcmp(inst->key, key) == 0)
+			return inst->fn;
+
+	/* instantiate: bind parameters as type names, replay the declaration */
+	bs = mkscope(s);
+	for (p = tmpl->params, i = 0; p; p = p->next, ++i) {
+		td = mkdecl((char *)p->name, DECLTYPE, types[i], QUALNONE, LINKNONE);
+		scopeputdecl(bs, td);
+	}
+	/* rename the function token to the mangled instantiation name (the
+	 * parser resolves identifiers by their interned token kind, so intern
+	 * the mangled name and swap the kind) */
+	found = false;
+	for (i = 0; i < (int)tmpl->ntoks; ++i) {
+		const char *nm;
+		if (tmpl->toks[i].kind < TIDENT)
+			continue;
+		nm = tokenstr(tmpl->toks[i].kind);
+		if (cpp_classify_ident(nm, strlen(nm)) != CPP_TNONE)
+			continue;
+		bool is_param = false;
+		for (p = tmpl->params; p; p = p->next)
+			if (strcmp(p->name, nm) == 0) {
+				is_param = true;
+				break;
+			}
+		if (!is_param) {
+			tmpl->toks[i].kind = tokenget(fnname, strlen(fnname));
+			found = true;
+			break;
+		}
+	}
+	if (!found)
+		error(&tok.loc, "cannot locate function name in template '%s'", name);
+
+	cur = tok;
+	tokpush(&cur, 1);
+	tokpush(tmpl->toks, tmpl->ntoks);
+	next();
+	if (!decl(bs, NULL))
+		error(&tok.loc, "failed to instantiate template '%s'", name);
+
+	fd = scopegetdecl(bs, fnname, 1);
+	if (!fd || fd->kind != DECLFUNC)
+		error(&tok.loc, "template '%s' instantiation produced no function", name);
+	/* re-register at file scope so later uses of the same instantiation
+	 * (and cross-function calls) resolve the symbol */
+	scopeputdecl(s, fd);
+	delscope(bs);
+
+	inst = xmalloc(sizeof(*inst));
+	snprintf(inst->key, sizeof inst->key, "%s", key);
+	inst->fn = fd;
+	inst->next = NULL;
+	*tmpl->insts_end = inst;
+	tmpl->insts_end = &inst->next;
+	return fd;
+}
+
+/* TLPAREN helper: when a pending template call is recorded (set by
+ * cpp_tmpl_placeholder), instantiate the template from the argument types
+ * and return the decayed callee expression; clears the pending state. */
+struct expr *
+cpp_tmpl_instantiate(struct scope *s, struct expr *arglist)
+{
+	const char *nm;
+	struct decl *fd;
+	struct expr *e;
+
+	if (!g_cpp_tmpl_depth)
+		return NULL;
+	/* pop before instantiating: the replay of the template body parses
+	 * nested calls whose TLPAREN lowering pops their own pending names */
+	nm = g_cpp_tmpl_stack[--g_cpp_tmpl_depth];
+	fd = cpp_tmpl_find_or_instantiate(s, nm, arglist);
+	if (!fd)
+		return NULL;
+	e = mkexpr(EXPRIDENT, fd->type, NULL);
+	e->u.ident.decl = fd;
+	e->lvalue = false;
+	return decay(e);
 }
