@@ -291,6 +291,7 @@ check: $(ATOMIC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/stdio test/stdio.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/malloc test/malloc.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/stdlib test/stdlib.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/strtod-hex test/strtod_hex.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/libgen test/libgen.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/ctype test/ctype.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/assert test/assert.c
@@ -330,6 +331,7 @@ check: $(ATOMIC_LIB)
 	/tmp/meuos-libc-check/stdio
 	/tmp/meuos-libc-check/malloc
 	/tmp/meuos-libc-check/stdlib
+	/tmp/meuos-libc-check/strtod-hex
 	/tmp/meuos-libc-check/libgen
 	/tmp/meuos-libc-check/ctype
 	/tmp/meuos-libc-check/assert
