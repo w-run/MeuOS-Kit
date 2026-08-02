@@ -20,14 +20,20 @@
 | S | `lambda_capture_class.cc` rc=0（copies==1, f()==101） | `cpp_lambda_expr` 合成 closure ctor 时按成员类型走 ctor（`cpp_lambda_cap_needs_ctor_init`），非位拷贝 |
 | T | `lambda_nested_capture.cc` rc=0（内层再捕获外层 base，2~3 层嵌套） | `cpp_lambda_expr` 捕获解析：scopegetdecl 失败时用 `cpp_member_ident` 解析为外层闭包成员 `(*this).name` |
 
-## 2. 缺陷状态表（最终）
+## 2. 缺陷状态表（最终，team-lead 核对版）
 | 缺陷 | 状态 | 提交哈希 | 验证 |
 |------|------|----------|------|
-| Q | ✅ closed | f8f0044 | 修复=delete 判空（p!=0 分支守护 dtor/cookie/free）；canary `test/cpp/new_delete_nullptr.cc` 转正；运行 rc=0 |
-| R | ✅ closed | 93ab4b4 | 修复=concept 实参 span 切分 + 修正嵌套 use nargs；`concepts_combo_boundary.cc` 去 `#if 0` 回归 rc=0 |
-| S | ✅ closed | f8f0044（混入，见 §3） | 修复=按捕获类型走 ctor 初始化；`lambda_capture_class.cc` rc=0（copies==1, f()==101） |
-| T | ✅ closed | f8f0044（混入，见 §3） | 修复=`cpp_member_ident` 解析外层闭包成员；`lambda_nested_capture.cc` 2~3 层嵌套 rc=0 |
-| V | ✅ closed | 93ab4b4（夹带于 R 提交） | MIR msimp 只削减 UDIV/UREM（有符号 div/rem 不强度削减）；`signed_div_pow2.c` 双路径实测 **MCC_USE_MIR=1 PASS + =0 PASS**（见 §6 缺陷 V/U 编号澄清） |
+| Q | ✅ closed | f8f0044 | delete/delete[] nullptr 判空 no-op；`new_delete_nullptr.cc` 转正 rc=0 |
+| R | ✅ closed | 93ab4b4 | concept 实参 span 切分 + 嵌套 use nargs；`concept_param_rename.cc`/`concepts_combo_boundary.cc` rc=0 |
+| S | ✅ closed | f8f0044（混入） | lambda 按值捕获类对象走 ctor（`cpp_lambda_cap_needs_ctor_init`）；`lambda_capture_class.cc` rc=0 |
+| T | ✅ closed | f8f0044（混入） | 嵌套 lambda 捕获外层成员（`cpp_member_ident`）；`lambda_nested_capture.cc` rc=0 |
+| V | ✅ closed | 93ab4b4（夹带于 R 提交） | MIR msimp 有符号 div/rem 误编译，削减限 UDIV/UREM；`signed_div_pow2.c` 双路径 PASS |
+| U | 🔄 **open**（worker-lambda 在途，P0） | — | size-0 空类按值传参/return 编译崩溃（cpp 前端 cpp_parse.c 路径）；worker-cpp20 复现 MIR=0/1 双路径均崩；探测 `pending/value_param_member_call.cc` |
+| F | ✅ closed | 647a05b（夹带） | MIR fold shl/sar(x,0) 优化缺口，2026-08-03 复核闭环（0802.md 缺陷 F 段） |
+| W | 🔄 open（worker-mir-tests 登记待排） | — | u8 字面量类型（第二轮） |
+| X | 🔄 open（worker-mir-tests 登记待排） | — | extern inline（第二轮） |
+| Y | 🔄 open | — | `delete (T*)expr` 解析失败（low，第二轮） |
+| va_list 溢出 | ✅ closed | 222a28d | `mabi_vaarg` overflow 推进固定 8 字节槽；`varargs_overflow.c` 双路径 rc=0 |
 
 **回归验证（基于 HEAD=f8f0044）**：`make check-cpp-func` 全绿（含 lambda.cc、new_delete_nullptr、concepts_combo_boundary、struct_multinher 等）；`make check-cpp-neg` 通过（rc=0）；现有 lambda 测试无破坏。
 
@@ -61,11 +67,11 @@
 ## 6. 缺陷 V/U 编号澄清 + 双路径验证（worker-judge 增补，2026-08-03）
 
 ### 编号澄清（重要，避免后续混淆）
-`0802.md` 队列表（worker-test/worker-doc 维护）的定义：
-- **缺陷 U = size-0 类按值传参段错误**（探测 `pending/value_param_member_call.cc`）——**仍 open**（0802.md:703 记录纠错，当前 HEAD 实测 rc=139），待分配修复。
-- **缺陷 V = MIR msimp 有符号 div/rem 被强度削减误编译**（负数用例 -7/2、-7%4、-17/8、-17%8）——**closed**（93ab4b4 夹带）。
+`0802.md` 队列表（worker-test/worker-doc 维护）的定义，两个缺陷**严格分离**：
+- **缺陷 U = size-0 空类按值传参/return 编译崩溃**（cpp 前端 `cpp_parse.c` 路径；探测 `pending/value_param_member_call.cc`）——🔄 **open**（P0，worker-lambda 在途；worker-cpp20 复现细化：MIR=0/1 双路径均崩，0802.md:281/703）。
+- **缺陷 V = MIR msimp 有符号 div/rem 被强度削减误编译**（负数用例 -7/2、-7%4、-17/8、-17%8）——✅ **closed**（93ab4b4 夹带，0802.md:725）。
 
-⚠️ team-lead 的广播消息称「缺陷 U（MIR div/rem）」与 worker-fold 测试注释「defect V」指向同一 div/rem 问题，编号不一致；本文档已按 0802.md 队列表统一为缺陷 V。
+⚠️ 曾出现编号混淆（team-lead 广播「缺陷 U（MIR div/rem）」、worker-fold 测试注释「defect V」指向同一 div/rem 问题；本文档早期版本也误标）。现统一：**U=cpp 前端空类崩溃（open），V=MIR 后端 div/rem（closed）**，与 0802.md 281/725 行一致。
 
 ### 缺陷 V 双路径验证（worker-judge 亲自实测，mcc 基于 f8f0044）
 | 路径 | 命令 | 结果 |
@@ -92,3 +98,16 @@
 
 ### S/T canary 转正（已随 fe1d55c 合入）
 `test/cpp/lambda_capture_class.cc`、`test/cpp/lambda_nested_capture.cc` 已从 pending/ 转入 `test/cpp/`（fe1d55c 夹带，456718f 记录归属），`pending/` 仅剩 `concept_param_rename.cc`、`value_param_member_call.cc`（分别随 R 转正 / 缺陷 U 处理）。check-cpp-func 自动收集含二者。
+
+---
+
+## 8. verify-all 门禁实测（worker-judge，2026-08-03）
+
+`sh test/verify-all.sh --verbose` 实测（mcc/m++ 已重建，HEAD 含全部修复）：
+- **PASS=6 FAIL=0 SKIP=0**：`make check` / `check-mir` / `check-cpp` / `check-c99 (MEUOS_SYSROOT)` / `check-c11 (MEUOS_SYSROOT)` / `check-sysroot-static`（自举 mcc 编译 mcc + 运行 hello）
+- 六项全 PASS（含自举）——team-lead 核验项 (2) 满足。
+- ⚠️ 门禁缺口仍在：verify-all.sh 未调用 `check-c-mir`（mir_matrix.sh MIR/LIR 双路径矩阵，Makefile 210 行已有该目标），legacy 路径未被 verify-all 显式验证；建议 worker-selfhost/worker-doc 把 `make check-c-mir` 纳入 verify-all.sh。
+
+## 9. 93ab4b4 / f8f0044 夹带处理（team-lead 裁决）
+- **不拆分、不 force-push**：f8f0044 已是多 worker pull 基点，重写祖先链破坏并发。提交归属不纯净的代价低于重写历史代价。
+- 在 0802.md 注明实际归属：R 提交实属 cpp_parse.c 修复，V 实属 mir/passes.c 等 4 文件（passes.c/signed_div_pow2.c/pass_test.c/0802.md），归属已混但功能正确。
