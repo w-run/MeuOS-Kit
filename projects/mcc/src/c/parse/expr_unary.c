@@ -11,6 +11,7 @@
 #include "util.h"
 #include "mcc.h"
 #include "expr_internal.h"
+#include "cpp/cpp_tokens.h"
 
 struct expr *mkexpr(enum exprkind, struct type *, struct expr *);
 struct expr *decay(struct expr *);
@@ -32,6 +33,23 @@ unaryexpr(struct scope *s)
 	struct expr *e, *l;
 	struct type *t;
 
+	/* C++ new/delete expressions: `new T(args)` lowers to a malloc +
+	 * constructor call, `delete p` to a destructor call + free.  Both
+	 * are parsed by the C++ frontend (they need the class ctor/dtor
+	 * machinery and the libc allocator). */
+	{
+		extern int g_lang;
+		if (g_lang == 1) {
+			extern enum cpp_tokenkind cpp_tok_kind(void);
+			extern struct expr *cpp_parse_new_expr(struct scope *);
+			extern struct expr *cpp_parse_delete_expr(struct scope *);
+			enum cpp_tokenkind ck = cpp_tok_kind();
+			if (ck == CPP_TNEW)
+				return cpp_parse_new_expr(s);
+			if (ck == CPP_TDELETE)
+				return cpp_parse_delete_expr(s);
+		}
+	}
 	op = tok.kind;
 	switch (op) {
 	case TINC:

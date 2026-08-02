@@ -2295,6 +2295,253 @@ cpp_emit_ctor_call(struct func *f, struct decl *d, struct expr *args)
 	funcexpr(f, call);
 }
 
+/* --- new/delete expressions (C++98) ---------------------------- */
+
+/* Ensure the file scope declares the libc allocator helper `name`
+ * (`malloc` / `free`); generated code calls it directly, so the program
+ * must link against a libc that provides them. */
+static struct decl *
+cpp_ensure_libc_fn(const char *name)
+{
+	extern struct scope filescope;
+	struct decl *fd;
+
+	fd = scopegetdecl(&filescope, name, 1);
+	if (fd && fd->kind == DECLFUNC)
+		return fd;
+	if (strcmp(name, "malloc") == 0) {
+		struct type *ft = mktype(TYPEFUNC, 0);
+		ft->base = mkpointertype(&typevoid, QUALNONE); /* void *malloc(size_t) */
+		ft->u.func.isvararg = false;
+		ft->u.func.nparam = 1;
+		ft->u.func.params = mkdecl("sz", DECLOBJECT, &typeulong,
+		    QUALNONE, LINKNONE);
+		ft->u.func.params->u.obj.storage = SDAUTO;
+		fd = mkdecl("malloc", DECLFUNC, ft, QUALNONE, LINKEXTERN);
+	} else if (strcmp(name, "free") == 0) {
+		struct type *ft = mktype(TYPEFUNC, 0);
+		ft->base = &typevoid; /* void free(void *) */
+		ft->u.func.isvararg = false;
+		ft->u.func.nparam = 1;
+		ft->u.func.params = mkdecl("p", DECLOBJECT,
+		    mkpointertype(&typevoid, QUALNONE), QUALNONE, LINKNONE);
+		ft->u.func.params->u.obj.storage = SDAUTO;
+		fd = mkdecl("free", DECLFUNC, ft, QUALNONE, LINKEXTERN);
+	} else {
+		return NULL;
+	}
+	fd->value = mkglobal(fd); /* global symbol slot for &malloc/&free */
+	scopeputdecl(&filescope, fd);
+	return fd;
+}
+
+/* Build a call expression `malloc(size)`. */
+static struct expr *
+cpp_malloc_expr(struct expr *size)
+{
+	struct decl *fd = cpp_ensure_libc_fn("malloc");
+	struct expr *fn, *call;
+
+	fn = mkexpr(EXPRIDENT, fd->type, NULL);
+	fn->u.ident.decl = fd;
+	fn = decay(fn); /* &malloc */
+	call = mkexpr(EXPRCALL, mkpointertype(&typevoid, QUALNONE), fn);
+	call->u.call.args = size;
+	call->u.call.nargs = 1;
+	return call;
+}
+
+/* Build a call expression `free(p)`. */
+static struct expr *
+cpp_free_expr(struct expr *p)
+{
+	struct decl *fd = cpp_ensure_libc_fn("free");
+	struct expr *fn, *call;
+
+	fn = mkexpr(EXPRIDENT, fd->type, NULL);
+	fn->u.ident.decl = fd;
+	fn = decay(fn); /* &free */
+	call = mkexpr(EXPRCALL, &typevoid, fn);
+	call->u.call.args = p;
+	call->u.call.nargs = 1;
+	return call;
+}
+
+/* Build a call expression `Class_Class(thisp, args...)`, resolving the
+ * constructor overload from the argument types (like an object
+ * declaration `Point p(3)`).  Returns NULL when the class has no
+ * matching constructor. */
+static struct expr *
+cpp_ctor_expr(struct type *t, struct expr *thisp, struct expr *args)
+{
+	extern struct scope filescope;
+	const char *tag = t ? t->u.structunion.tag : NULL;
+	char code[256];
+	struct decl *fd, *p;
+	struct expr *fn, *call, *a, **end;
+
+	if (!tag || !cpp_has_ctor(t, tag))
+		return NULL;
+	cpp_mangled_name_args(t, tag, args, code, sizeof code, true);
+	fd = scopegetdecl(t->scope ? t->scope : &filescope, code, true);
+	if (!fd || fd->kind != DECLFUNC) {
+		char code2[256];
+		cpp_mangled_name_args(t, tag, args, code2, sizeof code2, false);
+		fd = scopegetdecl(t->scope ? t->scope : &filescope, code2, true);
+		if (fd && fd->kind == DECLFUNC)
+			snprintf(code, sizeof code, "%s", code2);
+	}
+	if (!fd || fd->kind != DECLFUNC)
+		return NULL;
+	fn = mkexpr(EXPRIDENT, fd->type, NULL);
+	fn->u.ident.decl = fd;
+	fn = decay(fn); /* &Class_Class */
+	call = mkexpr(EXPRCALL, &typevoid, fn);
+	call->u.call.args = thisp;
+	call->u.call.nargs = 1;
+	end = &thisp->next;
+	/* reference parameters (copy/move ctors) receive the address of the
+	 * argument; by-value parameters receive the value */
+	for (a = args, p = fd->type->u.func.params ? fd->type->u.func.params->next : NULL;
+	     a; a = a->next, p = p ? p->next : NULL) {
+		struct expr *arg = a;
+		if (p && p->type && p->type->isref)
+			arg = mkunaryexpr(TBAND, a);
+		*end = arg;
+		end = &arg->next;
+		++call->u.call.nargs;
+	}
+	return call;
+}
+
+/* `new T` / `new T(args)`: lower to `tmp = malloc(sizeof(T)), ctor(tmp,
+ * args...), tmp` where `tmp` is a stack slot of type T*; the result is
+ * the pointer (a comma expression, so the ctor side effect runs before
+ * the value is used).  Array form `new T[n]` is not supported yet. */
+struct expr *
+cpp_parse_new_expr(struct scope *s)
+{
+	extern struct func *curfunc;
+	extern struct decl *mkdecl(char *, enum declkind, struct type *,
+	    enum typequal, enum linkage);
+	extern void funcinit(struct func *, struct decl *, struct init *,
+	    bool);
+	extern struct expr *mkassignexpr(struct expr *, struct expr *);
+	extern struct qualtype declspecs(struct scope *, enum storageclass *,
+	    enum funcspec *, int *);
+
+	struct qualtype base;
+	enum storageclass sc;
+	int align;
+	struct type *t, *pt;
+	struct expr *args = NULL, **ae = &args;
+	struct expr *ident, *ctor, *e;
+	struct decl *tmp;
+
+	next(); /* consume 'new' */
+	base = declspecs(s, &sc, NULL, &align);
+	if (!base.type)
+		error(&tok.loc, "expected type in 'new' expression");
+	t = base.type;
+	if (t->incomplete)
+		error(&tok.loc, "'new' on incomplete type");
+	if (tok.kind == TLBRACK)
+		error(&tok.loc, "'new T[n]' (array allocation) is not supported yet");
+	if (tok.kind == TLPAREN) {
+		next();
+		while (tok.kind != TRPAREN) {
+			if (args)
+				expect(TCOMMA, "or ')' after 'new' argument");
+			*ae = assignexpr(s);
+			ae = &(*ae)->next;
+		}
+		next();
+	}
+	if (!curfunc)
+		error(&tok.loc, "'new' outside of a function body is not supported");
+
+	/* tmp (T*) = malloc(sizeof(T)); emit the calls immediately (in parse
+	 * order) and yield an expression that reads the saved pointer. */
+	pt = mkpointertype(t, QUALNONE);
+	tmp = mkdecl("tmp", DECLOBJECT, pt, QUALNONE, LINKNONE);
+	tmp->u.obj.storage = SDAUTO;
+	funcinit(curfunc, tmp, NULL, false); /* allocate the pointer slot */
+
+	ident = mkexpr(EXPRIDENT, pt, NULL);
+	ident->qual = QUALNONE;
+	ident->lvalue = true;
+	ident->u.ident.decl = tmp;
+
+	funcexpr(curfunc, mkassignexpr(ident,
+	    cpp_malloc_expr(mkconstexpr(&typeulong, t->size))));
+
+	if (t->kind == TYPESTRUCT || t->kind == TYPEUNION) {
+		if (cpp_has_ctor(t, t->u.structunion.tag)) {
+			struct expr *thisp = mkexpr(EXPRIDENT, pt, NULL);
+			thisp->qual = QUALNONE; thisp->lvalue = true;
+			thisp->u.ident.decl = tmp;
+			ctor = cpp_ctor_expr(t, thisp, args);
+			if (!ctor)
+				error(&tok.loc, "no matching constructor for 'new %s'",
+				    t->u.structunion.tag);
+			funcexpr(curfunc, ctor);
+		} else if (args) {
+			error(&tok.loc, "'%s' has no constructor for 'new' with arguments",
+			    t->u.structunion.tag);
+		}
+	} else if (args) {
+		error(&tok.loc, "'new' with arguments requires a class type");
+	}
+	/* the new-expression's value: the pointer stored in tmp */
+	e = mkexpr(EXPRIDENT, pt, NULL);
+	e->qual = QUALNONE;
+	e->lvalue = true;
+	e->u.ident.decl = tmp;
+	return e;
+}
+
+/* `delete p`: emit a destructor call `Class_dtor(p)` (for a class with a
+ * destructor) followed by `free(p)`, and yield a void-typed expression.
+ * `delete[]` is not supported yet. */
+struct expr *
+cpp_parse_delete_expr(struct scope *s)
+{
+	extern struct scope filescope;
+	extern struct func *curfunc;
+
+	struct expr *e, *dtor, *fn;
+	struct type *t;
+	const char *tag;
+	char mname[256];
+	struct decl *fd;
+
+	next(); /* consume 'delete' */
+	if (tok.kind == TLBRACK)
+		error(&tok.loc, "'delete[]' (array deallocation) is not supported yet");
+	e = unaryexpr(s);
+	if (!e || e->type->kind != TYPEPOINTER)
+		error(&tok.loc, "delete operand must be a pointer");
+	t = e->type->base;
+	if (t && (t->kind == TYPESTRUCT || t->kind == TYPEUNION) &&
+	    (tag = t->u.structunion.tag) && cpp_has_dtor(t)) {
+		snprintf(mname, sizeof mname, "%s_dtor", tag);
+		fd = scopegetdecl(t->scope ? t->scope : &filescope, mname, true);
+		if (fd && fd->kind == DECLFUNC) {
+			fn = mkexpr(EXPRIDENT, fd->type, NULL);
+			fn->u.ident.decl = fd;
+			fn = decay(fn); /* &Class_dtor */
+			dtor = mkexpr(EXPRCALL, &typevoid, fn);
+			dtor->u.call.args = e;
+			dtor->u.call.nargs = 1;
+			funcexpr(curfunc, dtor); /* destructor runs before free */
+		}
+	}
+	/* the free(p) call expression is returned so the caller's funcexpr
+	 * (e.g. the expression statement) executes it; a void EXPRCALL is a
+	 * safe void-typed result */
+	return cpp_free_expr(e);
+}
+
 /* Append the mangling code for one type into buf (NUL-terminated). */
 static void
 cpp_mangle_type(struct type *t, char *buf, size_t bufsz)
