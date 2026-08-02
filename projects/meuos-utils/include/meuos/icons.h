@@ -1,9 +1,11 @@
 /* meuos/icons.h — 文件类型图标
  *
- * 设计原则：
- *   - 文件类型 → 图标映射
- *   - 优先 Nerd Font 字符（美观），回退 ASCII（兼容老终端）
- *   - 通过 icon_set()/icon_get() 切换字体集
+ * 三级图标体系：
+ *   ASCII   — 最简回退：/  @  *  (ls -F 风格)
+ *   Unicode — 基础 emoji，大多数终端支持：📁 📄 🔗 ⚙️
+ *   Nerd    — Nerd Font 字形，最美观
+ *
+ * 默认根据终端能力自动选择。
  */
 #ifndef MEUOS_ICONS_H
 #define MEUOS_ICONS_H
@@ -16,19 +18,22 @@ extern "C" {
 #endif
 
 typedef enum {
-    ICON_SET_ASCII,      /* 回退到 ASCII:  /dir *exe >link  */
-    ICON_SET_NERD,       /* Nerd Font:    󰉋 󰈔 󰈭                */
+    ICON_SET_ASCII = 0,   /* 回退到 ASCII:  / @ * |  */
+    ICON_SET_UNICODE,     /* Unicode emoji: 📁 📄 🔗  */
+    ICON_SET_NERD,        /* Nerd Font:    󰉋 󰈔 󰈭     */
 } icon_set_t;
 
 /* 设置全局字体集。返回之前的状态。 */
 icon_set_t icon_set(icon_set_t s);
 
-/* 检测是否使用 Nerd Font（通过 LANG/TERM 启发式）。
- * 用户可在配置中强制覆盖。 */
+/* 自动检测最佳图标集（Nerd > Unicode > ASCII）。 */
 int icon_detect_nerd(void);
+int icon_detect_unicode(void);
 
-/* 文件类型 → 图标（4 字节字符串）。
- * 必须用 4 字节数组接受返回值（如 char icon[5]）。
+/* 自动选择最佳图标集。 */
+icon_set_t icon_auto_detect(void);
+
+/* 文件类型 → 图标字符串。
  * mode 是 stat.st_mode；is_link 表示是符号链接。 */
 const char *icon_for_mode(mode_t mode, int is_link);
 

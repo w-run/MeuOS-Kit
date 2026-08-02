@@ -225,7 +225,11 @@ static void print_long(fileinfo_t *f) {
 }
 
 static void print_short(fileinfo_t *f) {
-    if (opts.show_icons) {
+    /* 现代模式：图标作为前缀（Unicode/Nerd），或后缀（ASCII ls -F 风格） */
+    icon_set_t iset = icon_set(ICON_SET_ASCII); /* 获取当前 */
+    icon_set(iset); /* 恢复（上面调用有副作用） */
+    if (opts.show_icons && iset >= ICON_SET_UNICODE) {
+        /* Unicode/Nerd: 图标在前 */
         fputs(icon_for_mode(f->mode, f->is_link), stdout);
         fputs(" ", stdout);
     }
@@ -233,6 +237,11 @@ static void print_short(fileinfo_t *f) {
         fputs(color_for_mode(f->mode), stdout);
     }
     printf("%s", f->name);
+    /* ASCII 模式: 后缀图标（ls -F 风格） */
+    if (opts.show_icons && iset == ICON_SET_ASCII) {
+        const char *suffix = icon_for_mode(f->mode, f->is_link);
+        if (*suffix) fputs(suffix, stdout);
+    }
     if (f->is_link && f->link_target) {
         printf(" → %s", f->link_target);
     }
@@ -409,14 +418,11 @@ int main(int argc, char **argv) {
     /* 默认设置（除非 --classic） */
     if (!opts.classic) {
         opts.almost_all = 1;  /* 类似 .hidden 但不显示 . 和 .. */
-        if (opts.show_color < 0) {
-            color_enable();
-            opts.show_color = 1;
-        }
-        if (!opts.show_icons) opts.show_icons = 1;
-        if (opts.sort == SORT_NAME && !opts.reverse_sort) {
-            /* 默认行为 */
-        }
+        opts.show_color = 1;
+        color_enable();
+        opts.show_icons = 1;
+        /* 自动检测最佳图标集 */
+        icon_set(icon_auto_detect());
     } else {
         opts.show_icons = 0;
         color_disable();
