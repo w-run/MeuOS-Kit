@@ -333,9 +333,32 @@ check-cpp-virtual: $(MPP_BIN)
 	    -o build/cpp_virtual test/cpp/virtual.cc
 	./build/cpp_virtual
 
-check-cpp: check-cpp-lex check-cpp-virtual
+# m++ C++ functional tests: each test/cpp/*.cc is compiled with m++ and
+# run; non-zero exit (or compile failure) fails the target.  These are
+# freestanding user programs (no meuos-libc dependency) so they link with
+# the host specs, keeping them runnable in any environment.  virtual.cc
+# needs the meuos sysroot and is exercised by check-cpp-virtual instead.
+check-cpp-func: $(MPP_BIN)
+	@for t in $$(ls test/cpp/*.cc | grep -v '\.neg\.cc' | grep -v '/virtual\.cc'); do \
+		out=/tmp/mpp-$$(basename $$t .cc); \
+		./$(MPP_BIN) --specs=host -o $$out $$t || exit $$?; \
+		$$out || exit $$?; \
+		if [ "$$(basename $$t)" = "global_dtor.cc" ]; then \
+			$$out | grep -q "^dtor 3$$" || { echo "FAIL: global_dtor order"; exit 1; }; \
+		fi; \
+	done
 
-.PHONY: all clean check check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir-bridge check-mir check-cpp-lex check-cpp-virtual check-cpp
+# m++ negative tests: test/cpp/*.neg.cc must be REJECTED by the compiler.
+check-cpp-neg: $(MPP_BIN)
+	@for t in test/cpp/*.neg.cc; do \
+		if ./$(MPP_BIN) --specs=host -o /tmp/mpp-neg-$$(basename $$t .neg.cc) $$t 2>/dev/null; then \
+			echo "FAIL: $$t should not compile"; exit 1; \
+		fi; \
+	done
+
+check-cpp: check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg
+
+.PHONY: all clean check check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir-bridge check-mir check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg check-cpp
 
 # chibicc community functional test suite (C11/C23 conformance).
 # Runs test/community/chibicc/run.sh against the MeuOS sysroot.

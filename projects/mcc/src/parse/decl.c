@@ -19,6 +19,7 @@
 #include "util.h"
 #include "mcc.h"
 #include "decl_internal.h"
+#include "cpp.h"
 struct decl *tentativedefns, **tentativedefnsend = &tentativedefns;
 
 struct decl *
@@ -144,6 +145,18 @@ decl(struct scope *s, struct func *f)
 	base = declspecs(s, &sc, &fs, &align);
 	if (!base.type)
 		return false;
+	/* C++ non-member operator overload: `Vec operator+(Vec a, Vec b)`.
+	 * The return type is already parsed; `operator` follows. */
+	{
+		extern int g_lang;
+		extern enum cpp_tokenkind cpp_tok_kind(void);
+		extern void cpp_parse_free_operator(struct scope *,
+		    struct qualtype);
+		if (g_lang == 1 && cpp_tok_kind() == CPP_TOPERATOR) {
+			cpp_parse_free_operator(s, base);
+			return true;
+		}
+	}
 	if (f) {
 		if (sc == SCTHREADLOCAL)
 			error(&tok.loc, "block scope declaration containing 'thread_local' must contain 'static' or 'extern'");
@@ -263,9 +276,11 @@ decl(struct scope *s, struct func *f)
 					/* C++ global class object: defer construction to
 					 * __mxx_global_var_init (runs before main). */
 					extern int g_lang;
-					extern void cpp_record_global_ctor(struct decl *);
+					extern void cpp_record_global_ctor(struct decl *,
+					    struct expr *);
 					if (g_lang == 1)
-						cpp_record_global_ctor(d);
+						cpp_record_global_ctor(d,
+						    ctor_call ? ctor_args : NULL);
 					d->tentative = true;
 					*tentativedefnsend = d;
 					tentativedefnsend = &d->next;
@@ -283,15 +298,20 @@ decl(struct scope *s, struct func *f)
 				    struct decl *);
 				extern void cpp_emit_ctor_call(struct func *,
 				    struct decl *, struct expr *);
-				extern void cpp_record_global_ctor(struct decl *);
+				extern void cpp_record_global_ctor(struct decl *,
+				    struct expr *);
 				if (g_lang == 1) {
-					if (ctor_call)
+					if (ctor_call && !f && d->u.obj.storage == SDSTATIC)
+						/* global object with ctor args: defer to
+						 * __mxx_global_var_init */
+						cpp_record_global_ctor(d, ctor_args);
+					else if (ctor_call)
 						cpp_emit_ctor_call(f, d, ctor_args);
 					else if (d->u.obj.storage == SDSTATIC &&
 					    d->defined && !f)
 						/* global object with a ctor: defer the
 						 * construction call to __mxx_global_var_init */
-						cpp_record_global_ctor(d);
+						cpp_record_global_ctor(d, NULL);
 					else
 						cpp_emit_default_ctor(f, d);
 					/* record local class objects for reverse-order

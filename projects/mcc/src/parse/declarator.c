@@ -27,6 +27,12 @@
 static bool
 is_ctor_expr_start(struct scope *s)
 {
+	/* Plain identifiers carry dynamic token kinds (>= TIDENT); only
+	 * keywords use their static enum values.  A non-typename identifier
+	 * cannot begin a parameter declaration, so it starts constructor
+	 * arguments instead (e.g. `Vec r(v)`). */
+	if (tok.kind >= TIDENT)
+		return !istypename(s, tokenstr(tok.kind));
 	switch (tok.kind) {
 	case TNUMBER:
 	case TSTRINGLIT:
@@ -38,8 +44,6 @@ is_ctor_expr_start(struct scope *s)
 	case TMUL:
 	case TBAND:
 		return true;
-	case TIDENT:
-		return !istypename(s, tokenstr(tok.kind));
 	default:
 		return false;
 	}
@@ -184,7 +188,7 @@ declaratortypes(struct scope *s, struct list *result, char **name, int *align, s
 				extern void cpp_ctor_args_begin(void);
 				extern void cpp_ctor_args_add(struct expr *);
 				extern void cpp_ctor_set_active(void);
-				cpp_ctor_args_begin();
+			cpp_ctor_args_begin();
 				while (tok.kind != TRPAREN) {
 					arge = assignexpr(s);
 					cpp_ctor_args_add(arge);

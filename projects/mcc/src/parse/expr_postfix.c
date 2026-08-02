@@ -121,16 +121,31 @@ postfixexpr(struct scope *s, struct expr *r)
 					extern bool g_cpp_member_const;
 					if (g_cpp_member_class && g_cpp_member_name) {
 						extern void cpp_mangled_name_args(struct type *,
-						    const char *, struct expr *, char *, size_t);
+						    const char *, struct expr *, char *, size_t,
+						    bool);
 						char mname2[256];
 						struct decl *fd2;
+						/* reference overloads are preferred for lvalue
+						 * arguments; fall back to by-value binding */
 						cpp_mangled_name_args(g_cpp_member_class,
 						    g_cpp_member_name, arglist, mname2,
-						    sizeof mname2);
+						    sizeof mname2, true);
 						if (g_cpp_member_const)
 							strncat(mname2, "K", sizeof mname2 - strlen(mname2) - 1);
 						fd2 = scopegetdecl(g_cpp_member_class->scope
 						    ? g_cpp_member_class->scope : s, mname2, 1);
+						if (!fd2 || fd2->kind != DECLFUNC) {
+							char mval2[256];
+							cpp_mangled_name_args(g_cpp_member_class,
+							    g_cpp_member_name, arglist, mval2,
+							    sizeof mval2, false);
+							if (g_cpp_member_const)
+								strncat(mval2, "K", sizeof mval2 - strlen(mval2) - 1);
+							fd2 = scopegetdecl(g_cpp_member_class->scope
+							    ? g_cpp_member_class->scope : s, mval2, 1);
+							if (fd2 && fd2->kind == DECLFUNC)
+								snprintf(mname2, sizeof mname2, "%s", mval2);
+						}
 						/* a non-const object may call a const method */
 						if (!g_cpp_member_const && (!fd2 || fd2->kind != DECLFUNC)) {
 							char mk2[256];
@@ -209,6 +224,19 @@ postfixexpr(struct scope *s, struct expr *r)
 				error(&tok.loc, "expected identifier after '%s' operator", tokenstr(op));
 			lvalue = op == TARROW || r->base->lvalue;
 			offset = 0;
+			/* C++ multiple inheritance: a name defined by more than one
+			 * base subobject is ambiguous (and the base-class subobjects
+			 * are anonymous members here). */
+			{
+				extern int g_lang;
+				extern bool cpp_member_ambiguous(struct type *,
+				    const char *);
+				if (g_lang == 1 &&
+				    cpp_member_ambiguous(t, tokenstr(tok.kind)))
+					error(&tok.loc, "request for member '%s' is "
+					    "ambiguous (multiple base classes define it)",
+					    tokenstr(tok.kind));
+			}
 			m = typemember(t, tokenstr(tok.kind), &offset);
 			if (!m)
 				error(&tok.loc, "struct/union has no member named '%s'", tok.lit);
@@ -335,14 +363,36 @@ postfixexpr(struct scope *s, struct expr *r)
 			break;
 		default:
 			/* this postfixexpr level is done: a pending member call that
-			 * was not followed by '(' is dropped (no leak into a later
-			 * unrelated call) */
+			 * was not followed by '(' is either a member-address use
+			 * (`&obj.meth`) or dropped (no leak into a later unrelated
+			 * call) */
 			{
 				extern bool cpp_pending_is_mine(int);
+				extern struct type *g_cpp_member_class;
+				extern const char *g_cpp_member_name;
+				extern struct decl *cpp_find_unique_member(struct type *,
+				    const char *, char *, size_t);
 				if (g_cpp_member_this && cpp_pending_is_mine(g_cpp_postfix_depth)
-				    && cpp_pending_was_placeholder())
+				    && cpp_pending_was_placeholder()) {
+					struct type *mt = g_cpp_member_class;
+					const char *mn = g_cpp_member_name;
+					struct decl *fd;
+					char mm[256];
+					if (mt && mn &&
+					    (fd = cpp_find_unique_member(mt, mn, mm,
+					        sizeof mm)) != NULL) {
+						/* single overload: `&obj.meth` is the address of
+						 * the one mangled member function */
+						r = mkexpr(EXPRIDENT, fd->type, NULL);
+						r->u.ident.decl = fd;
+						r = decay(r);
+						cpp_pending_clear_at_depth(g_cpp_postfix_depth);
+						--g_cpp_postfix_depth;
+						return r;
+					}
 					error(&tok.loc,
 					    "address of overloaded member function is ambiguous (use an explicit cast)");
+				}
 			}
 			cpp_pending_clear_at_depth(g_cpp_postfix_depth);
 			--g_cpp_postfix_depth;

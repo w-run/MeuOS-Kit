@@ -98,6 +98,7 @@ static void cpp_emit_base_ctor(struct func *f);
 static void cpp_mangle_type(struct type *t, char *buf, size_t bufsz);
 static void flush_pending_methods(void);
 static void cpp_emit_global_ctors(void);
+static void cpp_emit_global_dtor(struct func *f, struct decl *d);
 static void emit_base_ctors_for(struct func *f, struct type *classt,
                                 struct expr *thisp);
 static bool has_base(struct type *t);
@@ -235,6 +236,9 @@ cpp_member_ident(struct scope *s, const char *name)
 	t = g_cpp_method.class_type;
 	if (!t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
 		return NULL;
+	if (cpp_member_ambiguous(t, name))
+		error(&tok.loc, "request for member '%s' is ambiguous "
+		      "(multiple base classes define it)", name);
 	m = typemember(t, name, &offset);
 	if (!m) {
 		/* static data member? `count` -> Class_count */
@@ -706,6 +710,7 @@ static struct cpp_pending_method **g_cpp_pending_methods_end =
  * the .init_array section so the runtime runs them before main). */
 struct cpp_global_ctor {
 	struct decl *d;
+	struct expr *args;   /* ctor call arguments (may be NULL) */
 	struct cpp_global_ctor *next;
 };
 static struct cpp_global_ctor *g_cpp_global_ctors;
@@ -713,7 +718,7 @@ static struct cpp_global_ctor **g_cpp_global_ctors_end =
     &g_cpp_global_ctors;
 
 void
-cpp_record_global_ctor(struct decl *d)
+cpp_record_global_ctor(struct decl *d, struct expr *args)
 {
 	struct cpp_global_ctor *g;
 	const char *tag;
@@ -725,6 +730,7 @@ cpp_record_global_ctor(struct decl *d)
 		return;
 	g = xmalloc(sizeof *g);
 	g->d = d;
+	g->args = args;
 	g->next = NULL;
 	*g_cpp_global_ctors_end = g;
 	g_cpp_global_ctors_end = &g->next;
@@ -759,13 +765,14 @@ cpp_emit_global_ctors(void)
 	vt->base = &typevoid;
 	vt->u.func.params = NULL;
 	vt->u.func.nparam = 0;
+	vt->u.func.isvararg = false;   /* mktype leaves u.func uninitialized */
 
 	d = mkdecl("__mxx_global_var_init", DECLFUNC, vt, QUALNONE, LINKEXTERN);
 	d->value = mkglobal(d);
 	fs = mkscope(&filescope);
 	f = mkfunc(d, d->name, vt, fs);
 	for (g = g_cpp_global_ctors; g; g = g->next)
-		cpp_emit_ctor_call(f, g->d, NULL);
+		cpp_emit_ctor_call(f, g->d, g->args);
 	funcret(f, NULL);
 	emitfunc(f, true);
 	delfunc(f);
@@ -775,6 +782,40 @@ cpp_emit_global_ctors(void)
 	printf(".section .init_array,\"aw\"\n");
 	printf(".balign 8\n");
 	printf(".quad __mxx_global_var_init\n");
+
+	/* Reverse-order destruction: `void __mxx_global_var_fini(void)`
+	 * calls each global's destructor in reverse construction order and
+	 * is registered in .fini_array so the runtime runs it after main. */
+	vt = mktype(TYPEFUNC, 0);
+	vt->base = &typevoid;
+	vt->u.func.params = NULL;
+	vt->u.func.nparam = 0;
+	vt->u.func.isvararg = false;
+
+	d = mkdecl("__mxx_global_var_fini", DECLFUNC, vt, QUALNONE, LINKEXTERN);
+	d->value = mkglobal(d);
+	fs = mkscope(&filescope);
+	f = mkfunc(d, d->name, vt, fs);
+	{
+		/* reverse traversal: two pointers walk the list */
+		struct cpp_global_ctor *tail = NULL, *cur = g_cpp_global_ctors;
+		while (cur) {
+			struct cpp_global_ctor *next = cur->next;
+			cur->next = tail;
+			tail = cur;
+			cur = next;
+		}
+		for (g = tail; g; g = g->next)
+			cpp_emit_global_dtor(f, g->d);
+	}
+	funcret(f, NULL);
+	emitfunc(f, true);
+	delfunc(f);
+	delscope(fs);
+
+	printf(".section .fini_array,\"aw\"\n");
+	printf(".balign 8\n");
+	printf(".quad __mxx_global_var_fini\n");
 }
 
 /* Parse one method body (replayed token stream is positioned at '{'). */
@@ -971,26 +1012,52 @@ cpp_try_operator_call(struct scope *s, struct expr *l, enum tokenkind op,
 	if (!opcode || !t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
 		return false;
 	snprintf(mname, sizeof mname, "operator_%s", opcode);
-	if (!cpp_is_member_function(t, mname))
-		return false;
-	cpp_mangled_name_args(t, mname, r, mangled, sizeof mangled);
-	fd = scopegetdecl(t->scope ? t->scope : &filescope, mangled, 1);
+	if (cpp_is_member_function(t, mname)) {
+		cpp_mangled_name_args(t, mname, r, mangled, sizeof mangled, false);
+		fd = scopegetdecl(t->scope ? t->scope : &filescope, mangled, 1);
+		if (!fd || fd->kind != DECLFUNC)
+			return false;
+
+		fn = mkexpr(EXPRIDENT, fd->type, NULL);
+		fn->u.ident.decl = fd;
+		fn = decay(fn); /* &Class_operator_pl */
+
+		obj = mkunaryexpr(TBAND, l); /* &l */
+		obj->type = mkpointertype(t, l->qual);
+
+		call = mkexpr(EXPRCALL, fd->type->base, fn);
+		call->u.call.args = obj;
+		call->u.call.nargs = 1;
+		end = &obj->next;
+		if (r) {
+			*end = exprassign(r, fd->type->u.func.params->next->type);
+			end = &(*end)->next;
+			++call->u.call.nargs;
+		}
+		*out = call;
+		return true;
+	}
+	/* non-member operator overload: `operator_pl(a, b)` registered as a
+	 * free function in the current scope */
+	extern struct scope filescope;
+	fd = scopegetdecl(s, mname, 1);
 	if (!fd || fd->kind != DECLFUNC)
 		return false;
-
 	fn = mkexpr(EXPRIDENT, fd->type, NULL);
 	fn->u.ident.decl = fd;
-	fn = decay(fn); /* &Class_operator_pl */
-
-	obj = mkunaryexpr(TBAND, l); /* &l */
-	obj->type = mkpointertype(t, l->qual);
+	fn = decay(fn); /* &operator_pl */
 
 	call = mkexpr(EXPRCALL, fd->type->base, fn);
-	call->u.call.args = obj;
-	call->u.call.nargs = 1;
-	end = &obj->next;
+	call->u.call.args = NULL;
+	call->u.call.nargs = 0;
+	end = &call->u.call.args;
+	*end = exprassign(l, fd->type->u.func.params->type);
+	end = &(*end)->next;
+	++call->u.call.nargs;
 	if (r) {
-		*end = exprassign(r, fd->type->u.func.params->next->type);
+		*end = exprassign(r,
+		    fd->type->u.func.params->next
+		    ? fd->type->u.func.params->next->type : NULL);
 		end = &(*end)->next;
 		++call->u.call.nargs;
 	}
@@ -1254,12 +1321,147 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname,
 	}
 }
 
+/* Non-member operator overload: `Vec operator+(Vec a, Vec b) {...}`
+ * defines a free `operator_pl` function (no class/this).  The return
+ * type has already been parsed by declspecs (`base`); here we consume
+ * the `operator` keyword, the operator token, and the parameter list,
+ * then register the symbol and parse the body. */
+void
+cpp_parse_free_operator(struct scope *s, struct qualtype base)
+{
+	extern struct func *mkfunc(struct decl *, char *, struct type *,
+	    struct scope *);
+	extern void delfunc(struct func *);
+	extern void stmt(struct func *, struct scope *);
+	extern void emitfunc(struct func *, bool);
+	extern struct scope *delscope(struct scope *);
+
+	const char *opcode;
+	char mname[64], *pmangled;
+	struct type *ft;
+	struct decl *pd, *d, **pend;
+	struct decl *nd;
+	struct scope *fs;
+	struct func *f;
+
+	if (cpp_tok_kind() != CPP_TOPERATOR)
+		error(&tok.loc, "expected 'operator'");
+	next(); /* consume 'operator' */
+	opcode = cpp_op_mangle(tok.kind);
+	if (!opcode)
+		error(&tok.loc, "unsupported operator for overloading");
+	next(); /* consume the operator token */
+
+	ft = mktype(TYPEFUNC, 0);
+	ft->qual = QUALNONE;
+	ft->base = base.type; /* return type */
+	ft->u.func.isvararg = false;
+	ft->u.func.params = NULL;
+	ft->u.func.nparam = 0;
+	pend = &ft->u.func.params;
+	if (tok.kind == TLPAREN) {
+		next();
+		while (tok.kind != TRPAREN) {
+			pd = parameter(s);
+			*pend = pd;
+			pend = &pd->next;
+			++ft->u.func.nparam;
+			if (tok.kind == TRPAREN)
+				break;
+			expect(TCOMMA, "or ')' after operator parameter");
+		}
+		next(); /* consume ')' */
+	}
+	snprintf(mname, sizeof mname, "operator_%s", opcode);
+	/* mkdecl/scopeputdecl keep the name pointer; persist it off the
+	 * stack (token strings from the C parser are stable, ours are not). */
+	pmangled = xmalloc(strlen(mname) + 1);
+	strcpy(pmangled, mname);
+
+	d = scopegetdecl(s, mname, false);
+	if (d && d->kind != DECLFUNC)
+		error(&tok.loc, "'%s' redeclared with different kind", mname);
+	if (d && d->type && !typecompatible(ft, d->type))
+		error(&tok.loc, "'%s' redeclared with incompatible type", mname);
+	if (!d) {
+		d = mkdecl(pmangled, DECLFUNC, ft, QUALNONE, LINKEXTERN);
+		scopeputdecl(s, d);
+	} else {
+		d->type = typecomposite(ft, d->type);
+		free(pmangled);
+	}
+	d->value = mkglobal(d);
+
+	if (tok.kind != TLBRACE) {
+		if (tok.kind == TSEMICOLON)
+			next();
+		return; /* declaration only */
+	}
+
+	/* function definition: mirror the non-class body path */
+	fs = mkscope(s);
+	for (pd = ft->u.func.params; pd; pd = pd->next)
+		scopeputdecl(fs, pd);
+	f = mkfunc(d, d->name, d->type, fs);
+	stmt(f, fs);
+	emitfunc(f, d->linkage == LINKEXTERN);
+	delscope(fs);
+	delfunc(f);
+	d->defined = true;
+}
+
 /* C++ member-function lookup helpers.  A function member is registered in
  * the struct/union member list by addmember (C++ mode); these helpers let
  * the postfix-expression lowering detect and mangle member calls.  The
  * lookup recurses through anonymous members, so inherited members (the
  * base-class subobject is an anonymous member at offset 0) resolve to
  * their defining class. */
+
+/* Does `t` (or any of its base subobjects) contain a member named
+ * `name`?  Used to count ambiguous inherited members. */
+static bool
+cpp_base_contains(struct type *t, const char *name)
+{
+	struct member *m;
+
+	if (!t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
+		return false;
+	for (m = t->u.structunion.members; m; m = m->next) {
+		if (m->name) {
+			if (strcmp(m->name, name) == 0)
+				return true;
+		} else if (m->type && cpp_base_contains(m->type, name)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/* Multiple-inheritance member ambiguity: `obj.member` is ambiguous when
+ * the name is not a direct member and is defined by more than one base
+ * subobject (C++ [class.member.lookup]).  A direct member hides all
+ * inherited ones. */
+bool
+cpp_member_ambiguous(struct type *t, const char *name)
+{
+	struct member *m;
+	int nbases = 0, found = 0;
+
+	if (!t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
+		return false;
+	for (m = t->u.structunion.members; m; m = m->next)
+		if (m->name && strcmp(m->name, name) == 0)
+			return false;
+	for (m = t->u.structunion.members; m; m = m->next) {
+		if (!m->name && m->type &&
+		    (m->type->kind == TYPESTRUCT || m->type->kind == TYPEUNION)) {
+			++nbases;
+			if (cpp_base_contains(m->type, name))
+				++found;
+		}
+	}
+	return nbases > 1 && found > 1;
+}
 
 /* Find the function member `name` in `t`, optionally reporting the class
  * that defines it (`*owner`).  Recurses into anonymous (base-class)
@@ -1521,6 +1723,46 @@ cpp_emit_dtor(struct func *f, struct decl *d)
 	return true;
 }
 
+/* Emit a destructor call for a global class object (`Class_dtor(&g)`)
+ * into __mxx_global_var_fini.  No-op for classes without a destructor. */
+static void
+cpp_emit_global_dtor(struct func *f, struct decl *d)
+{
+	extern struct value *funcexpr(struct func *, struct expr *);
+	extern struct scope filescope;
+
+	struct type *t = d->type;
+	const char *tag;
+	char mname[256];
+	struct decl *fd;
+	struct expr *fn, *obj, *call;
+
+	if (!f || !d)
+		return;
+	tag = t ? t->u.structunion.tag : NULL;
+	if (!tag || !cpp_has_dtor(t))
+		return;
+	snprintf(mname, sizeof mname, "%s_dtor", tag);
+	fd = scopegetdecl(t->scope ? t->scope : &filescope, mname, true);
+	if (!fd || fd->kind != DECLFUNC)
+		return;
+
+	fn = mkexpr(EXPRIDENT, fd->type, NULL);
+	fn->u.ident.decl = fd;
+	fn = decay(fn); /* &Class_dtor */
+
+	obj = mkexpr(EXPRIDENT, d->type, NULL);
+	obj->qual = d->qual;
+	obj->lvalue = true;
+	obj->u.ident.decl = d;
+	obj = mkunaryexpr(TBAND, obj); /* &g */
+
+	call = mkexpr(EXPRCALL, &typevoid, fn);
+	call->u.call.args = obj;
+	call->u.call.nargs = 1;
+	funcexpr(f, call);
+}
+
 /* Emit destructor calls for all local class objects declared in scope `s`
  * when a block exits (reverse declaration order not yet implemented).
  * Called by stmt()'s compound-statement branch before delscope. */
@@ -1561,13 +1803,21 @@ cpp_emit_ctor_call(struct func *f, struct decl *d, struct expr *args)
 		error(&tok.loc, "no matching constructor for object '%s'", d->name);
 		return;
 	}
-	/* overload resolution: append the encoded argument types */
+	/* overload resolution: append the encoded argument types (reference
+	 * binding first for lvalue args, falling back to by-value) */
 	{
 		char code[256];
-		cpp_mangled_name_args(t, tag, args, code, sizeof code);
+		cpp_mangled_name_args(t, tag, args, code, sizeof code, true);
 		snprintf(mname, sizeof mname, "%s", code);
 	}
 	fd = scopegetdecl(t->scope ? t->scope : &filescope, mname, true);
+	if (!fd || fd->kind != DECLFUNC) {
+		char code2[256];
+		cpp_mangled_name_args(t, tag, args, code2, sizeof code2, false);
+		fd = scopegetdecl(t->scope ? t->scope : &filescope, code2, true);
+		if (fd && fd->kind == DECLFUNC)
+			snprintf(mname, sizeof mname, "%s", code2);
+	}
 	if (!fd || fd->kind != DECLFUNC) {
 		error(&tok.loc, "no matching constructor for object '%s'", d->name);
 		return;
@@ -1607,10 +1857,14 @@ cpp_mangle_type(struct type *t, char *buf, size_t bufsz)
 		*p++ = 'v';
 		goto out;
 	}
-	/* C++ references mangle by their referent type (the caller binds an
-	 * object, not a pointer). */
-	if (t->isref && t->kind == TYPEPOINTER)
+	/* C++ references mangle with a distinct 'R' marker so `f(Vec)` and
+	 * `f(Vec &)` get different overload names (the caller binds an
+	 * object by address, but the types must not collide). */
+	if (t->isref && t->kind == TYPEPOINTER) {
+		if (p + 1 <= end)
+			*p++ = 'R';
 		t = t->base;
+	}
 	switch (t->kind) {
 	case TYPEVOID:     *p++ = 'v'; break;
 	case TYPEBOOL:     *p++ = 'b'; break;
@@ -1645,10 +1899,15 @@ out:
 
 /* Mangled name of method `name` of class `t`, with the given argument
  * expressions' types appended for overload resolution:
- * `Class_method_ii` etc.  Returns the name in buf. */
+ * `Class_method_ii` etc.  Returns the name in buf.
+ *
+ * `prefer_ref` marks lvalue arguments as bindable by reference ('R'
+ * prefix), matching C++'s preference for reference overloads on
+ * lvalues; the caller falls back to the plain (by-value) encoding when
+ * no reference overload exists. */
 void
 cpp_mangled_name_args(struct type *t, const char *name, struct expr *args,
-                      char *buf, size_t bufsz)
+                      char *buf, size_t bufsz, bool prefer_ref)
 {
 	struct type *owner = NULL;
 	size_t n;
@@ -1662,6 +1921,8 @@ cpp_mangled_name_args(struct type *t, const char *name, struct expr *args,
 	for (; args; args = args->next) {
 		char code[64];
 		size_t cl;
+		if (prefer_ref && args->lvalue && n + 1 < bufsz)
+			buf[n++] = 'R';
 		cpp_mangle_type(args->type, code, sizeof code);
 		cl = strlen(code);
 		if (n + cl < bufsz) {
@@ -2230,3 +2491,42 @@ cpp_make_vcall(struct expr *thisp, struct type *owner, struct member *m,
 	return fn;
 }
 
+/* Resolve the address of a member function taken without a call
+ * (`&obj.meth`).  The member symbols are argument-encoded
+ * (`Class_meth_ii`), so a single overload is found by scanning the
+ * class scope for the `Class_meth` prefix.  Returns the unique DECLFUNC
+ * decl and copies its exact mangled name into `mname`; returns NULL when
+ * there is no such method or more than one candidate (ambiguous). */
+struct decl *
+cpp_find_unique_member(struct type *t, const char *name,
+                       char *mname, size_t mname_sz)
+{
+	extern struct scope filescope;
+	struct scope *sc = t->scope ? t->scope : &filescope;
+	const char *tag = t->u.structunion.tag ? t->u.structunion.tag : "anon";
+	size_t plen = strlen(tag) + 1 + strlen(name);
+	struct decl *found = NULL;
+	const char *found_name = NULL;
+	int n = 0;
+	size_t i;
+
+	snprintf(mname, mname_sz, "%s_%s", tag, name);
+	for (i = 0; i < sc->decls.cap; i++) {
+		const struct mapkey *k = &sc->decls.keys[i];
+		if (!k->str)
+			continue;
+		if (k->len >= plen && memcmp(k->str, mname, plen) == 0) {
+			struct decl *d = sc->decls.vals[i].p;
+			if (d && d->kind == DECLFUNC) {
+				found = d;
+				found_name = k->str;
+				++n;
+			}
+		}
+	}
+	if (n == 1) {
+		snprintf(mname, mname_sz, "%s", found_name);
+		return found;
+	}
+	return NULL;
+}
