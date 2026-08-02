@@ -1766,15 +1766,6 @@ expandfunc(struct macro *m)
 		t += arg[i].ntoken;
 	}
 	m->arg = arg;
-	fprintf(stderr, "DBG expand %s nparam=%zu ctx.len=%zu:", m->name, m->nparam, ctx.len);
-	for (i = 0; i < m->nparam; ++i) {
-		fprintf(stderr, " arg%zu.ntoken=%zu[", i, arg[i].ntoken);
-		for (size_t k = 0; k < arg[i].ntoken; ++k)
-			fprintf(stderr, " %s@%zu:%zu", tokenspell(&arg[i].token[k]),
-				arg[i].token[k].loc.line, arg[i].token[k].loc.col);
-		fprintf(stderr, " ]");
-	}
-	fprintf(stderr, "\n");
 	expandbody(m);
 }
 
