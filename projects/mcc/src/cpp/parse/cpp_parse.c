@@ -5570,6 +5570,740 @@ cpp_buffer_constexpr_body(struct decl *d)
 	g_cpp_cexpr_fns = fn;
 }
 
+/* --- C++23 constexpr statement interpreter (P2242 multi-statement bodies)
+ *
+ * `cpp_constexpr_eval` replays a constexpr function's body tokens with the
+ * argument values bound and folds `{ return <expr>; }`.  This interpreter
+ * extends that to full statement sequences: local integer variables,
+ * if/else, while/do/for loops, multiple returns, break/continue, and
+ * assignments / ++-- to the local variables (including the compound
+ * `a += b` lowering via an EXPRTEMP).  Anything it cannot fold to an
+ * integer constant degrades to a normal runtime call (CEXP_FAIL), matching
+ * the project's lenient constexpr/consteval philosophy.
+ *
+ * The interpreter shares the token-replay machinery: loop bodies are
+ * buffered with brace balance and re-pushed per iteration; the token
+ * context is rewound on exit so the caller's parse position is preserved.
+ * Locals and parameters are bound as DECLOBJECT objects whose integer
+ * value lives in u.obj.constval, so they parse as lvalues (for ++/=
+ * statements) and are read live (never frozen in place, unlike eval()),
+ * letting loop conditions see mutations. */
+
+/* statement-interpretation status */
+#define CEXP_OK      0
+#define CEXP_RET     1
+#define CEXP_FAIL    2
+#define CEXP_BREAK   3
+#define CEXP_CONT    4
+
+/* per-evaluation loop-step budget: guards against compile-time hangs */
+#define CEXP_MAX_STEPS 100000
+
+static int cpp_cexpr_stmt(struct scope *tmp, unsigned long long *ret,
+                          int *steps);
+
+/* Copy the current token into a growing buffer, keeping a private copy of
+ * the literal, and advance. */
+static void
+cexp_tok_push(struct token **toks, size_t *cap, size_t *n)
+{
+	struct token t = tok;
+
+	if (*n >= *cap) {
+		*cap = *cap ? *cap * 2 : 16;
+		*toks = xreallocarray(*toks, *cap, sizeof **toks);
+	}
+	(*toks)[*n] = t;
+	if (t.lit)
+		(*toks)[*n].lit = strdup(t.lit);
+	(*n)++;
+	next();
+}
+
+/* Copy a parenthesized `( ... )` group (balanced parens) into the buffer. */
+static void
+cexp_copy_paren(struct token **toks, size_t *cap, size_t *n)
+{
+	int pd = 0;
+
+	do {
+		if (tok.kind == TLPAREN)
+			++pd;
+		else if (tok.kind == TRPAREN)
+			--pd;
+		cexp_tok_push(toks, cap, n);
+	} while (pd > 0 && tok.kind != TEOF);
+}
+
+/* Buffer one statement's tokens from the stream (starting at `tok`),
+ * consuming them.  Handles compound `{...}`, control statements
+ * (if/while/do/for with paren-balanced headers and recursive bodies), and
+ * simple statements up to `;`.  The copy is suitable for tokpush() replay. */
+static void cexp_buffer_stmt_rec(struct token **toks, size_t *cap, size_t *n);
+
+static void
+cexp_buffer_stmt(struct token **out, size_t *nout)
+{
+	struct token *toks = NULL;
+	size_t cap = 0, n = 0;
+
+	cexp_buffer_stmt_rec(&toks, &cap, &n);
+	*out = toks;
+	*nout = n;
+}
+
+/* recursive core: append one statement to the growing buffer */
+static void
+cexp_buffer_stmt_rec(struct token **toks, size_t *cap, size_t *n)
+{
+	if (tok.kind == TLBRACE) {
+		int bd = 1;
+		cexp_tok_push(toks, cap, n); /* '{' */
+		while (bd > 0 && tok.kind != TEOF) {
+			if (tok.kind == TLBRACE)
+				++bd;
+			else if (tok.kind == TRBRACE)
+				--bd;
+			cexp_tok_push(toks, cap, n);
+		}
+	} else if (tok.kind == TIF) {
+		cexp_tok_push(toks, cap, n); /* 'if' */
+		if (tok.kind == TCONSTEXPR)
+			cexp_tok_push(toks, cap, n); /* 'if constexpr' */
+		cexp_copy_paren(toks, cap, n);
+		cexp_buffer_stmt_rec(toks, cap, n);  /* then branch */
+		if (tok.kind == TELSE) {
+			cexp_tok_push(toks, cap, n); /* 'else' */
+			cexp_buffer_stmt_rec(toks, cap, n); /* else branch */
+		}
+	} else if (tok.kind == TWHILE || tok.kind == TFOR) {
+		cexp_tok_push(toks, cap, n); /* keyword */
+		cexp_copy_paren(toks, cap, n);
+		cexp_buffer_stmt_rec(toks, cap, n); /* body */
+	} else if (tok.kind == TDO) {
+		cexp_tok_push(toks, cap, n); /* 'do' */
+		cexp_buffer_stmt_rec(toks, cap, n); /* body */
+		cexp_tok_push(toks, cap, n); /* 'while' */
+		cexp_copy_paren(toks, cap, n);
+		cexp_tok_push(toks, cap, n); /* ';' */
+	} else {
+		/* simple statement up to ';' */
+		do {
+			cexp_tok_push(toks, cap, n);
+		} while (tok.kind != TSEMICOLON && tok.kind != TRBRACE &&
+		         tok.kind != TEOF);
+		if (tok.kind == TSEMICOLON)
+			cexp_tok_push(toks, cap, n);
+	}
+}
+
+/* Resolve an lvalue expression to the local integer variable it refers to
+ * (a mutable DECLOBJECT bound by the interpreter, or a DECLCONST enum
+ * constant), or NULL.  `temp` is the EXPRTEMP target for `*tmp`. */
+static struct decl *
+cpp_cexpr_lval(struct expr *l, struct decl *temp)
+{
+	if (l->kind == EXPRIDENT && l->u.ident.decl) {
+		struct decl *d = l->u.ident.decl;
+		if (d->kind == DECLCONST ||
+		    (d->kind == DECLOBJECT && d->u.obj.has_constval))
+			return d;
+		return NULL;
+	}
+	if (l->kind == EXPRUNARY && l->op == TMUL && l->base &&
+	    l->base->kind == EXPRTEMP)
+		return temp;
+	return NULL;
+}
+
+/* Read/write the interpreter's integer value slot of a bound variable
+ * (DECLOBJECT constval for locals/params, DECLCONST enumconst for
+ * constants). */
+static unsigned long long
+cexp_var_get(struct decl *d)
+{
+	return d->kind == DECLCONST ? d->u.enumconst : d->u.obj.constval;
+}
+
+static void
+cexp_var_set(struct decl *d, unsigned long long v)
+{
+	if (d->kind == DECLCONST)
+		d->u.enumconst = v;
+	else
+		d->u.obj.constval = v;
+}
+
+/* Apply an integer binary operator, honoring the type's signedness (C
+ * division truncates toward zero; unsigned ops wrap).  Returns false on
+ * unsupported operators or division by zero. */
+static bool
+cpp_cexpr_binary(enum tokenkind op, struct type *t,
+                 unsigned long long lv, unsigned long long rv,
+                 unsigned long long *ret)
+{
+	bool sgn = t && (t->prop & PROPINT) && t->u.arith.issigned;
+	long long l = (long long)lv, r = (long long)rv;
+
+	switch (op) {
+	case TMUL:  *ret = sgn ? (unsigned long long)(l * r) : lv * rv; break;
+	case TDIV:
+		if (rv == 0)
+			return false;
+		*ret = sgn ? (unsigned long long)(l / r) : lv / rv;
+		break;
+	case TMOD:
+		if (rv == 0)
+			return false;
+		*ret = sgn ? (unsigned long long)(l % r) : lv % rv;
+		break;
+	case TADD:  *ret = sgn ? (unsigned long long)(l + r) : lv + rv; break;
+	case TSUB:  *ret = sgn ? (unsigned long long)(l - r) : lv - rv; break;
+	case TSHL:  *ret = lv << (rv & 63); break;
+	case TSHR:
+		*ret = sgn ? (unsigned long long)(l >> (rv & 63)) : lv >> (rv & 63);
+		break;
+	case TBAND: *ret = lv & rv; break;
+	case TBOR:  *ret = lv | rv; break;
+	case TXOR:  *ret = lv ^ rv; break;
+	case TLESS:
+		*ret = sgn ? (unsigned long long)(l < r) : (unsigned long long)(lv < rv);
+		break;
+	case TGREATER:
+		*ret = sgn ? (unsigned long long)(l > r) : (unsigned long long)(lv > rv);
+		break;
+	case TLEQ:
+		*ret = sgn ? (unsigned long long)(l <= r) : (unsigned long long)(lv <= rv);
+		break;
+	case TGEQ:
+		*ret = sgn ? (unsigned long long)(l >= r) : (unsigned long long)(lv >= rv);
+		break;
+	case TEQL: *ret = lv == rv; break;
+	case TNEQ: *ret = lv != rv; break;
+	default:   return false;
+	}
+	return true;
+}
+
+/* Evaluate a constexpr-compatible expression tree without mutating it (the
+ * standard eval() folds DECLCONST identifiers in place, which would freeze
+ * loop variables at their first value).  Handles assignments, ++/-- and
+ * conditionals that mutate local integer variables, and the compound
+ * assignment `tmp = &local; *tmp op= rhs` lowering.  `temp` carries the
+ * EXPRTEMP target decl across the compound-assign two-instruction pair.
+ * Returns true and sets *ret when the expression folds to an integer. */
+static bool
+cpp_cexpr_value(struct expr *e, struct decl **temp, unsigned long long *ret)
+{
+	struct decl *cd;
+	unsigned long long lv, rv;
+
+	if (!e)
+		return false;
+
+	/* `*tmp` dereferences the compound-assign temp's target */
+	if (e->kind == EXPRUNARY && e->op == TMUL && e->base &&
+	    e->base->kind == EXPRTEMP) {
+		if (!*temp)
+			return false;
+		*ret = cexp_var_get(*temp);
+		return true;
+	}
+	if (e->kind == EXPRIDENT && e->u.ident.decl) {
+		struct decl *d = e->u.ident.decl;
+		if (d->kind == DECLCONST) {
+			*ret = d->u.enumconst;
+			return true;
+		}
+		/* local/param or global `constexpr` variable (folded value) */
+		if (d->kind == DECLOBJECT && d->u.obj.has_constval) {
+			*ret = d->u.obj.constval;
+			return true;
+		}
+		return false;
+	}
+	if (e->kind == EXPRCONST && (e->type->prop & PROPINT)) {
+		*ret = e->u.constant.u;
+		return true;
+	}
+	switch (e->kind) {
+	case EXPRUNARY:
+		if (e->op == TSUB) {
+			if (!cpp_cexpr_value(e->base, temp, &lv))
+				return false;
+			*ret = (unsigned long long)(-(long long)lv);
+			return true;
+		}
+		return false;
+	case EXPRCAST:
+		return cpp_cexpr_value(e->base, temp, ret);
+	case EXPRBINARY:
+		if (!cpp_cexpr_value(e->u.binary.l, temp, &lv))
+			return false;
+		if (e->op == TLOR) {
+			if (lv) {
+				*ret = 1;
+				return true;
+			}
+			if (!cpp_cexpr_value(e->u.binary.r, temp, &rv))
+				return false;
+			*ret = rv ? 1 : 0;
+			return true;
+		}
+		if (e->op == TLAND) {
+			if (!lv) {
+				*ret = 0;
+				return true;
+			}
+			if (!cpp_cexpr_value(e->u.binary.r, temp, &rv))
+				return false;
+			*ret = rv ? 1 : 0;
+			return true;
+		}
+		if (!cpp_cexpr_value(e->u.binary.r, temp, &rv))
+			return false;
+		return cpp_cexpr_binary(e->op, e->type, lv, rv, ret);
+	case EXPRCOND:
+		if (!cpp_cexpr_value(e->base, temp, &lv))
+			return false;
+		return cpp_cexpr_value(lv ? e->u.cond.t : e->u.cond.f, temp, ret);
+	case EXPRASSIGN: {
+		cd = cpp_cexpr_lval(e->u.assign.l, *temp);
+		if (cd && (cd->kind == DECLCONST ||
+		    (cd->kind == DECLOBJECT && cd->u.obj.has_constval))) {
+			if (!cpp_cexpr_value(e->u.assign.r, temp, ret))
+				return false;
+			cexp_var_set(cd, *ret);
+			return true;
+		}
+		/* compound-assignment lowering: `tmp = &local` */
+		if (e->u.assign.l->kind == EXPRTEMP &&
+		    e->u.assign.r->kind == EXPRUNARY &&
+		    e->u.assign.r->op == TBAND) {
+			struct decl *t = cpp_cexpr_lval(e->u.assign.r->base, *temp);
+			if (t && (t->kind == DECLCONST ||
+			    (t->kind == DECLOBJECT && t->u.obj.has_constval))) {
+				*temp = t;
+				return true;
+			}
+		}
+		return false;
+	}
+	case EXPRINCDEC:
+		cd = cpp_cexpr_lval(e->base, *temp);
+		if (!cd || (cd->kind != DECLCONST &&
+		    !(cd->kind == DECLOBJECT && cd->u.obj.has_constval)))
+			return false;
+		*ret = cexp_var_get(cd);
+		if (!e->u.incdec.post)
+			*ret = e->op == TINC ? *ret + 1 : *ret - 1;
+		cexp_var_set(cd, cexp_var_get(cd) + (e->op == TINC ? 1 : -1));
+		return true;
+	case EXPRCOMMA: {
+		struct expr *it;
+		for (it = e->base; it; it = it->next) {
+			if (!cpp_cexpr_value(it, temp, ret))
+				return false;
+		}
+		return true;
+	}
+	case EXPRCALL: {
+		/* nested constexpr function call — fold via the evaluator */
+		extern struct expr *cpp_constexpr_eval(struct expr *);
+		extern void delexpr(struct expr *);
+		struct expr *r = cpp_constexpr_eval(e);
+		if (r) {
+			*ret = r->u.constant.u;
+			delexpr(r);
+			return true;
+		}
+		return false;
+	}
+	default:
+		return false;
+	}
+}
+
+/* Interpret a `while (cond) body` loop. */
+static int
+cpp_cexpr_while(struct scope *tmp, unsigned long long *ret, int *steps)
+{
+	extern struct expr *expr(struct scope *);
+	extern void tokpush(struct token *, size_t);
+	extern size_t tokctx_depth(void);
+	extern void tokctx_rewind(size_t);
+
+	struct expr *cond;
+	struct token *body = NULL;
+	struct token cur;
+	size_t nbody = 0;
+	unsigned long long v;
+	int st;
+
+	next(); /* 'while' */
+	expect(TLPAREN, "after 'while'");
+	cond = expr(tmp);
+	expect(TRPAREN, "after condition");
+	cexp_buffer_stmt(&body, &nbody);
+	cur = tok;
+	for (;;) {
+		if (++(*steps) > CEXP_MAX_STEPS)
+			return CEXP_FAIL;
+		{
+			struct decl *temp = NULL;
+			if (!cpp_cexpr_value(cond, &temp, &v))
+				return CEXP_FAIL;
+		}
+		if (!v)
+			break;
+		{
+			size_t base = tokctx_depth();
+			tokpush(&cur, 1);
+			tokpush(body, nbody);
+			next();
+			st = cpp_cexpr_stmt(tmp, ret, steps);
+			tokctx_rewind(base);
+			tok = cur;
+		}
+		if (st == CEXP_RET || st == CEXP_FAIL)
+			return st;
+		if (st == CEXP_BREAK)
+			break;
+		/* CEXP_OK / CEXP_CONT -> re-check the condition */
+	}
+	free(body);
+	return CEXP_OK;
+}
+
+/* Interpret a `do body while (cond);` loop. */
+static int
+cpp_cexpr_dowhile(struct scope *tmp, unsigned long long *ret, int *steps)
+{
+	extern struct expr *expr(struct scope *);
+	extern void tokpush(struct token *, size_t);
+	extern size_t tokctx_depth(void);
+	extern void tokctx_rewind(size_t);
+
+	struct token *body = NULL;
+	struct token cur;
+	size_t nbody = 0;
+	unsigned long long v;
+	int st;
+	struct expr *cond;
+
+	next(); /* 'do' */
+	cexp_buffer_stmt(&body, &nbody);
+	expect(TWHILE, "after 'do' body");
+	expect(TLPAREN, "after 'while'");
+	cond = expr(tmp);
+	expect(TRPAREN, "after condition");
+	expect(TSEMICOLON, "after 'do' loop");
+	cur = tok;
+	for (;;) {
+		if (++(*steps) > CEXP_MAX_STEPS)
+			return CEXP_FAIL;
+		{
+			size_t base = tokctx_depth();
+			tokpush(&cur, 1);
+			tokpush(body, nbody);
+			next();
+			st = cpp_cexpr_stmt(tmp, ret, steps);
+			tokctx_rewind(base);
+			tok = cur;
+		}
+		if (st == CEXP_RET || st == CEXP_FAIL)
+			return st;
+		if (st == CEXP_BREAK)
+			break;
+		{
+			struct decl *temp = NULL;
+			if (!cpp_cexpr_value(cond, &temp, &v))
+				return CEXP_FAIL;
+		}
+		if (!v)
+			break;
+	}
+	free(body);
+	return CEXP_OK;
+}
+
+/* Interpret a `for (init; cond; step) body` loop. */
+static int
+cpp_cexpr_for(struct scope *tmp, unsigned long long *ret, int *steps)
+{
+	extern struct expr *expr(struct scope *);
+
+	struct expr *cond = NULL, *step = NULL;
+	struct token *body = NULL;
+	struct token cur;
+	size_t nbody = 0;
+	unsigned long long v;
+	int st;
+
+	next(); /* 'for' */
+	expect(TLPAREN, "after 'for'");
+	if (tok.kind != TSEMICOLON) {
+		/* init statement: declaration (`int i = 0;`) or expression */
+		st = cpp_cexpr_stmt(tmp, ret, steps);
+		if (st != CEXP_OK)
+			return st;
+	} else {
+		next();
+	}
+	if (tok.kind != TSEMICOLON)
+		cond = expr(tmp);
+	expect(TSEMICOLON, "after 'for' condition");
+	if (tok.kind != TRPAREN)
+		step = expr(tmp);
+	expect(TRPAREN, "after 'for' step");
+	cexp_buffer_stmt(&body, &nbody);
+	cur = tok;
+	for (;;) {
+		if (++(*steps) > CEXP_MAX_STEPS)
+			return CEXP_FAIL;
+		if (cond) {
+			struct decl *temp = NULL;
+			if (!cpp_cexpr_value(cond, &temp, &v))
+				return CEXP_FAIL;
+			if (!v)
+				break;
+		}
+		{
+			size_t base = tokctx_depth();
+			tokpush(&cur, 1);
+			tokpush(body, nbody);
+			next();
+			st = cpp_cexpr_stmt(tmp, ret, steps);
+			tokctx_rewind(base);
+			tok = cur;
+		}
+		if (st == CEXP_RET || st == CEXP_FAIL)
+			return st;
+		if (st == CEXP_BREAK)
+			break;
+		/* CEXP_OK / CEXP_CONT -> run the step */
+		if (step) {
+			struct decl *temp = NULL;
+			if (!cpp_cexpr_value(step, &temp, &v))
+				return CEXP_FAIL;
+		}
+	}
+	free(body);
+	return CEXP_OK;
+}
+
+/* Interpret one statement from the token stream under a constant
+ * evaluation.  Returns a CEXP_* status; *ret receives the folded value on
+ * CEXP_RET.  `steps` is the shared loop-step budget. */
+static int
+cpp_cexpr_stmt(struct scope *tmp, unsigned long long *ret, int *steps)
+{
+	extern struct expr *expr(struct scope *);
+	extern struct expr *assignexpr(struct scope *);
+	extern struct qualtype declspecs(struct scope *, enum storageclass *,
+	    enum funcspec *, int *);
+	extern struct qualtype declarator(struct scope *, struct qualtype,
+	    char **, int *, struct scope **, bool);
+	extern struct decl *mkdecl(char *, enum declkind, struct type *,
+	    enum typequal, enum linkage);
+	extern void scopeputdecl(struct scope *, struct decl *);
+
+	struct qualtype base;
+	struct expr *e;
+	enum storageclass sc = SCNONE;
+	enum funcspec fs = 0;
+	int align = 0;
+
+	switch (tok.kind) {
+	case TSEMICOLON:
+		next();
+		return CEXP_OK;
+	case TLBRACE: {
+		/* compound statement: interpret statements until '}' */
+		int st;
+		next(); /* '{' */
+		for (;;) {
+			if (tok.kind == TRBRACE) {
+				next();
+				return CEXP_OK;
+			}
+			st = cpp_cexpr_stmt(tmp, ret, steps);
+			if (st != CEXP_OK)
+				return st;
+		}
+	}
+	case TRETURN: {
+		next();
+		if (tok.kind == TSEMICOLON) {
+			next();
+			return CEXP_FAIL; /* `return;` — no integer value */
+		}
+		e = expr(tmp);
+		expect(TSEMICOLON, "after return expression");
+		{
+			struct decl *temp = NULL;
+			if (!cpp_cexpr_value(e, &temp, ret))
+				return CEXP_FAIL;
+		}
+		return CEXP_RET;
+	}
+	case TIF: {
+		bool consteval_if = false, negate = false;
+		int st;
+		struct decl *temp = NULL;
+		unsigned long long v;
+
+		next(); /* 'if' */
+		if (tok.kind == TCONSTEXPR)
+			next(); /* 'if constexpr' */
+		else if (tok.kind == TLNOT) {
+			/* `if ! consteval` — the only valid `!` right after `if` */
+			next(); /* '!' */
+			if (cpp_tok_kind() == CPP_TCONSTEVAL) {
+				consteval_if = true;
+				negate = true;
+				next(); /* 'consteval' */
+			} else {
+				return CEXP_FAIL;
+			}
+		} else if (cpp_tok_kind() == CPP_TCONSTEVAL) {
+			consteval_if = true;
+			next(); /* 'consteval' */
+		}
+		if (consteval_if) {
+			/* in constant evaluation we are in the consteval
+			 * context: `if consteval` takes the then branch,
+			 * `if !consteval` the else */
+			if (!negate) {
+				st = cpp_cexpr_stmt(tmp, ret, steps);
+				if (st != CEXP_OK)
+					return st;
+				if (tok.kind == TELSE) {
+					next();
+					cpp_skip_branch();
+				}
+			} else {
+				cpp_skip_branch();
+				if (tok.kind == TELSE) {
+					next();
+					st = cpp_cexpr_stmt(tmp, ret, steps);
+					if (st != CEXP_OK)
+						return st;
+				}
+			}
+			return CEXP_OK;
+		}
+		expect(TLPAREN, "after 'if'");
+		e = expr(tmp);
+		expect(TRPAREN, "after condition");
+		if (!cpp_cexpr_value(e, &temp, &v))
+			return CEXP_FAIL;
+		if (v) {
+			st = cpp_cexpr_stmt(tmp, ret, steps);
+			if (st != CEXP_OK)
+				return st;
+			if (tok.kind == TELSE) {
+				next();
+				cpp_skip_branch();
+			}
+		} else {
+			cpp_skip_branch();
+			if (tok.kind == TELSE) {
+				next();
+				st = cpp_cexpr_stmt(tmp, ret, steps);
+				if (st != CEXP_OK)
+					return st;
+			}
+		}
+		return CEXP_OK;
+	}
+	case TWHILE:
+		return cpp_cexpr_while(tmp, ret, steps);
+	case TDO:
+		return cpp_cexpr_dowhile(tmp, ret, steps);
+	case TFOR:
+		return cpp_cexpr_for(tmp, ret, steps);
+	case TBREAK:
+		next();
+		return CEXP_BREAK;
+	case TCONTINUE:
+		next();
+		return CEXP_CONT;
+	case TSWITCH:
+	case TGOTO:
+		/* not interpreted; degrade to a runtime call */
+		return CEXP_FAIL;
+	default:
+		break;
+	}
+
+	/* declaration (`int s = <init>;`, `constexpr int s = ...;`) or
+	 * expression statement */
+	base = declspecs(tmp, &sc, &fs, &align);
+		if (base.type) {
+		char *name;
+		struct qualtype qt;
+		for (;;) {
+			qt = declarator(tmp, base, &name, &align, NULL, false);
+			if (!name || !qt.type)
+				return CEXP_FAIL;
+			if (consume(TASSIGN)) {
+				struct decl *cd;
+				struct decl *temp = NULL;
+				unsigned long long v;
+				e = assignexpr(tmp);
+				if (!cpp_cexpr_value(e, &temp, &v))
+					return CEXP_FAIL;
+				/* bind as a mutable object (lvalue for ++/=) with
+				 * the folded value cached in u.obj.constval */
+				cd = mkdecl(name, DECLOBJECT, qt.type, qt.qual,
+				            LINKNONE);
+				cd->u.obj.storage = SDAUTO;
+				cd->u.obj.has_constval = true;
+				cd->u.obj.constval = v;
+				scopeputdecl(tmp, cd);
+			} else {
+				/* uninitialized local: no constant value to bind */
+				return CEXP_FAIL;
+			}
+			if (consume(TSEMICOLON))
+				break;
+			if (!consume(TCOMMA))
+				return CEXP_FAIL;
+		}
+		return CEXP_OK;
+	}
+
+	/* expression statement */
+	{
+		struct decl *temp = NULL;
+		unsigned long long v;
+		e = expr(tmp);
+		if (!cpp_cexpr_value(e, &temp, &v))
+			return CEXP_FAIL;
+		expect(TSEMICOLON, "after expression");
+		return CEXP_OK;
+	}
+}
+
+/* Run the statement interpreter over the replayed body; returns a fresh
+ * EXPRCONST on a folded return, NULL when the body is not constant-
+ * evaluable (the caller then keeps the runtime call). */
+static struct expr *
+cpp_cexpr_interpret(struct scope *tmp, unsigned long long *retv)
+{
+	extern struct expr *mkexpr(enum exprkind, struct type *, struct expr *);
+	int steps = 0;
+	int st = cpp_cexpr_stmt(tmp, retv, &steps);
+	struct expr *e;
+
+	if (st != CEXP_RET)
+		return NULL;
+	e = mkexpr(EXPRCONST, &typeint, NULL);
+	e->u.constant.u = *retv;
+	return e;
+}
+
 /* Fold a constexpr function call when the callee is constexpr and every
  * argument is an integer constant; returns a fresh EXPRCONST or NULL. */
 struct expr *
@@ -5588,7 +6322,7 @@ cpp_constexpr_eval(struct expr *call)
 	struct expr *callee = call ? call->base : NULL;
 	struct decl *fd = NULL;
 	struct cpp_cexpr_fn *fn;
-	struct expr *a, *e, *r;
+	struct expr *a, *e;
 	struct scope *tmp;
 	struct token cur;
 	unsigned long long args[16];
@@ -5610,11 +6344,14 @@ cpp_constexpr_eval(struct expr *call)
 		return NULL;
 
 	for (a = call->u.call.args; a; a = a->next, ++nargs) {
-		struct expr *ae = eval(a);
-		if (nargs >= 16 || ae->kind != EXPRCONST ||
-		    !(ae->type->prop & PROPINT))
+		/* use the interpreter's non-mutating evaluator so arguments
+		 * referencing bound parameters fold in C as well as C++ mode
+		 * (eval() only folds DECLOBJECT constval under g_lang == 1) */
+		struct decl *temp = NULL;
+		unsigned long long av;
+		if (nargs >= 16 || !cpp_cexpr_value(a, &temp, &av))
 			return NULL;
-		args[nargs] = ae->u.constant.u;
+		args[nargs] = av;
 	}
 	if (nargs != fn->nparams)
 		return NULL;
@@ -5625,39 +6362,41 @@ cpp_constexpr_eval(struct expr *call)
 	 * return expression */
 	tmp = mkscope(&filescope);
 	for (i = 0; i < fn->nparams; ++i) {
-		struct decl *pd = mkdecl(fn->params[i], DECLCONST,
-		    fn->ptypes[i] ? fn->ptypes[i] : &typeint, QUALCONST,
+		/* bind parameters as mutable objects (function parameters are
+		 * modifiable lvalues in C++; ++/-- and = on them must parse) */
+		struct decl *pd = mkdecl(fn->params[i], DECLOBJECT,
+		    fn->ptypes[i] ? fn->ptypes[i] : &typeint, QUALNONE,
 		    LINKNONE);
-		pd->u.enumconst = args[i];
+		pd->u.obj.storage = SDAUTO;
+		pd->u.obj.has_constval = true;
+		pd->u.obj.constval = args[i];
 		scopeputdecl(tmp, pd);
 	}
 	++g_cpp_cexpr_depth;
 	{
 		struct func *saved = curfunc;
+		size_t base = tokctx_depth();
+		unsigned long long retv;
 		cur = tok;
 		tokpush(&cur, 1);
 		tokpush(fn->toks, fn->ntoks);
 		next(); /* { */
-		next(); /* return */
-		next(); /* start of the return expression */
-		e = expr(tmp);
-		expect(TSEMICOLON, "after constexpr return expression");
-		next(); /* } — back to cur */
+		e = cpp_cexpr_interpret(tmp, &retv);
+		/* discard any unconsumed replay tokens and restore the caller's
+		 * parse position (the pushed `cur` is never read) */
+		tokctx_rewind(base);
+		tok = cur;
 		curfunc = saved;
 	}
 	--g_cpp_cexpr_depth;
 
-	r = eval(e);
-	/* eval() folds in place and returns `e` itself, so capture the
-	 * constant value before the tree is freed below. */
-	if (r->kind == EXPRCONST && (r->type->prop & PROPINT)) {
+	if (e) {
 		struct expr *res = xmalloc(sizeof *res);
-		*res = *r;
+		*res = *e;
 		delexpr(e);
 		delscope(tmp);
 		return res;
 	}
-	delexpr(e);
 	delscope(tmp);
 	return NULL;
 }
