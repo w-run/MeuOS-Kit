@@ -1315,17 +1315,24 @@ cpp_subscript_call(struct scope *s, struct expr *obj, struct expr *args,
 
 	if (!t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
 		return false;
-	/* member operator[] first; a const member mangles with a K right
-	 * after the method name (`Vec_operator_ixKi`), so retry with the
-	 * const name — a non-const object may call a const method and a const
-	 * object requires it */
+	/* member operator[] first.  A const member mangles with a K right
+	 * after the method name (`Vec_operator_ixKi`).  Resolve the overload
+	 * from the object's constness like the ordinary member-call path
+	 * (cpp_parse.c this_decl const): a const object must pick the const
+	 * (K) overload, a non-const object prefers the non-const one and
+	 * falls back to a const method. */
 	if (cpp_is_member_function(t, mname)) {
-		cpp_mangled_name_args(t, mname, args, mangled, sizeof mangled, false);
+		bool obj_const = (obj->qual & QUALCONST) != 0;
+		char mnameQ[64];
+
+		snprintf(mnameQ, sizeof mnameQ, "%s%s", mname,
+		    obj_const ? "K" : "");
+		cpp_mangled_name_args(t, mnameQ, args, mangled, sizeof mangled, false);
 		fd = scopegetdecl(t->scope ? t->scope : &filescope, mangled, 1);
 		if (!fd || fd->kind != DECLFUNC) {
-			char mnameK[64];
-			snprintf(mnameK, sizeof mnameK, "%sK", mname);
-			cpp_mangled_name_args(t, mnameK, args, mangled, sizeof mangled, false);
+			snprintf(mnameQ, sizeof mnameQ, "%s%s", mname,
+			    obj_const ? "" : "K");
+			cpp_mangled_name_args(t, mnameQ, args, mangled, sizeof mangled, false);
 			fd = scopegetdecl(t->scope ? t->scope : &filescope, mangled, 1);
 		}
 		if (fd && fd->kind == DECLFUNC) {

@@ -47,6 +47,13 @@ struct CVec {
     int operator[](int i) const { return data[i]; }
 };
 
+/* constness-resolved overloads: a const object must bind the const
+ * overload, a non-const object the non-const one */
+struct D {
+    int operator[](int i) { return 1; }
+    int operator[](int i) const { return 10; }
+};
+
 struct Pair { int a, b; };
 int operator[](Pair p, int i) { return i == 0 ? p.a : p.b; }
 
@@ -114,6 +121,13 @@ main(void)
         int s = 0;
         for (int i = 0; i < 3; ++i) s += arr[i];
         if (s != 6) return 10;
+    }
+    /* 11. constness-resolved operator[] overloads */
+    {
+        D d;
+        const D cd;
+        if (d[0] != 1) return 11;
+        if (cd[0] != 10) return 11;
     }
     return 0;
 }
