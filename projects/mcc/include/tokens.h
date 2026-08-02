@@ -139,6 +139,7 @@ TOKEN(TPRAGMA,        "pragma")
 TOKEN(TUNDEF,         "undef")
 TOKEN(TWARNING,       "warning")
 TOKEN(T__VA_ARGS__,   "__VA_ARGS__")
+TOKEN(T__VA_OPT__,    "__VA_OPT__")
 
 /* keyword aliases */
 TOKEN(ALIAS_ALIGNAS,       "_Alignas")

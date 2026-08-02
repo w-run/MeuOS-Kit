@@ -383,6 +383,57 @@ expectnewline(void)
 /* The #if constant-expression arithmetic evaluator now lives in
  * pp_expr.c; evalexpr() below calls evalconst() via pp_internal.h. */
 
+/* Replace every `__has_c_attribute(name)` in `toks` with a TNUMBER 1/0
+ * (C23 6.10.1).  `name` is a plain identifier (standard attribute). */
+static void
+resolve_has_c_attribute(struct array *toks)
+{
+	static const char *const known[] = {
+		"noreturn", "fallthrough", "nodiscard",
+		"maybe_unused", "deprecated",
+	};
+	enum tokenkind hatk = tokenget("__has_c_attribute", 17);
+	size_t j, n = toks->len / sizeof(struct token);
+
+	for (j = 0; j < n; ) {
+		struct token *t = (struct token *)toks->val + j;
+		if (t->kind != hatk) {
+			j++;
+			continue;
+		}
+		bool found = false;
+		size_t nextj = j + 1;
+		if (nextj < n && ((struct token *)toks->val)[nextj].kind == TLPAREN) {
+			struct token *name = &((struct token *)toks->val)[nextj + 1];
+			if (name->kind == TIDENT || name->kind >= TPPIDENT) {
+				const char *nm = name->lit ? name->lit
+				                           : tokenstr(name->kind);
+				for (size_t k = 0; k < sizeof known / sizeof known[0]; ++k)
+					if (strcmp(nm, known[k]) == 0) {
+						found = true;
+						break;
+					}
+				nextj += 3;   /* '(' name ')' */
+			}
+		}
+		{
+			struct token num = { .kind = TNUMBER, .lit = found ? "1" : "0" };
+			struct array tmp = {0};
+			size_t k;
+			for (k = 0; k < j; k++)
+				arrayaddbuf(&tmp, (struct token *)toks->val + k,
+					sizeof(struct token));
+			arrayaddbuf(&tmp, &num, sizeof num);
+			for (k = nextj; k < n; k++)
+				arrayaddbuf(&tmp, (struct token *)toks->val + k,
+					sizeof(struct token));
+			*toks = tmp;
+			n = toks->len / sizeof(struct token);
+			j++;   /* advance past the inserted number */
+		}
+	}
+}
+
 
 /*
  * Read and evaluate a #if / #elif controlling expression. Macro expansion
@@ -513,6 +564,12 @@ evalexpr(void)
 		}
 	}
 
+	/* 2.6 resolve __has_c_attribute(name): 1 when mcc recognises the
+	 * standard attribute, 0 otherwise (C23 6.10.1).  Runs both before
+	 * (on the raw line) and after (on the macro-expanded line) macro
+	 * expansion, so `#if MACRO_ATTRIB(x)` forms work too. */
+	resolve_has_c_attribute(&defline);
+
 	/* 3. macro-expand by pushing defline onto the context and pulling
 	 *    tokens via next(); PPNEWLINE keeps the trailing sentinel so the
 	 *    pull stops without falling through to the main input scanner. */
@@ -526,6 +583,10 @@ evalexpr(void)
 		arrayaddbuf(&exp, &tok, sizeof tok);
 	}
 	ppflags = oldflags;
+
+	/* 3.5 resolve __has_c_attribute again: macro arguments may expand to
+	 * `__has_c_attribute(name)` only after expansion. */
+	resolve_has_c_attribute(&exp);
 
 	/* 4. remaining identifiers (not macros) become 0 */
 	for (i = 0; i < exp.len / sizeof *t; ++i) {
@@ -1357,6 +1418,93 @@ expandbody(struct macro *m)
 		struct token current = m->token[i];
 		size_t param;
 
+		/* C23 __VA_OPT__(content): if the variadic argument is non-empty,
+		 * the content tokens are substituted (parameters expanded, ##
+		 * resolved like the main body); otherwise they vanish entirely. */
+		if (current.kind == T__VA_OPT__) {
+			size_t vararg, depth, j;
+			bool hasargs;
+
+			if (i + 1 >= m->ntoken || m->token[i + 1].kind != TLPAREN)
+				error(&current.loc, "'__VA_OPT__' must be followed by '('");
+			vararg = (size_t)-1;
+			for (j = 0; j < m->nparam; ++j)
+				if (m->param[j].flags & PARAMVAR) {
+					vararg = j;
+					break;
+				}
+			hasargs = vararg < m->nparam && m->arg[vararg].ntoken > 0;
+			/* skip '__VA_OPT__ (' */
+			i += 2;
+			/* find the matching ')' (content may nest parens) */
+			depth = 1;
+			j = i;
+			while (j < m->ntoken) {
+				if (m->token[j].kind == TLPAREN)
+					depth++;
+				else if (m->token[j].kind == TRPAREN) {
+					depth--;
+					if (depth == 0)
+						break;
+				}
+				j++;
+			}
+			if (depth != 0)
+				error(&current.loc, "unbalanced '__VA_OPT__('");
+			/* substitute content [i, j) only when the variadic arg is
+			 * non-empty; each token goes through the same #/##/param
+			 * handling as the main body. */
+			if (hasargs) {
+				for (; i < j; ++i) {
+					struct token ct = m->token[i];
+					if (ct.kind == THASH) {
+						if (++i > j)
+							break;
+						param = macroparam(m, &m->token[i]);
+						if (param == (size_t)-1)
+							error(&m->token[i].loc,
+								"'%s' is not a macro parameter name",
+								tokenspell(&m->token[i]));
+						arrayaddbuf(&out, &m->arg[param].str, sizeof ct);
+						continue;
+					}
+					if (ct.kind == THASHHASH) {
+						struct token right;
+						struct token *last;
+
+						if (++i > j)
+							break;
+						param = macroparam(m, &m->token[i]);
+						if (param != (size_t)-1) {
+							if (m->arg[param].ntoken == 0)
+								continue;
+							if (!out.len) {
+								for (size_t k = 0; k < m->arg[param].ntoken; ++k)
+									arrayaddbuf(&out,
+										&m->arg[param].token[k],
+										sizeof(struct token));
+								continue;
+							}
+							right = m->arg[param].token[0];
+							last = arraylast(&out, sizeof *last);
+							*last = paste(*last, right);
+							for (size_t k = 1; k < m->arg[param].ntoken; ++k)
+								arrayaddbuf(&out, &m->arg[param].token[k],
+									sizeof(struct token));
+						} else {
+							right = m->token[i];
+							last = arraylast(&out, sizeof *last);
+							*last = paste(*last, right);
+						}
+						continue;
+					}
+					appendarg(&out, m, &ct);
+				}
+			} else {
+				i = j;   /* empty variadic arg: skip the whole content */
+			}
+			continue;
+		}
 		if (current.kind == THASH) {
 			if (++i == m->ntoken)
 				error(&current.loc, "missing macro parameter after '#' operator");
