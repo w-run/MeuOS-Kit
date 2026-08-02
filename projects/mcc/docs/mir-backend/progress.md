@@ -36,6 +36,7 @@
 | P6d | 切换前验证：123 一致性 0 diff（shift/.globl/sret 修复 daab688） | ✅ | daab688 |
 | P6e | 自举验证：104 源新后端编译/链接成功；self-mcc 运行崩（mcc_main 寄存器 bug） | 🔄 待调 | — |
 | P6c | 通用修复：slot4/8 无重叠打包 + 帧 rsp 16 对齐 | ✅ | 并入 P6a |
+| P6d | 宽度修复：32 位位移/比较（call 返回值高 32 位） | ✅ | 待提交 |
 | P4c | regalloc：线性扫描（mreg_scan，调用点双池） | ⏳ | — |
 | P4d | regalloc：phi 边移动（机器层 phi 已降级为 pred copy） | ⏳ | — |
 | P4e | regalloc 接管 emit（寄存器感知 + prologue/epilogue 保存 callee-saved） | ⏳ | — |

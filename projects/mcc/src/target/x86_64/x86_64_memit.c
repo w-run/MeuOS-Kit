@@ -197,6 +197,8 @@ emit_const(FILE *f, MConst *c)
 	}
 }
 
+static void emit_mval(FILE *f, MVal *v);
+
 /* 32-bit GPR names (rdi -> edi, r8 -> r8d) for width-aware compares */
 static const char *
 regname32(MReg r)
@@ -636,6 +638,7 @@ emit_ins(FILE *f, MInsM *in)
 		bool is32 = in->dtype != MT_I64 && in->dtype != MT_PTR;
 		const char *ws = is32 ? "l" : "q";
 		const char *rn = is32 ? "%eax" : "%rax";
+		const char *rn9 = is32 ? "%r9d" : "%r9";
 		const char *cc = in->op == MMOP_CMP ? "cmp" : "test";
 		mov_to_rax(f, s0, 0);
 		if (c) {
@@ -645,17 +648,20 @@ emit_ins(FILE *f, MInsM *in)
 				fprintf(f, ", %s\n", rn);
 			} else {
 				fprintf(f, "\tmovq\t$%lld, %%r9\n", (long long)c->u.i);
-				fprintf(f, "\t%s%s\t%%r9, %s\n", cc, ws, rn);
+				fprintf(f, "\t%s%s\t%s, %s\n", cc, ws, rn9, rn);
 			}
 		} else {
 			if (s1 && s1->kind == MV_CONST && s1->con &&
 			    !imm32(s1->con->u.i)) {
 				fprintf(f, "\tmovq\t$%lld, %%r9\n",
 				        (long long)s1->con->u.i);
-				fprintf(f, "\t%s%s\t%%r9, %s\n", cc, ws, rn);
+				fprintf(f, "\t%s%s\t%s, %s\n", cc, ws, rn9, rn);
 			} else {
 				fprintf(f, "\t%s%s\t", cc, ws);
-				emit_mval(f, s1);
+				if (is32)
+					emit_mval32(f, s1);
+				else
+					emit_mval(f, s1);
 				fprintf(f, ", %s\n", rn);
 			}
 		}
