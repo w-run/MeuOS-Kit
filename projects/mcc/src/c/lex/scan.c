@@ -120,6 +120,39 @@ op4(struct scanner *s, int t1, int t2, int t3, int t4)
 }
 
 static int
+hexdigval(int c)
+{
+	if (c >= '0' && c <= '9')
+		return c - '0';
+	if (c >= 'a' && c <= 'f')
+		return c - 'a' + 10;
+	if (c >= 'A' && c <= 'F')
+		return c - 'A' + 10;
+	return -1;
+}
+
+/* Append the UTF-8 encoding of the code point val to b. */
+static void
+bufaddutf8(struct buffer *b, unsigned long val)
+{
+	if (val < 0x80) {
+		bufadd(b, val);
+	} else if (val < 0x800) {
+		bufadd(b, 0xC0 | val >> 6);
+		bufadd(b, 0x80 | (val & 0x3F));
+	} else if (val < 0x10000) {
+		bufadd(b, 0xE0 | val >> 12);
+		bufadd(b, 0x80 | (val >> 6 & 0x3F));
+		bufadd(b, 0x80 | (val & 0x3F));
+	} else {
+		bufadd(b, 0xF0 | val >> 18);
+		bufadd(b, 0x80 | (val >> 12 & 0x3F));
+		bufadd(b, 0x80 | (val >> 6 & 0x3F));
+		bufadd(b, 0x80 | (val & 0x3F));
+	}
+}
+
+static int
 ident(struct scanner *s)
 {
 	int tok;
@@ -147,13 +180,7 @@ ident(struct scanner *s)
 				else { ungetc(hc, s->file); break; }
 			}
 			if (hexdig == ucn_n) {
-				/* Encode as UTF-8 and fill buffer */
-				unsigned char utf8[4]; int ulen = 1;
-				if (ucn_val < 0x80) utf8[0] = ucn_val;
-				else if (ucn_val < 0x800) { utf8[0] = 0xC0|(ucn_val>>6); utf8[1]=0x80|(ucn_val&0x3F); ulen=2; }
-				else if (ucn_val < 0x10000) { utf8[0]=0xE0|(ucn_val>>12); utf8[1]=0x80|((ucn_val>>6)&0x3F); utf8[2]=0x80|(ucn_val&0x3F); ulen=3; }
-				else { utf8[0]=0xF0|(ucn_val>>18); utf8[1]=0x80|((ucn_val>>12)&0x3F); utf8[2]=0x80|((ucn_val>>6)&0x3F); utf8[3]=0x80|(ucn_val&0x3F); ulen=4; }
-				for (int k = 0; k < ulen; k++) bufadd(&s->buf, utf8[k]);
+				bufaddutf8(&s->buf, ucn_val);
 				/* Read the next character (don't buffer it yet) */
 				s->chr = getc(s->file);
 				/* s->chr now holds the char after UCN; loop will check it */
@@ -174,6 +201,62 @@ static int
 isodigit(int c)
 {
 	return (unsigned)c - '0' < 8;
+}
+
+/* C++23 P1467 (and C23 _FloatN): accept the extended floating-point
+ * suffixes f16/f32/f64/f128/bf16.  mcc has no distinct _FloatN types, so
+ * the suffix is rewritten in place to the closest supported one: the
+ * 16/32 bit forms become 'f' (float), the 64/128 bit forms become an
+ * empty suffix (double).  Everything downstream then sees a plain
+ * floating constant. */
+static void
+extfloatsuffix(struct buffer *b)
+{
+	static const struct {
+		const char *name;
+		char repl;
+	} suffix[] = {
+		{"bf16", 'f'},  /* before f16: "1.0bf16" also ends in "f16" */
+		{"f128", '\0'},
+		{"f16", 'f'},
+		{"f32", 'f'},
+		{"f64", '\0'},
+	};
+	size_t i, j, n;
+	int c;
+
+	if (b->len < 2)
+		return;
+	/* A hexadecimal constant without an exponent is an integer, so
+	 * "0xf32" and friends must keep their digits. */
+	if (b->str[0] == '0' && (b->str[1] == 'x' || b->str[1] == 'X')) {
+		for (i = 2; i < b->len; ++i) {
+			if (b->str[i] == 'p' || b->str[i] == 'P')
+				break;
+		}
+		if (i == b->len)
+			return;
+	}
+	for (i = 0; i < countof(suffix); ++i) {
+		n = strlen(suffix[i].name);
+		if (b->len <= n)
+			continue;
+		for (j = 0; j < n; ++j) {
+			c = b->str[b->len - n + j];
+			if (tolower(c) != suffix[i].name[j])
+				break;
+		}
+		if (j < n)
+			continue;
+		/* only a real suffix, i.e. one directly after the value */
+		c = b->str[b->len - n - 1];
+		if (!isdigit(c) && c != '.')
+			continue;
+		b->len -= n;
+		if (suffix[i].repl)
+			bufadd(b, suffix[i].repl);
+		return;
+	}
 }
 
 static enum tokenkind
@@ -210,15 +293,132 @@ number(struct scanner *s)
 		}
 	}
 done:
+	extfloatsuffix(&s->buf);
 	return TNUMBER;
+}
+
+/* Replace the escape sequence that starts at offset start of the token
+ * buffer with a canonical form the literal decoder already understands.
+ *
+ * A code point below 0x80 is written as a three-digit octal escape: that
+ * keeps quotes, backslashes and NUL escaped in the token text, and the
+ * fixed width means a following digit can never be absorbed into it.
+ * Larger values become UTF-8 bytes, except for \x{...}, whose value has
+ * no character-set meaning and is emitted as a plain \x escape. */
+static void
+rewriteescape(struct scanner *s, size_t start, unsigned long val, bool hexoct)
+{
+	int shift;
+
+	s->buf.len = start;
+	if (val < (hexoct ? 0x200UL : 0x80UL)) {
+		bufadd(&s->buf, '\\');
+		bufadd(&s->buf, '0' + (val >> 6 & 7));
+		bufadd(&s->buf, '0' + (val >> 3 & 7));
+		bufadd(&s->buf, '0' + (val & 7));
+	} else if (hexoct) {
+		bufadd(&s->buf, '\\');
+		bufadd(&s->buf, 'x');
+		for (shift = 28; shift > 0 && !(val >> shift); shift -= 4)
+			;
+		for (; shift >= 0; shift -= 4)
+			bufadd(&s->buf, "0123456789abcdef"[val >> shift & 15]);
+	} else {
+		bufaddutf8(&s->buf, val);
+	}
+}
+
+/* C++23 P2290 delimited escape sequence: read "{h...h}" with s->chr on
+ * the opening brace. */
+static unsigned long
+delimited(struct scanner *s, const char *what)
+{
+	unsigned long val = 0;
+	int d;
+
+	nextchar(s);
+	if (hexdigval(s->chr) < 0)
+		error(&s->loc, "empty delimited %s", what);
+	while ((d = hexdigval(s->chr)) >= 0) {
+		if (val > 0x0fffffff)
+			error(&s->loc, "%s out of range", what);
+		val = val * 16 + d;
+		nextchar(s);
+	}
+	if (s->chr != '}')
+		error(&s->loc, "unterminated delimited %s", what);
+	nextchar(s);
+	return val;
+}
+
+/* C++23 P2361 named universal character: read "{NAME}" with s->chr on
+ * the opening brace.  Shipping the whole Unicode name table is not
+ * practical, so only the Latin letter names are recognised. */
+static unsigned long
+namedchar(struct scanner *s)
+{
+	char name[64];
+	size_t n = 0;
+
+	if (s->chr != '{')
+		error(&s->loc, "expected '{' after \\N");
+	nextchar(s);
+	while (s->chr != '}') {
+		if (s->chr == '\n' || s->chr == EOF)
+			error(&s->loc, "unterminated named universal character");
+		if (n == sizeof(name) - 1)
+			error(&s->loc, "named universal character is too long");
+		name[n++] = s->chr;
+		nextchar(s);
+	}
+	nextchar(s);
+	name[n] = '\0';
+	if (n == sizeof("LATIN CAPITAL LETTER A") - 1
+	    && memcmp(name, "LATIN CAPITAL LETTER ", 21) == 0
+	    && name[21] >= 'A' && name[21] <= 'Z')
+		return name[21];
+	if (n == sizeof("LATIN SMALL LETTER A") - 1
+	    && memcmp(name, "LATIN SMALL LETTER ", 19) == 0
+	    && name[19] >= 'A' && name[19] <= 'Z')
+		return name[19] - 'A' + 'a';
+	error(&s->loc, "unsupported named universal character '%s'", name);
 }
 
 static void
 escape(struct scanner *s)
 {
+	size_t start;
+	unsigned long val;
+	int i, n, d;
+
+	start = s->buf.len;  /* where nextchar() is about to put the '\\' */
 	nextchar(s);
-	if (s->chr == 'x') {
+	if (s->chr == 'u' || s->chr == 'U') {
+		n = s->chr == 'u' ? 4 : 8;
 		nextchar(s);
+		if (s->chr == '{') {
+			val = delimited(s, "universal character name");
+		} else {
+			for (val = 0, i = 0; i < n; ++i) {
+				d = hexdigval(s->chr);
+				if (d < 0)
+					error(&s->loc, "invalid universal character name");
+				val = val * 16 + d;
+				nextchar(s);
+			}
+		}
+		if (val > 0x10ffff)
+			error(&s->loc, "universal character name out of range");
+		rewriteescape(s, start, val, false);
+	} else if (s->chr == 'N') {
+		nextchar(s);
+		rewriteescape(s, start, namedchar(s), false);
+	} else if (s->chr == 'x') {
+		nextchar(s);
+		if (s->chr == '{') {
+			rewriteescape(s, start, delimited(s, "hexadecimal escape sequence"), true);
+			return;
+		}
 		if (!isxdigit(s->chr))
 			error(&s->loc, "invalid hexadecimal escape sequence");
 		do nextchar(s);
