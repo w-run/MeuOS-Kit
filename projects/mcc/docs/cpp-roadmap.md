@@ -86,11 +86,13 @@
 - **降级策略**：**必须完整做引用折叠与值类别判断**（这是 C++11 核心语义，无法跳过），但可以先不实现 `std::move` 内建特化（库层实现）、不做 `&&` 模板参数（转发引用）的完美转发——后者用重载替代。
 - **风险**：值类别判定（`return local;` 触发移动、`x + y` 临时量、`std::move(x)` 显式转换）需要给 expr 加 rvalue/lvalue 标记，**触及 C 前端 expr 结构**，改动面大，建议最后做。
 
-### 2.6 C++14/17（后续）
-- 泛型 lambda / auto 返回：建立在 2.1 + 2.3 之上，主要难度在「auto 参数模板化」= lambda 的 operator() 变成函数模板（token 回放可做）。
-- if constexpr / fold expressions：基于 2.2 包展开 + 2.4 求值器。
-- CTAD / 结构化绑定：class template argument deduction 基于 2.2 推导；结构化绑定是解构语法糖。
-- concepts/requires：`reference/cplusplus/src/parser/cxx/ast_rewriter_requires.cc` 可参考约束子句解析；但约束求值依赖 2.4 constexpr——**放最后**。
+### 2.6 C++14/17（✅ 已完成，a28b0f5/11d919d/a76e7ff/70890fa）
+- **泛型 lambda**（a28b0f5）：`[](auto x) {...}` — operator() 合成函数模板（`template<typename __T0> auto operator()(__T0 x)`），每个调用点实参类型实例化独立版本；无捕获场景完整，有捕获泛型 lambda 有 IR 栈槽缺陷（已知限制）。
+- **if constexpr**（11d919d）：`if constexpr (cond)` — eval() 折叠编译期常量条件，选中分支经 stmt() 解析、未选分支 token 级跳过（不实例化）；支持 else / else-if 链。
+- **CTAD**（a76e7ff）：`Vec v(a, b)` — declspecs 记录待推导模板名，decl() 从构造参数按位置推导实例化；token 重放修复（尾部 `;` + tokctx_rewind）。
+- **结构化绑定**（70890fa）：`auto [x, y] = p` — 隐藏对象 + 逐成员拷贝绑定（值绑定）。
+- **内联变量**（70890fa）：`inline static int x` — 成员声明允许 inline，无初始化 inline static 是定义（零初始化）。
+- concepts/requires：**未做**（依赖约束求值，放最后）。
 
 ---
 
