@@ -829,9 +829,11 @@ i386_encode_insn(const struct mt_target *target,
 			goto done;
 		}
 		if (ops[0].kind == OP_REG && ops[1].kind == OP_REG) {
-			/* movzbl %al, %eax — mod=3 (register form) */
+			/* movzbl %al, %eax — mod=3 (register form).
+			 * ModR/M: reg field = destination, rm field = source.
+			 * AT&T `movsbl src, dst` → ops[0]=src, ops[1]=dst. */
 			emit8(p, opc);
-			emit8(p + 1, modrm(3, ops[0].reg, ops[1].reg));
+			emit8(p + 1, modrm(3, ops[1].reg, ops[0].reg));
 			p += 2;
 			out->size = (size_t)(p - out->bytes);
 			goto done;
@@ -1699,7 +1701,7 @@ skip_jcc:
 			/* movzbl/movsbl reg, reg */
 			emit8(p, 0x0F);
 			emit8(p + 1, opcode);
-			emit8(p + 2, modrm(3, ops[0].reg, ops[1].reg));
+			emit8(p + 2, modrm(3, ops[1].reg, ops[0].reg));
 			p += 3;
 			out->size = (size_t)(p - out->bytes);
 			goto done;

@@ -416,7 +416,15 @@ lir_bridge(MFn *mfn)
 				Ref a0 = refval(mfn, in->src[0], fn);
 				if (rtype(a0) == RCon && fn->con[a0.val].bits.i <= 0)
 					a0 = getcon(0, fn);
-				*curi++ = (Ins){.op = Oalloc16, .cls = Kl, .to = to,
+				/* The alloc result class follows the pointer width the
+				 * frontend assigned to the MIR alloca destination (i32 on
+				 * ILP32 targets like i386, i64 on LP64).  Hardcoding Kl
+				 * makes i386 treat the result as a 64-bit stack-resident
+				 * temp; seladdr then reads the slot as an address instead
+				 * of folding the static allocation to [S0], corrupting
+				 * every store through it. */
+				int acls = in->dst ? mir_to_cls(in->dst->type) : Kl;
+				*curi++ = (Ins){.op = Oalloc16, .cls = acls, .to = to,
 				                .arg = {a0, R}};
 				continue;
 			}
