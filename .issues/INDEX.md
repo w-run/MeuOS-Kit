@@ -107,6 +107,18 @@
 - [ ] **unzip-thin-shell** — unzip.c 重构为薄壳（PKZIP 解析 + libmz 解压）
 - [ ] **tar-mz-support** — tar.c 增加 `-Z` 选项支持 .mz 格式
 
+## P10 — libutils 共享代码重构（✅ 完成）
+
+> **目标**：消除工具间重复代码，提取公共逻辑到 `libutils.a` 共享模块。
+
+- [x] **utils-netinfo** — 提取 ip/ifconfig/route/netstat 4 工具的公共网络信息逻辑到 `libutils/netinfo.c`（/proc/net/dev + ioctl + MAC/IP 格式化 + 路由解析 + CIDR）
+- [x] **utils-init** — `utils_init(argc, argv)` 一站式初始化，消除 35+ 工具的手写 version/program_name/--version/--help 样板代码
+- [x] **utils-duration** — 提取 `parse_duration`/`parse_duration_ts` 到 `libutils/duration.c`，增强复合时长（1h30m）和冒号格式（1:30:00）。重构 sleep/timeout
+- [x] **utils-signame** — 提取信号名表到 `libutils/signame.c`（20→31 信号 + `sig_from_name`/`sig_to_name`/`sig_list_all`）。重构 kill/timeout
+- [x] **utils-hex** — 提取 `bytes_to_hex`/`hex_to_bytes` 到 `libutils/hex.c`（支持冒号/连字符分隔）。重构 md5sum/sha256sum
+- [x] **utils-hash-bugfix** — 修复 md5sum/sha256sum 3 个预存 bug（MD5 输出字节序交错 + bits padding 污染 + check 模式 sscanf 解析）
+- [ ] **utils-digest** — 哈希框架抽象（暂缓，等 SHA-1/SHA-512 等更多算法后再做）
+
 ---
 
 ## 设计原则（速查，与 AGENT.md 同步）
@@ -127,11 +139,15 @@ meuos-utils 所有工具共享 `libutils.a`：
 |------|------|
 | `xmalloc` / `xstrdup` / `xrealloc` | OOM 失败即退出 |
 | `getopt_long` | GNU 长选项解析 |
-| `progname` | argv[0] 提取工具名 |
-| `version` | --version 输出版本 |
+| `progname` / `program_name` | argv[0] 提取工具名 |
+| `version` / `utils_init` | --version 输出 + 一站式初始化（--version/--help 自动处理） |
 | `quote` / `escape` | shell 引用转义 |
 | `human_readable` | 字节数 → "1.2K" 格式（ls -h 用） |
 | `mbsalign` / `mb_width` | UTF-8 多字节对齐 |
+| `netinfo` | 网络信息共享（/proc/net/dev + ioctl + MAC/IP + 路由） |
+| `duration` | 时长解析（1h30m / 1:30:00 / 90s → struct timespec） |
+| `signame` | 信号名表（sig_from_name/sig_to_name/sig_list_all，31 信号） |
+| `hex` | 十六进制转换（bytes_to_hex/hex_to_bytes，支持分隔符） |
 
 ### 分阶段提交
 

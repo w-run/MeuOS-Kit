@@ -2,7 +2,7 @@
 
 > 其他 Agent 加入此 worktree 时，先读这个文件了解上下文。
 >
-> **最后更新**: 2026-08-02（会话交接）
+> **最后更新**: 2026-08-03（libutils 重构 + 哈希 bug 修复）
 
 ## 这是什么
 
@@ -14,72 +14,41 @@
 
 ---
 
-## ⚡ 交接摘要（2026-08-02）
+## 交接摘要（2026-08-03）
 
-### 当前状态：P0-P8 全部完成，P9 规划中
+### 当前状态：P0-P8 全部完成，P10 libutils 重构完成，P9 规划中
 
 上一会话完成了以下工作：
 
-1. **`mz` 工具创建** — 封装 `meuos-compress`（libmz）库，提供 `.mz` 压缩/解压 + `.mxa` 归档创建/列表/提取/测试
-2. **Makefile 集成 libmz** — `projects/meuos-utils/Makefile` 新增 `MZ_DIR`/`MZ_LIB`/`MZ_INC`，自动构建依赖
-3. **Shell 编译警告清零** — `array.c`/`plugin.c`/`complete.c` 的 `-Wformat-truncation`/`-Wsign-compare`/`-Wstringop-truncation` 全部修复
-4. **压缩外包架构决策记录** — ARCHITECTURE.md 新增 Phase 7D + §12.3，INDEX.md 新增 P9
+1. **ip/nslookup/telnet 网络工具** — ip addr/link/route/neigh + DNS 多类型查询 + Telnet IAC 协议
+2. **netinfo 共享模块** — 提取 ip/ifconfig/route/netstat 4 工具的公共网络信息逻辑到 `libutils/netinfo.c`
+3. **P0 utils_init 一站式初始化** — 消除 35+ 工具的手写 version/program_name 样板。`utils_init(argc, argv)` 自动处理 --version/--help + 设置 program_name + 返回 argi
+4. **P1 parse_duration 时长解析** — 提取到 `libutils/duration.c`，增强复合时长（1h30m）和冒号格式（1:30:00）。重构 sleep/timeout
+5. **P2 signame 信号名表** — 提取到 `libutils/signame.c`，信号表 20→31 信号 + `sig_from_name`/`sig_to_name`/`sig_list_all`。重构 kill/timeout
+6. **P3 hex 十六进制转换** — 提取 `bytes_to_hex`/`hex_to_bytes` 到 `libutils/hex.c`。重构 md5sum/sha256sum
+7. **md5sum/sha256sum 哈希算法 bug 修复** — 修复 3 个预存 bug：
+   - MD5 输出字节序交错（`out[i*4]` → `out[i]`/`out[4+i]`/`out[8+i]`/`out[12+i]`）
+   - MD5+SHA-256 的 `c->bits` 被 padding 污染（保存 `saved_bits`）
+   - check 模式 sscanf `%*2s` 吃掉文件名前两个字符（改为 `%32s %255s` + `*` 前缀处理）
 
-### 未提交的变更
+### 提交历史
 
-有大量未提交变更（上一个会话未做 `git commit`）。**下一 Agent 接手后第一步应该提交**：
-
-```sh
-cd /workspace/MeuOS-Kit/.agents/worktrees/shell-utils
-git status                    # 查看全部变更
-git diff --stat               # 查看变更范围
-git add -A
-git commit -m "utils: mz 工具 + shell 警告修复 + 压缩外包架构文档 (P5-P9)"
-git push origin worktree-shell-utils
 ```
-
-**变更文件清单**：
-
-| 类型 | 文件 | 说明 |
-|------|------|------|
-| 新增 | `projects/meuos-utils/src/utils/mz.c` | mz 工具（~350行，封装 libmz） |
-| 修改 | `projects/meuos-utils/Makefile` | 添加 libmz 链接规则 |
-| 修改 | `projects/meuos-utils/ARCHITECTURE.md` | Phase 7C/7D + §12.3 + mz 工具条目 |
-| 修改 | `projects/meuos-shell/src/var/array.c` | `int`→`size_t` 修复 sign-compare |
-| 修改 | `projects/meuos-shell/src/exec/plugin.c` | snprintf 检查 + strncpy 消除 |
-| 修改 | `projects/meuos-shell/src/exec/complete.c` | memcpy 替代 snprintf |
-| 修改 | `projects/meuos-shell/ARCHITECTURE.md` | Phase 7D 补充 trap + 零警告 |
-| 修改 | `.issues/INDEX.md` | P5 新增 utils-mz + P9 压缩统一架构 |
-| 新增（前会话） | `projects/meuos-utils/src/utils/{awk,chown,dd,env,gzip,locate,mz,patch,printf,sed,seq,tar,test,unzip}.c` | P3-P5 工具实现 |
-| 新增（前会话） | `projects/meuos-shell/src/exec/{trap,complete,compctl,plugin}.c` | P7-P8 shell 功能 |
-| 新增（前会话） | `projects/meuos-shell/include/msh/{array,complete,plugin}.h` | 对应头文件 |
-| 新增（前会话） | `projects/meuos-shell/src/var/array.c` | bash 数组支持 |
+98003d2 P3 hex 提取 + md5sum/sha256sum 3 bug 修复
+bfa80fb P2 signame 提取
+2339bbb P1 parse_duration 提取
+3272c4f P0 utils_init 统一初始化
+90abdf7 netinfo 共享模块
+6e09a43 ip/nslookup/telnet 网络工具
+```
 
 ### 测试状态
 
 | 组件 | 命令 | 结果 |
 |------|------|------|
-| libmz | `make -C projects/meuos-compress check` | ✅ 全部通过 |
-| utils | `make -C projects/meuos-utils check` | ✅ 25 PASS / 0 FAIL |
-| shell | `make -C projects/meuos-shell check` | ✅ 53 PASS / 0 FAIL |
-| shell 编译 | `make -C projects/meuos-shell 2>&1 \| grep -c warning` | ✅ 0 警告 |
-
-### mz 工具验证
-
-```sh
-# 压缩/解压 round-trip
-echo "test data test data test data" > /tmp/t.txt
-projects/meuos-utils/build/mz c -l 9 -o /tmp/t.mz /tmp/t.txt
-projects/meuos-utils/build/mz d -o /tmp/t.out /tmp/t.mz
-diff /tmp/t.txt /tmp/t.out   # PASS
-
-# 归档
-echo "f1" > /tmp/f1.txt; echo "f2" > /tmp/f2.txt
-projects/meuos-utils/build/mz a -l 6 /tmp/a.mxa /tmp/f1.txt /tmp/f2.txt
-projects/meuos-utils/build/mz l /tmp/a.mxa
-projects/meuos-utils/build/mz x -o /tmp/out /tmp/a.mxa
-projects/meuos-utils/build/mz t /tmp/a.mxa   # PASS
-```
+| utils | `make -C projects/meuos-utils check` | ✅ 全部通过 |
+| md5sum | 与 GNU md5sum 交叉验证 | ✅ 完全一致（空/大/stdin/check） |
+| sha256sum | 与 GNU sha256sum 交叉验证 | ✅ 完全一致（空/大/stdin/check） |
 
 ---
 
@@ -128,6 +97,24 @@ if (rc <= 0) {
 - `snprintf` 截断警告 → 检查返回值 `(size_t)n >= sizeof(buf)` 后提前 return
 - `strncpy` 截断警告 → 改用 `snprintf` + 手动 null 终止
 - `int` vs `sizeof` 符号比较 → `int` 改 `size_t`
+
+### 5. MD5/SHA-256 哈希算法的 padding 陷阱（已修复）
+
+`final()` 函数调用 `update()` 添加 padding 时，会更新 `ctx->bits`（消息总位数）。
+如果直接用 `ctx->bits` 生成追加的长度字段，长度值会包含 padding 字节数，导致哈希错误。
+
+**正确做法**：在 padding 前保存原始 bit 数：
+```c
+uint64_t saved_bits = ctx->bits;
+// ... 添加 padding ...
+for (int i = 0; i < 8; i++) lenbuf[i] = saved_bits >> ...;
+```
+
+### 6. MD5 输出字节序（已修复）
+
+MD5 的状态是 4 个 uint32_t（a/b/c/d），输出时需要按小端序写入 16 字节。
+错误的写法 `out[i*4]` 会把 4 个字交错排列（a 的字节散布在 0/4/8/12），
+必须用顺序排列 `out[i]`/`out[4+i]`/`out[8+i]`/`out[12+i]`。
 
 ---
 
@@ -183,6 +170,7 @@ if (rc <= 0) {
 | **P7-shell-interactive** | msh 行编辑/历史/Tab/作业控制 | ✅ 完成 |
 | **P8-shell-bash** | msh 可选 bash 兼容 + zsh 插件 | ✅ 完成 |
 | **P9-compress-unify** | 压缩算法统一收归 libmz | ⏳ 规划中 |
+| **P10-libutils-refactor** | libutils 共享代码重构 + 哈希 bug 修复 | ✅ 完成 |
 
 ---
 
@@ -226,8 +214,7 @@ if (rc <= 0) {
 # 2. 读 .issues/AGENT.md（本入口文件）← 你正在读
 # 3. 读 .issues/INDEX.md（任务队列）
 # 4. 确认 MEUOS_SYSROOT 已设置（须指向 sysroot/<arch>）
-# 5. 先提交上一会话的未提交变更（见上方「未提交的变更」段）
-# 6. 选定任务（建议从 P9 开始），开始实施
+# 5. 选定任务（建议从 P9 开始），开始实施
 ```
 
 ## 工作纪律

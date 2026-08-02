@@ -49,7 +49,12 @@ meuos-utils/
 │   │   ├── pathname.c       # 安全 basename/dirname
 │   │   ├── getopt.c         # GNU 长选项子集
 │   │   ├── xmalloc.c        # OOM 分配器
-│   │   └── version.c        # 版本信息
+│   │   ├── version.c        # 版本 + utils_init/utils_usage/utils_die_usage
+│   │   ├── classic.c        # --classic 模式
+│   │   ├── netinfo.c        # 网络信息共享 (/proc/net/dev + ioctl + 路由)
+│   │   ├── duration.c       # 时长解析 (1h30m / 1:30:00 / 90s)
+│   │   ├── signame.c        # 信号名表 (sig_from_name/sig_to_name/sig_list_all)
+│   │   └── hex.c            # 十六进制转换 (bytes_to_hex/hex_to_bytes)
 │   ├── coreutils/           # 第一波核心（默认现代优先）
 │   │   ├── ls.c             # 现代：彩色+图标+树
 │   │   ├── tree.c           # tree（ls --tree 或独立）
@@ -188,6 +193,11 @@ meuos-utils/
 | 语法 | `syntax.h` | 轻量 token 着色（基于扩展名/token，无正则） |
 | 配置 | `config.h` | YAML 简化解析（自己实现或调 meow libm4） |
 | 哈希 | `hash.h` | 简单哈希表（gitignore 跳过、ignore 集合） |
+| **netinfo** | `netinfo.h` | 网络信息共享：/proc/net/dev 解析 + ioctl 调用 + MAC/IP 格式化 + 路由解析 |
+| **duration** | `utils.h` | 时长解析：复合格式 `1h30m` / 冒号格式 `1:30:00` / 简单 `90s` → `struct timespec` |
+| **signame** | `utils.h` | 信号名表：`sig_from_name()` / `sig_to_name()` / `sig_list_all()`（31 信号） |
+| **hex** | `utils.h` | 十六进制转换：`bytes_to_hex()` / `hex_to_bytes()`（支持冒号/连字符分隔） |
+| **utils_init** | `utils.h` | 一站式初始化：`--version` / `--help` 自动处理 + `program_name` 设置 + `argi` 返回 |
 
 ## 7. 编译路径
 
@@ -272,6 +282,17 @@ meow / msh / 工具链 / sysroot
 - ⏳ unzip.c 重构为薄壳：PKZIP 解析 + `mxa_read_file` / `mz_decompress`
 - ⏳ tar.c 增加 `-Z` 选项：两步模式（tar 打包 → mz 压缩）或流式 pipe
 
+### Phase 7F — libutils 共享代码重构（✅ 完成）
+
+> **目标**：消除工具间重复代码，提取公共逻辑到 `libutils.a` 共享模块。
+
+- ✅ **netinfo 共享模块** — 提取 ip/ifconfig/route/netstat 4 工具的公共网络信息逻辑（/proc/net/dev 解析 + ioctl 调用 + MAC/IP 格式化 + 路由解析 + CIDR 计算）到 `libutils/netinfo.c`
+- ✅ **utils_init 一站式初始化** — 消除 35+ 工具的手写 version/program_name 样板代码。`utils_init(argc, argv)` 自动处理 `--version`/`--help`、设置 `program_name`、返回 `argi`
+- ✅ **parse_duration 时长解析** — 提取到 `libutils/duration.c`，增强复合时长（`1h30m`）和冒号格式（`1:30:00`）。重构 sleep/timeout
+- ✅ **signame 信号名表** — 提取到 `libutils/signame.c`，信号表 20→31 + `sig_from_name()`/`sig_to_name()`/`sig_list_all()`。重构 kill/timeout
+- ✅ **hex 十六进制转换** — 提取到 `libutils/hex.c`，`bytes_to_hex()`/`hex_to_bytes()`（支持冒号/连字符分隔）。重构 md5sum/sha256sum
+- ✅ **md5sum/sha256sum 哈希算法 bug 修复** — 修复 3 个预存 bug：MD5 输出字节序交错 + bits padding 污染 + check 模式 sscanf 解析
+
 ## 11. 当前能力矩阵
 
 | 工具 | 状态 | 已实现特性 | 待实现 |
@@ -321,6 +342,20 @@ meow / msh / 工具链 / sysroot
 | **ping** | ✅ | ICMP echo+RTT统计+超时 | IPv6 |
 | **curl** | ✅ | HTTP/1.1 GET/POST+重定向+头+输出 | HTTPS/TLS |
 | **wget** | ✅ | HTTP下载+断点续传+重试+进度 | HTTPS/TLS |
+| **ip** | ✅ | addr/link/route/neigh 子命令 | netlink 协议 |
+| **nslookup** | ✅ | DNS A/AAAA/MX/TXT/CNAME/NS/PTR 查询 | — |
+| **telnet** | ✅ | IAC 协议客户端+终端协商 | — |
+| **md5sum** | ✅ | RFC 1321 MD5+check 模式+stdin | — |
+| **sha256sum** | ✅ | FIPS 180-4 SHA-256+check 模式+stdin | — |
+| **kill** | ✅ | 信号发送+`-l` 列出+名称/编号 | — |
+| **sleep** | ✅ | 复合时长(1h30m)+多参数 | — |
+| **timeout** | ✅ | 命令超时终止+信号选择 | — |
+| **date** | ✅ | 时间格式化+设置+UTC | — |
+| **hostname** | ✅ | 主机名查看+设置 | — |
+| **whoami** | ✅ | 当前用户名 | — |
+| **id** | ✅ | UID/GID/组信息 | — |
+| **uname** | ✅ | 系统信息(-a/-m/-r) | — |
+| **which** | ✅ | 命令路径查找 | — |
 
 ## 12. 实施笔记
 
@@ -353,3 +388,25 @@ meow / msh / 工具链 / sysroot
 5. tar.c 增加 `-Z` 选项支持 .mz 格式
 
 **当前状态**：mz 工具已完成（Phase 7C），其余为后续实现。
+
+### 12.4 libutils 共享代码重构与哈希算法 bug 修复（2026-08-03）
+
+**背景**：在实现 ip/nslookup/telnet 网络工具后，发现工具间存在大量重复代码（version/help 样板、网络信息解析、信号名表、时长解析、十六进制转换），遂启动 libutils 共享代码重构。
+
+**重构成果**：
+
+| 阶段 | 新增模块 | 消除的重复 | 影响工具 |
+|------|---------|-----------|----------|
+| netinfo | `libutils/netinfo.c` | ip/ifconfig/route/netstat 的 /proc/net/dev 解析 + ioctl + MAC/IP 格式化 | 4 个 |
+| utils_init | `libutils/version.c` | 35+ 工具的手写 version/program_name/--version/--help 样板 | 35+ 个 |
+| duration | `libutils/duration.c` | sleep/timeout 的本地 parse_duration | 2 个 |
+| signame | `libutils/signame.c` | kill/timeout 的本地信号名表（20→31 信号） | 2 个 |
+| hex | `libutils/hex.c` | md5sum/sha256sum 的本地 hex 转换函数 | 2 个 |
+
+**修复的预存 bug**：
+
+1. **MD5 输出字节序交错** — `md5_final()` 的输出循环使用 `out[i*4]` 将 a/b/c/d 的字节交错排列（a 的 4 字节散布在 0/4/8/12 位置），导致哈希值完全错误。修正为顺序排列 `out[i]`/`out[4+i]`/`out[8+i]`/`out[12+i]`。
+2. **MD5 + SHA-256 的 bits padding 污染** — `final()` 调用 `update()` 添加 padding 时也更新了 `c->bits`，导致追加的长度值包含 padding 字节数而非原始数据长度。修复：在 padding 前保存 `saved_bits`。
+3. **check 模式 sscanf 解析** — `%*2s` 会跳过空格后吃掉文件名前两个字符（如 `/tmp/test.txt` → `mp/test.txt`）。修正为 `%32s %255s`，并添加二进制模式 `*` 前缀处理。
+
+**验证**：md5sum/sha256sum 输出与 GNU 工具完全一致（空文件、大文件、stdin 均验证），check 模式可与 GNU 输出交叉验证。
