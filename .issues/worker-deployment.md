@@ -29,8 +29,8 @@
 ### 缺陷队列（2026-08-03；编号迁移为组件前缀+hex 见下）
 > **编号体系**：2026-08-03 起缺陷编号为「组件/阶段前缀 + 两位 hex」——`cpp-`（C++ 前端）、`c-`（C 前端）、`mir-`（MIR）、`x86-`（x86_64 后端）；旧字母保留对照，历史章节标题已在 0802.md 标注新编号。
 
-- **closed**：cpp-01(B,83db5ff)、cpp-02(C,c19a351)、cpp-03(D,16f1948)、cpp-04(E,6f3d734)、cpp-05(G,3f0ed41)、cpp-06(H,a096b52)、cpp-07(K,2755fe3)、cpp-08(M,4d93a66)、cpp-09(N,754b437)、cpp-0a(Q,f8f0044)、cpp-0b(R,93ab4b4)、cpp-0c(S,f8f0044)、cpp-0d(T,f8f0044)、cpp-0e(Z/U,2be27a7 LIR+e4a885c MIR 后端,empty_class_value.cc 双路径闭环)、mir-00(F,647a05b)、mir-01(V,93ab4b4+4c24bfe)、x86-00(va_list,222a28d)
-- **open**：cpp-0f(Y, delete (T*)expr, low)、c-00(W, u8 字面量)、c-01(X, inline+extern)（range-for 待 worker-cpp20 修复后另记）
+- **closed**：cpp-01(B,83db5ff)、cpp-02(C,c19a351)、cpp-03(D,16f1948)、cpp-04(E,6f3d734)、cpp-05(G,3f0ed41)、cpp-06(H,a096b52)、cpp-07(K,2755fe3)、cpp-08(M,4d93a66)、cpp-09(N,754b437)、cpp-0a(Q,f8f0044)、cpp-0b(R,93ab4b4)、cpp-0c(S,f8f0044)、cpp-0d(T,f8f0044)、cpp-0e(Z/U,2be27a7 LIR+e4a885c+00ed62b MIR 后端,empty_class_value.cc 双路径闭环)、mir-00(F,647a05b)、mir-01(V,93ab4b4+4c24bfe)、x86-00(va_list,222a28d)、range-for(71fbb35)
+- **open**：cpp-0f(Y, delete (T*)expr, low)、c-00(W, u8 字面量)、c-01(X, inline+extern)
 - **禁用**：mir-02(J, slotmerge 自举破坏)、mir-03(I, 并入 J)、cpp-00(A, 已废弃被 cpp-0e 替代)
 - 状态只标 open/pending，修复 push 后由 worker-doc 周期 pull 补记 closed + 哈希。
 
