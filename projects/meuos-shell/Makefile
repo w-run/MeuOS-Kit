@@ -21,7 +21,7 @@ BIN := $(BUILD)/msh
 
 BASE_CFLAGS := -Iinclude -I../meuos-utils/include
 
-.PHONY: all check check-pty clean install
+.PHONY: all check check-pty check-qemu check-qemu-vm clean install
 
 all: $(BIN)
 
@@ -57,6 +57,31 @@ check-pty: all
 	@echo ">>> PTY interactive tests"
 	@python3 test/pty_test.py ./$(BIN)
 	@echo ">>> PTY tests PASS"
+
+# qemu-user 模式测试（需要 qemu-x86_64-static + 静态二进制）
+check-qemu: all
+	@echo ">>> qemu-user mode tests"
+	@QEMU=$$(command -v qemu-x86_64-static || echo "$$MEUOS_KIT_ROOT/env/qemu/qemu-x86_64-static"); \
+	 if [ ! -x "$$QEMU" ]; then echo "SKIP: qemu-x86_64-static not found"; exit 0; fi; \
+	 # 用 musl-gcc 静态编译（qemu-user 下更兼容）\
+	 make -C ../meuos-utils clean && make -C ../meuos-utils CC=musl-gcc CFLAGS="-O2 -g -std=c11 -static" 2>/dev/null; \
+	 make -C . clean && make -C . CC=musl-gcc CFLAGS="-O2 -g -Wall -Wextra -std=c11 -static" 2>/dev/null; \
+	 # POSIX 烟雾测试 \
+	 printf '#!/bin/bash\nexec %s %s "$$@"\n' "$$QEMU" "$$(pwd)/build/msh" > /tmp/qemu-msh-wrapper.sh; \
+	 chmod +x /tmp/qemu-msh-wrapper.sh; \
+	 sh test/posix/smoke.sh /tmp/qemu-msh-wrapper.sh; \
+	 # 插件/主题/:cmd 测试 \
+	 bash test/msh_plugin_test.sh /tmp/qemu-msh-wrapper.sh; \
+	 # PTY 交互测试 \
+	 python3 test/qemu_pty_test.py; \
+	 rm -f /tmp/qemu-msh-wrapper.sh
+	@echo ">>> qemu-user tests PASS"
+
+# qemu-system VM 模式测试（需要 qemu-system-x86_64 + Alpine kernel + initramfs）
+check-qemu-vm: all
+	@echo ">>> qemu-system VM mode tests"
+	@python3 test/qemu_vm_test.py
+	@echo ">>> qemu-system VM tests PASS"
 
 install: all
 	@mkdir -p $(DESTDIR)/usr/bin
