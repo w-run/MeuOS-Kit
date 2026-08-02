@@ -331,9 +331,9 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
 | cpp-0c | S | lambda 按值捕获类对象不调拷贝构造 | ✅ closed（f8f0044 混入） |
 | cpp-0d | T | 嵌套 lambda 无法再捕获外层变量 | ✅ closed（f8f0044 混入） |
 | cpp-0e | Z/U | size-0 空类按值传参/返回崩溃（P0） | ✅ closed（三处：2be27a7 LIR 路径 + e4a885c MIR 后端空聚合 ABI 归一 + 00ed62b MIR 后端参数 DCE/regalloc；empty_class_value.cc 双路径完整闭环） |
-| cpp-0f | Y | `delete (T*)expr` 解析失败 | 🔄 open（low） |
-| c-00 | W | `u8"..."` 字面量元素类型应为 `char`（C11 §6.4.5p6） | 🔄 open（worker-mir-tests 发现） |
-| c-01 | X | inline 定义 + extern 声明未发外部定义（C99 §6.7.4p7） | 🔄 open（worker-mir-tests 发现） |
+| cpp-0f | Y | `delete (T*)expr` 解析失败 | ✅ closed（9e43494，delete/delete[] operand 改 castexpr + new_delete_cast.cc） |
+| c-00 | W | `u8"..."` 字面量元素类型应为 `char`（C11 §6.4.5p6） | ✅ closed（604be9e，expr_literal.c case '8' 改 &typechar + u8_string.c 类型守卫） |
+| c-01 | X | inline 定义 + extern 声明未发外部定义（C99 §6.7.4p7） | ✅ closed（e9fae35，decl.c 延迟发射 + extern promote + inline.c 双向断言，自举通过） |
 | mir-00 | F | fold shl/sar(x,0) 优化缺口 | ✅ closed（647a05b 夹带 + 实证复验） |
 | mir-01 | V | MIR msimp 有符号 div/rem 误削减 | ✅ closed（93ab4b4 夹带 + Test 3b/3c/3d + 4c24bfe） |
 | mir-02 | J | slotmerge 自举破坏（长期禁用 97c8541；二期见 worker-slot2） | 🚫 长期禁用 |
