@@ -59,6 +59,9 @@ addmember(struct structbuilder *b, struct qualtype mt, char *name, int align, un
 				mf->bits.before = mf->bits.after = 0;
 				mf->access = b->access;
 				mf->is_mutable = false;
+				mf->is_virtual = b->member_virtual;
+				mf->is_const = b->member_const;
+				mf->vslot = -1;
 				if (b->last)
 					*b->last = mf;
 				else
@@ -81,6 +84,9 @@ addmember(struct structbuilder *b, struct qualtype mt, char *name, int align, un
 		m->next = NULL;
 		m->access = b->access;
 		m->is_mutable = b->member_mutable;
+		m->is_virtual = b->member_virtual;
+		m->is_const = b->member_const;
+		m->vslot = -1;
 		*b->last = m;
 		b->last = &m->next;
 	} else {
@@ -177,10 +183,17 @@ structdecl(struct scope *s, struct structbuilder *b)
 		return;
 	attr(NULL, 0);
 	b->member_mutable = false;
+	b->member_virtual = false;
+	b->member_const = false;
 	/* C++ `mutable` storage: writable via const this. */
 	extern int g_lang;
 	if (g_lang == 1 && cpp_tok_kind() == CPP_TMUTABLE) {
 		b->member_mutable = true;
+		next();
+	}
+	/* C++ `virtual` member function: dispatched via the object's vtable. */
+	if (g_lang == 1 && cpp_tok_kind() == CPP_TVIRTUAL) {
+		b->member_virtual = true;
 		next();
 	}
 	/* C++ destructor: `~Class() { ... }`.  Detect it before declspecs
@@ -214,8 +227,8 @@ structdecl(struct scope *s, struct structbuilder *b)
 			width = -1;
 			{
 				extern void cpp_define_method(struct scope *,
-				    struct type *, const char *, const char *, bool, bool);
-				cpp_define_method(s, ct, "dtor", tag, false, false);
+				    struct type *, const char *, const char *, bool, bool, bool);
+				cpp_define_method(s, ct, "dtor", tag, false, false, false);
 			}
 			addmember(b, mt, name, align, width);
 			return;
@@ -264,8 +277,8 @@ structdecl(struct scope *s, struct structbuilder *b)
 		width = -1;
 		{
 			extern void cpp_define_method(struct scope *,
-			    struct type *, const char *, const char *, bool, bool);
-			cpp_define_method(s, ct, tag, tag, false, false);
+			    struct type *, const char *, const char *, bool, bool, bool);
+			cpp_define_method(s, ct, tag, tag, false, false, false);
 		}
 		addmember(b, mt, name, align, width);
 		return;
@@ -277,7 +290,7 @@ structdecl(struct scope *s, struct structbuilder *b)
 	if (g_lang == 1 && cpp_tok_kind() == CPP_TOPERATOR) {
 		extern const char *cpp_op_mangle(enum tokenkind);
 		extern void cpp_define_method(struct scope *, struct type *,
-		    const char *, const char *, bool, bool);
+		    const char *, const char *, bool, bool, bool);
 		const char *opcode;
 		struct type *ft;
 		struct decl *pd, **pend;
@@ -312,12 +325,13 @@ structdecl(struct scope *s, struct structbuilder *b)
 		}
 		if (tok.kind == TCONST) {
 			is_const = true;
+			b->member_const = true;
 			next();
 		}
 		mname = xmalloc(strlen(opcode) + 10);
 		sprintf(mname, "operator_%s", opcode);
 		cpp_define_method(s, ft, mname, b->type->u.structunion.tag,
-		                  is_const, false);
+		                  is_const, false, false);
 		addmember(b, (struct qualtype){ft, QUALNONE, NULL}, mname, 0, -1);
 		return;
 	}
@@ -343,17 +357,25 @@ structdecl(struct scope *s, struct structbuilder *b)
 			extern int g_lang;
 			if (g_lang == 1 && mt.type->kind == TYPEFUNC) {
 				extern void cpp_define_method(struct scope *,
-				    struct type *, const char *, const char *, bool, bool);
+				    struct type *, const char *, const char *, bool, bool, bool);
 				/* const member function: `void get() const {...}` */
 				bool is_const = false;
 				if (tok.kind == TCONST) {
 					is_const = true;
+					b->member_const = true;
 					next();
 				}
 				bool is_static = (sc & SCSTATIC) != 0;
 				/* class tag for name mangling (Class_method) */
+				extern bool g_cpp_define_virtual;
+				g_cpp_define_virtual = false;
 				cpp_define_method(s, mt.type, name,
-				    b->type->u.structunion.tag, is_const, is_static);
+				    b->type->u.structunion.tag, is_const, is_static,
+				    b->member_virtual);
+				/* an override of a base virtual is virtual even without
+				 * the keyword: propagate so addmember flags the member */
+				if (g_cpp_define_virtual)
+					b->member_virtual = true;
 				/* register the function member for call lowering */
 				addmember(b, mt, name, align, width);
 				/* leave the following token (class-body '}' or next

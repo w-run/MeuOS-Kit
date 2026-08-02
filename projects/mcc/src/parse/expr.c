@@ -243,8 +243,28 @@ exprassign(struct expr *e, struct type *t)
 			break;
 		if (et->kind != TYPEPOINTER)
 			error(&tok.loc, "assignment to pointer must be from pointer or null pointer constant");
-		if (t->base != &typevoid && et->base != &typevoid && !typecompatible(t->base, et->base))
-			error(&tok.loc, "base types of pointer assignment must be compatible or void");
+		if (t->base != &typevoid && et->base != &typevoid && !typecompatible(t->base, et->base)) {
+			/* C++: a derived-class pointer converts to a base-class
+			 * pointer (upcast).  If the base subobject is not at offset
+			 * 0 (multiple inheritance), adjust the address. */
+			extern int g_lang;
+			extern bool cpp_is_derived(struct type *, struct type *);
+			extern unsigned long long cpp_base_offset(struct type *,
+			    struct type *);
+			if (g_lang == 1 && cpp_is_derived(et->base, t->base)) {
+				unsigned long long off = cpp_base_offset(et->base, t->base);
+				if (off) {
+					struct expr *adj;
+					adj = mkbinaryexpr(&tok.loc, TADD,
+					    exprconvert(e, &typeulong),
+					    mkconstexpr(&typeulong, off));
+					adj->type = mkpointertype(t->base, t->qual);
+					e = adj;
+				}
+			} else {
+				error(&tok.loc, "base types of pointer assignment must be compatible or void");
+			}
+		}
 		/* void* accepts any qualified pointer (C11 6.3.2.3p1). */
 		if (t->base != &typevoid && (et->qual & t->qual) != et->qual)
 			error(&tok.loc, "assignment to pointer discards qualifiers");

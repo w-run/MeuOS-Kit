@@ -324,9 +324,18 @@ check-cpp-lex: $(CPP_SRCS)
 	$(HOST_CC) $(CFLAGS) -Iinclude -o build/cpp_lex_test $^ test/cpp/lex_test.c
 	./build/cpp_lex_test
 
-check-cpp: check-cpp-lex
+# C.2.5 virtual functions & vtables — end-to-end: m++ compiles
+# test/cpp/virtual.cc against the MeuOS sysroot and the binary asserts the
+# dispatch behavior (exit 0 = all checks passed).
+check-cpp-virtual: $(MPP_BIN)
+	@mkdir -p build
+	MEUOS_SYSROOT=$(abspath ../sysroot) ./m++ --specs=meuos \
+	    -o build/cpp_virtual test/cpp/virtual.cc
+	./build/cpp_virtual
 
-.PHONY: all clean check check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir-bridge check-mir check-cpp-lex check-cpp
+check-cpp: check-cpp-lex check-cpp-virtual
+
+.PHONY: all clean check check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir-bridge check-mir check-cpp-lex check-cpp-virtual check-cpp
 
 # chibicc community functional test suite (C11/C23 conformance).
 # Runs test/community/chibicc/run.sh against the MeuOS sysroot.

@@ -241,6 +241,33 @@ postfixexpr(struct scope *s, struct expr *r)
 					extern bool g_cpp_member_const;
 					bool obj_const = (tq & QUALCONST) != 0;
 					struct expr *thisp;
+					/* C++ virtual call (C.2.5): indirect through the
+					 * object's vtable — `(*(fn **)((*(void **)obj) +
+					 * slot*8))(obj, args...)`.  The this object points at
+					 * the defining class's subobject. */
+					if (m->is_virtual) {
+						extern struct expr *cpp_make_vcall(struct expr *,
+						    struct type *, struct member *, int);
+						extern struct type *cpp_method_owner(struct type *,
+						    const char *);
+						struct type *owner;
+						owner = cpp_method_owner(t, m->name);
+						thisp = r;
+						if (offset) {
+							thisp = mkbinaryexpr(&tok.loc, TADD,
+							    exprconvert(r, &typeulong),
+							    mkconstexpr(&typeulong, offset));
+							thisp->type = mkpointertype(owner, tq);
+						}
+						e = cpp_make_vcall(thisp, owner, m, m->vslot);
+						g_cpp_member_this = thisp; /* &subobject */
+						g_cpp_member_class = NULL; /* slot already resolved */
+						g_cpp_member_name = NULL;
+						g_cpp_member_const = obj_const;
+						cpp_pending_record_depth();
+						next();
+						break;
+					}
 					cpp_mangled_name(t, m->name, mname, sizeof mname);
 					if (obj_const)
 						strncat(mname, "K", sizeof mname - strlen(mname) - 1);

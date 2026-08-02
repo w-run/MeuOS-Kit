@@ -69,4 +69,36 @@ void cpp_define_static_data(struct scope *s, const char *qclass,
     const char *name);
 void cpp_record_global_ctor(struct decl *d);
 
+/* C++ virtual functions / vtable (C.2.5) ------------------------------ */
+
+/* One slot in a class's vtable layout.  `key` identifies the virtual
+ * method across the hierarchy (method name + trailing-const + encoded
+ * parameter types); an override reuses the base slot with the same key. */
+struct cpp_vslot {
+	const char *name;      /* method name (persistent) */
+	char key[256];         /* signature identity (name + K? + param codes) */
+	struct member *m;      /* the member (set when the member is added) */
+	struct type *owner;    /* class that owns the slot layout */
+	int index;             /* slot index in the full vtable layout */
+	struct cpp_vslot *next;
+};
+
+/* Is the named member of `t` a virtual function? */
+bool cpp_is_virtual(struct type *t, const char *name);
+/* Slot index of virtual member `m` in its declaring class's vtable. */
+int cpp_vslot_index(struct type *t, struct member *m);
+/* Class that declares the member function `name` of `t` (defining base
+ * for inherited methods), or NULL. */
+struct type *cpp_method_owner(struct type *t, const char *name);
+/* Byte offset of the `base` subobject within a complete object of class
+ * `derived` (0 when derived == base or base is the primary base). */
+unsigned long long cpp_base_offset(struct type *derived, struct type *base);
+/* Build the indirect callable for a virtual call: load the vptr from
+ * `thisp`, index the slot, cast to the method's function-pointer type
+ * (this + explicit params).  The call lowering prepends `thisp`. */
+struct expr *cpp_make_vcall(struct expr *thisp, struct type *owner,
+    struct member *m, int slot);
+/* Emit every polymorphic class's vtable data (called at end of TU). */
+void cpp_emit_vtables(void);
+
 #endif /* MCC_CPP_H */

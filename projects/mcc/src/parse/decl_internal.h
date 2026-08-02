@@ -73,6 +73,10 @@ struct structbuilder {
 	int access;
 	/* current member is C++ `mutable` (writable via const this) */
 	bool member_mutable;
+	/* current member is C++ `virtual` (dispatched via vtable) */
+	bool member_virtual;
+	/* current member is a C++ const member function */
+	bool member_const;
 };
 
 /* Tentative-definition list: tracked in decl.c but drained by

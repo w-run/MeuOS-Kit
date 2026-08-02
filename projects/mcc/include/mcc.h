@@ -103,8 +103,17 @@ struct member {
 	unsigned char access;
 	/* C++ mutable member: writable even through a const this pointer. */
 	bool is_mutable;
+	/* C++ virtual member function: dispatched via the object's vtable. */
+	bool is_virtual;
+	/* C++ const member function (trailing `const` qualifier). */
+	bool is_const;
+	/* C++ vtable slot index (valid once the class layout is finalized). */
+	int vslot;
 	struct member *next;
 };
+
+/* C++ vtable slot (full definition in cpp/cpp.h). */
+struct cpp_vslot;
 
 struct type {
 	enum typekind kind;
@@ -141,6 +150,15 @@ struct type {
 		struct {
 			char *tag;
 			struct member *members;
+			/* C++ virtual dispatch (m++).  `own_poly` is set when the
+			 * class itself declares a virtual function; `poly` means the
+			 * object needs vptr initialization (own or inherited). */
+			bool poly;
+			bool own_poly;
+			struct cpp_vslot *own_virtuals; /* virtual fns declared here */
+			struct cpp_vslot *vslots;       /* finalized vtable layout */
+			int nvslots;
+			struct type *primary_base;      /* first polymorphic base */
 		} structunion;
 		struct {
 			enum typequal basequal;

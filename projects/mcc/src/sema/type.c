@@ -55,6 +55,16 @@ mktype(enum typekind kind, enum typeprop prop)
 	t->value = NULL;
 	t->incomplete = false;
 	t->isref = false;
+	if (kind == TYPESTRUCT || kind == TYPEUNION) {
+		/* C++ virtual-dispatch fields must start zeroed: cpp_class_decl
+		 * and the vtable machinery read them before explicit init. */
+		t->u.structunion.poly = false;
+		t->u.structunion.own_poly = false;
+		t->u.structunion.own_virtuals = NULL;
+		t->u.structunion.vslots = NULL;
+		t->u.structunion.nvslots = 0;
+		t->u.structunion.primary_base = NULL;
+	}
 
 	return t;
 }

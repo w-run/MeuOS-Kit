@@ -76,7 +76,7 @@ cpp_pending_is_mine(int depth)
 }
 void cpp_define_method(struct scope *s, struct type *funct,
                               const char *mname, const char *class_tag,
-                              bool is_const, bool is_static);
+                              bool is_const, bool is_static, bool is_virtual);
 
 /* Method-body context: while parsing a member-function body, bare member
  * identifiers (`count`) lower to `(*this).count` via cpp_member_ident,
@@ -101,6 +101,17 @@ static void cpp_emit_global_ctors(void);
 static void emit_base_ctors_for(struct func *f, struct type *classt,
                                 struct expr *thisp);
 static bool has_base(struct type *t);
+static void cpp_vkey(const char *mname, struct type *funct, bool is_const,
+                     char *buf, size_t bufsz);
+static void cpp_compute_vtable(struct type *t);
+static void cpp_init_vptrs(struct func *f, struct type *t,
+                           struct expr *thisp);
+static bool cpp_find_final(struct type *d, const char *key,
+                           struct type **owner, struct member **outm);
+/* Set by cpp_define_method when the method just defined is effectively
+ * virtual (explicit `virtual` or an override of a base virtual); consumed
+ * by structdecl to flag the member. */
+bool g_cpp_define_virtual;
 
 /* Two-phase class parsing: while a class body is being collected, method
  * bodies are buffered (tokens) and replayed after the class layout is
@@ -247,6 +258,30 @@ cpp_member_ident(struct scope *s, const char *name)
 			return NULL;
 		bool this_const = g_cpp_method.this_decl &&
 		    (g_cpp_method.this_decl->type->qual & QUALCONST);
+		if (m->is_virtual) {
+			/* virtual call: indirect through this object's vtable */
+			struct type *owner;
+			struct expr *tp, *adj;
+			tp = cpp_this_expr();
+			if (!tp)
+				return NULL;
+			owner = cpp_method_owner(t, name);
+			adj = tp;
+			if (offset) {
+				adj = mkbinaryexpr(&tok.loc, TADD,
+				    exprconvert(tp, &typeulong),
+				    mkconstexpr(&typeulong, offset));
+				adj->type = mkpointertype(owner,
+				    this_const ? QUALCONST : QUALNONE);
+			}
+			e = cpp_make_vcall(adj, owner, m, m->vslot);
+			g_cpp_member_this = adj;
+			g_cpp_member_class = NULL;
+			g_cpp_member_name = NULL;
+			g_cpp_member_const = this_const;
+			cpp_pending_record_depth();
+			return e;
+		}
 		cpp_mangled_name(t, name, mname, sizeof mname);
 		if (this_const)
 			strncat(mname, "K", sizeof mname - strlen(mname) - 1);
@@ -414,6 +449,9 @@ cpp_class_decl(struct scope *s)
 		b.bits = 0;
 		b.pack = false;
 		b.access = is_class ? ACC_PRIVATE : ACC_PUBLIC;
+		b.member_mutable = false;
+		b.member_virtual = false;
+		b.member_const = false;
 
 		/* Each base-class subobject is registered as an anonymous member
 		 * so typemember()'s recursive search and the layout computation
@@ -471,6 +509,11 @@ cpp_class_decl(struct scope *s)
 	if (!t->align)
 		t->align = 1;
 	t->incomplete = false;
+
+	/* C++ virtual dispatch (C.2.5): compute the vtable slot layout, insert
+	 * the hidden vptr member if the class needs its own (no polymorphic
+	 * primary base), and record the class for vtable emission. */
+	cpp_compute_vtable(t);
 
 	/* Phase two: layout is fixed, parse the buffered method bodies. */
 	flush_pending_methods();
@@ -631,6 +674,7 @@ cpp_parse_translation_unit(void)
 	}
 	emittentativedefns();
 	cpp_emit_global_ctors();
+	cpp_emit_vtables();
 }
 
 /* --- member function lowering (C.2.3) -------------------------------- */
@@ -759,8 +803,12 @@ cpp_parse_method_body(struct cpp_pending_method *pm)
 
 	f = mkfunc(pm->d, pm->d->name, pm->d->type, fs);
 	/* constructor: run base-class constructors before the body */
-	if (strcmp(pm->mname, pm->tag) == 0)
+	if (strcmp(pm->mname, pm->tag) == 0) {
 		cpp_emit_base_ctor(f);
+		/* point every vptr at this class's vtable (the base ctor just set
+		 * them to the base view; the complete object needs the final one) */
+		cpp_init_vptrs(f, pm->classt, cpp_this_expr());
+	}
 	stmt(f, fs);
 	if (pm->d->u.func.isnoreturn)
 		funchlt(f);
@@ -1029,7 +1077,8 @@ cpp_member_accessible(struct type *t, struct member *m)
  * member names resolve to `(*this).name` via cpp_member_ident. */
 void
 cpp_define_method(struct scope *s, struct type *funct, const char *mname,
-                  const char *class_tag, bool is_const, bool is_static)
+                  const char *class_tag, bool is_const, bool is_static,
+                  bool is_virtual)
 {
 	extern struct decl *mkdecl(char *, enum declkind, struct type *,
 	    enum typequal, enum linkage);
@@ -1048,6 +1097,55 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname,
 	}
 	if (!classt || (classt->kind != TYPESTRUCT && classt->kind != TYPEUNION))
 		error(&tok.loc, "'%s' is not a class type", class_tag);
+
+	/* C++ virtual member (C.2.5): register the slot identity in the
+	 * class's own_virtuals list (deduped across in-class decl + out-of-line
+	 * definition); cpp_compute_vtable lays out the final slot indices.
+	 * An override keeps the virtual-ness of the base method even without
+	 * an explicit `virtual` keyword, so look the signature up in the
+	 * bases' vtable layouts too. */
+	{
+		bool eff_virtual = is_virtual;
+		char key[256];
+		struct member *bm;
+
+		g_cpp_define_virtual = false;
+		if (!is_static) {
+			cpp_vkey(mname, funct, is_const, key, sizeof key);
+			if (!eff_virtual) {
+				for (bm = classt->u.structunion.members; bm; bm = bm->next)
+					if (!bm->name && bm->type &&
+					    (bm->type->kind == TYPESTRUCT ||
+					     bm->type->kind == TYPEUNION) &&
+					    cpp_find_final(bm->type, key, NULL, NULL)) {
+						eff_virtual = true;
+						break;
+					}
+			}
+			if (eff_virtual) {
+				struct cpp_vslot *vs, **ve;
+				for (vs = classt->u.structunion.own_virtuals; vs; vs = vs->next)
+					if (strcmp(vs->key, key) == 0)
+						break;
+				if (!vs) {
+					vs = xmalloc(sizeof *vs);
+					vs->name = xmalloc(strlen(mname) + 1);
+					strcpy((char *)vs->name, mname);
+					memcpy(vs->key, key, sizeof key);
+					vs->m = NULL;
+					vs->owner = classt;
+					vs->index = -1;
+					vs->next = NULL;
+					ve = &classt->u.structunion.own_virtuals;
+					while (*ve)
+						ve = &(*ve)->next;
+					*ve = vs;
+				}
+				classt->u.structunion.own_poly = true;
+				g_cpp_define_virtual = true;
+			}
+		}
+	}
 
 	snprintf(mangled, sizeof mangled, "%s_%s", class_tag, mname);
 	/* const member functions get a distinct mangled name so a const
@@ -1253,11 +1351,18 @@ cpp_emit_default_ctor(struct func *f, struct decl *d)
 	obj = mkunaryexpr(TBAND, obj); /* &obj */
 
 	/* A class with no user constructor of its own still needs its base
-	 * subobjects constructed. */
+	 * subobjects constructed and its vptrs installed. */
 	if (!cpp_has_ctor(t, tag)) {
-		if (has_base(t))
+		bool any = false;
+		if (has_base(t)) {
 			emit_base_ctors_for(f, t, obj);
-		return has_base(t);
+			any = true;
+		}
+		if (t->u.structunion.poly) {
+			cpp_init_vptrs(f, t, obj);
+			any = true;
+		}
+		return any;
 	}
 
 	snprintf(mname, sizeof mname, "%s_%s", tag, tag);
@@ -1277,7 +1382,10 @@ cpp_emit_default_ctor(struct func *f, struct decl *d)
 }
 
 /* Emit calls to the user default constructors of the direct base
- * subobjects of `classt` (each at its layout offset from `thisp`). */
+ * subobjects of `classt` (each at its layout offset from `thisp`).
+ * A base/member with no user constructor still needs its own bases and
+ * data members constructed, so the walk recurses (the vptrs of the whole
+ * object are installed afterwards by cpp_init_vptrs). */
 static void
 emit_base_ctors_for(struct func *f, struct type *classt, struct expr *thisp)
 {
@@ -1297,15 +1405,8 @@ emit_base_ctors_for(struct func *f, struct type *classt, struct expr *thisp)
 		bt = m->type;
 		if (!bt || (bt->kind != TYPESTRUCT && bt->kind != TYPEUNION))
 			continue;
-		if (!bt->u.structunion.tag || !cpp_has_ctor(bt, bt->u.structunion.tag))
-			continue;
-		snprintf(mname, sizeof mname, "%s_%s", bt->u.structunion.tag, bt->u.structunion.tag);
-		fd = scopegetdecl(bt->scope ? bt->scope : &filescope, mname, true);
-		if (!fd || fd->kind != DECLFUNC)
-			continue;
-		fn = mkexpr(EXPRIDENT, fd->type, NULL);
-		fn->u.ident.decl = fd;
-		fn = decay(fn); /* &Base_Base */
+		if (m->name && m->type && m->type->kind == TYPEFUNC)
+			continue; /* member functions occupy no storage */
 		if (m->offset) {
 			/* this + subobject offset points at this base's subobject
 			 * (or class-type member object), always relative to the
@@ -1317,6 +1418,20 @@ emit_base_ctors_for(struct func *f, struct type *classt, struct expr *thisp)
 		} else {
 			call_this = thisp;
 		}
+		if (!bt->u.structunion.tag || !cpp_has_ctor(bt, bt->u.structunion.tag)) {
+			/* no user constructor: still construct its bases and any
+			 * class-typed data members */
+			if (has_base(bt))
+				emit_base_ctors_for(f, bt, call_this);
+			continue;
+		}
+		snprintf(mname, sizeof mname, "%s_%s", bt->u.structunion.tag, bt->u.structunion.tag);
+		fd = scopegetdecl(bt->scope ? bt->scope : &filescope, mname, true);
+		if (!fd || fd->kind != DECLFUNC)
+			continue;
+		fn = mkexpr(EXPRIDENT, fd->type, NULL);
+		fn->u.ident.decl = fd;
+		fn = decay(fn); /* &Base_Base */
 		call = mkexpr(EXPRCALL, &typevoid, fn);
 		call->u.call.args = call_this;
 		call->u.call.nargs = 1;
@@ -1570,3 +1685,548 @@ cpp_mangled_name(struct type *t, const char *name, char *buf, size_t bufsz)
 	         name);
 	return buf;
 }
+
+/* --- virtual functions / vtable (C.2.5) ------------------------------ */
+
+/* Signature key of a virtual method: `name` + trailing-const marker + the
+ * encoded parameter types, independent of the declaring class so an
+ * override in a derived class reuses the base slot.  Mirrors the mangled
+ * name encoding in cpp_define_method (`Class_methodK<params>`). */
+static void
+cpp_vkey(const char *mname, struct type *funct, bool is_const,
+         char *buf, size_t bufsz)
+{
+	struct decl *cur;
+	size_t n;
+
+	snprintf(buf, bufsz, "%s%s", mname ? mname : "?", is_const ? "K" : "");
+	n = strlen(buf);
+	if (funct && funct->kind == TYPEFUNC) {
+		for (cur = funct->u.func.params; cur; cur = cur->next) {
+			char code[64];
+			size_t cl;
+			cpp_mangle_type(cur->type, code, sizeof code);
+			cl = strlen(code);
+			if (n + cl < bufsz) {
+				memcpy(buf + n, code, cl + 1);
+				n += cl;
+			}
+		}
+	}
+}
+
+/* Symbol name of the implementation of virtual member `m` of `owner`
+ * (`Class_methodK<params>`), matching cpp_define_method's mangling. */
+static void
+cpp_slot_mangled(struct type *owner, struct member *m,
+                 char *buf, size_t bufsz)
+{
+	struct decl *cur;
+	size_t n;
+
+	snprintf(buf, bufsz, "%s_%s",
+	         (owner && owner->u.structunion.tag) ? owner->u.structunion.tag
+	                                            : "anon",
+	         m->name);
+	n = strlen(buf);
+	if (m->is_const && n + 1 < bufsz) {
+		strcpy(buf + n, "K");
+		++n;
+	}
+	if (m->type && m->type->kind == TYPEFUNC) {
+		for (cur = m->type->u.func.params; cur; cur = cur->next) {
+			char code[64];
+			size_t cl;
+			cpp_mangle_type(cur->type, code, sizeof code);
+			cl = strlen(code);
+			if (n + cl < bufsz) {
+				memcpy(buf + n, code, cl + 1);
+				n += cl;
+			}
+		}
+	}
+}
+
+/* Find the most-derived implementation of the virtual method with `key`
+ * in the class hierarchy rooted at `d` (the class itself first, then its
+ * direct bases in declaration order).  Returns true and sets *owner/*outm
+ * on success. */
+static bool
+cpp_find_final(struct type *d, const char *key, struct type **owner,
+               struct member **outm)
+{
+	struct member *m;
+	char k[256];
+
+	if (!d || (d->kind != TYPESTRUCT && d->kind != TYPEUNION))
+		return false;
+	for (m = d->u.structunion.members; m; m = m->next) {
+		if (m->is_virtual && m->name) {
+			cpp_vkey(m->name, m->type, m->is_const, k, sizeof k);
+			if (strcmp(k, key) == 0) {
+				if (owner)
+					*owner = d;
+				if (outm)
+					*outm = m;
+				return true;
+			}
+		}
+	}
+	for (m = d->u.structunion.members; m; m = m->next)
+		if (!m->name && cpp_find_final(m->type, key, owner, outm))
+			return true;
+	return false;
+}
+
+/* Class that declares the member function `name` of `t` (the defining
+ * base for inherited methods), or NULL. */
+struct type *
+cpp_method_owner(struct type *t, const char *name)
+{
+	struct type *owner = NULL;
+
+	if (cpp_method_member(t, name, &owner))
+		return owner;
+	return NULL;
+}
+
+bool
+cpp_is_virtual(struct type *t, const char *name)
+{
+	struct member *m = cpp_method_member(t, name, NULL);
+
+	return m && m->is_virtual;
+}
+
+/* Recursive helper for cpp_base_offset. */
+static bool
+cpp_base_offset_r(struct type *d, struct type *base, unsigned long long *off)
+{
+	struct member *m;
+	unsigned long long sub;
+
+	if (d == base) {
+		*off = 0;
+		return true;
+	}
+	if (!d || (d->kind != TYPESTRUCT && d->kind != TYPEUNION))
+		return false;
+	for (m = d->u.structunion.members; m; m = m->next) {
+		if (!m->name && m->type &&
+		    (m->type->kind == TYPESTRUCT || m->type->kind == TYPEUNION)) {
+			if (m->type == base) {
+				*off = m->offset;
+				return true;
+			}
+			if (cpp_base_offset_r(m->type, base, &sub)) {
+				*off = m->offset + sub;
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+unsigned long long
+cpp_base_offset(struct type *derived, struct type *base)
+{
+	unsigned long long off = 0;
+
+	cpp_base_offset_r(derived, base, &off);
+	return off;
+}
+
+int
+cpp_vslot_index(struct type *t, struct member *m)
+{
+	(void)t;
+	return m ? m->vslot : -1;
+}
+
+/* Insert the hidden vptr member at offset 0, shifting every existing
+ * member (including base subobjects) up by one pointer.  Only called for
+ * classes that need their own vptr (polymorphic with no polymorphic
+ * primary base). */
+static void
+cpp_insert_vptr(struct type *t)
+{
+	struct member *v, *m;
+
+	v = xmalloc(sizeof *v);
+	v->name = xmalloc(7);
+	strcpy(v->name, "__vptr");
+	v->type = mkpointertype(&typevoid, QUALNONE);
+	v->qual = QUALNONE;
+	v->offset = 0;
+	v->bits.before = v->bits.after = 0;
+	v->access = ACC_PRIVATE;
+	v->is_mutable = false;
+	v->is_virtual = false;
+	v->is_const = false;
+	v->vslot = -1;
+	v->next = t->u.structunion.members;
+	for (m = v->next; m; m = m->next)
+		/* function members occupy no layout space (their offset is the
+		 * defining subobject's offset, not a byte position), so only
+		 * data members and base subobjects shift up */
+		if (!(m->type && m->type->kind == TYPEFUNC))
+			m->offset += 8;
+	t->u.structunion.members = v;
+	t->size += 8;
+	if (t->align < 8)
+		t->align = 8;
+}
+
+/* Polyorphic classes needing vtable emission, in definition order. */
+struct cpp_vclass {
+	struct type *t;
+	struct cpp_vclass *next;
+};
+static struct cpp_vclass *g_cpp_vclasses;
+static struct cpp_vclass **g_cpp_vclasses_end = &g_cpp_vclasses;
+
+/* Compute the vtable slot layout for `t` (called once the class body and
+ * all base classes are complete): primary-base slots first, then this
+ * class's own new virtuals; overrides reuse the base slot index.  Also
+ * inserts the hidden vptr member when needed and records the class for
+ * vtable emission. */
+static void
+cpp_compute_vtable(struct type *t)
+{
+	struct member *m;
+	struct type *P = NULL;
+	struct cpp_vslot *vs, *bvs, *nv, **ve;
+	bool has_poly_base = false;
+
+	if (!t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
+		return;
+
+	/* primary base: first polymorphic direct base (anonymous member) */
+	for (m = t->u.structunion.members; m; m = m->next) {
+		if (!m->name && m->type &&
+		    (m->type->kind == TYPESTRUCT || m->type->kind == TYPEUNION) &&
+		    m->type->u.structunion.poly) {
+			P = m->type;
+			break;
+		}
+	}
+	t->u.structunion.primary_base = P;
+
+	/* layout: primary base's slots, then own virtuals (overrides reuse
+	 * the base slot instead of appending) */
+	t->u.structunion.vslots = NULL;
+	t->u.structunion.nvslots = 0;
+	for (bvs = P ? P->u.structunion.vslots : NULL; bvs; bvs = bvs->next) {
+		nv = xmalloc(sizeof *nv);
+		nv->name = bvs->name;
+		memcpy(nv->key, bvs->key, sizeof nv->key);
+		nv->m = NULL;
+		nv->owner = bvs->owner;
+		nv->index = t->u.structunion.nvslots++;
+		nv->next = NULL;
+		ve = &t->u.structunion.vslots;
+		while (*ve)
+			ve = &(*ve)->next;
+		*ve = nv;
+	}
+	for (vs = t->u.structunion.own_virtuals; vs; vs = vs->next) {
+		int idx = -1;
+		for (bvs = t->u.structunion.vslots; bvs; bvs = bvs->next)
+			if (strcmp(bvs->key, vs->key) == 0) {
+				idx = bvs->index;
+				break;
+			}
+		vs->index = idx;
+		if (idx < 0) {
+			/* genuinely new virtual: append a slot */
+			vs->index = t->u.structunion.nvslots++;
+			nv = xmalloc(sizeof *nv);
+			nv->name = vs->name;
+			memcpy(nv->key, vs->key, sizeof nv->key);
+			nv->m = vs->m;
+			nv->owner = t;
+			nv->index = vs->index;
+			nv->next = NULL;
+			ve = &t->u.structunion.vslots;
+			while (*ve)
+				ve = &(*ve)->next;
+			*ve = nv;
+		}
+	}
+
+	/* record the slot index on each virtual member (the call lowering
+	 * reads it via m->vslot) */
+	for (m = t->u.structunion.members; m; m = m->next) {
+		if (m->is_virtual && m->name) {
+			char key[256];
+			cpp_vkey(m->name, m->type, m->is_const, key, sizeof key);
+			for (vs = t->u.structunion.own_virtuals; vs; vs = vs->next)
+				if (strcmp(vs->key, key) == 0) {
+					m->vslot = vs->index;
+					break;
+				}
+		}
+	}
+
+	for (m = t->u.structunion.members; m; m = m->next)
+		if (!m->name && m->type &&
+		    (m->type->kind == TYPESTRUCT || m->type->kind == TYPEUNION) &&
+		    m->type->u.structunion.poly)
+			has_poly_base = true;
+	t->u.structunion.poly = t->u.structunion.own_poly || has_poly_base;
+
+	if (t->u.structunion.poly && !P && t->u.structunion.own_poly)
+		cpp_insert_vptr(t);
+
+	/* record for vtable emission (once) */
+	if (t->u.structunion.poly) {
+		struct cpp_vclass *vc;
+		for (vc = g_cpp_vclasses; vc; vc = vc->next)
+			if (vc->t == t)
+				return;
+		vc = xmalloc(sizeof *vc);
+		vc->t = t;
+		vc->next = NULL;
+		*g_cpp_vclasses_end = vc;
+		g_cpp_vclasses_end = &vc->next;
+	}
+}
+
+/* Vtable symbol name for class `most`, viewing the slot layout of
+ * `owner`: `__mxx_vtable_<most>` (primary) or
+ * `__mxx_vtable_<most>_<owner>` (secondary subobject). */
+static void
+vt_symbol_name(struct type *most, struct type *owner, char *buf, size_t bufsz)
+{
+	const char *mtag, *otag;
+
+	mtag = most->u.structunion.tag ? most->u.structunion.tag : "anon";
+	if (owner == most) {
+		snprintf(buf, bufsz, "__mxx_vtable_%s", mtag);
+		return;
+	}
+	otag = owner->u.structunion.tag ? owner->u.structunion.tag : "anon";
+	snprintf(buf, bufsz, "__mxx_vtable_%s_%s", mtag, otag);
+}
+
+/* A decl whose address is the named vtable symbol (used by the vptr
+ * initialization stores). */
+static struct decl *
+vt_decl(struct type *most, struct type *owner)
+{
+	extern struct decl *mkdecl(char *, enum declkind, struct type *,
+	    enum typequal, enum linkage);
+	char name[256];
+	char *pname;
+	struct decl *vd;
+
+	vt_symbol_name(most, owner, name, sizeof name);
+	pname = xmalloc(strlen(name) + 1);
+	strcpy(pname, name);
+	vd = mkdecl(pname, DECLOBJECT, mkpointertype(&typevoid, QUALNONE),
+	            QUALNONE, LINKEXTERN);
+	vd->value = mkglobal(vd);
+	return vd;
+}
+
+/* Emit `*(void **)((char *)thisp + off) = &vtable` — install one vptr.
+ * Built directly at the IR level (IADD + ISTOREL) to keep the frontend
+ * function body simple. */
+/* IR opcode numbers used by the vptr initialization (enum instkind in
+ * irgen.h; values verified against include/ops.h). */
+enum {
+	CPP_IR_IADD = 1,
+	CPP_IR_ISTOREL = 17,
+};
+
+/* Emit `*(void **)((char *)thisp + off) = &vtable` — install one vptr.
+ * Built directly at the IR level (IADD + ISTOREL) to keep the frontend
+ * function body simple. */
+static void
+emit_vptr_store(struct func *f, struct expr *thisp, unsigned long long off,
+                struct decl *vd)
+{
+	extern struct value *funcexpr(struct func *, struct expr *);
+	extern struct value *funcinst(struct func *, int, int,
+	    struct value *, struct value *);
+	extern struct value *mkintconst(unsigned long long);
+	struct value *base;
+	int pcls = typelong.size == 4 ? 'w' : 'l';
+
+	base = funcexpr(f, thisp);
+	if (off)
+		base = funcinst(f, CPP_IR_IADD, pcls, base, mkintconst(off));
+	/* *base = &__mxx_vtable_... (VALUE_GLOBAL address) */
+	funcinst(f, CPP_IR_ISTOREL, 0, vd->value, base);
+}
+
+/* Install every vptr of a complete object of type `t` at `thisp`:
+ * the primary vptr (offset 0) plus one per secondary polymorphic base
+ * subobject.  Called at the start of a constructor body (after the base
+ * constructors ran) and when an object with no user constructor is
+ * defined. */
+static void
+cpp_init_vptrs(struct func *f, struct type *t, struct expr *thisp)
+{
+	struct member *m;
+
+	if (!f || !t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
+		return;
+	if (!t->u.structunion.poly)
+		return;
+	if (t->u.structunion.primary_base || t->u.structunion.own_poly)
+		emit_vptr_store(f, thisp, 0, vt_decl(t, t));
+	for (m = t->u.structunion.members; m; m = m->next) {
+		if (!m->name && m->type &&
+		    (m->type->kind == TYPESTRUCT || m->type->kind == TYPEUNION) &&
+		    m->type->u.structunion.poly &&
+		    m->type != t->u.structunion.primary_base)
+			emit_vptr_store(f, thisp, m->offset, vt_decl(t, m->type));
+	}
+}
+
+/* Emit one vtable: the slot layout of `owner` filled with the most-derived
+ * implementations found in `most`.  The primary table (owner == most) is
+ * exported; secondary tables stay local. */
+static void
+emit_vtable_one(struct type *most, struct type *owner)
+{
+	char name[256];
+	struct cpp_vslot *vs;
+
+	vt_symbol_name(most, owner, name, sizeof name);
+	printf(".section .data,\"aw\",@progbits\n");
+	printf(".balign 8\n");
+	if (owner == most)
+		printf(".globl %s\n", name);
+	printf("%s:\n", name);
+	for (vs = owner->u.structunion.vslots; vs; vs = vs->next) {
+		struct type *impl_owner = NULL;
+		struct member *impl = NULL;
+		if (cpp_find_final(most, vs->key, &impl_owner, &impl)) {
+			char mangled[256];
+			cpp_slot_mangled(impl_owner, impl, mangled, sizeof mangled);
+			printf("    .quad %s\n", mangled);
+		} else {
+			printf("    .quad 0\n");
+		}
+	}
+}
+
+/* Emit the vtables of every polymorphic class defined in this translation
+ * unit: the primary table plus one secondary table per polymorphic
+ * secondary base subobject. */
+void
+cpp_emit_vtables(void)
+{
+	struct cpp_vclass *vc;
+	struct member *m;
+
+	for (vc = g_cpp_vclasses; vc; vc = vc->next) {
+		struct type *t = vc->t;
+		if (t->u.structunion.primary_base || t->u.structunion.own_poly)
+			emit_vtable_one(t, t);
+		for (m = t->u.structunion.members; m; m = m->next) {
+			if (!m->name && m->type &&
+			    (m->type->kind == TYPESTRUCT || m->type->kind == TYPEUNION) &&
+			    m->type->u.structunion.poly &&
+			    m->type != t->u.structunion.primary_base)
+				emit_vtable_one(t, m->type);
+		}
+	}
+}
+
+/* Shallow-deep clone of a simple expression tree.  Used to build the
+ * virtual-call indirect callee expression without sharing nodes with the
+ * call's this argument (the call tree is freed with delexpr, which
+ * assumes a tree, not a DAG). */
+static struct expr *
+cpp_expr_clone(struct expr *e)
+{
+	struct expr *n;
+
+	if (!e)
+		return NULL;
+	n = mkexpr(e->kind, e->type, e->base ? cpp_expr_clone(e->base) : NULL);
+	n->qual = e->qual;
+	n->lvalue = e->lvalue;
+	n->decayed = e->decayed;
+	n->op = e->op;
+	n->toeval = NULL;
+	n->next = NULL;
+	switch (e->kind) {
+	case EXPRIDENT:
+		n->u.ident.decl = e->u.ident.decl;
+		break;
+	case EXPRCONST:
+		n->u.constant = e->u.constant;
+		break;
+	case EXPRCAST:
+		n->toeval = cpp_expr_clone(e->toeval);
+		break;
+	case EXPRBINARY:
+		n->u.binary.l = cpp_expr_clone(e->u.binary.l);
+		n->u.binary.r = cpp_expr_clone(e->u.binary.r);
+		break;
+	default:
+		/* the this object is never anything more complex */
+		break;
+	}
+	return n;
+}
+
+/* Build the indirect callable for a virtual member call `obj.vmeth(args)`:
+ * `*(fn_type **)((*(void **)thisp) + slot * 8)`.  The call lowering
+ * (TLPAREN) prepends the this argument and matches the explicit
+ * parameters against fn_type. */
+struct expr *
+cpp_make_vcall(struct expr *thisp, struct type *owner, struct member *m,
+               int slot)
+{
+	extern struct decl *mkdecl(char *, enum declkind, struct type *,
+	    enum typequal, enum linkage);
+	struct type *mtype, *fn_type;
+	struct decl *td, *cur, *nd, **end;
+	struct expr *addr, *vt, *fn;
+
+	if (!owner || !m || !m->type || m->type->kind != TYPEFUNC)
+		return NULL;
+
+	mtype = m->type;
+	/* signature with the implicit `this` prepended */
+	fn_type = mktype(TYPEFUNC, 0);
+	fn_type->base = mtype->base;
+	fn_type->u.func.isvararg = mtype->u.func.isvararg;
+	fn_type->u.func.params = NULL;
+	fn_type->u.func.nparam = 0;
+	td = mkdecl("this", DECLOBJECT,
+	            mkpointertype(owner, m->is_const ? QUALCONST : QUALNONE),
+	            QUALNONE, LINKNONE);
+	td->u.obj.storage = SDAUTO;
+	fn_type->u.func.params = td;
+	fn_type->u.func.nparam = 1;
+	end = &td->next;
+	for (cur = mtype->u.func.params; cur; cur = cur->next) {
+		nd = mkdecl(cur->name, DECLOBJECT, cur->type, cur->qual, LINKNONE);
+		nd->u.obj.storage = SDAUTO;
+		*end = nd;
+		end = &nd->next;
+		++fn_type->u.func.nparam;
+	}
+
+	/* vt = *(void **)thisp  (thisp cloned: the call's this argument is a
+	 * separate node; delexpr would otherwise free it twice) */
+	addr = mkbinaryexpr(&tok.loc, TADD,
+	                    exprconvert(cpp_expr_clone(thisp), &typeulong),
+	                    mkconstexpr(&typeulong, 0));
+	addr->type = mkpointertype(mkpointertype(&typevoid, QUALNONE), QUALNONE);
+	vt = mkunaryexpr(TMUL, addr);
+	/* slot = (fn_type **)((unsigned long)vt + slot * 8)
+	 * fn    = *slot   (the slot holds the implementation's address) */
+	addr = mkbinaryexpr(&tok.loc, TADD, exprconvert(vt, &typeulong),
+	                    mkconstexpr(&typeulong, (unsigned long long)slot * 8));
+	addr->type = mkpointertype(mkpointertype(fn_type, QUALNONE), QUALNONE);
+	fn = mkunaryexpr(TMUL, addr);
+	return fn;
+}
+
