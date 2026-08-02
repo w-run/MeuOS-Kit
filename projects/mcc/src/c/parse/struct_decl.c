@@ -290,7 +290,11 @@ structdecl(struct scope *s, struct structbuilder *b)
 	extern int g_lang;
 	/* `T &operator...` / `T &&operator...`: declspecs leaves the leading
 	 * reference declarator pending (`&` is part of the declarator, not the
-	 * specifiers); fold it into the return type before the operator path. */
+	 * specifiers); fold it into the return type before the operator path.
+	 * When the '&' does not precede 'operator' (ordinary reference member
+	 * or method), restore the stream exactly: tokpush the consumed token
+	 * back on the heap (tokpush keeps the pointer) so declarator() sees
+	 * `& name` unchanged. */
 	if (g_lang == 1 && (tok.kind == TBAND || tok.kind == TLAND)) {
 		struct token save = tok;
 		next();
@@ -300,7 +304,12 @@ structdecl(struct scope *s, struct structbuilder *b)
 			rt->isrref = save.kind == TLAND;
 			base.type = rt;
 		} else {
-			tok = save; /* ordinary reference member; parse normally */
+			struct token *t = xmalloc(sizeof *t);
+			*t = tok;
+			if (t->lit)
+				t->lit = strdup(t->lit);
+			tokpush(t, 1);
+			tok = save; /* restore '&' as the current token */
 		}
 	}
 	if (g_lang == 1 && cpp_tok_kind() == CPP_TOPERATOR) {
