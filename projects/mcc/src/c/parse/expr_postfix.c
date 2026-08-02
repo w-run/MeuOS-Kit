@@ -52,6 +52,9 @@ postfixexpr(struct scope *s, struct expr *r)
 	enum typequal tq;
 	enum tokenkind op;
 	bool lvalue;
+	/* set when a `Class::member` qualification was recognized in a
+	 * `.`/`->` member access (T_PERIOD/TARROW case) */
+	bool qualified = false;
 
 	/* C++ member-call lowering: `obj.meth(...)` records the object here
 	 * and the call lowering (TLPAREN) prepends it as the this argument.
@@ -336,6 +339,7 @@ postfixexpr(struct scope *s, struct expr *r)
 				error(&tok.loc, "expected identifier after '%s' operator", tokenstr(op));
 			lvalue = op == TARROW || r->base->lvalue;
 			offset = 0;
+			qualified = false;
 			/* C++ template member call: `obj.get<int>(...)` or
 			 * `obj.get(...)`.  The `<` would otherwise be parsed as a
 			 * comparison operator, so detect it here (peeking past the
@@ -381,6 +385,53 @@ postfixexpr(struct scope *s, struct expr *r)
 					}
 				}
 			}
+			/* C++ class-qualified member access: `obj.Base::get()` /
+			 * `obj.Base::val`.  `Base` is a base class (or the object's
+			 * own class) of the object type; the `::` selects the member
+			 * in Base's scope and re-points `this` at the Base
+			 * subobject, so a qualified call reaches the base
+			 * implementation even when the derived class overrides it. */
+			{
+				extern int g_lang;
+				extern bool cpp_is_derived(struct type *, struct type *);
+				extern unsigned long long cpp_base_offset(struct type *,
+				    struct type *);
+				if (g_lang == 1) {
+					struct type *qt = scopegettag(s,
+					    tokenstr(tok.kind), 1);
+					if (qt && (qt->kind == TYPESTRUCT ||
+					    qt->kind == TYPEUNION) &&
+					    cpp_is_derived(t, qt)) {
+						struct token old = tok;
+						next();
+						if (tok.kind == TCOLONCOLON) {
+							if (qt != t) {
+								unsigned long long boff =
+								    cpp_base_offset(t, qt);
+								if (boff != (unsigned long long)-1) {
+									r = mkbinaryexpr(&tok.loc, TADD,
+									    exprconvert(r, &typeulong),
+									    mkconstexpr(&typeulong, boff));
+									r->type = mkpointertype(qt, tq);
+								}
+							}
+							t = qt;
+							qualified = true;
+							next(); /* consume '::' */
+							if (tok.kind < TIDENT)
+								error(&tok.loc,
+								    "expected member name after '::'");
+							goto member_lookup;
+						}
+						{
+							struct token nxt = tok;
+							tok = old;
+							tokpush(&nxt, 1);
+						}
+					}
+				}
+			}
+		member_lookup:
 			/* C++ multiple inheritance: a name defined by more than one
 			 * base subobject is ambiguous (and the base-class subobjects
 			 * are anonymous members here). */
@@ -394,7 +445,16 @@ postfixexpr(struct scope *s, struct expr *r)
 					    "ambiguous (multiple base classes define it)",
 					    tokenstr(tok.kind));
 			}
-			m = typemember(t, tokenstr(tok.kind), &offset);
+			/* class-qualified lookup honors the qualified class's own
+			 * members over inherited ones (`obj.Base::get()` reaches
+			 * Base::get even when Mid/Der override it) */
+			if (qualified) {
+				extern struct member *cpp_qualified_member(struct type *,
+				    const char *, unsigned long long *);
+				m = cpp_qualified_member(t, tokenstr(tok.kind), &offset);
+			} else {
+				m = typemember(t, tokenstr(tok.kind), &offset);
+			}
 			if (!m)
 				error(&tok.loc, "struct/union has no member named '%s'", tok.lit);
 			/* C++ access control: private/protected members are only

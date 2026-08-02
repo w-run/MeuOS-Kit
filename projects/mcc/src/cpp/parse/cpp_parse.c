@@ -1697,8 +1697,10 @@ cpp_member_ambiguous(struct type *t, const char *name)
 }
 
 /* Find the function member `name` in `t`, optionally reporting the class
- * that defines it (`*owner`).  Recurses into anonymous (base-class)
- * members. */
+ * that defines it (`*owner`).  The class's own members are checked before
+ * its base-class subobjects (which are anonymous members), so a derived
+ * class's method hides a same-named base method — matching C++ name
+ * lookup. */
 static struct member *
 cpp_method_member(struct type *t, const char *name, struct type **owner)
 {
@@ -1713,7 +1715,10 @@ cpp_method_member(struct type *t, const char *name, struct type **owner)
 					*owner = t;
 				return m;
 			}
-		} else if (!m->name) {
+		}
+	}
+	for (m = t->u.structunion.members; m; m = m->next) {
+		if (!m->name) {
 			sub = cpp_method_member(m->type, name, owner);
 			if (sub)
 				return sub;
@@ -1726,6 +1731,40 @@ bool
 cpp_is_member_function(struct type *t, const char *name)
 {
 	return cpp_method_member(t, name, NULL) != NULL;
+}
+
+/* Class-qualified member lookup for `obj.Base::get()`: resolve `name`
+ * in `t`'s scope, where the qualified class's own members shadow base
+ * members, then each direct base in turn (same shadowing rule
+ * recursively).  `*offset` accumulates the byte offset from `t`'s start
+ * (in caller units).  Unlike typemember (which recurses into a base as
+ * soon as it is seen), this makes the qualified class's own member win
+ * over an inherited one of the same name. */
+struct member *
+cpp_qualified_member(struct type *t, const char *name,
+    unsigned long long *offset)
+{
+	struct member *m, *sub;
+
+	if (!t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
+		return NULL;
+	for (m = t->u.structunion.members; m; m = m->next) {
+		if (m->name && strcmp(m->name, name) == 0) {
+			*offset += m->offset;
+			return m;
+		}
+	}
+	for (m = t->u.structunion.members; m; m = m->next) {
+		if (m->name || !m->type ||
+		    (m->type->kind != TYPESTRUCT && m->type->kind != TYPEUNION))
+			continue;
+		sub = cpp_qualified_member(m->type, name, offset);
+		if (sub) {
+			*offset += m->offset;
+			return sub;
+		}
+	}
+	return NULL;
 }
 
 /* Is class `t` derived from (or identical to) class `base`?  The base
