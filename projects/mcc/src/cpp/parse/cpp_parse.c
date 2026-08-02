@@ -429,7 +429,56 @@ cpp_tok_kind(void)
 		const char *name = tokenstr(tok.kind);
 		return cpp_classify_ident(name, name ? strlen(name) : 0);
 	}
-	return CPP_TNONE;
+	/* C keywords that are also C++ tags: the C lexer gives `struct`/`union`
+	 * their own token kinds (TSTRUCT/TUNION) rather than TIDENT, so the
+	 * identifier-based classification above never sees them.  Map them to
+	 * the C++ kinds so struct/union declarations are dispatched to the
+	 * C++ class path like `class`. */
+	switch (tok.kind) {
+	case TSTRUCT: return CPP_TSTRUCT;
+	case TUNION:  return CPP_TUNION;
+	default:      return CPP_TNONE;
+	}
+}
+
+/* Is the current token a `struct`/`union` tag declaration with a base-class
+ * list (`struct D : A, B`) or a body (`struct S { ... }`)?  Consumes the tag
+ * name (and an optional access specifier) to look one token ahead, then
+ * restores the token stream so the caller can either hand the whole
+ * declaration to cpp_class_decl (base lists and C++ bodies are handled
+ * there; the plain C parser rejects the `:`) or fall through to the C
+ * struct/union path when the tag is used as a plain type (`struct S s;`). */
+static bool
+cpp_struct_needs_class_decl(void)
+{
+	struct token kw, tag, colon, pending;
+	enum cpp_tokenkind k = cpp_tok_kind();
+
+	if (k != CPP_TSTRUCT && k != CPP_TUNION)
+		return false;
+	kw = tok;
+	next();
+	if (tok.kind < TIDENT) {
+		tok = kw; /* not a valid tag decl: restore and bail */
+		return false;
+	}
+	tag = tok;
+	next();
+	if (tok.kind == TCOLON || tok.kind == TLBRACE) {
+		/* base list or body present: restore `struct tag :/{` and report */
+		colon = tok;
+		tok = kw;
+		tokpush(&colon, 1); /* push in reverse so `tag` is consumed first */
+		tokpush(&tag, 1);
+		return true;
+	}
+	/* no base list / body: restore `struct tag <next>` and fall through
+	 * to the C path */
+	pending = tok;
+	tok = kw;
+	tokpush(&pending, 1);
+	tokpush(&tag, 1);
+	return false;
 }
 
 /* Parse a C++ `class`/`struct`/`union` declaration with access-control
@@ -557,9 +606,14 @@ cpp_class_decl(struct scope *s)
 				next();
 				continue;
 			}
-			if (k == CPP_TCLASS) {
-				/* nested class definition */
-				cpp_class_decl(s);
+			if (k == CPP_TCLASS || k == CPP_TSTRUCT || k == CPP_TUNION) {
+				/* nested class/struct definition; a struct/union only via
+				 * cpp_class_decl when it has a body or base-class list,
+				 * otherwise it is a plain member struct (C path) */
+				if (k == CPP_TCLASS || cpp_struct_needs_class_decl())
+					cpp_class_decl(s);
+				else
+					structdecl(s, &b);
 				continue;
 			}
 			if (k == CPP_TTEMPLATE) {
@@ -636,8 +690,11 @@ cpp_namespace_decl(struct scope *s)
 			cpp_namespace_decl(ns);
 			continue;
 		}
-		if (k == CPP_TCLASS) {
-			cpp_class_decl(ns);
+		if (k == CPP_TCLASS || k == CPP_TSTRUCT || k == CPP_TUNION) {
+			if (k == CPP_TCLASS || cpp_struct_needs_class_decl())
+				cpp_class_decl(ns);
+			else
+				decl(ns, NULL);
 			continue;
 		}
 		if (tok.kind == TSEMICOLON) {
@@ -734,8 +791,15 @@ cpp_parse_translation_unit(void)
 	while (tok.kind != TEOF) {
 		/* C++ class/struct/union with access control */
 		enum cpp_tokenkind k = cpp_tok_kind();
-		if (k == CPP_TCLASS) {
-			cpp_class_decl(&filescope);
+		if (k == CPP_TCLASS || k == CPP_TSTRUCT || k == CPP_TUNION) {
+			/* `class C ...` always goes to cpp_class_decl; a struct/union
+			 * goes there too when it has a body or base-class list
+			 * (`struct D : A {...}`); a bare tag use (`struct S s;`) stays
+			 * on the C path. */
+			if (k == CPP_TCLASS || cpp_struct_needs_class_decl())
+				cpp_class_decl(&filescope);
+			else
+				goto c_decl;
 			continue;
 		}
 		if (k == CPP_TNAMESPACE) {
@@ -751,6 +815,7 @@ cpp_parse_translation_unit(void)
 			continue;
 		}
 
+	c_decl:
 		if (!decl(&filescope, NULL)) {
 			if (tok.kind == TSEMICOLON)
 				error(&tok.loc, "unexpected ';' at top-level");
