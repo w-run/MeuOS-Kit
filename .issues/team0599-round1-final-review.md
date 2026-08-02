@@ -27,6 +27,7 @@
 | R | ✅ closed | 93ab4b4 | 修复=concept 实参 span 切分 + 修正嵌套 use nargs；`concepts_combo_boundary.cc` 去 `#if 0` 回归 rc=0 |
 | S | ✅ closed | f8f0044（混入，见 §3） | 修复=按捕获类型走 ctor 初始化；`lambda_capture_class.cc` rc=0（copies==1, f()==101） |
 | T | ✅ closed | f8f0044（混入，见 §3） | 修复=`cpp_member_ident` 解析外层闭包成员；`lambda_nested_capture.cc` 2~3 层嵌套 rc=0 |
+| V | ✅ closed | 93ab4b4（夹带于 R 提交） | MIR msimp 只削减 UDIV/UREM（有符号 div/rem 不强度削减）；`signed_div_pow2.c` 双路径实测 **MCC_USE_MIR=1 PASS + =0 PASS**（见 §6 缺陷 V/U 编号澄清） |
 
 **回归验证（基于 HEAD=f8f0044）**：`make check-cpp-func` 全绿（含 lambda.cc、new_delete_nullptr、concepts_combo_boundary、struct_multinher 等）；`make check-cpp-neg` 通过（rc=0）；现有 lambda 测试无破坏。
 
@@ -41,7 +42,7 @@
 - f8f0044 混入 S/T，使 S/T「提交哈希」追踪不清晰（文档应注明）。
 - S 仅验证类拷贝 ctor 调用（lambda_capture_class.cc）；更复杂场景（捕获含 ctor 的类 + operator() 体引用、移动语义交互）待 `lambda_capture_boundary.cc` 转正后回归。
 - T 验证 2~3 层同形参名嵌套；混合捕获（`[a]` 外层 + `[b,a]` 内层）、引用捕获交互待补充边界用例。
-- 缺陷 V：`empty-class by-value return` 编译崩溃已随 93ab4b4（R 提交）夹带闭环（75b0853 记录）；缺陷 U（size-0 类值传参段错误）同批已 closed。但 m++ 在 x86_64 编译空类边界仍需 worker-selfhost 复验，确保自举不崩。
+- 缺陷 V（MIR msimp 有符号 div/rem 误编译，负数用例 -7/2 等）：已随 93ab4b4（R 提交）夹带闭环，双路径实测 PASS；worker-fold 在途补充更精确回归（signed_div_pow2.c sdiv8/srem4 + pass_test.c `test_simpl_sdiv_pow2_exact`，注释标 defect V），建议尽快提交。缺陷 U（size-0 类按值传参段错误，探测文件 value_param_member_call.cc）**仍 open**（0802.md 703 行记录纠错，0802 队列表已重命名 U 并保留 pending/ 待修复）。
 - mxx-c2fix 合并冲突（见 §3.4）为最高优先级待处理项。
 
 ## 5. 第二批任务建议
@@ -49,8 +50,30 @@
 2. **文档校正**：0802.md 注明 S/T 实际随 f8f0044 闭环；缺陷 U 状态与范围再确认。
 3. **合并 c2fix**：执行 §3.4 合并方案，解决 cpp_parse.c 三路冲突，回归 `check-cpp-func/neg`。
 4. **回归门禁**：每次 push 跑 `make check-cpp-func check-cpp-neg` + C 路径 `make check-c99/c11/c23/mir`（缺陷 U 已验证全绿，但 c2fix 7 项需复验）。
-5. **残留缺陷**：缺陷 U 的 empty-class by-value return 编译崩溃；C++20/23 缺口调研、va_list 溢出、fold 优化加码（已在队列）。
+5. **残留缺陷**：缺陷 U（size-0 类值传参段错误，0802 记录仍活跃）待分配修复；C++20/23 缺口调研、va_list 溢出、fold 优化加码（已在队列）。
 6. **自举门禁**：worker-selfhost 维持 mcc 自编译 m++ 绿（c2fix 合并后尤需 verify-all 多轮）。
 
 ---
 （本报告为 worker-judge 终态整合；S/T canary 转正提交落地后如哈希/状态有变，由 worker-doc 同步 0802.md。）
+
+---
+
+## 6. 缺陷 V/U 编号澄清 + 双路径验证（worker-judge 增补，2026-08-03）
+
+### 编号澄清（重要，避免后续混淆）
+`0802.md` 队列表（worker-test/worker-doc 维护）的定义：
+- **缺陷 U = size-0 类按值传参段错误**（探测 `pending/value_param_member_call.cc`）——**仍 open**（0802.md:703 记录纠错，当前 HEAD 实测 rc=139），待分配修复。
+- **缺陷 V = MIR msimp 有符号 div/rem 被强度削减误编译**（负数用例 -7/2、-7%4、-17/8、-17%8）——**closed**（93ab4b4 夹带）。
+
+⚠️ team-lead 的广播消息称「缺陷 U（MIR div/rem）」与 worker-fold 测试注释「defect V」指向同一 div/rem 问题，编号不一致；本文档已按 0802.md 队列表统一为缺陷 V。
+
+### 缺陷 V 双路径验证（worker-judge 亲自实测，mcc 基于 f8f0044）
+| 路径 | 命令 | 结果 |
+|------|------|------|
+| MIR 默认 | `./mcc --specs=host signed_div_pow2.c` | **PASS**（-7/2=-3 等全部断言通过） |
+| legacy | `MCC_USE_MIR=0 ./mcc ...` | **PASS** |
+
+修复有效且不波及 legacy。回归测试 signed_div_pow2.c 已含负数+正数用例（-7/2=-3、-7%4=-3、-17/8=-2、-17%8=-1 等）。
+
+### 门禁缺口（已提请 worker-selfhost 确认）
+`verify-all.sh` 第 90 行跑 `make check-mir`（MIR 单元测试），**未调用 `check-c-mir`（mir_matrix.sh MIR/LIR 双路径矩阵）**；而 0802.md:733 声称 signed_div_pow2.c 被 `check-c99` 与 `check-c-mir` 双路径收集——实际 verify-all 门禁未显式跑 legacy 路径。建议把 `make check-c-mir` 纳入 verify-all.sh。verify-all 六项全 PASS（含自举）待 worker-selfhost 提供最近运行证据。
