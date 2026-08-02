@@ -351,6 +351,16 @@ lir_bridge(MFn *mfn)
 				}
 				continue;
 			}
+			if (in->op == MOP_VARARG) {
+				/* varargs marker: the callee is a variadic function.
+				 * selcall/argsclass keys float-argument placement off
+				 * Oargv — without it, float variadic args go in FPRs
+				 * instead of GPRs per the calling convention, and the
+				 * callee's va_arg reads garbage. */
+				*curi++ = (Ins){.op = Oargv, .cls = 0, .to = R,
+				                .arg = {R, R}};
+				continue;
+			}
 			int qop = mir_to_op(in->op);
 			int cls = mir_to_cls(in->dtype);
 			/* float<->int conversions: the LIR opcode encodes the source
