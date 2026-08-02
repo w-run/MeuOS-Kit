@@ -20,8 +20,8 @@
 #include "util.h"
 #include "mcc.h"
 #include "cpp.h"
-#include "../../parse/decl_internal.h"
-#include "../../parse/expr_internal.h"
+#include "../../c/parse/decl_internal.h"
+#include "../../c/parse/expr_internal.h"
 
 /* Pending `this` object for the next member-function call
  * (set by the postfix `.`/`->` lowering, consumed by TLPAREN). */

@@ -14,7 +14,7 @@ restructure (branch `worktree-mxx-work`, tracked in `.issues/0802.md`)
 split the backend into `libmcc.a` and added a C++ frontend (`m++`):
 
 - **C frontend**: `src/{lex,parse,sema,irgen}` — C11 lex/parse/sema +
-  AST -> `MFn` (MIR) lowering (`src/irgen/func_to_mir.c`).
+  AST -> `MFn` (MIR) lowering (`src/c/irgen/func_to_mir.c`).
 - **C++ frontend**: `src/cpp/{lex,parse}` — the `m++` binary
   (`g_lang=1`, driver `src/driver/mpp_main.c`). It lowers C++ constructs
   (class/namespace/template/overload/…) onto the same C decl/expr/AST
@@ -33,7 +33,7 @@ Default pipeline (`g_use_mir = 1`; `MCC_USE_MIR` env override, see
 `src/driver/main.c`):
 
 ```
-source.c  -> src/{lex,parse,sema} -> src/irgen ----+
+source.c  -> src/c/{lex,parse,sema} -> src/c/irgen ----+
                                                      v
 source.cc -> src/cpp/{lex,parse} ----------------> MFn (src/mir) -> MIR passes
                                                      |
@@ -160,11 +160,11 @@ mcc/
 | Directory | Stage | Responsibility |
 |-----------|-------|----------------|
 | `src/driver/` | orchestration | gcc/clang-style argv parse, init target, run preprocessor, drive `decl()` loop until EOF, emit forward decls, route output (-c/-S/-E/-o), invoke host `cc` for assemble/link |
-| `src/lex/` | source -> tokens | UTF-8 scanner, C11 token table, full C preprocessor (`#if`/`#ifdef`/`#ifndef`/`#elif`/`#else`/`#endif`/`#include`/`#define`/`#undef`/`__VA_OPT__`, plus `-D`/`-U`/`-I` API) |
-| `src/parse/` | tokens -> AST | recursive-descent parser building `struct decl`/`expr`/`stmt` trees; `attr.c` handles `_Noreturn`/`_Alignas`/`fallthrough` etc. |
-| `src/sema/` | AST -> typed AST | type table (`type.c`), scope tracking (`scope.c`), constant folding (`eval.c`), initializer parsing (`init.c`), tree/map helpers, target-specific wchar_t / va_list layout (`targ.c`) |
+| `src/c/lex/` | source -> tokens | UTF-8 scanner, C11 token table, full C preprocessor (`#if`/`#ifdef`/`#ifndef`/`#elif`/`#else`/`#endif`/`#include`/`#define`/`#undef`/`__VA_OPT__`, plus `-D`/`-U`/`-I` API) |
+| `src/c/parse/` | tokens -> AST | recursive-descent parser building `struct decl`/`expr`/`stmt` trees; `attr.c` handles `_Noreturn`/`_Alignas`/`fallthrough` etc. |
+| `src/c/sema/` | AST -> typed AST | type table (`type.c`), scope tracking (`scope.c`), constant folding (`eval.c`), initializer parsing (`init.c`), tree/map helpers, target-specific wchar_t / va_list layout (`targ.c`) |
 | `src/cpp/` | C++ source -> typed AST (m++) | C++ lexer (`lex/cpp_scan.c`) + parser (`parse/cpp_parse.c`); lowers class/namespace/template/overload/ctor-dtor/virtual to the C decl/expr machinery with mangled names |
-| `src/irgen/` | typed AST -> IR | the "integration boundary" - direct IR construction via `func*` builders; `func_to_mir.c` lowers to MIR `MFn` (MIR path, `g_use_mir=1`); `emit.c` walks the per-function CFG and translates to LIR `Fn` |
+| `src/c/irgen/` | typed AST -> IR | the "integration boundary" - direct IR construction via `func*` builders; `func_to_mir.c` lowers to MIR `MFn` (MIR path, `g_use_mir=1`); `emit.c` walks the per-function CFG and translates to LIR `Fn` |
 | `src/mir/` | typed AST -> MFn + MIR passes | MIR core construction (`build.c`), passes (`passes.c` mfold/msimpl/mdce, `copy.c` mcopy, `gvn.c` mgvn), machine layer + linear-scan regalloc for the direct backend (`machine.c`/`regalloc.c`) |
 | `src/lir/` | MFn -> LIR Fn | `bridge.c` translates MIR `MFn` to LIR `Fn` (Opar/Phi/Ocall/Oarg/Oargv), the entry consumed by all per-arch backends |
 | `src/ir/` | IR utilities | `ir_util.c` provides the in-memory IR construction API (`emit`/`newtmp`/`getcon`/`idup`/`vgrow`); `optab.c` is the operator attribute table; `printfn.c` is a debug IL dumper |
@@ -177,17 +177,17 @@ mcc/
 
 Useful jump points when investigating a specific bug or feature:
 
-- **Adding a new C11 feature** -> start in `src/parse/` (parser), then `src/sema/type.c` (type system), finally `src/irgen/expr.c` (IR lowering)
-- **Adding a new IR instruction** -> add to `include/ops.h` (X-macro) -> `src/irgen/expr.c` (emit) -> `src/irgen/emit.c:fe_to_ir_op()` (translate to IR op)
-- **mcc segfaults during compile** -> most likely `src/irgen/emit.c:emitfunc()` (Fn init) or `src/ir/ir_util.c:vgrow()` (Vec corruption)
-- **Wrong code generated** -> check `src/irgen/emit.c:valref()` (value -> Ref translation), then `src/opt/` passes in `run_passes()` order
+- **Adding a new C11 feature** -> start in `src/c/parse/` (parser), then `src/c/sema/type.c` (type system), finally `src/c/irgen/expr.c` (IR lowering)
+- **Adding a new IR instruction** -> add to `include/ops.h` (X-macro) -> `src/c/irgen/expr.c` (emit) -> `src/c/irgen/emit.c:fe_to_ir_op()` (translate to IR op)
+- **mcc segfaults during compile** -> most likely `src/c/irgen/emit.c:emitfunc()` (Fn init) or `src/ir/ir_util.c:vgrow()` (Vec corruption)
+- **Wrong code generated** -> check `src/c/irgen/emit.c:valref()` (value -> Ref translation), then `src/opt/` passes in `run_passes()` order
 - **ABI bug (struct return, varargs)** -> `src/target/<arch>/<arch>_abi.c` or `src/target/x86_64/x86_64_sysv.c`
 - **Adding a new target** -> add `src/target/<new>/` with 4 files mirroring `amd64/`, register it in `src/driver/target_select.c:pick_target()`
 - **`mcc -S` output wrong** -> `src/target/<arch>/<arch>_emit.c`
-- **Preprocessor bug** -> `src/lex/pp.c` (conditional compilation, #include, macro expansion, -D/-U/-I); `src/lex/pp_expr.c` (#if arithmetic evaluation)
+- **Preprocessor bug** -> `src/c/lex/pp.c` (conditional compilation, #include, macro expansion, -D/-U/-I); `src/c/lex/pp_expr.c` (#if arithmetic evaluation)
 - **Command-line option not working** -> `src/driver/main.c` (argv parsing) + `src/driver/arg_compat.c` (option normalization) + `include/arg.h` (ARGBEGIN macro)
 - **Phase 1a regression** -> `make check` (must print `exit=0`)
-- **IR pass ordering** -> `src/irgen/emit.c:run_passes()` mirrors `reference/qbe/main.c`'s `func()` callback
+- **IR pass ordering** -> `src/c/irgen/emit.c:run_passes()` mirrors `reference/qbe/main.c`'s `func()` callback
 
 ## 5. irgen/ Split Rationale
 
@@ -214,7 +214,7 @@ the AST -> IR translation:
 | `emittype.c` | register struct/union into IR `typ[]` | all of irgen/ (via `emittype`, called from `mkfunc`/`funcexpr`) |
 | `emit.c` | IR construction + pass pipeline | frontend (via `emitfunc`/`emitdata`) |
 
-`irgen.h` is **internal to `src/irgen/`**: it declares the `struct value`/
+`irgen.h` is **internal to `src/c/irgen/`**: it declares the `struct value`/
 `block`/`func` types and the cross-file helpers (`mkfltconst`,
 `irtype`, `functemp`, `funcinst`, `funcbits`, `convert`, `calcvla`,
 `funcalloc`, `funcstore`, `funcload`, `funclval`). The frontend
@@ -227,7 +227,7 @@ Per AGENTS.md §4, mcc is built with a **simple Makefile** (no
 autotools/cmake/meson). Key Makefile mechanics:
 
 - Sources are split into `FE_DIRS` (C/C++ frontends:
-  `src/driver src/cpp src/lex src/parse src/sema src/irgen`) and
+  `src/driver src/cpp src/c`) and
   `BE_DIRS` (shared backend: `src/mir src/lir src/ir src/opt src/abi
   src/emit src/target src/util`); `find` auto-discovers `.c` files in
   both, so **adding/removing a `.c` file requires no Makefile edit.**
@@ -311,9 +311,9 @@ The user has asked for **progressive** removal of `cproc`/`qbe` naming
 artifacts and structural integration of the two source trees. Status:
 
 **Done in irgen-refactor (irgen/ split round)**:
-- `cproc_op_to_qbe()` -> `fe_to_ir_op()` (in `src/irgen/emit.c`)
+- `cproc_op_to_qbe()` -> `fe_to_ir_op()` (in `src/c/irgen/emit.c`)
 - Comment cleanup: most "cproc does X" -> "the frontend does X"
-- File split removed monolithic `irgen.c` (no cproc/qbe filename in `src/irgen/`)
+- File split removed monolithic `irgen.c` (no cproc/qbe filename in `src/c/irgen/`)
 
 **Done in Phase 1b (control flow + call round)**:
 - Pass 2 emit pattern switched from BACKWARD `emit()` to FORWARD
@@ -352,16 +352,16 @@ artifacts and structural integration of the two source trees. Status:
   - `driver/` -> `src/driver/`
   - `frontend/{lex,parse,sema,util}/` -> `src/{lex,parse,sema,util}/`
     (removed `frontend/` intermediate layer)
-  - `irgen/` -> `src/irgen/`
+  - `irgen/` -> `src/c/irgen/`
   - `backend/{ir,opt,abi,emit}/` -> `src/{ir,opt,abi,emit}/`
     (removed `backend/` intermediate layer)
   - `target/` -> `src/target/` (with amd64/arm64/rv64 subdirs)
 - **Makefile**: `SRC_DIRS := src` (single recursive root)
 - **Symbol renames** (internal API, no public ABI impact):
-  - `qbetype()` -> `irtype()` (in `src/irgen/value.c`)
+  - `qbetype()` -> `irtype()` (in `src/c/irgen/value.c`)
   - `b->qbe` -> `b->ir` (struct block field, IR Blk pointer)
-  - `run_qbe_passes()` -> `run_passes()` (in `src/irgen/emit.c`)
-  - `ir_to_qbe_op()` -> `fe_to_ir_op()` (in `src/irgen/emit.c`)
+  - `run_qbe_passes()` -> `run_passes()` (in `src/c/irgen/emit.c`)
+  - `ir_to_qbe_op()` -> `fe_to_ir_op()` (in `src/c/irgen/emit.c`)
 - **Comment cleanup**: "QBE" -> "IR" / "backend" (in src/ and include/
   .c/.h files, 78 files touched); "cproc" -> "the frontend" where
   referring to our own code. **Preserved**: `reference/cproc/` and
@@ -389,7 +389,7 @@ artifacts and structural integration of the two source trees. Status:
 - **`include/arg.h`**: ARGBEGIN macro extended with `case '-'` to
   dispatch long options (`--version`, `--help`) while staying
   backward-compatible with short-option cluster parsing.
-- **`src/lex/pp.c`**: implemented previously-missing preprocessor
+- **`src/c/lex/pp.c`**: implemented previously-missing preprocessor
   directives `#if`/`#ifdef`/`#ifndef`/`#elif`/`#else`/`#endif`
   (conditional compilation stack + skip logic), `#include` (with -I
   path search + quote/angle-bracket distinction), `#if` constant

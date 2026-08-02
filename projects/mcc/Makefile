@@ -8,8 +8,7 @@
 # .todo/cpp-shared-backend.md stage A):
 #   include/        shared headers
 #   src/driver/     main.c unified driver                  (C frontend)
-#   src/{lex,parse,sema}/  frontend (lex/parsing/semantics) (C frontend)
-#   src/irgen/      AST -> IR direct construction           (C frontend)
+#   src/c/{lex,parse,sema,irgen}/  C frontend              (C frontend)
 #   src/util/       common utilities (xmalloc/utf/warn)     (shared)
 #   src/{ir,opt,abi,emit}/  IR core + optimization passes   (libmcc)
 #   src/target/{x86_64,aarch64,riscv64,i386,loongarch64}/  (libmcc)
@@ -60,7 +59,7 @@ CFLAGS += -DMCC_DEFAULT_TARGET=\"$(DEFAULT_TARGET)\"
 # language-agnostic). Stage A of the libmcc migration: BE objects are
 # archived into libmcc.a so a future m++ binary can link the same archive.
 # util/ is shared (utf/warn/xmalloc are used by both FE and BE).
-FE_DIRS := src/driver src/cpp src/lex src/parse src/sema src/irgen
+FE_DIRS := src/driver src/cpp src/c
 BE_DIRS := src/mir src/lir src/ir src/opt src/abi src/emit src/target src/util
 
 # mpp_main.c provides the C++-mode main() (g_lang=1) and is linked only
