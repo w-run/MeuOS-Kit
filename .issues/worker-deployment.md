@@ -1,6 +1,33 @@
 # MeuOS-Kit 会话 Worker 部署记录
 
-> 更新：2026-08-02。记录 mcc/m++ 重构会话中 worker 的部署/角色/状态，供后续会话恢复上下文。
+> 更新：2026-08-03。记录 mcc/m++ 重构会话中 worker 的部署/角色/状态，供后续会话恢复上下文。
+
+## 当前团队：mcc-team-0599（2026-08-03 接管）
+
+承接 `mcc-mxx-cont` 收官成果（A-N 缺陷全闭环），专注缺陷 Q/R/S/T 修复 + 第二批专项。权威进度在 `.issues/0802.md`「mcc-team-0599 部署与缺陷状态」。
+
+### 第一批 worker（缺陷修复 + 文档）
+| Worker | 任务 | 缺陷 |
+|---|---|---|
+| worker-q | delete/delete[] nullptr 段错误修复 | Q（open） |
+| worker-r | concept 形参名 ≠ T 误判 undeclared 修复 | R（open） |
+| worker-lambda | lambda 捕获（拷贝 ctor + 嵌套捕获） | S+T（open） |
+| worker-doc | 文档同步（.issues/docs/ARCHITECTURE，只改 .md） | — |
+
+### 第二批 worker（专项）
+| Worker | 任务 |
+|---|---|
+| worker-test | 测试回归（verify-all 保持绿 + canary 回归） |
+| worker-judge | reasoning 裁判整合 |
+| worker-va | MIR va_list 溢出路径 |
+| worker-fold | MIR fold 优化专项 |
+| worker-slot2 | slotmerge 二期方案（J 项替代） |
+| worker-cpp20/23 | C++20/23 缺口调研 |
+| worker-selfhost | 自举门禁（mcc 自编译 m++） |
+| worker-mir-tests | MIR/C 测试缺口 |
+
+### 缺陷队列（2026-08-03）
+A-N ✅ 全闭环（J 长期项禁用）；Q/R/S/T 🔄 open。状态只标 open/pending，修复 push 后由 worker-doc 周期 pull 补记 closed + 哈希。
 
 ## 团队架构（语义化管理）
 

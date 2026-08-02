@@ -312,6 +312,19 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
 - **MIR 路径遗留**（非 m++ 专属）：自举 mcc 编译「聚合参数+varargs+栈传参」组合在
   declspecs 写 NULL（Bug B 待调）；atomic_concurrent/thread_local 多架构 TLS 既有问题。
 
+### m++ 缺陷队列（截至 2026-08-03，mcc-team-0599）
+
+| 编号 | 缺陷 | 状态 |
+|---|---|---|
+| A-N | 历史缺陷全队列（含 B 聚合 varargs、C 继承析构链、E ns 限制、F MIR fold、K concept 深度、M 未命名参数、N 数组 new stride） | ✅ 全闭环（详见 `.issues/0802.md`；N=754b437、M=4d93a66、K=2755fe3） |
+| J | slotmerge 自举破坏（长期项，已禁用 97c8541；二期见 worker-slot2） | 🚫 长期禁用 |
+| Q | `delete nullptr`/`delete[] nullptr` 运行期段错误（应 no-op） | 🔄 open（worker-q） |
+| R | concept 形参名 ≠ `T` 时被误判 undeclared | 🔄 open（worker-r） |
+| S | lambda 按值捕获类对象不调用拷贝构造 | 🔄 open（worker-lambda） |
+| T | 嵌套 lambda 无法再捕获外层已捕获变量 | 🔄 open（worker-lambda） |
+
+> 状态规则：缺陷状态只标 open/pending；修复提交 push 后由 worker-doc 周期 pull 补记 closed + 哈希。C++ 覆盖状态见上表（C++98~23 收官 ✅，2026-08-02）。
+
 ## 8. Progressive Cleanup Notes
 
 The user has asked for **progressive** removal of `cproc`/`qbe` naming
