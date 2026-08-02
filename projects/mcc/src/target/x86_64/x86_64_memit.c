@@ -197,6 +197,31 @@ emit_const(FILE *f, MConst *c)
 	}
 }
 
+/* 32-bit GPR names (rdi -> edi, r8 -> r8d) for width-aware compares */
+static const char *
+regname32(MReg r)
+{
+	static const char *n32[] = {
+		"eax", "ecx", "edx", "esi", "edi", "r8d", "r9d", "r10d",
+		"r11d", "ebx", "r12d", "r13d", "r14d", "r15d", "ebp", "esp",
+	};
+	if (r >= 0 && r < 16)
+		return n32[r];
+	return "eax";
+}
+
+/* like emit_mval but 32-bit register names for GPRs */
+static void
+emit_mval32(FILE *f, MVal *v)
+{
+	if (v && v->kind == MV_TEMP && v->reg >= 0)
+		fprintf(f, "%%%s", regname32(v->reg));
+	else if (v && v->kind == MV_REG)
+		fprintf(f, "%%%s", regname32(v->reg));
+	else
+		emit_mval(f, v);
+}
+
 static void
 emit_mval(FILE *f, MVal *v)
 {
@@ -506,8 +531,10 @@ emit_ins(FILE *f, MInsM *in)
 	case MMOP_ADD: case MMOP_SUB: case MMOP_MUL:
 	case MMOP_AND: case MMOP_OR:  case MMOP_XOR:
 	case MMOP_SHL: case MMOP_SHR: case MMOP_SAR: {
-		/* integer arithmetic is done 64-bit (low 32 bits match the
-		 * 32-bit forms); only loads/stores honor the width */
+		/* shifts must honour the operand width: a 64-bit shr pulls the
+		 * sign/overflow high bits down into the low word, which breaks
+		 * 32-bit bitfield extraction.  Other ops keep 64-bit forms
+		 * (low 32 bits match). */
 		const char *op;
 		switch (in->op) {
 		case MMOP_ADD: op = "add"; break;
@@ -520,13 +547,18 @@ emit_ins(FILE *f, MInsM *in)
 		case MMOP_SHR: op = "shr"; break;
 		default:       op = "sar"; break;
 		}
+		bool isshift = in->op >= MMOP_SHL && in->op <= MMOP_SAR;
+		const char *wsuf = (in->dtype == MT_I64 || in->dtype == MT_PTR)
+		                   ? "q" : "l";
 		mov_to_rax(f, s0, 0);
-		if (in->op >= MMOP_SHL && in->op <= MMOP_SAR) {
-			/* shift count in %cl */
+		if (isshift) {
+			/* shift count in %cl; 32-bit shifts need the 32-bit
+			 * accumulator name */
 			fputs("\tmovq\t", f);
 			emit_mval(f, s1);
 			fputs(", %rcx\n", f);
-			fprintf(f, "\t%sq\t%%cl, %%rax\n", op);
+			fprintf(f, "\t%s%s\t%%cl, %s\n", op, wsuf,
+			        wsuf[0] == 'l' ? "%eax" : "%rax");
 		} else if (c) {
 			if (imm32(c->u.i)) {
 				fprintf(f, "\t%sq\t", op);
@@ -601,28 +633,30 @@ emit_ins(FILE *f, MInsM *in)
 			fputs(", %xmm0\n", f);
 			return;
 		}
+		bool is32 = in->dtype != MT_I64 && in->dtype != MT_PTR;
+		const char *ws = is32 ? "l" : "q";
+		const char *rn = is32 ? "%eax" : "%rax";
+		const char *cc = in->op == MMOP_CMP ? "cmp" : "test";
 		mov_to_rax(f, s0, 0);
 		if (c) {
 			if (imm32(c->u.i)) {
-				fprintf(f, "\t%sq\t", in->op == MMOP_CMP ? "cmp" : "test");
+				fprintf(f, "\t%s%s\t", cc, ws);
 				emit_const(f, c);
-				fputs(", %rax\n", f);
+				fprintf(f, ", %s\n", rn);
 			} else {
 				fprintf(f, "\tmovq\t$%lld, %%r9\n", (long long)c->u.i);
-				fprintf(f, "\t%sq\t%%r9, %%rax\n",
-				        in->op == MMOP_CMP ? "cmp" : "test");
+				fprintf(f, "\t%s%s\t%%r9, %s\n", cc, ws, rn);
 			}
 		} else {
 			if (s1 && s1->kind == MV_CONST && s1->con &&
 			    !imm32(s1->con->u.i)) {
 				fprintf(f, "\tmovq\t$%lld, %%r9\n",
 				        (long long)s1->con->u.i);
-				fprintf(f, "\t%sq\t%%r9, %%rax\n",
-				        in->op == MMOP_CMP ? "cmp" : "test");
+				fprintf(f, "\t%s%s\t%%r9, %s\n", cc, ws, rn);
 			} else {
-				fprintf(f, "\t%sq\t", in->op == MMOP_CMP ? "cmp" : "test");
+				fprintf(f, "\t%s%s\t", cc, ws);
 				emit_mval(f, s1);
-				fputs(", %rax\n", f);
+				fprintf(f, ", %s\n", rn);
 			}
 		}
 		return;
@@ -911,8 +945,11 @@ mfnm_emit_x86_64(MFnM *fm, FILE *f)
 	framesize += align;   /* align must survive: subq restores %16 */
 
 	fprintf(f, ".text\n");
-	if (fm->name)
-		fprintf(f, ".globl %s\n%s:\n", fm->name, fm->name);
+	if (fm->name) {
+		if (fm->host && fm->host->export)
+			fprintf(f, ".globl %s\n", fm->name);
+		fprintf(f, "%s:\n", fm->name);
+	}
 	fputs("\tpushq\t%rbp\n", f);
 	fputs("\tmovq\t%rsp, %rbp\n", f);
 	/* save callee-saved registers used by the allocator */

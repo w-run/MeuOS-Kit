@@ -480,6 +480,14 @@ mabi_selret(MFnM *fm, MOut *o, MInsM *term)
 	if (term->td) {
 		MAClass aret;
 		mabi_typclass(&aret, term->td);
+		if (!term->src[0]) {
+			/* dead path (e.g. a switch join after per-case rets):
+			 * nothing to pack, just emit the plain return */
+			term->op = MMOP_RET;
+			term->src[0] = 0;
+			term->td = 0;
+			return;
+		}
 		if (aret.inmem) {
 			/* sret: copy the aggregate into the hidden return buffer
 			 * (RDI, pinned by regalloc via fm->sret_rdi), then return it */
