@@ -144,6 +144,94 @@ test_simpl_sdiv_not_reduced(void)
 	mfn_free(fn);
 }
 
+/* Test 3c: exact defect-V regression cases at the MIR pass level —
+ * signed div by 2 (`-7/2`) and signed rem by 4 (`-7%4`) must NOT be
+ * strength-reduced to SAR/AND (C truncates toward zero, SAR toward -inf).
+ * Mirrors the four runtime cases from the canary signed_div_pow2.c. */
+static void
+test_simpl_sdiv_pow2_exact(void)
+{
+	MFn *fn = mfn_new("simpl_sdiv_exact", 2);
+	MBlk *b = mblk_new(fn, "entry");
+	mfn_addblk(fn, b);
+
+	MVal *x = mval_new(fn, MV_TEMP, MT_I32, 0, "x");
+	MVal *rd2 = mval_new(fn, MV_TEMP, MT_I32, 0, "rd2");
+	MVal *rr4 = mval_new(fn, MV_TEMP, MT_I32, 0, "rr4");
+	madd1(fn, b, MOP_PAR, MT_I32, x, MREF_CON(0));
+	MConst *c2 = mconst_int(fn, MT_I32, 2);
+	MConst *c4 = mconst_int(fn, MT_I32, 4);
+	madd(fn, b, MOP_DIV, MT_I32, rd2, MREF_VAL(x), MREF_CON(c2));
+	madd(fn, b, MOP_REM, MT_I32, rr4, MREF_VAL(x), MREF_CON(c4));
+	mret(fn, b, MREF_VAL(rd2));
+
+	run_mir_pass(fn, MIR_PASS_FOLD);
+	CHECK(count_op(b, MOP_DIV) == 1, "signed div by 2 kept (not sar)");
+	CHECK(count_op(b, MOP_REM) == 1, "signed rem by 4 kept (not and)");
+	CHECK(count_op(b, MOP_SAR) == 0, "no sar introduced for div by 2");
+	CHECK(count_op(b, MOP_SHR) == 0, "no shr introduced for div by 2");
+	CHECK(count_op(b, MOP_AND) == 0, "no and introduced for rem by 4");
+	mfn_free(fn);
+}
+
+/* Fold a single binary op on two integer constants and return the folded
+ * result.  `ok` reports whether the op folded to a constant at all. */
+static int64_t
+fold_binop_const(MOP op, int64_t lhs, int64_t rhs, int *ok)
+{
+	MFn *fn = mfn_new("fold_binop", 2);
+	MBlk *b = mblk_new(fn, "entry");
+	mfn_addblk(fn, b);
+
+	MVal *a = mval_new(fn, MV_TEMP, MT_I32, 0, "a");
+	MVal *r = mval_new(fn, MV_TEMP, MT_I32, 0, "r");
+	madd1(fn, b, MOP_PAR, MT_I32, a, MREF_CON(0));
+	madd(fn, b, op, MT_I32, r, MREF_CON(mconst_int(fn, MT_I32, lhs)),
+	     MREF_CON(mconst_int(fn, MT_I32, rhs)));
+	mret(fn, b, MREF_VAL(r));
+
+	run_mir_pass(fn, MIR_PASS_FOLD);
+	int64_t got = 0;
+	*ok = (b->term.src[0].con != 0);
+	if (*ok)
+		got = b->term.src[0].con->u.i;
+	mfn_free(fn);
+	return got;
+}
+
+/* Test 3d: the exact miscompile cases from defect V, pinned by value.
+ *
+ * A power-of-two divisor is the case that used to be strength-reduced into
+ * SAR/AND; with a negative dividend SAR rounds toward -inf while C rounds
+ * toward zero, so `-7/2` came out as -4 instead of -3.  These assertions
+ * pin the C semantics for the constant-fold path (the constexpr/consteval
+ * route, where a wrong value would be baked in at compile time); Tests 3b
+ * and 3c pin the non-constant path structurally. */
+static void
+test_fold_signed_pow2_values(void)
+{
+	struct { MOP op; int64_t l, r, want; const char *msg; } cases[] = {
+		{ MOP_DIV, -7,   2,  -3, "div(-7,2) == -3 (not -4)" },
+		{ MOP_REM, -7,   4,  -3, "rem(-7,4) == -3 (not 1)"  },
+		{ MOP_DIV, -17,  8,  -2, "div(-17,8) == -2 (not -3)" },
+		{ MOP_REM, -17,  8,  -1, "rem(-17,8) == -1 (not 7)"  },
+		/* positive dividends must stay correct too */
+		{ MOP_DIV,  7,   2,   3, "div(7,2) == 3"  },
+		{ MOP_REM,  7,   4,   3, "rem(7,4) == 3"  },
+		/* -8 is exactly divisible: no rounding ambiguity */
+		{ MOP_DIV, -8,   2,  -4, "div(-8,2) == -4" },
+		{ MOP_REM, -8,   2,   0, "rem(-8,2) == 0"  },
+	};
+	for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+		int ok = 0;
+		int64_t got = fold_binop_const(cases[i].op, cases[i].l,
+		                               cases[i].r, &ok);
+		CHECK(ok, cases[i].msg);
+		if (ok)
+			CHECK(got == cases[i].want, cases[i].msg);
+	}
+}
+
 /* Test 4: dead code elimination. */
 static void
 test_dce(void)
@@ -446,6 +534,8 @@ int main(void)
 	test_simpl_id();
 	test_simpl_udiv();
 	test_simpl_sdiv_not_reduced();
+	test_simpl_sdiv_pow2_exact();
+	test_fold_signed_pow2_values();
 	test_dce();
 	test_dce_sideeffect();
 	test_copy_prop();
