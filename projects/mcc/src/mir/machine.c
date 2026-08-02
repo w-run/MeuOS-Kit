@@ -92,12 +92,6 @@ const MTargetM mtarget_x86_64 = {
 	.nfpr = 16,
 	.rglob = (1ull << X64MREG_RBP) | (1ull << X64MREG_RSP),
 	.reserved = 0,
-	/* R8 is excluded from allocation: a call-crossing value that the
-	 * interval logic placed in R8 was clobbered by an emitted call in
-	 * very large functions (self-hosted mcc_main).  Keeping R8 as an
-	 * emitter scratch sidesteps it; root cause is a cross-call interval
-	 * misclassification still under investigation. */
-	.scratch = (1ull << X64MREG_R8),
 	.argreg = x64_argreg,
 	.rsave = x64_rsave,
 	.rclob = x64_rclob,

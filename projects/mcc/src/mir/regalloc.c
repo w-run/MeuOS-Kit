@@ -341,14 +341,16 @@ mreg_scan(MFnM *fm, MRegCtx *ctx)
 				int hint = iv->v->hint;
 				if (hint >= 0 && !busy[hint] &&
 				    !fixed_conflict(&fixed[hint], s, e)) {
-					bool inpool = false;
+					bool incaller = false, incallee = false;
 					for (uint32_t p = 0; p < px[cls].nreg; p++)
 						if (px[cls].regs[p] == hint)
-							inpool = true;
+							incaller = true;
 					for (uint32_t p = 0; p < pc[cls].nreg; p++)
 						if (pc[cls].regs[p] == hint)
-							inpool = true;
-					if (inpool)
+							incallee = true;
+					/* a call-crossing value must never take a
+					 * caller-saved hint: the call clobbers it */
+					if (incallee || (!cross && incaller))
 						chosen = hint;
 				}
 				/* caller-saved pool first for non-call-crossing values */
