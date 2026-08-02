@@ -22,6 +22,12 @@
 #include "cpp.h"
 struct decl *tentativedefns, **tentativedefnsend = &tentativedefns;
 
+/* Inline definitions whose external-definition status is undecided
+ * (defect c-01).  Linked through d->next like tentativedefns; promoted
+ * to an external definition by a later `extern` declaration, otherwise
+ * drained (bodies freed, nothing emitted) at end of translation unit. */
+struct decl *inlinedefers, **inlinedefersend = &inlinedefers;
+
 /* C++ free-function overloading: two functions differ only in their
  * parameter lists — never in their return type.  Compare only the
  * parameter signatures (arity, varargs, and each parameter type). */
@@ -511,6 +517,17 @@ decl(struct scope *s, struct func *f)
 				d->value = mkglobal(d);
 				d->u.func.inlinedefn = d->linkage == LINKEXTERN && fs & FUNCINLINE && !(sc & SCEXTERN) && (!prior || prior->u.func.inlinedefn);
 				d->u.func.isnoreturn = fs & FUNCNORETURN || a.kind & ATTRNORETURN;
+				/* C99 6.7.4p6: an `extern` (or plain, non-inline) declaration
+				 * of a function that was previously defined `inline` promotes
+				 * that inline definition to an external definition — emit the
+				 * deferred body now (defect c-01). */
+				if (!d->u.func.inlinedefn && d->u.func.deferfn) {
+					emitfunc(d->u.func.deferfn, d->linkage == LINKEXTERN);
+					delscope(d->u.func.deferscope);
+					delfunc(d->u.func.deferfn);
+					d->u.func.deferfn = NULL;
+					d->u.func.deferscope = NULL;
+				}
 				{
 					extern int g_lang;
 					/* constexpr function (C23, and C++): the
@@ -562,11 +579,26 @@ decl(struct scope *s, struct func *f)
 					}
 					if (d->u.func.isnoreturn)
 						funchlt(f);
-					/* XXX: need to keep track of function in case a later declaration specifies extern */
-					if (!d->u.func.inlinedefn)
+					/* C99 6.7.4p6: a function defined `inline` (without
+					 * `extern`) has an inline definition, which provides an
+					 * alternative to — but is not itself — an external
+					 * definition.  A later `extern` (or plain, non-inline)
+					 * declaration in the same translation unit turns it into
+					 * an external definition (defect c-01); with no such
+					 * declaration it must not be emitted at all.  Since that
+					 * declaration may follow the definition, defer the
+					 * emission decision and keep the body (and its function
+					 * scope) alive until then. */
+					if (!d->u.func.inlinedefn) {
 						emitfunc(f, d->linkage == LINKEXTERN);
-					s = delscope(s);
-					delfunc(f);
+						s = delscope(s);
+						delfunc(f);
+					} else {
+						d->u.func.deferfn = f;
+						d->u.func.deferscope = s;
+						*inlinedefersend = d;
+						inlinedefersend = &d->next;
+					}
 					d->defined = true;
 					return true;
 				} else if (funcscope) {
@@ -621,5 +653,16 @@ emittentativedefns(void)
 		if (!d->defined && !(d->linkage == LINKNONE
 			&& strcmp(d->name, "string") == 0))
 			defineobj(d, NULL, false, NULL);
+	}
+	/* Inline definitions never promoted by an `extern` declaration stay
+	 * inline definitions (C99 6.7.4p6): emit nothing, just free the
+	 * deferred body and its function scope (defect c-01). */
+	for (d = inlinedefers; d; d = d->next) {
+		if (d->u.func.deferfn) {
+			delscope(d->u.func.deferscope);
+			delfunc(d->u.func.deferfn);
+			d->u.func.deferfn = NULL;
+			d->u.func.deferscope = NULL;
+		}
 	}
 }

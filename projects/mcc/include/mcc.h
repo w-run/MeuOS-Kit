@@ -248,6 +248,13 @@ struct decl {
 			bool inlinedefn;
 			bool isnoreturn;
 			bool isconstexpr;   /* C++ constexpr function */
+			/* C99 6.7.4p6: an inline definition is not itself an external
+			 * definition.  The body is deferred here (with its function
+			 * scope held open) until a later `extern`/non-inline
+			 * declaration promotes it to an external definition, or the
+			 * translation unit ends and it is dropped (defect c-01). */
+			struct func *deferfn;
+			struct scope *deferscope;
 		} func;
 		unsigned long long enumconst;
 		enum builtinkind builtin;
