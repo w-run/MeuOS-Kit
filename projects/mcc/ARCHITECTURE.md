@@ -326,6 +326,7 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
 | V | MIR msimp pow2 强度削减误编译有符号 div/rem（负数错误，`-7/2=-4` 应 -3） | ✅ closed（随 93ab4b4 夹带；pass_test 3b + test/c99/signed_div_pow2.c 回归） |
 | W | `u8"..."` 字面量元素类型为 `unsigned char`，应为 `char`（C11 §6.4.5p6） | 🔄 open（worker-mir-tests 发现） |
 | X | `inline` 定义 + `extern` 声明未产生外部定义（C99 §6.7.4p7） | 🔄 open（worker-mir-tests 发现） |
+| Y | `delete (T*)expr` 解析失败（delete 操作数走 unaryexpr，不含 cast-expression） | 🔄 open（low，worker-q 登记） |
 
 > 状态规则：缺陷状态只标 open/pending；修复提交 push 后由 worker-doc 周期 pull 补记 closed + 哈希。C++ 覆盖状态见上表（C++98~23 收官 ✅，2026-08-02）。
 > MIR/LIR 双路径门禁：`make check-c-mir`（`test/mir_matrix.sh`），c99/c11/c23 用例在 `MCC_USE_MIR=1/0` 下编译+退出码+stdout 三重一致，基线 69/69 全绿。

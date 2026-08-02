@@ -27,12 +27,13 @@
 | worker-mir-tests | MIR/C 测试缺口（发现缺陷 W/X） |
 
 ### 缺陷队列（2026-08-03）
-A-N ✅ 全闭环（J 长期项禁用）；Q/R/V ✅ closed；S/T/U/W/X 🔄 open。状态只标 open/pending，修复 push 后由 worker-doc 周期 pull 补记 closed + 哈希。
+A-N ✅ 全闭环（J 长期项禁用）；Q/R/V ✅ closed；S/T/U/W/X/Y 🔄 open。状态只标 open/pending，修复 push 后由 worker-doc 周期 pull 补记 closed + 哈希。
 - Q：f8f0044（delete/delete[] nullptr 判空守卫 + new_delete_nullptr.cc 回归）
 - R：93ab4b4（concept 按模板参数表折叠形参）
 - V：随 93ab4b4 夹带（MIR msimp 有符号 div/rem；pass_test 3b + test/c99/signed_div_pow2.c 回归）
 - W：u8 字面量元素类型应为 char（open）
 - X：inline+extern 未发外部定义（open）
+- Y：delete (T*)expr 解析失败，low（open）
 
 ## 团队架构（语义化管理）
 
