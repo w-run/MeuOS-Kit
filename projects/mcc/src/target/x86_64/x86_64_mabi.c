@@ -356,9 +356,12 @@ mabi_selpar(MFnM *fm, MOut *o, MInsM *parms, int n, uint32_t *vafa)
 	}
 
 	/* record varargs register usage for selvastart: packed offsets of
-	 * the first unused GPR/XMM (counts of registers already consumed) */
+	 * the first unused GPR/XMM (counts of registers already consumed)
+	 * plus the byte offset (from rbp) of the first caller-pushed stack
+	 * argument (off starts at 16 = rbp+16, below the saved rbp and the
+	 * return address).  va_start stores this as overflow_arg_area. */
 	(void)pa;
-	*vafa = (ni << 4) | (ns << 8);
+	*vafa = (ni << 4) | (ns << 8) | (off << 12);
 	free(ac);
 }
 
@@ -408,23 +411,31 @@ mabi_selcall(MFnM *fm, MOut *o, MInsM *args, int n, MInsM *call)
 		}
 	}
 
-	/* argument moves */
+	/* argument moves: store stack-passed args FIRST, then load register
+	 * args.  memit routes floating-point stores through %xmm0, so if a
+	 * stack FP arg were stored after the register args were set up it
+	 * would clobber the FP arg register it is about to fill (SysV passes
+	 * FP args in xmm0-7, and >8 FP args spill the rest onto the stack). */
 	uint32_t soff = 0;
 	for (int i = 0; i < n; i++) {
 		MInsM *a = &args[i];
-		if (ac[i].inmem) {
-			if (a->td) {
-				MVal *dstp = tmp(fm, MT_PTR, "abi");
-				mout_addr(o, MMOP_LEA, MT_PTR, dstp,
-				          maddr(reg(fm, X64MREG_RSP), 0, 1, soff), 0);
-				mout_blit(fm, o, dstp, a->src[0], ac[i].size);
-			} else {
-				mout_addr(o, MMOP_STORE, a->dtype, 0,
-				          maddr(reg(fm, X64MREG_RSP), 0, 1, soff), a->src[0]);
-			}
-			soff += ac[i].size;
+		if (!ac[i].inmem)
 			continue;
+		if (a->td) {
+			MVal *dstp = tmp(fm, MT_PTR, "abi");
+			mout_addr(o, MMOP_LEA, MT_PTR, dstp,
+			          maddr(reg(fm, X64MREG_RSP), 0, 1, soff), 0);
+			mout_blit(fm, o, dstp, a->src[0], ac[i].size);
+		} else {
+			mout_addr(o, MMOP_STORE, a->dtype, 0,
+			          maddr(reg(fm, X64MREG_RSP), 0, 1, soff), a->src[0]);
 		}
+		soff += ac[i].size;
+	}
+	for (int i = 0; i < n; i++) {
+		MInsM *a = &args[i];
+		if (ac[i].inmem)
+			continue;
 		if (a->td) {
 			if (ac[i].cls[0] != MT_NONE) {
 				MVal *r0 = rarg(fm, &ni, &ns, ac[i].cls[0] == MT_F64);
@@ -541,13 +552,14 @@ mabi_vastart(MFnM *fm, MOut *o, MVal *ap, uint32_t vafa)
 	MVal *rbp = reg(fm, X64MREG_RBP);
 	int gp = ((vafa >> 4) & 15) * 8;
 	int fp = 48 + ((vafa >> 8) & 15) * 16;
+	int sp = vafa >> 12;
 
 	mout_cst(o, MMOP_STORE, MT_I32, 0, 0, imm(fm, MT_I32, gp));
 	o->ins[o->nins - 1].addr = maddr(ap, 0, 1, 0);
 	mout_cst(o, MMOP_STORE, MT_I32, 0, 0, imm(fm, MT_I32, fp));
 	o->ins[o->nins - 1].addr = maddr(ap, 0, 1, 4);
 	MVal *oa = tmp(fm, MT_PTR, "abi");
-	mout_addr(o, MMOP_LEA, MT_PTR, oa, maddr(rbp, 0, 1, 0), 0);
+	mout_addr(o, MMOP_LEA, MT_PTR, oa, maddr(rbp, 0, 1, sp), 0);
 	mout_addr(o, MMOP_STORE, MT_PTR, 0, maddr(ap, 0, 1, 8), oa);
 	MVal *rs = tmp(fm, MT_PTR, "abi");
 	mout_addr(o, MMOP_LEA, MT_PTR, rs, maddr(rbp, 0, 1, -176), 0);
@@ -560,22 +572,61 @@ mabi_vaarg(MFnM *fm, MOut *o, MInsM *in)
 	MVal *ap = in->src[0];
 	MVal *dst = in->dst;
 	bool isf = in->dtype == MT_F32 || in->dtype == MT_F64;
-	int ooff = isf ? 4 : 0;
-	int oinc = isf ? 16 : 8;
+	int ooff = isf ? 4 : 0;      /* gp_offset / fp_offset field */
+	int oinc = isf ? 16 : 8;     /* per-argument advance */
+	int limit = isf ? 176 : 48;  /* reg_save_area bound */
 
-	/* conservative single-path expansion: read the current offset from
-	 * reg_save_area; the full reg/overflow split lands in P4/P5. */
-	MVal *r0 = tmp(fm, MT_I32, "va");
-	mout_addr(o, MMOP_LOAD, MT_I32, r0, maddr(ap, 0, 1, ooff), 0);
-	MVal *r1 = tmp(fm, MT_PTR, "va");
-	mout_addr(o, MMOP_LOAD, MT_PTR, r1, maddr(ap, 0, 1, 16), 0);
-	MVal *r2 = tmp(fm, MT_PTR, "va");
-	mout(o, MMOP_ADD, MT_PTR, r2, r1, r0);
-	mout_addr(o, MMOP_LOAD, in->dtype, dst, maddr(r2, 0, 1, 0), 0);
-	/* advance the offset */
-	MVal *nof = tmp(fm, MT_I32, "va");
-	mout_cst(o, MMOP_ADD, MT_I32, nof, r0, imm(fm, MT_I32, oinc));
+	/* offset = current gp_offset / fp_offset */
+	MVal *off = tmp(fm, MT_I32, "va");
+	mout_addr(o, MMOP_LOAD, MT_I32, off, maddr(ap, 0, 1, ooff), 0);
+	/* in_reg = offset < limit (unsigned) */
+	mout_cst(o, MMOP_CMP, MT_I32, 0, off, imm(fm, MT_I32, limit));
+	MVal *inr = tmp(fm, MT_I32, "va");
+	MInsM *sc = mout(o, MMOP_SETCC, MT_I32, inr, 0, 0);
+	sc->cc = MCC_CC;
+	/* mask = in_reg ? -1 : 0  (64-bit) */
+	MVal *inr64 = tmp(fm, MT_I64, "va");
+	mout(o, MMOP_MOVZX, MT_I64, inr64, inr, 0);
+	MVal *mask = tmp(fm, MT_I64, "va");
+	mout(o, MMOP_NEG, MT_I64, mask, inr64, 0);
+
+	/* reg path address = reg_save_area + offset */
+	MVal *regp = tmp(fm, MT_PTR, "va");
+	mout_addr(o, MMOP_LOAD, MT_PTR, regp, maddr(ap, 0, 1, 16), 0);
+	MVal *off64 = tmp(fm, MT_I64, "va");
+	mout(o, MMOP_MOVZX, MT_I64, off64, off, 0);
+	MVal *rega = tmp(fm, MT_PTR, "va");
+	mout(o, MMOP_ADD, MT_PTR, rega, regp, off64);
+	/* overflow path address = overflow_arg_area */
+	MVal *stkp = tmp(fm, MT_PTR, "va");
+	mout_addr(o, MMOP_LOAD, MT_PTR, stkp, maddr(ap, 0, 1, 8), 0);
+
+	/* addr = in_reg ? rega : stkp (branchless select)
+	 *   addr = stkp ^ ((rega ^ stkp) & mask)
+	 *   mask = -1 -> rega, mask = 0 -> stkp */
+	MVal *diff = tmp(fm, MT_PTR, "va");
+	mout(o, MMOP_XOR, MT_PTR, diff, rega, stkp);
+	MVal *sel = tmp(fm, MT_PTR, "va");
+	mout(o, MMOP_AND, MT_PTR, sel, diff, mask);
+	MVal *addr = tmp(fm, MT_PTR, "va");
+	mout(o, MMOP_XOR, MT_PTR, addr, stkp, sel);
+
+	/* dst = *addr */
+	mout_addr(o, MMOP_LOAD, in->dtype, dst, maddr(addr, 0, 1, 0), 0);
+
+	/* advance: reg path bumps the offset field, overflow path bumps the
+	 * overflow_arg_area pointer (in_reg -> mask is -1, else 0) */
+	MVal *incr = tmp(fm, MT_I64, "va");
+	mout_cst(o, MMOP_AND, MT_I64, incr, mask, imm(fm, MT_I64, oinc));
+	MVal *nof = tmp(fm, MT_I64, "va");
+	mout(o, MMOP_ADD, MT_I64, nof, off64, incr);
 	mout_addr(o, MMOP_STORE, MT_I32, 0, maddr(ap, 0, 1, ooff), nof);
+	MVal *nstk = tmp(fm, MT_I64, "va");
+	mout(o, MMOP_NOT, MT_I64, nstk, mask, 0);
+	mout_cst(o, MMOP_AND, MT_I64, nstk, nstk, imm(fm, MT_I64, oinc));
+	MVal *nsp = tmp(fm, MT_PTR, "va");
+	mout(o, MMOP_ADD, MT_PTR, nsp, stkp, nstk);
+	mout_addr(o, MMOP_STORE, MT_PTR, 0, maddr(ap, 0, 1, 8), nsp);
 }
 
 /* ---- main entry ----------------------------------------------------------- */
