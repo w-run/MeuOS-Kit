@@ -287,6 +287,7 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
 | auto/decltype | ✅ | auto 变量声明（局部/全局）+ C++14 auto 返回类型推导，支持模板结果/链式/成员模板（160e2a2） |
 | 变参模板/包展开 | ✅ | `typename... Args` 包参数 + `f(args...)` 转发 + `sizeof...(Args)` + 空包（df0c489） |
 | lambda（匿名类降级） | ✅ | 闭包合成文件作用域 `__lambdaN` 类，值捕获=成员+合成构造、体=operator()、`obj(args)` 降级（877beed） |
+| constexpr 求值器 | ✅ | constexpr 函数体 token 缓冲回放 + 编译期折叠、constexpr 变量常量初值捕获、static_assert 编译期求值（3ac233b；阶段 1 + 阶段 2 的 static_assert 部分） |
 | 6 架构 MIR 路径 | ✅ | varargs 全打通，扩展矩阵全 PASS（109a3ff） |
 | 验收门禁 | ✅ | `test/verify-all.sh` + `make check-all`（c940c34） |
 
@@ -299,6 +300,7 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
 - **继承**：虚继承；纯虚函数（`= 0` 槽位留 0）；虚析构。
 - **auto/decltype**：仅 `auto x = expr`（局部/全局）与 C++14 `auto f()` 返回类型推导；未做 `auto&` 引用折叠、decltype 独立推导（160e2a2 落地范围）。
 - **lambda**：仅值捕获（无 `[&x]` 引用捕获、`[=]`/`[&]` 默认捕获、init-capture、泛型 lambda、跨函数传递捕获），引用捕获明确报错（877beed 落地范围）。
+- **constexpr**：仅整型常量折叠（阶段 1）+ static_assert（阶段 2 部分）；未做数组维度/非类型模板实参的编译期求值、constexpr 对象含成员访问（需 mini 内存模型）、类静态 constexpr 成员在常量表达式中的折叠（3ac233b 落地范围）。
 - **其它**：函数指针声明参数里的类名未识别（独立问题）。
 - **MIR 路径遗留**（非 m++ 专属）：自举 mcc 编译「聚合参数+varargs+栈传参」组合在
   declspecs 写 NULL（Bug B 待调）；atomic_concurrent/thread_local 多架构 TLS 既有问题。

@@ -1,12 +1,12 @@
 # m++ C++ 前端路线图（cpp-roadmap.md）
 
-> 状态：规划文档（planner 产出，2026-08-02；成员模板 c93d5f7、auto/decltype 160e2a2 已完成）。
-> 用途：为 m++ 未实现特性（constexpr → 移动语义 → C++14/17/20）提供实现顺序、参考源与降级策略的决策依据。
+> 状态：规划文档（planner 产出，2026-08-02；成员模板 c93d5f7、auto/decltype 160e2a2、变参模板 df0c489、lambda 877beed、constexpr 3ac233b 已完成）。
+> 用途：为 m++ 未实现特性（移动语义 → C++14/17/20）提供实现顺序、参考源与降级策略的决策依据。
 > 约束：不写代码；报告事实均来自实际文件/搜索，标注参考源路径。
 
 ## 0. 调研结论摘要
 
-- **m++ 现状**（实测）：`src/cpp/` 仅两文件（`lex/cpp_scan.c` 139 行 + `parse/cpp_parse.c` 3301 行），走「词法 → 语法/语义合一 → 复用 C 前端 decl/expr → 共享 MIR 后端」路线。已实现 C.2.3 构造/析构、C.2.5 虚函数/vtable、C.2.8 函数/类模板（instantiate-on-first-use，token 缓冲回放式）、成员模板（C.2.8，c93d5f7 完成：类内 `template` 方法注册 + `obj.get<int>(...)` 调用点实例化，`cpp.h` 提供 `cpp_tmpl_lookup/placeholder/instantiate/class_*`）、auto/decltype（160e2a2 完成：`auto x = expr` 局部/全局 + C++14 `auto f()` 返回类型推导，支持模板结果/链式调用/成员模板）、变参模板/包展开（df0c489 完成：`typename... Args` 包参数 + `f(args...)` 转发 + `sizeof...(Args)` + 空包）、lambda（877beed 完成：`[captures](params) -> ret { body }` 闭包合成为文件作用域 `__lambdaN` 匿名类，值捕获=成员+合成构造、体=operator()、`obj(args)` 降级 functor 调用）。
+- **m++ 现状**（实测）：`src/cpp/` 仅两文件（`lex/cpp_scan.c` 139 行 + `parse/cpp_parse.c` 3301 行），走「词法 → 语法/语义合一 → 复用 C 前端 decl/expr → 共享 MIR 后端」路线。已实现 C.2.3 构造/析构、C.2.5 虚函数/vtable、C.2.8 函数/类模板（instantiate-on-first-use，token 缓冲回放式）、成员模板（C.2.8，c93d5f7 完成：类内 `template` 方法注册 + `obj.get<int>(...)` 调用点实例化，`cpp.h` 提供 `cpp_tmpl_lookup/placeholder/instantiate/class_*`）、auto/decltype（160e2a2 完成：`auto x = expr` 局部/全局 + C++14 `auto f()` 返回类型推导，支持模板结果/链式调用/成员模板）、变参模板/包展开（df0c489 完成：`typename... Args` 包参数 + `f(args...)` 转发 + `sizeof...(Args)` + 空包）、lambda（877beed 完成：`[captures](params) -> ret { body }` 闭包合成为文件作用域 `__lambdaN` 匿名类，值捕获=成员+合成构造、体=operator()、`obj(args)` 降级 functor 调用）、constexpr（3ac233b 完成：constexpr 函数体 token 缓冲回放 + `cpp_constexpr_eval` 编译期折叠、constexpr 变量常量初值捕获、static_assert 编译期求值）。
 - **模板机制特点**：非 AST 模板，而是**token 缓冲回放**（`cpp_template_decl` 存 `toks[]`，实例化时把参数绑定为 DECLTYPE、重命名函数 token、`tokpush` 回放重解析）。这是极简路径，但参数推导只支持位置式（`cpp_tmpl_deduce`），无 SFINAE/偏特化/两阶段查找。
 - **参考源可用性**：
   - `reference/aburiscript/`（19 万行 C++ 前端→LLVM）：**唯一完整可参考的降级实现**，含 `constexpr/consteval_engine.cpp`（AST 解释器）、`collect/collect_templates_packs.cpp`（包展开）、`collect/collect_overload.cpp`（重载决议）、`ast2llvm/lower_*.cpp`（降级 lowering）、`abi/mangle.cpp`。模块可按需摘取思路，但代码是完整 C++ AST 架构，m++ 是 token 回放架构，**不能直接搬代码，只能借鉴算法**。
@@ -24,12 +24,12 @@
 | 1 | **auto / decltype** ✅（已完成，160e2a2） | 无（token 已留 CPP_TAUTO/TDECLTYPE） | 高（一切现代代码的前置） | 低 |
 | 2 | **变参模板 / 包展开** ✅（已完成，df0c489） | C.2.8 模板 token 回放 | 高（STL/现代代码基础） | 中高 |
 | 3 | **lambda（匿名类降级）** ✅（已完成，877beed） | 类/构造/捕获；auto（可后补） | 高 | 中 |
-| 4 | **constexpr 求值器** | 常量折叠/表达式树；变参模板可选 | 高（编译期计算） | 高 |
+| 4 | **constexpr 求值器** ✅（已完成，3ac233b） | 常量折叠/表达式树；变参模板可选 | 高（编译期计算） | 高 |
 | 5 | **移动语义（右值引用）** | 重载决议 + 构造/析构 | 中高（性能） | 高 |
 | 6 | C++14/17（泛型 lambda/if constexpr/CTAD/结构化绑定） | 上面全部 | 渐进 | 递进 |
 | 7 | concepts/requires | 模板 + 重载完备 | 中 | 高 |
 
-> 建议的**迭代骨架**：「constexpr → 移动语义」（成员模板 c93d5f7、auto/decltype 160e2a2、变参模板 df0c489、lambda 877beed 已完成，从骨架移除）。此顺序的理由见 §4 对任务给定路线的具体分析。
+> 建议的**迭代骨架**：「移动语义」（成员模板 c93d5f7、auto/decltype 160e2a2、变参模板 df0c489、lambda 877beed、constexpr 3ac233b 已完成，从骨架移除）。此顺序的理由见 §4 对任务给定路线的具体分析。
 
 ---
 
@@ -64,17 +64,17 @@
   4. 泛型 lambda（`auto` 参数）放 C++14 段。⛔ 未做。
 - **风险**：闭包类型需要唯一命名（mangle 规则）、捕获变量作用域在成员方法体内解析（`cpp_member_ident` 已有裸成员名解析，可复用）。m++ 无局部类（类定义在函数内）限制——若闭包定义进函数体需评估 `cpp_template_decl`/类定义路径的嵌套能力。✅ 已按文件作用域类规避。
 
-### 2.4 constexpr 求值器
-- **机制**：AST/表达式树解释器。m++ 表达式已是 C 前端的 `struct expr`（常量折叠 `mkconstexpr` 大量使用），**求值器可直接解释 expr 树**，无需新建 IR。
+### 2.4 constexpr 求值器（✅ 已完成，3ac233b；阶段 1+2 的 static_assert 部分）
+- **机制**：AST/表达式树解释器。m++ 表达式已是 C 前端的 `struct expr`（常量折叠 `mkconstexpr` 大量使用），**求值器可直接解释 expr 树**，无需新建 IR。**已实现**：`cpp_buffer_constexpr_body` 在 decl() 遇 constexpr 函数体时缓冲 `{ return <expr> ; }` 的 token（`lit` 深拷贝、带大括号配平），再 `tokpush` 回放让 stmt() 照常产出运行时定义；`cpp_constexpr_eval`（挂在 eval() 的 EXPRCALL 分支，g_lang==1）在调用方是 constexpr 函数且全部实参为整型常量时，把参数绑定为 DECLCONST（`u.enumconst`）入临时 scope，重放体 token 重解析 return 表达式并 eval 折叠——递归调用天然复用（`g_cpp_cexpr_depth` 64 层上限）；constexpr 变量在 defineobj 处要求常量整型初值并把折叠值存 `decl.obj.constval`，供后续常量表达式（含链式 `constexpr int v2 = sq(v1)`）复用。static_assert 经既有 `intconstexpr`/eval 路径求值，失败报「static assertion failed: <msg>」。**落地范围**：纯算术/比较/移位/位运算/一元负/三元、递归（阶乘）、无参/未命名参数函数、static_assert 通过/失败、运行时常量实参调用折叠与非常量实参保留真实调用。**未做（阶段 2 余下 + 3）**：数组维度/非类型模板实参的编译期求值、constexpr 对象含成员访问（需 mini 内存模型）。test/cpp/constexpr.cc 26 断言 + 4 个负向。
 - **参考**：
   - `reference/aburiscript/constexpr/consteval_engine.cpp`（4728 行，完整 AST 解释器：`InterpreterSession`/栈帧/`EvalMemory` 内存模型/const 对象表）。
   - `reference/aburiscript/constexpr/consteval_result.h` / `const_value.h` / `eval_memory.h`（求值结果 + 内存模型的数据结构设计）。
   - SCPP constexpr 引擎设计文档（AST 解释器思路，社区参考）。
 - **降级策略（关键）**：
-  - **阶段 1（推荐）**：仅常量折叠扩展——`constexpr int` 变量 + `constexpr` 函数（纯算术/比较/数组索引），用现有 fold 能力解释。
-  - **阶段 2**：`static_assert` + 数组维度 + 模板实参（非类型）的编译期求值。
-  - **阶段 3**：constexpr 对象（含成员访问）→ 需要 mini 内存模型（aburi `EvalMemory` 思路）。
-- **风险**：求值器与 C 后端折叠逻辑重叠，需明确"谁负责"（建议求值器只读 expr 树、输出 MConst，不依赖 IR）。`constexpr` 递归深度、循环（C++14 放宽）需限制防止编译期挂起。
+  - **阶段 1（推荐）**：仅常量折叠扩展——`constexpr int` 变量 + `constexpr` 函数（纯算术/比较/数组索引），用现有 fold 能力解释。✅ 已实现（token 缓冲回放式，非 AST 解释器）。
+  - **阶段 2**：`static_assert` + 数组维度 + 模板实参（非类型）的编译期求值。🟡 static_assert 已实现；数组维度/非类型模板实参未做。
+  - **阶段 3**：constexpr 对象（含成员访问）→ 需要 mini 内存模型（aburi `EvalMemory` 思路）。⛔ 未做。
+- **风险**：求值器与 C 后端折叠逻辑重叠，需明确"谁负责"（建议求值器只读 expr 树、输出 MConst，不依赖 IR）。`constexpr` 递归深度、循环（C++14 放宽）需限制防止编译期挂起。✅ 已用 g_cpp_cexpr_depth=64 上限防挂起；求值器只读 eval() 折叠结果，不引入 IR。已知缺陷：早期 WIP 因「尾随 token 栈上悬垂指针 + eval 结果 use-after-free + fd 空解引用」段错误 139，均已修复（尾随 token 堆分配、折叠值先拷贝再释放、空检查前置）。
 
 ### 2.5 移动语义（右值引用）
 - **机制**：`T&&` 类型 + 引用折叠 + 重载决议对「值类别（lvalue/rvalue）」的选择 + 移动构造/移动赋值。m++ 已有引用参数（`prefer_ref` mangle 'R' 标记）与重载决议雏形。
@@ -101,7 +101,7 @@
 | auto/decltype | 只做 `auto x = expr` | 类型回填正确性 | 无 |
 | 变参模板 ✅（df0c489） | 只做函数包+简单展开 | 包定位/重复规则 | 回放开销线性增长 |
 | lambda ✅（877beed） | 无捕获→static fn 指针；值捕获→匿名类 | 捕获语义正确 | 局部类定义嵌套能力 |
-| constexpr | 阶段 1 纯算术折叠即可交付 | 求值器正确性（不进 IR 无限循环） | 与 C fold 职责重叠 |
+| constexpr ✅（3ac233b） | 阶段 1 纯算术折叠即可交付 | 求值器正确性（不进 IR 无限循环） | 与 C fold 职责重叠 |
 | 移动语义 | 可不做完美转发 | **引用折叠 + 值类别** | 触达 expr 结构，改动面大 |
 
 **全局原则**：m++ 的 token 回放模板是「算法参考 aburi、机制自研」的放大器——aburi 是完整 AST 架构，其 collect/constexpr 模块提供**语义规则清单**，但每个特性的落地都要用 m++ 自己的 token+decl/expr 机制重写，**不要试图移植代码**。
