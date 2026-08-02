@@ -3079,6 +3079,22 @@ cpp_template_decl(struct scope *s, struct type *owner)
 		if (toks[i].kind < TIDENT)
 			continue;
 		nm = tokenstr(toks[i].kind);
+		/* a template operator overload: `template<typename T> auto
+		 * operator()(...)`.  The method name is `operator_<op>` ("cl"
+		 * for operator(), "pl" for operator+), matching the non-template
+		 * lowering so the call site resolves it. */
+		if (cpp_classify_ident(nm, strlen(nm)) == CPP_TOPERATOR) {
+			const char *onm = NULL;
+			if (i + 1 < ntoks)
+				onm = cpp_op_mangle(toks[i + 1].kind);
+			if (onm) {
+				char *m = xmalloc(strlen("operator_") + strlen(onm) + 1);
+				sprintf(m, "operator_%s", onm);
+				tmpl->name = m;
+				break;
+			}
+			continue;
+		}
 		if (cpp_classify_ident(nm, strlen(nm)) != CPP_TNONE)
 			continue; /* keyword */
 		param = false;
@@ -3661,14 +3677,38 @@ cpp_tmpl_member_instantiate(struct scope *s, struct expr *thisp,
 		scopeputdecl(bs, td);
 	}
 	{
-		struct token *rtoks = xmalloc(tmpl->ntoks * sizeof *rtoks);
-		memcpy(rtoks, tmpl->toks, tmpl->ntoks * sizeof *rtoks);
+		int rn = tmpl->ntoks;
+		struct token *rtoks = xmalloc(rn * sizeof *rtoks);
+		memcpy(rtoks, tmpl->toks, rn * sizeof *rtoks);
 		found = false;
-		for (i = 0; i < (int)tmpl->ntoks; ++i) {
+		for (i = 0; i < rn; ++i) {
 			const char *nm;
 			if (rtoks[i].kind < TIDENT)
 				continue;
 			nm = tokenstr(rtoks[i].kind);
+			/* `operator` overload template: `template<typename T> auto
+			 * operator()(...)`.  Replace `operator` + its trailing token
+			 * (e.g. `()`) with the mangled method name so declarator sees
+			 * a plain `mname(...)` declarator. */
+			if (cpp_classify_ident(nm, strlen(nm)) == CPP_TOPERATOR) {
+				rtoks[i].kind = tokenget(mname, strlen(mname));
+				found = true;
+				/* `operator()` is `operator` `(` `)`: drop both so the
+				 * mangled name becomes a plain `mname(...)` declarator;
+				 * a token-operator (`operator+`) is just `operator` `+`
+				 * — drop the single operand too. */
+				if (i + 1 < rn && rtoks[i + 1].kind == TLPAREN) {
+					int drop = 2; /* '(' ')' */
+					if (i + 2 < rn && rtoks[i + 2].kind == TRPAREN)
+						memmove(rtoks + i + 1, rtoks + i + 3,
+						    (rn - i - 3) * sizeof *rtoks);
+					else
+						memmove(rtoks + i + 1, rtoks + i + 2,
+						    (rn - i - 2) * sizeof *rtoks);
+					rn -= drop;
+				}
+				break;
+			}
 			if (cpp_classify_ident(nm, strlen(nm)) != CPP_TNONE)
 				continue;
 			bool is_param = false;
@@ -3685,10 +3725,9 @@ cpp_tmpl_member_instantiate(struct scope *s, struct expr *thisp,
 		}
 		if (!found)
 			error(&tok.loc, "cannot locate member name in template '%s'", name);
-
 		cur = tok;
 		tokpush(&cur, 1);
-		tokpush(rtoks, tmpl->ntoks);
+		tokpush(rtoks, rn);
 	}
 	next();
 	{
@@ -3897,7 +3936,7 @@ cpp_lambda_expr(struct scope *s)
 			scopeputdecl(&filescope, td);
 		}
 	}
-	wcap = 64 + (size_t)ncap * 24 + pn + rn + bn + 8;
+	wcap = 64 + (size_t)ncap * 24 + pn + rn + bn + 32;
 	wtoks = xmalloc(wcap * sizeof *wtoks);
 
 	cpp_tb(wtoks, &wn, tmpl, 0, "class");
@@ -3933,7 +3972,25 @@ cpp_lambda_expr(struct scope *s)
 	}
 	cpp_tb(wtoks, &wn, tmpl, TRBRACE, NULL);
 	/* `operator()(params) { body }` — `ret` is the explicit `->` type if
-	 * given, otherwise `auto` (deduced from the body's return). */
+	 * given, otherwise `auto` (deduced from the body's return).  A C++14
+	 * generic lambda (`[](auto x) {...}`) has an `auto` parameter: the
+	 * operator() becomes a function template (`template<typename __T0>
+	 * operator()(__T0 x)`) so each call-site argument type instantiates
+	 * its own version. */
+	{
+		bool generic = false;
+		int i;
+		for (i = 0; i < (int)pn; ++i)
+			if (ptoks[i].kind == TAUTO)
+				generic = true;
+		if (generic) {
+			cpp_tb(wtoks, &wn, tmpl, 0, "template");
+			cpp_tb(wtoks, &wn, tmpl, TLESS, NULL);
+			cpp_tb(wtoks, &wn, tmpl, 0, "typename");
+			cpp_tb(wtoks, &wn, tmpl, 0, "__T0");
+			cpp_tb(wtoks, &wn, tmpl, TGREATER, NULL);
+		}
+	}
 	if (rn) {
 		memcpy(wtoks + wn, rtoks, rn * sizeof *rtoks);
 		wn += rn;
@@ -3944,8 +4001,15 @@ cpp_lambda_expr(struct scope *s)
 	cpp_tb(wtoks, &wn, tmpl, TLPAREN, NULL);
 	cpp_tb(wtoks, &wn, tmpl, TRPAREN, NULL);
 	if (pn) {
-		memcpy(wtoks + wn, ptoks, pn * sizeof *ptoks);
-		wn += pn;
+		/* copy the parameter tokens, replacing `auto` with the template
+		 * type parameter `__T0` (generic lambda) */
+		size_t i;
+		for (i = 0; i < pn; ++i) {
+			if (ptoks[i].kind == TAUTO)
+				cpp_tb(wtoks, &wn, tmpl, 0, "__T0");
+			else
+				wtoks[wn++] = ptoks[i];
+		}
 	}
 	if (bn) {
 		memcpy(wtoks + wn, btoks, bn * sizeof *btoks);

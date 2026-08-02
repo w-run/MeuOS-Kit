@@ -106,13 +106,17 @@ postfixexpr(struct scope *s, struct expr *r)
 				extern int g_lang;
 				extern bool cpp_is_member_function(struct type *,
 				    const char *);
+				extern bool cpp_tmpl_member(struct type *,
+				    const char *);
+				extern bool g_cpp_member_tmpl;
 				extern struct type *g_cpp_member_class;
 				extern const char *g_cpp_member_name;
 				extern bool g_cpp_member_const;
 				if (g_lang == 1 &&
 				    (r->type->kind == TYPESTRUCT ||
 				     r->type->kind == TYPEUNION) &&
-				    cpp_is_member_function(r->type, "operator_cl")) {
+				    (cpp_is_member_function(r->type, "operator_cl") ||
+				     cpp_tmpl_member(r->type, "operator_cl"))) {
 					g_cpp_member_this = mkunaryexpr(TBAND, r);
 					g_cpp_member_this->type =
 					    mkpointertype(r->type, r->qual);
@@ -120,6 +124,12 @@ postfixexpr(struct scope *s, struct expr *r)
 					g_cpp_member_name = "operator_cl";
 					g_cpp_member_const =
 					    (r->qual & QUALCONST) != 0;
+					/* a generic lambda's operator() is a
+					 * function template: instantiate it from
+					 * the call-site argument types */
+					if (!cpp_is_member_function(r->type,
+					    "operator_cl"))
+						g_cpp_member_tmpl = true;
 					cpp_pending_record_depth();
 				} else {
 					error(&tok.loc, "called object is not a function");
