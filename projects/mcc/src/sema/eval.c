@@ -111,8 +111,17 @@ eval(struct expr *expr)
 	switch (expr->kind) {
 	case EXPRIDENT:
 		d = expr->u.ident.decl;
-		if (d->kind != DECLCONST)
+		if (d->kind != DECLCONST) {
+			/* C++ constexpr variable: its (integer) value is usable in
+			 * later constant expressions. */
+			extern int g_lang;
+			if (g_lang == 1 && d->kind == DECLOBJECT &&
+			    d->u.obj.has_constval) {
+				expr->kind = EXPRCONST;
+				expr->u.constant.u = d->u.obj.constval;
+			}
 			break;
+		}
 		expr->kind = EXPRCONST;
 		expr->u.constant.u = d->u.enumconst;
 		break;
@@ -218,6 +227,17 @@ eval(struct expr *expr)
 			if (l->kind != EXPRCONST || r->kind != EXPRCONST)
 				break;
 			binary(expr, expr->op, l, r);
+		}
+		break;
+	case EXPRCALL:
+		/* C++ constexpr function: fold the call when the callee is a
+		 * constexpr function and all arguments are integer constants. */
+		extern int g_lang;
+		extern struct expr *cpp_constexpr_eval(struct expr *);
+		if (g_lang == 1) {
+			struct expr *r = cpp_constexpr_eval(expr);
+			if (r)
+				return r;
 		}
 		break;
 	}

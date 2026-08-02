@@ -106,11 +106,19 @@ defineobj(struct decl *d, struct init *init, bool hasinit, struct func *f)
 		error(&tok.loc, "object '%s' has incomplete type", d->name);
 	if (d->u.obj.align < d->type->align)
 		d->u.obj.align = d->type->align;
-	/* C23: constexpr variable must have a constant expression initializer */
+	/* C23/C++ constexpr variable: must have a constant expression
+	 * initializer; the C++ phase-1 subset additionally requires an
+	 * integer constant (`constexpr int x = 1.5;` is rejected). */
 	if ((d->qual & QUALCONSTEXPR) && hasinit && init->expr) {
+		extern int g_lang;
 		struct expr *e = eval(init->expr);
 		if (e->kind != EXPRCONST)
 			error(&tok.loc, "constexpr variable '%s' requires a constant expression initializer", d->name);
+		if (g_lang == 1 && !(e->type->prop & PROPINT))
+			error(&tok.loc, "constexpr variable '%s' requires a constant integer expression initializer", d->name);
+		/* remember the value so a later constant expression can reuse it */
+		d->u.obj.constval = e->u.constant.u;
+		d->u.obj.has_constval = true;
 		init->expr = e;
 	}
 	if (d->u.obj.storage == SDAUTO)
@@ -382,6 +390,13 @@ decl(struct scope *s, struct func *f)
 			d->value = mkglobal(d);
 			d->u.func.inlinedefn = d->linkage == LINKEXTERN && fs & FUNCINLINE && !(sc & SCEXTERN) && (!prior || prior->u.func.inlinedefn);
 			d->u.func.isnoreturn = fs & FUNCNORETURN || a.kind & ATTRNORETURN;
+			{
+				extern int g_lang;
+				/* C++ constexpr function: the QUALCONSTEXPR qualifier is set
+				 * by the typequal() handling of the `constexpr` keyword */
+				if (g_lang == 1 && (base.qual & QUALCONSTEXPR))
+					d->u.func.isconstexpr = true;
+			}
 			if (tok.kind == TLBRACE) {
 				if (!allowfunc)
 					error(&tok.loc, "function definition not allowed");
@@ -391,6 +406,15 @@ decl(struct scope *s, struct func *f)
 				assert(funcscope);
 				s = funcscope;
 				f = mkfunc(d, name, t, s);
+				/* C++ constexpr function: buffer the body tokens for
+				 * compile-time evaluation, then replay them so the normal
+				 * runtime definition is also emitted. */
+				{
+					extern int g_lang;
+					extern void cpp_buffer_constexpr_body(struct decl *);
+					if (g_lang == 1 && d->u.func.isconstexpr)
+						cpp_buffer_constexpr_body(d);
+				}
 				stmt(f, s);
 				/* C++14 `auto` return type: backfill the type deduced from
 				 * the body's return statement(s). */

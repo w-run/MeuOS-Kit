@@ -3751,3 +3751,183 @@ cpp_lambda_expr(struct scope *s)
 	e->u.ident.decl = tmp;
 	return e;
 }
+
+/* --- C++ constexpr functions (compile-time evaluation, phase 1/2) ------- */
+
+/* A constexpr function whose body is buffered so a constant-context call
+ * (`constexpr int v = sq(5);`, static_assert) can be folded by replaying
+ * `{ return <expr> ; }` with the argument values bound. */
+struct cpp_cexpr_fn {
+	struct decl *fd;         /* the constexpr function decl */
+	char **params;           /* parameter names */
+	struct type **ptypes;    /* parameter types */
+	int nparams;
+	struct token *toks;      /* `{ return <expr> ; }` body tokens */
+	size_t ntoks;
+	struct cpp_cexpr_fn *next;
+};
+
+static struct cpp_cexpr_fn *g_cpp_cexpr_fns;
+static int g_cpp_cexpr_depth;   /* recursion limit */
+
+/* Buffer a constexpr function's `{ ... }` body (called from decl() with
+ * tok positioned on '{'), then replay it so the normal runtime definition
+ * is still emitted by the caller's stmt(). */
+void
+cpp_buffer_constexpr_body(struct decl *d)
+{
+	extern void tokpush(struct token *, size_t);
+
+	struct cpp_cexpr_fn *fn;
+	struct decl *pd;
+	size_t cap = 0, ntok = 0;
+	int bd = 0, n = 0;
+
+	fn = xmalloc(sizeof *fn);
+	fn->fd = d;
+	fn->nparams = 0;
+	for (pd = d->type->u.func.params; pd; pd = pd->next)
+		++fn->nparams;
+	fn->params = xmalloc(fn->nparams * sizeof *fn->params);
+	fn->ptypes = xmalloc(fn->nparams * sizeof *fn->ptypes);
+	for (pd = d->type->u.func.params; pd; pd = pd->next) {
+		fn->params[n] = pd->name ? pd->name : (char *)"";
+		fn->ptypes[n] = pd->type;
+		++n;
+	}
+	fn->toks = NULL;
+	fn->ntoks = 0;
+	while (tok.kind != TEOF) {
+		if (ntok >= cap) {
+			cap = cap ? cap * 2 : 32;
+			fn->toks = xreallocarray(fn->toks, cap, sizeof *fn->toks);
+		}
+		/* copy the token; the scanner reuses its literal buffer on the
+		 * next next(), so keep a private copy of `lit` for the replay */
+		{
+			struct token tt = tok;
+			if (tt.lit)
+				tt.lit = strdup(tt.lit);
+			fn->toks[ntok++] = tt;
+		}
+		if (tok.kind == TLBRACE)
+			++bd;
+		else if (tok.kind == TRBRACE) {
+			--bd;
+			if (bd == 0) {
+				next();
+				break;
+			}
+		}
+		next();
+	}
+	fn->ntoks = ntok;
+	/* Replay the body in front of the token that follows it so the
+	 * caller's stmt() parses the runtime definition and the parse then
+	 * continues at the right stream position.  The trailing token must
+	 * outlive this function (stmt() consumes it only after we return),
+	 * so it is copied to the heap rather than pushed as a stack local. */
+	{
+		struct token *trail = xmalloc(sizeof *trail);
+		*trail = tok;
+		if (trail->lit)
+			trail->lit = strdup(trail->lit);
+		tokpush(trail, 1);
+		tokpush(fn->toks, fn->ntoks);
+		next(); /* position tok at '{' */
+	}
+	fn->next = g_cpp_cexpr_fns;
+	g_cpp_cexpr_fns = fn;
+}
+
+/* Fold a constexpr function call when the callee is constexpr and every
+ * argument is an integer constant; returns a fresh EXPRCONST or NULL. */
+struct expr *
+cpp_constexpr_eval(struct expr *call)
+{
+	extern struct scope filescope;
+	extern struct func *curfunc;
+	extern struct decl *mkdecl(char *, enum declkind, struct type *,
+	    enum typequal, enum linkage);
+	extern void tokpush(struct token *, size_t);
+	extern struct expr *expr(struct scope *);
+	extern struct scope *mkscope(struct scope *);
+	extern struct scope *delscope(struct scope *);
+	extern void scopeputdecl(struct scope *, struct decl *);
+
+	struct expr *callee = call ? call->base : NULL;
+	struct decl *fd = NULL;
+	struct cpp_cexpr_fn *fn;
+	struct expr *a, *e, *r;
+	struct scope *tmp;
+	struct token cur;
+	unsigned long long args[16];
+	int i, nargs = 0;
+
+	if (call->kind != EXPRCALL || !callee)
+		return NULL;
+	if (callee->kind == EXPRUNARY && callee->op == TBAND &&
+	    callee->base && callee->base->kind == EXPRIDENT)
+		fd = callee->base->u.ident.decl;
+	else if (callee->kind == EXPRIDENT)
+		fd = callee->u.ident.decl;
+	if (!fd || fd->kind != DECLFUNC || !fd->u.func.isconstexpr)
+		return NULL;
+	for (fn = g_cpp_cexpr_fns; fn; fn = fn->next)
+		if (fn->fd == fd)
+			break;
+	if (!fn)
+		return NULL;
+
+	for (a = call->u.call.args; a; a = a->next, ++nargs) {
+		struct expr *ae = eval(a);
+		if (nargs >= 16 || ae->kind != EXPRCONST ||
+		    !(ae->type->prop & PROPINT))
+			return NULL;
+		args[nargs] = ae->u.constant.u;
+	}
+	if (nargs != fn->nparams)
+		return NULL;
+	if (g_cpp_cexpr_depth >= 64)
+		error(&tok.loc, "constexpr evaluation recursion too deep");
+
+	/* bind the parameters as integer constants and fold the body's
+	 * return expression */
+	tmp = mkscope(&filescope);
+	for (i = 0; i < fn->nparams; ++i) {
+		struct decl *pd = mkdecl(fn->params[i], DECLCONST,
+		    fn->ptypes[i] ? fn->ptypes[i] : &typeint, QUALCONST,
+		    LINKNONE);
+		pd->u.enumconst = args[i];
+		scopeputdecl(tmp, pd);
+	}
+	++g_cpp_cexpr_depth;
+	{
+		struct func *saved = curfunc;
+		cur = tok;
+		tokpush(&cur, 1);
+		tokpush(fn->toks, fn->ntoks);
+		next(); /* { */
+		next(); /* return */
+		next(); /* start of the return expression */
+		e = expr(tmp);
+		expect(TSEMICOLON, "after constexpr return expression");
+		next(); /* } — back to cur */
+		curfunc = saved;
+	}
+	--g_cpp_cexpr_depth;
+
+	r = eval(e);
+	/* eval() folds in place and returns `e` itself, so capture the
+	 * constant value before the tree is freed below. */
+	if (r->kind == EXPRCONST && (r->type->prop & PROPINT)) {
+		struct expr *res = xmalloc(sizeof *res);
+		*res = *r;
+		delexpr(e);
+		delscope(tmp);
+		return res;
+	}
+	delexpr(e);
+	delscope(tmp);
+	return NULL;
+}

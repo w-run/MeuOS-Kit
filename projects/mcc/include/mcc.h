@@ -234,11 +234,16 @@ struct decl {
 			/* alignment of object storage (may be stricter than type requires) */
 			int align;
 			enum storageduration storage;
+			/* C++ constexpr variable: the constant value of its (folded)
+			 * initializer, usable in later constant expressions. */
+			unsigned long long constval;
+			bool has_constval;
 		} obj;
 		struct {
 			/* the function might have an "inline definition" (C11 6.7.4p7) */
 			bool inlinedefn;
 			bool isnoreturn;
+			bool isconstexpr;   /* C++ constexpr function */
 		} func;
 		unsigned long long enumconst;
 		enum builtinkind builtin;

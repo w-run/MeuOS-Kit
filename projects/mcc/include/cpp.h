@@ -60,6 +60,10 @@ int cpp_sizeof_pack(void);
 /* Parse a C++11 lambda expression and lower it to a closure object of a
  * synthesized anonymous class (primaryexpr's `[` entry point). */
 struct expr *cpp_lambda_expr(struct scope *s);
+/* C++ constexpr functions: buffer the body of a constexpr function (called
+ * from decl() with tok on '{') and fold a constant-context call. */
+void cpp_buffer_constexpr_body(struct decl *d);
+struct expr *cpp_constexpr_eval(struct expr *expr);
 bool cpp_has_ctor(struct type *t, const char *tag);
 bool cpp_emit_default_ctor(struct func *f, struct decl *d);
 bool cpp_has_dtor(struct type *t);
