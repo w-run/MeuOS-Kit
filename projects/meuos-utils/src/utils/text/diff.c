@@ -320,9 +320,18 @@ int main(int argc, char **argv) {
     else
         output_context(ops, nops, path_a, path_b, context, colored);
     
+    /* 判断是否有差异：任何非 '=' 操作都算差异 */
+    int has_diff = 0;
+    for (int i = 0; i < nops; i++) {
+        if (ops[i].type != '=') {
+            has_diff = 1;
+            break;
+        }
+    }
+    
     free(ops);
     free_lines(A, na);
     free_lines(B, nb);
     
-    return 0;
+    return has_diff ? 1 : 0;
 }

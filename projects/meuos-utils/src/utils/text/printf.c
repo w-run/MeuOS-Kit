@@ -67,7 +67,7 @@ static void print_escape(const char **p) {
 
 int main(int argc, char **argv) {
     if (argc > 1 && (!strcmp(argv[1], "--version"))) {
-        printf("printf %s\n", version);
+        version();
         return 0;
     }
     if (argc > 1 && (!strcmp(argv[1], "--help"))) {
@@ -80,62 +80,72 @@ int main(int argc, char **argv) {
     const char *fmt = argv[1];
     int argi = 2;
 
-    for (const char *p = fmt; *p; p++) {
-        if (*p == '\\') {
-            p++;
-            if (!*p) { putchar('\\'); break; }
-            const char *pp = p;
-            if (*pp == 'c') {
-                /* 停止并返回：后续不处理 */
-                return 0;
-            }
-            print_escape(&p);
-            continue;
-        }
-        if (*p == '%') {
-            p++;
-            if (!*p) { putchar('%'); break; }
-            if (*p == '%') { putchar('%'); continue; }
-            /* 宽度/精度简化：跳过 */
-            while (*p == '-' || *p == '+' || *p == ' ' || *p == '#' || *p == '0') p++;
-            while (isdigit((unsigned char)*p)) p++;
-            if (*p == '.') {
+    /* GNU printf 行为：当有剩余参数时，重复使用格式串 */
+    for (;;) {
+        int format_used = 0;  /* 本次是否消耗了参数 */
+
+        for (const char *p = fmt; *p; p++) {
+            if (*p == '\\') {
                 p++;
+                if (!*p) { putchar('\\'); break; }
+                const char *pp = p;
+                if (*pp == 'c') {
+                    /* 停止并返回：后续不处理 */
+                    return 0;
+                }
+                print_escape(&p);
+                p--;  /* compensate for for-loop's p++ (print_escape already advanced p) */
+                continue;
+            }
+            if (*p == '%') {
+                p++;
+                if (!*p) { putchar('%'); break; }
+                if (*p == '%') { putchar('%'); continue; }
+                /* 宽度/精度简化：跳过 */
+                while (*p == '-' || *p == '+' || *p == ' ' || *p == '#' || *p == '0') p++;
                 while (isdigit((unsigned char)*p)) p++;
+                if (*p == '.') {
+                    p++;
+                    while (isdigit((unsigned char)*p)) p++;
+                }
+                /* 长度修饰符 */
+                if (*p == 'l') p++;
+                if (*p == 'l') p++;
+                char spec = *p;
+                const char *arg = (argi < argc) ? argv[argi] : "";
+                argi++;
+                format_used = 1;
+                char buf[256];
+                switch (spec) {
+                case 's': print_str(arg); break;
+                case 'd': case 'i': snprintf(buf, sizeof(buf), "%d", atoi(arg)); print_str(buf); break;
+                case 'o': snprintf(buf, sizeof(buf), "%o", (unsigned)atoi(arg)); print_str(buf); break;
+                case 'u': snprintf(buf, sizeof(buf), "%u", (unsigned)atoi(arg)); print_str(buf); break;
+                case 'x': snprintf(buf, sizeof(buf), "%x", (unsigned)atoi(arg)); print_str(buf); break;
+                case 'X': snprintf(buf, sizeof(buf), "%X", (unsigned)atoi(arg)); print_str(buf); break;
+                case 'c': {
+                    int c = arg[0];
+                    putchar(c);
+                    break;
+                }
+                case 'f': case 'e': case 'E': case 'g': case 'G': {
+                    snprintf(buf, sizeof(buf), "%f", atof(arg));
+                    print_str(buf);
+                    break;
+                }
+                case 'p': snprintf(buf, sizeof(buf), "%p", (void*)arg); print_str(buf); break;
+                default:
+                    putchar('%');
+                    putchar(spec);
+                    break;
+                }
+                continue;
             }
-            /* 长度修饰符 */
-            if (*p == 'l') p++;
-            if (*p == 'l') p++;
-            char spec = *p;
-            const char *arg = (argi < argc) ? argv[argi] : "";
-            argi++;
-            char buf[256];
-            switch (spec) {
-            case 's': print_str(arg); break;
-            case 'd': case 'i': snprintf(buf, sizeof(buf), "%d", atoi(arg)); print_str(buf); break;
-            case 'o': snprintf(buf, sizeof(buf), "%o", (unsigned)atoi(arg)); print_str(buf); break;
-            case 'u': snprintf(buf, sizeof(buf), "%u", (unsigned)atoi(arg)); print_str(buf); break;
-            case 'x': snprintf(buf, sizeof(buf), "%x", (unsigned)atoi(arg)); print_str(buf); break;
-            case 'X': snprintf(buf, sizeof(buf), "%X", (unsigned)atoi(arg)); print_str(buf); break;
-            case 'c': {
-                int c = arg[0];
-                putchar(c);
-                break;
-            }
-            case 'f': case 'e': case 'E': case 'g': case 'G': {
-                snprintf(buf, sizeof(buf), "%f", atof(arg));
-                print_str(buf);
-                break;
-            }
-            case 'p': snprintf(buf, sizeof(buf), "%p", (void*)arg); print_str(buf); break;
-            default:
-                putchar('%');
-                putchar(spec);
-                break;
-            }
-            continue;
+            putchar(*p);
         }
-        putchar(*p);
+
+        /* 如果没有剩余参数或本次没有消耗参数，退出循环 */
+        if (argi >= argc || !format_used) break;
     }
     return 0;
 }

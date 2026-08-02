@@ -153,9 +153,9 @@ static int run_repl(void) {
             }
             n = (ssize_t)strlen(line);
         } else {
-            fprintf(stderr, "%s", ps1);
+            fputs(ps1, stdout);
             free(ps1);
-            fflush(stderr);
+            fflush(stdout);
             n = getline(&line, &cap, stdin);
             if (n < 0) break;  /* EOF */
             /* 去掉行尾换行 */

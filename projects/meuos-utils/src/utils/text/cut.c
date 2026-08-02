@@ -91,25 +91,27 @@ int main(int argc, char **argv) {
             for (int i = 0; i < (int)L; i++) {
                 if (in_range(r, n, i + 1)) fputc(line[i], stdout);
             }
+            fputc('\n', stdout);
         } else {
             /* 按 delimiter 切 */
             int field = 1;
             int started = 0;
+            int need_delim = 0;  /* 是否需要在下一个字段前输出分隔符 */
             for (int i = 0; i <= (int)L; i++) {
                 int at_end = (i == (int)L);
                 if (at_end || line[i] == delimiter) {
-                    if (started) {
-                        fputc('\n', stdout);
-                        started = 0;
-                    }
+                    started = 0;
                     field++;
                 } else {
                     if (!started && in_range(r, n, field)) {
+                        if (need_delim) fputc(delimiter, stdout);
                         started = 1;
+                        need_delim = 1;
                     }
                     if (started) fputc(line[i], stdout);
                 }
             }
+            fputc('\n', stdout);
         }
     }
     return 0;

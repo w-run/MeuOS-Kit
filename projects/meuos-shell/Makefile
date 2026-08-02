@@ -21,7 +21,7 @@ BIN := $(BUILD)/msh
 
 BASE_CFLAGS := -Iinclude -I../meuos-utils/include
 
-.PHONY: all check clean install
+.PHONY: all check check-pty clean install
 
 all: $(BIN)
 
@@ -51,6 +51,12 @@ check: all
 	@sh test/posix/smoke.sh ./$(BIN)
 	@rm -f /tmp/msh-ver.txt /tmp/msh-script.sh
 	@echo ">>> all smoke tests PASS"
+
+# PTY 交互测试（需要 Python3）
+check-pty: all
+	@echo ">>> PTY interactive tests"
+	@python3 test/pty_test.py ./$(BIN)
+	@echo ">>> PTY tests PASS"
 
 install: all
 	@mkdir -p $(DESTDIR)/usr/bin

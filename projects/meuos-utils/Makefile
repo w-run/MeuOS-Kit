@@ -50,7 +50,7 @@ TOOL_BINS := $(addprefix $(BUILD)/,$(TOOL_NAMES))
 SPECIAL_BINS := $(BUILD)/mz $(BUILD)/awk
 GENERIC_BINS := $(filter-out $(SPECIAL_BINS),$(TOOL_BINS))
 
-.PHONY: all check clean install
+.PHONY: all check check-cross clean install
 
 all: $(LIBUTILS_LIB) $(GENERIC_BINS) $(SPECIAL_BINS)
 
@@ -138,6 +138,12 @@ check: all
 	@rm -f /tmp/utils-cat.in /tmp/utils-ver.txt /tmp/utils-ls-ver.txt /tmp/utils-tree-ver.txt
 	@echo ">>> all smoke tests PASS"
 	@cd test && ./runner.sh
+
+# 交叉验证测试（需要 Python3 + GNU coreutils）
+check-cross: all
+	@echo ">>> cross-check vs GNU coreutils"
+	@python3 test/cross_check.py ./$(BUILD)
+	@echo ">>> cross-check PASS"
 
 # 安装
 install: all
