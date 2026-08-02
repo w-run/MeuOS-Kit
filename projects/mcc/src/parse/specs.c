@@ -305,25 +305,60 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 		 * branch below. */
 		extern int g_lang;
 		if (g_lang == 1 && tok.kind >= TIDENT && !t && !ts) {
-			/* C++ namespace-qualified type name: `ns::Type`.  A namespace
-			 * identifier can only be followed by `::`, so no lookahead is
-			 * needed. */
+			/* C++ namespace-qualified type name: `ns::Type` or
+			 * `ns1::ns2::Type`.  A namespace identifier can only be
+			 * followed by `::`, so no lookahead is needed.  Walk the
+			 * namespace chain; if the final component is a class, it is
+			 * the type.  If it is not a class (a function/variable, e.g.
+			 * `Geo::fill(...)` as a statement), restore the whole token
+			 * stream and report no type so the caller falls back to the
+			 * expression path. */
 			struct decl *nsd = scopegetdecl(s, tokenstr(tok.kind), 1);
 			if (nsd && nsd->kind == DECLNAMESPACE) {
-				struct type *ct2;
+				struct scope *cur = nsd->u.ns;
+				struct token nssaved = tok;
 				next(); /* consume namespace name */
-				if (tok.kind != TCOLONCOLON)
-					error(&tok.loc, "expected '::' after namespace name");
-				next(); /* consume '::' */
-				if (tok.kind < TIDENT)
-					error(&tok.loc, "expected type name after '::'");
-				ct2 = scopegettag(nsd->u.ns, tokenstr(tok.kind), 1);
-				if (!ct2 || (ct2->kind != TYPESTRUCT && ct2->kind != TYPEUNION))
-					error(&tok.loc, "no class named '%s' in namespace '%s'",
-					      tokenstr(tok.kind), nsd->name);
-				t = ct2;
-				++ntypes;
-				next();
+				for (;;) {
+					struct type *ct2;
+					struct token ccolon, comp;
+					if (tok.kind != TCOLONCOLON)
+						error(&tok.loc, "expected '::' after namespace name");
+					ccolon = tok;
+					next(); /* consume '::' */
+					if (tok.kind < TIDENT)
+						error(&tok.loc, "expected name after '::'");
+					comp = tok;
+					ct2 = scopegettag(cur, tokenstr(tok.kind), 1);
+					if (ct2 && (ct2->kind == TYPESTRUCT ||
+					            ct2->kind == TYPEUNION)) {
+						/* a class: this is the type name */
+						t = ct2;
+						++ntypes;
+						next();
+						break;
+					}
+					/* not a class: either a nested namespace (continue)
+					 * or a non-type member (restore & fall back) */
+					if (tok.kind >= TIDENT) {
+						struct decl *m2 = scopegetdecl(cur,
+						    tokenstr(tok.kind), 1);
+						if (m2 && m2->kind == DECLNAMESPACE) {
+							cur = m2->u.ns;
+							next();
+							continue;
+						}
+					}
+					/* `ns::member` where member is a function/object:
+					 * this is an expression, not a type declaration.
+					 * Restore the full `ns :: member ...` stream. */
+					{
+						struct token nxt = tok;
+						tokpush(&nxt, 1);       /* member */
+						tokpush(&ccolon, 1);    /* '::' */
+						tok = nssaved;          /* ns */
+					}
+					return (struct qualtype){NULL, QUALNONE, NULL};
+				}
 				break;
 			}
 			struct type *ct = scopegettag(s, tokenstr(tok.kind), 1);
@@ -690,10 +725,12 @@ istypename(struct scope *s, const char *name)
 		return 1;
 	/* C++: a class/struct/union tag is itself a type name (`Point p`),
 	 * unlike C where a bare tag name is not a type.  Enabled when the
-	 * C++ frontend is active (m++ driver sets g_lang=1). */
+	 * C++ frontend is active (m++ driver sets g_lang=1).  The lookup
+	 * recurses so a class declared in an enclosing (e.g. file) scope is
+	 * a type name inside a namespace. */
 	extern int g_lang;
 	if (g_lang == 1) {
-		t = scopegettag(s, name, 0);
+		t = scopegettag(s, name, 1);
 		if (t && (t->kind == TYPESTRUCT || t->kind == TYPEUNION))
 			return 1;
 	}

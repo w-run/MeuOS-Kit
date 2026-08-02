@@ -94,7 +94,7 @@ declcommon(struct scope *s, enum declkind kind, char *name, char *asmname, struc
 		prior->type = typecomposite(t, prior->type);
 		return prior;
 	}
-	if (s->parent)
+	if (s->parent && !s->name)
 		prior = scopegetdecl(s->parent, name, true);
 	linkage = getlinkage(kind, sc, prior, fscope);
 	if (linkage != LINKNONE && s->parent) {
@@ -275,6 +275,23 @@ decl(struct scope *s, struct func *f)
 		case DECLOBJECT:
 			if (align && align < t->align)
 				error(&tok.loc, "object '%s' requires alignment %d, which is stricter than specified alignment %d", name, t->align, align);
+			/* C++ namespace-scope object: give it a namespace-qualified
+			 * assembler symbol (`Geo_version`) so it does not collide with
+			 * a same-named global (`version`).  The plain name is kept for
+			 * scope lookup; only the emitted symbol is prefixed. */
+			{
+				extern int g_lang;
+				extern const char *cpp_ns_asm_prefix(struct scope *,
+				    char *, size_t);
+				if (g_lang == 1 && s->name && !asmname) {
+					char pfx[256];
+					if (cpp_ns_asm_prefix(s, pfx, sizeof pfx)) {
+						char *m = xmalloc(strlen(pfx) + strlen(name) + 2);
+						sprintf(m, "%s_%s", pfx, name);
+						asmname = m;
+					}
+				}
+			}
 			d = declcommon(s, kind, name, asmname, t, tq, sc, prior);
 			if (d->u.obj.align < align)
 				d->u.obj.align = align;
@@ -367,7 +384,12 @@ decl(struct scope *s, struct func *f)
 						/* global object with a ctor: defer the
 						 * construction call to __mxx_global_var_init */
 						cpp_record_global_ctor(d, NULL);
-					else
+					else if (!hasinit)
+						/* `T x;` — no initializer, run the default ctor.
+						 * `T x = expr;` is initialized by the assignment
+						 * in funcinit() (copy-initialization); running the
+						 * default ctor afterwards would zero the fields
+						 * again. */
 						cpp_emit_default_ctor(f, d);
 					/* record local class objects for reverse-order
 					 * destruction at scope exit (head-insert: newest
@@ -433,6 +455,22 @@ decl(struct scope *s, struct func *f)
 					regname = mng;
 					prior = scopegetdecl(s, mng, false);
 				}
+				/* C++ namespace-scope function: prefix the assembler symbol
+				 * with the enclosing namespace (`Geo_dist`) so it cannot
+				 * collide with a same-named function at file scope. */
+				{
+					extern const char *cpp_ns_asm_prefix(struct scope *,
+					    char *, size_t);
+					if (g_lang == 1 && s->name && !asmname) {
+						char pfx[256];
+						if (cpp_ns_asm_prefix(s, pfx, sizeof pfx)) {
+							char *m = xmalloc(strlen(pfx) +
+							    strlen(regname) + 2);
+							sprintf(m, "%s_%s", pfx, regname);
+							asmname = m;
+						}
+					}
+				}
 				d = declcommon(s, kind, (char *)regname, asmname, t, tq, sc, prior);
 				if (mng && d == prior)
 					free(mng); /* existing overload: name not retained */
@@ -454,7 +492,11 @@ decl(struct scope *s, struct func *f)
 					/* re-open scope from function declarator */
 					assert(funcscope);
 					s = funcscope;
-					f = mkfunc(d, (char *)regname, t, s);
+					/* the function's assembler symbol is the asmname when a
+					 * namespace prefix (or explicit __asm__) applies, so
+					 * the definition label matches the call-site symbol */
+					f = mkfunc(d, d->asmname ? d->asmname : (char *)regname,
+					    t, s);
 					/* C++ constexpr function: buffer the body tokens for
 					 * compile-time evaluation, then replay them so the normal
 					 * runtime definition is also emitted. */

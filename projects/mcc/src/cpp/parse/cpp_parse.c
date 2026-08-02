@@ -235,6 +235,37 @@ cpp_take_qual_ns(void)
 	return ns;
 }
 
+/* Qualified assembly prefix for a declaration inside namespace(s):
+ * `Outer_Inner` for a name declared in `namespace Outer { namespace Inner
+ * { ... } }`, `Geo` for a single-level `namespace Geo`.  Returns NULL if
+ * `s` is the file scope (no enclosing namespace).  The caller uses this
+ * to give namespace-scope objects/functions a distinct symbol name so a
+ * namespace variable does not collide with a same-named global. */
+const char *
+cpp_ns_asm_prefix(struct scope *s, char *buf, size_t bufsz)
+{
+	const char *names[16];
+	int n = 0, i;
+
+	(void)bufsz;
+	for (; s && s->name; s = s->parent) {
+		if (n >= (int)countof(names))
+			break;
+		names[n++] = s->name;
+	}
+	if (!n)
+		return NULL;
+	buf[0] = '\0';
+	/* names[] is innermost-first; walk it backwards to build
+	 * Outer_Inner (outermost first). */
+	for (i = n - 1; i >= 0; i--) {
+		if (i != n - 1)
+			strcat(buf, "_");
+		strcat(buf, names[i]);
+	}
+	return buf;
+}
+
 /* Build the expression for the implicit `this` pointer of the method
  * body currently being parsed (NULL outside a method body). */
 static struct expr *
