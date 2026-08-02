@@ -6,8 +6,10 @@
 #   1. check             冒烟：构建 mcc 并编译运行 hello
 #   2. check-mir         MIR 核心单元测试（types/passes/machine/abi/regalloc/bridge）
 #   3. check-cpp         m++ C++ 前端（lex/virtual/func/neg，含虚表与模板）
-#   4. check-c99/check-c11 C 回归，--specs=host 或 MEUOS_SYSROOT 模式按当前环境可用性
-#   5. check-sysroot-static 自举：mcc 编译 mcc + 运行 hello
+#   4. check-c99         C 回归（c99 套，--specs=host 或 MEUOS_SYSROOT 模式按当前环境可用性）
+#   5. check-c11         C 回归（c11 套）
+#   6. check-sysroot-static 自举：mcc 编译 mcc + 运行 hello
+#   7. check-c-mir       C 功能回归 × MIR/LIR 双路径矩阵（mir_matrix.sh：MIR=1 与 MIR=0 编译运行且 stdout 一致）
 #
 # 用法：
 #   sh test/verify-all.sh [--verbose]
@@ -108,6 +110,9 @@ fi
 
 # 5. 自举（内部自行构建 sysroot，任何环境下均执行）
 run "make check-sysroot-static" make check-sysroot-static
+
+# 7. C 功能回归 × MIR/LIR 双路径矩阵（mir_matrix.sh：MIR=1 与 MIR=0 均编译运行且 stdout 一致）
+run "make check-c-mir" make check-c-mir
 
 # 汇总
 echo "======================================"
