@@ -146,6 +146,7 @@ postfixexpr(struct scope *s, struct expr *r)
 				extern struct type *g_cpp_member_class;
 				extern const char *g_cpp_member_name;
 				extern bool g_cpp_member_const;
+				extern bool g_cpp_member_rvalue;
 				if (g_lang == 1 &&
 				    (r->type->kind == TYPESTRUCT ||
 				     r->type->kind == TYPEUNION) &&
@@ -154,6 +155,7 @@ postfixexpr(struct scope *s, struct expr *r)
 					g_cpp_member_this = mkunaryexpr(TBAND, r);
 					g_cpp_member_this->type =
 					    mkpointertype(r->type, r->qual);
+					g_cpp_member_rvalue = !r->lvalue;
 					g_cpp_member_class = r->type;
 					g_cpp_member_name = "operator_cl";
 					g_cpp_member_const =
@@ -247,59 +249,70 @@ postfixexpr(struct scope *s, struct expr *r)
 						g_cpp_member_name = NULL;
 						g_cpp_member_tmpl = false;
 					} else {
-				/* C++ overload resolution: re-resolve the member
-				 * function from the argument types. */
-				{
-					extern struct type *g_cpp_member_class;
-					extern const char *g_cpp_member_name;
-					extern bool g_cpp_member_const;
-					if (g_cpp_member_class && g_cpp_member_name) {
-						extern void cpp_mangled_name_args(struct type *,
-						    const char *, struct expr *, char *, size_t,
-						    bool);
-						char mname2[256];
-						struct decl *fd2;
-						/* reference overloads are preferred for lvalue
-						 * arguments; fall back to by-value binding */
-						cpp_mangled_name_args(g_cpp_member_class,
-						    g_cpp_member_name, arglist, mname2,
-						    sizeof mname2, true);
-						if (g_cpp_member_const)
-							strncat(mname2, "K", sizeof mname2 - strlen(mname2) - 1);
+			/* C++ overload resolution: re-resolve the member
+			 * function from the argument types. */
+			{
+				extern struct type *g_cpp_member_class;
+				extern const char *g_cpp_member_name;
+				extern bool g_cpp_member_const;
+				extern bool g_cpp_member_rvalue;
+				if (g_cpp_member_class && g_cpp_member_name) {
+					extern void cpp_mangled_name_args(struct type *,
+					    const char *, struct expr *, char *, size_t,
+					    bool);
+					char mname2[256], mval2[256], kbase[256];
+					struct decl *fd2;
+					/* the const "K" suffix goes right after the method
+					 * name, before the argument codes — matching
+					 * cpp_define_method's `Class_methodK<argcodes>`
+					 * mangling (the old appending-after broke const
+					 * overloaded methods with arguments). */
+					snprintf(kbase, sizeof kbase, "%s%s",
+					    g_cpp_member_name,
+					    g_cpp_member_const ? "K" : "");
+					/* reference overloads are preferred for lvalue
+					 * arguments; fall back to by-value binding.  A
+					 * temporary object prefers the deducing-this
+					 * `this X&& self` overload (trailing "V"). */
+					cpp_mangled_name_args(g_cpp_member_class, kbase,
+					    arglist, mname2, sizeof mname2, true);
+					if (g_cpp_member_rvalue &&
+					    strlen(mname2) + 1 < sizeof mname2)
+						strcat(mname2, "V");
+					fd2 = scopegetdecl(g_cpp_member_class->scope
+					    ? g_cpp_member_class->scope : s, mname2, 1);
+					if (!fd2 || fd2->kind != DECLFUNC) {
+						cpp_mangled_name_args(g_cpp_member_class, kbase,
+						    arglist, mval2, sizeof mval2, false);
 						fd2 = scopegetdecl(g_cpp_member_class->scope
-						    ? g_cpp_member_class->scope : s, mname2, 1);
-						if (!fd2 || fd2->kind != DECLFUNC) {
-							char mval2[256];
-							cpp_mangled_name_args(g_cpp_member_class,
-							    g_cpp_member_name, arglist, mval2,
-							    sizeof mval2, false);
-							if (g_cpp_member_const)
-								strncat(mval2, "K", sizeof mval2 - strlen(mval2) - 1);
-							fd2 = scopegetdecl(g_cpp_member_class->scope
-							    ? g_cpp_member_class->scope : s, mval2, 1);
-							if (fd2 && fd2->kind == DECLFUNC)
-								snprintf(mname2, sizeof mname2, "%s", mval2);
-						}
-						/* a non-const object may call a const method */
-						if (!g_cpp_member_const && (!fd2 || fd2->kind != DECLFUNC)) {
-							char mk2[256];
-							snprintf(mk2, sizeof mk2, "%sK", mname2);
-							fd2 = scopegetdecl(g_cpp_member_class->scope
-							    ? g_cpp_member_class->scope : s, mk2, 1);
-							if (fd2 && fd2->kind == DECLFUNC)
-								strncat(mname2, "K", sizeof mname2 - strlen(mname2) - 1);
-						}
-						if (!fd2 || fd2->kind != DECLFUNC)
-							error(&tok.loc,
-							    "no matching member function for '%s'",
-							    g_cpp_member_name);
-						t = fd2->type;
-						r = mkexpr(EXPRIDENT, fd2->type, NULL);
-						r->u.ident.decl = fd2;
-						r = decay(r); /* &Class_method_i */
+						    ? g_cpp_member_class->scope : s, mval2, 1);
+						if (fd2 && fd2->kind == DECLFUNC)
+							snprintf(mname2, sizeof mname2, "%s", mval2);
 					}
-					g_cpp_member_class = NULL;
-					g_cpp_member_name = NULL;
+					/* a non-const object may call a const method */
+					if (!g_cpp_member_const &&
+					    (!fd2 || fd2->kind != DECLFUNC)) {
+						char mk2[256];
+						snprintf(mk2, sizeof mk2, "%sK",
+						    g_cpp_member_name);
+						cpp_mangled_name_args(g_cpp_member_class, mk2,
+						    arglist, mval2, sizeof mval2, false);
+						fd2 = scopegetdecl(g_cpp_member_class->scope
+						    ? g_cpp_member_class->scope : s, mval2, 1);
+						if (fd2 && fd2->kind == DECLFUNC)
+							snprintf(mname2, sizeof mname2, "%s", mval2);
+					}
+					if (!fd2 || fd2->kind != DECLFUNC)
+						error(&tok.loc,
+						    "no matching member function for '%s'",
+						    g_cpp_member_name);
+					t = fd2->type;
+					r = mkexpr(EXPRIDENT, fd2->type, NULL);
+					r->u.ident.decl = fd2;
+					r = decay(r); /* &Class_method_i */
+				}
+				g_cpp_member_class = NULL;
+				g_cpp_member_name = NULL;
 				}
 				}
 				}
@@ -396,6 +409,7 @@ postfixexpr(struct scope *s, struct expr *r)
 						extern struct expr *cpp_tmpl_member_placeholder(void);
 						extern struct expr *g_cpp_member_this;
 						extern bool g_cpp_member_const;
+						extern bool g_cpp_member_rvalue;
 						extern bool g_cpp_member_tmpl;
 						struct token nxt = tok;
 						const char *mname = tokenstr(old.kind);
@@ -403,6 +417,8 @@ postfixexpr(struct scope *s, struct expr *r)
 						tokpush(&nxt, 1);
 						cpp_tmpl_member_pend(t, mname);
 						g_cpp_member_this = r;
+						g_cpp_member_rvalue =
+						    r->base ? !r->base->lvalue : false;
 						g_cpp_member_class = t;
 						g_cpp_member_name = mname;
 						g_cpp_member_const = (tq & QUALCONST) != 0;
@@ -514,6 +530,7 @@ postfixexpr(struct scope *s, struct expr *r)
 				extern struct expr *g_cpp_member_this;
 				extern struct type *g_cpp_member_class;
 				extern const char *g_cpp_member_name;
+				extern bool g_cpp_member_rvalue;
 				extern void cpp_pending_record_depth(void);
 				char mname[256];
 				struct decl *fd;
@@ -544,6 +561,8 @@ postfixexpr(struct scope *s, struct expr *r)
 						}
 						e = cpp_make_vcall(thisp, owner, m, m->vslot);
 						g_cpp_member_this = thisp; /* &subobject */
+						g_cpp_member_rvalue =
+						    r->base ? !r->base->lvalue : false;
 						g_cpp_member_class = NULL; /* slot already resolved */
 						g_cpp_member_name = NULL;
 						g_cpp_member_const = obj_const;
@@ -588,6 +607,8 @@ postfixexpr(struct scope *s, struct expr *r)
 						thisp->type = mkpointertype(t, tq);
 					}
 					g_cpp_member_this = thisp; /* &subobject */
+					g_cpp_member_rvalue =
+					    r->base ? !r->base->lvalue : false;
 					g_cpp_member_class = t;
 					g_cpp_member_name = m->name;
 					g_cpp_member_const = obj_const;

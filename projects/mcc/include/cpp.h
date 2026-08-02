@@ -9,6 +9,7 @@
 #define MCC_CPP_H
 
 struct qualtype;   /* defined in src/parse/decl_internal.h */
+struct decl;
 
 #include <stddef.h>
 
@@ -49,9 +50,19 @@ struct expr *cpp_temp_construct(struct scope *s, struct type *ct);
 extern struct type *g_cpp_member_class;
 extern const char *g_cpp_member_name;
 extern bool g_cpp_member_const;
+extern bool g_cpp_member_rvalue; /* object expression is a temporary (rvalue) */
 extern int g_cpp_postfix_depth;
 void cpp_pending_record_depth(void);
 void cpp_pending_clear_at_depth(int depth);
+/* deducing-this (P0847): the declarator signals a `this X& self` explicit
+ * object parameter before parsing it; cpp_define_method consumes it and
+ * substitutes the object parameter for the implicit `this`. */
+void cpp_explicit_obj_begin(void);
+void cpp_explicit_obj_set(struct decl *d);
+struct decl *cpp_explicit_obj_take(void);
+/* `this` expression of the method body being parsed (NULL outside a
+ * method body); deducing-this methods resolve it to &(*self). */
+struct expr *cpp_this_expr(void);
 void cpp_pending_set_placeholder(void);
 bool cpp_pending_was_placeholder(void);
 bool cpp_pending_is_mine(int depth);

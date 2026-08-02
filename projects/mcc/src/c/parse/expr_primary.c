@@ -265,6 +265,19 @@ primaryexpr(struct scope *s)
 					}
 				}
 			}
+			/* C++ `this` (a keyword): the method-body `this` pointer.
+			 * `this` is an identifier to the C lexer and cannot name a
+			 * user variable, so intercepting it here is unambiguous. */
+			extern int g_lang;
+			if (g_lang == 1 &&
+			    strcmp(tokenstr(tok.kind), "this") == 0) {
+				extern struct expr *cpp_this_expr(void);
+				e = cpp_this_expr();
+				if (e) {
+					next();
+					break;
+				}
+			}
 			d = scopegetdecl(s, tokenstr(tok.kind), 1);
 			if (!d) {
 				/* `using namespace foo;` makes foo's members visible */

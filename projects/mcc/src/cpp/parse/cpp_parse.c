@@ -31,6 +31,7 @@ struct expr *g_cpp_member_this;
 struct type *g_cpp_member_class;
 const char *g_cpp_member_name;
 bool g_cpp_member_const;
+bool g_cpp_member_rvalue; /* the pending member object is a temporary */
 /* C++17 CTAD: when declspecs sees a class-template name without explicit
  * `<...>` arguments, it records the template name here; decl() completes
  * the deduction from the constructor-call arguments. */
@@ -78,6 +79,7 @@ cpp_pending_clear_at_depth(int depth)
 		g_cpp_member_class = NULL;
 		g_cpp_member_name = NULL;
 		g_cpp_member_const = false;
+		g_cpp_member_rvalue = false;
 		g_cpp_member_tmpl = false;
 		g_cpp_pending_placeholder = false;
 	}
@@ -87,6 +89,37 @@ bool
 cpp_pending_is_mine(int depth)
 {
 	return g_cpp_pending_depth == depth;
+}
+
+/* deducing-this explicit object parameter (P0847): the declarator calls
+ * cpp_explicit_obj_begin before parsing a leading `this X& self` parameter
+ * and cpp_explicit_obj_set with the parsed decl; cpp_define_method takes
+ * the decl (and clears the pending state) to substitute it for the
+ * implicit `this`. */
+static struct decl *g_cpp_explicit_obj;
+static bool g_cpp_explicit_obj_pending;
+
+void
+cpp_explicit_obj_begin(void)
+{
+	g_cpp_explicit_obj_pending = true;
+	g_cpp_explicit_obj = NULL;
+}
+
+void
+cpp_explicit_obj_set(struct decl *d)
+{
+	g_cpp_explicit_obj = d;
+}
+
+struct decl *
+cpp_explicit_obj_take(void)
+{
+	struct decl *d = g_cpp_explicit_obj_pending ? g_cpp_explicit_obj : NULL;
+
+	g_cpp_explicit_obj_pending = false;
+	g_cpp_explicit_obj = NULL;
+	return d;
 }
 
 /* Record a return expression of an `auto`-returning function body.  The
@@ -291,18 +324,30 @@ cpp_ns_asm_prefix(struct scope *s, char *buf, size_t bufsz)
 }
 
 /* Build the expression for the implicit `this` pointer of the method
- * body currently being parsed (NULL outside a method body). */
-static struct expr *
+ * body currently being parsed (NULL outside a method body).  In a
+ * deducing-this method the object parameter is a reference (`this X&
+ * self`), so `this` is the address of its referent (&(*self)). */
+struct expr *
 cpp_this_expr(void)
 {
 	struct expr *e;
+	struct decl *td = g_cpp_method.this_decl;
 
-	if (!g_cpp_method.active || !g_cpp_method.this_decl)
+	if (!g_cpp_method.active || !td)
 		return NULL;
-	e = mkexpr(EXPRIDENT, g_cpp_method.this_decl->type, NULL);
-	e->qual = g_cpp_method.this_decl->qual;
+	e = mkexpr(EXPRIDENT, td->type, NULL);
+	e->qual = td->qual;
 	e->lvalue = true;
-	e->u.ident.decl = g_cpp_method.this_decl;
+	e->u.ident.decl = td;
+	if (td->type && td->type->kind == TYPEPOINTER && td->type->isref) {
+		/* `this` for deducing-this: &(*self), the object pointer */
+		struct expr *obj = mkunaryexpr(TMUL, e);
+		obj->type = td->type->base;
+		obj->lvalue = true;
+		e = mkunaryexpr(TBAND, obj);
+		e->type = mkpointertype(td->type->base, td->type->qual);
+		e->lvalue = true;
+	}
 	return e;
 }
 
@@ -1539,58 +1584,98 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname,
 		}
 	}
 
-	snprintf(mangled, sizeof mangled, "%s_%s", class_tag, mname);
-	/* const member functions get a distinct mangled name so a const
-	 * object can only call const methods */
-	if (is_const)
-		strncat(mangled, "K", sizeof mangled - strlen(mangled) - 1);
-	/* overload resolution: append the encoded explicit parameter types
-	 * (`Class_method_ii`); no-arg methods keep the bare mangled name */
-	for (cur = funct->u.func.params; cur; cur = cur->next) {
-		char code[64];
-		cpp_mangle_type(cur->type, code, sizeof code);
-		strncat(mangled, code, sizeof mangled - strlen(mangled) - 1);
-	}
-	/* static members get a distinct mangled name (no `this`); the S goes
-	 * after the parameter encoding to match cpp_mangled_name_args + "S" */
-	if (is_static)
-		strncat(mangled, "S", sizeof mangled - strlen(mangled) - 1);
-	/* mkdecl/scopeputdecl keep the name pointer; persist it off the
-	 * stack (the C parser's token strings are stable, ours is not). */
-	pmangled = xmalloc(strlen(mangled) + 1);
-	strcpy(pmangled, mangled);
+	/* deducing-this (P0847): a leading `this X& self` explicit object
+	 * parameter replaces the implicit `this`.  It is excluded from the
+	 * mangled overload signature (the object is passed like `this`), its
+	 * cv-qualification selects the const "K" form, and an `X&&` object
+	 * param gets a trailing "V" so the rvalue overload mangles apart from
+	 * the lvalue `X&` form (the call site tries the V variant for
+	 * temporary objects). */
+	{
+		struct decl *exobj = cpp_explicit_obj_take();
+		bool has_exobj = exobj && funct->u.func.params == exobj;
+		bool eff_const = is_const ||
+		    (has_exobj && exobj->type->kind == TYPEPOINTER &&
+		     (exobj->type->qual & QUALCONST));
+		bool exobj_rref = has_exobj && exobj->type->isrref;
+		struct decl *params = has_exobj ? funct->u.func.params->next
+		                                : funct->u.func.params;
 
-	/* Build the mangled function type:
-	 * `Class_method(Class *this, args...) -> funct->base` (or just
-	 * `Class_method(args...)` for a static member).  The declarator
-	 * already parsed the explicit params into funct; we copy those decls
-	 * so funct (kept in the member list for call lowering) and mtype
-	 * don't share the same decl chain. */
-	mtype = mktype(TYPEFUNC, 0);
-	mtype->base = funct->base;
-	mtype->qual = funct->qual;
-	mtype->prop |= funct->prop;
-	mtype->align = funct->align;
-	mtype->u.func.isvararg = funct->u.func.isvararg;
-	mtype->u.func.params = NULL;
-	mtype->u.func.nparam = 0;
-	thisd = NULL;
-	end = &mtype->u.func.params;
-	if (!is_static) {
-		thisd = mkdecl("this", DECLOBJECT,
-		               mkpointertype(classt, is_const ? QUALCONST : QUALNONE),
-		               QUALNONE, LINKNONE);
-		thisd->u.obj.storage = SDAUTO;
-		*end = thisd;
-		end = &thisd->next;
-		++mtype->u.func.nparam;
-	}
-	for (cur = funct->u.func.params; cur; cur = cur->next) {
-		nd = mkdecl(cur->name, DECLOBJECT, cur->type, cur->qual, LINKNONE);
-		nd->u.obj.storage = SDAUTO;
-		*end = nd;
-		end = &nd->next;
-		++mtype->u.func.nparam;
+		snprintf(mangled, sizeof mangled, "%s_%s", class_tag, mname);
+		/* const member functions get a distinct mangled name so a const
+		 * object can only call const methods */
+		if (eff_const)
+			strncat(mangled, "K", sizeof mangled - strlen(mangled) - 1);
+		/* overload resolution: append the encoded explicit parameter types
+		 * (`Class_method_ii`); no-arg methods keep the bare mangled name */
+		for (cur = params; cur; cur = cur->next) {
+			char code[64];
+			cpp_mangle_type(cur->type, code, sizeof code);
+			strncat(mangled, code, sizeof mangled - strlen(mangled) - 1);
+		}
+		/* static members get a distinct mangled name (no `this`); the S
+		 * goes after the parameter encoding to match
+		 * cpp_mangled_name_args + "S" */
+		if (is_static)
+			strncat(mangled, "S", sizeof mangled - strlen(mangled) - 1);
+		/* rvalue-object (`this X&& self`) overload: trailing V */
+		if (exobj_rref)
+			strncat(mangled, "V", sizeof mangled - strlen(mangled) - 1);
+		/* mkdecl/scopeputdecl keep the name pointer; persist it off the
+		 * stack (the C parser's token strings are stable, ours is not). */
+		pmangled = xmalloc(strlen(mangled) + 1);
+		strcpy(pmangled, mangled);
+
+		/* Build the mangled function type:
+		 * `Class_method(Class *this, args...) -> funct->base` (or just
+		 * `Class_method(args...)` for a static member).  The declarator
+		 * already parsed the explicit params into funct; we copy those
+		 * decls so funct (kept in the member list for call lowering) and
+		 * mtype don't share the same decl chain. */
+		mtype = mktype(TYPEFUNC, 0);
+		mtype->base = funct->base;
+		mtype->qual = funct->qual;
+		mtype->prop |= funct->prop;
+		mtype->align = funct->align;
+		mtype->u.func.isvararg = funct->u.func.isvararg;
+		mtype->u.func.params = NULL;
+		mtype->u.func.nparam = 0;
+		thisd = NULL;
+		end = &mtype->u.func.params;
+		if (!is_static) {
+			if (has_exobj) {
+				/* deducing-this: the explicit object parameter is mtype
+				 * param[0], so the method-body scope binds `self` (a
+				 * reference that auto-derefs on use); the call site
+				 * passes &obj, which is its lowered pointer.  The body's
+				 * `this` resolves to the object parameter too
+				 * (cpp_this_expr emits &(*self)). */
+				struct decl *objd = mkdecl(exobj->name, DECLOBJECT,
+				    exobj->type, exobj->qual, LINKNONE);
+				objd->u.obj.storage = SDAUTO;
+				*end = objd;
+				end = &objd->next;
+				++mtype->u.func.nparam;
+				thisd = objd;
+			} else {
+				thisd = mkdecl("this", DECLOBJECT,
+				    mkpointertype(classt,
+				        eff_const ? QUALCONST : QUALNONE),
+				    QUALNONE, LINKNONE);
+				thisd->u.obj.storage = SDAUTO;
+				*end = thisd;
+				end = &thisd->next;
+				++mtype->u.func.nparam;
+			}
+		}
+		for (cur = params; cur; cur = cur->next) {
+			nd = mkdecl(cur->name, DECLOBJECT, cur->type, cur->qual,
+			            LINKNONE);
+			nd->u.obj.storage = SDAUTO;
+			*end = nd;
+			end = &nd->next;
+			++mtype->u.func.nparam;
+		}
 	}
 
 	/* Register the mangled function symbol in the class's scope (the

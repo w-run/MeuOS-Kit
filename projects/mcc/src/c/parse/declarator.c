@@ -24,6 +24,37 @@
  * rather than a function parameter declaration?  `Point p(3)` — a numeric
  * literal (or any expression token that cannot begin a parameter
  * declaration) means object construction, not a function declarator. */
+/* Could the current token begin a type-specifier (for disambiguating a
+ * `this X& self` deducing-this parameter from a `this` ctor argument)? */
+static bool
+cpp_is_type_start(struct scope *s)
+{
+	if (tok.kind >= TIDENT)
+		return istypename(s, tokenstr(tok.kind));
+	switch (tok.kind) {
+	case TCONST:
+	case TVOLATILE:
+	case TCONSTEXPR:
+	case TINT:
+	case TCHAR:
+	case TSHORT:
+	case TLONG:
+	case TFLOAT:
+	case TDOUBLE:
+	case TSIGNED:
+	case TUNSIGNED:
+	case TBOOL:
+	case TVOID:
+	case TSTRUCT:
+	case TUNION:
+	case TENUM:
+	case TRESTRICT:
+		return true;
+	default:
+		return false;
+	}
+}
+
 static bool
 is_ctor_expr_start(struct scope *s)
 {
@@ -31,8 +62,30 @@ is_ctor_expr_start(struct scope *s)
 	 * keywords use their static enum values.  A non-typename identifier
 	 * cannot begin a parameter declaration, so it starts constructor
 	 * arguments instead (e.g. `Vec r(v)`). */
-	if (tok.kind >= TIDENT)
+	if (tok.kind >= TIDENT) {
+		extern int g_lang;
+		if (g_lang == 1 &&
+		    strcmp(tokenstr(tok.kind), "this") == 0) {
+			/* `this` alone or as an expression is a valid ctor argument
+			 * (`Vec v(this)`, `Vec v(this->n)`); `this` followed by a
+			 * type-specifier is a C++23 deducing-this explicit object
+			 * parameter (`void f(this X& self)`), which is NOT a ctor
+			 * call. */
+			struct token save = tok;
+			struct token pending;
+			bool deducing;
+			next();
+			deducing = cpp_is_type_start(s);
+			/* rewind: re-queue the token after `this` from a local
+			 * snapshot (tokpush stores the address, so it must not
+			 * point at the global `tok`, which is restored below) */
+			pending = tok;
+			tok = save;
+			tokpush(&pending, 1);
+			return !deducing;
+		}
 		return !istypename(s, tokenstr(tok.kind));
+	}
 	switch (tok.kind) {
 	case TNUMBER:
 	case TSTRINGLIT:
@@ -226,7 +279,21 @@ declaratortypes(struct scope *s, struct list *result, char **name, int *align, s
 				}
 				if (tok.kind == TRPAREN)
 					break;
-				d = parameter(s);
+				/* C++23 deducing this (P0847): a leading `this X& self`
+				 * explicit object parameter.  `this` is an identifier to
+				 * the C lexer; only the first parameter may be one. */
+				if (g_lang == 1 && t->u.func.nparam == 0 &&
+				    tok.kind >= TIDENT &&
+				    strcmp(tokenstr(tok.kind), "this") == 0) {
+					extern void cpp_explicit_obj_begin(void);
+					extern void cpp_explicit_obj_set(struct decl *);
+					cpp_explicit_obj_begin();
+					next(); /* consume 'this' */
+					d = parameter(s);
+					cpp_explicit_obj_set(d);
+				} else {
+					d = parameter(s);
+				}
 				if (d->name)
 					scopeputdecl(s, d);
 				*paramend = d;
