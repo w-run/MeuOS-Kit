@@ -367,6 +367,27 @@ done:
 	return TNUMBER;
 }
 
+/* Is the literal currently being scanned a narrow (single-byte) one?
+ * The buffer begins with the literal prefix, or the opening quote for an
+ * unprefixed narrow literal: "..." / u8"..." are narrow, while L"...",
+ * U"..." and u"..." are wide. */
+static bool
+litnarrow(struct scanner *s)
+{
+	if (s->buf.len == 0)
+		return true;
+	switch (s->buf.str[0]) {
+	case 'L':
+	case 'U':
+		return false;
+	case 'u':
+		/* u"..." (char16_t) is wide; u8"..." is a UTF-8 narrow string. */
+		return !(s->buf.len >= 2 && s->buf.str[1] != '8');
+	default:
+		return true;
+	}
+}
+
 /* Replace the escape sequence that starts at offset start of the token
  * buffer with a canonical form the literal decoder already understands.
  *
@@ -374,9 +395,17 @@ done:
  * keeps quotes, backslashes and NUL escaped in the token text, and the
  * fixed width means a following digit can never be absorbed into it.
  * Larger values become UTF-8 bytes, except for \x{...}, whose value has
- * no character-set meaning and is emitted as a plain \x escape. */
+ * no character-set meaning and is emitted as a plain \x escape.
+ *
+ * A wide \x{...} above 0x1FF is also emitted as a plain \x escape, which
+ * the downstream decoder reads greedily; a wide literal of the form
+ * \x{BIG} followed by a hexadecimal digit therefore merges the two into
+ * one value (a known limitation shared with the non-delimited \x form).
+ * For a narrow literal only the low byte survives, so we write it as a
+ * three-digit octal escape regardless of magnitude -- that keeps the
+ * narrowing correct and a trailing digit unambiguous. */
 static void
-rewriteescape(struct scanner *s, size_t start, unsigned long val, bool hexoct)
+rewriteescape(struct scanner *s, size_t start, unsigned long val, bool hexoct, bool narrow)
 {
 	int shift;
 
@@ -386,6 +415,12 @@ rewriteescape(struct scanner *s, size_t start, unsigned long val, bool hexoct)
 		bufadd(&s->buf, '0' + (val >> 6 & 7));
 		bufadd(&s->buf, '0' + (val >> 3 & 7));
 		bufadd(&s->buf, '0' + (val & 7));
+	} else if (hexoct && narrow) {
+		unsigned long b = val & 0xFF;
+		bufadd(&s->buf, '\\');
+		bufadd(&s->buf, '0' + (b >> 6 & 7));
+		bufadd(&s->buf, '0' + (b >> 3 & 7));
+		bufadd(&s->buf, '0' + (b & 7));
 	} else if (hexoct) {
 		bufadd(&s->buf, '\\');
 		bufadd(&s->buf, 'x');
@@ -449,9 +484,11 @@ escape(struct scanner *s)
 {
 	size_t start;
 	unsigned long val;
+	bool narrow;
 	int i, n, d;
 
 	start = s->buf.len;  /* where nextchar() is about to put the '\\' */
+	narrow = litnarrow(s);
 	nextchar(s);
 	if (s->chr == 'u' || s->chr == 'U') {
 		n = s->chr == 'u' ? 4 : 8;
@@ -469,14 +506,14 @@ escape(struct scanner *s)
 		}
 		if (val > 0x10ffff)
 			error(&s->loc, "universal character name out of range");
-		rewriteescape(s, start, val, false);
+		rewriteescape(s, start, val, false, narrow);
 	} else if (s->chr == 'N') {
 		nextchar(s);
-		rewriteescape(s, start, namedchar(s), false);
+		rewriteescape(s, start, namedchar(s), false, narrow);
 	} else if (s->chr == 'x') {
 		nextchar(s);
 		if (s->chr == '{') {
-			rewriteescape(s, start, delimited(s, "hexadecimal escape sequence"), true);
+			rewriteescape(s, start, delimited(s, "hexadecimal escape sequence"), true, narrow);
 			return;
 		}
 		if (!isxdigit(s->chr))
