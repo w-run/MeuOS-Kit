@@ -3543,24 +3543,35 @@ cpp_template_decl(struct scope *s, struct type *owner)
 
 	/* C++20 requires-clause: `template<...> requires Expr<T> decl`.
 	 * Buffer the constraint expression tokens (everything from `requires`
-	 * up to the start of the declaration).  The constraint is normally a
-	 * single `Concept<T>` term: we consume tokens until a top-level
-	 * identifier that follows the closing '>' of a `Concept<...>` (that
-	 * identifier begins the return type), or until '{' / ';'. */
+	 * up to the start of the declaration).  The constraint is a boolean
+	 * expression over concept uses (`Small<T>`, `Small<T> && NotVoid<T>`,
+	 * `!Small<T>`); we consume tokens until the return type / function
+	 * name of the declaration begins, or until '{' / ';'.  A constraint
+	 * combinator (`&&` / `||` / `!`) keeps the following concept name in
+	 * the clause. */
 	if (cpp_tok_kind() == CPP_TREQUIRES) {
 		struct token *ctoks = NULL;
 		size_t cn = 0, ccap = 0;
 		int depth = 0;
+		bool after_op = false; /* previous token was && / || / ! */
 		next(); /* consume 'requires' */
 		for (;;) {
 			if (tok.kind == TEOF)
 				break;
 			if (depth == 0 && (tok.kind == TLBRACE || tok.kind == TSEMICOLON))
 				break;
-			if (depth == 0 && cn > 0 && tok.kind >= TIDENT &&
-			    cpp_classify_ident(tokenstr(tok.kind), 0) == CPP_TNONE &&
-			    tok.kind != tokenget(tmpl->name ? tmpl->name : "", 0))
-				break; /* return-type identifier begins the declaration */
+			/* The declaration begins with the return type (a keyword
+			 * like `int` or a type/function name), or '{' / ';'.  A
+			 * constraint combinator (`&&` / `||` / `!`) means the
+			 * next identifier is another concept name and stays part
+			 * of the requires-clause; identifiers and template-arg
+			 * brackets are also constraint tokens. */
+			if (depth == 0 && cn > 0 && !after_op &&
+			    (tok.kind >= TIDENT ||
+			     (tok.kind != TLESS && tok.kind != TGREATER &&
+			      tok.kind != TCOMMA && tok.kind != TLAND &&
+			      tok.kind != TLOR && tok.kind != TLNOT)))
+				break;
 			if (tok.kind == TLESS || tok.kind == TLPAREN || tok.kind == TLBRACK)
 				++depth;
 			else if (tok.kind == TGREATER || tok.kind == TRPAREN ||
@@ -3573,6 +3584,8 @@ cpp_template_decl(struct scope *s, struct type *owner)
 				ctoks = xreallocarray(ctoks, ccap, sizeof *ctoks);
 			}
 			ctoks[cn++] = tok;
+			after_op = tok.kind == TLAND || tok.kind == TLOR ||
+			    tok.kind == TLNOT;
 			next();
 		}
 		tmpl->constraint = ctoks;
@@ -3686,90 +3699,230 @@ cpp_tmpl_deduce(struct cpp_template *tmpl, struct expr *arglist,
 	return true;
 }
 
-/* C++20 constraint checking (minimal): evaluate the requires-clause of a
- * template against the deduced argument types.
+/* C++20 constraint checking: evaluate the requires-clause of a template
+ * against the deduced argument types.
  *
- * The constraint is a concept use `Concept<T>` (buffered by
- * cpp_template_decl).  We look up the concept definition, replay its
- * body tokens with the template-parameter names bound to the actual
- * types (they are already in scope as DECLTYPE decls), parse the body as
- * an expression and constant-fold it: a nonzero result means the
- * constraint is satisfied.  Returns true when there is no constraint.
- */
-static bool
-cpp_check_constraint(struct cpp_template *tmpl, struct scope *bs)
+ * A constraint is a boolean expression over concept uses:
+ *   `Small<T>`, `Small<T> && NotVoid<T>`, `!Small<T>`, `A<T> || B<T>`.
+ * We look up each concept definition, replay its body tokens with the
+ * template-parameter names bound to the actual types (already in scope as
+ * DECLTYPE decls), parse the body as an expression and constant-fold it:
+ * a nonzero result means that concept use is satisfied.  `&&`, `||`, `!`
+ * combine sub-constraints recursively.  Returns true when there is no
+ * constraint. */
+static bool eval_constraint(struct token *c, size_t n, struct scope *bs);
+
+/* Maximum constraint expansion depth (guards against recursive
+ * concept definitions referencing each other). */
+#define MAX_CONSTRAINT_DEPTH 16
+
+/* Expand a concept body: substitute the body's template parameters with
+ * the argument tokens and recursively expand any concept uses inside the
+ * body.  Returns a heap-allocated token array kept alive through the
+ * tokpush/expr below. */
+static struct token *
+expand_concept_body(struct cpp_template *con, struct token *args,
+    size_t nargs, struct scope *bs, size_t *outn, int depth)
 {
-	struct token *c = tmpl->constraint;
-	size_t n = tmpl->nconstraint;
-	struct cpp_template *con;
+	struct token *out = NULL;
+	size_t on = 0, cap = 0;
+	size_t i;
+
+	for (i = 0; i < con->ntoks; i++) {
+		struct token t = con->toks[i];
+		/* substitute the concept's own parameter names */
+		if (t.kind >= TIDENT) {
+			struct cpp_tmpl_param *pp;
+			size_t k = 0;
+			for (pp = con->params; pp; pp = pp->next, ++k)
+				if (strcmp(pp->name, tokenstr(t.kind)) == 0)
+					break;
+			if (pp && k < nargs) {
+				if (on >= cap) {
+					cap = cap ? cap * 2 : 32;
+					out = xreallocarray(out, cap, sizeof *out);
+				}
+				out[on++] = args[k];
+				continue;
+			}
+		}
+		/* a concept use inside the body: `Name < ... >` */
+		if (depth < MAX_CONSTRAINT_DEPTH && t.kind >= TIDENT &&
+		    i + 2 < con->ntoks && con->toks[i + 1].kind == TLESS) {
+			struct cpp_template *sub;
+			for (sub = g_cpp_templates; sub; sub = sub->next)
+				if (sub->is_concept &&
+				    strcmp(sub->name, tokenstr(t.kind)) == 0)
+					break;
+			if (sub) {
+				size_t j = i + 2;
+				int d = 1;
+				while (j < con->ntoks && d > 0) {
+					if (con->toks[j].kind == TLESS)
+						++d;
+					else if (con->toks[j].kind == TGREATER)
+						--d;
+					++j;
+				}
+				{
+					struct token *body;
+					size_t bn;
+					body = expand_concept_body(sub,
+					    &con->toks[i + 2], j - 2 - (i + 2),
+					    bs, &bn, depth + 1);
+					for (size_t q = 0; q < bn; q++) {
+						if (on >= cap) {
+							cap = cap ? cap * 2 : 32;
+							out = xreallocarray(out, cap, sizeof *out);
+						}
+						out[on++] = body[q];
+					}
+				}
+				i = j - 1;
+				continue;
+			}
+		}
+		if (on >= cap) {
+			cap = cap ? cap * 2 : 32;
+			out = xreallocarray(out, cap, sizeof *out);
+		}
+		out[on++] = t;
+	}
+	*outn = on;
+	return out;
+}
+
+/* Expand a constraint token stream, replacing concept uses `Name<args>`
+ * with their (recursively expanded) concept bodies. */
+static struct token *
+expand_constraint_tokens(struct token *c, size_t n, struct scope *bs,
+    size_t *outn)
+{
+	struct token *out = NULL;
+	size_t on = 0, cap = 0;
+	size_t i;
+
+	for (i = 0; i < n; ) {
+		if (c[i].kind >= TIDENT && i + 2 < n &&
+		    c[i + 1].kind == TLESS) {
+			struct cpp_template *con;
+			for (con = g_cpp_templates; con; con = con->next)
+				if (con->is_concept &&
+				    strcmp(con->name, tokenstr(c[i].kind)) == 0)
+					break;
+			if (con) {
+				size_t j = i + 2;
+				int d = 1;
+				while (j < n && d > 0) {
+					if (c[j].kind == TLESS)
+						++d;
+					else if (c[j].kind == TGREATER)
+						--d;
+					++j;
+				}
+				{
+					struct token *body;
+					size_t bn;
+					body = expand_concept_body(con,
+					    &c[i + 2], j - 2 - (i + 2),
+					    bs, &bn, 0);
+					for (size_t q = 0; q < bn; q++) {
+						if (on >= cap) {
+							cap = cap ? cap * 2 : 64;
+							out = xreallocarray(out, cap, sizeof *out);
+						}
+						out[on++] = body[q];
+					}
+				}
+				i = j;
+				continue;
+			}
+		}
+		if (on >= cap) {
+			cap = cap ? cap * 2 : 64;
+			out = xreallocarray(out, cap, sizeof *out);
+		}
+		out[on++] = c[i];
+		++i;
+	}
+	*outn = on;
+	return out;
+}
+
+/* Evaluate one concept use `Name<args>` by expanding it into plain
+ * constant-expression tokens and folding the result. */
+static bool
+eval_concept_use(struct token *c, size_t n, struct scope *bs)
+{
 	struct token cur;
 	struct expr *e;
+	struct token *exp;
+	size_t en;
 
-	if (!c || !n)
-		return true;
-
-	/* the constraint is a concept use: `Concept<...>` — the first token
-	 * is the concept name */
-	if (c[0].kind < TIDENT)
+	if (n == 0 || c[0].kind < TIDENT)
 		error(&tok.loc, "requires-clause must name a concept");
-	for (con = g_cpp_templates; con; con = con->next)
-		if (con->is_concept && strcmp(con->name, tokenstr(c[0].kind)) == 0)
-			break;
-	if (!con)
-		error(&tok.loc, "unknown concept '%s' in requires-clause",
-		    tokenstr(c[0].kind));
+	exp = expand_constraint_tokens(c, n, bs, &en);
+	if (!exp || !en)
+		error(&tok.loc, "requires-clause must name a concept");
 
-	/* replay the concept body (with its own template parameter bound to
-	 * the same type as this template's first parameter), parse + fold */
 	{
 		extern struct expr *expr(struct scope *);
 		extern struct expr *eval(struct expr *);
 		extern void tokpush(struct token *, size_t);
-		extern struct decl *mkdecl(char *, enum declkind, struct type *,
-		    enum typequal, enum linkage);
-		extern void scopeputdecl(struct scope *, struct decl *);
-		extern struct scope *mkscope(struct scope *);
-		struct scope *cs = mkscope(bs);
-		struct cpp_tmpl_param *cp;
-		struct decl *td;
-		int i;
-
-		/* bind the concept's template parameter(s) to the deduced types
-		 * (positional: concept param i <- template arg i) */
-		i = 0;
-		for (cp = con->params; cp; cp = cp->next, ++i) {
-			struct type *at = NULL;
-			/* map to the outer template's deduced type: the constraint
-			 * `Integral<T>` passes `T` (the outer template's param);
-			 * find the type bound to that parameter name in bs */
-			if (i + 1 < (int)n && c[i + 1].kind == TLESS) {
-				/* argument is the token after '<', e.g. `T` */
-				if (i + 2 < (int)n && c[i + 2].kind >= TIDENT) {
-					struct decl *pd = scopegetdecl(bs,
-					    tokenstr(c[i + 2].kind), 1);
-					if (pd && pd->kind == DECLTYPE)
-						at = pd->type;
-				}
-			}
-			if (!at)
-				error(&tok.loc, "cannot resolve concept argument for '%s'",
-				    con->name);
-			td = mkdecl((char *)cp->name, DECLTYPE, at, QUALNONE, LINKNONE);
-			scopeputdecl(cs, td);
-		}
-
 		cur = tok;
 		tokpush(&cur, 1);
-		tokpush(con->toks, con->ntoks);
+		tokpush(exp, en);
 		next();
-		e = expr(cs);
+		e = expr(bs);
+		/* the expanded constraint may have consumed the saved token;
+		 * put it back so decl() resumes at the right position */
+		tokpush(&cur, 1);
+		next();
 		e = eval(e);
 		if (!e || !(e->type->prop & PROPINT) || e->kind != EXPRCONST)
-			error(&tok.loc, "concept '%s' is not a constant boolean expression",
-			    con->name);
+			error(&tok.loc,
+			    "requires-clause is not a constant boolean expression");
 		return e->u.constant.u != 0;
 	}
 }
+
+/* Recursively evaluate a constraint expression: `A && B`, `A || B`,
+ * `!A`, or a single concept use `Name<args>`. */
+static bool
+eval_constraint(struct token *c, size_t n, struct scope *bs)
+{
+	size_t i;
+	int depth = 0;
+
+	if (!c || !n)
+		return true;
+	for (i = 0; i < n; i++) {
+		if (c[i].kind == TLESS || c[i].kind == TLPAREN ||
+		    c[i].kind == TLBRACK)
+			++depth;
+		else if ((c[i].kind == TGREATER || c[i].kind == TRPAREN ||
+		    c[i].kind == TRBRACK) && depth > 0)
+			--depth;
+		else if (depth == 0) {
+			if (c[i].kind == TLAND)
+				return eval_constraint(c, i, bs) &&
+				    eval_constraint(c + i + 1, n - i - 1, bs);
+			if (c[i].kind == TLOR)
+				return eval_constraint(c, i, bs) ||
+				    eval_constraint(c + i + 1, n - i - 1, bs);
+			if (c[i].kind == TLNOT)
+				return !eval_constraint(c + i + 1, n - i - 1, bs);
+		}
+	}
+	return eval_concept_use(c, n, bs);
+}
+
+static bool
+cpp_check_constraint(struct cpp_template *tmpl, struct scope *bs)
+{
+	return eval_constraint(tmpl->constraint, tmpl->nconstraint, bs);
+}
+
 
 /* Find the DECLFUNC for the instantiation of template `name` with the
  * given call-site arguments, instantiating it (replaying the buffered
@@ -3953,10 +4106,13 @@ cpp_tmpl_find_or_instantiate(struct scope *s, const char *name,
 	next();
 	/* C++20 requires-clause: the constraint must hold for the deduced
 	 * types, otherwise the instantiation is ill-formed. */
-	if (!cpp_check_constraint(tmpl, bs))
-		error(&tok.loc,
-		    "template '%s' instantiated with a type that does not satisfy its requires-clause",
-		    name);
+	{
+		bool cok = cpp_check_constraint(tmpl, bs);
+			if (!cok)
+			error(&tok.loc,
+			    "template '%s' instantiated with a type that does not satisfy its requires-clause",
+			    name);
+	}
 	if (!decl(bs, NULL))
 		error(&tok.loc, "failed to instantiate template '%s'", name);
 	if (g_cpp_pack_depth > 0)

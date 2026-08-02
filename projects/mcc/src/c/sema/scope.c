@@ -17,6 +17,7 @@ scopeinit(void)
 		{.name = "__builtin_nanf",        .kind = DECLBUILTIN, .u.builtin = BUILTINNANF},
 		{.name = "__builtin_offsetof",    .kind = DECLBUILTIN, .u.builtin = BUILTINOFFSETOF},
 		{.name = "__builtin_types_compatible_p", .kind = DECLBUILTIN, .u.builtin = BUILTINTYPESCOMPATIBLEP},
+		{.name = "__is_same", .kind = DECLBUILTIN, .u.builtin = BUILTINTYPESCOMPATIBLEP},
 		{.name = "__builtin_unreachable", .kind = DECLBUILTIN, .u.builtin = BUILTINUNREACHABLE},
 		{.name = "__builtin_va_arg",      .kind = DECLBUILTIN, .u.builtin = BUILTINVAARG},
 		{.name = "__builtin_va_copy",     .kind = DECLBUILTIN, .u.builtin = BUILTINVACOPY},
