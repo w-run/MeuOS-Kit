@@ -146,7 +146,11 @@ round_digits(char *digits, int count, int *decpt)
 			(*decpt)++;
 		}
 	}
-	digits[count] = '\0';
+	/* count==0: digits[0] holds the rounded first digit (or the raw
+	 * first digit when no carry) -- do not NUL it out, the caller needs
+	 * it for a %.0f of a value in (0,1). */
+	if (count > 0)
+		digits[count] = '\0';
 }
 
 /* Exact decimal digit extraction via the integer mantissa.
@@ -373,23 +377,28 @@ __meuos_fmt_fp(struct __meuos_print_sink *sink, double value, int conv,
 			if (sig < 1) sig = 1;
 		} else if (conv == 'f' || conv == 'F') {
 			/* %f: need the integer part plus `precision` fractional
-			 * digits, plus one digit that drives rounding at the
-			 * precision boundary.  Never fewer than the 17 digits a
-			 * double can represent (matches the historical output). */
+			 * digits.  dto_digits generates sig+1 digits and rounds at
+			 * position sig, so sig must equal int_digits + precision:
+			 * the rounding trigger is then exactly the (precision+1)-th
+			 * fractional digit, and the result has precision fraction
+			 * digits.  (An extra +1 here, or a minimum of 17, moves the
+			 * rounding point past the digits %f actually prints and
+			 * silently drops the carry -- e.g. pi %.6f printed
+			 * 3.141592 instead of 3.141593.) */
 			int int_digits = 1;
 			if (value != 0.0) {
 				int_digits = dto_decpt(value);
 				if (int_digits < 0) int_digits = 0;
 			}
-			sig = int_digits + precision + 1;
-			if (sig < 17) sig = 17;
+			sig = int_digits + precision;
 		} else {
 			/* %e: one digit before the point + precision fraction. */
 			sig = precision + 1;
-			if (sig < 17) sig = 17;
 		}
 		ndig = sig;
+		if (ndig < 1) ndig = 1;
 		if (value == 0.0) {
+			if (sig < 1) sig = 1;   /* %.0f of 0.0 must still emit digits[0]='0' */
 			for (i = 0; i < sig; i++) digits[i] = '0';
 			digits[sig] = '\0';
 			decpt = 1;
