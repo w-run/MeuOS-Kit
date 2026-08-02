@@ -546,9 +546,14 @@ mdce_block(MFn *fn, MBlk *b)
 
 	for (uint32_t i = 0; i < b->nins; i++) {
 		MIns *in = &b->ins[i];
+		/* MOP_PAR is ABI-significant: even an unused parameter occupies an
+		 * argument register slot, so the machine backend's selpar must see
+		 * every one (removing an unused PAR shifted a following scalar
+		 * param's register from RSI to RDI, breaking the caller/callee
+		 * agreement under MCC_MIR_BACKEND=1; verified 2026-08-03). */
 		bool has_side_effect = (in->op == MOP_STORE || in->op == MOP_CALL ||
 		                        in->op == MOP_ALLOCA || in->op == MOP_VASTART ||
-		                        in->op == MOP_SALLOC);
+		                        in->op == MOP_SALLOC || in->op == MOP_PAR);
 		if (in->dst && in->dst->nuse == 0 && !has_side_effect &&
 		    in->dst->kind == MV_TEMP) {
 			/* no uses and no side effects -> dead */

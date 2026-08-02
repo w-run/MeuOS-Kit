@@ -300,8 +300,21 @@ mreg_scan(MFnM *fm, MRegCtx *ctx)
 				MVal *ops[5] = { in->dst, in->src[0], in->src[1],
 				                 in->addr.base, in->addr.index };
 				for (int k = 0; k < 5; k++)
-					if (ops[k] && ops[k]->kind == MV_REG && ops[k]->reg >= 0)
+					if (ops[k] && ops[k]->kind == MV_REG && ops[k]->reg >= 0) {
 						fixed_add(&fixed[ops[k]->reg], in->pos);
+						/* Incoming argument registers hold their values from
+						 * function entry until the entry-block instruction
+						 * that consumes them (selpar's param moves).  Any
+						 * interval starting before that consumption would
+						 * clobber the argument — e.g. the empty-class pad
+						 * alloca grabbed RSI and overwrote a following
+						 * scalar parameter still living in RSI (verified
+						 * 2026-08-03 under MCC_MIR_BACKEND=1).  Reserve the
+						 * register for the whole [0, pos) prefix. */
+						if (b == fm->start)
+							for (uint32_t p = 0; p < in->pos; p++)
+								fixed_add(&fixed[ops[k]->reg], p);
+					}
 				if (in->op == MMOP_CALL) {
 					/* keep every call: a fixed 64-entry array silently
 					 * dropped calls in huge functions, misclassifying

@@ -232,6 +232,35 @@ test_fold_signed_pow2_values(void)
 	}
 }
 
+/* Test 3e: an unused MOP_PAR is ABI-significant and must survive DCE.
+ * Removing an unused parameter's PAR shifted a following scalar
+ * parameter's argument register (RSI->RDI) under MCC_MIR_BACKEND=1,
+ * breaking the caller/callee agreement (verified 2026-08-03). */
+static void
+test_dce_param_kept(void)
+{
+	MFn *fn = mfn_new("dce_param", 2);
+	MBlk *b = mblk_new(fn, "entry");
+	mfn_addblk(fn, b);
+
+	MVal *a = mval_new(fn, MV_TEMP, MT_AGG, 0, "a");  /* unused agg param */
+	MVal *n = mval_new(fn, MV_TEMP, MT_I32, 0, "n");
+	MVal *r = mval_new(fn, MV_TEMP, MT_I32, 0, "r");
+	MVal *dead = mval_new(fn, MV_TEMP, MT_I32, 0, "dead");
+	madd1(fn, b, MOP_PAR, MT_AGG, a, MREF_CON(0));
+	madd1(fn, b, MOP_PAR, MT_I32, n, MREF_CON(0));
+	madd(fn, b, MOP_ADD, MT_I32, dead, MREF_VAL(n), MREF_CON(mconst_int(fn, MT_I32, 1)));
+	madd1(fn, b, MOP_COPY, MT_I32, r, MREF_VAL(n));
+	mret(fn, b, MREF_VAL(r));
+
+	run_mir_pass(fn, MIR_PASS_DCE);
+	/* both PARs survive (the unused agg param is ABI-significant); the
+	 * genuinely dead ADD is removed */
+	CHECK(count_op(b, MOP_PAR) == 2, "unused agg param's PAR kept");
+	CHECK(count_op(b, MOP_ADD) == 0, "dead add removed");
+	mfn_free(fn);
+}
+
 /* Test 4: dead code elimination. */
 static void
 test_dce(void)
@@ -536,6 +565,7 @@ int main(void)
 	test_simpl_sdiv_not_reduced();
 	test_simpl_sdiv_pow2_exact();
 	test_fold_signed_pow2_values();
+	test_dce_param_kept();
 	test_dce();
 	test_dce_sideeffect();
 	test_copy_prop();
