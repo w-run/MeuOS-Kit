@@ -340,6 +340,16 @@ primaryexpr(struct scope *s)
 			}
 			next();
 			break;
+		case TLBRACK: {
+			/* C++ lambda expression: `[captures](params) -> ret { body }`.
+			 * The array-subscript form is a postfix operator, so a `[`
+			 * here (primary position) is always a lambda. */
+			extern int g_lang;
+			extern struct expr *cpp_lambda_expr(struct scope *);
+			if (g_lang == 1)
+				return cpp_lambda_expr(s);
+			break;
+		}
 		}
 		error(&tok.loc, "expected primary expression");
 	}

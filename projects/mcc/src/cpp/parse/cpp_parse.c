@@ -885,38 +885,42 @@ cpp_parse_method_body(struct cpp_pending_method *pm)
 	for (nd = pm->mtype->u.func.params; nd; nd = nd->next)
 		scopeputdecl(fs, nd);
 
-	g_cpp_method.class_type = pm->classt;
-	g_cpp_method.this_decl = pm->is_static ? NULL : pm->thisd;
-	g_cpp_method.active = true;
+	/* method-body context is saved/restored so a nested method-body parse
+	 * (an inner class or a lambda closure defined inside this body) does
+	 * not clobber the outer context mid-parse */
+	{
+		struct cpp_method_ctx saved = g_cpp_method;
+		g_cpp_method.class_type = pm->classt;
+		g_cpp_method.this_decl = pm->is_static ? NULL : pm->thisd;
+		g_cpp_method.active = true;
 
-	f = mkfunc(pm->d, pm->d->name, pm->d->type, fs);
-	/* constructor: run base-class constructors before the body */
-	if (strcmp(pm->mname, pm->tag) == 0) {
-		cpp_emit_base_ctor(f);
-		/* point every vptr at this class's vtable (the base ctor just set
-		 * them to the base view; the complete object needs the final one) */
-		cpp_init_vptrs(f, pm->classt, cpp_this_expr());
-	}
-	stmt(f, fs);
-	if (pm->d->u.func.isnoreturn)
-		funchlt(f);
-	/* C++14 `auto` return type: backfill the type deduced from the body's
-	 * return statement(s). */
-	if (pm->d->type->base == &typeauto) {
-		if (!g_cpp_auto_ret_type)
-			error(&tok.loc, "'auto' member function '%s' has no return statement to deduce its type from", pm->mname);
-		pm->d->type->base = g_cpp_auto_ret_type;
-		g_cpp_auto_ret_type = NULL;
-		g_cpp_auto_ret_func = NULL;
-	}
-	emitfunc(f, pm->d->linkage == LINKEXTERN);
-	delscope(fs);
-	delfunc(f);
-	pm->d->defined = true;
+		f = mkfunc(pm->d, pm->d->name, pm->d->type, fs);
+		/* constructor: run base-class constructors before the body */
+		if (strcmp(pm->mname, pm->tag) == 0) {
+			cpp_emit_base_ctor(f);
+			/* point every vptr at this class's vtable (the base ctor just set
+			 * them to the base view; the complete object needs the final one) */
+			cpp_init_vptrs(f, pm->classt, cpp_this_expr());
+		}
+		stmt(f, fs);
+		if (pm->d->u.func.isnoreturn)
+			funchlt(f);
+		/* C++14 `auto` return type: backfill the type deduced from the
+		 * body's return statement(s). */
+		if (pm->d->type->base == &typeauto) {
+			if (!g_cpp_auto_ret_type)
+				error(&tok.loc, "'auto' member function '%s' has no return statement to deduce its type from", pm->mname);
+			pm->d->type->base = g_cpp_auto_ret_type;
+			g_cpp_auto_ret_type = NULL;
+			g_cpp_auto_ret_func = NULL;
+		}
+		emitfunc(f, pm->d->linkage == LINKEXTERN);
+		delscope(fs);
+		delfunc(f);
+		pm->d->defined = true;
 
-	g_cpp_method.active = false;
-	g_cpp_method.this_decl = NULL;
-	g_cpp_method.class_type = NULL;
+		g_cpp_method = saved;
+	}
 }
 
 /* Collect the `{...}` body tokens and queue the method for replay once
@@ -966,9 +970,17 @@ static void
 flush_pending_methods(void)
 {
 	extern void tokpush(struct token *, size_t);
-	struct cpp_pending_method *pm;
+	struct cpp_pending_method *head, *pm;
 
-	for (pm = g_cpp_pending_methods; pm; pm = pm->next) {
+	/* Detach the pending list first: a method body that defines an inner
+	 * class (or a lambda closure) queues more methods, and an inner
+	 * class's flush must not re-process the methods already being handled
+	 * here. */
+	head = g_cpp_pending_methods;
+	g_cpp_pending_methods = NULL;
+	g_cpp_pending_methods_end = &g_cpp_pending_methods;
+
+	for (pm = head; pm; pm = pm->next) {
 		/* the class-body-following token (e.g. ';') currently sits in the
 		 * global tok; push it back so the replayed body is parsed in front
 		 * of it and next() returns to it afterwards. */
@@ -978,8 +990,6 @@ flush_pending_methods(void)
 		next(); /* position tok at the first replayed token ('{') */
 		cpp_parse_method_body(pm);
 	}
-	g_cpp_pending_methods = NULL;
-	g_cpp_pending_methods_end = &g_cpp_pending_methods;
 }
 
 /* Operator-overload mangling code for a punctuation token: `operator+`
@@ -1006,6 +1016,7 @@ cpp_op_mangle(enum tokenkind op)
 	case TBOR:     return "or";
 	case TXOR:     return "er";
 	case TLNOT:    return "nt";
+	case TLPAREN:  return "cl";   /* operator() — functors / lambdas */
 	default:       return NULL;
 	}
 }
@@ -2655,6 +2666,12 @@ cpp_sizeof_pack(void)
 	return g_cpp_pack_depth > 0 ? g_cpp_pack_stack[g_cpp_pack_depth - 1] : 0;
 }
 
+/* --- C++11 lambda expressions (anonymous-class lowering) --------------- */
+
+/* Monotonic counter for the synthesized closure class names (`__lambda0`,
+ * `__lambda1`, ...). */
+static int g_cpp_lambda_count;
+
 const char *
 cpp_tmpl_lookup(const char *name)
 {
@@ -3476,4 +3493,261 @@ cpp_tmpl_member_instantiate(struct scope *s, struct expr *thisp,
 	e->u.ident.decl = fd;
 	e->lvalue = false;
 	return decay(e);
+}
+
+/* One captured variable of a lambda (`x` in `[x]`). */
+struct cpp_lambda_cap {
+	const char *name;      /* capture name (also the closure member name) */
+	struct type *t;        /* captured variable's type */
+	struct decl *d;        /* the enclosing-scope variable decl */
+	bool by_ref;           /* `[&x]` reference capture */
+};
+
+/* Token-stream builder for the synthesized closure-class definition. */
+static void
+cpp_tb(struct token *buf, size_t *n, struct token tmpl, enum tokenkind k,
+       const char *name)
+{
+	struct token *t = &buf[*n];
+	*t = tmpl;
+	if (name)
+		t->kind = tokenget(name, strlen(name));
+	else
+		t->kind = k;
+	++*n;
+}
+
+/* Parse a C++11 lambda expression `[captures](params) -> ret { body }` and
+ * lower it to an anonymous closure class (`__lambdaN`) whose `operator()`
+ * is the lambda body and whose members are the by-value captures; returns
+ * a freshly constructed closure object (an anonymous temporary).
+ *
+ * The closure class is defined by replaying a synthesized
+ * `class __lambdaN { ... }` through cpp_class_decl, reusing the existing
+ * member/constructor/operator machinery.  By-reference captures, default
+ * captures (`[=]` / `[&]`), init-captures and generic (auto) parameters
+ * are not supported yet. */
+struct expr *
+cpp_lambda_expr(struct scope *s)
+{
+	extern struct func *curfunc;
+	extern struct decl *mkdecl(char *, enum declkind, struct type *,
+	    enum typequal, enum linkage);
+	extern void funcinit(struct func *, struct decl *, struct init *,
+	    bool);
+	extern void tokpush(struct token *, size_t);
+
+	struct cpp_lambda_cap caps[16];
+	int ncap = 0;
+	struct token *ptoks = NULL, *rtoks = NULL, *btoks = NULL;
+	size_t pn = 0, pcap = 0, rn = 0, rcap = 0, bn = 0, bcap = 0;
+	struct token *wtoks;
+	size_t wn = 0, wcap;
+	struct token tmpl = tok;
+	char tagname[64], tn[32], cn[32];
+	struct token cur;
+	struct decl *td;
+	struct type *ct;
+	struct expr *e, *args, **ae;
+	struct decl *tmp;
+	int i;
+
+	/* --- capture list `[ x, y ]` --- */
+	next(); /* consume '[' */
+	while (tok.kind != TRBRACK) {
+		if (tok.kind == TBAND)
+			error(&tok.loc, "reference capture '[&...]' is not supported yet (by-value capture only)");
+		if (tok.kind < TIDENT)
+			error(&tok.loc, "expected capture name in lambda capture list");
+		if (ncap >= (int)countof(caps))
+			error(&tok.loc, "too many captures in lambda");
+		caps[ncap].name = tokenstr(tok.kind);
+		caps[ncap].by_ref = false;
+		caps[ncap].d = scopegetdecl(s, caps[ncap].name, 1);
+		if (!caps[ncap].d || caps[ncap].d->kind != DECLOBJECT)
+			error(&tok.loc, "cannot capture variable '%s'", caps[ncap].name);
+		caps[ncap].t = caps[ncap].d->type;
+		++ncap;
+		next();
+		if (tok.kind == TRBRACK)
+			break;
+		expect(TCOMMA, "',' or ']' in lambda capture list");
+	}
+	next(); /* consume ']' */
+
+	/* --- parameter list `( params )` (optional in C++; buffer through
+	 * the matching ')') --- */
+	if (tok.kind == TLPAREN) {
+		int pdepth = 0;
+		for (;;) {
+			if (pn >= pcap) {
+				pcap = pcap ? pcap * 2 : 16;
+				ptoks = xreallocarray(ptoks, pcap, sizeof *ptoks);
+			}
+			ptoks[pn++] = tok;
+			if (tok.kind == TLPAREN)
+				++pdepth;
+			else if (tok.kind == TRPAREN) {
+				--pdepth;
+				if (pdepth == 0) {
+					next();
+					break;
+				}
+			}
+			next();
+		}
+	} /* else: `[] { ... }` / `[] -> ret { ... }` — empty parameter list */
+
+	/* --- optional `-> ret` return type (buffer up to the body) --- */
+	if (tok.kind == TARROW) {
+		next(); /* consume '->' */
+		while (tok.kind != TLBRACE && tok.kind != TEOF) {
+			if (rn >= rcap) {
+				rcap = rcap ? rcap * 2 : 16;
+				rtoks = xreallocarray(rtoks, rcap, sizeof *rtoks);
+			}
+			rtoks[rn++] = tok;
+			next();
+		}
+	}
+
+	/* --- function body `{ ... }` --- */
+	{
+		int bd = 0;
+		if (tok.kind != TLBRACE)
+			error(&tok.loc, "expected lambda body");
+		for (;;) {
+			if (bn >= bcap) {
+				bcap = bcap ? bcap * 2 : 32;
+				btoks = xreallocarray(btoks, bcap, sizeof *btoks);
+			}
+			btoks[bn++] = tok;
+			if (tok.kind == TLBRACE)
+				++bd;
+			else if (tok.kind == TRBRACE) {
+				--bd;
+				if (bd == 0) {
+					next();
+					break;
+				}
+			}
+			next();
+		}
+	}
+
+	/* --- synthesize the closure class `class __lambdaN { ... };` ---
+	 * Defined at file scope (like a real C++ closure type) so the
+	 * operator() body's name lookup does not see the enclosing function's
+	 * locals (which would shadow the captured members). */
+	{
+		extern struct scope filescope;
+		snprintf(tagname, sizeof tagname, "__lambda%d", g_cpp_lambda_count++);
+		for (i = 0; i < ncap; ++i) {
+			/* per-capture DECLTYPE `__lti` bound to the captured type;
+			 * the closure member declaration `__lti cap_i` is typed. */
+			snprintf(tn, sizeof tn, "__lt%d", i);
+			td = mkdecl(xmalloc(strlen(tn) + 1), DECLTYPE, caps[i].t,
+			    QUALNONE, LINKNONE);
+			strcpy((char *)td->name, tn);
+			scopeputdecl(&filescope, td);
+		}
+	}
+	wcap = 64 + (size_t)ncap * 24 + pn + rn + bn + 8;
+	wtoks = xmalloc(wcap * sizeof *wtoks);
+
+	cpp_tb(wtoks, &wn, tmpl, 0, "class");
+	cpp_tb(wtoks, &wn, tmpl, 0, tagname);
+	cpp_tb(wtoks, &wn, tmpl, TLBRACE, NULL);
+	cpp_tb(wtoks, &wn, tmpl, 0, "public");
+	cpp_tb(wtoks, &wn, tmpl, TCOLON, NULL);
+	for (i = 0; i < ncap; ++i) {
+		snprintf(tn, sizeof tn, "__lt%d", i);
+		cpp_tb(wtoks, &wn, tmpl, 0, tn);
+		cpp_tb(wtoks, &wn, tmpl, 0, caps[i].name);
+		cpp_tb(wtoks, &wn, tmpl, TSEMICOLON, NULL);
+	}
+	/* synthesized constructor `__lambdaN(__lt0 __c0, ...) { cap = __c; }` */
+	cpp_tb(wtoks, &wn, tmpl, 0, tagname);
+	cpp_tb(wtoks, &wn, tmpl, TLPAREN, NULL);
+	for (i = 0; i < ncap; ++i) {
+		if (i)
+			cpp_tb(wtoks, &wn, tmpl, TCOMMA, NULL);
+		snprintf(tn, sizeof tn, "__lt%d", i);
+		cpp_tb(wtoks, &wn, tmpl, 0, tn);
+		snprintf(cn, sizeof cn, "__c%d", i);
+		cpp_tb(wtoks, &wn, tmpl, 0, cn);
+	}
+	cpp_tb(wtoks, &wn, tmpl, TRPAREN, NULL);
+	cpp_tb(wtoks, &wn, tmpl, TLBRACE, NULL);
+	for (i = 0; i < ncap; ++i) {
+		cpp_tb(wtoks, &wn, tmpl, 0, caps[i].name);
+		cpp_tb(wtoks, &wn, tmpl, TASSIGN, NULL);
+		snprintf(cn, sizeof cn, "__c%d", i);
+		cpp_tb(wtoks, &wn, tmpl, 0, cn);
+		cpp_tb(wtoks, &wn, tmpl, TSEMICOLON, NULL);
+	}
+	cpp_tb(wtoks, &wn, tmpl, TRBRACE, NULL);
+	/* `operator()(params) { body }` — `ret` is the explicit `->` type if
+	 * given, otherwise `auto` (deduced from the body's return). */
+	if (rn) {
+		memcpy(wtoks + wn, rtoks, rn * sizeof *rtoks);
+		wn += rn;
+	} else {
+		cpp_tb(wtoks, &wn, tmpl, 0, "auto");
+	}
+	cpp_tb(wtoks, &wn, tmpl, 0, "operator");
+	cpp_tb(wtoks, &wn, tmpl, TLPAREN, NULL);
+	cpp_tb(wtoks, &wn, tmpl, TRPAREN, NULL);
+	if (pn) {
+		memcpy(wtoks + wn, ptoks, pn * sizeof *ptoks);
+		wn += pn;
+	}
+	if (bn) {
+		memcpy(wtoks + wn, btoks, bn * sizeof *btoks);
+		wn += bn;
+	}
+	cpp_tb(wtoks, &wn, tmpl, TRBRACE, NULL); /* close class body */
+	cpp_tb(wtoks, &wn, tmpl, TSEMICOLON, NULL);
+
+	/* replay the synthesized definition through cpp_class_decl.  The
+	 * closure's operator() body is parsed by flush_pending_methods, which
+	 * clobbers curfunc; restore it so the construction below (and the
+	 * enclosing function's parsing) still targets the right function. */
+	{
+		extern struct scope filescope;
+		struct func *saved_cur = curfunc;
+		cur = tok;
+		tokpush(&cur, 1);
+		tokpush(wtoks, wn);
+		next();
+		cpp_class_decl(&filescope);
+		curfunc = saved_cur;
+	}
+
+	ct = scopegettag(&filescope, tagname, 1);
+	if (!ct)
+		error(&tok.loc, "lambda closure class '%s' was not created", tagname);
+
+	/* --- construct the closure object (anonymous temporary) --- */
+	if (!curfunc)
+		error(&tok.loc, "lambda used outside of a function body is not supported");
+	tmp = mkdecl("tmp", DECLOBJECT, ct, QUALNONE, LINKNONE);
+	tmp->u.obj.storage = SDAUTO;
+	funcinit(curfunc, tmp, NULL, false); /* allocate storage */
+	args = NULL;
+	ae = &args;
+	for (i = 0; i < ncap; ++i) {
+		struct expr *cap = mkexpr(EXPRIDENT, caps[i].t, NULL);
+		cap->qual = caps[i].d->qual;
+		cap->lvalue = true;
+		cap->u.ident.decl = caps[i].d;
+		*ae = cap;
+		ae = &cap->next;
+	}
+	cpp_emit_ctor_call(curfunc, tmp, args);
+
+	e = mkexpr(EXPRIDENT, ct, NULL);
+	e->lvalue = true;
+	e->u.ident.decl = tmp;
+	return e;
 }

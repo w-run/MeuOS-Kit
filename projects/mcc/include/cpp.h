@@ -57,6 +57,9 @@ void cpp_auto_return(struct func *f, struct expr *e);
 /* Number of elements in the innermost replaying template parameter pack
  * (for `sizeof...(Args)`); 0 outside a variadic instantiation. */
 int cpp_sizeof_pack(void);
+/* Parse a C++11 lambda expression and lower it to a closure object of a
+ * synthesized anonymous class (primaryexpr's `[` entry point). */
+struct expr *cpp_lambda_expr(struct scope *s);
 bool cpp_has_ctor(struct type *t, const char *tag);
 bool cpp_emit_default_ctor(struct func *f, struct decl *d);
 bool cpp_has_dtor(struct type *t);

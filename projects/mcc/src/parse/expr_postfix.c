@@ -97,8 +97,34 @@ postfixexpr(struct scope *s, struct expr *r)
 				expect(TRPAREN, "after builtin parameters");
 				break;
 			}
-			if (r->type->kind != TYPEPOINTER || r->type->base->kind != TYPEFUNC)
-				error(&tok.loc, "called object is not a function");
+			if (r->type->kind != TYPEPOINTER || r->type->base->kind != TYPEFUNC) {
+				/* C++ functor call: `obj(args...)` lowers to
+				 * `obj.operator()(args...)` — a class object with an
+				 * operator() member is callable.  Route through the
+				 * existing member-call lowering (which resolves the
+				 * overload from the argument types). */
+				extern int g_lang;
+				extern bool cpp_is_member_function(struct type *,
+				    const char *);
+				extern struct type *g_cpp_member_class;
+				extern const char *g_cpp_member_name;
+				extern bool g_cpp_member_const;
+				if (g_lang == 1 &&
+				    (r->type->kind == TYPESTRUCT ||
+				     r->type->kind == TYPEUNION) &&
+				    cpp_is_member_function(r->type, "operator_cl")) {
+					g_cpp_member_this = mkunaryexpr(TBAND, r);
+					g_cpp_member_this->type =
+					    mkpointertype(r->type, r->qual);
+					g_cpp_member_class = r->type;
+					g_cpp_member_name = "operator_cl";
+					g_cpp_member_const =
+					    (r->qual & QUALCONST) != 0;
+					cpp_pending_record_depth();
+				} else {
+					error(&tok.loc, "called object is not a function");
+				}
+			}
 			{
 				/* Collect the argument expressions first so a C++ member
 				 * call can resolve overloads from the actual argument

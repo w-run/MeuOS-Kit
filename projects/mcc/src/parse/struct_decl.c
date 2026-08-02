@@ -302,6 +302,11 @@ structdecl(struct scope *s, struct structbuilder *b)
 		if (!opcode)
 			error(&tok.loc, "unsupported operator for overloading");
 		next(); /* consume the operator token */
+		/* operator(): the closing ')' of the operator token follows
+		 * (`operator()`, not `operator ( ...`); the next '(' is the
+		 * parameter list. */
+		if (strcmp(opcode, "cl") == 0)
+			expect(TRPAREN, "after 'operator()'");
 
 		ft = mktype(TYPEFUNC, 0);
 		ft->qual = QUALNONE;
