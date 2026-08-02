@@ -1529,7 +1529,9 @@ aarch64_encode_insn(const struct mt_target *target,
 		}
 		if (!found) return -1;
 		int rd = ops[0].reg;
-		emit32(out, &off, 0x1A9F07E0 | (cond << 12) | ((unsigned)rd & 0x1F));
+		int is64 = (ops[0].wreg == XREG);
+		emit32(out, &off, (is64 ? 0x9A9F07E0 : 0x1A9F07E0) |
+		       (cond << 12) | ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
