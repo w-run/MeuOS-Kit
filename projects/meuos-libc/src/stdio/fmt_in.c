@@ -26,6 +26,7 @@ vsscanf(const char *input, const char *format, va_list arguments)
 	int assigned = 0;
 	while (*format) {
 		int width = 0;
+		int length = 0;
 
 		if (isspace_int(*format)) {
 			while (isspace_int(*format)) ++format;
@@ -44,6 +45,16 @@ vsscanf(const char *input, const char *format, va_list arguments)
 		 * conversion consumes (0/absent means unlimited). */
 		while (*format >= '0' && *format <= '9')
 			width = width * 10 + *format++ - '0';
+		/* Length modifier: 0=none, 1=l, 2=ll, 5=h, 6=hh. */
+		if (*format == 'l') {
+			length = 1;
+			++format;
+			if (*format == 'l') { length = 2; ++format; }
+		} else if (*format == 'h') {
+			length = 5;
+			++format;
+			if (*format == 'h') { length = 6; ++format; }
+		}
 		if (*format == 'c') {
 			char *out = va_arg(arguments, char *);
 			int i;
@@ -73,8 +84,8 @@ vsscanf(const char *input, const char *format, va_list arguments)
 			int is_signed = (*format == 'd' || *format == 'i');
 			int negative = 0, digits = 0;
 			int overflow = 0;
-			unsigned value = 0;
-			unsigned limit;
+			unsigned long long value = 0;
+			unsigned long long limit, tmax;
 			if (*format == 'i')
 				base = 0;		/* auto-detect */
 			else if (*format == 'o')
@@ -101,55 +112,67 @@ vsscanf(const char *input, const char *format, va_list arguments)
 				input += 2;
 				digits += 2;
 			}
-			/* Clamp target: the most negative int is INT_MAX+1. */
-			limit = (is_signed && negative) ? (unsigned)INT_MAX + 1u : (unsigned)INT_MAX;
+			/* Target-type bounds (length: 0=int, 1=long, 2=long long,
+			 * 5=short, 6=signed/unsigned char). */
+			switch (length) {
+			case 2: tmax = is_signed ? 0x7fffffffffffffffULL : 0xffffffffffffffffULL; break;
+			case 1: tmax = is_signed ? (unsigned long long)LONG_MAX : (unsigned long long)ULONG_MAX; break;
+			case 5: tmax = is_signed ? (unsigned long long)SHRT_MAX : (unsigned long long)USHRT_MAX; break;
+			case 6: tmax = is_signed ? (unsigned long long)SCHAR_MAX : (unsigned long long)UCHAR_MAX; break;
+			default: tmax = is_signed ? (unsigned long long)INT_MAX : (unsigned long long)UINT_MAX; break;
+			}
+			limit = (is_signed && negative) ? tmax + 1 : tmax;
 			while (*input && (width == 0 || digits < width)) {
 				int digit = *input >= '0' && *input <= '9' ? *input - '0'
 					: (*input >= 'a' && *input <= 'f' ? *input - 'a' + 10
 					: (*input >= 'A' && *input <= 'F' ? *input - 'A' + 10 : base));
 				if (digit >= base) break;
-				/* Guard against unsigned wraparound on overflow; keep
-				 * consuming the remaining digits either way. */
-				if (value > (limit - (unsigned)digit) / (unsigned)base)
+				/* Guard against wraparound on overflow; keep consuming
+				 * the remaining digits either way. */
+				if (value > (limit - (unsigned long long)digit) / (unsigned long long)base)
 					overflow = 1;
 				else if (!overflow)
-					value = value * (unsigned)base + (unsigned)digit;
+					value = value * (unsigned long long)base + (unsigned long long)digit;
 				++digits;
 				++input;
 			}
 			if (!digits) break;
 			if (is_signed) {
-				int *out = va_arg(arguments, int *);
+				long long signed_val;
 				if (overflow)
-					*out = negative ? INT_MIN : INT_MAX;
+					signed_val = negative ? -(long long)limit : (long long)tmax;
 				else if (negative)
-					*out = value > (unsigned)INT_MAX ? INT_MIN : -(int)value;
+					signed_val = -(long long)value;
 				else
-					*out = value > (unsigned)INT_MAX ? INT_MAX : (int)value;
+					signed_val = (long long)value;
+				switch (length) {
+				case 2: { long long *o = va_arg(arguments, long long *); *o = signed_val; break; }
+				case 1: { long *o = va_arg(arguments, long *); *o = (long)signed_val; break; }
+				case 5: { short *o = va_arg(arguments, short *); *o = (short)signed_val; break; }
+				case 6: { signed char *o = va_arg(arguments, signed char *); *o = (signed char)signed_val; break; }
+				default: { int *o = va_arg(arguments, int *); *o = (int)signed_val; break; }
+				}
 			} else {
-				unsigned *out = va_arg(arguments, unsigned *);
-				*out = value;
+				unsigned long long uval = overflow ? limit : value;
+				switch (length) {
+				case 2: { unsigned long long *o = va_arg(arguments, unsigned long long *); *o = uval; break; }
+				case 1: { unsigned long *o = va_arg(arguments, unsigned long *); *o = (unsigned long)uval; break; }
+				case 5: { unsigned short *o = va_arg(arguments, unsigned short *); *o = (unsigned short)uval; break; }
+				case 6: { unsigned char *o = va_arg(arguments, unsigned char *); *o = (unsigned char)uval; break; }
+				default: { unsigned *o = va_arg(arguments, unsigned *); *o = (unsigned)uval; break; }
+				}
 			}
 			++assigned;
 			++format;
 			continue;
 		}
 		if (*format == 'f' || *format == 'e' || *format == 'g'
-		 || *format == 'F' || *format == 'E' || *format == 'G'
-		 || *format == 'l') {
-			/* %f/%e/%g -> float*, %lf/%le/%lg -> double*; the token is a
-			 * decimal floating constant ([sign] digits [. digits] [eE
-			 * [sign] digits]) which we collect and hand to strtod. */
-			int is_long = 0;
+		 || *format == 'F' || *format == 'E' || *format == 'G') {
+			/* %f/%e/%g -> float*, %lf/%le/%lg -> double* (l length modifier);
+			 * the token is a decimal floating constant ([sign] digits
+			 * [. digits] [eE [sign] digits]) fed to strtod. */
 			char tmp[64];
 			int ti = 0, used = 0;
-			if (*format == 'l') {
-				if (format[1] == 'f' || format[1] == 'e' || format[1] == 'g'
-				 || format[1] == 'F' || format[1] == 'E' || format[1] == 'G')
-					is_long = 1;
-				else
-					break;
-			}
 #define FTOK_COND (width == 0 || used < width)
 			if ((*input == '+' || *input == '-') && FTOK_COND) {
 				tmp[ti++] = *input++;
@@ -183,7 +206,7 @@ vsscanf(const char *input, const char *format, va_list arguments)
 			if (ti == 0)
 				break;
 			tmp[ti] = 0;
-			if (is_long) {
+			if (length == 1) {
 				double *out = va_arg(arguments, double *);
 				*out = strtod(tmp, NULL);
 			} else {
@@ -191,7 +214,7 @@ vsscanf(const char *input, const char *format, va_list arguments)
 				*out = (float)strtod(tmp, NULL);
 			}
 			++assigned;
-			format += is_long ? 2 : 1;
+			++format;
 			continue;
 		}
 		break;

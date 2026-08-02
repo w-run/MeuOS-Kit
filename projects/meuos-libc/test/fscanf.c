@@ -66,6 +66,22 @@ main(void)
 			return 15;
 	}
 
+	/* length modifiers: %ld/%lld/%hd */
+	{
+		long lv;
+		long long llv;
+		short hv;
+		strcpy(buf, "-123456 9999999999 7");
+		stream = fmemopen(buf, sizeof buf, "r");
+		if (!stream)
+			return 16;
+		if (fscanf(stream, "%ld %lld %hd", &lv, &llv, &hv) != 3
+		 || lv != -123456L || llv != 9999999999LL || hv != 7)
+			return 17;
+		if (fclose(stream) != 0)
+			return 18;
+	}
+
 	/* EOF on an empty stream (/dev/null reads EOF immediately) */
 	stream = fopen("/dev/null", "r");
 	if (!stream)
