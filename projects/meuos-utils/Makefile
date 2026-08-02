@@ -1,10 +1,15 @@
 # meuos-utils — MeuOS 核心工具集
 #
 # Source layout:
-#   include/          public API (utils.h + tool-specific headers)
-#   src/libutils/     静态库 libutils.a（xmalloc/getopt/progname/version/...）
-#   src/utils/        各工具源文件，每文件一个工具
-#   test/             各工具的回归脚本
+#   include/            public API (utils.h + tool-specific headers)
+#   src/libutils/       静态库 libutils.a（xmalloc/getopt/progname/version/...）
+#   src/utils/core/     核心文件/目录操作 (ls/cp/mv/rm/cat/tree/...)
+#   src/utils/text/     文本处理 (head/tail/wc/sort/grep/sed/awk/...)
+#   src/utils/file/     文件路径/类型 (file/basename/dirname/readlink/...)
+#   src/utils/arch/     归档/压缩 (tar/gzip/unzip/mz)
+#   src/utils/sys/      系统/进程 (date/env/sleep/kill/id/uname/...)
+#   src/utils/net/      网络工具 (curl/wget/ifconfig/netstat/route/ping)
+#   test/               各工具的回归脚本
 #
 # Two compile paths:
 #   * Host CC (default for `make`/`make check`): cc -D_GNU_SOURCE
@@ -24,23 +29,40 @@ MZ_INC := -I$(MZ_DIR)/include
 # 公共编译选项
 BASE_CFLAGS := -Iinclude -Isrc
 
+# 工具分类子目录
+TOOL_DIRS := core text file arch sys net
+
+# VPATH：让 Make 按类别搜索源文件
+VPATH := $(addprefix src/utils/,$(TOOL_DIRS))
+
 # libutils 源文件
 LIBUTILS_SRCS := $(sort $(wildcard src/libutils/*.c))
 LIBUTILS_OBJS := $(patsubst src/%.c,$(BUILD)/%.o,$(LIBUTILS_SRCS))
 LIBUTILS_LIB := $(BUILD)/libutils.a
 
-# 各工具：src/utils/<toolname>.c -> build/<toolname>
-TOOL_SRCS := $(sort $(wildcard src/utils/*.c))
-TOOL_BINS := $(patsubst src/utils/%.c,$(BUILD)/%,$(TOOL_SRCS))
+# 各工具：src/utils/<category>/<toolname>.c -> build/<toolname>
+# 用 notdir 去掉分类目录，所有二进制平铺到 build/
+TOOL_SRCS := $(sort $(foreach dir,$(TOOL_DIRS),$(wildcard src/utils/$(dir)/*.c)))
+TOOL_NAMES := $(notdir $(patsubst %.c,%,$(TOOL_SRCS)))
+TOOL_BINS := $(addprefix $(BUILD)/,$(TOOL_NAMES))
+
+# 需要特殊链接的工具（从通用规则中排除）
+SPECIAL_BINS := $(BUILD)/mz $(BUILD)/awk
+GENERIC_BINS := $(filter-out $(SPECIAL_BINS),$(TOOL_BINS))
 
 .PHONY: all check clean install
 
-all: $(LIBUTILS_LIB) $(TOOL_BINS) $(BUILD)/mz
+all: $(LIBUTILS_LIB) $(GENERIC_BINS) $(SPECIAL_BINS)
 
 # mz 工具：依赖 libmz
-$(BUILD)/mz: src/utils/mz.c $(LIBUTILS_LIB) $(MZ_LIB)
+$(BUILD)/mz: src/utils/arch/mz.c $(LIBUTILS_LIB) $(MZ_LIB)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(BASE_CFLAGS) $(MZ_INC) -o $@ $< $(LIBUTILS_LIB) $(MZ_LIB) -ldl
+
+# awk: -O2 optimization exposes UB in parser; use -O0 until fixed
+$(BUILD)/awk: src/utils/text/awk.c $(LIBUTILS_LIB)
+	@mkdir -p $(dir $@)
+	$(CC) -O0 -g $(BASE_CFLAGS) -o $@ $< $(LIBUTILS_LIB) -lm
 
 # libmz 依赖
 $(MZ_LIB):
@@ -55,15 +77,11 @@ $(BUILD)/libutils/%.o: src/libutils/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(BASE_CFLAGS) -c -o $@ $<
 
-# 通用工具编译规则
-$(BUILD)/%: src/utils/%.c $(LIBUTILS_LIB)
+# 通用工具编译规则（VPATH 自动搜索 src/utils/<category>/）
+$(GENERIC_BINS): $(LIBUTILS_LIB)
+$(BUILD)/%: %.c $(LIBUTILS_LIB)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(BASE_CFLAGS) -o $@ $< $(LIBUTILS_LIB)
-
-# awk: -O2 optimization exposes UB in parser; use -O0 until fixed
-$(BUILD)/awk: src/utils/awk.c $(LIBUTILS_LIB)
-	@mkdir -p $(dir $@)
-	$(CC) -O0 -g $(BASE_CFLAGS) -o $@ $< $(LIBUTILS_LIB) -lm
 
 # 检查
 check: all
