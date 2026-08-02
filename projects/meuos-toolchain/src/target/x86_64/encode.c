@@ -975,6 +975,29 @@ x86_64_encode_insn(const struct mt_target *target,
 				goto unsupported;
 			goto done;
 		}
+		if (n == 2 && (strcmp(base, "movaps") == 0 ||
+		                strcmp(base, "movapd") == 0)) {
+			/* MOVAPS/MOVAPD (aligned packed single/double): 0F 28
+			 * (load) / 0F 29 (store).  MOVAPD carries the 66 mandatory
+			 * prefix.  Without this branch the generic `mov` handler
+			 * below matches these mnemonics and encodes %xmm sources
+			 * with the GP-register opcode, silently corrupting
+			 * 128-bit register saves (e.g. vastart's %xmm0..%xmm7
+			 * spill in the va_list area). */
+			unsigned pfx = (strcmp(base, "movapd") == 0) ? 0x66 : 0;
+			if (is_xmm(&op[0]) && is_xmm(&op[1])) {
+				emit_sse(out->bytes, &out->size, out, pfx, 0x28,
+				         op[1].reg, &op[0], 0, R_X86_64_PC32, -4);
+			} else if (is_xmm(&op[0]) && op[1].kind == OP_MEM) {
+				emit_sse(out->bytes, &out->size, out, pfx, 0x29,
+				         op[0].reg, &op[1], 0, R_X86_64_PC32, -4);
+			} else if (op[0].kind == OP_MEM && is_xmm(&op[1])) {
+				emit_sse(out->bytes, &out->size, out, pfx, 0x28,
+				         op[1].reg, &op[0], 0, R_X86_64_PC32, -4);
+			} else
+				goto unsupported;
+			goto done;
+		}
 		if (n == 2 && (strcmp(base, "cvtss2sd") == 0 ||
 		                strcmp(base, "cvtsd2ss") == 0)) {
 			unsigned pfx = (strcmp(base, "cvtsd2ss") == 0) ? 0xF2 : 0xF3;
