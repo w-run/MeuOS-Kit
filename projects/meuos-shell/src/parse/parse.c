@@ -655,6 +655,8 @@ extern int msh_builtin_set(int argc, char **argv);
 
 static int is_builtin(const char *name) {
     if (!name) return 0;
+    /* :cmd 指令系统拦截 */
+    if (name[0] == ':' && name[1] != '\0') return 1;
     return !strcmp(name, "cd") || !strcmp(name, "export")
         || !strcmp(name, "unset") || !strcmp(name, "set")
         || !strcmp(name, "exit") || !strcmp(name, "true")
@@ -765,6 +767,11 @@ int msh_run_builtin(ast_t *ast, int argc, char **argv) {
     }
     
     if (argc == 0) { return 0; }
+    /* :cmd 指令分发（: 单独是 no-op，:foo 是指令） */
+    if (name[0] == ':' && name[1] != '\0') {
+        extern int msh_cmd_dispatch(int argc, char **argv);
+        return msh_cmd_dispatch(argc, argv);
+    }
     if (!strcmp(name, ":")) return 0;
     if (!strcmp(name, "true")) return 0;
     if (!strcmp(name, "false")) return 1;
@@ -819,6 +826,7 @@ int msh_run_builtin(ast_t *ast, int argc, char **argv) {
     if (!strcmp(name, "type")) {
         if (argc < 2) return 1;
         if (is_builtin(argv[1])) { printf("%s is a shell builtin\n", argv[1]); return 0; }
+        if (func_lookup(argv[1])) { printf("%s is a function\n", argv[1]); return 0; }
         /* 检查 PATH */
         return 1;
     }
@@ -1746,7 +1754,10 @@ int msh_eval(ast_t *ast) {
         return rc;
     }
     if (ast->type == AST_FUNC) {
-        func_add(ast->str_val, ast->body);
+        /* 分离 body 所有权：func 表接管 body，ast_free 不会释放它 */
+        ast_t *body = ast->body;
+        ast->body = NULL;
+        func_add(ast->str_val, body);
         return 0;
     }
     if (ast->type == AST_BRACE_GROUP) {

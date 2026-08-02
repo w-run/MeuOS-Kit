@@ -46,6 +46,10 @@ int msh_theme_apply(const char *name);
 int msh_theme_current(void);
 int msh_theme_builtin(const char *name);  /* 兼容旧接口 */
 
+/* === YAML 主题 API === */
+int msh_theme_try_yaml_builtin(const char *name);
+int msh_theme_apply_yaml_file(const char *path, const char *name);
+
 /* === 兼容转换层 API === */
 /* 从 bash/zsh 配置文件导入别名、环境变量、主题。
  * target: "bash" 或 "zsh"

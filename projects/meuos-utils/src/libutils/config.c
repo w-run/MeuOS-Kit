@@ -297,6 +297,9 @@ static cfg_value_t *parse_mapping_until(cfg_parser_t *p, int indent, int stop_at
                 if (peek.indent > ln.indent) {
                     /* 子节点 */
                     if (peek.is_list_item) {
+                        /* 回退到 peek 前的位置，让 parse_list_at 从第一项开始 */
+                        p->pos = saved_pos2;
+                        p->lineno = saved_lineno2;
                         child = parse_list_at(p, peek.indent);
                     } else {
                         p->pos = saved_pos2;

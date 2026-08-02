@@ -593,7 +593,10 @@ static int theme_info(const char *name) {
 }
 
 int msh_theme_apply(const char *name) {
-    /* 查内置主题 */
+    /* 1. 尝试内置 YAML 主题（优先，更强大） */
+    if (msh_theme_try_yaml_builtin(name) == 0) return 0;
+
+    /* 2. 查内置 .msh 主题 */
     for (int i = 0; builtin_theme_names[i]; i++) {
         if (strcmp(builtin_theme_names[i], name) == 0) {
             int ret = msh_run_string(builtin_theme_code[i],
@@ -603,17 +606,31 @@ int msh_theme_apply(const char *name) {
         }
     }
 
-    /* 查用户主题 */
+    /* 3. 查用户主题 */
     for (int i = 0; i < num_themes; i++) {
         if (strcmp(themes[i].name, name) == 0 && !themes[i].builtin) {
+            /* 尝试 YAML 格式 */
+            if (msh_theme_apply_yaml_file(themes[i].path, name) == 0) return 0;
+            /* 回退到 .msh 脚本 */
             int ret = source_file(themes[i].path);
             if (ret == 0) setenv("MSH_THEME", name, 1);
             return ret;
         }
     }
 
-    /* 尝试直接路径 */
+    /* 4. 尝试直接路径 */
     char path[PATH_MAX];
+    /* 先试 .yaml */
+    snprintf(path, sizeof(path), "%s/%s.yaml", get_theme_dir(), name);
+    if (access(path, R_OK) == 0) {
+        return msh_theme_apply_yaml_file(path, name);
+    }
+    /* 再试 .yml */
+    snprintf(path, sizeof(path), "%s/%s.yml", get_theme_dir(), name);
+    if (access(path, R_OK) == 0) {
+        return msh_theme_apply_yaml_file(path, name);
+    }
+    /* 再试 .msh */
     snprintf(path, sizeof(path), "%s/%s.msh", get_theme_dir(), name);
     if (access(path, R_OK) == 0) {
         int ret = source_file(path);

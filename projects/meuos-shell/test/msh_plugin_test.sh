@@ -322,6 +322,124 @@ OUT=$(run 'export MSH_PS1="line1\nline2"; echo "PS1=$MSH_PS1"')
 assert_contains "PS1 \\n 转义设置" "PS1=" "$OUT"
 
 echo ""
+echo "=== 7. :cmd 指令系统测试 ==="
+
+# 7.1 :help 显示帮助
+OUT=$(run ':help')
+assert_contains ":help 显示帮助" "msh :cmd" "$OUT"
+
+# 7.2 :version 显示版本
+OUT=$(run ':version')
+assert_contains ":version 显示版本" "msh" "$OUT"
+
+# 7.3 :config 显示配置
+OUT=$(run ':config')
+assert_contains ":config 显示配置" "msh" "$OUT"
+
+# 7.4 :themes 列出主题
+OUT=$(run ':themes')
+assert_contains ":themes 列出主题" "modern" "$OUT"
+
+# 7.5 :theme modern 应用主题
+OUT=$(run ':theme modern && echo "PS1=$MSH_PS1"')
+assert_contains ":theme modern 应用" "PS1=" "$OUT"
+
+# 7.6 :plugins 列出插件
+OUT=$(run ':plugins')
+assert_contains ":plugins 列出插件" "git" "$OUT"
+
+# 7.7 :plugin git 加载插件
+OUT=$(run ':plugin git && alias gst')
+assert_contains ":plugin git 加载" "git status" "$OUT"
+
+# 7.8 :langs 列出语言
+OUT=$(run ':langs')
+assert_contains ":langs 列出语言" "zh-CN" "$OUT"
+
+# 7.9 :lang en-US 切换语言
+OUT=$(run ':lang en-US && :langs')
+assert_contains ":lang en-US 切换" "en-US" "$OUT"
+
+# 7.10 :lang zh-CN 切回中文
+OUT=$(run ':lang zh-CN && :langs')
+assert_contains ":lang zh-CN 切回" "zh-CN" "$OUT"
+
+# 7.11 :help theme 显示单条帮助
+OUT=$(run ':help theme')
+assert_contains ":help theme 单条" ":theme" "$OUT"
+
+# 7.12 未知 :cmd 报错
+OUT=$(run ':nonexistent 2>&1; true')
+assert_contains "未知 :cmd 报错" "未知指令" "$OUT"
+
+# 7.13 : 单独是 no-op（不触发 :cmd）
+OUT=$(run ': && echo ok')
+assert_contains ": no-op 不触发" "ok" "$OUT"
+
+# 7.14 插件函数扩展 :cmd
+OUT=$(run '_cmd_test() { echo custom-cmd; }; :test')
+assert_contains "插件函数扩展 :cmd" "custom-cmd" "$OUT"
+
+# 7.15 别名扩展 :cmd
+OUT=$(run 'alias :hi="echo hi-there"; :hi')
+assert_contains "别名扩展 :cmd" "hi-there" "$OUT"
+
+echo ""
+echo "=== 8. YAML 结构化主题测试 ==="
+
+# 8.1 YAML 主题颜色变量替换
+OUT=$(run ':theme colorful && echo "PS1=$MSH_PS1"')
+assert_contains "YAML colorful 颜色变量" "PS1=" "$OUT"
+
+# 8.2 YAML 主题 powerline
+OUT=$(run ':theme powerline && echo "PS1=$MSH_PS1"')
+assert_contains "YAML powerline" "PS1=" "$OUT"
+
+# 8.3 YAML 主题 rainbow
+OUT=$(run ':theme rainbow && echo "PS1=$MSH_PS1"')
+assert_contains "YAML rainbow" "PS1=" "$OUT"
+
+# 8.4 YAML 主题 minimal
+OUT=$(run ':theme minimal && echo "PS1=$MSH_PS1"')
+assert_contains "YAML minimal" "PS1=" "$OUT"
+
+# 8.5 YAML 主题 clean
+OUT=$(run ':theme clean && echo "PS1=$MSH_PS1"')
+assert_contains "YAML clean" "PS1=" "$OUT"
+
+# 8.6 YAML 主题 modern 内嵌脚本执行
+OUT=$(run ':theme modern && echo "FEAT=$THEME_FEATURES"')
+assert_contains "YAML modern 内嵌脚本" "FEAT=git" "$OUT"
+
+# 8.7 用户自定义 YAML 主题（需要 HOME 设置）
+TEST_HOME=$(mktemp -d)
+mkdir -p "$TEST_HOME/.msh/themes"
+cat > "$TEST_HOME/.msh/themes/testyaml.yaml" << 'YAMLEOF'
+name: testyaml
+desc: 测试主题
+colors:
+  primary: "1;33"
+  accent: "35"
+states:
+  default:
+    ps1: '\e[${primary}mT\e[0m\e[${accent}m\w\e[0m\$ '
+    ps2: '> '
+script:
+  - export TEST_YAML_THEME=1
+  - alias tll=ls
+YAMLEOF
+OUT=$(HOME="$TEST_HOME" "$MSH" -c ':theme testyaml && echo "PS1=$MSH_PS1" && echo "T=$TEST_YAML_THEME" && alias tll')
+assert_contains "用户 YAML 主题颜色" "1;33" "$OUT"
+assert_contains "用户 YAML 主题脚本" "T=1" "$OUT"
+assert_contains "用户 YAML 主题别名" "alias tll" "$OUT"
+rm -rf "$TEST_HOME"
+
+# 8.8 YAML 主题状态切换（root 状态）
+OUT=$(run ':theme modern && echo "PS1=$MSH_PS1"')
+# root 用户应该使用 # 而非 $
+assert_contains "YAML root 状态切换" "#" "$OUT"
+
+echo ""
 echo "=========================================="
 echo "Plugin/Theme/i18n/Compat 测试结果:"
 echo "  PASS: $PASS"
