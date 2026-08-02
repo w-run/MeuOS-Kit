@@ -21,19 +21,21 @@
 | T | `lambda_nested_capture.cc` rc=0（内层再捕获外层 base，2~3 层嵌套） | `cpp_lambda_expr` 捕获解析：scopegetdecl 失败时用 `cpp_member_ident` 解析为外层闭包成员 `(*this).name` |
 
 ## 2. 缺陷状态表（最终，team-lead 核对版）
-| 缺陷 | 状态 | 提交哈希 | 验证 |
+> 编号体系（2026-08-03 起）：「组件前缀 + 两位 hex」——cpp-/c-/mir-/x86-；旧字母保留对照。
+
+| 缺陷（新编号） | 状态 | 提交哈希 | 验证 |
 |------|------|----------|------|
-| Q | ✅ closed | f8f0044 | delete/delete[] nullptr 判空 no-op；`new_delete_nullptr.cc` 转正 rc=0 |
-| R | ✅ closed | 93ab4b4 | concept 实参 span 切分 + 嵌套 use nargs；`concept_param_rename.cc`/`concepts_combo_boundary.cc` rc=0 |
-| S | ✅ closed | f8f0044（混入） | lambda 按值捕获类对象走 ctor（`cpp_lambda_cap_needs_ctor_init`）；`lambda_capture_class.cc` rc=0 |
-| T | ✅ closed | f8f0044（混入） | 嵌套 lambda 捕获外层成员（`cpp_member_ident`）；`lambda_nested_capture.cc` rc=0 |
-| V | ✅ closed | 93ab4b4（夹带于 R 提交） | MIR msimp 有符号 div/rem 误编译，削减限 UDIV/UREM；`signed_div_pow2.c` 双路径 PASS |
-| U | 🔄 **open**（worker-lambda 在途，P0） | — | size-0 空类按值传参/return 编译崩溃（cpp 前端 cpp_parse.c 路径）；worker-cpp20 复现 MIR=0/1 双路径均崩；探测 `pending/value_param_member_call.cc` |
-| F | ✅ closed | 647a05b（夹带） | MIR fold shl/sar(x,0) 优化缺口，2026-08-03 复核闭环（0802.md 缺陷 F 段） |
-| W | 🔄 open（worker-mir-tests 登记待排） | — | u8 字面量类型（第二轮） |
-| X | 🔄 open（worker-mir-tests 登记待排） | — | extern inline（第二轮） |
-| Y | 🔄 open | — | `delete (T*)expr` 解析失败（low，第二轮） |
-| va_list 溢出 | ✅ closed | 222a28d | `mabi_vaarg` overflow 推进固定 8 字节槽；`varargs_overflow.c` 双路径 rc=0 |
+| cpp-0a（Q） | ✅ closed | f8f0044 | delete/delete[] nullptr 判空 no-op；`new_delete_nullptr.cc` 转正 rc=0 |
+| cpp-0b（R） | ✅ closed | 93ab4b4 | concept 实参 span 切分 + 嵌套 use nargs；`concept_param_rename.cc`/`concepts_combo_boundary.cc` rc=0 |
+| cpp-0c（S） | ✅ closed | f8f0044（混入） | lambda 按值捕获类对象走 ctor（`cpp_lambda_cap_needs_ctor_init`）；`lambda_capture_class.cc` rc=0 |
+| cpp-0d（T） | ✅ closed | f8f0044（混入） | 嵌套 lambda 捕获外层成员（`cpp_member_ident`）；`lambda_nested_capture.cc` rc=0 |
+| mir-01（V） | ✅ closed | 93ab4b4（夹带于 R 提交） | MIR msimp 有符号 div/rem 误编译，削减限 UDIV/UREM；`signed_div_pow2.c` 双路径 PASS |
+| cpp-0e（U/Z） | 🔄 **open**（worker-lambda 在途，P0） | — | size-0 空类按值传参/return 编译崩溃（cpp 前端 cpp_parse.c 路径）；worker-cpp20 复现 MIR=0/1 双路径均崩；探测 `pending/value_param_member_call.cc` |
+| mir-00（F） | ✅ closed | 647a05b（夹带） | MIR fold shl/sar(x,0) 优化缺口，2026-08-03 复核闭环（0802.md 缺陷 F 段） |
+| c-00（W） | 🔄 open（worker-mir-tests 登记待排） | — | u8 字面量类型（第二轮） |
+| c-01（X） | 🔄 open（worker-mir-tests 登记待排） | — | extern inline（第二轮） |
+| cpp-0f（Y） | 🔄 open | — | `delete (T*)expr` 解析失败（low，第二轮） |
+| x86-00（va_list 溢出） | ✅ closed | 222a28d | `mabi_vaarg` overflow 推进固定 8 字节槽；`varargs_overflow.c` 双路径 rc=0 |
 
 **回归验证（基于 HEAD=f8f0044）**：`make check-cpp-func` 全绿（含 lambda.cc、new_delete_nullptr、concepts_combo_boundary、struct_multinher 等）；`make check-cpp-neg` 通过（rc=0）；现有 lambda 测试无破坏。
 
@@ -48,7 +50,7 @@
 - f8f0044 混入 S/T，使 S/T「提交哈希」追踪不清晰（文档应注明）。
 - S 仅验证类拷贝 ctor 调用（lambda_capture_class.cc）；更复杂场景（捕获含 ctor 的类 + operator() 体引用、移动语义交互）待 `lambda_capture_boundary.cc` 转正后回归。
 - T 验证 2~3 层同形参名嵌套；混合捕获（`[a]` 外层 + `[b,a]` 内层）、引用捕获交互待补充边界用例。
-- 缺陷 V（MIR msimp 有符号 div/rem 误编译，负数用例 -7/2 等）：已随 93ab4b4（R 提交）夹带闭环，双路径实测 PASS；回归收口 4c24bfe（signed_div_pow2.c 四实际用例 -7/2/-7%4/-17/8/-17%8 + pass_test Test 3c `test_simpl_sdiv_pow2_exact` 有符号 div/rem 不削减 + Test 3d `test_fold_signed_pow2_values` 常量折叠按值断言），文档补记 7890a35，均合入。缺陷 U（size-0 类按值传参段错误，探测文件 value_param_member_call.cc）**仍 open**（0802.md 703 行记录纠错，0802 队列表已重命名 U 并保留 pending/ 待修复）。
+- 缺陷 mir-01（旧 V，MIR msimp 有符号 div/rem 误编译，负数用例 -7/2 等）：已随 93ab4b4（R 提交）夹带闭环，双路径实测 PASS；回归收口 4c24bfe（signed_div_pow2.c 四实际用例 -7/2/-7%4/-17/8/-17%8 + pass_test Test 3c `test_simpl_sdiv_pow2_exact` 有符号 div/rem 不削减 + Test 3d `test_fold_signed_pow2_values` 常量折叠按值断言），文档补记 7890a35，均合入。缺陷 cpp-0e（旧 U/Z，size-0 类按值传参段错误，探测文件 value_param_member_call.cc）**仍 open**（0802.md 703 行记录纠错，0802 队列表已重命名 U→Z→cpp-0e 并保留 pending/ 待修复）。
 - mxx-c2fix 合并冲突（见 §3.4）为最高优先级待处理项。
 
 ## 5. 第二批任务建议
@@ -66,12 +68,12 @@
 
 ## 6. 缺陷 V/U 编号澄清 + 双路径验证（worker-judge 增补，2026-08-03）
 
-### 编号澄清（重要，避免后续混淆）
-`0802.md` 队列表（worker-test/worker-doc 维护）的定义，两个缺陷**严格分离**：
-- **缺陷 U = size-0 空类按值传参/return 编译崩溃**（cpp 前端 `cpp_parse.c` 路径；探测 `pending/value_param_member_call.cc`）——🔄 **open**（P0，worker-lambda 在途；worker-cpp20 复现细化：MIR=0/1 双路径均崩，0802.md:281/703）。
-- **缺陷 V = MIR msimp 有符号 div/rem 被强度削减误编译**（负数用例 -7/2、-7%4、-17/8、-17%8）——✅ **closed**（93ab4b4 夹带，0802.md:725）。
+### 编号澄清（重要，避免后续混淆；2026-08-03 起迁移为组件前缀+hex）
+`0802.md` 队列表（worker-test/worker-doc 维护）的定义，两个缺陷**严格分离**（新编号）：
+- **缺陷 cpp-0e（旧 U/Z）= size-0 空类按值传参/return 编译崩溃**（cpp 前端 `cpp_parse.c` 路径；探测 `pending/value_param_member_call.cc`）——🔄 **open**（P0，worker-lambda 在途；worker-cpp20 复现细化：MIR=0/1 双路径均崩，0802.md:281/703）。
+- **缺陷 mir-01（旧 V）= MIR msimp 有符号 div/rem 被强度削减误编译**（负数用例 -7/2、-7%4、-17/8、-17%8）——✅ **closed**（93ab4b4 夹带，0802.md:725）。
 
-⚠️ 曾出现编号混淆（team-lead 广播「缺陷 U（MIR div/rem）」、worker-fold 测试注释「defect V」指向同一 div/rem 问题；本文档早期版本也误标）。现统一：**U=cpp 前端空类崩溃（open），V=MIR 后端 div/rem（closed）**，与 0802.md 281/725 行一致。
+⚠️ 曾出现编号混淆（team-lead 广播「缺陷 U（MIR div/rem）」、worker-fold 测试注释「defect V」指向同一 div/rem 问题；本文档早期版本也误标）。现统一：**cpp-0e=cpp 前端空类崩溃（open），mir-01=MIR 后端 div/rem（closed）**，与 0802.md 281/725 行一致。
 
 ### 缺陷 V 双路径验证（worker-judge 亲自实测，mcc 基于 f8f0044）
 | 路径 | 命令 | 结果 |

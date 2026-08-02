@@ -312,21 +312,34 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
 - **MIR 路径遗留**（非 m++ 专属）：自举 mcc 编译「聚合参数+varargs+栈传参」组合在
   declspecs 写 NULL（Bug B 待调）；atomic_concurrent/thread_local 多架构 TLS 既有问题。
 
-### m++ 缺陷队列（截至 2026-08-03，mcc-team-0599）
+### m++ 缺陷队列（截至 2026-08-03，mcc-team-0599；编号迁移为组件前缀+hex）
+> **编号体系说明**：2026-08-03 起缺陷编号为「组件/阶段前缀 + 两位 hex」——`cpp-`（C++ 前端）、`c-`（C 前端）、`mir-`（MIR）、`x86-`（x86_64 后端）。旧字母保留对照。
 
-| 编号 | 缺陷 | 状态 |
-|---|---|---|
-| A-N | 历史缺陷全队列（含 B 聚合 varargs、C 继承析构链、E ns 限制、F MIR fold、K concept 深度、M 未命名参数、N 数组 new stride） | ✅ 全闭环（详见 `.issues/0802.md`；N=754b437、M=4d93a66、K=2755fe3） |
-| J | slotmerge 自举破坏（长期项，已禁用 97c8541；二期见 worker-slot2） | 🚫 长期禁用 |
-| Q | `delete nullptr`/`delete[] nullptr` 运行期段错误（应 no-op） | ✅ closed（f8f0044，判空守卫 + 回归用例） |
-| R | concept 形参名 ≠ `T` 时被误判 undeclared | ✅ closed（93ab4b4，按模板参数表折叠形参） |
-| S | lambda 按值捕获类对象不调用拷贝构造 | ✅ closed（f8f0044 混入，canary 已转正） |
-| T | 嵌套 lambda 无法再捕获外层已捕获变量 | ✅ closed（f8f0044 混入，canary 已转正） |
-| Z | 无数据成员类按值传参段错误（size-0 by-value SEGV，0802.md 记录纠错；team-lead 命名澄清 U→Z） | 🔄 open（worker-lambda 在途） |
-| V | MIR msimp pow2 强度削减误编译有符号 div/rem（负数错误，`-7/2=-4` 应 -3） | ✅ closed（随 93ab4b4 夹带；pass_test 3b + test/c99/signed_div_pow2.c 回归） |
-| W | `u8"..."` 字面量元素类型为 `unsigned char`，应为 `char`（C11 §6.4.5p6） | 🔄 open（worker-mir-tests 发现） |
-| X | `inline` 定义 + `extern` 声明未产生外部定义（C99 §6.7.4p7） | 🔄 open（worker-mir-tests 发现） |
-| Y | `delete (T*)expr` 解析失败（delete 操作数走 unaryexpr，不含 cast-expression） | 🔄 open（low，worker-q 登记） |
+| 编号（新） | 旧 | 缺陷 | 状态 |
+|---|---|---|---|
+| cpp-01 | B | 自由函数重载被拒 | ✅ closed（83db5ff） |
+| cpp-02 | C | 继承析构链缺失 | ✅ closed（c19a351） |
+| cpp-03 | D | static void 方法误判构造 | ✅ closed（16f1948） |
+| cpp-04 | E | ns 四项限制 | ✅ closed（6f3d734） |
+| cpp-05 | G | 泛型 lambda 捕获 | ✅ closed（3f0ed41） |
+| cpp-06 | H | 限定+虚调用 | ✅ closed（a096b52） |
+| cpp-07 | K | concept 递归深度 | ✅ closed（2755fe3） |
+| cpp-08 | M | 未命名参数 ctor | ✅ closed（4d93a66） |
+| cpp-09 | N | 数组 new stride | ✅ closed（754b437） |
+| cpp-0a | Q | `delete nullptr`/`delete[] nullptr` 段错误 | ✅ closed（f8f0044） |
+| cpp-0b | R | concept 形参名 ≠ `T` 误判 undeclared | ✅ closed（93ab4b4） |
+| cpp-0c | S | lambda 按值捕获类对象不调拷贝构造 | ✅ closed（f8f0044 混入） |
+| cpp-0d | T | 嵌套 lambda 无法再捕获外层变量 | ✅ closed（f8f0044 混入） |
+| cpp-0e | Z/U | size-0 空类按值传参/返回崩溃（P0） | 🔄 open（worker-lambda 在途） |
+| cpp-0f | Y | `delete (T*)expr` 解析失败 | 🔄 open（low） |
+| c-00 | W | `u8"..."` 字面量元素类型应为 `char`（C11 §6.4.5p6） | 🔄 open（worker-mir-tests 发现） |
+| c-01 | X | inline 定义 + extern 声明未发外部定义（C99 §6.7.4p7） | 🔄 open（worker-mir-tests 发现） |
+| mir-00 | F | fold shl/sar(x,0) 优化缺口 | ✅ closed（647a05b 夹带 + 实证复验） |
+| mir-01 | V | MIR msimp 有符号 div/rem 误削减 | ✅ closed（93ab4b4 夹带 + Test 3b/3c/3d + 4c24bfe） |
+| mir-02 | J | slotmerge 自举破坏（长期禁用 97c8541；二期见 worker-slot2） | 🚫 长期禁用 |
+| mir-03 | I | slotmerge 崩溃（并入 J） | 🚫 禁用 |
+| x86-00 | va_list | MIR 后端 va_list 溢出 | ✅ closed（222a28d） |
+| cpp-00 | A | size-0 类值传参（历史名，已被 cpp-0e 替代） | 🚫 废弃 |
 
 > 状态规则：缺陷状态只标 open/pending；修复提交 push 后由 worker-doc 周期 pull 补记 closed + 哈希。C++ 覆盖状态见上表（C++98~23 收官 ✅，2026-08-02）。
 > MIR/LIR 双路径门禁：`make check-c-mir`（`test/mir_matrix.sh`），c99/c11/c23 用例在 `MCC_USE_MIR=1/0` 下编译+退出码+stdout 三重一致，基线 69/69 全绿。

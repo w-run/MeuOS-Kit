@@ -26,15 +26,13 @@
 | worker-selfhost | 自举门禁（mcc 自编译 m++） |
 | worker-mir-tests | MIR/C 测试缺口（发现缺陷 W/X） |
 
-### 缺陷队列（2026-08-03）
-A-N ✅ 全闭环（J 长期项禁用）；Q/R/S/T/V ✅ closed；Z/W/X/Y 🔄 open（U 已弃用，size-0 空类改名 Z 派发 worker-lambda）。状态只标 open/pending，修复 push 后由 worker-doc 周期 pull 补记 closed + 哈希。
-- Q：f8f0044（delete/delete[] nullptr 判空守卫 + new_delete_nullptr.cc 回归）
-- R：93ab4b4（concept 按模板参数表折叠形参）
-- S/T：f8f0044 混入（lambda 捕获 ctor/嵌套捕获，canary 已转正）
-- V：随 93ab4b4 夹带（MIR msimp 有符号 div/rem；pass_test 3b/3c/3d + test/c99/signed_div_pow2.c 回归，回归提交 4c24bfe）
-- W：u8 字面量元素类型应为 char（open）
-- X：inline+extern 未发外部定义（open）
-- Y：delete (T*)expr 解析失败，low（open）
+### 缺陷队列（2026-08-03；编号迁移为组件前缀+hex 见下）
+> **编号体系**：2026-08-03 起缺陷编号为「组件/阶段前缀 + 两位 hex」——`cpp-`（C++ 前端）、`c-`（C 前端）、`mir-`（MIR）、`x86-`（x86_64 后端）；旧字母保留对照，历史章节标题已在 0802.md 标注新编号。
+
+- **closed**：cpp-01(B,83db5ff)、cpp-02(C,c19a351)、cpp-03(D,16f1948)、cpp-04(E,6f3d734)、cpp-05(G,3f0ed41)、cpp-06(H,a096b52)、cpp-07(K,2755fe3)、cpp-08(M,4d93a66)、cpp-09(N,754b437)、cpp-0a(Q,f8f0044)、cpp-0b(R,93ab4b4)、cpp-0c(S,f8f0044)、cpp-0d(T,f8f0044)、mir-00(F,647a05b)、mir-01(V,93ab4b4+4c24bfe)、x86-00(va_list,222a28d)
+- **open**：cpp-0e(Z/U, size-0 空类按值传参/返回崩溃，worker-lambda 在途 P0)、cpp-0f(Y, delete (T*)expr, low)、c-00(W, u8 字面量)、c-01(X, inline+extern)
+- **禁用**：mir-02(J, slotmerge 自举破坏)、mir-03(I, 并入 J)、cpp-00(A, 已废弃被 cpp-0e 替代)
+- 状态只标 open/pending，修复 push 后由 worker-doc 周期 pull 补记 closed + 哈希。
 
 ## 团队架构（语义化管理）
 
