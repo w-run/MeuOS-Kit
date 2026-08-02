@@ -595,6 +595,25 @@ spill(Fn *fn)
 					break;
 				}
 			bscopy(u, v);
+		if (i->op == Ocall) {
+			/* Force a slot for every FP temp live across this call
+			 * and drop it from the in-register set: rega frees all
+			 * caller-saved registers at a call and expects to reload
+			 * from slots, so a cross-call FP temp without a slot is
+			 * silently lost.  This is the case that GCM exposes on
+			 * arm by hoisting a folded-constant computation into the
+			 * start block, leaving its result live across many calls;
+			 * rega then keeps it in a caller-saved register that a
+			 * mid-chain block overwrites, and the final use reads the
+			 * wrong value.  Spilling it here (slot + not in v) makes
+			 * rega load/store through the slot instead. */
+			for (t=Tmp0; bsiter(v, &t); t++)
+				if (KBASE(tmp[t].cls) == 1) {
+					if (tmp[t].slot == -1)
+						slot(t);
+					bsclr(v, t);
+				}
+		}
 		limit2(v, 0, 0, w);
 		for (n=0; n<2; n++)
 				if (rtype(i->arg[n]) == RTmp) {
