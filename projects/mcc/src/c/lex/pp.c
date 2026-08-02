@@ -1766,6 +1766,15 @@ expandfunc(struct macro *m)
 		t += arg[i].ntoken;
 	}
 	m->arg = arg;
+	fprintf(stderr, "DBG expand %s nparam=%zu ctx.len=%zu:", m->name, m->nparam, ctx.len);
+	for (i = 0; i < m->nparam; ++i) {
+		fprintf(stderr, " arg%zu.ntoken=%zu[", i, arg[i].ntoken);
+		for (size_t k = 0; k < arg[i].ntoken; ++k)
+			fprintf(stderr, " %d:%s", arg[i].token[k].kind,
+				tokenspell(&arg[i].token[k]) ? tokenspell(&arg[i].token[k]) : "?");
+		fprintf(stderr, " ]");
+	}
+	fprintf(stderr, "\n");
 	expandbody(m);
 }
 
@@ -1847,6 +1856,31 @@ tokctx_rewind(size_t depth)
 	if (depth > ctx.len)
 		return;
 	ctx.len = depth;
+}
+
+/* Tokens pushed past a trial parse are discarded; the trial wrapper then
+ * pushes a small guard buffer so the caller's next() has a well-defined
+ * token to stop at without falling through to source scanning. */
+static struct token trial_guard[8];
+
+void
+cpp_trial_guard(size_t depth)
+{
+	static bool inited;
+
+	if (!inited) {
+		int i;
+		for (i = 0; i < (int)countof(trial_guard); i++) {
+			trial_guard[i].kind = i == 0 ? TSEMICOLON : TEOF;
+			trial_guard[i].loc = (struct location){NULL, 0, 0};
+			trial_guard[i].lit = NULL;
+		}
+		inited = true;
+	}
+	if (depth > ctx.len)
+		return;
+	ctx.len = depth;
+	ctxpush(trial_guard, countof(trial_guard), NULL, false);
 }
 
 char *

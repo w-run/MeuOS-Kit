@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <limits.h>
+#include <setjmp.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -14,6 +15,50 @@
 struct token tok;
 static struct map tokmap;  /* maps string to token */
 static struct array tokstr;  /* maps token to string */
+
+/* Trial-parse support (C++ requires-expressions and other SFINAE-style
+ * well-formedness checks): while g_cpp_trial_depth > 0, error() longjmps
+ * to the innermost cpp_trial_begin() instead of exiting the compiler.
+ * g_cpp_trial_env holds the jump buffer of the innermost trial (saved and
+ * restored around nested trials by cpp_trial_begin/end), so an error in a
+ * nested trial rethrows to its enclosing trial. */
+static jmp_buf g_cpp_trial_env;
+static int g_cpp_trial_depth;
+
+int
+cpp_trial_depth(void)
+{
+	return g_cpp_trial_depth;
+}
+
+void
+cpp_trial_begin(jmp_buf env)
+{
+	jmp_buf old;
+	memcpy(old, g_cpp_trial_env, sizeof old);
+	memcpy(g_cpp_trial_env, env, sizeof g_cpp_trial_env);
+	memcpy(env, old, sizeof old);
+	++g_cpp_trial_depth;
+}
+
+void
+cpp_trial_end(jmp_buf env)
+{
+	jmp_buf old;
+	memcpy(old, g_cpp_trial_env, sizeof old);
+	memcpy(g_cpp_trial_env, env, sizeof g_cpp_trial_env);
+	memcpy(env, old, sizeof old);
+	--g_cpp_trial_depth;
+}
+
+/* Called by the trial wrappers when the parse under trial triggered an
+ * error: restore the innermost trial's env so the setjmp returns. */
+void
+cpp_trial_rethrow(void)
+{
+	if (g_cpp_trial_depth > 0)
+		longjmp(g_cpp_trial_env, 1);
+}
 
 /* Min-color support for diagnostics (p9-ui: colored error/warn like clang).
  * No external dependency — gated on isatty(stderr). */
@@ -184,6 +229,15 @@ void
 error(const struct location *loc, const char *fmt, ...)
 {
 	va_list ap;
+
+	/* Trial parse (SFINAE-style well-formedness check, e.g. C++20
+	 * requires-expressions): a parse/type error is not fatal — unwind to
+	 * the enclosing trial and report failure to the caller. */
+	if (g_cpp_trial_depth > 0) {
+		(void)loc;
+		(void)fmt;
+		cpp_trial_rethrow();
+	}
 
 	/* --error-json: emit one structured JSON object per diagnostic so
 	 * tooling (editors, CI) can parse diagnostics without scraping text.

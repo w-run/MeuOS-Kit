@@ -173,6 +173,12 @@ struct expr *cpp_tmpl_member_placeholder(void);
  * skipped at the token level so it is never instantiated. */
 void cpp_if_constexpr(struct func *f, struct expr *cond, struct scope *s);
 
+/* C++20 requires-expression: `requires { ... }` /
+ * `requires (params) { reqs... }`.  Parsed in primaryexpr; consumes the
+ * whole expression and returns a bool constant (`true` when every
+ * requirement is well-formed). */
+struct expr *cpp_requires_expr(struct scope *s);
+
 /* C++17 structured binding: `auto [x, y] = expr;` — create a hidden
  * object for the initializer and bind each name to a copy of the
  * corresponding member.  Returns true if handled (tok consumed). */

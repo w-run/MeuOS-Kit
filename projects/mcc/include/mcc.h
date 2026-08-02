@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <setjmp.h>
 
 struct func;
 
@@ -583,6 +584,19 @@ void scopeputtag(struct scope *, const char *, struct type *);
 struct type *scopegettag(struct scope *, const char *, bool);
 
 extern struct scope filescope;
+
+/* Trial-parse support (SFINAE-style well-formedness checks, used by the
+ * C++ requires-expression evaluator): error() longjmps to the innermost
+ * active trial instead of aborting.  cpp_trial_begin/end save/restore the
+ * enclosing trial's jump buffer so nested trials rethrow on error.
+ * cpp_trial_guard rewinds the token context to `depth` and pushes a
+ * bounded guard buffer so a caller resuming after a trial never falls
+ * through to source scanning. */
+void cpp_trial_begin(jmp_buf env);
+void cpp_trial_end(jmp_buf env);
+void cpp_trial_rethrow(void);
+int cpp_trial_depth(void);
+void cpp_trial_guard(size_t depth);
 
 /* expr */
 
