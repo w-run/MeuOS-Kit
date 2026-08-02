@@ -120,6 +120,63 @@ delexpr(struct expr *e)
 	}
 	free(e);
 }
+/* Shallow-structure deep copy of an expression tree, used when a node
+ * must be referenced by more than one parent (e.g. the two comparisons
+ * in the lowering of `a <=> b`).  delexpr() frees every child it sees,
+ * so a node referenced twice would otherwise be freed twice. */
+struct expr *
+expr_dup(struct expr *e)
+{
+	struct expr *n, *sub, *prev, *a;
+	enum exprkind k;
+	(void)sub;
+	(void)prev;
+	if (!e)
+		return NULL;
+	n = xmalloc(sizeof *n);
+	*n = *e;
+	k = e->kind;
+	if (k == EXPRCALL) {
+		n->base = expr_dup(e->base);
+		a = NULL;
+		prev = NULL;
+		for (sub = e->u.call.args; sub; sub = sub->next) {
+			struct expr *c = expr_dup(sub);
+			c->next = NULL;
+			if (prev)
+				prev->next = c;
+			else
+				a = c;
+			prev = c;
+		}
+		n->u.call.args = a;
+	} else if (k == EXPRBITFIELD || k == EXPRINCDEC ||
+	    k == EXPRUNARY || k == EXPRCAST) {
+		n->base = expr_dup(e->base);
+	} else if (k == EXPRBINARY) {
+		n->u.binary.l = expr_dup(e->u.binary.l);
+		n->u.binary.r = expr_dup(e->u.binary.r);
+	} else if (k == EXPRCOND) {
+		n->base = expr_dup(e->base);
+		n->u.cond.t = expr_dup(e->u.cond.t);
+		n->u.cond.f = expr_dup(e->u.cond.f);
+	} else if (k == EXPRCOMMA) {
+		struct expr *c, *cp, *head;
+		head = NULL;
+		cp = NULL;
+		for (c = e->base; c; c = c->next) {
+			struct expr *cc = expr_dup(c);
+			cc->next = NULL;
+			if (cp)
+				cp->next = cc;
+			else
+				head = cc;
+			cp = cc;
+		}
+		n->base = head;
+	}
+	return n;
+}
 struct expr *
 mkconstexpr(struct type *t, unsigned long long n)
 {
@@ -404,6 +461,7 @@ mkbinaryexpr(struct location *loc, enum tokenkind op, struct expr *l, struct exp
 	case TGREATER:
 	case TLEQ:
 	case TGEQ:
+	case TSPACESHIP:
 		t = &typeint;
 		if (lp & PROPREAL && rp & PROPREAL) {
 			commonreal(&l, &r);
@@ -476,6 +534,37 @@ mkbinaryexpr(struct location *loc, enum tokenkind op, struct expr *l, struct exp
 		break;
 	default:
 		fatal("internal error: unknown binary operator %d", op);
+	}
+	if (op == TSPACESHIP) {
+		/* C++20 three-way comparison `a <=> b` (simplified int result):
+		 *   (a > b) ? 1 : ((a < b) ? -1 : 0)
+		 * The two comparisons are EXPRBINARY nodes evaluated for truth
+		 * (backend emits a 0/1 int).  They reference the same operands,
+		 * so the second comparison uses deep copies (delexpr would
+		 * otherwise free the operands twice). */
+		struct expr *gt = mkexpr(EXPRBINARY, &typeint, NULL);
+		gt->op = TGREATER;
+		gt->u.binary.l = l;
+		gt->u.binary.r = r;
+		struct expr *lt = mkexpr(EXPRBINARY, &typeint, NULL);
+		lt->op = TLESS;
+		lt->u.binary.l = expr_dup(l);
+		lt->u.binary.r = expr_dup(r);
+		struct expr *one = mkexpr(EXPRCONST, &typeint, NULL);
+		one->u.constant.u = 1;
+		struct expr *mone = mkexpr(EXPRCONST, &typeint, NULL);
+		mone->u.constant.u = (unsigned long long)-1;
+		struct expr *zero = mkexpr(EXPRCONST, &typeint, NULL);
+		zero->u.constant.u = 0;
+		/* (a < b) ? -1 : 0 */
+		struct expr *inner = mkexpr(EXPRCOND, &typeint, lt);
+		inner->u.cond.t = mone;
+		inner->u.cond.f = zero;
+		/* (a > b) ? 1 : inner */
+		struct expr *outer = mkexpr(EXPRCOND, &typeint, gt);
+		outer->u.cond.t = one;
+		outer->u.cond.f = inner;
+		return outer;
 	}
 	e = mkexpr(EXPRBINARY, t, NULL);
 	e->op = op;

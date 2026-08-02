@@ -360,7 +360,25 @@ again:
 			goto again;
 		return tok;
 	case '<':
-		return op4(s, TLESS, TLEQ, TSHL, TSHLASSIGN);
+		/* C++20 three-way comparison `<=>`: `<` `=` `>` */
+		nextchar(s); /* consume the first '<'; s->chr is the next char */
+		if (s->chr == '<') {
+			nextchar(s);
+			if (s->chr == '=') {
+				nextchar(s);
+				return TSHLASSIGN;
+			}
+			return TSHL;
+		}
+		if (s->chr == '=') {
+			nextchar(s);
+			if (s->chr == '>') {
+				nextchar(s);
+				return TSPACESHIP;
+			}
+			return TLEQ;
+		}
+		return TLESS;
 	case '=':
 		return op2(s, TASSIGN, TEQL);
 	case '>':

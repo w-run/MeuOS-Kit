@@ -46,7 +46,8 @@ precedence(enum tokenkind t)
 	case TLESS:
 	case TGREATER:
 	case TLEQ:
-	case TGEQ:     return 6;
+	case TGEQ:
+	case TSPACESHIP: return 6;
 	case TSHL:
 	case TSHR:     return 7;
 	case TADD:

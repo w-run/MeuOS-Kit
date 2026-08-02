@@ -586,6 +586,7 @@ struct expr *assignexpr(struct scope *);
 struct expr *condexpr(struct scope *);
 unsigned long long intconstexpr(struct scope *, bool);
 void delexpr(struct expr *);
+struct expr *expr_dup(struct expr *);
 
 struct expr *exprassign(struct expr *, struct type *);
 struct expr *exprpromote(struct expr *);
