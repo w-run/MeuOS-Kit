@@ -489,8 +489,11 @@ postfixexpr(struct scope *s, struct expr *r)
 					/* C++ virtual call (C.2.5): indirect through the
 					 * object's vtable — `(*(fn **)((*(void **)obj) +
 					 * slot*8))(obj, args...)`.  The this object points at
-					 * the defining class's subobject. */
-					if (m->is_virtual) {
+					 * the defining class's subobject.
+					 * A class-qualified call (`obj.Base::f()`) must NOT
+					 * go through the vtable: it statically binds to the
+					 * qualified class's implementation (defect H). */
+					if (m->is_virtual && !qualified) {
 						extern struct expr *cpp_make_vcall(struct expr *,
 						    struct type *, struct member *, int);
 						extern struct type *cpp_method_owner(struct type *,
