@@ -5,6 +5,7 @@
 #include <string.h>
 #include "util.h"
 #include "mcc.h"
+#include "cpp.h"
 
 /* C23 labeled break/continue: maps label names to loop/switch targets */
 #define MAX_LABELED 64
@@ -162,14 +163,33 @@ stmt(struct func *f, struct scope *s)
 		break;
 
 	/* 6.8.4 Selection statement */
-	case TIF:
+	case TIF: {
+		/* C++17 `if constexpr (cond) { ... } else { ... }`: the condition
+		 * must be a compile-time constant; the unselected branch is
+		 * discarded entirely (skipped at the token level) so templates /
+		 * ill-formed code in it are never instantiated. */
+		extern int g_lang;
+		bool constexpr_if = false;
 		next();
+		/* `constexpr` is a C23 keyword (TCONSTEXPR) in the C lexer; the
+		 * C++ frontend re-uses that spelling. */
+		if (g_lang == 1 && tok.kind == TCONSTEXPR) {
+			constexpr_if = true;
+			next(); /* consume 'constexpr' */
+		}
 		s = mkscope(s);
 		expect(TLPAREN, "after 'if'");
 		e = expr(s);
 		t = e->type;
 		if (!(t->prop & PROPSCALAR))
 			error(&tok.loc, "controlling expression of if statement must have scalar type");
+		if (constexpr_if) {
+			extern void cpp_if_constexpr(struct func *, struct expr *,
+			    struct scope *);
+			cpp_if_constexpr(f, e, s);
+			s = delscope(s);
+			break;
+		}
 		b[0] = mkblock("if_true");
 		b[1] = mkblock("if_false");
 		funcbranch(f, e, b[0], b[1]);
@@ -194,6 +214,7 @@ stmt(struct func *f, struct scope *s)
 		}
 		s = delscope(s);
 		break;
+	}
 	case TSWITCH:
 		next();
 

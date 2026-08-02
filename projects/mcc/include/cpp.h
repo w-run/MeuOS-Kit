@@ -145,4 +145,9 @@ struct expr *cpp_tmpl_member_instantiate(struct scope *s,
  * TLPAREN "called object" checks until the instantiation replaces it). */
 struct expr *cpp_tmpl_member_placeholder(void);
 
+/* C++17 `if constexpr (cond)`: the condition must be a compile-time
+ * constant; the selected branch is parsed (via stmt()) and the other is
+ * skipped at the token level so it is never instantiated. */
+void cpp_if_constexpr(struct func *f, struct expr *cond, struct scope *s);
+
 #endif /* MCC_CPP_H */

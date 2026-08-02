@@ -206,6 +206,7 @@ cpp_ctor_clear_active(void)
 }
 static bool cpp_class_decl(struct scope *s);
 static void cpp_namespace_decl(struct scope *s);
+static void cpp_skip_branch(void);
 
 void
 cpp_set_qual_class(const char *tag)
@@ -4239,4 +4240,101 @@ cpp_constexpr_eval(struct expr *call)
 	delexpr(e);
 	delscope(tmp);
 	return NULL;
+}
+
+/* C++17 `if constexpr (cond) { ... } else { ... }`.
+ *
+ * The condition is parsed by the C `if` handling and handed here.  It must
+ * be a compile-time constant; only the selected branch is parsed (through
+ * stmt()), the other is skipped at the token level so it is never
+ * instantiated (the whole point of if constexpr inside templates). */
+void
+cpp_if_constexpr(struct func *f, struct expr *cond, struct scope *s)
+{
+	extern void stmt(struct func *, struct scope *);
+	extern void next(void);
+	extern struct expr *expr(struct scope *);
+	extern struct expr *eval(struct expr *);
+
+	unsigned long long v = 0;
+	bool have = false;
+
+	if (cond) {
+		struct expr *r = eval(cond);
+		/* eval() folds in place and returns the same node */
+		if (r->kind == EXPRCONST && (r->type->prop & PROPINT)) {
+			v = r->u.constant.u;
+			have = true;
+		}
+	}
+	if (!have)
+		error(&tok.loc, "if constexpr condition is not a constant expression");
+	next(); /* consume ')' after the condition */
+	{
+		bool take_then = v != 0;
+		if (take_then) {
+			/* parse the then-branch normally */
+			stmt(f, s);
+			/* skip the else-branch, if present (`else` is a C keyword,
+			 * TELSE; cpp_tok_kind only sees identifiers) */
+			if (tok.kind == TELSE) {
+				next();
+				cpp_skip_branch();
+			}
+		} else {
+			/* discard the then-branch, parse the else-branch */
+			cpp_skip_branch();
+			if (tok.kind == TELSE) {
+				next();
+				stmt(f, s);
+			}
+		}
+	}
+}
+
+/* Skip the statement that currently begins at `tok` (a compound `{...}`
+ * statement or a single statement), leaving the token stream positioned
+ * after it.  Used to discard the unselected branch of `if constexpr`. */
+static void
+cpp_skip_branch(void)
+{
+	extern void next(void);
+
+	if (tok.kind == TLBRACE) {
+		int depth = 0;
+		for (;;) {
+			if (tok.kind == TLBRACE)
+				++depth;
+			else if (tok.kind == TRBRACE) {
+				--depth;
+				if (depth == 0) {
+					next();
+					break;
+				}
+			} else if (tok.kind == TEOF) {
+				error(&tok.loc, "unterminated 'if constexpr' branch");
+				break;
+			}
+			next();
+		}
+	} else {
+		/* a single non-compound statement: skip one statement.  For the
+		 * common `if constexpr (c) stmt;` we skip to the next ';' at the
+		 * current nesting depth. */
+		int depth = 0;
+		for (;;) {
+			if (tok.kind == TLBRACE)
+				++depth;
+			else if (tok.kind == TRBRACE) {
+				if (depth == 0)
+					break;
+				--depth;
+			} else if (tok.kind == TSEMICOLON && depth == 0) {
+				next();
+				break;
+			} else if (tok.kind == TEOF)
+				break;
+			next();
+		}
+	}
 }
