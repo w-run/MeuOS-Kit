@@ -98,13 +98,28 @@ test_typclass(void)
 		CHECK(a.inmem == 1);
 	}
 
-	/* empty struct -> in memory */
+	/* empty struct (size 0) -> in memory */
 	{
 		MTypeDesc *td = mtd_new("S0", false);
 		mtd_finalize(td);
 		mfn_addtype(fn, td);
 		mabi_typclass(&a, td);
 		CHECK(a.inmem == 1);
+	}
+
+	/* size-1 empty aggregate (C++ `class Empty{}`, sizeof 1, no members)
+	 * -> the sole eightbyte is INTEGER: caller/callee must agree on a
+	 * register slot.  Regression for the MIR-backend gap found alongside
+	 * defect U (mirrors the LIR fix in 2be27a7). */
+	{
+		MTypeDesc *td = mtd_new("S1", false);
+		td->size = 1;
+		td->align = 1;
+		mtd_finalize(td);
+		mfn_addtype(fn, td);
+		mabi_typclass(&a, td);
+		CHECK(a.inmem == 0);
+		CHECK(a.cls[0] == MT_I64);
 	}
 
 	mfn_free(fn);

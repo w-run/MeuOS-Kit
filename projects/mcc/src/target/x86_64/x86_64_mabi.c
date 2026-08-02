@@ -100,6 +100,15 @@ mabi_typclass(MAClass *a, MTypeDesc *td)
 	a->cls[0] = a->cls[1] = MT_NONE;
 	a->inmem = 0;
 	mabi_classify(a, td, 0);
+	/* An eightbyte that classify() left untouched is INTEGER per the SysV
+	 * psABI — e.g. a C++ `class Empty {}` (size 1, no data members) has
+	 * no field to land in the slot.  Leaving it MT_NONE made the caller
+	 * and callee disagree on the argument register: the caller put the
+	 * value in RDI while the callee read RSI for `&e` (verified under
+	 * MCC_MIR_BACKEND=1, 2026-08-03).  Mirrors the LIR fix in 2be27a7. */
+	for (uint32_t k = 0; k * 8 < sz; k++)
+		if (a->cls[k] == MT_NONE)
+			a->cls[k] = MT_I64;
 }
 
 int
