@@ -63,9 +63,29 @@ mssa_check(MFn *fn)
 			for (int a = 0; a < 2; a++) {
 				MRef r = in->src[a];
 				if (r.val) {
-					uint32_t id = r.val->id;
-					if (id >= fn->nval || fn->val[id] != r.val)
-						err |= bad(fn, "ins source refs a non-live value");
+					/* MV_TYPE refs carry the frontend typ[] index in
+					 * ->id (func_to_mir overwrites it; the bridge emits
+					 * TYPE(idx) from it), NOT a value-table index.  Only
+					 * MV_TEMP (a real SSA value) must resolve through the
+					 * value table. */
+					if (r.val->kind == MV_TEMP) {
+						uint32_t id = r.val->id;
+						if (id >= fn->nval || fn->val[id] != r.val) {
+							MVal *tab = (id < fn->nval) ? fn->val[id] : 0;
+							char buf[240];
+							snprintf(buf, sizeof buf,
+								"ins[%d] src[%d] op=%d refs v%u(kind=%d '%s' %p) "
+								"table v%u(kind=%d '%s' %p)",
+								n, a, (int)in->op, id,
+								(int)r.val->kind, r.val->name ? r.val->name : "?",
+								(void *)r.val,
+								id < fn->nval ? id : 0,
+								tab ? (int)tab->kind : -1,
+								tab && tab->name ? tab->name : "?",
+								(void *)tab);
+							err |= bad(fn, buf);
+						}
+					}
 				}
 				if (r.con) {
 					uint32_t id = r.con->id;
