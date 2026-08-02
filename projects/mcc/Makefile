@@ -204,6 +204,12 @@ check-c23: $(BIN)
 		$$out || exit $$?; \
 	done
 
+# C 功能回归 × MIR/LIR 双路径矩阵：把 c99/c11/c23 三套正向用例分别在
+# MCC_USE_MIR=1（MIR 默认路径）与 MCC_USE_MIR=0（legacy 直接 LIR 路径）
+# 下编译运行，要求两路径均通过且 stdout 一致。守护双路径不回归、不分化。
+check-c-mir: $(BIN)
+	@sh test/mir_matrix.sh ./$(BIN)
+
 check-driver: $(BIN)
 	sh test/driver/sysroot.sh ./$(BIN)
 	sh test/driver/feature-regress.sh ./$(BIN)
@@ -357,7 +363,7 @@ check-cpp-neg: $(MPP_BIN)
 
 check-cpp: check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg
 
-.PHONY: all clean check check-all check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir-bridge check-mir check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg check-cpp
+.PHONY: all clean check check-all check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-c-mir check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir-bridge check-mir check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg check-cpp
 
 # chibicc community functional test suite (C11/C23 conformance).
 # Runs test/community/chibicc/run.sh against the MeuOS sysroot.

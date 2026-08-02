@@ -13,6 +13,7 @@
 | `make check-c99` | C99 功能回归 | glob `test/c99/*.c` |
 | `make check-c11` | C11（atomic/thread_local/varargs） | glob `test/c11/*.c` |
 | `make check-c23` | C23 | glob `test/c23/*.c` |
+| `make check-c-mir` | c99/c11/c23 × MIR/LIR 双路径矩阵（MCC_USE_MIR=1 与 =0 均须通过且 stdout 一致） | `test/mir_matrix.sh` |
 | `make check-cpp-func` | m++ 正向功能 | glob `test/cpp/*.cc`（排除 `.neg.cc` 与 `virtual.cc`） |
 | `make check-cpp-neg` | m++ 负向（应被拒绝） | glob `test/cpp/*.neg.cc` |
 | `make check-cpp-virtual` | 虚函数/虚表（需 sysroot） | 固定 `test/cpp/virtual.cc` |
