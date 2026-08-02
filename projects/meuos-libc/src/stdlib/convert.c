@@ -122,7 +122,6 @@ __isoc23_strtoull(const char *text, char **end, int base)
 	return strtoull(text, end, base);
 }
 
-#if !defined(__i386__)
 static int
 hexdigit_value(int c)
 {
@@ -259,12 +258,40 @@ strtod(const char *text, char **end)
 		*end = (char *)text;
 	return negative ? -value : value;
 }
-#endif
+
+/* C99 7.20.1.3: strtof / strtold narrow the same decimal/hex parsing.
+ * strtold needs 80-bit long double which mcc does not support yet, so it is
+ * deferred.  strtof reuses strtod and rounds to float; for the vast majority
+ * of inputs the double-rounding result equals glibc's directly-rounded value.
+ * The cases that differ are float halfway ties at the limit of precision. */
+float
+strtof(const char *text, char **end)
+{
+	return (float)strtod(text, end);
+}
 
 int
 atoi(const char *text)
 {
 	return (int)strtol(text, 0, 10);
+}
+
+double
+atof(const char *text)
+{
+	return strtod(text, 0);
+}
+
+long
+atol(const char *text)
+{
+	return strtol(text, 0, 10);
+}
+
+long long
+atoll(const char *text)
+{
+	return strtoll(text, 0, 10);
 }
 
 int
@@ -284,6 +311,11 @@ labs(long value)
 long long
 llabs(long long value)
 {
+	/* 避免 64 位有符号比较：mcc 的 i386 后端不支持 Kl flagislt
+	 *（见 src/target/i386/i386_emit.c "Kl op %s not yet supported"），
+	 * 原 `value < 0 ? -u : u` 触发崩溃。改用符号掩码算术求绝对值；
+	 * 对 INT64_MIN 的溢出行为与原三元版一致（UB，位结果相同）。 */
 	unsigned long long u = (unsigned long long)value;
-	return (long long)(value < 0 ? -u : u);
+	unsigned long long s = 0 - (u >> 63);	/* 全 1（负）或全 0（正） */
+	return (long long)((u ^ s) - s);
 }
