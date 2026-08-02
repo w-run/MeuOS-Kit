@@ -27,7 +27,7 @@
 | worker-mir-tests | MIR/C 测试缺口（发现缺陷 W/X） |
 
 ### 缺陷队列（2026-08-03）
-A-N ✅ 全闭环（J 长期项禁用）；Q/R/S/T/V ✅ closed；U/W/X/Y 🔄 open。状态只标 open/pending，修复 push 后由 worker-doc 周期 pull 补记 closed + 哈希。
+A-N ✅ 全闭环（J 长期项禁用）；Q/R/S/T/V ✅ closed；Z/W/X/Y 🔄 open（U 已弃用，size-0 空类改名 Z 派发 worker-lambda）。状态只标 open/pending，修复 push 后由 worker-doc 周期 pull 补记 closed + 哈希。
 - Q：f8f0044（delete/delete[] nullptr 判空守卫 + new_delete_nullptr.cc 回归）
 - R：93ab4b4（concept 按模板参数表折叠形参）
 - S/T：f8f0044 混入（lambda 捕获 ctor/嵌套捕获，canary 已转正）
