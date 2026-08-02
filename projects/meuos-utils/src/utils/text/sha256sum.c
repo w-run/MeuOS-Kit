@@ -76,13 +76,15 @@ static void sha256_update(sha256_ctx *c, const void *data, size_t len) {
 }
 
 static void sha256_final(sha256_ctx *c, unsigned char out[32]) {
+    /* 保存原始 bit 数，padding 之前取值 */
+    uint64_t saved_bits = c->bits;
     unsigned char pad[64];
     memset(pad, 0, 64);
     pad[0] = 0x80;
     size_t padlen = c->buf_len < 56 ? 56 - c->buf_len : 120 - c->buf_len;
     sha256_update(c, pad, padlen);
     unsigned char lenbuf[8];
-    for (int i = 0; i < 8; i++) lenbuf[i] = (unsigned char)(c->bits >> ((7-i)*8));
+    for (int i = 0; i < 8; i++) lenbuf[i] = (unsigned char)(saved_bits >> ((7-i)*8));
     sha256_update(c, lenbuf, 8);
     for (int i = 0; i < 8; i++) {
         out[i*4]   = (unsigned char)(c->state[i] >> 24);
@@ -92,14 +94,7 @@ static void sha256_final(sha256_ctx *c, unsigned char out[32]) {
     }
 }
 
-static void sha256_hex(const unsigned char hash[32], char *hex) {
-    static const char *h = "0123456789abcdef";
-    for (int i = 0; i < 32; i++) {
-        hex[i*2] = h[hash[i] >> 4];
-        hex[i*2+1] = h[hash[i] & 0xf];
-    }
-    hex[64] = '\0';
-}
+/* sha256_hex 已由 libutils 的 bytes_to_hex 替代 */
 
 static int sha256_file(const char *fname, char *hexout) {
     FILE *f = fopen(fname, "rb");
@@ -109,7 +104,7 @@ static int sha256_file(const char *fname, char *hexout) {
     while ((n = fread(buf, 1, sizeof(buf), f)) > 0) sha256_update(&c, buf, n);
     fclose(f);
     unsigned char hash[32]; sha256_final(&c, hash);
-    sha256_hex(hash, hexout);
+    bytes_to_hex(hash, 32, hexout);
     return 0;
 }
 
@@ -133,7 +128,8 @@ int main(int argc, char **argv) {
             while (fgets(line, sizeof(line), f)) {
                 char expected[65];
                 char fname[256];
-                if (sscanf(line, "%64s %*2s %255s", expected, fname) < 2) continue;
+                if (sscanf(line, "%64s %255s", expected, fname) < 2) continue;
+                if (fname[0] == '*') memmove(fname, fname + 1, strlen(fname));
                 char actual[65];
                 if (sha256_file(fname, actual) < 0) {
                     printf("%s: FAILED\n", fname);
@@ -154,7 +150,7 @@ int main(int argc, char **argv) {
             unsigned char buf[65536]; size_t n;
             while ((n = fread(buf, 1, sizeof(buf), stdin)) > 0) sha256_update(&c, buf, n);
             unsigned char hash[32]; sha256_final(&c, hash);
-            char hex[65]; sha256_hex(hash, hex);
+            char hex[65]; bytes_to_hex(hash, 32, hex);
             printf("%s  -\n", hex);
         } else {
             char hex[65];

@@ -83,30 +83,26 @@ static void md5_update(md5_ctx *c, const void *data, size_t len) {
 }
 
 static void md5_final(md5_ctx *c, unsigned char out[16]) {
+    /* 保存原始 bit 数，padding 之前取值 */
+    uint64_t saved_bits = c->bits;
     unsigned char pad[64];
     memset(pad, 0, 64);
     pad[0] = 0x80;
     size_t padlen = c->buf_len < 56 ? 56 - c->buf_len : 120 - c->buf_len;
     md5_update(c, pad, padlen);
     unsigned char lenbuf[8];
-    for (int i = 0; i < 8; i++) lenbuf[i] = (unsigned char)(c->bits >> (i * 8));
+    for (int i = 0; i < 8; i++) lenbuf[i] = (unsigned char)(saved_bits >> (i * 8));
     md5_update(c, lenbuf, 8);
+    /* 输出 a/b/c/d 各 4 字节，小端 */
     for (int i = 0; i < 4; i++) {
-        out[i*4]   = (unsigned char)(c->a >> (i*8));
-        out[i*4+1] = (unsigned char)(c->b >> (i*8));
-        out[i*4+2] = (unsigned char)(c->c >> (i*8));
-        out[i*4+3] = (unsigned char)(c->d >> (i*8));
+        out[i]    = (unsigned char)(c->a >> (i*8));
+        out[4+i]  = (unsigned char)(c->b >> (i*8));
+        out[8+i]  = (unsigned char)(c->c >> (i*8));
+        out[12+i] = (unsigned char)(c->d >> (i*8));
     }
 }
 
-static void md5_hex(const unsigned char hash[16], char *hex) {
-    static const char *h = "0123456789abcdef";
-    for (int i = 0; i < 16; i++) {
-        hex[i*2] = h[hash[i] >> 4];
-        hex[i*2+1] = h[hash[i] & 0xf];
-    }
-    hex[32] = '\0';
-}
+/* md5_hex 已由 libutils 的 bytes_to_hex 替代 */
 
 static int md5_file(const char *fname, char *hexout) {
     FILE *f = fopen(fname, "rb");
@@ -118,7 +114,7 @@ static int md5_file(const char *fname, char *hexout) {
     fclose(f);
     unsigned char hash[16];
     md5_final(&c, hash);
-    md5_hex(hash, hexout);
+    bytes_to_hex(hash, 16, hexout);
     return 0;
 }
 
@@ -144,7 +140,8 @@ int main(int argc, char **argv) {
                 char expected[33];
                 char fname[256];
                 /* 格式: <hash>  <file> */
-                if (sscanf(line, "%32s %*2s %255s", expected, fname) < 2) continue;
+                if (sscanf(line, "%32s %255s", expected, fname) < 2) continue;
+                if (fname[0] == '*') memmove(fname, fname + 1, strlen(fname));
                 char actual[33];
                 if (md5_file(fname, actual) < 0) {
                     printf("%s: FAILED\n", fname);
@@ -166,7 +163,7 @@ int main(int argc, char **argv) {
             unsigned char buf[65536]; size_t n;
             while ((n = fread(buf, 1, sizeof(buf), stdin)) > 0) md5_update(&c, buf, n);
             unsigned char hash[16]; md5_final(&c, hash);
-            char hex[33]; md5_hex(hash, hex);
+            char hex[33]; bytes_to_hex(hash, 16, hex);
             printf("%s  -\n", hex);
         } else {
             char hex[33];

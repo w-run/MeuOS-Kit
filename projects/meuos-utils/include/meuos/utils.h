@@ -156,6 +156,17 @@ int sig_from_name(const char *s);
 const char *sig_to_name(int sig);
 void sig_list_all(void);
 
+/* === 十六进制转换 ===
+ *
+ * bytes_to_hex: 二进制 → 小写十六进制字符串
+ *   out 需至少 2*len + 1 字节。
+ * hex_to_bytes: 十六进制字符串 → 二进制
+ *   返回写入的字节数，错误返回 -1。
+ *   跳过空格/换行，大小写不敏感。
+ */
+void bytes_to_hex(const unsigned char *data, size_t len, char *out);
+int hex_to_bytes(const char *hex, unsigned char *out, size_t max_out);
+
 #ifdef __cplusplus
 }
 #endif
