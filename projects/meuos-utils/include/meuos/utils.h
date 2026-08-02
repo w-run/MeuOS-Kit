@@ -13,6 +13,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <time.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -123,6 +124,24 @@ char *human_readable(uint64_t bytes, int si);
  * 各工具 main 开头调 utils_classic_init(argc, argv)。 */
 extern int utils_classic_mode;
 int utils_classic_init(int argc, char **argv);
+
+/* === 时长解析 ===
+ *
+ * 解析时长字符串，支持以下格式：
+ *   "5"       -> 5 秒
+ *   "5s"      -> 5 秒
+ *   "5m"      -> 5 分钟
+ *   "5h"      -> 5 小时
+ *   "5d"      -> 5 天
+ *   "1h30m"   -> 5400 秒（复合时长）
+ *   "1:30"    -> 90 秒（MM:SS 格式）
+ *   "1:30:00" -> 5400 秒（HH:MM:SS 格式）
+ *
+ * parse_duration 返回秒数（double），错误返回 -1.0。
+ * parse_duration_ts 直接填充 struct timespec（用于 nanosleep），返回 0=成功 / -1=错误。
+ */
+double parse_duration(const char *s);
+int parse_duration_ts(const char *s, struct timespec *ts);
 
 #ifdef __cplusplus
 }

@@ -1,6 +1,7 @@
 /* timeout — 在指定时间后杀死命令
  * 用法：timeout [-s SIGNAL] DURATION COMMAND [ARG]...
- * 选项：-s SIGNAL 使用的信号(默认 TERM), -k KILL 超时后发 KILL
+ * 选项：-s SIGNAL 使用的信号(默认 TERM)
+ * DURATION 支持复合时长 (1h30m) 和冒号格式 (1:30:00)
  */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -13,17 +14,6 @@
 #include <unistd.h>
 
 #include "meuos/utils.h"
-
-static double parse_duration(const char *s) {
-    char *end;
-    double val = strtod(s, &end);
-    if (end == s) return -1;
-    if (*end == '\0' || !strcmp(end, "s")) return val;
-    if (!strcmp(end, "m")) return val * 60;
-    if (!strcmp(end, "h")) return val * 3600;
-    if (!strcmp(end, "d")) return val * 86400;
-    return -1;
-}
 
 static int sig_from_name(const char *s) {
     if (strncmp(s, "SIG", 3) == 0) s += 3;
@@ -55,8 +45,8 @@ int main(int argc, char **argv) {
         else break;
     }
     if (argi >= argc) { fprintf(stderr, "timeout: missing DURATION\n"); return 2; }
-    double dur = parse_duration(argv[argi++]);
-    if (dur < 0) { fprintf(stderr, "timeout: invalid duration\n"); return 2; }
+    struct timespec ts;
+    if (parse_duration_ts(argv[argi++], &ts) < 0) { fprintf(stderr, "timeout: invalid duration\n"); return 2; }
     if (argi >= argc) { fprintf(stderr, "timeout: missing COMMAND\n"); return 2; }
 
     child_pid = fork();
@@ -74,10 +64,7 @@ int main(int argc, char **argv) {
     sa.sa_flags = 0;
     sigaction(SIGALRM, &sa, NULL);
 
-    unsigned int secs = (unsigned int)dur;
-    unsigned long nsecs = (unsigned long)((dur - secs) * 1000000000UL);
-    struct timespec ts = { secs, nsecs };
-    if (dur > 0) {
+    if (ts.tv_sec > 0 || ts.tv_nsec > 0) {
         if (nanosleep(&ts, NULL) == 0 || errno != EINTR) {
             /* 超时到了 */
             got_timeout = 1;
