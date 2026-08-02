@@ -333,6 +333,7 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 				struct token saved = tok;
 				next();
 				if (tok.kind == TCOLONCOLON) {
+					struct token ccolon = tok;
 					struct type *it;
 					next();
 					if (tok.kind < TIDENT)
@@ -344,6 +345,18 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 						next();
 						break;
 					}
+					/* `Class::member` is an expression (static member
+					 * call/access), not a type declaration: restore the
+					 * whole token stream (`Class :: member ...`) and
+					 * report no type so decl() falls back to the
+					 * expression-statement path. */
+					{
+						struct token cur = tok;
+						tokpush(&cur, 1);    /* member */
+						tokpush(&ccolon, 1); /* '::' */
+						tok = saved;         /* Class */
+					}
+					return (struct qualtype){NULL, QUALNONE, NULL};
 				}
 				/* not a nested-class reference: restore */
 				{
