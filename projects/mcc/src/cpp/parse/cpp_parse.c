@@ -1006,7 +1006,8 @@ cpp_parse_method_body(struct cpp_pending_method *pm)
 
 	fs = mkscope(pm->s);
 	for (nd = pm->mtype->u.func.params; nd; nd = nd->next)
-		scopeputdecl(fs, nd);
+		if (nd->name) /* unnamed parameters (`B(int)`) have no name to bind */
+			scopeputdecl(fs, nd);
 
 	/* method-body context is saved/restored so a nested method-body parse
 	 * (an inner class or a lambda closure defined inside this body) does
@@ -1634,7 +1635,8 @@ cpp_parse_free_operator(struct scope *s, struct qualtype base)
 	/* function definition: mirror the non-class body path */
 	fs = mkscope(s);
 	for (pd = ft->u.func.params; pd; pd = pd->next)
-		scopeputdecl(fs, pd);
+		if (pd->name) /* unnamed parameters have no name to bind */
+			scopeputdecl(fs, pd);
 	f = mkfunc(d, d->name, d->type, fs);
 	stmt(f, fs);
 	emitfunc(f, d->linkage == LINKEXTERN);
