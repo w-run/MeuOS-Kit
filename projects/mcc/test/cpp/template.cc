@@ -34,6 +34,21 @@ public:
     }
 };
 
+template <typename T> class Box {
+public:
+    T val;
+    Box() { val = 0; }
+    Box(T v) { val = v; }
+    T get() { return val; }
+};
+
+template <typename T> class Pair {
+public:
+    T a, b;
+    Pair(T x, T y) { a = x; b = y; }
+    T sum() { return a + b; }
+};
+
 int
 main(void)
 {
@@ -51,6 +66,18 @@ main(void)
 
     Holder h;
     if (h.apply() != 9) return 8;
+
+    /* class templates */
+    Box<int> bx(42);
+    if (bx.get() != 42) return 9;         /* int instantiation */
+    Box<double> bd(2.5);
+    if (bd.get() != 2.5) return 10;       /* double instantiation */
+    Box<int> bx2;
+    if (bx2.get() != 0) return 11;        /* cache reuse */
+    Pair<int> pr(10, 4);
+    if (pr.sum() != 14) return 12;
+    Pair<int> q(max(3, 8), max(1, 2));  /* class + function templates */
+    if (q.sum() != 10) return 13;
 
     return 0;
 }

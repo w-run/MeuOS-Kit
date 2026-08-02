@@ -114,5 +114,11 @@ void cpp_emit_vtables(void);
 const char *cpp_tmpl_lookup(const char *name);
 struct expr *cpp_tmpl_placeholder(const char *name);
 struct expr *cpp_tmpl_instantiate(struct scope *s, struct expr *arglist);
+/* Class templates: is `name` a `template<...> class Foo { ... }`? */
+const char *cpp_tmpl_class_lookup(const char *name);
+/* Instantiate `Foo<...>` (tok is positioned at '<' on entry); parses the
+ * explicit template arguments, defines the instantiated class, and returns
+ * its type. */
+struct type *cpp_tmpl_class_instantiate(struct scope *s, const char *name);
 
 #endif /* MCC_CPP_H */

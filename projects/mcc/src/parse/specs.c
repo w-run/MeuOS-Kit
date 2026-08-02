@@ -551,6 +551,24 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 						next();
 						break;
 					}
+					/* C++ class template: `Foo<int>` used as a type name.
+					 * Peek for '<'; instantiate the class on first use. */
+					extern const char *cpp_tmpl_class_lookup(const char *);
+					extern struct type *cpp_tmpl_class_instantiate(struct scope *,
+					    const char *);
+					if (cpp_tmpl_class_lookup(tokenstr(tok.kind))) {
+						struct token saved = tok;
+						next();
+						if (tok.kind == TLESS) {
+							t = cpp_tmpl_class_instantiate(s,
+							    tokenstr(saved.kind));
+							tq = QUALNONE;
+							++ntypes;
+							break;
+						}
+						tokpush(&saved, 1);
+						next();
+					}
 				}
 				goto done;
 			}

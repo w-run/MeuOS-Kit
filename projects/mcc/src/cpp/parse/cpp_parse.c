@@ -2554,17 +2554,29 @@ struct cpp_tmpl_inst {
 	struct cpp_tmpl_inst *next;
 };
 
-/* A function template declaration.  `toks` holds the declaration tokens
- * after the `template <...>` header (return type .. body); it is replayed
- * with each concrete parameter binding to define the instantiation. */
+/* A concrete instantiation of a class template (`Foo<int>`): the
+ * instantiated class type, under its mangled tag name. */
+struct cpp_tmpl_cls_inst {
+	char key[128];       /* mangled tag name, e.g. "Foo_i" */
+	struct type *t;
+	struct cpp_tmpl_cls_inst *next;
+};
+
+/* A function or class template declaration.  `toks` holds the declaration
+ * tokens after the `template <...>` header (function declaration + body,
+ * or `class Foo { ... }`); it is replayed with each concrete parameter
+ * binding to define the instantiation. */
 struct cpp_template {
 	const char *name;
 	int nparams;
 	struct cpp_tmpl_param *params;
 	struct token *toks;
 	size_t ntoks;
+	bool is_class;               /* `template<...> class Foo { ... }` */
 	struct cpp_tmpl_inst *insts;
 	struct cpp_tmpl_inst **insts_end;
+	struct cpp_tmpl_cls_inst *cls_insts;
+	struct cpp_tmpl_cls_inst **cls_insts_end;
 	struct cpp_template *next;
 };
 
@@ -2649,8 +2661,11 @@ cpp_template_decl(struct scope *s)
 	tmpl->params = NULL;
 	tmpl->toks = NULL;
 	tmpl->ntoks = 0;
+	tmpl->is_class = false;
 	tmpl->insts = NULL;
 	tmpl->insts_end = &tmpl->insts;
+	tmpl->cls_insts = NULL;
+	tmpl->cls_insts_end = &tmpl->cls_insts;
 	tmpl->next = NULL;
 	pe = &tmpl->params;
 
@@ -2676,6 +2691,13 @@ cpp_template_decl(struct scope *s)
 	}
 	next(); /* consume '>' */
 
+	/* class template: `template<...> class Foo { ... }` (struct/union too) */
+	{
+		enum cpp_tokenkind k = cpp_tok_kind();
+		if (k == CPP_TCLASS || k == CPP_TSTRUCT || k == CPP_TUNION)
+			tmpl->is_class = true;
+	}
+
 	/* buffer the rest of the declaration (return type .. body / ';') */
 	toks = NULL;
 	for (;;) {
@@ -2700,6 +2722,9 @@ cpp_template_decl(struct scope *s)
 		if (tok.kind == TEOF)
 			break;
 	}
+	/* a class template's `};` leaves the trailing ';' here; consume it */
+	if (tmpl->is_class && tok.kind == TSEMICOLON)
+		next();
 	tmpl->toks = toks;
 	tmpl->ntoks = ntoks;
 
@@ -2797,41 +2822,49 @@ cpp_tmpl_find_or_instantiate(struct scope *s, const char *name,
 		if (strcmp(inst->key, key) == 0)
 			return inst->fn;
 
-	/* instantiate: bind parameters as type names, replay the declaration */
+	/* instantiate: bind parameters as type names, replay the declaration.
+	 * The buffered tokens are shared across instantiations, so rename on
+	 * a private copy. */
 	bs = mkscope(s);
 	for (p = tmpl->params, i = 0; p; p = p->next, ++i) {
 		td = mkdecl((char *)p->name, DECLTYPE, types[i], QUALNONE, LINKNONE);
 		scopeputdecl(bs, td);
 	}
-	/* rename the function token to the mangled instantiation name (the
-	 * parser resolves identifiers by their interned token kind, so intern
-	 * the mangled name and swap the kind) */
-	found = false;
-	for (i = 0; i < (int)tmpl->ntoks; ++i) {
-		const char *nm;
-		if (tmpl->toks[i].kind < TIDENT)
-			continue;
-		nm = tokenstr(tmpl->toks[i].kind);
-		if (cpp_classify_ident(nm, strlen(nm)) != CPP_TNONE)
-			continue;
-		bool is_param = false;
-		for (p = tmpl->params; p; p = p->next)
-			if (strcmp(p->name, nm) == 0) {
-				is_param = true;
+	{
+		struct token *rtoks = xmalloc(tmpl->ntoks * sizeof *rtoks);
+		memcpy(rtoks, tmpl->toks, tmpl->ntoks * sizeof *rtoks);
+		/* rename the function token to the mangled instantiation name (the
+		 * parser resolves identifiers by their interned token kind, so
+		 * intern the mangled name and swap the kind) */
+		found = false;
+		for (i = 0; i < (int)tmpl->ntoks; ++i) {
+			const char *nm;
+			if (rtoks[i].kind < TIDENT)
+				continue;
+			nm = tokenstr(rtoks[i].kind);
+			if (cpp_classify_ident(nm, strlen(nm)) != CPP_TNONE)
+				continue;
+			bool is_param = false;
+			for (p = tmpl->params; p; p = p->next)
+				if (strcmp(p->name, nm) == 0) {
+					is_param = true;
+					break;
+				}
+			if (!is_param) {
+				rtoks[i].kind = tokenget(fnname, strlen(fnname));
+				found = true;
 				break;
 			}
-		if (!is_param) {
-			tmpl->toks[i].kind = tokenget(fnname, strlen(fnname));
-			found = true;
-			break;
 		}
-	}
-	if (!found)
-		error(&tok.loc, "cannot locate function name in template '%s'", name);
+		if (!found)
+			error(&tok.loc, "cannot locate function name in template '%s'", name);
 
-	cur = tok;
-	tokpush(&cur, 1);
-	tokpush(tmpl->toks, tmpl->ntoks);
+		cur = tok;
+		tokpush(&cur, 1);
+		tokpush(rtoks, tmpl->ntoks);
+		/* rtoks stays alive (tokpush stores pointers) until decl() consumes
+		 * it below; deliberately not freed (bounded per-instantiation). */
+	}
 	next();
 	if (!decl(bs, NULL))
 		error(&tok.loc, "failed to instantiate template '%s'", name);
@@ -2875,4 +2908,138 @@ cpp_tmpl_instantiate(struct scope *s, struct expr *arglist)
 	e->u.ident.decl = fd;
 	e->lvalue = false;
 	return decay(e);
+}
+
+/* --- C.2.8 class templates (instantiate-on-first-use) ------------------ */
+
+const char *
+cpp_tmpl_class_lookup(const char *name)
+{
+	struct cpp_template *t;
+
+	for (t = g_cpp_templates; t; t = t->next)
+		if (t->is_class && strcmp(t->name, name) == 0)
+			return t->name;
+	return NULL;
+}
+
+/* Instantiate a class template: `Foo<...>` (tok positioned at '<').
+ * Parses the explicit template arguments, replays the buffered
+ * `class Foo { ... }` declaration (with each parameter bound and the tag
+ * renamed to the mangled instantiation name) through cpp_class_decl, and
+ * returns the instantiated class type. */
+struct type *
+cpp_tmpl_class_instantiate(struct scope *s, const char *name)
+{
+	extern struct type *typename(struct scope *, enum typequal *,
+	    struct expr **);
+	struct cpp_template *tmpl;
+	struct cpp_tmpl_cls_inst *ci;
+	struct cpp_tmpl_param *p;
+	struct type *args[16];
+	struct type *t;
+	char key[128], tag[128];
+	struct token cur;
+	struct decl *td;
+	enum typequal tq;
+	struct expr *toeval;
+	int i, n = 0;
+
+	for (tmpl = g_cpp_templates; tmpl; tmpl = tmpl->next)
+		if (tmpl->is_class && strcmp(tmpl->name, name) == 0)
+			break;
+	if (!tmpl)
+		return NULL;
+	if (tmpl->nparams > 16)
+		error(&tok.loc, "template '%s' has too many parameters", name);
+
+	/* explicit template arguments `<T1, T2, ...>` */
+	expect(TLESS, "after class template name");
+	do {
+		if (n >= tmpl->nparams)
+			error(&tok.loc, "too many template arguments for class template '%s'", name);
+		tq = QUALNONE;
+		toeval = NULL;
+		args[n++] = typename(s, &tq, &toeval);
+		if (tok.kind == TGREATER)
+			break;
+		expect(TCOMMA, "',' or '>' in class template argument list");
+	} while (tok.kind != TGREATER);
+	next(); /* consume '>' */
+	if (n < tmpl->nparams)
+		error(&tok.loc, "too few template arguments for class template '%s'", name);
+
+	/* mangled tag name: Foo + "_" + type codes (e.g. Foo_i) */
+	snprintf(key, sizeof key, "%s", name);
+	for (i = 0; i < tmpl->nparams; ++i) {
+		char code[64];
+		cpp_mangle_type(args[i], code, sizeof code);
+		strncat(key, "_", sizeof key - strlen(key) - 1);
+		strncat(key, code, sizeof key - strlen(key) - 1);
+	}
+	snprintf(tag, sizeof tag, "%s", key);
+
+	for (ci = tmpl->cls_insts; ci; ci = ci->next)
+		if (strcmp(ci->key, key) == 0)
+			return ci->t;
+
+	/* bind the parameters as type names (re-put replaces the previous
+	 * binding; the names are generic template params and stay benignly in
+	 * file scope) */
+	for (p = tmpl->params, i = 0; p; p = p->next, ++i) {
+		td = mkdecl((char *)p->name, DECLTYPE, args[i], QUALNONE, LINKNONE);
+		scopeputdecl(&filescope, td);
+	}
+	/* rename the class-name token to the mangled tag, and every
+	 * constructor/destructor token (which spells the original class name)
+	 * so struct_decl recognizes them as the class's own constructors.
+	 * The buffered tokens are shared across instantiations, so rename on
+	 * a private copy. */
+	{
+		struct token *rtoks = xmalloc(tmpl->ntoks * sizeof *rtoks);
+		bool found = false;
+		memcpy(rtoks, tmpl->toks, tmpl->ntoks * sizeof *rtoks);
+		for (i = 0; i < (int)tmpl->ntoks; ++i) {
+			const char *nm;
+			if (rtoks[i].kind < TIDENT)
+				continue;
+			nm = tokenstr(rtoks[i].kind);
+			if (cpp_classify_ident(nm, strlen(nm)) != CPP_TNONE)
+				continue;
+			bool is_param = false;
+			for (p = tmpl->params; p; p = p->next)
+				if (strcmp(p->name, nm) == 0) {
+					is_param = true;
+					break;
+				}
+			if (!is_param && strcmp(nm, name) == 0) {
+				/* the class name itself or a constructor/destructor */
+				rtoks[i].kind = tokenget(tag, strlen(tag));
+				found = true;
+			}
+		}
+		if (!found)
+			error(&tok.loc, "cannot locate class name in template '%s'", name);
+
+		/* replay `class Foo_i { ... }` to define the instantiated class.
+		 * rtoks stays alive (tokpush stores pointers) until cpp_class_decl
+		 * consumes it below; deliberately not freed (bounded). */
+		cur = tok;
+		tokpush(&cur, 1);
+		tokpush(rtoks, tmpl->ntoks);
+	}
+	next();
+	cpp_class_decl(&filescope);
+
+	t = scopegettag(&filescope, tag, 1);
+	if (!t)
+		error(&tok.loc, "class template '%s' instantiation produced no class", name);
+
+	ci = xmalloc(sizeof(*ci));
+	snprintf(ci->key, sizeof ci->key, "%s", key);
+	ci->t = t;
+	ci->next = NULL;
+	*tmpl->cls_insts_end = ci;
+	tmpl->cls_insts_end = &ci->next;
+	return t;
 }
