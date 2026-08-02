@@ -330,7 +330,7 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
 | cpp-0b | R | concept 形参名 ≠ `T` 误判 undeclared | ✅ closed（93ab4b4） |
 | cpp-0c | S | lambda 按值捕获类对象不调拷贝构造 | ✅ closed（f8f0044 混入） |
 | cpp-0d | T | 嵌套 lambda 无法再捕获外层变量 | ✅ closed（f8f0044 混入） |
-| cpp-0e | Z/U | size-0 空类按值传参/返回崩溃（P0） | 🔄 open（worker-lambda 在途） |
+| cpp-0e | Z/U | size-0 空类按值传参/返回崩溃（P0） | ✅ closed（2be27a7，mem.c 槽活跃区间 + typclass Kx→Kl，empty_class_value.cc 双路径 rc=0） |
 | cpp-0f | Y | `delete (T*)expr` 解析失败 | 🔄 open（low） |
 | c-00 | W | `u8"..."` 字面量元素类型应为 `char`（C11 §6.4.5p6） | 🔄 open（worker-mir-tests 发现） |
 | c-01 | X | inline 定义 + extern 声明未发外部定义（C99 §6.7.4p7） | 🔄 open（worker-mir-tests 发现） |
