@@ -371,6 +371,24 @@ structdecl(struct scope *s, struct structbuilder *b)
 					b->member_const = true;
 					next();
 				}
+				/* C++11 override/final specifiers: `void f() override {}`,
+				 * `virtual void f() final {}`.  Syntactically accepted and
+				 * consumed here; `override` also marks the member virtual
+				 * (so the vtable slot is allocated) and `final` records
+				 * the flag for the virtual-table checks. */
+				{
+					extern enum cpp_tokenkind cpp_tok_kind(void);
+					extern bool g_cpp_define_virtual;
+					extern bool g_cpp_method_final;
+					while (cpp_tok_kind() == CPP_TOVERRIDE ||
+					    cpp_tok_kind() == CPP_TFINAL) {
+						if (cpp_tok_kind() == CPP_TOVERRIDE)
+							g_cpp_define_virtual = true;
+						else
+							g_cpp_method_final = true;
+						next();
+					}
+				}
 				bool is_static = (sc & SCSTATIC) != 0;
 				/* class tag for name mangling (Class_method) */
 				extern bool g_cpp_define_virtual;

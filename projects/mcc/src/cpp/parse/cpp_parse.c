@@ -155,6 +155,8 @@ static struct decl *cpp_tmpl_find_or_instantiate(struct scope *s,
  * virtual (explicit `virtual` or an override of a base virtual); consumed
  * by structdecl to flag the member. */
 bool g_cpp_define_virtual;
+/* Set when a method was declared with the `final` specifier. */
+bool g_cpp_method_final;
 
 /* Two-phase class parsing: while a class body is being collected, method
  * bodies are buffered (tokens) and replayed after the class layout is
