@@ -358,7 +358,7 @@ check-cpp-neg: $(MPP_BIN)
 
 check-cpp: check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg
 
-.PHONY: all clean check check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir-bridge check-mir check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg check-cpp
+.PHONY: all clean check check-all check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir-bridge check-mir check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg check-cpp
 
 # chibicc community functional test suite (C11/C23 conformance).
 # Runs test/community/chibicc/run.sh against the MeuOS sysroot.
@@ -367,3 +367,8 @@ check-chibicc: $(BIN)
 	@sh test/community/chibicc/run.sh
 
 check-community: check-c99 check-chibicc
+
+# 一键回归验收门禁：聚合所有 check 目标（test/verify-all.sh），
+# 任一检查失败即以非零状态退出。只新增本目标，不改动已有 check 目标。
+check-all:
+	sh test/verify-all.sh
