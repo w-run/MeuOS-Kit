@@ -50,6 +50,19 @@
     → `test/cpp/free_func_overload.cc`）、`ctor_base_dtor.cc`（继承
     析构链，→ `ctor_dtor_order.cc`）、`static_void_method.cc`
     （static void 方法，→ `static_void_method.cc`）
+- 2026-08-02 清理（gp-2）：删除 8 个早期复现测试——已被转正版或
+  等效测试覆盖，无独立价值：
+  - `ambig_addr.neg.cc` → `test/cpp/ambig_addr.neg.cc`（转正）
+  - `multi_ambig.neg.cc` → `test/cpp/multi_ambig.neg.cc`（转正）
+  - `free_operator.cc` → `test/cpp/free_operator.cc`（转正）
+  - `global_dtor.cc` → `test/cpp/global_dtor.cc`（转正）
+  - `method_addr.cc` → `test/cpp/method_addr.cc`（转正）
+  - `ctor_ident_args.cc` / `ref_overload.cc` / `ref_var.cc`
+    → `test/cpp/ref_ctor.cc`（引用变量、值/引用重载、带标识符
+    实参构造链已被综合覆盖）
+  - 保留 `struct_multinher.cc`：struct 多继承（`struct D : A, B`）
+    仍未修复（报 "expected '(' or identifier"），无等效测试，
+    作已知缺陷复现继续保留
 
 ## 新增测试清单（2026-08-02，worker-test）
 
