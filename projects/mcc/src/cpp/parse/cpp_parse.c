@@ -2675,7 +2675,14 @@ cpp_parse_new_expr(struct scope *s)
 
 /* `delete p`: emit a destructor call `Class_dtor(p)` (for a class with a
  * destructor) followed by `free(p)`, and yield a void-typed expression.
- * `delete[]` is not supported yet. */
+ *
+ * C++ says `delete` / `delete[]` on a null pointer is a no-op: the operand
+ * is evaluated once, and neither a destructor nor the allocator may be
+ * touched for a null pointer.  `free(NULL)` is itself a no-op, so a scalar
+ * `delete` only needs its destructor guarded; `delete[]` additionally
+ * reads the array-length cookie at `(char*)p - sizeof(size_t)` and frees
+ * `(char*)p - sizeof(size_t)`, both of which must stay inside the
+ * null-guard (defect Q). */
 struct expr *
 cpp_parse_delete_expr(struct scope *s)
 {
@@ -2687,20 +2694,48 @@ cpp_parse_delete_expr(struct scope *s)
 	const char *tag;
 	char mname[256];
 	struct decl *fd;
+	extern struct block *mkblock(char *);
+	extern void funclabel(struct func *, struct block *);
+	extern void funcjmp(struct func *, struct block *);
+	extern struct value *funcbranch(struct func *,
+	    struct expr *, struct block *, struct block *);
 
 	next(); /* consume 'delete' */
 	if (tok.kind == TLBRACK) {
 		/* delete[] p: read the array-length cookie stored by `new T[n]`,
 		 * destruct each element (for a class with a destructor) in a
-		 * loop, then free the raw allocation. */
-		struct expr *ne, *cp, *castc, *deref, *fp;
-		struct decl *nd;
+		 * loop, then free the raw allocation.  The whole body runs
+		 * only when p != NULL. */
+		struct expr *ne, *cp, *castc, *deref, *fp, *te, *nul;
+		struct decl *nd, *td;
+		struct block *bload, *bdone;
 		next(); /* consume '[' */
 		expect(TRBRACK, "after 'delete['");
 		e = unaryexpr(s);
 		if (!e || e->type->kind != TYPEPOINTER)
 			error(&tok.loc, "delete operand must be a pointer");
 		t = e->type->base;
+		/* __dl_fp = (void*)0; set to (char*)e - sizeof(size_t) only
+		 * inside the null-guard, so the returned free(NULL) is a
+		 * no-op when e is null */
+		td = mkdecl("__dl_fp", DECLOBJECT,
+		    mkpointertype(&typevoid, QUALNONE), QUALNONE, LINKNONE);
+		td->u.obj.storage = SDAUTO;
+		funcinit(curfunc, td, NULL, false);
+		te = mkexpr(EXPRIDENT, td->type, NULL);
+		te->lvalue = true;
+		te->u.ident.decl = td;
+		funcexpr(curfunc, mkassignexpr(te, mkconstexpr(td->type, 0)));
+		/* if (e != 0) { ... } */
+		nul = mkexpr(EXPRBINARY, &typeint, NULL);
+		nul->op = TNEQ;
+		nul->u.binary.l = e;
+		nul->u.binary.r = mkexpr(EXPRCONST, &typenullptr, NULL);
+		nul->u.binary.r->u.constant.u = 0;
+		bload = mkblock("body");
+		bdone = mkblock("done");
+		funcbranch(curfunc, nul, bload, bdone);
+		funclabel(curfunc, bload);
 		/* n = *(size_t*)((char*)p - sizeof(size_t)) */
 		nd = mkdecl("__dl_n", DECLOBJECT, &typeulong, QUALNONE, LINKNONE);
 		nd->u.obj.storage = SDAUTO;
@@ -2721,13 +2756,8 @@ cpp_parse_delete_expr(struct scope *s)
 		if (t && (t->kind == TYPESTRUCT || t->kind == TYPEUNION) &&
 		    (tag = t->u.structunion.tag) && cpp_has_dtor(t)) {
 			struct decl *iv;
-			struct expr *ie, *lt, *ptr, *inc, *dn;
-			struct block *bloop, *bbody, *bdone;
-			extern struct block *mkblock(char *);
-			extern void funclabel(struct func *, struct block *);
-			extern void funcjmp(struct func *, struct block *);
-			extern struct value *funcbranch(struct func *,
-			    struct expr *, struct block *, struct block *);
+			struct expr *ie, *lt, *inc, *dn;
+			struct block *bloop, *bbody;
 			iv = mkdecl("__dl_i", DECLOBJECT, &typeint, QUALNONE, LINKNONE);
 			iv->u.obj.storage = SDAUTO;
 			funcinit(curfunc, iv, NULL, false);
@@ -2737,7 +2767,6 @@ cpp_parse_delete_expr(struct scope *s)
 			funcexpr(curfunc, mkassignexpr(ie, mkconstexpr(&typeint, 0)));
 			bloop = mkblock("loop");
 			bbody = mkblock("body");
-			bdone = mkblock("done");
 			funclabel(curfunc, bloop);
 			lt = mkexpr(EXPRBINARY, &typeint, NULL);
 			lt->op = TLESS;
@@ -2778,15 +2807,20 @@ cpp_parse_delete_expr(struct scope *s)
 			inc->u.binary.r = mkconstexpr(&typeint, 1);
 			funcexpr(curfunc, mkassignexpr(ie, inc));
 			funcjmp(curfunc, bloop);
-			funclabel(curfunc, bdone);
 		}
-		/* free((char*)p - sizeof(size_t)) */
+		/* __dl_fp = (char*)p - sizeof(size_t) */
 		fp = mkexpr(EXPRBINARY, mkpointertype(&typechar, QUALNONE), NULL);
 		fp->op = TSUB;
 		fp->u.binary.l = mkexpr(EXPRCAST, mkpointertype(&typechar, QUALNONE), e);
 		fp->u.binary.r = mkconstexpr(&typeulong, sizeof(size_t));
-		return cpp_free_expr(mkexpr(EXPRCAST,
-		    mkpointertype(&typevoid, QUALNONE), fp));
+		funcexpr(curfunc, mkassignexpr(te, mkexpr(EXPRCAST,
+		    mkpointertype(&typevoid, QUALNONE), fp)));
+		funcjmp(curfunc, bdone);
+		funclabel(curfunc, bdone);
+		/* free(__dl_fp): NULL when p was NULL (no-op), the raw
+		 * allocation otherwise.  Emitted as the returned call so the
+		 * caller's funcexpr (e.g. the expression statement) runs it. */
+		return cpp_free_expr(te);
 	}
 	e = unaryexpr(s);
 	if (!e || e->type->kind != TYPEPOINTER)
@@ -2797,6 +2831,19 @@ cpp_parse_delete_expr(struct scope *s)
 		snprintf(mname, sizeof mname, "%s_dtor", tag);
 		fd = scopegetdecl(t->scope ? t->scope : &filescope, mname, true);
 		if (fd && fd->kind == DECLFUNC) {
+			/* dtor runs only for a non-null pointer; free(NULL)
+			 * is a no-op so the destructor guard suffices */
+			struct block *bload, *bdone;
+			struct expr *nul;
+			nul = mkexpr(EXPRBINARY, &typeint, NULL);
+			nul->op = TNEQ;
+			nul->u.binary.l = e;
+			nul->u.binary.r = mkexpr(EXPRCONST, &typenullptr, NULL);
+			nul->u.binary.r->u.constant.u = 0;
+			bload = mkblock("body");
+			bdone = mkblock("done");
+			funcbranch(curfunc, nul, bload, bdone);
+			funclabel(curfunc, bload);
 			fn = mkexpr(EXPRIDENT, fd->type, NULL);
 			fn->u.ident.decl = fd;
 			fn = decay(fn); /* &Class_dtor */
@@ -2804,6 +2851,8 @@ cpp_parse_delete_expr(struct scope *s)
 			dtor->u.call.args = e;
 			dtor->u.call.nargs = 1;
 			funcexpr(curfunc, dtor); /* destructor runs before free */
+			funcjmp(curfunc, bdone);
+			funclabel(curfunc, bdone);
 		}
 	}
 	/* the free(p) call expression is returned so the caller's funcexpr
@@ -4993,7 +5042,12 @@ cpp_tmpl_member_instantiate(struct scope *s, struct expr *thisp,
 struct cpp_lambda_cap {
 	const char *name;      /* capture name (also the closure member name) */
 	struct type *t;        /* captured variable's type */
-	struct decl *d;        /* the enclosing-scope variable decl */
+	struct decl *d;        /* the enclosing-scope variable decl (NULL when
+	                          the capture resolves to an outer closure's
+	                          member — defect T) */
+	struct expr *arg;      /* lvalue of the captured entity: the local
+	                          variable's identifier, or `(*this).m` for an
+	                          outer closure member */
 	bool by_ref;           /* `[&x]` reference capture */
 };
 
@@ -5009,6 +5063,23 @@ cpp_tb(struct token *buf, size_t *n, struct token tmpl, enum tokenkind k,
 	else
 		t->kind = k;
 	++*n;
+}
+
+/* Should a captured value be copy-constructed through its class's
+ * constructor rather than bit-copied?  A class-typed capture (`[c]` where
+ * `c` is a class object with a user constructor) must run the copy ctor —
+ * defect S — otherwise construction side effects (refcounts, deep copies,
+ * logging) are silently lost.  Such captures are initialized via a ctor
+ * initializer-list item `c(__cN)` so the member-init path selects the
+ * copy/move ctor by overload resolution; scalars and classes without a
+ * user ctor keep the plain bitwise body assignment. */
+static bool
+cpp_lambda_cap_needs_ctor_init(const struct cpp_lambda_cap *cap)
+{
+	struct type *t = cap->t;
+	if (!t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
+		return false;
+	return cpp_has_ctor(t, t->u.structunion.tag);
 }
 
 /* Parse a C++11 lambda expression `[captures](params) -> ret { body }` and
@@ -5058,9 +5129,36 @@ cpp_lambda_expr(struct scope *s)
 		caps[ncap].name = tokenstr(tok.kind);
 		caps[ncap].by_ref = false;
 		caps[ncap].d = scopegetdecl(s, caps[ncap].name, 1);
-		if (!caps[ncap].d || caps[ncap].d->kind != DECLOBJECT)
-			error(&tok.loc, "cannot capture variable '%s'", caps[ncap].name);
-		caps[ncap].t = caps[ncap].d->type;
+		if (caps[ncap].d && caps[ncap].d->kind == DECLOBJECT) {
+			/* ordinary capture of an enclosing-scope local */
+			caps[ncap].t = caps[ncap].d->type;
+			caps[ncap].arg = mkexpr(EXPRIDENT, caps[ncap].t, NULL);
+			caps[ncap].arg->qual = caps[ncap].d->qual;
+			caps[ncap].arg->lvalue = true;
+			caps[ncap].arg->u.ident.decl = caps[ncap].d;
+		} else {
+			/* defect T: an outer lambda's captured variable lowers to a
+			 * member of its closure class, not a local; resolve it the
+			 * same way a bare member name in the operator() body is
+			 * resolved — as `(*this).name` of the current method's
+			 * class.  This lets an inner lambda re-capture anything the
+			 * outer one captured. */
+			struct expr *me = cpp_member_ident(s, caps[ncap].name);
+			if (!me || me->type->kind == TYPEFUNC) {
+				/* a member function (or non-member) is not capturable;
+				 * clear any pending member-call state cpp_member_ident
+				 * may have recorded */
+				g_cpp_member_this = NULL;
+				g_cpp_member_class = NULL;
+				g_cpp_member_name = NULL;
+				g_cpp_member_const = false;
+				error(&tok.loc, "cannot capture variable '%s'",
+				    caps[ncap].name);
+			}
+			caps[ncap].d = NULL;
+			caps[ncap].t = me->type;
+			caps[ncap].arg = me;
+		}
 		++ncap;
 		next();
 		if (tok.kind == TRBRACK)
@@ -5146,7 +5244,7 @@ cpp_lambda_expr(struct scope *s)
 			scopeputdecl(&filescope, td);
 		}
 	}
-	wcap = 64 + (size_t)ncap * 24 + pn + rn + bn + 32;
+	wcap = 64 + (size_t)ncap * 32 + pn + rn + bn + 32;
 	wtoks = xmalloc(wcap * sizeof *wtoks);
 
 	cpp_tb(wtoks, &wn, tmpl, 0, "class");
@@ -5160,7 +5258,12 @@ cpp_lambda_expr(struct scope *s)
 		cpp_tb(wtoks, &wn, tmpl, 0, caps[i].name);
 		cpp_tb(wtoks, &wn, tmpl, TSEMICOLON, NULL);
 	}
-	/* synthesized constructor `__lambdaN(__lt0 __c0, ...) { cap = __c; }` */
+	/* synthesized constructor
+	 * `__lambdaN(__lt0 __c0, ...) : classcap(__c0) { scalarcap = __c1; }`
+	 * Class-typed captures with a user constructor go through the ctor
+	 * initializer list so the member-init path runs the copy/move ctor
+	 * chosen by overload resolution (defect S); scalars and POD captures
+	 * keep the plain assignment (a bit copy is their correct semantics). */
 	cpp_tb(wtoks, &wn, tmpl, 0, tagname);
 	cpp_tb(wtoks, &wn, tmpl, TLPAREN, NULL);
 	for (i = 0; i < ncap; ++i) {
@@ -5172,8 +5275,24 @@ cpp_lambda_expr(struct scope *s)
 		cpp_tb(wtoks, &wn, tmpl, 0, cn);
 	}
 	cpp_tb(wtoks, &wn, tmpl, TRPAREN, NULL);
+	{
+		bool first = true;
+		for (i = 0; i < ncap; ++i) {
+			if (!cpp_lambda_cap_needs_ctor_init(&caps[i]))
+				continue;
+			cpp_tb(wtoks, &wn, tmpl, first ? TCOLON : TCOMMA, NULL);
+			first = false;
+			cpp_tb(wtoks, &wn, tmpl, 0, caps[i].name);
+			cpp_tb(wtoks, &wn, tmpl, TLPAREN, NULL);
+			snprintf(cn, sizeof cn, "__c%d", i);
+			cpp_tb(wtoks, &wn, tmpl, 0, cn);
+			cpp_tb(wtoks, &wn, tmpl, TRPAREN, NULL);
+		}
+	}
 	cpp_tb(wtoks, &wn, tmpl, TLBRACE, NULL);
 	for (i = 0; i < ncap; ++i) {
+		if (cpp_lambda_cap_needs_ctor_init(&caps[i]))
+			continue; /* already copy-constructed by the init list */
 		cpp_tb(wtoks, &wn, tmpl, 0, caps[i].name);
 		cpp_tb(wtoks, &wn, tmpl, TASSIGN, NULL);
 		snprintf(cn, sizeof cn, "__c%d", i);
@@ -5256,10 +5375,9 @@ cpp_lambda_expr(struct scope *s)
 	args = NULL;
 	ae = &args;
 	for (i = 0; i < ncap; ++i) {
-		struct expr *cap = mkexpr(EXPRIDENT, caps[i].t, NULL);
-		cap->qual = caps[i].d->qual;
-		cap->lvalue = true;
-		cap->u.ident.decl = caps[i].d;
+		/* the capture's lvalue: a local variable's identifier, or an
+		 * outer closure member `(*this).m` (defect T) */
+		struct expr *cap = caps[i].arg;
 		*ae = cap;
 		ae = &cap->next;
 	}
