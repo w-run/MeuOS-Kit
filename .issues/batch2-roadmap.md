@@ -117,9 +117,10 @@ da9e2bf  m++: operator[] const 重载决议修复（P0，§3 登记缺陷闭环�
 
 ### 7.2 在途未收敛（重建衔接重点）
 
-- **G3 deducing this（P0847）**：worker-cpp23 在途，**工作树未提交**：
+- **G3 deducing this（P0847）**：worker-cpp23 在途，**工作树未提交**（三文件）：
   - `projects/mcc/include/cpp.h`（+7：`g_cpp_member_rvalue`、`cpp_explicit_obj_begin/set/take`）
-  - `projects/mcc/src/cpp/parse/cpp_parse.c`（+97/-30：显式对象参数解析）
+  - `projects/mcc/src/c/parse/declarator.c`（+15/-1：首参 `this` 拦截 → `cpp_explicit_obj_begin/set`）
+  - `projects/mcc/src/cpp/parse/cpp_parse.c`（+97/-30：显式对象参数解析与 cpp_define_method 集成）
   - **收敛结果以 worker-cpp23 回报为准**：若已提交补记哈希；若 stash 记 stash 编号（当前 stash@{0}/@{1} 为既有项，勿混淆）。工作树当前含上述未提交修改，重建团队须先确认归属再决定提交/stash/恢复。
 - **会话结束前未收到 worker-cpp23 的收敛哈希**——重建后第一步：向 worker-cpp23 确认 G3 提交/stash 状态。
 
