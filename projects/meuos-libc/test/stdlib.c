@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <limits.h>
+#include <wchar.h>
 
 /* glibc 内部符号：不在公共头文件中声明 */
 long __isoc23_strtol(const char *, char **, int);
@@ -73,6 +74,20 @@ main(void)
 	}
 	if (getppid() <= 0)
 		return 1;
+	{
+		wchar_t wc, wbuf[4];
+		char mbuf[4];
+		if (mblen("abc", 3) != 1 || mblen("", 1) != 0 || mblen(NULL, 0) != 0)
+			return 1;
+		if (mbtowc(&wc, "x", 1) != 1 || wc != L'x')
+			return 1;
+		if (wctomb(mbuf, L'A') != 1 || mbuf[0] != 'A')
+			return 1;
+		if (mbstowcs(wbuf, "hi", 3) != 2 || wbuf[0] != L'h' || wbuf[1] != L'i' || wbuf[2] != 0)
+			return 1;
+		if (wcstombs(mbuf, wbuf, 3) != 2 || mbuf[0] != 'h' || mbuf[1] != 'i' || mbuf[2] != 0)
+			return 1;
+	}
 	if (strtod("-12.5e1x", &end) != -125.0 || *end != 'x')
 		return 1;
 	if (strtoul("0x2a", &end, 0) != 42 || *end)

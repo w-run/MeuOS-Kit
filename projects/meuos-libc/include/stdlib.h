@@ -52,4 +52,11 @@ char *mkdtemp(char *);
 char *canonicalize_file_name(const char *);
 char *realpath(const char *, char *);
 
+/* C99 7.20.7 multibyte/wide character conversion (single-byte locale) */
+int mblen(const char *, size_t);
+int mbtowc(wchar_t *, const char *, size_t);
+int wctomb(char *, wchar_t);
+size_t mbstowcs(wchar_t *, const char *, size_t);
+size_t wcstombs(char *, const wchar_t *, size_t);
+
 #endif

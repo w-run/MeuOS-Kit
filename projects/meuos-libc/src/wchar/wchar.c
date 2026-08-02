@@ -107,6 +107,12 @@ wint_t towupper(wint_t c) { return toupper((int)c); }
 /* MB/C conversion (simple: only ASCII, single-byte) */
 static int mb_cur_max = 1;
 
+int mblen(const char *s, size_t n) {
+	if (!s) return 0; /* no state-dependent encodings */
+	if (n == 0 || !*s) return 0;
+	return 1;
+}
+
 int mbtowc(wchar_t *pwc, const char *s, size_t n) {
 	if (!s) return 0; /* no state-dependent encodings */
 	if (n == 0 || !*s) return 0;

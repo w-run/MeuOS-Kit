@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdio.h>
 
-typedef int wchar_t;
+/* wchar_t comes from <stddef.h> (C99 7.17). */
 typedef int wint_t;
 
 #define WEOF (-1)
