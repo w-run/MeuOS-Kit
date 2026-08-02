@@ -218,6 +218,28 @@ decl(struct scope *s, struct func *f)
 				ctor_args = cpp_ctor_args_take();
 				t = base.type;
 				tq = base.qual;
+				/* C++17 CTAD: a class-template name used without
+				 * explicit arguments (`Vec v(a, b)`); deduces the
+				 * template arguments from the constructor args. */
+				extern const char *g_cpp_ctad_tmpl;
+				extern struct type *cpp_tmpl_class_ctad(struct scope *,
+				    const char *, struct expr *);
+				if (g_cpp_ctad_tmpl) {
+					/* cpp_tmpl_class_ctad replays the template
+					 * definition (moving the global token stream);
+					 * restore the caller's position (the ';' after
+					 * the ctor call). */
+					struct token ctok = tok;
+					struct type *inst = cpp_tmpl_class_ctad(s,
+					    g_cpp_ctad_tmpl, ctor_args);
+					tok = ctok;
+					if (!inst)
+						error(&tok.loc,
+						    "cannot deduce template arguments for '%s'",
+						    g_cpp_ctad_tmpl);
+					t = inst;
+					g_cpp_ctad_tmpl = NULL;
+				}
 			}
 		}
 		if (consume(T__ASM__)) {

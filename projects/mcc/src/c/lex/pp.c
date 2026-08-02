@@ -1682,6 +1682,25 @@ tokpush(struct token *t, size_t n)
 		ctxpush(&t[i - 1], 1, NULL, t[i - 1].space);
 }
 
+/* Token-context depth in bytes (for save/restore around a token replay
+ * that may leave unconsumed tokens, e.g. a template instantiation whose
+ * method bodies are buffered rather than consumed). */
+size_t
+tokctx_depth(void)
+{
+	return ctx.len;
+}
+
+/* Truncate the token context back to `depth` bytes (from tokctx_depth).
+ * Unconsumed tokens pushed by a replay are discarded. */
+void
+tokctx_rewind(size_t depth)
+{
+	if (depth > ctx.len)
+		return;
+	ctx.len = depth;
+}
+
 char *
 expect(enum tokenkind kind, const char *msg)
 {

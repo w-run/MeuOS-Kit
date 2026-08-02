@@ -31,6 +31,10 @@ struct expr *g_cpp_member_this;
 struct type *g_cpp_member_class;
 const char *g_cpp_member_name;
 bool g_cpp_member_const;
+/* C++17 CTAD: when declspecs sees a class-template name without explicit
+ * `<...>` arguments, it records the template name here; decl() completes
+ * the deduction from the constructor-call arguments. */
+const char *g_cpp_ctad_tmpl;
 /* The pending member call is a template-member call (`obj.get<int>(...)`);
  * set by cpp_tmpl_member_pend, cleared with the rest of the pending state. */
 bool g_cpp_member_tmpl;
@@ -3386,21 +3390,135 @@ cpp_tmpl_class_lookup(const char *name)
 	return NULL;
 }
 
+/* Instantiate a class template with the given type arguments: replay the
+ * buffered `class Foo { ... }` declaration (with each parameter bound and
+ * the tag renamed to the mangled instantiation name `Foo_<codes>`) through
+ * cpp_class_decl.  Returns the instantiated class type (cached per key). */
+static struct type *
+cpp_tmpl_class_do_inst(struct scope *s, struct cpp_template *tmpl,
+                       struct type **args)
+{
+	extern struct scope filescope;
+	struct cpp_tmpl_cls_inst *ci;
+	struct cpp_tmpl_param *p;
+	struct type *t;
+	char key[128], tag[128];
+	struct token cur;
+	struct decl *td;
+	size_t depth;
+	int i;
+
+	/* mangled tag name: Foo + "_" + type codes (e.g. Foo_i) */
+	snprintf(key, sizeof key, "%s", tmpl->name);
+	for (i = 0; i < tmpl->nparams; ++i) {
+		char code[64];
+		cpp_mangle_type(args[i], code, sizeof code);
+		strncat(key, "_", sizeof key - strlen(key) - 1);
+		strncat(key, code, sizeof key - strlen(key) - 1);
+	}
+	snprintf(tag, sizeof tag, "%s", key);
+
+	for (ci = tmpl->cls_insts; ci; ci = ci->next)
+		if (strcmp(ci->key, key) == 0)
+			return ci->t;
+
+	/* bind the parameters as type names (re-put replaces the previous
+	 * binding; the names are generic template params and stay benignly in
+	 * file scope) */
+	for (p = tmpl->params, i = 0; p; p = p->next, ++i) {
+		td = mkdecl((char *)p->name, DECLTYPE, args[i], QUALNONE, LINKNONE);
+		scopeputdecl(&filescope, td);
+	}
+	/* rename the class-name token to the mangled tag, and every
+	 * constructor/destructor token (which spells the original class name)
+	 * so struct_decl recognizes them as the class's own constructors.
+	 * The buffered tokens are shared across instantiations, so rename on
+	 * a private copy. */
+	{
+		/* append a trailing ';' so cpp_class_decl's replay does not run
+		 * past the class definition into the caller's token stream (the
+		 * template buffer stops at the closing '}' without it) */
+		struct token *rtoks = xmalloc((tmpl->ntoks + 1) * sizeof *rtoks);
+		bool found = false;
+		int rn = tmpl->ntoks;
+		memcpy(rtoks, tmpl->toks, tmpl->ntoks * sizeof *rtoks);
+		rtoks[rn].kind = TSEMICOLON;
+		rtoks[rn].space = false;
+		++rn;
+		for (i = 0; i < (int)tmpl->ntoks; ++i) {
+			const char *nm;
+			if (rtoks[i].kind < TIDENT)
+				continue;
+			nm = tokenstr(rtoks[i].kind);
+			if (cpp_classify_ident(nm, strlen(nm)) != CPP_TNONE)
+				continue;
+			bool is_param = false;
+			for (p = tmpl->params; p; p = p->next)
+				if (strcmp(p->name, nm) == 0) {
+					is_param = true;
+					break;
+				}
+			if (!is_param && strcmp(nm, tmpl->name) == 0) {
+				/* the class name itself or a constructor/destructor */
+				rtoks[i].kind = tokenget(tag, strlen(tag));
+				found = true;
+			}
+		}
+		if (!found)
+			error(&tok.loc, "cannot locate class name in template '%s'", tmpl->name);
+
+		/* replay `class Foo_i { ... }` to define the instantiated class.
+		 * rtoks stays alive (tokpush stores pointers) until cpp_class_decl
+		 * consumes it below; deliberately not freed (bounded).  Record the
+		 * token-context depth so the replay's unconsumed tokens (class
+		 * method bodies are buffered, not consumed) can be discarded
+		 * afterwards instead of leaking into the caller's stream. */
+		depth = tokctx_depth();
+		cur = tok;
+		tokpush(&cur, 1);
+		tokpush(rtoks, rn);
+	}
+	next();
+	{
+		/* cpp_class_decl replays the class definition; constructor bodies
+		 * are parsed by flush_pending_methods, which switches curfunc.
+		 * Restore it so the caller (a declaration mid-parse, e.g. CTAD)
+		 * keeps targeting the right function. */
+		extern struct func *curfunc;
+		struct func *saved_cf = curfunc;
+		cpp_class_decl(&filescope);
+		curfunc = saved_cf;
+	}
+	/* restore the caller's token position (the replayed definition has
+	 * been consumed; cur was the caller's token pushed ahead of rtoks)
+	 * and drop any unconsumed replay tokens */
+	tok = cur;
+	tokctx_rewind(depth);
+
+	t = scopegettag(&filescope, tag, 1);
+	if (!t)
+		error(&tok.loc, "class template '%s' instantiation produced no class", tmpl->name);
+
+	ci = xmalloc(sizeof(*ci));
+	snprintf(ci->key, sizeof ci->key, "%s", key);
+	ci->t = t;
+	ci->next = NULL;
+	*tmpl->cls_insts_end = ci;
+	tmpl->cls_insts_end = &ci->next;
+	return t;
+}
+
 /* Instantiate a class template: `Foo<...>` (tok positioned at '<').
- * Parses the explicit template arguments, replays the buffered
- * `class Foo { ... }` declaration (with each parameter bound and the tag
- * renamed to the mangled instantiation name) through cpp_class_decl, and
- * returns the instantiated class type. */
+ * Parses the explicit template arguments, then delegates to
+ * cpp_tmpl_class_do_inst. */
 struct type *
 cpp_tmpl_class_instantiate(struct scope *s, const char *name)
 {
 	extern struct type *typename(struct scope *, enum typequal *,
 	    struct expr **);
 	struct cpp_template *tmpl;
-	struct cpp_tmpl_cls_inst *ci;
 	struct cpp_tmpl_param *p;
 	struct type *args[16];
-	struct type *t;
 	char key[128], tag[128];
 	struct token cur;
 	struct decl *td;
@@ -3432,79 +3550,52 @@ cpp_tmpl_class_instantiate(struct scope *s, const char *name)
 	if (n < tmpl->nparams)
 		error(&tok.loc, "too few template arguments for class template '%s'", name);
 
-	/* mangled tag name: Foo + "_" + type codes (e.g. Foo_i) */
-	snprintf(key, sizeof key, "%s", name);
-	for (i = 0; i < tmpl->nparams; ++i) {
-		char code[64];
-		cpp_mangle_type(args[i], code, sizeof code);
-		strncat(key, "_", sizeof key - strlen(key) - 1);
-		strncat(key, code, sizeof key - strlen(key) - 1);
+	(void)p;
+	(void)key;
+	(void)tag;
+	(void)cur;
+	(void)td;
+	return cpp_tmpl_class_do_inst(s, tmpl, args);
+}
+
+/* C++17 CTAD: `Vec v(a, b)` — a class template used without explicit
+ * arguments deduces its template parameters from the constructor-call
+ * argument types (each argument maps positionally to one parameter,
+ * unwrapping references/pointers to the value type).  Looks up the
+ * template by `name` and instantiates it with the deduced arguments. */
+struct type *
+cpp_tmpl_class_ctad(struct scope *s, const char *name, struct expr *args)
+{
+	struct cpp_template *tmpl;
+	struct cpp_tmpl_param *p;
+	struct type *types[16];
+	struct expr *a;
+	int i = 0;
+
+	for (tmpl = g_cpp_templates; tmpl; tmpl = tmpl->next)
+		if (tmpl->is_class && strcmp(tmpl->name, name) == 0)
+			break;
+	if (!tmpl)
+		return NULL;
+	if (tmpl->nparams > 16)
+		error(&tok.loc, "template '%s' has too many parameters", name);
+
+	/* deduce one template argument per call argument, positionally */
+	for (a = args; a && i < tmpl->nparams; a = a->next, ++i) {
+		struct type *at = a->type;
+		/* unwrap pointer to the pointee for `T *d` parameters */
+		while (at && at->kind == TYPEPOINTER && !at->isref)
+			at = at->base;
+		if (!at)
+			at = &typeint;
+		types[i] = at;
 	}
-	snprintf(tag, sizeof tag, "%s", key);
+	if (i < tmpl->nparams)
+		error(&tok.loc,
+		    "cannot deduce template argument %d of '%s' (too few constructor arguments)",
+		    i + 1, name);
 
-	for (ci = tmpl->cls_insts; ci; ci = ci->next)
-		if (strcmp(ci->key, key) == 0)
-			return ci->t;
-
-	/* bind the parameters as type names (re-put replaces the previous
-	 * binding; the names are generic template params and stay benignly in
-	 * file scope) */
-	for (p = tmpl->params, i = 0; p; p = p->next, ++i) {
-		td = mkdecl((char *)p->name, DECLTYPE, args[i], QUALNONE, LINKNONE);
-		scopeputdecl(&filescope, td);
-	}
-	/* rename the class-name token to the mangled tag, and every
-	 * constructor/destructor token (which spells the original class name)
-	 * so struct_decl recognizes them as the class's own constructors.
-	 * The buffered tokens are shared across instantiations, so rename on
-	 * a private copy. */
-	{
-		struct token *rtoks = xmalloc(tmpl->ntoks * sizeof *rtoks);
-		bool found = false;
-		memcpy(rtoks, tmpl->toks, tmpl->ntoks * sizeof *rtoks);
-		for (i = 0; i < (int)tmpl->ntoks; ++i) {
-			const char *nm;
-			if (rtoks[i].kind < TIDENT)
-				continue;
-			nm = tokenstr(rtoks[i].kind);
-			if (cpp_classify_ident(nm, strlen(nm)) != CPP_TNONE)
-				continue;
-			bool is_param = false;
-			for (p = tmpl->params; p; p = p->next)
-				if (strcmp(p->name, nm) == 0) {
-					is_param = true;
-					break;
-				}
-			if (!is_param && strcmp(nm, name) == 0) {
-				/* the class name itself or a constructor/destructor */
-				rtoks[i].kind = tokenget(tag, strlen(tag));
-				found = true;
-			}
-		}
-		if (!found)
-			error(&tok.loc, "cannot locate class name in template '%s'", name);
-
-		/* replay `class Foo_i { ... }` to define the instantiated class.
-		 * rtoks stays alive (tokpush stores pointers) until cpp_class_decl
-		 * consumes it below; deliberately not freed (bounded). */
-		cur = tok;
-		tokpush(&cur, 1);
-		tokpush(rtoks, tmpl->ntoks);
-	}
-	next();
-	cpp_class_decl(&filescope);
-
-	t = scopegettag(&filescope, tag, 1);
-	if (!t)
-		error(&tok.loc, "class template '%s' instantiation produced no class", name);
-
-	ci = xmalloc(sizeof(*ci));
-	snprintf(ci->key, sizeof ci->key, "%s", key);
-	ci->t = t;
-	ci->next = NULL;
-	*tmpl->cls_insts_end = ci;
-	tmpl->cls_insts_end = &ci->next;
-	return t;
+	return cpp_tmpl_class_do_inst(s, tmpl, types);
 }
 
 /* --- C.2.8 member templates (template methods in a class) ------------- */

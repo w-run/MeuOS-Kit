@@ -133,6 +133,14 @@ const char *cpp_tmpl_class_lookup(const char *name);
  * explicit template arguments, defines the instantiated class, and returns
  * its type. */
 struct type *cpp_tmpl_class_instantiate(struct scope *s, const char *name);
+/* C++17 CTAD: `Vec v(a, b)` — deduce the template arguments of class
+ * template `name` from the constructor-call argument types and define the
+ * instantiated class. */
+struct type *cpp_tmpl_class_ctad(struct scope *s, const char *name,
+    struct expr *args);
+/* C++17 CTAD pending template name, set by declspecs when a class-template
+ * name appears without explicit arguments; decl() completes the deduction. */
+extern const char *g_cpp_ctad_tmpl;
 /* Member templates: is `name` a template member function of class `t`?
  * `cpp_tmpl_member_pend` records the pending member-template call; the
  * TLPAREN lowering calls cpp_tmpl_member_instantiate (with the this

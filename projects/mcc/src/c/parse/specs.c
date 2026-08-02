@@ -614,6 +614,7 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 					extern const char *cpp_tmpl_class_lookup(const char *);
 					extern struct type *cpp_tmpl_class_instantiate(struct scope *,
 					    const char *);
+					extern const char *g_cpp_ctad_tmpl;
 					if (cpp_tmpl_class_lookup(tokenstr(tok.kind))) {
 						struct token saved = tok;
 						next();
@@ -624,8 +625,16 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 							++ntypes;
 							break;
 						}
-						tokpush(&saved, 1);
-						next();
+						/* no `<`: C++17 CTAD candidate (`Vec v(a, b)`).
+						 * Record the template name and use the auto
+						 * placeholder; decl() deduces the arguments from
+						 * the constructor call.  `Vec` is already
+						 * consumed; tok points at the declarator. */
+						g_cpp_ctad_tmpl = tokenstr(saved.kind);
+						extern struct type typeauto;
+						t = &typeauto;
+						tq = QUALNONE;
+						++ntypes;
 					}
 				}
 				goto done;
