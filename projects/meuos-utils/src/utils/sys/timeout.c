@@ -15,18 +15,6 @@
 
 #include "meuos/utils.h"
 
-static int sig_from_name(const char *s) {
-    if (strncmp(s, "SIG", 3) == 0) s += 3;
-    struct { const char *n; int s; } tab[] = {
-        {"TERM", SIGTERM}, {"HUP", SIGHUP}, {"INT", SIGINT},
-        {"KILL", SIGKILL}, {"QUIT", SIGQUIT}, {"ABRT", SIGABRT},
-        {0, 0}
-    };
-    for (int i = 0; tab[i].n; i++)
-        if (!strcasecmp(tab[i].n, s)) return tab[i].s;
-    return atoi(s);
-}
-
 static pid_t child_pid = 0;
 static int got_timeout = 0;
 

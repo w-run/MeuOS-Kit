@@ -143,6 +143,19 @@ int utils_classic_init(int argc, char **argv);
 double parse_duration(const char *s);
 int parse_duration_ts(const char *s, struct timespec *ts);
 
+/* === 信号名 ↔ 编号转换 ===
+ *
+ * sig_from_name: "TERM"/"SIGTERM"/"15" -> 15 (信号编号)
+ *   自动跳过 "SIG" 前缀，数字字符串直接转换。
+ *   未知名返回 -1。
+ * sig_to_name: 15 -> "TERM" (不含 "SIG" 前缀)
+ *   未知编号返回 NULL。
+ * sig_list_all: 打印所有已知信号到 stdout（用于 kill -l）。
+ */
+int sig_from_name(const char *s);
+const char *sig_to_name(int sig);
+void sig_list_all(void);
+
 #ifdef __cplusplus
 }
 #endif
