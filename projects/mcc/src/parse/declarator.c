@@ -69,11 +69,19 @@ declaratortypes(struct scope *s, struct list *result, char **name, int *align, s
 		listinsert(result, &t->link);
 	}
 	/* C++ reference declarator: `T &name` is a reference type (a pointer
-	 * that auto-dereferences in expressions). */
+	 * that auto-dereferences in expressions).  `T &&name` is an rvalue
+	 * reference (binds only to temporaries).  The lexer tokenizes `&&` as
+	 * a single TLAND token, so both `&` (TBAND) and `&&` (TLAND) start a
+	 * reference declarator; in this context they cannot be a binary
+	 * logical-and operator. */
 	extern int g_lang;
-	while (g_lang == 1 && consume(TBAND)) {
+	while (g_lang == 1 && (tok.kind == TBAND || tok.kind == TLAND)) {
 		t = mkpointertype(NULL, QUALNONE);
 		t->isref = true;
+		/* `&&` (TLAND) = rvalue reference; distinguish it from a single
+		 * `&` so the mangled signature can tell the overloads apart. */
+		t->isrref = tok.kind == TLAND;
+		next();
 		listinsert(result, &t->link);
 	}
 	if (name)

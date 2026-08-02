@@ -261,10 +261,12 @@ parseinit(struct scope *s, struct type *t)
 			default:  /* scalar type */
 				assert(t->prop & PROPSCALAR);
 				/* C++ reference binding: `T &r = x` stores &x in the
-				 * pointer-typed reference (auto-dereferenced on use). */
+				 * pointer-typed reference (auto-dereferenced on use).
+				 * An lvalue reference requires an lvalue; an rvalue
+				 * reference (`T &&r = temp`) binds to a temporary. */
 				if (t->kind == TYPEPOINTER && t->isref) {
 					extern struct expr *mkunaryexpr(enum tokenkind, struct expr *);
-					if (!expr->lvalue)
+					if (!expr->lvalue && !t->isrref)
 						error(&tok.loc, "cannot bind non-lvalue to reference");
 					expr = mkunaryexpr(TBAND, expr);
 				}

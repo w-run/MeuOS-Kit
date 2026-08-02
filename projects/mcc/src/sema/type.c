@@ -61,6 +61,7 @@ mktype(enum typekind kind, enum typeprop prop)
 	t->value = NULL;
 	t->incomplete = false;
 	t->isref = false;
+	t->isrref = false;
 	if (kind == TYPESTRUCT || kind == TYPEUNION) {
 		/* C++ virtual-dispatch fields must start zeroed: cpp_class_decl
 		 * and the vtable machinery read them before explicit init. */
@@ -241,6 +242,11 @@ typecompatible(struct type *t1, struct type *t2)
 	case TYPEBITINT:
 		return t1->u.arith.width == t2->u.arith.width && t1->u.arith.issigned == t2->u.arith.issigned;
 	case TYPEPOINTER:
+		/* C++ references are pointers with isref/isrref markers; a value,
+		 * an lvalue reference and an rvalue reference to the same base are
+		 * distinct types (`f(T)`, `f(T&)`, `f(T&&)` are separate overloads). */
+		if (t1->isref != t2->isref || t1->isrref != t2->isrref)
+			return false;
 		goto derived;
 	case TYPEARRAY:
 		if (t1->incomplete || t2->incomplete)

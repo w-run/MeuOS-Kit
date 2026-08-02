@@ -1276,7 +1276,11 @@ cpp_temp_construct(struct scope *s, struct type *ct)
 
 	e = mkexpr(EXPRIDENT, ct, NULL);
 	e->qual = QUALNONE;
-	e->lvalue = true;
+	/* anonymous temporary is an rvalue: the value-category marker drives
+	 * overload resolution so a temporary prefers the move/rvalue overload
+	 * over the copy/lvalue one.  IR generation addresses it via its decl
+	 * regardless of this flag. */
+	e->lvalue = false;
 	e->u.ident.decl = tmp;
 	return e;
 }
@@ -2030,7 +2034,7 @@ cpp_emit_ctor_call(struct func *f, struct decl *d, struct expr *args)
 	struct type *t = d->type;
 	const char *tag;
 	char mname[256];
-	struct decl *fd;
+	struct decl *fd, *p;
 	struct expr *fn, *obj, *call, *a, **end;
 	size_t n = 0;
 
@@ -2075,9 +2079,16 @@ cpp_emit_ctor_call(struct func *f, struct decl *d, struct expr *args)
 	call->u.call.args = obj;
 	call->u.call.nargs = 1;
 	end = &obj->next;
-	for (a = args; a; a = a->next) {
-		*end = a;
-		end = &a->next;
+	/* reference parameters (copy/move ctors: `Vec(Vec &o)`, `Vec(Vec &&o)`)
+	 * receive the address of the argument, like member-function calls;
+	 * by-value parameters receive the value. */
+	for (a = args, p = fd->type->u.func.params ? fd->type->u.func.params->next : NULL;
+	     a; a = a->next, p = p ? p->next : NULL) {
+		struct expr *arg = a;
+		if (p && p->type && p->type->isref)
+			arg = mkunaryexpr(TBAND, a);
+		*end = arg;
+		end = &arg->next;
 		++call->u.call.nargs;
 	}
 	(void)n;
@@ -2095,12 +2106,13 @@ cpp_mangle_type(struct type *t, char *buf, size_t bufsz)
 		*p++ = 'v';
 		goto out;
 	}
-	/* C++ references mangle with a distinct 'R' marker so `f(Vec)` and
-	 * `f(Vec &)` get different overload names (the caller binds an
-	 * object by address, but the types must not collide). */
+	/* C++ references mangle with a distinct marker so `f(Vec)`, `f(Vec &)`
+	 * and `f(Vec &&)` get different overload names (the caller binds an
+	 * object by address, but the types must not collide): 'R' = lvalue
+	 * reference, 'V' = rvalue reference (move overloads). */
 	if (t->isref && t->kind == TYPEPOINTER) {
 		if (p + 1 <= end)
-			*p++ = 'R';
+			*p++ = t->isrref ? 'V' : 'R';
 		t = t->base;
 	}
 	switch (t->kind) {
@@ -2159,8 +2171,11 @@ cpp_mangled_name_args(struct type *t, const char *name, struct expr *args,
 	for (; args; args = args->next) {
 		char code[64];
 		size_t cl;
-		if (prefer_ref && args->lvalue && n + 1 < bufsz)
-			buf[n++] = 'R';
+		/* overload-resolution value category: lvalue args prefer the
+		 * lvalue-reference overload ('R'), rvalue (temporary) args prefer
+		 * the rvalue-reference/move overload ('V') */
+		if (prefer_ref && n + 1 < bufsz)
+			buf[n++] = args->lvalue ? 'R' : 'V';
 		cpp_mangle_type(args->type, code, sizeof code);
 		cl = strlen(code);
 		if (n + cl < bufsz) {
@@ -2203,9 +2218,10 @@ cpp_free_mangle_name(const char *name, struct type *funct, char *buf,
 
 /* Mangled name of a free-function call `name(args...)`, encoded from
  * the argument expression types for overload resolution (`helper_ii`).
- * `prefer_ref` marks lvalue arguments with the 'R' reference prefix,
- * matching cpp_mangled_name_args so a `f(Vec&)` overload is preferred
- * on lvalues while rvalues fall back to the by-value overload. */
+ * `prefer_ref` marks the value category of each argument — lvalue with
+ * 'R', rvalue (temporary) with 'V' — so `f(Vec&)` wins on lvalues and
+ * `f(Vec&&)` (the move overload) wins on temporaries, falling back to
+ * the by-value overload when no reference variant exists. */
 void
 cpp_free_mangle_name_args(const char *name, struct expr *args, char *buf,
                           size_t bufsz, bool prefer_ref)
@@ -2217,8 +2233,8 @@ cpp_free_mangle_name_args(const char *name, struct expr *args, char *buf,
 	for (; args; args = args->next) {
 		char code[64];
 		size_t cl;
-		if (prefer_ref && args->lvalue && n + 1 < bufsz)
-			buf[n++] = 'R';
+		if (prefer_ref && n + 1 < bufsz)
+			buf[n++] = args->lvalue ? 'R' : 'V';
 		cpp_mangle_type(args->type, code, sizeof code);
 		cl = strlen(code);
 		if (n + cl < bufsz) {

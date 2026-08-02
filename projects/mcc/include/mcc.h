@@ -132,6 +132,10 @@ struct type {
 	/* C++ reference type: a pointer that auto-dereferences in
 	 * expressions and binds to the address of its initializer. */
 	bool isref;
+	/* C++ rvalue reference (`T &&`): like a reference but only binds to
+	 * temporary (rvalue) arguments; distinguishes the move-constructor /
+	 * move-assignment overloads from the by-value and lvalue-ref ones. */
+	bool isrref;
 	union {
 		struct {
 			bool issigned, iscomplex;
