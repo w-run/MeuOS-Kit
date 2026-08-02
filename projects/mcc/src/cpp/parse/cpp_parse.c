@@ -2711,7 +2711,7 @@ cpp_parse_delete_expr(struct scope *s)
 		struct block *bload, *bdone;
 		next(); /* consume '[' */
 		expect(TRBRACK, "after 'delete['");
-		e = unaryexpr(s);
+		e = castexpr(s);
 		if (!e || e->type->kind != TYPEPOINTER)
 			error(&tok.loc, "delete operand must be a pointer");
 		t = e->type->base;
@@ -2822,7 +2822,7 @@ cpp_parse_delete_expr(struct scope *s)
 		 * caller's funcexpr (e.g. the expression statement) runs it. */
 		return cpp_free_expr(te);
 	}
-	e = unaryexpr(s);
+	e = castexpr(s);
 	if (!e || e->type->kind != TYPEPOINTER)
 		error(&tok.loc, "delete operand must be a pointer");
 	t = e->type->base;
