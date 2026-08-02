@@ -284,6 +284,7 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
 | C.2.8 函数模板 | ✅ | instantiate-on-first-use（84727a6） |
 | C.2.8 类模板 | ✅ | `Foo<T>` 类型上下文实例化（642574b） |
 | C.2.8 成员模板 | ✅ | 类内模板方法 + 类模板实例内的成员模板 `obj.get<int>()`（c93d5f7） |
+| auto/decltype | ✅ | auto 变量声明（局部/全局）+ C++14 auto 返回类型推导，支持模板结果/链式/成员模板（160e2a2） |
 | 6 架构 MIR 路径 | ✅ | varargs 全打通，扩展矩阵全 PASS（109a3ff） |
 | 验收门禁 | ✅ | `test/verify-all.sh` + `make check-all`（c940c34） |
 
@@ -293,6 +294,7 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
   非类型模板参数；类模板成员函数体急切实例化（C++ 语义为按需惰性）、
   类模板作函数返回值触发既有聚合返回拷贝限制。
 - **继承**：虚继承；纯虚函数（`= 0` 槽位留 0）；虚析构。
+- **auto/decltype**：仅 `auto x = expr`（局部/全局）与 C++14 `auto f()` 返回类型推导；未做 `auto&` 引用折叠、decltype 独立推导（160e2a2 落地范围）。
 - **其它**：函数指针声明参数里的类名未识别（独立问题）。
 - **MIR 路径遗留**（非 m++ 专属）：自举 mcc 编译「聚合参数+varargs+栈传参」组合在
   declspecs 写 NULL（Bug B 待调）；atomic_concurrent/thread_local 多架构 TLS 既有问题。

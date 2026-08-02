@@ -1,12 +1,12 @@
 # m++ C++ 前端路线图（cpp-roadmap.md）
 
-> 状态：规划文档（planner 产出，2026-08-02；成员模板已完成，见 c93d5f7）。
+> 状态：规划文档（planner 产出，2026-08-02；成员模板 c93d5f7、auto/decltype 160e2a2 已完成）。
 > 用途：为 m++ 未实现特性（C++11 lambda → constexpr → 变参模板 → 移动语义 → C++14/17/20）提供实现顺序、参考源与降级策略的决策依据。
 > 约束：不写代码；报告事实均来自实际文件/搜索，标注参考源路径。
 
 ## 0. 调研结论摘要
 
-- **m++ 现状**（实测）：`src/cpp/` 仅两文件（`lex/cpp_scan.c` 139 行 + `parse/cpp_parse.c` 3301 行），走「词法 → 语法/语义合一 → 复用 C 前端 decl/expr → 共享 MIR 后端」路线。已实现 C.2.3 构造/析构、C.2.5 虚函数/vtable、C.2.8 函数/类模板（instantiate-on-first-use，token 缓冲回放式）、成员模板（C.2.8，c93d5f7 完成：类内 `template` 方法注册 + `obj.get<int>(...)` 调用点实例化，`cpp.h` 提供 `cpp_tmpl_lookup/placeholder/instantiate/class_*`）。
+- **m++ 现状**（实测）：`src/cpp/` 仅两文件（`lex/cpp_scan.c` 139 行 + `parse/cpp_parse.c` 3301 行），走「词法 → 语法/语义合一 → 复用 C 前端 decl/expr → 共享 MIR 后端」路线。已实现 C.2.3 构造/析构、C.2.5 虚函数/vtable、C.2.8 函数/类模板（instantiate-on-first-use，token 缓冲回放式）、成员模板（C.2.8，c93d5f7 完成：类内 `template` 方法注册 + `obj.get<int>(...)` 调用点实例化，`cpp.h` 提供 `cpp_tmpl_lookup/placeholder/instantiate/class_*`）、auto/decltype（160e2a2 完成：`auto x = expr` 局部/全局 + C++14 `auto f()` 返回类型推导，支持模板结果/链式调用/成员模板）。
 - **模板机制特点**：非 AST 模板，而是**token 缓冲回放**（`cpp_template_decl` 存 `toks[]`，实例化时把参数绑定为 DECLTYPE、重命名函数 token、`tokpush` 回放重解析）。这是极简路径，但参数推导只支持位置式（`cpp_tmpl_deduce`），无 SFINAE/偏特化/两阶段查找。
 - **参考源可用性**：
   - `reference/aburiscript/`（19 万行 C++ 前端→LLVM）：**唯一完整可参考的降级实现**，含 `constexpr/consteval_engine.cpp`（AST 解释器）、`collect/collect_templates_packs.cpp`（包展开）、`collect/collect_overload.cpp`（重载决议）、`ast2llvm/lower_*.cpp`（降级 lowering）、`abi/mangle.cpp`。模块可按需摘取思路，但代码是完整 C++ AST 架构，m++ 是 token 回放架构，**不能直接搬代码，只能借鉴算法**。
@@ -21,7 +21,7 @@
 | 序 | 特性 | 前置依赖 | 收益 | 难度 |
 |---|---|---|---|---|
 | 0 | 成员模板 ✅（已完成，c93d5f7） | C.2.8 模板 | 中（类模板配套） | 中 |
-| 1 | **auto / decltype** | 无（token 已留 CPP_TAUTO/TDECLTYPE） | 高（一切现代代码的前置） | 低 |
+| 1 | **auto / decltype** ✅（已完成，160e2a2） | 无（token 已留 CPP_TAUTO/TDECLTYPE） | 高（一切现代代码的前置） | 低 |
 | 2 | **变参模板 / 包展开** | C.2.8 模板 token 回放 | 高（STL/现代代码基础） | 中高 |
 | 3 | **lambda（匿名类降级）** | 类/构造/捕获；auto（可后补） | 高 | 中 |
 | 4 | **constexpr 求值器** | 常量折叠/表达式树；变参模板可选 | 高（编译期计算） | 高 |
@@ -29,18 +29,18 @@
 | 6 | C++14/17（泛型 lambda/if constexpr/CTAD/结构化绑定） | 上面全部 | 渐进 | 递进 |
 | 7 | concepts/requires | 模板 + 重载完备 | 中 | 高 |
 
-> 建议的**迭代骨架**：「auto/decltype → 变参模板 → lambda → constexpr → 移动语义」（成员模板已随 c93d5f7 完成，从骨架移除）。此顺序的理由见 §4 对任务给定路线的具体分析。
+> 建议的**迭代骨架**：「变参模板 → lambda → constexpr → 移动语义」（成员模板 c93d5f7、auto/decltype 160e2a2 已完成，从骨架移除）。此顺序的理由见 §4 对任务给定路线的具体分析。
 
 ---
 
 ## 2. 每项特性的实现路径
 
-### 2.1 auto / decltype（推荐最先）
-- **机制**：`auto` 作为占位类型，在声明初始化处（`auto x = expr;`）或返回类型（`auto f() -> T`，后者 C++14 才推广）用表达式类型回填。m++ 已有完整类型系统 + 表达式树，`type` 指针现成，只需在 decl 解析处延迟定类型。
+### 2.1 auto / decltype（✅ 已完成，160e2a2）
+- **机制**：`auto` 作为占位类型，在声明初始化处（`auto x = expr;`）或返回类型（`auto f() -> T`，后者 C++14 才推广）用表达式类型回填。m++ 已有完整类型系统 + 表达式树，`type` 指针现成，只需在 decl 解析处延迟定类型。**已实现**：declspecs 返回 `&typeauto` 占位（C 模式保持 auto=int）；DECLOBJECT 路径对占位解析初始化表达式并回填声明类型（算术/指针/类类型/模板结果 `auto m = max(3,7)`）；C++14 返回类型推导 `cpp_auto_return`（首次 return 定类型、后续 return 校验兼容，free+member 函数、链式 auto 调用、成员模板均支持）。test/cpp/auto_decl.cc 16 断言。
 - **参考**：
   - `reference/aburiscript/helpers/auto_type_utils.cpp`（auto 类型推导工具）。
   - `reference/aburiscript/collect/collect_decl_variable.cpp`（变量声明的类型回填）。
-- **降级策略**：先只支持 `auto x = <expr>`（无引用折叠、无 `auto&`），返回类型 auto 放 C++14 段。**无需完整实现即可解锁大量现代语法**。
+- **降级策略**：先只支持 `auto x = <expr>`（无引用折叠、无 `auto&`），返回类型 auto 放 C++14 段。**无需完整实现即可解锁大量现代语法**。✅ 按此落地（未做 `auto&` 引用折叠，属后续）。
 
 ### 2.2 变参模板 / 包展开
 - **机制**：m++ 的 token 回放模板天然适合"展开式"处理——`template <typename... Ts>` 的包参数在实例化时复制 token 序列 N 次并绑定。关键难点是包参数在参数列表/函数体中的**定位与重复**。
@@ -113,17 +113,17 @@
 任务给定的顺序与计划 C.3（C.3.1 移动语义在前）不同。结合依赖分析给出修正建议：
 
 - **成员模板** ✅ 已按建议最先完成（c93d5f7，依赖 C.2.8 既有模板机制，改动最小）。
-- **lambda 提前到第 2-3 位** ⚠️ 偏早：lambda 语法本身不依赖 constexpr/变参模板，**前置只需 auto 或类机制**；但 lambda 捕获/闭包语义依赖引用与构造（已有）。**建议：在 lambda 之前先插一个轻量 auto/decltype 步骤**（§2.1），否则 `auto f = [&]{};` 无法声明，lambda 价值大打折扣。
+- **lambda 提前到第 2-3 位** ⚠️ 偏早：lambda 语法本身不依赖 constexpr/变参模板，**前置只需 auto 或类机制**；但 lambda 捕获/闭包语义依赖引用与构造（已有）。原建议的「lambda 前先插轻量 auto/decltype 步骤」（§2.1）**已由 160e2a2 落实**（`auto f = [&]{};` 声明已解锁），lambda 即为当前下一项。
 - **constexpr 放在 lambda 之后** ✅ 合理：constexpr 求值器是独立大模块（难度最高），放在 lambda（难度中、回报直观）之后可先积累表达式/类型处理经验；且 C++11 constexpr 实际常配合变参模板做编译期计算——**变参模板宜提到 constexpr 之前**。
 - **变参模板排在 constexpr 之后** ⚠️ 建议前移：变参模板是 STL/现代 C++ 的地基，且 constexpr 的典型用例（编译期求和/递归类型）需要包展开支撑；token 回放机制下包展开属于"模板系统的自然延伸"，先做可让 constexpr 阶段的模板实参传递更顺。
 - **移动语义最后** ✅ 合理：依赖重载决议成熟 + expr 值类别改造（改动面大），且无移动语义 C++98 风格代码仍可编译，收益主要体现在性能与 STL——放最后符合"先求正确、后求现代"。
 
 ### 修正后的推荐路线
 ```
-✅成员模板(已完成 c93d5f7) → auto/decltype → 变参模板/包展开 → lambda → constexpr 求值器 → 移动语义 → C++14/17 → concepts
+✅成员模板(c93d5f7) → ✅auto/decltype(160e2a2) → 变参模板/包展开 → lambda → constexpr 求值器 → 移动语义 → C++14/17 → concepts
 ```
 每步验收（对接现有 `test/cpp/` + Makefile `check-cpp-*`）：
-1. auto：`auto x = 42; auto s = f();` 编译运行。
+1. auto：`auto x = 42; auto s = f();` 编译运行。✅（auto_decl.cc 16 断言，160e2a2）
 2. 变参：`template<typename... Ts> int sum(Ts... a)` 递归求和。
 3. lambda：`[&](){}` / `[=]` / 无捕获转函数指针三档测试。
 4. constexpr：`constexpr int sq(int n){return n*n;}` + static_assert。
