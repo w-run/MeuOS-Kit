@@ -674,7 +674,12 @@ static int is_builtin(const char *name) {
         || !strcmp(name, "local") || !strcmp(name, "getopts")
         || !strcmp(name, "umask") || !strcmp(name, "hash")
         || !strcmp(name, "let") || !strcmp(name, "declare")
-        || !strcmp(name, "typeset");
+        || !strcmp(name, "typeset")
+        /* === Shell-Utils 联动：高性能内建 === */
+        || !strcmp(name, "printf")
+        || !strcmp(name, "test") || !strcmp(name, "[")
+        || !strcmp(name, "sleep")
+        || !strcmp(name, "seq");
 }
 
 int msh_run_builtin(ast_t *ast, int argc, char **argv) {
@@ -1032,6 +1037,175 @@ int msh_run_builtin(ast_t *ast, int argc, char **argv) {
     /* === let === */
     if (!strcmp(name, "let")) {
         return msh_builtin_let(argc, argv);
+    }
+    /* === Shell-Utils 联动：高性能内建 === */
+
+    /* printf 内建：避免 fork+exec 的格式化输出 */
+    if (!strcmp(name, "printf")) {
+        if (argc < 2) {
+            fprintf(stderr, "msh: printf: missing format string\n");
+            return 2;
+        }
+        const char *fmt = argv[1];
+        /* 收集后续参数 */
+        const char **args = NULL;
+        int nargs = 0;
+        if (argc > 2) {
+            args = malloc(sizeof(char*) * (argc - 1));
+            for (int i = 2; i < argc; i++) args[nargs++] = argv[i];
+        }
+        int arg_idx = 0;
+        const char *p = fmt;
+        while (*p) {
+            if (*p == '\\') {
+                /* 转义序列 */
+                p++;
+                switch (*p) {
+                case 'n': putchar('\n'); break;
+                case 't': putchar('\t'); break;
+                case 'r': putchar('\r'); break;
+                case '\\': putchar('\\'); break;
+                case '0': putchar('\0'); break;
+                case '\"': putchar('\"'); break;
+                default: putchar('\\'); putchar(*p); break;
+                }
+                if (*p) p++;
+            } else if (*p == '%') {
+                p++;
+                /* 跳过 flags/width/precision */
+                while (*p && (strchr("-+ #0", *p) || (*p >= '0' && *p <= '9') || *p == '.' || *p == '*')) p++;
+                char conv = *p;
+                if (conv) p++;
+                const char *arg = (arg_idx < nargs) ? args[arg_idx++] : "";
+                switch (conv) {
+                case 'd': case 'i': printf("%d", arg ? atoi(arg) : 0); break;
+                case 's': fputs(arg ? arg : "", stdout); break;
+                case 'c': putchar(arg ? arg[0] : '\0'); break;
+                case 'x': printf("%x", arg ? (unsigned)atoi(arg) : 0); break;
+                case 'X': printf("%X", arg ? (unsigned)atoi(arg) : 0); break;
+                case 'o': printf("%o", arg ? (unsigned)atoi(arg) : 0); break;
+                case 'u': printf("%u", arg ? (unsigned)atoi(arg) : 0); break;
+                case 'f': case 'g': case 'e': printf("%g", arg ? atof(arg) : 0.0); break;
+                case '%': putchar('%'); break;
+                default: putchar('%'); putchar(conv); break;
+                }
+            } else {
+                putchar(*p);
+                p++;
+            }
+        }
+        free(args);
+        fflush(stdout);
+        msh_last_status = 0;
+        return 0;
+    }
+    /* test / [ 内建：POSIX 条件测试，避免 fork+exec */
+    if (!strcmp(name, "test") || !strcmp(name, "[")) {
+        int result = 1; /* 默认 false */
+        int test_argc = argc;
+        char **test_argv = argv;
+        /* [ 命令需要以 ] 结尾 */
+        if (!strcmp(name, "[")) {
+            if (argc < 2 || strcmp(argv[argc - 1], "]") != 0) {
+                fprintf(stderr, "msh: [: missing `]`\n");
+                return 2;
+            }
+            test_argc = argc - 1; /* 去掉 ] */
+        }
+        /* 跳过命令名 */
+        int n = test_argc - 1; /* 参数个数 */
+        char **a = test_argv + 1; /* 参数从 argv[1] 开始 */
+        if (n == 0) result = 1;
+        else if (n == 1) result = (strlen(a[0]) > 0) ? 0 : 1;
+        else if (n == 2) {
+            /* 一元操作符 -flag arg */
+            const char *op = a[0];
+            const char *arg = a[1];
+            struct stat st;
+            if (!strcmp(op, "-z")) result = (strlen(arg) == 0) ? 0 : 1;
+            else if (!strcmp(op, "-n")) result = (strlen(arg) > 0) ? 0 : 1;
+            else if (!strcmp(op, "-e")) result = (access(arg, F_OK) == 0) ? 0 : 1;
+            else if (!strcmp(op, "-f")) result = (stat(arg, &st) == 0 && S_ISREG(st.st_mode)) ? 0 : 1;
+            else if (!strcmp(op, "-d")) result = (stat(arg, &st) == 0 && S_ISDIR(st.st_mode)) ? 0 : 1;
+            else if (!strcmp(op, "-r")) result = (access(arg, R_OK) == 0) ? 0 : 1;
+            else if (!strcmp(op, "-w")) result = (access(arg, W_OK) == 0) ? 0 : 1;
+            else if (!strcmp(op, "-x")) result = (access(arg, X_OK) == 0) ? 0 : 1;
+            else if (!strcmp(op, "-s")) result = (stat(arg, &st) == 0 && st.st_size > 0) ? 0 : 1;
+            else if (!strcmp(op, "-h") || !strcmp(op, "-L")) result = (lstat(arg, &st) == 0 && S_ISLNK(st.st_mode)) ? 0 : 1;
+            else if (!strcmp(op, "-p")) result = (stat(arg, &st) == 0 && S_ISFIFO(st.st_mode)) ? 0 : 1;
+            else if (!strcmp(op, "-S")) result = (stat(arg, &st) == 0 && S_ISSOCK(st.st_mode)) ? 0 : 1;
+            else if (!strcmp(op, "-b")) result = (stat(arg, &st) == 0 && S_ISBLK(st.st_mode)) ? 0 : 1;
+            else if (!strcmp(op, "-c")) result = (stat(arg, &st) == 0 && S_ISCHR(st.st_mode)) ? 0 : 1;
+            else if (!strcmp(op, "!")) result = (strlen(a[1]) > 0) ? 1 : 0;
+            else { fprintf(stderr, "msh: test: %s: unknown operator\n", op); result = 2; }
+        } else if (n == 3) {
+            /* 二元操作符 a op b */
+            const char *left = a[0];
+            const char *op = a[1];
+            const char *right = a[2];
+            struct stat st1, st2;
+            if (!strcmp(op, "=") || !strcmp(op, "==")) result = (strcmp(left, right) == 0) ? 0 : 1;
+            else if (!strcmp(op, "!=")) result = (strcmp(left, right) != 0) ? 0 : 1;
+            else if (!strcmp(op, "-eq")) result = (atoi(left) == atoi(right)) ? 0 : 1;
+            else if (!strcmp(op, "-ne")) result = (atoi(left) != atoi(right)) ? 0 : 1;
+            else if (!strcmp(op, "-lt")) result = (atoi(left) < atoi(right)) ? 0 : 1;
+            else if (!strcmp(op, "-le")) result = (atoi(left) <= atoi(right)) ? 0 : 1;
+            else if (!strcmp(op, "-gt")) result = (atoi(left) > atoi(right)) ? 0 : 1;
+            else if (!strcmp(op, "-ge")) result = (atoi(left) >= atoi(right)) ? 0 : 1;
+            else if (!strcmp(op, "-nt")) result = (stat(left, &st1) == 0 && stat(right, &st2) == 0 && st1.st_mtime > st2.st_mtime) ? 0 : 1;
+            else if (!strcmp(op, "-ot")) result = (stat(left, &st1) == 0 && stat(right, &st2) == 0 && st1.st_mtime < st2.st_mtime) ? 0 : 1;
+            else if (!strcmp(op, "-ef")) result = (stat(left, &st1) == 0 && stat(right, &st2) == 0 && st1.st_dev == st2.st_dev && st1.st_ino == st2.st_ino) ? 0 : 1;
+            else { fprintf(stderr, "msh: test: %s: unknown operator\n", op); result = 2; }
+        } else {
+            /* 多参数：简化处理 -a (AND) 和 -o (OR) */
+            /* TODO: 完整的 -a/-o 逻辑 */
+            result = 1;
+        }
+        msh_last_status = result;
+        return result;
+    }
+    /* sleep 内建：避免 fork+exec 的延时 */
+    if (!strcmp(name, "sleep")) {
+        if (argc < 2) { fprintf(stderr, "msh: sleep: missing operand\n"); return 2; }
+        for (int i = 1; i < argc; i++) {
+            double secs = atof(argv[i]);
+            if (secs > 0) {
+                unsigned int whole = (unsigned int)secs;
+                unsigned long frac = (unsigned long)((secs - whole) * 1e6);
+                if (whole > 0) sleep(whole);
+                if (frac > 0) usleep(frac);
+            }
+        }
+        msh_last_status = 0;
+        return 0;
+    }
+    /* seq 内建：避免 fork+exec 的序列生成 */
+    if (!strcmp(name, "seq")) {
+        double start = 1.0, step = 1.0, end;
+        int is_int = 1;
+        if (argc == 2) { end = atof(argv[1]); }
+        else if (argc == 3) { start = atof(argv[1]); end = atof(argv[2]); }
+        else if (argc == 4) { start = atof(argv[1]); step = atof(argv[2]); end = atof(argv[3]); }
+        else { fprintf(stderr, "msh: seq: usage: seq [start [step]] end\n"); return 2; }
+        /* 检查是否整数 */
+        for (int i = 1; i < argc; i++) {
+            if (strchr(argv[i], '.')) { is_int = 0; break; }
+        }
+        if (step == 0) { fprintf(stderr, "msh: seq: step cannot be zero\n"); return 1; }
+        if (step > 0) {
+            for (double v = start; v <= end + 1e-9; v += step) {
+                if (is_int) printf("%ld\n", (long)v);
+                else printf("%g\n", v);
+            }
+        } else {
+            for (double v = start; v >= end - 1e-9; v += step) {
+                if (is_int) printf("%ld\n", (long)v);
+                else printf("%g\n", v);
+            }
+        }
+        fflush(stdout);
+        msh_last_status = 0;
+        return 0;
     }
     (void)ast;
     return 0;

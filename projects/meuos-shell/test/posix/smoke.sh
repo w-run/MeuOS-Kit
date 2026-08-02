@@ -187,6 +187,34 @@ assert_output "declare basic" "hello" "declare x=hello; echo \$x"
 assert_output "typeset basic" "world" "typeset x=world; echo \$x"
 assert_output "local basic" "localval" "f() { local x=localval; echo \$x; }; f"
 
+### Shell-Utils 联动内置：printf / test / sleep / seq ###
+assert_output "printf %s" "hello" "printf '%s' hello"
+assert_output "printf %d" "42" "printf '%d' 42"
+assert_output "printf mixed" "Name:A Value:42" "printf '%s:%s %s:%d' Name A Value 42"
+assert_rc "test -eq true" 0 "test 1 -eq 1"
+assert_rc "test -eq false" 1 "test 1 -eq 2"
+assert_rc "test string =" 0 "test 'abc' = 'abc'"
+assert_rc "test string !=" 1 "test 'abc' != 'abc'"
+assert_rc "test -d /tmp" 0 "test -d /tmp"
+assert_rc "test -f exists" 0 "test -f /etc/hostname"
+assert_rc "test -e missing" 1 "test -e /nonexistent12345"
+assert_rc "[ -eq true ]" 0 "[ 1 -eq 1 ]"
+assert_rc "[ -eq false ]" 1 "[ 1 -eq 2 ]"
+assert_rc "[ string = ]" 0 "[ 'a' = 'a' ]"
+assert_output "seq 3" "1
+2
+3" "seq 3"
+assert_output "seq range" "2
+3
+4" "seq 2 4"
+assert_output "seq step" "2
+4
+6" "seq 2 2 6"
+assert_rc "sleep 0.01" 0 "sleep 0.01"
+assert_output "seq countdown" "3
+2
+1" "seq 3 -1 1"
+
 echo ""
 echo "=== POSIX smoke: $pass PASS / $fail FAIL ==="
 [ "$fail" -eq 0 ]
