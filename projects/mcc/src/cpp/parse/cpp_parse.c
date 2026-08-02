@@ -2886,7 +2886,10 @@ struct cpp_template {
 	size_t ntoks;
 	bool is_class;               /* `template<...> class Foo { ... }` */
 	bool is_member;              /* template member function of a class */
+	bool is_concept;             /* `template<...> concept Name = expr;` */
 	struct type *owner;          /* enclosing class (member templates) */
+	struct token *constraint;    /* requires-clause tokens (`requires Expr<T>`) */
+	size_t nconstraint;
 	struct cpp_tmpl_inst *insts;
 	struct cpp_tmpl_inst **insts_end;
 	struct cpp_tmpl_cls_inst *cls_insts;
@@ -3044,6 +3047,94 @@ cpp_template_decl(struct scope *s, struct type *owner)
 			tmpl->is_class = true;
 	}
 
+	/* C++20 concept definition: `template<...> concept Name = expr;`.
+	 * The concept body (a constant boolean expression over the template
+	 * parameters) is buffered; a use `requires Integral<T>` looks the
+	 * concept up and substitutes the argument types. */
+	if (cpp_tok_kind() == CPP_TCONCEPT) {
+		struct cpp_template *ct = xmalloc(sizeof *ct);
+		struct token *ctoks = NULL;
+		size_t cn = 0, ccap = 0;
+		*ct = *tmpl; /* copy params etc. */
+		ct->is_concept = true;
+		ct->toks = NULL;
+		ct->ntoks = 0;
+		ct->constraint = NULL;
+		ct->nconstraint = 0;
+		ct->insts = NULL;
+		ct->insts_end = &ct->insts;
+		ct->cls_insts = NULL;
+		ct->cls_insts_end = &ct->cls_insts;
+		ct->next = NULL;
+		free(tmpl); /* the original was just a scaffolding copy */
+		tmpl = ct;
+		next(); /* consume 'concept' */
+		if (tok.kind < TIDENT)
+			error(&tok.loc, "expected concept name after 'concept'");
+		tmpl->name = xmalloc(strlen(tokenstr(tok.kind)) + 1);
+		strcpy((char *)tmpl->name, tokenstr(tok.kind));
+		next(); /* consume the concept name */
+		expect(TASSIGN, "after concept name");
+		/* buffer `expr;` — everything up to the ';' */
+		for (;;) {
+			if (tok.kind == TSEMICOLON)
+				break;
+			if (tok.kind == TEOF)
+				error(&tok.loc, "unterminated concept definition '%s'",
+				    tmpl->name);
+			if (cn >= ccap) {
+				ccap = ccap ? ccap * 2 : 64;
+				ctoks = xreallocarray(ctoks, ccap, sizeof *ctoks);
+			}
+			ctoks[cn++] = tok;
+			next();
+		}
+		next(); /* consume ';' */
+		tmpl->toks = ctoks;
+		tmpl->ntoks = cn;
+		*g_cpp_templates_end = tmpl;
+		g_cpp_templates_end = &tmpl->next;
+		return;
+	}
+
+	/* C++20 requires-clause: `template<...> requires Expr<T> decl`.
+	 * Buffer the constraint expression tokens (everything from `requires`
+	 * up to the start of the declaration).  The constraint is normally a
+	 * single `Concept<T>` term: we consume tokens until a top-level
+	 * identifier that follows the closing '>' of a `Concept<...>` (that
+	 * identifier begins the return type), or until '{' / ';'. */
+	if (cpp_tok_kind() == CPP_TREQUIRES) {
+		struct token *ctoks = NULL;
+		size_t cn = 0, ccap = 0;
+		int depth = 0;
+		next(); /* consume 'requires' */
+		for (;;) {
+			if (tok.kind == TEOF)
+				break;
+			if (depth == 0 && (tok.kind == TLBRACE || tok.kind == TSEMICOLON))
+				break;
+			if (depth == 0 && cn > 0 && tok.kind >= TIDENT &&
+			    cpp_classify_ident(tokenstr(tok.kind), 0) == CPP_TNONE &&
+			    tok.kind != tokenget(tmpl->name ? tmpl->name : "", 0))
+				break; /* return-type identifier begins the declaration */
+			if (tok.kind == TLESS || tok.kind == TLPAREN || tok.kind == TLBRACK)
+				++depth;
+			else if (tok.kind == TGREATER || tok.kind == TRPAREN ||
+			    tok.kind == TRBRACK) {
+				if (depth > 0)
+					--depth;
+			}
+			if (cn >= ccap) {
+				ccap = ccap ? ccap * 2 : 16;
+				ctoks = xreallocarray(ctoks, ccap, sizeof *ctoks);
+			}
+			ctoks[cn++] = tok;
+			next();
+		}
+		tmpl->constraint = ctoks;
+		tmpl->nconstraint = cn;
+	}
+
 	/* buffer the rest of the declaration (return type .. body / ';') */
 	toks = NULL;
 	for (;;) {
@@ -3149,6 +3240,91 @@ cpp_tmpl_deduce(struct cpp_template *tmpl, struct expr *arglist,
 		error(&tok.loc, "too many arguments for template '%s'", tmpl->name);
 	*nout = i;
 	return true;
+}
+
+/* C++20 constraint checking (minimal): evaluate the requires-clause of a
+ * template against the deduced argument types.
+ *
+ * The constraint is a concept use `Concept<T>` (buffered by
+ * cpp_template_decl).  We look up the concept definition, replay its
+ * body tokens with the template-parameter names bound to the actual
+ * types (they are already in scope as DECLTYPE decls), parse the body as
+ * an expression and constant-fold it: a nonzero result means the
+ * constraint is satisfied.  Returns true when there is no constraint.
+ */
+static bool
+cpp_check_constraint(struct cpp_template *tmpl, struct scope *bs)
+{
+	struct token *c = tmpl->constraint;
+	size_t n = tmpl->nconstraint;
+	struct cpp_template *con;
+	struct token cur;
+	struct expr *e;
+
+	if (!c || !n)
+		return true;
+
+	/* the constraint is a concept use: `Concept<...>` — the first token
+	 * is the concept name */
+	if (c[0].kind < TIDENT)
+		error(&tok.loc, "requires-clause must name a concept");
+	for (con = g_cpp_templates; con; con = con->next)
+		if (con->is_concept && strcmp(con->name, tokenstr(c[0].kind)) == 0)
+			break;
+	if (!con)
+		error(&tok.loc, "unknown concept '%s' in requires-clause",
+		    tokenstr(c[0].kind));
+
+	/* replay the concept body (with its own template parameter bound to
+	 * the same type as this template's first parameter), parse + fold */
+	{
+		extern struct expr *expr(struct scope *);
+		extern struct expr *eval(struct expr *);
+		extern void tokpush(struct token *, size_t);
+		extern struct decl *mkdecl(char *, enum declkind, struct type *,
+		    enum typequal, enum linkage);
+		extern void scopeputdecl(struct scope *, struct decl *);
+		extern struct scope *mkscope(struct scope *);
+		struct scope *cs = mkscope(bs);
+		struct cpp_tmpl_param *cp;
+		struct decl *td;
+		int i;
+
+		/* bind the concept's template parameter(s) to the deduced types
+		 * (positional: concept param i <- template arg i) */
+		i = 0;
+		for (cp = con->params; cp; cp = cp->next, ++i) {
+			struct type *at = NULL;
+			/* map to the outer template's deduced type: the constraint
+			 * `Integral<T>` passes `T` (the outer template's param);
+			 * find the type bound to that parameter name in bs */
+			if (i + 1 < (int)n && c[i + 1].kind == TLESS) {
+				/* argument is the token after '<', e.g. `T` */
+				if (i + 2 < (int)n && c[i + 2].kind >= TIDENT) {
+					struct decl *pd = scopegetdecl(bs,
+					    tokenstr(c[i + 2].kind), 1);
+					if (pd && pd->kind == DECLTYPE)
+						at = pd->type;
+				}
+			}
+			if (!at)
+				error(&tok.loc, "cannot resolve concept argument for '%s'",
+				    con->name);
+			td = mkdecl((char *)cp->name, DECLTYPE, at, QUALNONE, LINKNONE);
+			scopeputdecl(cs, td);
+		}
+
+		cur = tok;
+		tokpush(&cur, 1);
+		tokpush(con->toks, con->ntoks);
+		next();
+		e = expr(cs);
+		e = eval(e);
+		if (!e || !(e->type->prop & PROPINT) || e->kind != EXPRCONST)
+			error(&tok.loc, "concept '%s' is not a constant boolean expression",
+			    con->name);
+		return e->u.constant.u != 0;
+	}
 }
 
 /* Find the DECLFUNC for the instantiation of template `name` with the
@@ -3331,6 +3507,12 @@ cpp_tmpl_find_or_instantiate(struct scope *s, const char *name,
 		 * it below; deliberately not freed (bounded per-instantiation). */
 	}
 	next();
+	/* C++20 requires-clause: the constraint must hold for the deduced
+	 * types, otherwise the instantiation is ill-formed. */
+	if (!cpp_check_constraint(tmpl, bs))
+		error(&tok.loc,
+		    "template '%s' instantiated with a type that does not satisfy its requires-clause",
+		    name);
 	if (!decl(bs, NULL))
 		error(&tok.loc, "failed to instantiate template '%s'", name);
 	if (g_cpp_pack_depth > 0)
