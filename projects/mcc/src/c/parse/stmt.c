@@ -530,12 +530,42 @@ stmt(struct func *f, struct scope *s)
 		 * ill-formed code in it are never instantiated. */
 		extern int g_lang;
 		bool constexpr_if = false;
+		bool consteval_if = false;
+		bool consteval_neg = false;
 		next();
 		/* `constexpr` is a C23 keyword (TCONSTEXPR) in the C lexer; the
-		 * C++ frontend re-uses that spelling. */
-		if (g_lang == 1 && tok.kind == TCONSTEXPR) {
-			constexpr_if = true;
-			next(); /* consume 'constexpr' */
+		 * C++ frontend re-uses that spelling.  `consteval` (C++20) is an
+		 * identifier to the C lexer, so it is matched by name. */
+		if (g_lang == 1) {
+			if (tok.kind == TCONSTEXPR) {
+				constexpr_if = true;
+				next(); /* consume 'constexpr' */
+			} else if (tok.kind >= TIDENT &&
+			           strcmp(tokenstr(tok.kind), "consteval") == 0) {
+				consteval_if = true;
+				next(); /* consume 'consteval' */
+			} else if (tok.kind == TLNOT) {
+				/* `if ! consteval` — the only valid `!` right after `if` */
+				struct token nottok = tok;
+				next(); /* consume '!' */
+				if (tok.kind >= TIDENT &&
+				    strcmp(tokenstr(tok.kind), "consteval") == 0) {
+					consteval_if = true;
+					consteval_neg = true;
+					next(); /* consume 'consteval' */
+				} else {
+					/* not `if !consteval` (malformed `if !expr`):
+					 * rewind so the normal path reports it */
+					tokpush(&tok, 1);
+					tok = nottok;
+				}
+			}
+		}
+		if (consteval_if) {
+			extern void cpp_if_consteval(struct func *, struct scope *,
+			    bool);
+			cpp_if_consteval(f, s, consteval_neg);
+			break;
 		}
 		s = mkscope(s);
 		expect(TLPAREN, "after 'if'");

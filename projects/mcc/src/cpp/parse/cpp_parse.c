@@ -6401,6 +6401,41 @@ cpp_constexpr_eval(struct expr *call)
 	return NULL;
 }
 
+/* C++23 `if consteval { ... } else { ... }` (P1938) and `if !consteval`.
+ *
+ * The branch is selected by whether the statement is in a constant-
+ * evaluated context: the constexpr statement interpreter runs with
+ * g_cpp_cexpr_depth > 0 and takes the consteval branch; ordinary runtime
+ * parsing (depth == 0) takes the else branch for `if consteval` (and the
+ * then branch for `if !consteval`).  The unselected branch is skipped at
+ * the token level; its well-formedness is not checked (matching the
+ * codebase's if-constexpr leniency). */
+void
+cpp_if_consteval(struct func *f, struct scope *s, bool negate)
+{
+	extern void stmt(struct func *, struct scope *);
+	extern void next(void);
+
+	bool constant_ctx = g_cpp_cexpr_depth > 0;
+	/* `if consteval`: take the then branch iff constant-evaluated;
+	 * `if !consteval`: inverted */
+	bool take_then = constant_ctx != negate;
+
+	if (take_then) {
+		stmt(f, s);
+		if (tok.kind == TELSE) {
+			next();
+			cpp_skip_branch();
+		}
+	} else {
+		cpp_skip_branch();
+		if (tok.kind == TELSE) {
+			next();
+			stmt(f, s);
+		}
+	}
+}
+
 /* C++17 `if constexpr (cond) { ... } else { ... }`.
  *
  * The condition is parsed by the C `if` handling and handed here.  It must
