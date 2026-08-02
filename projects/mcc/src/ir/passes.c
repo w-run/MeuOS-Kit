@@ -64,7 +64,9 @@ run_passes(Fn *fn)
 	P(rega);
 	if (ol >= 1) P(postra);
 	P(fillcfg);
-	P(slotmerge);
+	/* P(slotmerge); -- disabled (defect J): slotmerge miscompiles large
+	 * functions, breaking self-host (self-built mcc SIGSEGVs on any input).
+	 * See .issues/0802.md defect J.  Re-enable after root cause fixed. */
 	P(simpljmp);
 	P(fillcfg);
 	/* link blocks in rpo order, terminating the last with link=0 */
