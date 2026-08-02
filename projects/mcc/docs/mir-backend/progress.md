@@ -98,3 +98,68 @@ check-mir 全绿；bridge 路径 0 回归。
   延伸"修复；`fm->regsused` 记录全部已分配寄存器（非当前活跃集）。
 - 所有 spill 槽 8 字节对齐（emit 用 movq 访问），4 字节值不越界。
 - 静态 alloca 用帧内 leaq 预留（不碰 %rsp），动态 alloca（VLA）fallback。
+
+## 独立验证记录（isel-debug，干净 worktree 全量复测）
+
+> 每轮均在**干净 worktree**（`git worktree add` 到已提交状态）构建验证，
+> 不混入工作区未提交改动。硬性标准：c99/c11 新后端 0 失败；123 测试
+> bridge 路径 .s 与 oracle 字节一致；代表性程序运行正确。
+
+### 轮 1 — P3b（eca97b7，2026-08-02）
+
+- c99/c11 34 测试 `MCC_MIR_BACKEND=1` 编译全通过；19 个有 main 测试
+  MIR 后端 vs bridge 退出码+stdout **19/19 一致**（确认真走新后端，均含
+  .bb 块结构）。
+- hello（printf）、fib(10)=55 运行正确；39 个 C 测试 bridge .s 与 oracle
+  **39/39 字节一致**。
+- 聚合/varargs fallback 混合模式不崩，汇编特征确认标量走 MIR、聚合走
+  bridge。
+- **发现 2 个 P3b 边界 bug**（已由 mir-backend 修复，见上方"边界 bug
+  修复"节）：
+  1. 浮点参数读取错误：`fadd(7,2)` 返回 0.0（bridge 3.5）——MIR 后端
+     prologue 参数 slot 偏移错乱 + 浮点用整数指令（addq 而非 addsd）。
+  2. >6 参数栈传参非法寻址：`printf` 7 参数生成 `movl %eax,(,%rsp)`
+     （rsp 作 index 非法）。
+
+### 轮 2 — d6483d5（Bug 1/2 修复 + P4 提交，2026-08-02）
+
+- **发现阻断性构建缺陷**：`x86_64_memit.c:637/784 'g_salloc' undeclared`
+  ——g_salloc 被 d6483d5 新增的 MMOP_SALLOC 分支使用但**从未定义**，干净
+  worktree 无法构建。验证时加本地补丁 `static int g_salloc;` 绕过。
+- Bug 1/2 复测通过：fadd(4,5)=9.0、fdiv(7,2)=3.5、fneg(7)=-7.0、printf
+  7/9 参数全对。
+- **发现 P4 参数传递段错误**：`int x=add(3,4); printf("%d",x)` GP fault
+  （libc 内）；simple/mul3/big/gcd+sumsq 组合**全部段错误**。根因：被调方
+  bb1 用 rsi/r8 解引用参数 slot，但 slot 指针语义跨块未保持，且调用方传值
+  （rdi/rsi=3,4）与被调方按地址解引用不匹配 → `movl (%rsi)` 把参数值当地址。
+- P4 regalloc 抽查：simple 汇编仍全栈槽解引用（`movl (%r10)`），未真正
+  用寄存器——当时判定"P4 未实现寄存器分配"（后经 f9b9c34 轮**修正**，
+  见下）。
+
+### 轮 3 — f9b9c34（P5/P6 后，2026-08-02）
+
+- **独立构建 ✅**：无 g_salloc 错误（P5/P6 重构移除该变量）。
+- **参数传递段错误已修复 ✅**：simple=7、mul3=15、big=7、gcd=12、
+  sumsq=385 全部正确，与 bridge 一致。
+- **regalloc 真实性确认 ✅（修正轮 2 误判）**：`MCC_DEBUG_MBE=1` dump 显示
+  simple/compute 全部中间值分配物理寄存器（reg=3/4/5，slots 全 -1，
+  regsused=0x38）；emit 有 `v->reg >= 0 → %reg` 分发（memit.c:212）。
+  此前误判为"全栈槽"的 `movl (%r10)` 实为 ABI 层把 SysV 参数（rdi/rsi）
+  落栈后的 load 指令（`@[%v3]` 地址），加载结果确在寄存器中运算。
+- **c99/c11 0 失败 ✅**：34 编译全过，19 个有 main 测试 MIR 新后端 vs
+  bridge **19/19 一致**。
+- **bridge 基线一致 ✅**：39 个 C 测试 .s 与 oracle **39/39 字节一致**
+  （84 cpp 为 m++ C++ 测试，不在 mcc 范围）。
+- hello + fib(10)=55 + varargs `sum_va(4,1,2,3,4)=10` 全部正确（P6b
+  varargs 新后端支持确认）。
+
+### 遗留（非正确性）
+
+- **isel 冗余 store/load**：中间值被 isel 层 store 到栈再 load（尽管
+  regalloc 已分配寄存器），如 `x=3` 存 -16(%rbp) 后立即重载。功能正确、
+  性能未优化；属 isel 缺少 copy-propagation/load-elimination，不影响
+  P4/P5 可靠性结论，后续可作为优化项。
+
+**结论**：P4 的两个阻断性缺陷（g_salloc 未定义、参数传递段错误）在
+P5/P6 已彻底修复；regalloc（线性扫描，依据 regalloc-design.md）真实
+分配寄存器；P4/P5 可靠，默认切换（MCC_MIR_BACKEND 接管）可评估。
