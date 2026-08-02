@@ -292,7 +292,8 @@ mreg_scan(MFnM *fm, MRegCtx *ctx)
 			fixed_add(&fixed[X64MREG_RDI], p);
 	}
 	{
-		uint32_t calls[64], ncalls = 0;
+		uint32_t *calls = NULL;
+		uint32_t ncalls = 0, ccalls = 0;
 		for (MBlkM *b = fm->link; b; b = b->link) {
 			for (uint32_t j = 0; j < b->nins; j++) {
 				MInsM *in = &b->ins[j];
@@ -301,8 +302,16 @@ mreg_scan(MFnM *fm, MRegCtx *ctx)
 				for (int k = 0; k < 5; k++)
 					if (ops[k] && ops[k]->kind == MV_REG && ops[k]->reg >= 0)
 						fixed_add(&fixed[ops[k]->reg], in->pos);
-				if (in->op == MMOP_CALL && ncalls < 64)
+				if (in->op == MMOP_CALL) {
+					/* keep every call: a fixed 64-entry array silently
+					 * dropped calls in huge functions, misclassifying
+					 * call-crossing intervals as non-crossing */
+					if (ncalls == ccalls) {
+						ccalls = ccalls ? ccalls * 2 : 64;
+						calls = realloc(calls, ccalls * sizeof *calls);
+					}
 					calls[ncalls++] = in->pos;
+				}
 			}
 			MInsM *t = &b->term;
 			MVal *tops[3] = { t->src[0], t->addr.base, t->addr.index };
@@ -391,6 +400,7 @@ mreg_scan(MFnM *fm, MRegCtx *ctx)
 		for (uint32_t i = 0; i < ncand; i++)
 			if (cand[i].reg >= 0)
 				cand[i].v->reg = cand[i].reg;
+		free(calls);
 
 		/* Shift spill slots below the callee-saved save area so the
 		 * emitter's prologue pushes do not overlap them. */
