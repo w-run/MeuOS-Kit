@@ -2548,11 +2548,23 @@ cpp_parse_new_expr(struct scope *s)
 					lt->u.binary.r = mkexpr(EXPRCAST, &typeint, ne);
 					funcbranch(curfunc, lt, bbody, bdone);
 					funclabel(curfunc, bbody);
-					/* ctor(&tmp[i]) — tmp + i */
+					/* ctor(&tmp[i]) — tmp + i*sizeof(T): the IR TADD does
+					 * not scale a pointer operand (scaling happens in the
+					 * C frontend's sema, which cpp bypasses), so the
+					 * element stride must be applied here */
 					ptr = mkexpr(EXPRBINARY, pt, NULL);
 					ptr->op = TADD;
 					ptr->u.binary.l = ident;
-					ptr->u.binary.r = ie;
+					{
+						struct expr *off = mkexpr(EXPRBINARY,
+						    &typeulong, NULL);
+						off->op = TMUL;
+						off->u.binary.l = mkexpr(EXPRCAST,
+						    &typeulong, ie);
+						off->u.binary.r =
+						    mkconstexpr(&typeulong, t->size);
+						ptr->u.binary.r = off;
+					}
 					ctor = cpp_ctor_expr(t, ptr, NULL);
 					if (!ctor)
 						error(&tok.loc,
@@ -2731,7 +2743,8 @@ cpp_parse_delete_expr(struct scope *s)
 			lt->u.binary.r = mkexpr(EXPRCAST, &typeint, ne);
 			funcbranch(curfunc, lt, bbody, bdone);
 			funclabel(curfunc, bbody);
-			/* dtor(&p[i]) — p + i */
+			/* dtor(&p[i]) — p + i*sizeof(T) (element stride applied
+			 * here: the IR TADD does not scale pointer operands) */
 			snprintf(mname, sizeof mname, "%s_dtor", tag);
 			fd = scopegetdecl(t->scope ? t->scope : &filescope, mname, true);
 			if (fd && fd->kind == DECLFUNC) {
@@ -2739,7 +2752,16 @@ cpp_parse_delete_expr(struct scope *s)
 				thp = mkexpr(EXPRBINARY, e->type, NULL);
 				thp->op = TADD;
 				thp->u.binary.l = e;
-				thp->u.binary.r = ie;
+				{
+					struct expr *off = mkexpr(EXPRBINARY,
+					    &typeulong, NULL);
+					off->op = TMUL;
+					off->u.binary.l = mkexpr(EXPRCAST,
+					    &typeulong, ie);
+					off->u.binary.r =
+					    mkconstexpr(&typeulong, t->size);
+					thp->u.binary.r = off;
+				}
 				fn = mkexpr(EXPRIDENT, fd->type, NULL);
 				fn->u.ident.decl = fd;
 				fn = decay(fn);
