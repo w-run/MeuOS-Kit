@@ -313,11 +313,7 @@ test_fold_rem_neg(void)
 	mfn_free(fn);
 }
 
-/* Test 12: shift-by-zero is the identity — shl(x,0)/sar(x,0) -> x.
- * NOTE: FOLD currently does NOT simplify these (verified 2026-08-02); the
- * instructions are kept and the result is still correct.  This test pins
- * the safe no-op behavior so a later simplification stays regression-checked:
- * once fold handles shift-by-zero, tighten these to expect b->nins == 1. */
+/* Test 12: shift-by-zero is the identity — shl(x,0)/sar(x,0)/shr(x,0) -> x. */
 static void
 test_fold_shift_zero(void)
 {
@@ -328,17 +324,21 @@ test_fold_shift_zero(void)
 	MVal *x = mval_new(fn, MV_TEMP, MT_I32, 0, "x");
 	MVal *r1 = mval_new(fn, MV_TEMP, MT_I32, 0, "r1");
 	MVal *r2 = mval_new(fn, MV_TEMP, MT_I32, 0, "r2");
+	MVal *r3 = mval_new(fn, MV_TEMP, MT_I32, 0, "r3");
 	madd1(fn, b, MOP_PAR, MT_I32, x, MREF_CON(0));
 	MConst *c0 = mconst_int(fn, MT_I32, 0);
 	madd(fn, b, MOP_SHL, MT_I32, r1, MREF_VAL(x), MREF_CON(c0));
 	madd(fn, b, MOP_SAR, MT_I32, r2, MREF_VAL(x), MREF_CON(c0));
+	madd(fn, b, MOP_SHR, MT_I32, r3, MREF_VAL(x), MREF_CON(c0));
 	mret(fn, b, MREF_VAL(r1));
 
 	run_mir_pass(fn, MIR_PASS_FOLD);
-	/* currently not simplified: PAR + SHL + SAR remain, ret keeps r1 */
-	CHECK(count_op(b, MOP_SHL) == 1, "shl kept (not yet simplified)");
-	CHECK(count_op(b, MOP_SAR) == 1, "sar kept (not yet simplified)");
-	CHECK(b->term.src[0].val == r1, "ret still references r1");
+	/* all three shift-by-zero ops fold to x: only PAR + RET remain */
+	CHECK(count_op(b, MOP_SHL) == 0, "shl(x,0) folded away");
+	CHECK(count_op(b, MOP_SAR) == 0, "sar(x,0) folded away");
+	CHECK(count_op(b, MOP_SHR) == 0, "shr(x,0) folded away");
+	CHECK(b->nins == 1, "only PAR remains (ret is the terminator)");
+	CHECK(b->term.src[0].val == x, "ret r1 maps to x");
 	mfn_free(fn);
 }
 

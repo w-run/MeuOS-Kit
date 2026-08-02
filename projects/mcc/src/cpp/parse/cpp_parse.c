@@ -2435,10 +2435,22 @@ cpp_parse_new_expr(struct scope *s)
 	int align;
 	struct type *t, *pt;
 	struct expr *args = NULL, **ae = &args;
-	struct expr *ident, *ctor, *e;
+	struct expr *ident, *ctor, *e, *place;
 	struct decl *tmp;
 
 	next(); /* consume 'new' */
+	place = NULL;
+	/* placement new: `new (ptr) T(args)` — construct at `ptr`, no
+	 * allocation.  Extra placement arguments are accepted but unused. */
+	if (tok.kind == TLPAREN) {
+		next();
+		place = assignexpr(s);
+		while (tok.kind == TCOMMA) {
+			next();
+			(void)assignexpr(s);
+		}
+		expect(TRPAREN, "after placement arguments in 'new'");
+	}
 	base = declspecs(s, &sc, NULL, &align);
 	if (!base.type)
 		error(&tok.loc, "expected type in 'new' expression");
@@ -2583,9 +2595,33 @@ cpp_parse_new_expr(struct scope *s)
 	if (!curfunc)
 		error(&tok.loc, "'new' outside of a function body is not supported");
 
+	pt = mkpointertype(t, QUALNONE);
+	if (place) {
+		/* placement new: no allocation; construct at (T*)place */
+		if (t->kind == TYPESTRUCT || t->kind == TYPEUNION) {
+			if (cpp_has_ctor(t, t->u.structunion.tag)) {
+				struct expr *thisp = mkexpr(EXPRCAST, pt, place);
+				ctor = cpp_ctor_expr(t, thisp, args);
+				if (!ctor)
+					error(&tok.loc,
+					    "no matching constructor for 'new (ptr) %s'",
+					    t->u.structunion.tag);
+				funcexpr(curfunc, ctor);
+			} else if (args) {
+				error(&tok.loc,
+				    "'%s' has no constructor for 'new' with arguments",
+				    t->u.structunion.tag);
+			}
+		} else if (args) {
+			error(&tok.loc,
+			    "'new' with arguments requires a class type");
+		}
+		e = mkexpr(EXPRCAST, pt, place);
+		e->lvalue = true;
+		return e;
+	}
 	/* tmp (T*) = malloc(sizeof(T)); emit the calls immediately (in parse
 	 * order) and yield an expression that reads the saved pointer. */
-	pt = mkpointertype(t, QUALNONE);
 	tmp = mkdecl("tmp", DECLOBJECT, pt, QUALNONE, LINKNONE);
 	tmp->u.obj.storage = SDAUTO;
 	funcinit(curfunc, tmp, NULL, false); /* allocate the pointer slot */

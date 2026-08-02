@@ -449,6 +449,16 @@ msimp_block(MFn *fn, MBlk *b)
 					continue;
 				}
 				break;
+			case MOP_SHL:
+			case MOP_SHR:
+			case MOP_SAR:
+				/* shift by 0 is the identity: x << 0 == x >> 0 == x >>> 0 == x */
+				if (a1.con && a1.con->kind == MC_INT && a1.con->u.i == 0) {
+					map_set(tab, in->dst, a0);
+					removed++;
+					continue;
+				}
+				break;
 			case MOP_UDIV:
 			case MOP_UREM:
 			case MOP_DIV:
