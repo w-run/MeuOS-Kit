@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <limits.h>
 
 /* glibc 内部符号：不在公共头文件中声明 */
 long __isoc23_strtol(const char *, char **, int);
@@ -30,6 +32,46 @@ main(void)
 	if (strtoull("177", &end, 8) != 127ULL || *end)
 		return 1;
 	if (abs(-7) != 7 || labs(-9L) != 9L || llabs(-11LL) != 11LL)
+		return 1;
+	if (llabs(LLONG_MAX) != LLONG_MAX || llabs(-9223372036854775807LL) != 9223372036854775807LL)
+		return 1;
+	{
+		div_t d = div(7, 2);
+		if (d.quot != 3 || d.rem != 1)
+			return 1;
+		d = div(-7, 2);
+		if (d.quot != -3 || d.rem != -1)
+			return 1;
+		d = div(7, -2);
+		if (d.quot != -3 || d.rem != 1)
+			return 1;
+		ldiv_t l = ldiv(100, 7);
+		if (l.quot != 14 || l.rem != 2)
+			return 1;
+		l = ldiv(-100, 7);
+		if (l.quot != -14 || l.rem != -2)
+			return 1;
+	}
+	{
+		int i, r1, r2;
+		srand(1234);
+		r1 = rand();
+		if (r1 < 0 || r1 > RAND_MAX || RAND_MAX < 32767)
+			return 1;
+		for (i = 0; i < 100; i++)
+			if (rand() < 0 || rand() > RAND_MAX)
+				return 1;
+		srand(99);
+		rand();
+		srand(99);
+		r2 = rand();
+		if (r1 == r2)	/* different seeds should diverge */
+			return 1;
+		srand(1234);
+		if (rand() != r1)
+			return 1;
+	}
+	if (getppid() <= 0)
 		return 1;
 	if (strtod("-12.5e1x", &end) != -125.0 || *end != 'x')
 		return 1;

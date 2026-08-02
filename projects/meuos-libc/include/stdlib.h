@@ -3,6 +3,18 @@
 
 #include <stddef.h>
 
+#define RAND_MAX 32767
+
+typedef struct {
+	int quot;
+	int rem;
+} div_t;
+
+typedef struct {
+	long quot;
+	long rem;
+} ldiv_t;
+
 void *malloc(size_t);
 void free(void *);
 void *calloc(size_t, size_t);
@@ -20,6 +32,10 @@ long long atoll(const char *);
 int abs(int);
 long labs(long);
 long long llabs(long long);
+int rand(void);
+void srand(unsigned int);
+div_t div(int, int);
+ldiv_t ldiv(long, long);
 void qsort(void *, size_t, size_t, int (*)(const void *, const void *));
 void *bsearch(const void *, const void *, size_t, size_t, int (*)(const void *, const void *));
 extern char **environ;

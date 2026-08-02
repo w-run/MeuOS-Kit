@@ -319,3 +319,39 @@ llabs(long long value)
 	unsigned long long s = 0 - (u >> 63);	/* 全 1（负）或全 0（正） */
 	return (long long)((u ^ s) - s);
 }
+
+/* ---- C99 7.20.2: rand/srand (deterministic LCG, glibc-compatible
+ *      constants so callers porting seed sequences see the same stream). */
+static unsigned long __meuos_rand_state = 1;
+
+int
+rand(void)
+{
+	__meuos_rand_state = __meuos_rand_state * 1103515245UL + 12345UL;
+	return (int)((__meuos_rand_state >> 16) & 0x7fff);
+}
+
+void
+srand(unsigned int seed)
+{
+	__meuos_rand_state = (unsigned long)seed;
+}
+
+/* ---- C99 7.20.6.2: div / ldiv ---- */
+div_t
+div(int numer, int denom)
+{
+	div_t result;
+	result.quot = numer / denom;
+	result.rem = numer % denom;
+	return result;
+}
+
+ldiv_t
+ldiv(long numer, long denom)
+{
+	ldiv_t result;
+	result.quot = numer / denom;
+	result.rem = numer % denom;
+	return result;
+}
