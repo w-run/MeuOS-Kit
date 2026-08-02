@@ -31,19 +31,16 @@
 | P4fix | Bug 1/2 边界修复（浮点 isel + 栈传参寻址） | ✅ | d6483d5, 3ce88c0 |
 | P5a | postra 冗余 mov 消除 + slot4/8 双游标复采 | ✅ | 33385f9, ab12b95, 5581557 |
 | P5b | hint 优先级（ABI 边界寄存器倾向） | ✅ | ab12b95 |
-| P6a | 聚合函数新后端（去 fallback：BLIT/sret/参数 pad） | ✅ | 待提交 |
+| P6a | 聚合函数新后端（去 fallback：BLIT/sret/参数 pad） | ✅ | cc24361（先 2071ae6） |
 | P6b | varargs 新后端（去 fallback：ap alloca 32B/帧对齐/常量池标签） | ✅ | f9b9c34 |
 | P6d | 切换前验证：123 一致性 0 diff（shift/.globl/sret 修复 daab688） | ✅ | daab688 |
-| P6e | 自举验证：104 源新后端编译/链接成功；self-mcc 运行崩（mcc_main 寄存器 bug） | 🔄 待调 | — |
+| P6e | 自举验证：mcc_main 崩溃根因已修复（hint 跨 call da6aee4 + calls[64] 去上限 9718e44），self-mcc --version / 编译运行 hello 正常 | ✅ | da6aee4, 9718e44 |
 | P6c | 通用修复：slot4/8 无重叠打包 + 帧 rsp 16 对齐 | ✅ | 并入 P6a |
 | P6d | 宽度修复：32 位位移/比较（call 返回值高 32 位） | ✅ | 已提交 0612242 |
 | P6e | regalloc：hint 跨 call 检查（caller-saved 拒绝） | ✅ | 已提交 da6aee4 |
 | P6f | regalloc：calls 数组去 64 上限（超大函数漏 call） | ✅ | 已提交 9718e44 |
 | P6g | Bug B 修复：selcall sret 分配 pad（qualtype 24B） | ✅ | 已提交 eccf7ae |
 | P6h | Bug C 修复：meuos-libc strtod 不支持 hex float（0x1p63）→ self-mcc 编译 eval.c 崩溃。已修复并全量自举 105/105 | ✅ | 已提交 f412f75 |
-| P4c | regalloc：线性扫描（mreg_scan，调用点双池） | ⏳ | — |
-| P4d | regalloc：phi 边移动（机器层 phi 已降级为 pred copy） | ⏳ | — |
-| P4e | regalloc 接管 emit（寄存器感知 + prologue/epilogue 保存 callee-saved） | ⏳ | — |
 
 ## 验证结果（截至 P3b）
 
