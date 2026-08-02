@@ -238,7 +238,7 @@ stringconcat(struct stringlit *str, bool forceutf8)
 	++len;  /* null byte */
 	switch (kind) {
 	case 0: t = &typechar; break;
-	case '8': t = &typeuchar; break;
+	case '8': t = &typechar; break;
 	case 'u': t = &typeushort; break;
 	case 'U': t = &typeuint; break;
 	case 'L': t = targ->typewchar; break;

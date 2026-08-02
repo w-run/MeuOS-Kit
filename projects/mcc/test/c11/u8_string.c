@@ -5,9 +5,6 @@
  *   - 相邻 u8 字面量拼接（stringconcat），sizeof 含末尾 NUL；
  *   - 元素值访问（`u8"x"[0]`）。
  *
- * 已知缺陷（见 .issues/0802.md 缺陷 W）：mcc 把 u8 字面量元素类型置为
- * unsigned char（C11 规定应为 plain char），导致 `char *s = u8"x"` /
- * `const char *s = u8"x"` 被拒（需强转）。此处只覆盖能通过的数组初始化路径。
  */
 extern int puts(const char *);
 
@@ -30,6 +27,17 @@ int main(void) {
 	if (u8"x"[0] != 0x78) {
 		puts("FAIL: u8 subscript");
 		return 3;
+	}
+
+	/* 元素类型：C11 §6.4.5p6 规定 u8 字面量元素类型为 char，
+	 * 因此可隐式初始化 char* / const char*（缺陷 c-00 回归守卫） */
+	{
+		char *s = u8"x";
+		const char *cs = u8"y";
+		if (s[0] != 0x78 || cs[0] != 0x79) {
+			puts("FAIL: u8 element type is char");
+			return 4;
+		}
 	}
 
 	/* 混排前缀不允许（应编译期报错，此处验证正例之外不误报） */
