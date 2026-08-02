@@ -3857,6 +3857,13 @@ static int g_cpp_tmpl_depth;
 static int g_cpp_pack_stack[64];
 static int g_cpp_pack_depth;
 
+/* Template parameter type bindings for the instantiation currently being
+ * parsed into a constexpr body (set by cpp_tmpl_find_or_instantiate just
+ * before decl(), consumed and cleared by cpp_buffer_constexpr_body). */
+static const char *g_cpp_cexpr_tmpl_params[16];
+static struct type *g_cpp_cexpr_tmpl_types[16];
+static int g_cpp_cexpr_tmpl_n;
+
 /* Number of elements in the innermost replaying parameter pack, for
  * `sizeof...(Args)`. */
 int
@@ -4680,8 +4687,46 @@ cpp_tmpl_find_or_instantiate(struct scope *s, const char *name,
 			    "template '%s' instantiated with a type that does not satisfy its requires-clause",
 			    name);
 	}
-	if (!decl(bs, NULL))
-		error(&tok.loc, "failed to instantiate template '%s'", name);
+	/* Expose this instantiation's template parameter type bindings so a
+	 * constexpr body buffered inside decl() can capture them for the
+	 * constant evaluator.  Saved and restored across nested instantiations
+	 * (a constexpr template body may call another template) so the outer
+	 * function keeps its own parameters. */
+	{
+		const char *sv_p[16];
+		struct type *sv_t[16];
+		int sv_n = g_cpp_cexpr_tmpl_n, k, nfix = 0;
+		struct cpp_tmpl_param *pp;
+		for (k = 0; k < sv_n; ++k) {
+			sv_p[k] = g_cpp_cexpr_tmpl_params[k];
+			sv_t[k] = g_cpp_cexpr_tmpl_types[k];
+		}
+		g_cpp_cexpr_tmpl_n = 0;
+		/* count fixed (non-pack) parameters; the trailing pack binds its
+		 * first element as a placeholder at this index */
+		for (pp = tmpl->params; pp; pp = pp->next)
+			if (!pp->is_pack)
+				++nfix;
+		{
+			int pi = 0;
+			for (pp = tmpl->params; pp && g_cpp_cexpr_tmpl_n < 16;
+			     pp = pp->next, ++pi) {
+				int ti = pp->is_pack ? nfix : pi;
+				if (ti >= nt)
+					break;
+				g_cpp_cexpr_tmpl_params[g_cpp_cexpr_tmpl_n] = pp->name;
+				g_cpp_cexpr_tmpl_types[g_cpp_cexpr_tmpl_n] = types[ti];
+				++g_cpp_cexpr_tmpl_n;
+			}
+		}
+		if (!decl(bs, NULL))
+			error(&tok.loc, "failed to instantiate template '%s'", name);
+		g_cpp_cexpr_tmpl_n = sv_n;
+		for (k = 0; k < sv_n; ++k) {
+			g_cpp_cexpr_tmpl_params[k] = sv_p[k];
+			g_cpp_cexpr_tmpl_types[k] = sv_t[k];
+		}
+	}
 	if (g_cpp_pack_depth > 0)
 		--g_cpp_pack_depth;
 
@@ -5586,6 +5631,16 @@ struct cpp_cexpr_fn {
 	int nparams;
 	struct token *toks;      /* `{ return <expr> ; }` body tokens */
 	size_t ntoks;
+	/* Template parameter type bindings for a constexpr *template* function
+	 * instantiation.  The body was buffered at instantiation time with the
+	 * template parameter token (e.g. `T`) still literal, so the constant
+	 * evaluator must re-bind each parameter name to its instantiated type
+	 * (as a DECLTYPE) before replaying the body — otherwise `sizeof(T)` and
+	 * other type usages of `T` fail with "undeclared identifier".  NULL /
+	 * 0 for non-template constexpr functions. */
+	const char **tmpl_params;
+	struct type **tmpl_types;
+	int ntmpl;
 	struct cpp_cexpr_fn *next;
 };
 
@@ -5619,6 +5674,23 @@ cpp_buffer_constexpr_body(struct decl *d)
 	}
 	fn->toks = NULL;
 	fn->ntoks = 0;
+	fn->tmpl_params = NULL;
+	fn->tmpl_types = NULL;
+	fn->ntmpl = 0;
+	/* Capture the active template instantiation's parameter bindings (if
+	 * this constexpr function is a template instantiation) so the constant
+	 * evaluator can resolve type usages of the template parameters. */
+	if (g_cpp_cexpr_tmpl_n > 0) {
+		int i;
+		fn->ntmpl = g_cpp_cexpr_tmpl_n;
+		fn->tmpl_params = xmalloc(fn->ntmpl * sizeof *fn->tmpl_params);
+		fn->tmpl_types = xmalloc(fn->ntmpl * sizeof *fn->tmpl_types);
+		for (i = 0; i < fn->ntmpl; ++i) {
+			fn->tmpl_params[i] = strdup(g_cpp_cexpr_tmpl_params[i]);
+			fn->tmpl_types[i] = g_cpp_cexpr_tmpl_types[i];
+		}
+		g_cpp_cexpr_tmpl_n = 0;
+	}
 	while (tok.kind != TEOF) {
 		if (ntok >= cap) {
 			cap = cap ? cap * 2 : 32;
@@ -6463,6 +6535,15 @@ cpp_constexpr_eval(struct expr *call)
 		pd->u.obj.has_constval = true;
 		pd->u.obj.constval = args[i];
 		scopeputdecl(tmp, pd);
+	}
+	/* re-bind the template parameters of a constexpr *template* function so
+	 * type usages (e.g. `sizeof(T)`) resolve during constant evaluation.
+	 * This mirrors the runtime instantiation path, which binds the same
+	 * parameters as DECLTYPE in the instantiation scope `bs`. */
+	for (i = 0; fn->ntmpl && i < fn->ntmpl; ++i) {
+		struct decl *td = mkdecl((char *)fn->tmpl_params[i], DECLTYPE,
+		    fn->tmpl_types[i], QUALNONE, LINKNONE);
+		scopeputdecl(tmp, td);
 	}
 	++g_cpp_cexpr_depth;
 	{
