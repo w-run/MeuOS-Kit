@@ -27,7 +27,7 @@
 | 4 | **constexpr 求值器** ✅（已完成，3ac233b） | 常量折叠/表达式树；变参模板可选 | 高（编译期计算） | 高 |
 | 5 | **移动语义（右值引用）** ✅（已完成，4491a27） | 重载决议 + 构造/析构 | 中高（性能） | 高 |
 | 6 | C++14/17（泛型 lambda/if constexpr/CTAD/结构化绑定/内联变量） ✅（已完成，a28b0f5/11d919d/a76e7ff/70890fa） | 上面全部 | 渐进 | 递进 |
-| 7 | concepts/requires ✅（已完成，8e07d08） | 模板 + 重载完备 | 中 | 高 |
+| 7 | concepts/requires ✅（已完成，8e07d08 + 组合 b2da695） | 模板 + 重载完备 | 中 | 高 |
 
 > 建议的**迭代骨架**：「移动语义」（成员模板 c93d5f7、auto/decltype 160e2a2、变参模板 df0c489、lambda 877beed、constexpr 3ac233b 已完成，从骨架移除）。此顺序的理由见 §4 对任务给定路线的具体分析。
 
@@ -93,7 +93,7 @@
 - **CTAD**（a76e7ff）：`Vec v(a, b)` — declspecs 记录待推导模板名，decl() 从构造参数按位置推导实例化；token 重放修复（尾部 `;` + tokctx_rewind）。
 - **结构化绑定**（70890fa）：`auto [x, y] = p` — 隐藏对象 + 逐成员拷贝绑定（值绑定）。
 - **内联变量**（70890fa）：`inline static int x` — 成员声明允许 inline，无初始化 inline static 是定义（零初始化）。
-- **concepts/requires**（8e07d08，C++20 最小集）：`template <typename T> concept Name = expr;` 概念定义 + `requires Concept<T>` requires-clause。实例化时重放概念体（参数类型替换）+ 常量折叠，不满足报错。**限制**：约束须命名概念；概念体为 T 的布尔表达式（sizeof/==/&&），概念组合（概念引用概念）未支持。
+- **concepts/requires**（8e07d08 最小集 + b2da695 组合）：`template <typename T> concept Name = expr;` 概念定义 + `requires Concept<T>` requires-clause。实例化时重放概念体（参数类型替换）+ 常量折叠，不满足报错。**组合（b2da695）**：修复 constraint 缓冲 bug（非约束 token 断 + `&&/||/!` 后概念名保留）+ 递归约束求值（eval_constraint 拆分 `&&/||/!`、eval_concept_use 展开概念体、MAX_CONSTRAINT_DEPTH=16）+ `__is_same` 内置别名。**限制**：概念体为 T 的布尔表达式（sizeof/==/&&/||/!）；测试 concepts_req_and.cc/concepts_body.cc/concepts_req_neg.neg.cc。
 
 ---
 

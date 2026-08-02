@@ -290,8 +290,8 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
 | constexpr 求值器 | ✅ | constexpr 函数体 token 缓冲回放 + 编译期折叠、constexpr 变量常量初值捕获、static_assert 编译期求值（3ac233b；阶段 1 + 阶段 2 的 static_assert 部分） |
 | 移动语义（右值引用） | ✅ | `T&&` + 引用折叠 + lvalue/rvalue 值类别重载（4491a27） |
 | C++14/17 五项 | ✅ | 泛型 lambda（a28b0f5）、if constexpr（11d919d）、CTAD（a76e7ff）、结构化绑定+内联变量（70890fa） |
-| C++20 三项 | ✅ | 三向比较 `<=>`（34d0566）、consteval 立即函数（e698f37）、concepts/requires（8e07d08）——**C++ 98~23 覆盖收官** |
-| m++ 边界 4 项 | ✅ | override/final（40d46f2）、ctor 初始化列表（1eb76da）、限定成员调用 `Base::get()`（35a6ede）、new/delete（ecc42cf） |
+| C++20 三项 | ✅ | 三向比较 `<=>`（34d0566）、consteval 立即函数（e698f37）、concepts/requires（8e07d08）+ 概念组合 `&&/||/!` 递归求值（b2da695）——**C++ 98~23 覆盖收官** |
+| m++ 边界 4 项 | ✅ | override/final（40d46f2）、ctor 初始化列表（1eb76da）、限定成员调用 `Base::get()`（35a6ede）、new/delete（ecc42cf）+ 数组形式 `new T[n]`/`delete[]`（329de75） |
 | 6 架构 MIR 路径 | ✅ | varargs 全打通，扩展矩阵全 PASS（109a3ff） |
 | C 覆盖达成 | ✅ | C99/C11/C23 全部实现：__VA_OPT__/__has_c_attribute（c60874d）、C23 constexpr 函数求值（753df8a）——**C 90~23 目标达成** |
 | 验收门禁 | ✅ | `test/verify-all.sh` + `make check-all`（c940c34） |
