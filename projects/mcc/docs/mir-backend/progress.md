@@ -163,6 +163,37 @@ check-mir 全绿；bridge 路径 0 回归。
   性能未优化；属 isel 缺少 copy-propagation/load-elimination，不影响
   P4/P5 可靠性结论，后续可作为优化项。
 
+## 未初始化读排查 + calls 审计（isel-debug，2026-08-02）
+
+### calls[64] 修复完备性审计（9718e44 之后）
+- **calls 动态 realloc 已修复 mcc_main 崩溃**（mcc_main 241 个 call 远超
+  原 64 上限，超限 call 被丢弃 → 跨 call 区间误判不跨 → 分到 caller-saved
+  → call clobber）。self-mcc `--version` 稳定（干净 worktree 实测）。
+- 其余固定数组审计：
+  - `fixed[64]`/`busy[64]`：按物理寄存器索引，pos/bit 动态正确。
+  - `act[256]`：同时活跃区间上限，nact 满 256 时**强制 spill**（非崩溃，
+    性能隐患，超大函数可能 spill 过多）。
+  - `cand=malloc(nval)`（未清零）：只读前 ncand 个（已赋值），无泄漏。
+  - MVal 全 calloc 初始化（reg=-1/slot=-1/hint=-1），regalloc/spill/emit
+    路径未发现明确的未初始化读。
+
+### "不稳定崩溃"实测：是确定性 Bug B，不是未初始化读
+- 干净 worktree（9718e44）构建 self-mcc 编译最简 `int main(void){return 0;}`：
+  --specs=host **20/20 崩**、默认 specs **10/10 崩**（100% 确定性）。
+- 崩溃固定：`segfault at 0 ip 0x4a58d1 error 6`（declspecs 写 NULL）。
+
+### Bug B 根因：isel 错误消除空指针检查
+- declspecs 源码（src/parse/specs.c:299-302）：
+  ```c
+  if (sc) *sc = SCNONE;   if (fs) *fs = FUNCNONE;   if (align) *align = 0;
+  ```
+- **bridge 版保留空检查**（`cmpq $0,%rdx; jz`），**MIR 后端版无条件
+  `movl $0,(%rdx)` 写 NULL** → 崩溃。
+- 最小复现 `void set(int *p){ if(p) *p=0; }` MIR 后端**正确**（保留空检查），
+  说明是 declspecs 大函数的特定控制流触发 isel/opt 错误折叠条件 store。
+- 建议方向：检查 MIR fold/gvn 对 `if(ptr) *ptr=const` 的处理（对比
+  MCC_DEBUG_MBE 的 pre/post-pass MIR 定位空检查消失的 pass）。
+
 **结论**：P4 的两个阻断性缺陷（g_salloc 未定义、参数传递段错误）在
 P5/P6 已彻底修复；regalloc（线性扫描，依据 regalloc-design.md）真实
 分配寄存器；P4/P5 可靠，默认切换（MCC_MIR_BACKEND 接管）可评估。
