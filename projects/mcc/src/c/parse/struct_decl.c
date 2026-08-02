@@ -354,7 +354,16 @@ structdecl(struct scope *s, struct structbuilder *b)
 			addmember(b, base, NULL, 0, width);
 		} else {
 			mt = declarator(s, base, &name, &align, NULL, false);
-			width = consume(TCOLON) ? intconstexpr(s, false) : -1;
+			/* a C++ member function's trailing ':' is the ctor init list
+			 * (`Derived(int v) : Base(v), m(v) {}`), not a bitfield width
+			 * (functions are never bitfields); leave it for cpp side. */
+			{
+				extern int g_lang;
+				if (!(g_lang == 1 && mt.type->kind == TYPEFUNC))
+					width = consume(TCOLON) ? intconstexpr(s, false) : -1;
+				else
+					width = -1;
+			}
 			/* C++ member function: define it as an out-of-line free
 			 * function `ClassName_method` (this-pointer lowering and
 			 * in-body member access are handled by the C++ frontend).

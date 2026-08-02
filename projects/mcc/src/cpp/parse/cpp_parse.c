@@ -132,6 +132,7 @@ static struct scope *g_cpp_qual_ns;
 
 static void cpp_emit_base_ctor(struct func *f);
 static void cpp_emit_base_dtor(struct func *f);
+static void cpp_parse_init_list(struct func *f, struct scope *fs);
 static void cpp_mangle_type(struct type *t, char *buf, size_t bufsz);
 static void flush_pending_methods(void);
 static void cpp_emit_global_ctors(void);
@@ -154,9 +155,25 @@ static struct decl *cpp_tmpl_find_or_instantiate(struct scope *s,
 /* Set by cpp_define_method when the method just defined is effectively
  * virtual (explicit `virtual` or an override of a base virtual); consumed
  * by structdecl to flag the member. */
+/* Set by cpp_define_method when the method just defined is effectively
+ * virtual (explicit `virtual` or an override of a base virtual); consumed
+ * by structdecl to flag the member. */
 bool g_cpp_define_virtual;
 /* Set when a method was declared with the `final` specifier. */
 bool g_cpp_method_final;
+
+/* Constructor init-list item: `m(args)` or `Base(args)` in
+ * `Derived(int v) : Base(v), m(v * 2) {}`.  Populated by
+ * cpp_parse_init_list (called at the start of a ctor body) and consumed
+ * by emit_base_ctors_for so an explicit initializer supersedes the
+ * implicit default-construction call. */
+struct cpp_init_item {
+	const char *name;
+	struct expr *args; /* linked list of argument expressions */
+	struct cpp_init_item *next;
+};
+static struct cpp_init_item *g_cpp_init_items;
+static struct cpp_init_item **g_cpp_init_end = &g_cpp_init_items;
 
 /* Two-phase class parsing: while a class body is being collected, method
  * bodies are buffered (tokens) and replayed after the class layout is
@@ -1001,8 +1018,12 @@ cpp_parse_method_body(struct cpp_pending_method *pm)
 		g_cpp_method.active = true;
 
 		f = mkfunc(pm->d, pm->d->name, pm->d->type, fs);
-		/* constructor: run base-class constructors before the body */
+		/* constructor: parse the init list (`: Base(v), m(v)`) if any,
+		 * then run base-class constructors before the body */
 		if (strcmp(pm->mname, pm->tag) == 0) {
+			g_cpp_init_items = NULL;
+			g_cpp_init_end = &g_cpp_init_items;
+			cpp_parse_init_list(f, fs);
 			cpp_emit_base_ctor(f);
 			/* point every vptr at this class's vtable (the base ctor just set
 			 * them to the base view; the complete object needs the final one) */
@@ -1057,6 +1078,33 @@ buffer_method_body(struct scope *s, struct type *classt, struct type *mtype,
 	pm->s = s;
 	pm->is_static = is_static;
 	pm->next = NULL;
+
+	/* a ctor init list (`: Base(v) { ... }`) has no opening brace right
+	 * after the declarator: buffer through the body's closing '}'.
+	 * `seen` tracks whether we have entered the body yet: the tokens
+	 * between ':' and the first '{' (the init items and their argument
+	 * expressions) must be buffered too, but brace depth only starts
+	 * counting at the body's '{'. */
+	if (tok.kind == TCOLON) {
+		bool seen = false;
+		do {
+			if (pm->ntoks >= cap) {
+				cap = cap ? cap * 2 : 64;
+				pm->toks = xreallocarray(pm->toks, cap, sizeof *pm->toks);
+			}
+			pm->toks[pm->ntoks++] = tok;
+			if (tok.kind == TLBRACE) {
+				++bd;
+				seen = true;
+			} else if (tok.kind == TRBRACE) {
+				--bd;
+			}
+			next();
+		} while ((!seen || bd > 0) && tok.kind != TEOF);
+		*g_cpp_pending_methods_end = pm;
+		g_cpp_pending_methods_end = &pm->next;
+		return;
+	}
 
 	do {
 		if (pm->ntoks >= cap) {
@@ -1473,7 +1521,10 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname,
 	}
 	d->value = mkglobal(d);
 
-	if (tok.kind != TLBRACE) {
+	/* a ctor init list (`: Base(v)`) also means a function definition; the
+	 * buffered body (from the ':' through the closing '}') is parsed by
+	 * cpp_parse_method_body, which consumes the init list first */
+	if (tok.kind != TLBRACE && tok.kind != TCOLON) {
 		if (tok.kind == TSEMICOLON)
 			next();
 		return; /* declaration only */
@@ -1802,24 +1853,77 @@ emit_base_ctors_for(struct func *f, struct type *classt, struct expr *thisp)
 		} else {
 			call_this = thisp;
 		}
-		if (!bt->u.structunion.tag || !cpp_has_ctor(bt, bt->u.structunion.tag)) {
-			/* no user constructor: still construct its bases and any
-			 * class-typed data members */
-			if (has_base(bt))
-				emit_base_ctors_for(f, bt, call_this);
-			continue;
+		/* A ctor-init-list item names this base/member: `Base(v)` /
+		 * `m(v)`.  It may select a constructor overload, so resolve the
+		 * mangled name from the argument expression types (like an
+		 * object declaration `Point p(3)`).  A direct base is registered
+		 * as an anonymous member, so its class tag is the name used in
+		 * the init list. */
+		{
+			const char *key = m->name ? m->name :
+			    (bt->u.structunion.tag ? bt->u.structunion.tag : NULL);
+			struct cpp_init_item *match = NULL;
+			if (key) {
+				struct cpp_init_item *it;
+				for (it = g_cpp_init_items; it; it = it->next)
+					if (strcmp(it->name, key) == 0) {
+						match = it;
+						break;
+					}
+			}
+			if (match && match->args) {
+				/* explicit initializer: select the matching overload */
+				char code[256];
+				cpp_mangled_name_args(bt, bt->u.structunion.tag,
+				    match->args, code, sizeof code, true);
+				fd = scopegetdecl(bt->scope ? bt->scope : &filescope,
+				    code, true);
+				if (!fd || fd->kind != DECLFUNC) {
+					cpp_mangled_name_args(bt, bt->u.structunion.tag,
+					    match->args, code, sizeof code, false);
+					fd = scopegetdecl(bt->scope ? bt->scope : &filescope,
+					    code, true);
+				}
+				if (!fd || fd->kind != DECLFUNC)
+					error(&tok.loc, "no matching constructor for '%s' in initializer list", key);
+			} else {
+				/* no explicit initializer: default construction */
+				if (!bt->u.structunion.tag ||
+				    !cpp_has_ctor(bt, bt->u.structunion.tag)) {
+					if (has_base(bt))
+						emit_base_ctors_for(f, bt, call_this);
+					continue;
+				}
+				snprintf(mname, sizeof mname, "%s_%s",
+				    bt->u.structunion.tag, bt->u.structunion.tag);
+				fd = scopegetdecl(bt->scope ? bt->scope : &filescope,
+				    mname, true);
+				if (!fd || fd->kind != DECLFUNC)
+					continue;
+			}
+			fn = mkexpr(EXPRIDENT, fd->type, NULL);
+			fn->u.ident.decl = fd;
+			fn = decay(fn); /* &Class_Class */
+			call = mkexpr(EXPRCALL, &typevoid, fn);
+			call->u.call.args = call_this;
+			call->u.call.nargs = 1;
+			if (match && match->args) {
+				/* reference parameters (copy/move ctors) receive
+				 * the address of the argument */
+				struct decl *p = fd->type->u.func.params ?
+				    fd->type->u.func.params->next : NULL;
+				struct expr *a, **end = &call_this->next;
+				for (a = match->args; a; a = a->next, p = p ? p->next : NULL) {
+					struct expr *arg = a;
+					if (p && p->type && p->type->isref)
+						arg = mkunaryexpr(TBAND, a);
+					*end = arg;
+					end = &arg->next;
+					++call->u.call.nargs;
+				}
+			}
+			funcexpr(f, call);
 		}
-		snprintf(mname, sizeof mname, "%s_%s", bt->u.structunion.tag, bt->u.structunion.tag);
-		fd = scopegetdecl(bt->scope ? bt->scope : &filescope, mname, true);
-		if (!fd || fd->kind != DECLFUNC)
-			continue;
-		fn = mkexpr(EXPRIDENT, fd->type, NULL);
-		fn->u.ident.decl = fd;
-		fn = decay(fn); /* &Base_Base */
-		call = mkexpr(EXPRCALL, &typevoid, fn);
-		call->u.call.args = call_this;
-		call->u.call.nargs = 1;
-		funcexpr(f, call);
 	}
 }
 
@@ -1830,6 +1934,56 @@ static void
 cpp_emit_base_ctor(struct func *f)
 {
 	emit_base_ctors_for(f, g_cpp_method.class_type, cpp_this_expr());
+}
+
+/* Parse a constructor initializer list `: Base(v), m(v * 2)` that sits
+ * between the ctor's parameter list and its body.  Each item is a bare
+ * name (base-class tag or data member) followed by parenthesized
+ * argument expressions; the arguments are parsed as expressions and
+ * kept for emit_base_ctors_for.  The trailing '{' of the body is left
+ * for stmt() to consume. */
+static void
+cpp_parse_init_list(struct func *f, struct scope *fs)
+{
+	extern struct expr *condexpr(struct scope *);
+	struct cpp_init_item *it;
+
+	if (tok.kind != TCOLON) {
+		return;
+	}
+	next(); /* consume ':' */
+	for (;;) {
+		if (tok.kind < TIDENT)
+			error(&tok.loc, "expected member or base name in ctor initializer list");
+		it = xmalloc(sizeof *it);
+		it->name = tokenstr(tok.kind);
+		it->args = NULL;
+		it->next = NULL;
+		next();
+		expect(TLPAREN, "'(' after initializer name");
+		{
+			/* one or more comma-separated argument expressions (parsed
+			 * with condexpr so the ',' between init items is not eaten) */
+			struct expr *head = NULL, **ae = &head;
+			for (;;) {
+				struct expr *a = condexpr(fs);
+				*ae = a;
+				ae = &a->next;
+				if (tok.kind != TCOMMA)
+					break;
+				next(); /* consume ',' between args */
+			}
+			it->args = head;
+		}
+		expect(TRPAREN, "')' after initializer arguments");
+		*g_cpp_init_end = it;
+		g_cpp_init_end = &it->next;
+		if (tok.kind == TCOMMA) {
+			next();
+			continue;
+		}
+		break;
+	}
 }
 
 /* Emit calls to the user destructors of the base subobjects of `classt`,
