@@ -5,6 +5,7 @@
 - 审计基线提交：`fe69a46`（HEAD，同步 origin）
 - 审计人：auditor（验收检查型 worker）
 - 范围：最近 10 个提交代码审查 + verify-all.sh 门禁基线 + 工作区在途改动编译验证
+- 后续更新：问题 1（c93d5f7 门禁回归）已由 **6003f47** 修复（补 `extern cpp_pending_record_depth` 声明），verify-all 自举门禁恢复 6/6 PASS（2026-08-02）。
 
 ---
 
@@ -36,7 +37,7 @@
 | make check-cpp | PASS |
 | make check-c99 (MEUOS_SYSROOT) | PASS |
 | make check-c11 (MEUOS_SYSROOT) | PASS |
-| make check-sysroot-static | **FAIL** |
+| make check-sysroot-static | **FAIL**（问题 1，c93d5f7 引入；已由 6003f47 修复，修复后 6/6） |
 
 **1 FAIL：check-sysroot-static，错误为 `expr_postfix.c:288: error: undeclared identifier: cpp_pending_record_depth`。**
 
@@ -83,7 +84,7 @@
 
 ## 3. 发现的问题
 
-### 问题 1（严重，门禁回归）— c93d5f7 成员模板提交在 `expr_postfix.c:288` 调用未声明函数
+### 问题 1（严重，门禁回归；**已修复 6003f47**）— c93d5f7 成员模板提交在 `expr_postfix.c:288` 调用未声明函数
 
 - **位置**：`projects/mcc/src/parse/expr_postfix.c:288`
   ```c
@@ -95,7 +96,8 @@
   ```
 - **根因**：`expr_postfix.c` 不 `#include "cpp.h"`（仅 include util.h/mcc.h/expr_internal.h）。该文件此前对 cpp 前端函数均用局部 `extern` 声明（见 339 行 `extern void cpp_pending_record_depth(void);`）。c93d5f7 在成员模板分支（约 262-300 行）调用了 `cpp_pending_record_depth()`，但**该调用点之前没有前置 extern 声明**——第一个可见声明在 339 行（更靠后）。宿主 gcc 因 `-Wno-all` 将隐式声明降级为 warning 侥幸通过（实测 `cc -Wimplicit-function-declaration` 下即报 error），而 mcc 自举编译器严格要求，直接报错。
 - **影响**：`make check-all` 门禁在成员模板提交后不可全绿；自举链路（mcc 编译 mcc）被破坏。
-- **建议**：在 `expr_postfix.c` 顶部函数作用域（如 61-67 行 extern 声明区）补一行 `extern void cpp_pending_record_depth(void);`，或在 262 行成员模板块内声明。最小改动即可修复，且与既有成员模板 extern 声明风格一致。
+- **修复（6003f47）**：在 `expr_postfix.c` 顶部 extern 声明区补 `extern void cpp_pending_record_depth(void);`（与既有 cpp_pending_* 声明并列）。修复后 `verify-all.sh` 自举门禁恢复 **6/6 PASS**。
+- **原建议**：在 `expr_postfix.c` 顶部函数作用域（如 61-67 行 extern 声明区）补一行 `extern void cpp_pending_record_depth(void);`，或在 262 行成员模板块内声明。最小改动即可修复，且与既有成员模板 extern 声明风格一致。✅ 已按此修复。
 
 ### 问题 2（低，观察项）— 在途调试输出均为 getenv 门控，但需确认去留
 
@@ -130,8 +132,8 @@
 ## 5. 审计结论
 
 1. 已提交的最近 10 个提交中，9 个 PASS、格式与文档质量合格。
-2. **1 个提交（c93d5f7 成员模板）引入门禁回归**：`expr_postfix.c:288` 调用 `cpp_pending_record_depth()` 无前置声明，导致 `make check-sysroot-static` 失败，`make check-all` 无法全绿。需修复后重新验证。
+2. **1 个提交（c93d5f7 成员模板）引入门禁回归**：`expr_postfix.c:288` 调用 `cpp_pending_record_depth()` 无前置声明，导致 `make check-sysroot-static` 失败，`make check-all` 无法全绿。**已由 6003f47 修复**（补 extern 声明，1 行级改动），修复后 verify-all 自举门禁恢复 6/6 PASS。
 3. 工作区在途改动（调试输出 + aarch64 cset 64 位）构建验证全部通过，未破坏构建；调试输出均为 getenv 门控，符合规范。
 4. aarch64 e2e 的 qemu 环节为环境缺失（`env/qemu/` 不存在），不属代码回归。
 
-**处置建议**：优先修复问题 1（补 extern 声明，1 行级改动），随后重跑 `verify-all.sh` 确认 6/6 全绿后再推进成员模板相关工作。
+**处置**：问题 1 已修复（6003f47）并确认自举门禁 6/6 全绿，审计闭环完成。问题 2（getenv 调试门控去留）待各 owner 合并前确认。
