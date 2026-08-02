@@ -320,8 +320,8 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
 | J | slotmerge 自举破坏（长期项，已禁用 97c8541；二期见 worker-slot2） | 🚫 长期禁用 |
 | Q | `delete nullptr`/`delete[] nullptr` 运行期段错误（应 no-op） | ✅ closed（f8f0044，判空守卫 + 回归用例） |
 | R | concept 形参名 ≠ `T` 时被误判 undeclared | ✅ closed（93ab4b4，按模板参数表折叠形参） |
-| S | lambda 按值捕获类对象不调用拷贝构造 | 🔄 open（worker-lambda） |
-| T | 嵌套 lambda 无法再捕获外层已捕获变量 | 🔄 open（worker-lambda） |
+| S | lambda 按值捕获类对象不调用拷贝构造 | ✅ closed（f8f0044 混入，canary 已转正） |
+| T | 嵌套 lambda 无法再捕获外层已捕获变量 | ✅ closed（f8f0044 混入，canary 已转正） |
 | U | 无数据成员类按值传参段错误（size-0 by-value SEGV，0802.md 记录纠错） | 🔄 open（待分配） |
 | V | MIR msimp pow2 强度削减误编译有符号 div/rem（负数错误，`-7/2=-4` 应 -3） | ✅ closed（随 93ab4b4 夹带；pass_test 3b + test/c99/signed_div_pow2.c 回归） |
 | W | `u8"..."` 字面量元素类型为 `unsigned char`，应为 `char`（C11 §6.4.5p6） | 🔄 open（worker-mir-tests 发现） |

@@ -11,7 +11,7 @@
 |---|---|---|
 | worker-q | delete/delete[] nullptr 段错误修复 | Q（✅ closed，f8f0044） |
 | worker-r | concept 形参名 ≠ T 误判 undeclared 修复 | R（✅ closed，93ab4b4） |
-| worker-lambda | lambda 捕获（拷贝 ctor + 嵌套捕获） | S+T（open） |
+| worker-lambda | lambda 捕获（拷贝 ctor + 嵌套捕获） | S+T（✅ closed，f8f0044 混入） |
 | worker-doc | 文档同步（.issues/docs/ARCHITECTURE，只改 .md） | — |
 
 ### 第二批 worker（专项）
@@ -27,10 +27,11 @@
 | worker-mir-tests | MIR/C 测试缺口（发现缺陷 W/X） |
 
 ### 缺陷队列（2026-08-03）
-A-N ✅ 全闭环（J 长期项禁用）；Q/R/V ✅ closed；S/T/U/W/X/Y 🔄 open。状态只标 open/pending，修复 push 后由 worker-doc 周期 pull 补记 closed + 哈希。
+A-N ✅ 全闭环（J 长期项禁用）；Q/R/S/T/V ✅ closed；U/W/X/Y 🔄 open。状态只标 open/pending，修复 push 后由 worker-doc 周期 pull 补记 closed + 哈希。
 - Q：f8f0044（delete/delete[] nullptr 判空守卫 + new_delete_nullptr.cc 回归）
 - R：93ab4b4（concept 按模板参数表折叠形参）
-- V：随 93ab4b4 夹带（MIR msimp 有符号 div/rem；pass_test 3b + test/c99/signed_div_pow2.c 回归）
+- S/T：f8f0044 混入（lambda 捕获 ctor/嵌套捕获，canary 已转正）
+- V：随 93ab4b4 夹带（MIR msimp 有符号 div/rem；pass_test 3b/3c/3d + test/c99/signed_div_pow2.c 回归，回归提交 4c24bfe）
 - W：u8 字面量元素类型应为 char（open）
 - X：inline+extern 未发外部定义（open）
 - Y：delete (T*)expr 解析失败，low（open）
