@@ -116,6 +116,34 @@ test_simpl_udiv(void)
 	mfn_free(fn);
 }
 
+/* Test 3b: signed div/rem by power of two must NOT be strength-reduced.
+ * C division rounds toward zero, but SAR rounds toward -inf (and `x & m`
+ * is not a valid srem), so folding MOP_DIV/MOP_REM miscompiled negatives
+ * (e.g. -7/2 -> -4 instead of -3, verified 2026-08-03).  Both ops stay. */
+static void
+test_simpl_sdiv_not_reduced(void)
+{
+	MFn *fn = mfn_new("simpl_sdiv", 2);
+	MBlk *b = mblk_new(fn, "entry");
+	mfn_addblk(fn, b);
+
+	MVal *x = mval_new(fn, MV_TEMP, MT_I32, 0, "x");
+	MVal *rd = mval_new(fn, MV_TEMP, MT_I32, 0, "rd");
+	MVal *rr = mval_new(fn, MV_TEMP, MT_I32, 0, "rr");
+	madd1(fn, b, MOP_PAR, MT_I32, x, MREF_CON(0));
+	MConst *c8 = mconst_int(fn, MT_I32, 8);
+	madd(fn, b, MOP_DIV, MT_I32, rd, MREF_VAL(x), MREF_CON(c8));
+	madd(fn, b, MOP_REM, MT_I32, rr, MREF_VAL(x), MREF_CON(c8));
+	mret(fn, b, MREF_VAL(rd));
+
+	run_mir_pass(fn, MIR_PASS_FOLD);
+	CHECK(count_op(b, MOP_DIV) == 1, "signed div by 8 kept (not shr)");
+	CHECK(count_op(b, MOP_REM) == 1, "signed rem by 8 kept (not and)");
+	CHECK(count_op(b, MOP_SAR) == 0, "no sar introduced");
+	CHECK(count_op(b, MOP_SHR) == 0, "no shr introduced");
+	mfn_free(fn);
+}
+
 /* Test 4: dead code elimination. */
 static void
 test_dce(void)
@@ -417,6 +445,7 @@ int main(void)
 	test_fold_const();
 	test_simpl_id();
 	test_simpl_udiv();
+	test_simpl_sdiv_not_reduced();
 	test_dce();
 	test_dce_sideeffect();
 	test_copy_prop();

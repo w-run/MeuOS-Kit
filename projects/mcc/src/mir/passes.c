@@ -461,9 +461,11 @@ msimp_block(MFn *fn, MBlk *b)
 				break;
 			case MOP_UDIV:
 			case MOP_UREM:
-			case MOP_DIV:
-			case MOP_REM:
-				/* div/rem by power-of-two -> shift/and (unsigned only) */
+				/* div/rem by power-of-two -> shift/and (unsigned only).  The
+				 * signed MOP_DIV/MOP_REM must NOT be strength-reduced here:
+				 * C division rounds toward zero while SAR rounds toward
+				 * -inf, so folding `-7/2` to SAR produced -4 instead of -3
+				 * (verified 2026-08-03). */
 				if (a1.con && a1.con->kind == MC_INT && a1.con->u.i > 0) {
 					uint64_t v = (uint64_t)a1.con->u.i;
 					if ((v & (v - 1)) == 0) {
@@ -475,16 +477,15 @@ msimp_block(MFn *fn, MBlk *b)
 							n++;
 						}
 					MRef sh = MREF_CON(mconst_int(fn, MT_I32, n));
-						if (in->op == MOP_UDIV || in->op == MOP_DIV) {
-							/* rewrite in place to a shift so the definition stays
-							 * at the original position (SSA order preserved; madd
-							 * would move the def past its uses).  a1 must track
-							 * the new shift amount: the copy at the end of the
-							 * loop rewrites src[1] from a1, and a stale a1 would
-							 * clobber the rewritten shift amount back to the
-							 * divisor (x/8 turned into x>>8 instead of x>>3). */
-							MOP shf = (in->op == MOP_UDIV) ? MOP_SHR : MOP_SAR;
-							in->op = shf;
+						/* rewrite in place to a shift so the definition stays
+						 * at the original position (SSA order preserved; madd
+						 * would move the def past its uses).  a1 must track
+						 * the new shift amount: the copy at the end of the
+						 * loop rewrites src[1] from a1, and a stale a1 would
+						 * clobber the rewritten shift amount back to the
+						 * divisor (x/8 turned into x>>8 instead of x>>3). */
+						if (in->op == MOP_UDIV) {
+							in->op = MOP_SHR;
 							in->src[0] = a0;
 							in->src[1] = sh;
 							a1 = sh;

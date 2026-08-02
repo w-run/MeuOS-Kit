@@ -48,16 +48,13 @@ template <typename T> concept D14 = D13<T>;
 template <typename T> requires D14<T> T bump(T x) { return x + 1; }
 
 /* two-template-parameter constrained function: only the first is gated.
- * NOTE: pinned disabled — defect R: m++ rejects any concept whose body
- * uses a renamed template parameter (`concept Four = sizeof(X) == 4`
- * with X != T).  Tracked in .issues/0802.md (defect R).  Re-enable when
- * the parameter-name binding is fixed. */
-#if 0
-template <typename T> concept Four = sizeof(T) == 4;
+ * The concept body deliberately uses a renamed parameter (X, not T) to
+ * pin defect R: the concept-body fold must bind parameter names from the
+ * concept's own template-parameter list, not assume the literal `T`. */
+template <typename X> concept Four = sizeof(X) == 4;
 template <typename A, typename B> requires Four<A> int mix(A a, B b) {
     return (int)a + (int)b;
 }
-#endif
 
 int
 main(void)
@@ -70,10 +67,8 @@ main(void)
     /* depth-15 chain still folds */
     if (bump(41) != 42) return 4;
 
-#if 0
     /* two-parameter: gate the first, leave the second free */
     if (mix(40, 2) != 42) return 5;            /* int, char */
-#endif
 
     /* reuse the disjunction across two deduced types of matching sizes
      * (1-byte char, 4-byte int) so the concept body is instantiated

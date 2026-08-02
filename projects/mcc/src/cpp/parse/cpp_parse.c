@@ -3986,6 +3986,40 @@ static bool eval_constraint(struct token *c, size_t n, struct scope *bs);
  * concept definitions referencing each other). */
 #define MAX_CONSTRAINT_DEPTH 16
 
+/* Split the argument token span `args[0..nargs)` of a concept use
+ * `Name < args... >` on top-level commas.  Returns a heap array of
+ * 2 * (*nout) offsets: argument k spans args[o[2*k] .. o[2*k + 1]).
+ * An argument may be several tokens long (`unsigned int`), so the
+ * parameter -> argument mapping cannot be a plain index. */
+static size_t *
+concept_arg_spans(struct token *args, size_t nargs, size_t *nout)
+{
+	size_t *o = NULL, n = 0, cap = 0, k, start = 0;
+	int d = 0;
+
+	for (k = 0; k <= nargs; k++) {
+		if (k == nargs || (d == 0 && args[k].kind == TCOMMA)) {
+			if (n + 2 > cap) {
+				cap = cap ? cap * 2 : 8;
+				o = xreallocarray(o, cap, sizeof *o);
+			}
+			o[n++] = start;
+			o[n++] = k;
+			start = k + 1;
+			continue;
+		}
+		if (args[k].kind == TLESS || args[k].kind == TLPAREN ||
+		    args[k].kind == TLBRACK)
+			++d;
+		else if ((args[k].kind == TGREATER ||
+		    args[k].kind == TRPAREN || args[k].kind == TRBRACK) &&
+		    d > 0)
+			--d;
+	}
+	*nout = n / 2;
+	return o;
+}
+
 /* Expand a concept body: substitute the body's template parameters with
  * the argument tokens and recursively expand any concept uses inside the
  * body.  Returns a heap-allocated token array kept alive through the
@@ -3994,37 +4028,59 @@ static struct token *
 expand_concept_body(struct cpp_template *con, struct token *args,
     size_t nargs, struct scope *bs, size_t *outn, int depth)
 {
-	struct token *out = NULL;
-	size_t on = 0, cap = 0;
+	struct token *out = NULL, *sub = NULL;
+	size_t on = 0, cap = 0, sn = 0, scap = 0;
 	size_t i;
+	size_t nspan;
+	size_t *span = concept_arg_spans(args, nargs, &nspan);
 
+	/* pass 1: substitute the concept's own parameter names by their
+	 * argument spans, so the body is fully concrete w.r.t. this use.
+	 * A later pass handles concept uses inside the body; because the
+	 * substitution happened first, their argument tokens are already
+	 * this use's actual types, not this body's parameter names. */
 	for (i = 0; i < con->ntoks; i++) {
 		struct token t = con->toks[i];
-		/* substitute the concept's own parameter names */
 		if (t.kind >= TIDENT) {
 			struct cpp_tmpl_param *pp;
 			size_t k = 0;
 			for (pp = con->params; pp; pp = pp->next, ++k)
 				if (strcmp(pp->name, tokenstr(t.kind)) == 0)
 					break;
-			if (pp && k < nargs) {
-				if (on >= cap) {
-					cap = cap ? cap * 2 : 32;
-					out = xreallocarray(out, cap, sizeof *out);
+			if (pp && k < nspan) {
+				/* emit the whole argument span: the argument
+				 * may be a multi-token type (`unsigned int`,
+				 * `const char *`, …), not just one token */
+				for (size_t q = span[2 * k]; q < span[2 * k + 1];
+				    q++) {
+					if (sn >= scap) {
+						scap = scap ? scap * 2 : 32;
+						sub = xreallocarray(sub, scap,
+						    sizeof *sub);
+					}
+					sub[sn++] = args[q];
 				}
-				out[on++] = args[k];
 				continue;
 			}
 		}
-		/* a concept use inside the body: `Name < ... >` */
-		if (t.kind >= TIDENT && i + 2 < con->ntoks &&
-		    con->toks[i + 1].kind == TLESS) {
-			struct cpp_template *sub;
-			for (sub = g_cpp_templates; sub; sub = sub->next)
-				if (sub->is_concept &&
-				    strcmp(sub->name, tokenstr(t.kind)) == 0)
+		if (sn >= scap) {
+			scap = scap ? scap * 2 : 32;
+			sub = xreallocarray(sub, scap, sizeof *sub);
+		}
+		sub[sn++] = t;
+	}
+
+	/* pass 2: expand concept uses in the substituted body stream. */
+	for (i = 0; i < sn; i++) {
+		if (sub[i].kind >= TIDENT && i + 2 < sn &&
+		    sub[i + 1].kind == TLESS) {
+			struct cpp_template *csub;
+			for (csub = g_cpp_templates; csub; csub = csub->next)
+				if (csub->is_concept &&
+				    strcmp(csub->name, tokenstr(sub[i].kind)) ==
+				    0)
 					break;
-			if (sub) {
+			if (csub) {
 				if (depth >= MAX_CONSTRAINT_DEPTH)
 					error(&tok.loc,
 					    "requires-clause evaluation too deep: "
@@ -4032,18 +4088,18 @@ expand_concept_body(struct cpp_template *con, struct token *args,
 					    MAX_CONSTRAINT_DEPTH);
 				size_t j = i + 2;
 				int d = 1;
-				while (j < con->ntoks && d > 0) {
-					if (con->toks[j].kind == TLESS)
+				while (j < sn && d > 0) {
+					if (sub[j].kind == TLESS)
 						++d;
-					else if (con->toks[j].kind == TGREATER)
+					else if (sub[j].kind == TGREATER)
 						--d;
 					++j;
 				}
 				{
 					struct token *body;
 					size_t bn;
-					body = expand_concept_body(sub,
-					    &con->toks[i + 2], j - 2 - (i + 2),
+					body = expand_concept_body(csub,
+					    &sub[i + 2], j - 1 - (i + 2),
 					    bs, &bn, depth + 1);
 					for (size_t q = 0; q < bn; q++) {
 						if (on >= cap) {
@@ -4061,8 +4117,10 @@ expand_concept_body(struct cpp_template *con, struct token *args,
 			cap = cap ? cap * 2 : 32;
 			out = xreallocarray(out, cap, sizeof *out);
 		}
-		out[on++] = t;
+		out[on++] = sub[i];
 	}
+	free(sub);
+	free(span);
 	*outn = on;
 	return out;
 }
@@ -4099,7 +4157,7 @@ expand_constraint_tokens(struct token *c, size_t n, struct scope *bs,
 					struct token *body;
 					size_t bn;
 					body = expand_concept_body(con,
-					    &c[i + 2], j - 2 - (i + 2),
+					    &c[i + 2], j - 1 - (i + 2),
 					    bs, &bn, 0);
 					for (size_t q = 0; q < bn; q++) {
 						if (on >= cap) {
