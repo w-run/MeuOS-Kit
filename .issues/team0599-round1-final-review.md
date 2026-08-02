@@ -77,3 +77,18 @@
 
 ### 门禁缺口（已提请 worker-selfhost 确认）
 `verify-all.sh` 第 90 行跑 `make check-mir`（MIR 单元测试），**未调用 `check-c-mir`（mir_matrix.sh MIR/LIR 双路径矩阵）**；而 0802.md:733 声称 signed_div_pow2.c 被 `check-c99` 与 `check-c-mir` 双路径收集——实际 verify-all 门禁未显式跑 legacy 路径。建议把 `make check-c-mir` 纳入 verify-all.sh。verify-all 六项全 PASS（含自举）待 worker-selfhost 提供最近运行证据。
+
+---
+
+## 7. 其他审核项（worker-judge 实测，2026-08-03）
+
+### va_list 溢出路径修复（worker-va，222a28d）
+- 根因：`mabi_vaarg` 的 overflow 路径用 `oinc`（reg_save_area 槽宽，FP 类 16）推进 `overflow_arg_area`，但 SysV x86_64 栈参数统一 8 字节槽 → 第一个溢出 double 后指针跳槽，后续 FP vararg 读错地址（10 FP varargs 时 sum 45≠55）。修复：overflow 推进固定为 8，reg 路径保留 `oinc`。
+- 审核：**根因修复正确**（overflow 是连续 8 字节栈槽，与 reg_save_area 16 字节 FP 槽语义不同；bridge 路径 selvaarg 早已用 8 佐证）。回归测试 `test/c99/varargs_overflow.c` 覆盖 GP/FP/mixed/寄存器耗尽四种溢出形态。
+- 实测（mcc 重建后，`-I../sysroot/usr/include`）：`MCC_USE_MIR=1` → **rc=0**；`MCC_USE_MIR=0` → **rc=0**。双路径 PASS。
+
+### 缺陷队列新增（worker-doc 登记，待后续处理）
+- **缺陷 W**：u8 字面量类型（open）；**缺陷 X**：extern inline（open）；**缺陷 Y**：`delete (T*)expr` 解析失败（low/open）。均不影响已闭环的 Q/R/S/T/V。
+
+### S/T canary 转正（已随 fe1d55c 合入）
+`test/cpp/lambda_capture_class.cc`、`test/cpp/lambda_nested_capture.cc` 已从 pending/ 转入 `test/cpp/`（fe1d55c 夹带，456718f 记录归属），`pending/` 仅剩 `concept_param_rename.cc`、`value_param_member_call.cc`（分别随 R 转正 / 缺陷 U 处理）。check-cpp-func 自动收集含二者。
