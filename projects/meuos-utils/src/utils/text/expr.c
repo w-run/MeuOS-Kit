@@ -11,7 +11,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char version[] = "0.1.0-expr (meuos-utils)";
+#include "meuos/utils.h"
+
 
 /* 简化版递归下降表达式求值器 */
 
@@ -215,8 +216,8 @@ static char *eval_or(parser_t *p) {
 }
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("expr %s\n", version); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) { printf("Usage: expr EXPRESSION\n"); return 0; }
+    int argi = utils_init(argc, argv);
+    if (argi < argc && !strcmp(argv[argi], "--help")) { printf("Usage: expr EXPRESSION\n"); return 0; }
     if (argc < 2) { fprintf(stderr, "expr: missing operand\n"); return 2; }
     /* 跳过 -- */
     int start = 1;

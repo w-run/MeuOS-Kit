@@ -12,16 +12,12 @@
 #include <string.h>
 #include <unistd.h>
 
-static const char version[] = "0.1.0-id (meuos-utils)";
+#include "meuos/utils.h"
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("id %s\n", version); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) {
-        printf("Usage: id [-u] [-g] [-G] [-n] [USER]\n");
-        return 0;
-    }
+    int argi = utils_init(argc, argv);
+    if (argi < argc && !strcmp(argv[argi], "--help")) utils_usage("Usage: id [-u] [-g] [-G] [-n] [USER]\n");
     int want_uid = 0, want_gid = 0, want_gids = 0, want_name = 0;
-    int argi = 1;
     while (argi < argc && argv[argi][0] == '-' && argv[argi][1] != '\0') {
         for (char *p = argv[argi]+1; *p; p++) {
             switch (*p) {

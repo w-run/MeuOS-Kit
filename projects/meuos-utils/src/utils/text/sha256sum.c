@@ -9,7 +9,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-static const char version[] = "0.1.0-sha256sum (meuos-utils)";
+
+#include "meuos/utils.h"
 
 /* === SHA-256 implementation (public domain) === */
 typedef struct {
@@ -113,9 +114,9 @@ static int sha256_file(const char *fname, char *hexout) {
 }
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("sha256sum %s\n", version); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) { printf("Usage: sha256sum [-c] [FILE]...\n"); return 0; }
-    int check = 0, argi = 1;
+    int argi = utils_init(argc, argv);
+    if (argi < argc && !strcmp(argv[argi], "--help")) { printf("Usage: sha256sum [-c] [FILE]...\n"); return 0; }
+    int check = 0;
     while (argi < argc && argv[argi][0] == '-' && argv[argi][1] != '\0') {
         for (char *p = argv[argi]+1; *p; p++) {
             if (*p == 'c') check = 1;

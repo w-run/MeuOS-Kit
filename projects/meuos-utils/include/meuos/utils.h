@@ -42,6 +42,40 @@ void version(void) __attribute__((noreturn));
 /* 输出版本信息到 fp，不退出。 */
 void print_version(FILE *fp);
 
+/* === 一站式初始化（推荐入口） ===
+ *
+ * 合并 set_program_name + utils_classic_init + --version 自动拦截。
+ * 扫描 argv 查找 --version（任意位置）：找到则调 version() 退出（不返回）。
+ * --classic 由 utils_classic_init 处理（设 utils_classic_mode + 关颜色）。
+ *
+ * 返回值：工具特定选项解析的起始 argv 索引（始终为 1）。
+ *
+ * 用法：
+ *   int main(int argc, char **argv) {
+ *       int argi = utils_init(argc, argv);   // --version 已自动处理
+ *       // 从 argv[argi] 开始解析工具选项
+ *   }
+ */
+int utils_init(int argc, char **argv);
+
+/* === --help 输出助手 ===
+ *
+ * 打印版本行 + 指定 usage 文本到 stdout，然后 exit(0)。
+ * 用于工具的 --help 分支，统一格式。
+ *
+ * 用法：
+ *   if (!strcmp(argv[argi], "--help")) utils_usage(usage_text);
+ *
+ * usage_text 示例：
+ *   "Usage: echo [OPTION]... [STRING]...\n"
+ *   "  -n     Do not append newline\n"
+ *   "  --help  Show this help\n"
+ */
+void utils_usage(const char *usage_text) __attribute__((noreturn));
+
+/* 输出 usage 到 stderr 并 exit(2)。用于参数错误时。 */
+void utils_die_usage(const char *usage_text) __attribute__((noreturn));
+
 /* 长选项解析（兼容 GNU getopt_long 行为）。
  * 简化的子集，仅满足当前工具需要。详细文档见 libutils/getopt.c。
  *

@@ -11,7 +11,8 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
-static const char version[] = "0.1.0-timeout (meuos-utils)";
+
+#include "meuos/utils.h"
 
 static double parse_duration(const char *s) {
     char *end;
@@ -46,12 +47,11 @@ static void alarm_handler(int sig) {
 }
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("timeout %s\n", version); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) { printf("Usage: timeout [-s SIGNAL] DURATION COMMAND [ARG]...\n"); return 0; }
+    int argi = utils_init(argc, argv);
     int sig = SIGTERM;
-    int argi = 1;
     while (argi < argc && argv[argi][0] == '-' && argv[argi][1] != '\0') {
         if (!strcmp(argv[argi], "-s") && argi + 1 < argc) { sig = sig_from_name(argv[++argi]); argi++; }
+        else if (!strcmp(argv[argi], "--help")) { printf("Usage: timeout [-s SIGNAL] DURATION COMMAND [ARG]...\n"); return 0; }
         else break;
     }
     if (argi >= argc) { fprintf(stderr, "timeout: missing DURATION\n"); return 2; }

@@ -9,9 +9,8 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <sys/stat.h>
 
-static const char version[] = "0.1.0-which (meuos-utils)";
+#include "meuos/utils.h"
 
 static int find_in_path(const char *cmd, int all, int silent) {
     if (strchr(cmd, '/')) {
@@ -47,9 +46,9 @@ static int find_in_path(const char *cmd, int all, int silent) {
 }
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("which %s\n", version); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) { printf("Usage: which [-a] [-s] COMMAND...\n"); return 0; }
-    int all = 0, silent = 0, argi = 1;
+    int argi = utils_init(argc, argv);
+    if (argi < argc && !strcmp(argv[argi], "--help")) utils_usage("Usage: which [-a] [-s] COMMAND...\n");
+    int all = 0, silent = 0;
     while (argi < argc && argv[argi][0] == '-' && argv[argi][1] != '\0') {
         for (char *p = argv[argi] + 1; *p; p++) {
             if (*p == 'a') all = 1;

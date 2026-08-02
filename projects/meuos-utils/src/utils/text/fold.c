@@ -8,12 +8,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char version[] = "0.1.0-fold (meuos-utils)";
+#include "meuos/utils.h"
+
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("fold %s\n", version); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) { printf("Usage: fold [-w WIDTH] [-b] [-s] [FILE]...\n"); return 0; }
-    int width = 80, bytes = 0, breaks = 0, argi = 1;
+    int argi = utils_init(argc, argv);
+    if (argi < argc && !strcmp(argv[argi], "--help")) { printf("Usage: fold [-w WIDTH] [-b] [-s] [FILE]...\n"); return 0; }
+    int width = 80, bytes = 0, breaks = 0;
     while (argi < argc && argv[argi][0] == '-' && argv[argi][1] != '\0') {
         if (!strcmp(argv[argi], "-w") && argi + 1 < argc) { width = atoi(argv[argi+1]); argi += 2; }
         else if (!strcmp(argv[argi], "-b")) { bytes = 1; argi++; }

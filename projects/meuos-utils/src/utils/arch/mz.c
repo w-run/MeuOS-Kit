@@ -27,6 +27,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "meuos/utils.h"
+
 #include "mz.h"
 #include "mxa.h"
 

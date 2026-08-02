@@ -20,7 +20,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-static const char *prog = "patch";
+#include "meuos/utils.h"
+
+/* program_name provided by libutils.a */
 
 typedef struct {
     char *old_name;
@@ -40,8 +42,7 @@ typedef struct {
     int hunk_cap;
 } file_patch_t;
 
-static void *xmalloc(size_t n) { void *p = malloc(n); if (!p) { perror(prog); exit(1);} return p; }
-static char *xstrdup(const char *s) { char *r = strdup(s); if (!r) { perror(prog); exit(1);} return r; }
+/* xmalloc/xstrdup provided by libutils.a */
 
 /* Strip N path components from filename */
 static char *strip_prefix(const char *path, int strip) {
@@ -278,7 +279,7 @@ static int apply_hunk(char ***lines, int *count, hunk_t *hunk, int reverse) {
     }
     
     if (match_pos < 0) {
-        fprintf(stderr, "%s: hunk failed to apply\n", prog);
+        fprintf(stderr, "%s: hunk failed to apply\n", program_name);
         return -1;
     }
     
@@ -373,12 +374,12 @@ static int apply_file_patch(file_patch_t *fp, int strip, int reverse, int dry_ru
                 file_lines = xmalloc(sizeof(char*));
                 file_count = 0;
             } else {
-                fprintf(stderr, "%s: can't find file to patch: %s\n", prog, target);
+                fprintf(stderr, "%s: can't find file to patch: %s\n", program_name, target);
                 free(target);
                 return 1;
             }
         } else {
-            fprintf(stderr, "%s: can't find file to patch: %s\n", prog, target);
+            fprintf(stderr, "%s: can't find file to patch: %s\n", program_name, target);
             free(target);
             return 1;
         }
@@ -397,7 +398,7 @@ static int apply_file_patch(file_patch_t *fp, int strip, int reverse, int dry_ru
     }
     
     if (fail > 0) {
-        fprintf(stderr, "%s: %d hunk(s) FAILED to apply\n", prog, fail);
+        fprintf(stderr, "%s: %d hunk(s) FAILED to apply\n", program_name, fail);
     }
     
     if (!dry_run && fail == 0) {
@@ -407,9 +408,9 @@ static int apply_file_patch(file_patch_t *fp, int strip, int reverse, int dry_ru
         } else {
             write_file_lines(target, file_lines, file_count);
         }
-        printf("%s: patching file %s (%d hunk%s applied)\n", prog, target, ok, ok == 1 ? "" : "s");
+        printf("%s: patching file %s (%d hunk%s applied)\n", program_name, target, ok, ok == 1 ? "" : "s");
     } else if (dry_run) {
-        printf("%s: checking file %s (%d hunk%s would apply)\n", prog, target, ok, ok == 1 ? "" : "s");
+        printf("%s: checking file %s (%d hunk%s would apply)\n", program_name, target, ok, ok == 1 ? "" : "s");
     }
     
     free_lines(file_lines, file_count);
@@ -450,15 +451,15 @@ int main(int argc, char **argv) {
         if (strcmp(opt, "-R") == 0 || strcmp(opt, "--reverse") == 0) { reverse = 1; oi++; continue; }
         if (strcmp(opt, "-E") == 0) { oi++; continue; }
         if (strcmp(opt, "-i") == 0) {
-            if (++oi >= argc) { fprintf(stderr, "%s: -i requires argument\n", prog); return 2; }
+            if (++oi >= argc) { fprintf(stderr, "%s: -i requires argument\n", program_name); return 2; }
             patchfile = argv[oi]; oi++; continue;
         }
         if (strcmp(opt, "-o") == 0) {
-            if (++oi >= argc) { fprintf(stderr, "%s: -o requires argument\n", prog); return 2; }
+            if (++oi >= argc) { fprintf(stderr, "%s: -o requires argument\n", program_name); return 2; }
             output_file = argv[oi]; oi++; continue;
         }
         if (strcmp(opt, "-p") == 0) {
-            if (++oi >= argc) { fprintf(stderr, "%s: -p requires argument\n", prog); return 2; }
+            if (++oi >= argc) { fprintf(stderr, "%s: -p requires argument\n", program_name); return 2; }
             strip = atoi(argv[oi]); oi++; continue;
         }
         if (strncmp(opt, "-p", 2) == 0 && isdigit(opt[2])) {
@@ -470,7 +471,7 @@ int main(int argc, char **argv) {
             oi++;
             continue;
         }
-        fprintf(stderr, "%s: unknown option %s\n", prog, opt);
+        fprintf(stderr, "%s: unknown option %s\n", program_name, opt);
         return 2;
     }
     
@@ -480,7 +481,7 @@ int main(int argc, char **argv) {
     
     if (patchfile) {
         FILE *f = fopen(patchfile, "r");
-        if (!f) { fprintf(stderr, "%s: %s: %s\n", prog, patchfile, strerror(errno)); return 1; }
+        if (!f) { fprintf(stderr, "%s: %s: %s\n", program_name, patchfile, strerror(errno)); return 1; }
         fseek(f, 0, SEEK_END);
         long sz = ftell(f);
         fseek(f, 0, SEEK_SET);
@@ -509,7 +510,7 @@ int main(int argc, char **argv) {
     parse_patch(patchdata, patchlen, &patches, &num_patches);
     
     if (num_patches == 0) {
-        fprintf(stderr, "%s: no patches found\n", prog);
+        fprintf(stderr, "%s: no patches found\n", program_name);
         free(patchdata);
         return 1;
     }

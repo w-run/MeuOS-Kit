@@ -7,7 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char version[] = "0.1.0-dirname (meuos-utils)";
+#include "meuos/utils.h"
+
 
 static char *dir_name(const char *path) {
     size_t len = strlen(path);
@@ -28,9 +29,9 @@ static char *dir_name(const char *path) {
 }
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("dirname %s\n", version); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) { printf("Usage: dirname [-z] NAME...\n"); return 0; }
-    int nul_sep = 0, argi = 1;
+    int argi = utils_init(argc, argv);
+    if (argi < argc && !strcmp(argv[argi], "--help")) { printf("Usage: dirname [-z] NAME...\n"); return 0; }
+    int nul_sep = 0;
     if (argi < argc && !strcmp(argv[argi], "-z")) { nul_sep = 1; argi++; }
     if (argi >= argc) { fprintf(stderr, "dirname: missing operand\n"); return 2; }
     for (int i = argi; i < argc; i++) {

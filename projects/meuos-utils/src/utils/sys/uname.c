@@ -10,18 +10,14 @@
 #include <sys/utsname.h>
 #include <unistd.h>
 
-static const char version_str[] = "0.1.0-uname (meuos-utils)";
+#include "meuos/utils.h"
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("uname %s\n", version_str); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) {
-        printf("Usage: uname [-a] [-s] [-n] [-r] [-v] [-m] [-p]\n");
-        return 0;
-    }
+    int argi = utils_init(argc, argv);
+    if (argi < argc && !strcmp(argv[argi], "--help")) utils_usage("Usage: uname [-a] [-s] [-n] [-r] [-v] [-m] [-p]\n");
     struct utsname u;
     if (uname(&u) < 0) { perror("uname"); return 1; }
     int all = 0, want_s = 0, want_n = 0, want_r = 0, want_v = 0, want_m = 0, want_p = 0;
-    int argi = 1;
     while (argi < argc && argv[argi][0] == '-' && argv[argi][1] != '\0') {
         for (char *p = argv[argi]+1; *p; p++) {
             switch (*p) {

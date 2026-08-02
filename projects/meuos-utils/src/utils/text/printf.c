@@ -10,7 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char version[] = "0.1.0-printf (meuos-utils)";
+#include "meuos/utils.h"
+
 
 static void print_str(const char *s) { fputs(s, stdout); }
 

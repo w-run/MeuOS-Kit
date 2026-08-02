@@ -8,13 +8,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char version[] = "0.1.0-expand (meuos-utils)";
+#include "meuos/utils.h"
+
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("expand %s\n", version); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) { printf("Usage: expand [-t LIST] [FILE]...\n"); return 0; }
+    int argi = utils_init(argc, argv);
+    if (argi < argc && !strcmp(argv[argi], "--help")) { printf("Usage: expand [-t LIST] [FILE]...\n"); return 0; }
     int tabsize = 8;
-    int argi = 1;
     while (argi < argc && argv[argi][0] == '-' && argv[argi][1] != '\0') {
         if (!strcmp(argv[argi], "-t") && argi + 1 < argc) { tabsize = atoi(argv[argi+1]); argi += 2; }
         else if (argv[argi][1] == 't' && argv[argi][2] >= '0' && argv[argi][2] <= '9') { tabsize = atoi(argv[argi]+2); argi++; }

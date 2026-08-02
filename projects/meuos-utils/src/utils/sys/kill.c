@@ -14,7 +14,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-static const char version[] = "0.1.0-kill (meuos-utils)";
+#include "meuos/utils.h"
 
 static const struct { const char *name; int sig; } sigtab[] = {
     {"HUP", SIGHUP}, {"INT", SIGINT}, {"QUIT", SIGQUIT}, {"ILL", SIGILL},
@@ -39,15 +39,14 @@ static const char *sig_to_name(int sig) {
 }
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("kill %s\n", version); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) {
+    int argi = utils_init(argc, argv);
+    int sig = SIGTERM;
+
+    if (argi < argc && !strcmp(argv[argi], "--help")) {
         printf("Usage: kill [-s SIGNAL | -SIGNAL] PID...\n  or:  kill -l [SIGNAL]\n");
         return 0;
     }
-    int argi = 1;
-    int sig = SIGTERM;
-
-    if (argc > 1 && !strcmp(argv[1], "-l")) {
+    if (argi < argc && !strcmp(argv[argi], "-l")) {
         if (argc > 2) {
             int s = atoi(argv[2]);
             if (s <= 0) s = sig_from_name(argv[2]);
@@ -62,7 +61,7 @@ int main(int argc, char **argv) {
         }
         return 0;
     }
-    if (argc > 1 && !strcmp(argv[1], "-L")) {
+    if (argi < argc && !strcmp(argv[argi], "-L")) {
         for (int i = 0; sigtab[i].name; i++)
             printf("%2d) %-6s%c", sigtab[i].sig, sigtab[i].name,
                    (i % 8 == 7) ? '\n' : ' ');

@@ -27,16 +27,11 @@
 #include <time.h>
 #include <utime.h>
 
+#include "meuos/utils.h"
+
 #define BLOCK 512
 #define NAME_MAX_TAR 100
 
-static const char *prog = "tar";
-
-static void die(const char *fmt, ...) {
-    va_list ap; va_start(ap, fmt);
-    fprintf(stderr, "%s: ", prog); vfprintf(stderr, fmt, ap); fputc('\n', stderr);
-    va_end(ap); exit(2);
-}
 
 /* === pax 头部 === */
 typedef struct {
@@ -161,7 +156,7 @@ static int write_padding(int fd, size_t size) {
 static void archive_file(int fd, const char *path, const char *arcname, int verbose) {
     struct stat st;
     if (lstat(path, &st) != 0) {
-        fprintf(stderr, "%s: %s: %s\n", prog, path, strerror(errno));
+        fprintf(stderr, "%s: %s: %s\n", program_name, path, strerror(errno));
         return;
     }
     
@@ -182,7 +177,7 @@ static void archive_file(int fd, const char *path, const char *arcname, int verb
     if (typeflag == '0' && S_ISREG(st.st_mode)) {
         int in = open(path, O_RDONLY);
         if (in < 0) {
-            fprintf(stderr, "%s: %s: %s\n", prog, path, strerror(errno));
+            fprintf(stderr, "%s: %s: %s\n", program_name, path, strerror(errno));
             return;
         }
         char buf[8192];
@@ -200,7 +195,7 @@ static void archive_file(int fd, const char *path, const char *arcname, int verb
 static void archive_dir(int fd, const char *path, const char *prefix, int verbose) {
     DIR *d = opendir(path);
     if (!d) {
-        fprintf(stderr, "%s: %s: %s\n", prog, path, strerror(errno));
+        fprintf(stderr, "%s: %s: %s\n", program_name, path, strerror(errno));
         return;
     }
     struct dirent *e;
@@ -270,7 +265,7 @@ static int do_create(const char *outfile, char **files, int nfiles,
     for (int i = 0; i < nfiles; i++) {
         struct stat st;
         if (lstat(files[i], &st) != 0) {
-            fprintf(stderr, "%s: %s: %s\n", prog, files[i], strerror(errno));
+            fprintf(stderr, "%s: %s: %s\n", program_name, files[i], strerror(errno));
             continue;
         }
         /* Use basename for archive name */
@@ -339,7 +334,7 @@ static int do_extract(int fd, int verbose, const char *chdir_dir) {
         
         /* Verify magic */
         if (memcmp(h->magic, "ustar", 5) != 0) {
-            fprintf(stderr, "%s: not a valid tar header\n", prog);
+            fprintf(stderr, "%s: not a valid tar header\n", program_name);
             break;
         }
         
@@ -424,7 +419,7 @@ static int do_extract(int fd, int verbose, const char *chdir_dir) {
             }
             int out = open(name, O_WRONLY | O_CREAT | O_TRUNC, mode ? mode : 0644);
             if (out < 0) {
-                fprintf(stderr, "%s: %s: %s\n", prog, name, strerror(errno));
+                fprintf(stderr, "%s: %s: %s\n", program_name, name, strerror(errno));
                 /* Skip file data */
                 unsigned long remaining = size;
                 while (remaining > 0) {

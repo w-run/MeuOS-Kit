@@ -9,12 +9,12 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-static const char version[] = "0.1.0-whoami (meuos-utils)";
+#include "meuos/utils.h"
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("whoami %s\n", version); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) { printf("Usage: whoami\n"); return 0; }
-    (void)argv;
+    int argi = utils_init(argc, argv);
+    if (argi < argc && !strcmp(argv[argi], "--help")) utils_usage("Usage: whoami\n");
+    (void)argc; (void)argv;
     uid_t uid = geteuid();
     struct passwd *pw = getpwuid(uid);
     if (!pw) { fprintf(stderr, "whoami: cannot find name for UID %d\n", uid); return 1; }

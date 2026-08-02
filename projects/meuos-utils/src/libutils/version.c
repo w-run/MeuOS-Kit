@@ -36,6 +36,41 @@ void version(void) {
     exit(0);
 }
 
+/* === 一站式初始化 === */
+int utils_init(int argc, char **argv) {
+    set_program_name(argv[0]);
+    utils_classic_init(argc, argv);
+
+    /* 扫描 argv 查找 --version（任意位置），自动拦截 */
+    for (int i = 1; i < argc; i++) {
+        if (argv[i] && strcmp(argv[i], "--version") == 0)
+            version(); /* 不返回 */
+    }
+
+    return 1; /* 工具选项从 argv[1] 开始解析 */
+}
+
+/* === --help 输出助手 === */
+void utils_usage(const char *usage_text) {
+    /* 先输出版本行（不含 LICENSE，简洁） */
+    printf("%s (meuos-utils) %s\n",
+           program_name ? program_name : "utils",
+           meuos_utils_version);
+    /* 输出工具特定的 usage 文本 */
+    if (usage_text)
+        fputs(usage_text, stdout);
+    exit(0);
+}
+
+void utils_die_usage(const char *usage_text) {
+    fprintf(stderr, "%s (meuos-utils) %s\n",
+            program_name ? program_name : "utils",
+            meuos_utils_version);
+    if (usage_text)
+        fputs(usage_text, stderr);
+    exit(2);
+}
+
 void die(const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);

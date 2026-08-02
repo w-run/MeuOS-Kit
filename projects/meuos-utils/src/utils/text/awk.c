@@ -19,6 +19,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "meuos/utils.h"
+
 static void awk_die(const char *fmt, ...) {
     va_list ap; va_start(ap, fmt);
     fprintf(stderr, "awk: "); vfprintf(stderr, fmt, ap); fputc('\n', stderr);

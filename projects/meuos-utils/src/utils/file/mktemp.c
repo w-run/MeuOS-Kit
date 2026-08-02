@@ -10,7 +10,8 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-static const char version[] = "0.1.0-mktemp (meuos-utils)";
+
+#include "meuos/utils.h"
 
 static int make_random(char *tmpl) {
     static const char chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -37,13 +38,12 @@ static int make_random(char *tmpl) {
 }
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("mktemp %s\n", version); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) {
+    int argi = utils_init(argc, argv);
+    if (argi < argc && !strcmp(argv[argi], "--help")) {
         printf("Usage: mktemp [-d] [-q] [-u] [TEMPLATE]\n");
         return 0;
     }
     int make_dir = 0, dry_run = 0, quiet = 0;
-    int argi = 1;
     while (argi < argc && argv[argi][0] == '-' && argv[argi][1] != '\0') {
         for (char *p = argv[argi]+1; *p; p++) {
             if (*p == 'd') make_dir = 1;

@@ -9,7 +9,7 @@
 #include <time.h>
 #include <unistd.h>
 
-static const char version[] = "0.1.0-sleep (meuos-utils)";
+#include "meuos/utils.h"
 
 static double parse_duration(const char *s) {
     char *end;
@@ -23,11 +23,11 @@ static double parse_duration(const char *s) {
 }
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("sleep %s\n", version); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) { printf("Usage: sleep NUMBER[SUFFIX]...\n"); return 0; }
-    if (argc < 2) { fprintf(stderr, "sleep: missing operand\n"); return 2; }
+    int argi = utils_init(argc, argv);
+    if (argi < argc && !strcmp(argv[argi], "--help")) utils_usage("Usage: sleep NUMBER[SUFFIX]...\n");
+    if (argi >= argc) { fprintf(stderr, "sleep: missing operand\n"); return 2; }
     double total = 0;
-    for (int i = 1; i < argc; i++) {
+    for (int i = argi; i < argc; i++) {
         double d = parse_duration(argv[i]);
         if (d < 0) { fprintf(stderr, "sleep: invalid time interval '%s'\n", argv[i]); return 2; }
         total += d;

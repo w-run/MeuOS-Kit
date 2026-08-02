@@ -11,7 +11,7 @@
 #include <string.h>
 #include <time.h>
 
-static const char version[] = "0.1.0-date (meuos-utils)";
+#include "meuos/utils.h"
 
 static void print_format(const struct tm *tm, const char *fmt) {
     char buf[4096];
@@ -20,17 +20,14 @@ static void print_format(const struct tm *tm, const char *fmt) {
 }
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("date %s\n", version); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) {
-        printf("Usage: date [-u] [+FORMAT] [-d STRING] [-R] [-I[FMT]]\n");
-        return 0;
-    }
+    int argi = utils_init(argc, argv);
+    if (argi < argc && !strcmp(argv[argi], "--help")) utils_usage("Usage: date [-u] [+FORMAT] [-d STRING] [-R] [-I[FMT]]\n");
     int utc = 0;
     const char *fmt = "%a %b %e %H:%M:%S %Z %Y";  /* 默认 C locale 格式 */
     time_t t = time(NULL);
     struct tm tm;
 
-    for (int i = 1; i < argc; i++) {
+    for (int i = argi; i < argc; i++) {
         if (!strcmp(argv[i], "-u")) utc = 1;
         else if (!strcmp(argv[i], "-R")) fmt = "%a, %d %b %Y %H:%M:%S %z";
         else if (!strncmp(argv[i], "-I", 2)) {

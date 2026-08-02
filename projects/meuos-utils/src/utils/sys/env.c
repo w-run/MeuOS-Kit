@@ -10,21 +10,14 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "meuos/utils.h"
+
 extern char **environ;
 
-static const char version[] = "0.1.0-env (meuos-utils)";
-
 int main(int argc, char **argv) {
-    if (argc > 1 && (!strcmp(argv[1], "--version"))) {
-        printf("env %s\n", version);
-        return 0;
-    }
-    if (argc > 1 && (!strcmp(argv[1], "--help"))) {
-        printf("Usage: env [-i] [NAME=VALUE]... [COMMAND [ARG]...]\n");
-        return 0;
-    }
+    int argi = utils_init(argc, argv);
+    if (argi < argc && !strcmp(argv[argi], "--help")) utils_usage("Usage: env [-i] [NAME=VALUE]... [COMMAND [ARG]...]\n");
 
-    int argi = 1;
     int ignore_env = 0;
 
     /* 选项 */

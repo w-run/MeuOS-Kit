@@ -14,12 +14,12 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-static const char version[] = "0.1.0-hostname (meuos-utils)";
+#include "meuos/utils.h"
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("hostname %s\n", version); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) { printf("Usage: hostname [-s] [-i] [NAME]\n"); return 0; }
-    int short_name = 0, ip = 0, argi = 1;
+    int argi = utils_init(argc, argv);
+    if (argi < argc && !strcmp(argv[argi], "--help")) utils_usage("Usage: hostname [-s] [-i] [NAME]\n");
+    int short_name = 0, ip = 0;
     while (argi < argc && argv[argi][0] == '-' && argv[argi][1] != '\0') {
         for (char *p = argv[argi]+1; *p; p++) {
             if (*p == 's') short_name = 1;

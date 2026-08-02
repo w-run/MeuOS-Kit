@@ -8,7 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char version[] = "0.1.0-tac (meuos-utils)";
+#include "meuos/utils.h"
+
 
 static char *read_all(FILE *fp, size_t *out_len) {
     size_t cap = 65536, len = 0;
@@ -40,10 +41,9 @@ static void tac_buf(const char *data, size_t len, const char *sep) {
 }
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("tac %s\n", version); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) { printf("Usage: tac [-s SEP] [FILE]...\n"); return 0; }
+    int argi = utils_init(argc, argv);
+    if (argi < argc && !strcmp(argv[argi], "--help")) { printf("Usage: tac [-s SEP] [FILE]...\n"); return 0; }
     const char *sep = "\n";
-    int argi = 1;
     while (argi < argc && argv[argi][0] == '-' && argv[argi][1] != '\0') {
         if (!strcmp(argv[argi], "-s") && argi + 1 < argc) { sep = argv[++argi]; argi++; }
         else break;

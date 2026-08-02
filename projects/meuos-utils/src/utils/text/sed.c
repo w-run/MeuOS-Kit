@@ -23,8 +23,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "meuos/utils.h"
+
 /* 版本 */
-static const char sed_version[] = "0.1.0-sed (meuos-utils)";
 
 static int sed_die(const char *fmt, ...) {
     va_list ap;
@@ -728,12 +729,8 @@ static void usage(void) {
 }
 
 int main(int argc, char **argv) {
-    /* --version / --help */
-    if (argc > 1 && (!strcmp(argv[1], "--version"))) {
-        printf("sed %s\n", sed_version);
-        return 0;
-    }
-    if (argc > 1 && (!strcmp(argv[1], "--help"))) usage();
+    int argi = utils_init(argc, argv);
+    if (argi < argc && (!strcmp(argv[argi], "--help"))) usage();
 
     sed_ctx_t ctx;
     ctx_init(&ctx);

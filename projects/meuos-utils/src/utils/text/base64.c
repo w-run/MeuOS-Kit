@@ -9,7 +9,8 @@
 #include <errno.h>
 #include <string.h>
 
-static const char version[] = "0.1.0-base64 (meuos-utils)";
+#include "meuos/utils.h"
+
 static const char b64tab[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 static void encode(FILE *in, int cols) {
@@ -63,10 +64,9 @@ static void decode(FILE *in, int ignore_garbage) {
 }
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("base64 %s\n", version); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) { printf("Usage: base64 [-d] [-i] [-w COLS] [FILE]\n"); return 0; }
+    int argi = utils_init(argc, argv);
+    if (argi < argc && !strcmp(argv[argi], "--help")) { printf("Usage: base64 [-d] [-i] [-w COLS] [FILE]\n"); return 0; }
     int decode_mode = 0, ignore_garbage = 0, cols = 76;
-    int argi = 1;
     while (argi < argc && argv[argi][0] == '-' && argv[argi][1] != '\0') {
         for (char *p = argv[argi]+1; *p; p++) {
             if (*p == 'd') decode_mode = 1;

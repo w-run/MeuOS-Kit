@@ -11,7 +11,8 @@
 #include <sys/statvfs.h>
 #include <mntent.h>
 
-static const char version[] = "0.1.0-df (meuos-utils)";
+#include "meuos/utils.h"
+
 
 static void print_size(unsigned long long sz, int human, const char *unit) {
     if (human) {
@@ -25,11 +26,10 @@ static void print_size(unsigned long long sz, int human, const char *unit) {
 }
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("df %s\n", version); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) { printf("Usage: df [-h] [-k|-m] [-i] [FILE]...\n"); return 0; }
+    int argi = utils_init(argc, argv);
+    if (argi < argc && !strcmp(argv[argi], "--help")) { printf("Usage: df [-h] [-k|-m] [-i] [FILE]...\n"); return 0; }
     int human = 0, unit_k = 1, unit_m = 0, inodes = 0;
-    int argi = 1;
-    while (argi < argc && argv[argi][0] == '-' && argv[argi][1] != '\0') {
+while (argi < argc && argv[argi][0] == '-' && argv[argi][1] != '\0') {
         for (char *p = argv[argi]+1; *p; p++) {
             switch (*p) {
             case 'h': human = 1; break;

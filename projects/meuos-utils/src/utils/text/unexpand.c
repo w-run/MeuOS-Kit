@@ -8,12 +8,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char version[] = "0.1.0-unexpand (meuos-utils)";
+#include "meuos/utils.h"
+
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("unexpand %s\n", version); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) { printf("Usage: unexpand [-a] [-t N] [FILE]...\n"); return 0; }
-    int all = 0, tabsize = 8, argi = 1;
+    int argi = utils_init(argc, argv);
+    if (argi < argc && !strcmp(argv[argi], "--help")) { printf("Usage: unexpand [-a] [-t N] [FILE]...\n"); return 0; }
+    int all = 0, tabsize = 8;
     while (argi < argc && argv[argi][0] == '-' && argv[argi][1] != '\0') {
         if (!strcmp(argv[argi], "-a")) { all = 1; argi++; }
         else if (!strcmp(argv[argi], "-t") && argi + 1 < argc) { tabsize = atoi(argv[argi+1]); argi += 2; }

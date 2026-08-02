@@ -28,13 +28,8 @@
 #include <unistd.h>
 #include <limits.h>
 
-static const char *prog = "locate";
+#include "meuos/utils.h"
 
-static void die(const char *fmt, ...) {
-    va_list ap; va_start(ap, fmt);
-    fprintf(stderr, "%s: ", prog); vfprintf(stderr, fmt, ap); fputc('\n', stderr);
-    va_end(ap); exit(2);
-}
 
 static const char *default_db(void) {
     const char *home = getenv("HOME");
@@ -95,7 +90,7 @@ static int do_updatedb(const char *dbpath, const char *root) {
     walk_dir(root ? root : ".", 20);
     
     close(db_fd);
-    fprintf(stderr, "%s: database updated: %ld entries\n", prog, db_count);
+    fprintf(stderr, "%s: database updated: %ld entries\n", program_name, db_count);
     return 0;
 }
 
@@ -105,8 +100,8 @@ static int do_locate(const char *pattern, const char *dbpath,
                      int limit) {
     FILE *db = fopen(dbpath, "r");
     if (!db) {
-        fprintf(stderr, "%s: cannot open database %s: %s\n", prog, dbpath, strerror(errno));
-        fprintf(stderr, "%s: hint: run '%s -u' to build the database\n", prog, prog);
+        fprintf(stderr, "%s: cannot open database %s: %s\n", program_name, dbpath, strerror(errno));
+        fprintf(stderr, "%s: hint: run '%s -u' to build the database\n", program_name, program_name);
         return 1;
     }
     
@@ -227,7 +222,7 @@ int main(int argc, char **argv) {
     }
     
     if (oi >= argc) {
-        fprintf(stderr, "%s: no pattern specified (try --help)\n", prog);
+        fprintf(stderr, "%s: no pattern specified (try --help)\n", program_name);
         return 2;
     }
     

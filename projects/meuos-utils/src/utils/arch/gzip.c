@@ -26,6 +26,8 @@
 #include <stdint.h>
 #include <time.h>
 
+#include "meuos/utils.h"
+
 static const char *prog = "gzip";
 
 /* === CRC32 === */

@@ -8,13 +8,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char version[] = "0.1.0-paste (meuos-utils)";
+#include "meuos/utils.h"
+
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("paste %s\n", version); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) { printf("Usage: paste [-d LIST] [-s] [FILE]...\n"); return 0; }
+    int argi = utils_init(argc, argv);
+    if (argi < argc && !strcmp(argv[argi], "--help")) { printf("Usage: paste [-d LIST] [-s] [FILE]...\n"); return 0; }
     const char *delims = "\t";
-    int serial = 0, argi = 1;
+    int serial = 0;
     while (argi < argc && argv[argi][0] == '-' && argv[argi][1] != '\0') {
         if (!strcmp(argv[argi], "-d") && argi + 1 < argc) { delims = argv[++argi]; argi++; }
         else if (!strcmp(argv[argi], "-s")) { serial = 1; argi++; }

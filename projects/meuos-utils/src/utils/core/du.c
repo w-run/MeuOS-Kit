@@ -12,7 +12,8 @@
 #include <dirent.h>
 #include <unistd.h>
 
-static const char version[] = "0.1.0-du (meuos-utils)";
+#include "meuos/utils.h"
+
 
 static int human = 0, summary = 0, all_files = 0;
 static int unit = 512;  /* 默认块大小（POSIX: 512B blocks via stat_blocks） */
@@ -63,9 +64,8 @@ static long long count_dir(const char *path) {
 }
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("du %s\n", version); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) { printf("Usage: du [-h] [-s] [-a] [-k|-m|-b] [FILE]...\n"); return 0; }
-    int argi = 1;
+    int argi = utils_init(argc, argv);
+    if (argi < argc && !strcmp(argv[argi], "--help")) { printf("Usage: du [-h] [-s] [-a] [-k|-m|-b] [FILE]...\n"); return 0; }
     while (argi < argc && argv[argi][0] == '-' && argv[argi][1] != '\0') {
         for (char *p = argv[argi]+1; *p; p++) {
             switch (*p) {

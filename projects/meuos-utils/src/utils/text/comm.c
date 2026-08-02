@@ -8,13 +8,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char version[] = "0.1.0-comm (meuos-utils)";
+#include "meuos/utils.h"
+
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("comm %s\n", version); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) { printf("Usage: comm [-1] [-2] [-3] FILE1 FILE2\n"); return 0; }
+    int argi = utils_init(argc, argv);
+    if (argi < argc && !strcmp(argv[argi], "--help")) { printf("Usage: comm [-1] [-2] [-3] FILE1 FILE2\n"); return 0; }
     int suppress[4] = {0};  /* [1]=only1, [2]=only2, [3]=both */
-    int argi = 1;
     while (argi < argc && argv[argi][0] == '-' && argv[argi][1] != '\0') {
         for (char *p = argv[argi]+1; *p; p++) {
             if (*p == '1') suppress[1] = 1;

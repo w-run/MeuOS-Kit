@@ -25,6 +25,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "meuos/utils.h"
+
 /* CRC32 (same as gzip) */
 static uint32_t crc_table[256];
 static int crc_table_init = 0;

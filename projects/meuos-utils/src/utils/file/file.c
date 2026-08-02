@@ -13,7 +13,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-static const char version[] = "0.1.0-file (meuos-utils)";
+#include "meuos/utils.h"
+
 
 static const char *check_elf(const unsigned char *buf, size_t len) {
     if (len < 16) return NULL;
@@ -108,9 +109,9 @@ static void identify(const char *fname, int brief, int mime) {
 }
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("file %s\n", version); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) { printf("Usage: file [-b] [-i] FILE...\n"); return 0; }
-    int brief = 0, mime = 0, argi = 1;
+    int argi = utils_init(argc, argv);
+    if (argi < argc && !strcmp(argv[argi], "--help")) { printf("Usage: file [-b] [-i] FILE...\n"); return 0; }
+    int brief = 0, mime = 0;
     while (argi < argc && argv[argi][0] == '-' && argv[argi][1] != '\0') {
         for (char *p = argv[argi]+1; *p; p++) {
             if (*p == 'b') brief = 1;

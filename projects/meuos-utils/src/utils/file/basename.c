@@ -9,7 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char version[] = "0.1.0-basename (meuos-utils)";
+#include "meuos/utils.h"
+
 
 static char *base_name(const char *path) {
     const char *p = path;
@@ -38,15 +39,14 @@ static char *strip_suffix(const char *name, const char *suffix) {
 }
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("basename %s\n", version); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) {
+    int argi = utils_init(argc, argv);
+    if (argi < argc && !strcmp(argv[argi], "--help")) {
         printf("Usage: basename NAME [SUFFIX]\n"
                "  or:  basename -a [-s SUFFIX] NAME...\n");
         return 0;
     }
     int multi = 0, nul_sep = 0;
     const char *suffix = NULL;
-    int argi = 1;
     while (argi < argc && argv[argi][0] == '-' && argv[argi][1] != '\0') {
         if (!strcmp(argv[argi], "-a")) { multi = 1; argi++; }
         else if (!strcmp(argv[argi], "-s")) { suffix = argv[++argi]; multi = 1; argi++; }

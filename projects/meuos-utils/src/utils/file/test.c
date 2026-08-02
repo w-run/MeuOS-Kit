@@ -25,7 +25,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-static const char version[] = "0.1.0-test (meuos-utils)";
+#include "meuos/utils.h"
+
 static int pos = 0;
 static int argc_global;
 static char **argv_global;

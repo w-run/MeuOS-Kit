@@ -8,11 +8,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char version[] = "0.1.0-nl (meuos-utils)";
+#include "meuos/utils.h"
+
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("nl %s\n", version); return 0; }
-    if (argc > 1 && !strcmp(argv[1], "--help")) {
+    int argi = utils_init(argc, argv);
+    if (argi < argc && !strcmp(argv[argi], "--help")) {
         printf("Usage: nl [-b STYLE] [-n FORMAT] [-w WIDTH] [-s SEP] [-v START] [FILE]...\n");
         return 0;
     }
@@ -21,7 +22,6 @@ int main(int argc, char **argv) {
     int width = 6;
     const char *sep = "\t";
     long line_no = 1;
-    int argi = 1;
     while (argi < argc && argv[argi][0] == '-' && argv[argi][1] != '\0') {
         if (!strcmp(argv[argi], "-b") && argi + 1 < argc) { body_style = argv[argi+1][0]; argi += 2; }
         else if (!strcmp(argv[argi], "-n") && argi + 1 < argc) { num_fmt = argv[argi+1]; argi += 2; }
