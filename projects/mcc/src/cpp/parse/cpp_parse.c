@@ -127,11 +127,14 @@ static const char *g_cpp_qual_class;
 static struct scope *g_cpp_qual_ns;
 
 static void cpp_emit_base_ctor(struct func *f);
+static void cpp_emit_base_dtor(struct func *f);
 static void cpp_mangle_type(struct type *t, char *buf, size_t bufsz);
 static void flush_pending_methods(void);
 static void cpp_emit_global_ctors(void);
 static void cpp_emit_global_dtor(struct func *f, struct decl *d);
 static void emit_base_ctors_for(struct func *f, struct type *classt,
+                                struct expr *thisp);
+static void emit_base_dtors_for(struct func *f, struct type *classt,
                                 struct expr *thisp);
 static bool has_base(struct type *t);
 static void cpp_vkey(const char *mname, struct type *funct, bool is_const,
@@ -903,6 +906,11 @@ cpp_parse_method_body(struct cpp_pending_method *pm)
 			cpp_init_vptrs(f, pm->classt, cpp_this_expr());
 		}
 		stmt(f, fs);
+		/* destructor: run base-class destructors after the body (the
+		 * derived body runs first, then each base's body via its own
+		 * `Base_dtor`, recursively — reverse construction order) */
+		if (strcmp(pm->mname, "dtor") == 0)
+			cpp_emit_base_dtor(f);
 		if (pm->d->u.func.isnoreturn)
 			funchlt(f);
 		/* C++14 `auto` return type: backfill the type deduced from the
@@ -1715,6 +1723,73 @@ static void
 cpp_emit_base_ctor(struct func *f)
 {
 	emit_base_ctors_for(f, g_cpp_method.class_type, cpp_this_expr());
+}
+
+/* Emit calls to the user destructors of the base subobjects of `classt`,
+ * each at its layout offset from `thisp`.  Called at the end of a
+ * derived-class destructor body so destruction runs in reverse
+ * construction order (derived body → each base's own `Base_dtor`, which
+ * recurses into its bases).  A base with no user destructor still needs
+ * its own bases destroyed, so the walk recurses. */
+static void
+emit_base_dtors_for(struct func *f, struct type *classt, struct expr *thisp)
+{
+	extern struct value *funcexpr(struct func *, struct expr *);
+	extern struct scope filescope;
+
+	struct member *m;
+	struct type *bt;
+	char mname[256];
+	struct decl *fd;
+	struct expr *fn, *call, *call_this;
+
+	for (m = classt->u.structunion.members; m; m = m->next) {
+		/* destructor marker members are not objects */
+		if (m->name && m->name[0] == '~')
+			continue;
+		bt = m->type;
+		if (!bt || (bt->kind != TYPESTRUCT && bt->kind != TYPEUNION))
+			continue;
+		if (m->name && m->type && m->type->kind == TYPEFUNC)
+			continue; /* member functions occupy no storage */
+		if (m->offset) {
+			/* this + subobject offset points at this base's subobject
+			 * (or class-type member object), always relative to the
+			 * original `this` */
+			call_this = mkbinaryexpr(&tok.loc, TADD,
+			    exprconvert(thisp, &typeulong),
+			    mkconstexpr(&typeulong, m->offset));
+			call_this->type = mkpointertype(bt, QUALNONE);
+		} else {
+			call_this = thisp;
+		}
+		if (!bt->u.structunion.tag || !cpp_has_dtor(bt)) {
+			/* no user destructor: still destroy its own bases */
+			if (has_base(bt))
+				emit_base_dtors_for(f, bt, call_this);
+			continue;
+		}
+		snprintf(mname, sizeof mname, "%s_dtor", bt->u.structunion.tag);
+		fd = scopegetdecl(bt->scope ? bt->scope : &filescope, mname, true);
+		if (!fd || fd->kind != DECLFUNC)
+			continue;
+		fn = mkexpr(EXPRIDENT, fd->type, NULL);
+		fn->u.ident.decl = fd;
+		fn = decay(fn); /* &Base_dtor */
+		call = mkexpr(EXPRCALL, &typevoid, fn);
+		call->u.call.args = call_this;
+		call->u.call.nargs = 1;
+		funcexpr(f, call);
+	}
+}
+
+/* Emit implicit base-class destruction at the end of a derived-class
+ * destructor: `class D : B { ~D() {...} }` runs each direct base's
+ * `B_dtor(&this)` after the derived body. */
+static void
+cpp_emit_base_dtor(struct func *f)
+{
+	emit_base_dtors_for(f, g_cpp_method.class_type, cpp_this_expr());
 }
 
 /* Does `t` have at least one direct base class (anonymous subobject)? */

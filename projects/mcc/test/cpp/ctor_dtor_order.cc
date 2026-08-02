@@ -8,9 +8,9 @@
  *  - locals destroyed before `main` returns
  *
  * Events are recorded into a global log array and asserted in one place.
- * NOTE: derived-class dtors currently do NOT invoke base-class dtors in
- * m++ (see test/cpp/pending/ctor_base_dtor.cc); this test only asserts
- * what is implemented (the derived dtor itself runs).
+ * Derived-class dtors chain to base-class dtors in reverse construction
+ * order (Leaf body → Mid body → Base body), so a Leaf dtor logs 300, 200,
+ * 100.
  *
  * Each check returns a distinct exit code; run via `check-cpp-func`.
  */
@@ -65,16 +65,15 @@ int main(void) {
     if (g_n != 9) return 7;
     if (g_log[7] != 12 || g_log[8] != 1012) return 8;
 
-    /* inherited object dtor runs on block exit: mark(300) only — the
-     * base/mid dtors are not invoked yet (see pending/ctor_base_dtor.cc);
-     * update this assertion when the dtor chain is fixed. */
+    /* inherited object dtor runs on block exit: the derived dtor body
+     * (300) then the base chain (Mid 200, Base 100) */
     {
         Leaf ll;
         if (g_n != 12) return 9;
         if (g_log[9] != 1 || g_log[10] != 2 || g_log[11] != 3) return 10;
     }
-    if (g_n != 13) return 11;
-    if (g_log[12] != 300) return 12;
+    if (g_n != 15) return 11;
+    if (g_log[12] != 300 || g_log[13] != 200 || g_log[14] != 100) return 12;
 
     return 0;
 }
