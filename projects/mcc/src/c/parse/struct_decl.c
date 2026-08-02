@@ -288,6 +288,21 @@ structdecl(struct scope *s, struct structbuilder *b)
 	 * return type was parsed by declspecs; parse the operator token and
 	 * parameter list by hand and lower it to `Class_operator_pl`. */
 	extern int g_lang;
+	/* `T &operator...` / `T &&operator...`: declspecs leaves the leading
+	 * reference declarator pending (`&` is part of the declarator, not the
+	 * specifiers); fold it into the return type before the operator path. */
+	if (g_lang == 1 && (tok.kind == TBAND || tok.kind == TLAND)) {
+		struct token save = tok;
+		next();
+		if (cpp_tok_kind() == CPP_TOPERATOR) {
+			struct type *rt = mkpointertype(base.type, QUALNONE);
+			rt->isref = true;
+			rt->isrref = save.kind == TLAND;
+			base.type = rt;
+		} else {
+			tok = save; /* ordinary reference member; parse normally */
+		}
+	}
 	if (g_lang == 1 && cpp_tok_kind() == CPP_TOPERATOR) {
 		extern const char *cpp_op_mangle(enum tokenkind);
 		extern void cpp_define_method(struct scope *, struct type *,
@@ -303,11 +318,13 @@ structdecl(struct scope *s, struct structbuilder *b)
 		if (!opcode)
 			error(&tok.loc, "unsupported operator for overloading");
 		next(); /* consume the operator token */
-		/* operator(): the closing ')' of the operator token follows
-		 * (`operator()`, not `operator ( ...`); the next '(' is the
+		/* operator()/operator[]: the closing ')' or ']' of the operator
+		 * token follows (`operator()`, `operator[]`); the next '(' is the
 		 * parameter list. */
 		if (strcmp(opcode, "cl") == 0)
 			expect(TRPAREN, "after 'operator()'");
+		else if (strcmp(opcode, "ix") == 0)
+			expect(TRBRACK, "after 'operator[]'");
 
 		ft = mktype(TYPEFUNC, 0);
 		ft->qual = QUALNONE;

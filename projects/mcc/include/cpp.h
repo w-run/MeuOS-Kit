@@ -32,6 +32,10 @@ bool cpp_is_member_function(struct type *t, const char *name);
 const char *cpp_op_mangle(enum tokenkind op);
 bool cpp_try_operator_call(struct scope *s, struct expr *l,
     enum tokenkind op, struct expr *r, struct expr **out);
+/* Lower `obj[args...]` to `obj.operator_ix(args...)` (C++23 P2128 allows
+ * arbitrary argument counts).  Returns true and sets *out on success. */
+bool cpp_subscript_call(struct scope *s, struct expr *obj,
+    struct expr *args, struct expr **out);
 const char *cpp_mangled_name(struct type *t, const char *name,
     char *buf, size_t bufsz);
 void cpp_mangled_name_args(struct type *t, const char *name,

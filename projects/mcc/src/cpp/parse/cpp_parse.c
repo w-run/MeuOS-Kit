@@ -1177,6 +1177,7 @@ cpp_op_mangle(enum tokenkind op)
 	case TXOR:     return "er";
 	case TLNOT:    return "nt";
 	case TLPAREN:  return "cl";   /* operator() — functors / lambdas */
+	case TLBRACK:  return "ix";   /* operator[] — subscript (C++23 P2128) */
 	default:       return NULL;
 	}
 }
@@ -1285,6 +1286,92 @@ cpp_try_operator_call(struct scope *s, struct expr *l, enum tokenkind op,
 		*end = exprassign(r,
 		    fd->type->u.func.params->next
 		    ? fd->type->u.func.params->next->type : NULL);
+		end = &(*end)->next;
+		++call->u.call.nargs;
+	}
+	*out = call;
+	return true;
+}
+
+/* Lower `obj[args...]` to a member operator[] call
+ * `obj.operator_ix(args...)`.  The subscript is a postfix operator, so
+ * unlike cpp_try_operator_call (binary `l op r`) the object is always the
+ * first argument and the bracket contents are a comma-separated argument
+ * list — C++23 P2128 allows operator[] to take any number of parameters.
+ * Returns true and sets *out on success (caller keeps the builtin
+ * subscript error). */
+bool
+cpp_subscript_call(struct scope *s, struct expr *obj, struct expr *args,
+                   struct expr **out)
+{
+	extern struct scope filescope;
+
+	struct type *t = obj ? obj->type : NULL;
+	const char *mname = "operator_ix";
+	char mangled[512];
+	struct decl *fd;
+	struct expr *fn, *o, *call, **end;
+	struct decl *param;
+
+	if (!t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
+		return false;
+	/* member operator[] first; a const member mangles with a K right
+	 * after the method name (`Vec_operator_ixKi`), so retry with the
+	 * const name — a non-const object may call a const method and a const
+	 * object requires it */
+	if (cpp_is_member_function(t, mname)) {
+		cpp_mangled_name_args(t, mname, args, mangled, sizeof mangled, false);
+		fd = scopegetdecl(t->scope ? t->scope : &filescope, mangled, 1);
+		if (!fd || fd->kind != DECLFUNC) {
+			char mnameK[64];
+			snprintf(mnameK, sizeof mnameK, "%sK", mname);
+			cpp_mangled_name_args(t, mnameK, args, mangled, sizeof mangled, false);
+			fd = scopegetdecl(t->scope ? t->scope : &filescope, mangled, 1);
+		}
+		if (fd && fd->kind == DECLFUNC) {
+			fn = mkexpr(EXPRIDENT, fd->type, NULL);
+			fn->u.ident.decl = fd;
+			fn = decay(fn); /* &Class_operator_ix */
+
+			o = mkunaryexpr(TBAND, obj); /* &obj */
+			o->type = mkpointertype(t, obj->qual);
+
+			call = mkexpr(EXPRCALL, fd->type->base, fn);
+			call->u.call.args = o;
+			call->u.call.nargs = 1;
+			end = &o->next;
+			/* mtype param[0] is the implicit `this`; explicit params
+			 * follow. */
+			param = fd->type->u.func.params ? fd->type->u.func.params->next
+			                                : NULL;
+			for (; args; args = args->next, param = param ? param->next : NULL) {
+				*end = exprassign(args, param ? param->type : NULL);
+				end = &(*end)->next;
+				++call->u.call.nargs;
+			}
+			*out = call;
+			return true;
+		}
+	}
+	/* non-member operator[]: `operator_ix(obj, args...)` registered as a
+	 * free function (C++23 P2128R8 allows non-member subscripts) */
+	fd = scopegetdecl(s, mname, 1);
+	if (!fd || fd->kind != DECLFUNC)
+		return false;
+	fn = mkexpr(EXPRIDENT, fd->type, NULL);
+	fn->u.ident.decl = fd;
+	fn = decay(fn);
+	call = mkexpr(EXPRCALL, fd->type->base, fn);
+	call->u.call.args = NULL;
+	call->u.call.nargs = 0;
+	end = &call->u.call.args;
+	param = fd->type->u.func.params;
+	*end = exprassign(obj, param ? param->type : NULL);
+	end = &(*end)->next;
+	++call->u.call.nargs;
+	param = param ? param->next : NULL;
+	for (; args; args = args->next, param = param ? param->next : NULL) {
+		*end = exprassign(args, param ? param->type : NULL);
 		end = &(*end)->next;
 		++call->u.call.nargs;
 	}
@@ -1585,6 +1672,12 @@ cpp_parse_free_operator(struct scope *s, struct qualtype base)
 	if (!opcode)
 		error(&tok.loc, "unsupported operator for overloading");
 	next(); /* consume the operator token */
+	/* operator()/operator[]: the closing ')' / ']' of the operator token
+	 * follows; the next '(' is the parameter list. */
+	if (strcmp(opcode, "cl") == 0)
+		expect(TRPAREN, "after 'operator()'");
+	else if (strcmp(opcode, "ix") == 0)
+		expect(TRBRACK, "after 'operator[]'");
 
 	ft = mktype(TYPEFUNC, 0);
 	ft->qual = QUALNONE;

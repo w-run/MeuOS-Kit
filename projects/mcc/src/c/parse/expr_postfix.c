@@ -78,6 +78,37 @@ postfixexpr(struct scope *s, struct expr *r)
 		case TLBRACK:  /* subscript */
 			next();
 			arr = r;
+			/* C++ class-type subscript: `a[i]` / `a[i, j]` (C++23 P2128)
+			 * lowers to the member call `a.operator_ix(i, j)`.  The
+			 * bracket contents are a comma-separated argument list, not a
+			 * single comma-expression. */
+			{
+				extern int g_lang;
+				if (g_lang == 1 &&
+				    (arr->type->kind == TYPESTRUCT ||
+				     arr->type->kind == TYPEUNION)) {
+					extern bool cpp_subscript_call(struct scope *,
+					    struct expr *, struct expr *, struct expr **);
+					struct expr *arglist = NULL, **ae = &arglist;
+					struct expr *ocall = NULL;
+					while (tok.kind != TRBRACK) {
+						if (arglist)
+							expect(TCOMMA, "or ']' after subscript argument");
+						*ae = assignexpr(s);
+						ae = &(*ae)->next;
+					}
+					next(); /* consume ']' */
+					if (cpp_subscript_call(s, arr, arglist, &ocall)) {
+						e = ocall;
+						/* reference-returning operator[] yields the
+						 * referent lvalue (hidden pointer deref) */
+						if (e->type->isref)
+							e = mkunaryexpr(TMUL, e);
+						break;
+					}
+					error(&tok.loc, "class type has no matching operator[]");
+				}
+			}
 			idx = expr(s);
 			if (arr->type->kind != TYPEPOINTER) {
 				if (idx->type->kind != TYPEPOINTER)
@@ -322,6 +353,10 @@ postfixexpr(struct scope *s, struct expr *r)
 					    "not enough arguments for function call");
 			}
 			e = decay(e);
+			/* C++ reference return: the call result is a hidden pointer
+			 * that auto-dereferences to the referent lvalue. */
+			if (e->type->isref)
+				e = mkunaryexpr(TMUL, e);
 			break;
 		case TPERIOD:
 			r = mkunaryexpr(TBAND, r);

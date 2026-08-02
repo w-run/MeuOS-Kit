@@ -799,7 +799,19 @@ stmt(struct func *f, struct scope *s)
 				v = funcexpr(f, e);
 				delexpr(e);
 			} else {
-				e = exprassign(expr(s), t->base);
+				e = expr(s);
+				/* C++ reference return: the expression must be an lvalue
+				 * and is returned by address (references are hidden
+				 * pointers).  Without this `T &f() { return lvalue; }`
+				 * hits a pointer-assignment type error. */
+				if (t->base->isref) {
+					extern struct expr *mkunaryexpr(enum tokenkind,
+					    struct expr *);
+					if (!e->lvalue)
+						error(&tok.loc, "cannot return a non-lvalue as a reference");
+					e = mkunaryexpr(TBAND, e);
+				}
+				e = exprassign(e, t->base);
 				v = funcexpr(f, e);
 				delexpr(e);
 			}
