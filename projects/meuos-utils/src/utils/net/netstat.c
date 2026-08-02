@@ -6,6 +6,7 @@
  * -l: 仅监听  -n: 数字模式  -a: 全部  -r: 路由表  -i: 接口  -s: 统计
  *
  * 默认：-t -u -a（类似 netstat 不带参数）
+ * 共享代码通过 netinfo 模块复用（与 ip/ifconfig/route 共用）。
  *
  * --classic: 传统格式
  */
@@ -18,6 +19,7 @@
 #include <netinet/in.h>
 
 #include "meuos/utils.h"
+#include "meuos/netinfo.h"
 
 static void usage(void) {
     fprintf(stderr,
@@ -151,25 +153,14 @@ static void show_unix(void) {
 static void show_route(void) {
     FILE *f = fopen("/proc/net/route", "r");
     if (!f) return;
-    char line[512];
     printf("Kernel IP routing table\n");
     printf("%-16s %-16s %-16s %-6s %-6s %s\n",
            "Destination", "Gateway", "Genmask", "Flags", "Metric", "Iface");
-    fgets(line, sizeof(line), f);
-    while (fgets(line, sizeof(line), f)) {
-        char iface[16];
-        unsigned int dest, gw, mask;
-        unsigned int flags, metric;
-        if (sscanf(line, "%15s %x %x %x %u %u",
-                   iface, &dest, &gw, &mask, &flags, &metric) < 6)
-            continue;
-        struct in_addr da, ga, ma;
-        da.s_addr = dest; ga.s_addr = gw; ma.s_addr = mask;
-        char db[32], gb[32], mb[32];
-        inet_ntop(AF_INET, &da, db, sizeof(db));
-        inet_ntop(AF_INET, &ga, gb, sizeof(gb));
-        inet_ntop(AF_INET, &ma, mb, sizeof(mb));
-        printf("%-16s %-16s %-16s %-6x %-6u %s\n", db, gb, mb, flags, metric, iface);
+    struct route_entry e;
+    while (netinfo_route_read_line(f, &e) == 0) {
+        printf("%-16s %-16s %-16s %-6x %-6u %s\n",
+               fmt_hex_ip(e.dest), fmt_hex_ip(e.gateway), fmt_hex_ip(e.mask),
+               e.flags, e.metric, e.iface);
     }
     fclose(f);
 }
@@ -177,29 +168,13 @@ static void show_route(void) {
 static void show_ifaces(void) {
     FILE *f = fopen("/proc/net/dev", "r");
     if (!f) return;
-    char line[512];
     printf("%-12s %-10s %-10s %-10s %-10s %-10s %-10s\n",
            "Iface", "RXbytes", "RXpkts", "RXerr", "TXbytes", "TXpkts", "TXerr");
-    fgets(line, sizeof(line), f);
-    fgets(line, sizeof(line), f);
-    while (fgets(line, sizeof(line), f)) {
-        char name[64];
-        char *p = line;
-        while (*p == ' ') p++;
-        char *colon = strchr(p, ':');
-        if (!colon) continue;
-        size_t nlen = colon - p;
-        if (nlen >= sizeof(name)) nlen = sizeof(name) - 1;
-        memcpy(name, p, nlen);
-        name[nlen] = '\0';
-        unsigned long rb, rp, re, rd, rf, rfr, rc, rm;
-        unsigned long tb, tp, te, td, tf, tco, tca, tc2;
-        sscanf(colon + 1,
-            "%lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu",
-            &rb, &rp, &re, &rd, &rf, &rfr, &rc, &rm,
-            &tb, &tp, &te, &td, &tf, &tco, &tca, &tc2);
+    struct net_dev_stats st;
+    while (netinfo_dev_read_line(f, &st) == 0) {
         printf("%-12s %-10lu %-10lu %-10lu %-10lu %-10lu %-10lu\n",
-               name, rb, rp, re, tb, tp, te);
+               st.name, st.rx_bytes, st.rx_packets, st.rx_errors,
+               st.tx_bytes, st.tx_packets, st.tx_errors);
     }
     fclose(f);
 }

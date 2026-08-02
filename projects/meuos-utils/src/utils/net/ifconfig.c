@@ -4,6 +4,7 @@
  *
  * 读取 /proc/net/dev 和 /sys/class/net/ 获取接口信息。
  * 支持 -a 显示全部（含未启用接口）、-s 精简统计模式。
+ * 共享代码通过 netinfo 模块复用（与 ip/route/netstat 共用）。
  *
  * --classic: 传统 ifconfig 格式
  */
@@ -23,6 +24,7 @@
 #include <netdb.h>
 
 #include "meuos/utils.h"
+#include "meuos/netinfo.h"
 
 static void usage(void) {
     fprintf(stderr,
@@ -30,13 +32,6 @@ static void usage(void) {
         "  -a    Show all interfaces (including inactive)\n"
         "  -s    Short list output\n"
         "  --classic  Traditional format\n");
-}
-
-static char *mac_bytes(unsigned char *m) {
-    static char buf[18];
-    snprintf(buf, sizeof(buf), "%02x:%02x:%02x:%02x:%02x:%02x",
-             m[0], m[1], m[2], m[3], m[4], m[5]);
-    return buf;
 }
 
 static void print_human_bytes(uint64_t b) {
@@ -51,36 +46,13 @@ static int show_interface(const char *ifname, int short_mode) {
         /* 精简模式：类似 ifconfig -s */
         FILE *f = fopen("/proc/net/dev", "r");
         if (!f) return 1;
-        char line[512];
-        /* 跳过前两行 */
-        fgets(line, sizeof(line), f);
-        fgets(line, sizeof(line), f);
-        while (fgets(line, sizeof(line), f)) {
-            char name[64];
-            unsigned long rx_bytes, rx_pkt, rx_err, rx_drop, rx_fifo, rx_frame;
-            unsigned long rx_compressed, rx_multicast;
-            unsigned long tx_bytes, tx_pkt, tx_err, tx_drop, tx_fifo;
-            unsigned long tx_colls, tx_carrier, tx_compressed;
-            char *p = line;
-            while (*p == ' ') p++;
-            /* 接口名 */
-            char *colon = strchr(p, ':');
-            if (!colon) continue;
-            size_t nlen = colon - p;
-            if (nlen >= sizeof(name)) nlen = sizeof(name) - 1;
-            memcpy(name, p, nlen);
-            name[nlen] = '\0';
-            if (ifname && strcmp(name, ifname) != 0) continue;
-            sscanf(colon + 1,
-                "%lu %lu %lu %lu %lu %lu %lu %lu %lu "
-                "%lu %lu %lu %lu %lu %lu %lu %lu",
-                &rx_bytes, &rx_pkt, &rx_err, &rx_drop, &rx_fifo, &rx_frame,
-                &rx_compressed, &rx_multicast, &tx_bytes, &tx_pkt, &tx_err,
-                &tx_drop, &tx_fifo, &tx_colls, &tx_carrier, &tx_compressed);
-            printf("%-10s ", name);
-            print_human_bytes(rx_bytes);
+        struct net_dev_stats st;
+        while (netinfo_dev_read_line(f, &st) == 0) {
+            if (ifname && strcmp(st.name, ifname) != 0) continue;
+            printf("%-10s ", st.name);
+            print_human_bytes(st.rx_bytes);
             printf("  ");
-            print_human_bytes(tx_bytes);
+            print_human_bytes(st.tx_bytes);
             printf("\n");
         }
         fclose(f);
@@ -94,9 +66,17 @@ static int show_interface(const char *ifname, int short_mode) {
         return 1;
     }
 
+    int s = socket(AF_INET, SOCK_DGRAM, 0);
+    if (s < 0) {
+        perror("ifconfig: socket");
+        freeifaddrs(ifa0);
+        return 1;
+    }
+
+    const char *cur_ifname = ifname;
     int showed = 0;
     for (ifa = ifa0; ifa; ifa = ifa->ifa_next) {
-        if (ifname && strcmp(ifa->ifa_name, ifname) != 0)
+        if (cur_ifname && strcmp(ifa->ifa_name, cur_ifname) != 0)
             continue;
         if (!ifa->ifa_addr)
             continue;
@@ -104,18 +84,16 @@ static int show_interface(const char *ifname, int short_mode) {
         /* 只在第一次遇到这个接口时打印头 */
         if (!showed || strcmp(ifa->ifa_name, ifname ? ifname : "") != 0) {
             showed = 1;
-            ifname = ifa->ifa_name;
-            printf("\n%s: flags=%d", ifa->ifa_name, ifa->ifa_flags);
-            int s = socket(AF_INET, SOCK_DGRAM, 0);
-            if (s >= 0) {
-                struct ifreq ifr;
-                memset(&ifr, 0, sizeof(ifr));
-                strncpy(ifr.ifr_name, ifa->ifa_name, IFNAMSIZ - 1);
-                if (ioctl(s, SIOCGIFMTU, &ifr) == 0)
-                    printf("  mtu %d", ifr.ifr_mtu);
-                close(s);
+            cur_ifname = ifa->ifa_name;
+
+            /* 通过共享 ioctl 封装获取 flags/MTU */
+            struct if_info info;
+            if (ifinfo_get(s, ifa->ifa_name, &info) == 0) {
+                printf("\n%s: flags=%d  mtu %d\n",
+                       ifa->ifa_name, info.flags, info.mtu);
+            } else {
+                printf("\n%s: flags=%d\n", ifa->ifa_name, ifa->ifa_flags);
             }
-            printf("\n");
         }
 
         char host[NI_MAXHOST];
@@ -144,50 +122,28 @@ static int show_interface(const char *ifname, int short_mode) {
     }
 
     /* 获取 MAC 地址 */
-    int s = socket(AF_INET, SOCK_DGRAM, 0);
-    if (s >= 0) {
-        struct ifreq ifr;
-        memset(&ifr, 0, sizeof(ifr));
-        strncpy(ifr.ifr_name, ifname ? ifname : "", IFNAMSIZ - 1);
-        if (ioctl(s, SIOCGIFHWADDR, &ifr) == 0) {
-            printf("    ether %s\n",
-                   mac_bytes((unsigned char *)ifr.ifr_hwaddr.sa_data));
+    if (cur_ifname) {
+        struct if_info info;
+        if (ifinfo_get(s, cur_ifname, &info) == 0 && info.has_mac) {
+            printf("    ether %s\n", fmt_mac(info.mac));
         }
-        close(s);
     }
+    close(s);
 
     /* 统计信息 */
     FILE *f = fopen("/proc/net/dev", "r");
     if (f) {
-        char line[512];
-        fgets(line, sizeof(line), f);
-        fgets(line, sizeof(line), f);
-        while (fgets(line, sizeof(line), f)) {
-            char name[64];
-            char *p = line;
-            while (*p == ' ') p++;
-            char *colon = strchr(p, ':');
-            if (!colon) continue;
-            size_t nlen = colon - p;
-            if (nlen >= sizeof(name)) nlen = sizeof(name) - 1;
-            memcpy(name, p, nlen);
-            name[nlen] = '\0';
-            if (ifname && strcmp(name, ifname) != 0) continue;
-            unsigned long rx_b, rx_p, rx_e, rx_d, rx_f, rx_fr, rx_c, rx_m;
-            unsigned long tx_b, tx_p, tx_e, tx_d, tx_f, tx_co, tx_ca, tx_c2;
-            sscanf(colon + 1,
-                "%lu %lu %lu %lu %lu %lu %lu %lu %lu "
-                "%lu %lu %lu %lu %lu %lu %lu %lu",
-                &rx_b, &rx_p, &rx_e, &rx_d, &rx_f, &rx_fr, &rx_c, &rx_m,
-                &tx_b, &tx_p, &tx_e, &tx_d, &tx_f, &tx_co, &tx_ca, &tx_c2);
-            printf("    RX packets %lu  bytes %lu", rx_p, rx_b);
-            if (rx_e) printf("  errors %lu", rx_e);
-            if (rx_d) printf("  dropped %lu", rx_d);
+        struct net_dev_stats st;
+        while (netinfo_dev_read_line(f, &st) == 0) {
+            if (cur_ifname && strcmp(st.name, cur_ifname) != 0) continue;
+            printf("    RX packets %lu  bytes %lu", st.rx_packets, st.rx_bytes);
+            if (st.rx_errors) printf("  errors %lu", st.rx_errors);
+            if (st.rx_dropped) printf("  dropped %lu", st.rx_dropped);
             printf("\n");
-            printf("    TX packets %lu  bytes %lu", tx_p, tx_b);
-            if (tx_e) printf("  errors %lu", tx_e);
-            if (tx_d) printf("  dropped %lu", tx_d);
-            if (tx_co) printf("  collisions %lu", tx_co);
+            printf("    TX packets %lu  bytes %lu", st.tx_packets, st.tx_bytes);
+            if (st.tx_errors) printf("  errors %lu", st.tx_errors);
+            if (st.tx_dropped) printf("  dropped %lu", st.tx_dropped);
+            if (st.tx_collisions) printf("  collisions %lu", st.tx_collisions);
             printf("\n");
             break;
         }
@@ -216,6 +172,7 @@ int main(int argc, char **argv) {
         argi++;
     }
 
+    (void)all; /* -a flag: reserved for showing inactive interfaces */
     const char *ifname = (argi < argc) ? argv[argi] : NULL;
     return show_interface(ifname, short_mode);
 }

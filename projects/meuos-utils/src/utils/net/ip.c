@@ -15,6 +15,7 @@
  *   ip -s link                   显示统计信息
  *
  * 读取 /proc/net/ 和使用 ioctl/netlink 进行操作。
+ * 共享代码通过 netinfo 模块复用（与 ifconfig/route/netstat 共用）。
  *
  * --classic: 传统格式
  */
@@ -35,6 +36,7 @@
 #include <netdb.h>
 
 #include "meuos/utils.h"
+#include "meuos/netinfo.h"
 
 static void usage(void) {
     fprintf(stderr,
@@ -53,20 +55,6 @@ static void usage(void) {
         "  ip neigh [show]\n"
         "  ip -s link [show]\n"
         "  --classic  Traditional format\n");
-}
-
-/* 打印接口 flags（共享给 addr_show 和 link_show） */
-static void print_flags(unsigned int flags) {
-    printf("<");
-    int first = 1;
-    if (flags & IFF_UP)         { printf("%sUP", first ? "" : ","); first = 0; }
-    if (flags & IFF_BROADCAST)   { printf("%sBROADCAST", first ? "" : ","); first = 0; }
-    if (flags & IFF_LOOPBACK)    { printf("%sLOOPBACK", first ? "" : ","); first = 0; }
-    if (flags & IFF_RUNNING)     { printf("%sRUNNING", first ? "" : ","); first = 0; }
-    if (flags & IFF_NOARP)       { printf("%sNOARP", first ? "" : ","); first = 0; }
-    if (flags & IFF_MULTICAST)   { printf("%sMULTICAST", first ? "" : ","); first = 0; }
-    if (flags & IFF_PROMISC)     { printf("%sPROMISC", first ? "" : ","); first = 0; }
-    printf(">");
 }
 
 /* === addr show === */
@@ -107,40 +95,31 @@ static int cmd_addr_show(const char *ifname) {
                 nshown++;
             }
 
-            /* 获取 ifindex + MTU via ioctl */
-            struct ifreq ifr;
-            memset(&ifr, 0, sizeof(ifr));
-            snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", ifa->ifa_name);
-            int ifindex = nshown;
-            int mtu = 0;
-            if (ioctl(s, SIOCGIFINDEX, &ifr) == 0) ifindex = ifr.ifr_ifindex;
-            if (ioctl(s, SIOCGIFMTU, &ifr) == 0) mtu = ifr.ifr_mtu;
+            /* 通过共享 ioctl 封装获取 flags/MTU/MAC */
+            struct if_info info;
+            if (ifinfo_get(s, ifa->ifa_name, &info) == 0) {
+                int ifindex = nshown; /* 近似 index */
+                struct ifreq ifr;
+                memset(&ifr, 0, sizeof(ifr));
+                snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", ifa->ifa_name);
+                if (ioctl(s, SIOCGIFINDEX, &ifr) == 0) ifindex = ifr.ifr_ifindex;
 
-            /* 接口头 */
-            printf("%d: %s: ", ifindex, ifa->ifa_name);
-            print_flags(ifa->ifa_flags);
-            printf(" mtu %d state %s\n", mtu,
-                   (ifa->ifa_flags & IFF_UP) ? "UP" : "DOWN");
+                /* 接口头 */
+                printf("%d: %s: ", ifindex, ifa->ifa_name);
+                fmt_if_flags(info.flags);
+                printf(" mtu %d state %s\n", info.mtu,
+                       (info.flags & IFF_UP) ? "UP" : "DOWN");
 
-            /* 获取 MAC 地址 */
-            memset(&ifr, 0, sizeof(ifr));
-            snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", ifa->ifa_name);
-            if (ioctl(s, SIOCGIFHWADDR, &ifr) == 0) {
-                unsigned char *m = (unsigned char *)ifr.ifr_hwaddr.sa_data;
-                printf("    link/ether %02x:%02x:%02x:%02x:%02x:%02x",
-                       m[0], m[1], m[2], m[3], m[4], m[5]);
-                if (ifa->ifa_flags & IFF_BROADCAST) {
-                    struct ifreq br;
-                    memset(&br, 0, sizeof(br));
-                    snprintf(br.ifr_name, sizeof(br.ifr_name), "%s", ifa->ifa_name);
-                    if (ioctl(s, SIOCGIFBRDADDR, &br) == 0) {
-                        struct sockaddr_in *sa = (struct sockaddr_in *)&br.ifr_broadaddr;
+                /* MAC 地址 + 广播地址 */
+                if (info.has_mac) {
+                    printf("    link/ether %s", fmt_mac(info.mac));
+                    if (info.flags & IFF_BROADCAST) {
                         char bbuf[INET_ADDRSTRLEN];
-                        inet_ntop(AF_INET, &sa->sin_addr, bbuf, sizeof(bbuf));
-                        printf(" brd %s", bbuf);
+                        if (ifinfo_get_bcast(s, ifa->ifa_name, bbuf, sizeof(bbuf)) == 0)
+                            printf(" brd %s", bbuf);
                     }
+                    printf("\n");
                 }
-                printf("\n");
             }
         }
 
@@ -164,16 +143,10 @@ static int cmd_addr_show(const char *ifname) {
             if (ifa->ifa_netmask) {
                 if (ifa->ifa_netmask->sa_family == AF_INET) {
                     struct sockaddr_in *nm = (struct sockaddr_in *)ifa->ifa_netmask;
-                    unsigned long mask = ntohl(nm->sin_addr.s_addr);
-                    while (mask & 0x80000000) { prefix++; mask <<= 1; }
+                    prefix = netmask_to_prefix_v4(ntohl(nm->sin_addr.s_addr));
                 } else if (ifa->ifa_netmask->sa_family == AF_INET6) {
                     struct sockaddr_in6 *nm = (struct sockaddr_in6 *)ifa->ifa_netmask;
-                    for (int i = 0; i < 16; i++) {
-                        unsigned char b = nm->sin6_addr.s6_addr[i];
-                        if (b == 0xff) prefix += 8;
-                        else if (b == 0) break;
-                        else { while (b & 0x80) { prefix++; b <<= 1; } break; }
-                    }
+                    prefix = netmask_to_prefix_v6(nm->sin6_addr.s6_addr);
                 }
             }
             printf("    %s %s/%d", fam, host, prefix);
@@ -216,67 +189,35 @@ static int cmd_link_show(const char *ifname, int show_stats) {
         return 1;
     }
 
-    char line[512];
-    /* 跳过前两行标题 */
-    if (!fgets(line, sizeof(line), f)) goto done;
-    if (!fgets(line, sizeof(line), f)) goto done;
-
     int idx = 1;
-    while (fgets(line, sizeof(line), f)) {
-        char name[64];
-        char *p = line;
-        while (*p == ' ') p++;
-        char *colon = strchr(p, ':');
-        if (!colon) continue;
-        size_t nlen = colon - p;
-        if (nlen >= sizeof(name)) nlen = sizeof(name) - 1;
-        memcpy(name, p, nlen);
-        name[nlen] = '\0';
-        if (ifname && strcmp(name, ifname) != 0) continue;
+    struct net_dev_stats st;
+    while (netinfo_dev_read_line(f, &st) == 0) {
+        if (ifname && strcmp(st.name, ifname) != 0) continue;
 
-        unsigned long rx_b, rx_p, rx_e, rx_d, rx_fi, rx_fr, rx_c, rx_m;
-        unsigned long tx_b, tx_p, tx_e, tx_d, tx_fi, tx_co, tx_ca, tx_c2;
-        sscanf(colon + 1,
-            "%lu %lu %lu %lu %lu %lu %lu %lu %lu "
-            "%lu %lu %lu %lu %lu %lu %lu %lu",
-            &rx_b, &rx_p, &rx_e, &rx_d, &rx_fi, &rx_fr, &rx_c, &rx_m,
-            &tx_b, &tx_p, &tx_e, &tx_d, &tx_fi, &tx_co, &tx_ca, &tx_c2);
-
-        /* 获取 flags + MTU + MAC via 单一 socket */
-        struct ifreq ifr;
-        memset(&ifr, 0, sizeof(ifr));
-        snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", name);
-        unsigned int flags = 0;
-        int mtu = 0;
-        if (ioctl(s, SIOCGIFFLAGS, &ifr) == 0) flags = ifr.ifr_flags;
-        memset(&ifr, 0, sizeof(ifr));
-        snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", name);
-        if (ioctl(s, SIOCGIFMTU, &ifr) == 0) mtu = ifr.ifr_mtu;
-
-        printf("%d: %s: ", idx, name);
-        print_flags(flags);
-        printf(" mtu %d state %s\n", mtu, (flags & IFF_UP) ? "UP" : "DOWN");
-
-        /* 获取 MAC */
-        memset(&ifr, 0, sizeof(ifr));
-        snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", name);
-        if (ioctl(s, SIOCGIFHWADDR, &ifr) == 0) {
-            unsigned char *m = (unsigned char *)ifr.ifr_hwaddr.sa_data;
-            printf("    link/ether %02x:%02x:%02x:%02x:%02x:%02x\n",
-                   m[0], m[1], m[2], m[3], m[4], m[5]);
+        /* 通过共享 ioctl 封装获取 flags/MTU/MAC */
+        struct if_info info;
+        if (ifinfo_get(s, st.name, &info) != 0) {
+            memset(&info, 0, sizeof(info));
         }
+
+        printf("%d: %s: ", idx, st.name);
+        fmt_if_flags(info.flags);
+        printf(" mtu %d state %s\n", info.mtu, (info.flags & IFF_UP) ? "UP" : "DOWN");
+
+        if (info.has_mac)
+            printf("    link/ether %s\n", fmt_mac(info.mac));
 
         if (show_stats) {
             printf("    RX: bytes packets errors dropped\n"
                    "    %lu %lu %lu %lu\n"
                    "    TX: bytes packets errors dropped\n"
                    "    %lu %lu %lu %lu\n",
-                   rx_b, rx_p, rx_e, rx_d,
-                   tx_b, tx_p, tx_e, tx_d);
+                   st.rx_bytes, st.rx_packets, st.rx_errors, st.rx_dropped,
+                   st.tx_bytes, st.tx_packets, st.tx_errors, st.tx_dropped);
         }
         idx++;
     }
-done:
+
     close(s);
     fclose(f);
     return 0;
@@ -312,45 +253,23 @@ static int cmd_link_set(const char *ifname, const char *attr, const char *val) {
     return 0;
 }
 
-/* 计算前缀长度：掩码 -> CIDR 前缀 */
-static int mask_to_prefix(unsigned int mask) {
-    int prefix = 0;
-    while (mask & 0x80000000) { prefix++; mask <<= 1; }
-    return prefix;
-}
-
 /* === route show === */
 static int cmd_route_show(void) {
     FILE *f = fopen("/proc/net/route", "r");
     if (!f) { perror("ip: /proc/net/route"); return 1; }
-    char line[512];
-    fgets(line, sizeof(line), f); /* skip header */
-    while (fgets(line, sizeof(line), f)) {
-        char iface[16];
-        unsigned int dest, gw, mask;
-        unsigned int flags, metric;
-        if (sscanf(line, "%15s %x %x %x %x %x",
-                   iface, &dest, &gw, &mask, &flags, &metric) < 6)
-            continue;
-        struct in_addr ga;
-        ga.s_addr = gw;
-        char gb[32];
-        inet_ntop(AF_INET, &ga, gb, sizeof(gb));
 
-        if (dest == 0) {
+    struct route_entry e;
+    while (netinfo_route_read_line(f, &e) == 0) {
+        if (e.dest == 0) {
             /* default route */
-            printf("default via %s dev %s", gb, iface);
+            printf("default via %s dev %s", fmt_hex_ip(e.gateway), e.iface);
         } else {
-            int prefix = mask_to_prefix(ntohl(mask));
-            struct in_addr da;
-            da.s_addr = dest;
-            char db[32];
-            inet_ntop(AF_INET, &da, db, sizeof(db));
-            printf("%s/%d", db, prefix);
-            if (gw != 0) printf(" via %s", gb);
-            printf(" dev %s", iface);
+            int prefix = netmask_to_prefix_v4(ntohl(e.mask));
+            printf("%s/%d", fmt_hex_ip(e.dest), prefix);
+            if (e.gateway != 0) printf(" via %s", fmt_hex_ip(e.gateway));
+            printf(" dev %s", e.iface);
         }
-        if (metric > 0) printf(" metric %u", metric);
+        if (e.metric > 0) printf(" metric %u", e.metric);
         printf("\n");
     }
     fclose(f);
