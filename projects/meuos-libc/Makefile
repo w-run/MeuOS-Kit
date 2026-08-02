@@ -32,6 +32,11 @@ ARCH   ?= x86_64
 MCC    ?= ../mcc/mcc
 SYSROOT ?= ../sysroot
 
+# 默认目标必须是 all：x86_64 分支在 Makefile 前部显式定义
+# $(BUILD)/thread/__tls_get_addr.o 规则，会抢先成为 GNU make 的默认目标，
+# 导致裸 `make` 只构建该文件而不构建 libc。显式固定默认目标。
+.DEFAULT_GOAL := all
+
 # C sources are compiled by mcc (or the host CC for x86_64); assembly
 # sources always go through the host assembler. For i386, mcc handles
 # C compilation via --target=i386 while the host assembler uses -m32.
@@ -292,6 +297,8 @@ check: $(ATOMIC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/malloc test/malloc.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/stdlib test/stdlib.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/strtod-hex test/strtod_hex.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/strtof test/strtof.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/fp-fmt test/fp_fmt.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/libgen test/libgen.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/ctype test/ctype.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/assert test/assert.c
@@ -332,6 +339,8 @@ check: $(ATOMIC_LIB)
 	/tmp/meuos-libc-check/malloc
 	/tmp/meuos-libc-check/stdlib
 	/tmp/meuos-libc-check/strtod-hex
+	/tmp/meuos-libc-check/strtof
+	/tmp/meuos-libc-check/fp-fmt
 	/tmp/meuos-libc-check/libgen
 	/tmp/meuos-libc-check/ctype
 	/tmp/meuos-libc-check/assert
