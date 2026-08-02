@@ -177,6 +177,7 @@ structdecl(struct scope *s, struct structbuilder *b)
 	unsigned long long width;
 	int align;
 	enum storageclass sc;
+	enum funcspec fs;
 
 	extern enum cpp_tokenkind cpp_tok_kind(void);
 	if (staticassert(s))
@@ -235,7 +236,7 @@ structdecl(struct scope *s, struct structbuilder *b)
 		}
 		error(&tok.loc, "expected class name after '~'");
 	}
-	base = declspecs(s, &sc, NULL, &align);
+	base = declspecs(s, &sc, &fs, &align);
 	if (!base.type)
 		error(&tok.loc, "no type in struct member declaration");
 	/* C++ constructor: `ClassName(...) { ... }`.  declspecs parsed the
@@ -412,6 +413,15 @@ structdecl(struct scope *s, struct structbuilder *b)
 					emitdata(sd, init);
 					sd->defined = true;
 					expect(TSEMICOLON, "after static member initializer");
+					return;
+				}
+				/* C++17 inline static member without an initializer is a
+				 * definition: emit a zero-initialized object (unlike a
+				 * plain `static` member, which is only a declaration). */
+				if ((fs & FUNCINLINE) && mt.type->kind != TYPEFUNC) {
+					emitdata(sd, NULL);
+					sd->defined = true;
+					expect(TSEMICOLON, "after inline static member");
 					return;
 				}
 				/* skip addmember: no layout space */

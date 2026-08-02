@@ -201,6 +201,18 @@ decl(struct scope *s, struct func *f)
 		return true;
 	}
 	for (;;) {
+		/* C++17 structured binding: `auto [x, y] = p;` */
+		{
+			extern int g_lang;
+			extern struct type typeauto;
+			extern bool cpp_struct_binding(struct func *, struct scope *,
+			    struct qualtype);
+			if (g_lang == 1 && base.type == &typeauto &&
+			    tok.kind == TLBRACK) {
+				if (cpp_struct_binding(f, s, base))
+					return true;
+			}
+		}
 		/* C++ constructor-call declarator: `Point p(3, 4);` */
 		bool ctor_call = false;
 		struct expr *ctor_args = NULL;

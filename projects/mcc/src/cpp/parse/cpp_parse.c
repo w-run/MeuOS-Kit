@@ -4429,3 +4429,115 @@ cpp_skip_branch(void)
 		}
 	}
 }
+
+/* C++17 structured binding: `auto [x, y] = p;`.
+ *
+ * Creates a hidden object initialized from the initializer expression,
+ * then binds each name to a copy of the corresponding member
+ * (`x = p.first`, `y = p.second`), so the names are value bindings.
+ * Returns true if handled (the whole declarator + initializer consumed). */
+bool
+cpp_struct_binding(struct func *f, struct scope *s, struct qualtype base)
+{
+	extern struct decl *mkdecl(char *, enum declkind, struct type *,
+	    enum typequal, enum linkage);
+	extern void funcinit(struct func *, struct decl *, struct init *,
+	    bool);
+	extern struct value *funcexpr(struct func *, struct expr *);
+	extern struct init *mkinit(unsigned long long, unsigned long long,
+	    struct bitfield, struct expr *);
+	extern struct expr *mkconstexpr(struct type *, unsigned long long);
+	extern struct expr *exprconvert(struct expr *, struct type *);
+	extern void next(void);
+	extern struct expr *assignexpr(struct scope *);
+	extern struct expr *mkexpr(enum exprkind, struct type *, struct expr *);
+	extern struct expr *mkunaryexpr(enum tokenkind, struct expr *);
+	extern struct expr *mkbinaryexpr(struct location *, enum tokenkind,
+	    struct expr *, struct expr *);
+	extern struct type typeauto;
+
+	char *names[32];
+	int n = 0;
+	struct member *m;
+	struct expr *init, *e;
+	struct decl *obj, *bd;
+	struct type *t;
+	int i;
+
+	if (!f)
+		return false;
+	next(); /* consume '[' */
+	while (tok.kind != TRBRACK) {
+		if (tok.kind < TIDENT || n >= (int)countof(names))
+			error(&tok.loc, "bad structured-binding name list");
+		names[n++] = (char *)tokenstr(tok.kind);
+		next();
+		if (tok.kind == TRBRACK)
+			break;
+		expect(TCOMMA, "',' or ']' in structured binding");
+	}
+	next(); /* consume ']' */
+	if (n == 0)
+		error(&tok.loc, "empty structured binding");
+	expect(TASSIGN, "after structured binding");
+	init = assignexpr(s);
+	if (!init || !init->type || init->type->kind == TYPEVOID ||
+	    init->type == &typeauto)
+		error(&tok.loc, "structured binding requires an object initializer");
+	t = init->type;
+	if (t->kind != TYPESTRUCT && t->kind != TYPEUNION)
+		error(&tok.loc, "structured binding requires a class type");
+	{
+		int nm = 0;
+		for (m = t->u.structunion.members; m; m = m->next)
+			if (m->name)
+				++nm;
+		if (nm != n)
+			error(&tok.loc,
+			    "structured binding names (%d) do not match member count (%d)",
+			    n, nm);
+	}
+	expect(TSEMICOLON, "after structured binding");
+
+	/* hidden object: allocate storage, copy the initializer in */
+	obj = mkdecl("__sb", DECLOBJECT, t, QUALNONE, LINKNONE);
+	obj->u.obj.storage = SDAUTO;
+	funcinit(f, obj, NULL, false);
+	{
+		extern struct expr *mkassignexpr(struct expr *, struct expr *);
+		struct expr *lhs = mkexpr(EXPRIDENT, t, NULL);
+		lhs->lvalue = true;
+		lhs->u.ident.decl = obj;
+		funcexpr(f, mkassignexpr(lhs, init));
+	}
+	/* bind each name to a copy of the corresponding member */
+	for (m = t->u.structunion.members, i = 0; m && i < n; m = m->next) {
+		struct member *mi = m;
+		char *nm;
+		struct expr *load, *lhs;
+		if (!mi->name)
+			continue;
+		nm = names[i];
+		bd = mkdecl(nm, DECLOBJECT, mi->type, mi->qual, LINKNONE);
+		bd->u.obj.storage = SDAUTO;
+		funcinit(f, bd, NULL, false);
+		scopeputdecl(s, bd);
+		/* load = *( (T*)&obj + offset ) */
+		lhs = mkexpr(EXPRIDENT, t, NULL);
+		lhs->lvalue = true;
+		lhs->u.ident.decl = obj;
+		load = mkbinaryexpr(&(struct location){0}, TADD,
+		    exprconvert(mkunaryexpr(TBAND, lhs), &typeulong),
+		    mkconstexpr(&typeulong, mi->offset));
+		load->type = mkpointertype(mi->type, mi->qual);
+		load = mkunaryexpr(TMUL, load);
+		load->lvalue = true;
+		/* bd = load */
+		lhs = mkexpr(EXPRIDENT, mi->type, NULL);
+		lhs->lvalue = true;
+		lhs->u.ident.decl = bd;
+		funcexpr(f, mkassignexpr(lhs, load));
+		++i;
+	}
+	return true;
+}

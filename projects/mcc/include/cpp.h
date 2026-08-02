@@ -158,4 +158,10 @@ struct expr *cpp_tmpl_member_placeholder(void);
  * skipped at the token level so it is never instantiated. */
 void cpp_if_constexpr(struct func *f, struct expr *cond, struct scope *s);
 
+/* C++17 structured binding: `auto [x, y] = expr;` — create a hidden
+ * object for the initializer and bind each name to a copy of the
+ * corresponding member.  Returns true if handled (tok consumed). */
+bool cpp_struct_binding(struct func *f, struct scope *s,
+    struct qualtype base);
+
 #endif /* MCC_CPP_H */
