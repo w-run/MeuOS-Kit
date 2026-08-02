@@ -167,6 +167,7 @@ static void cpp_emit_base_ctor(struct func *f);
 static void cpp_emit_base_dtor(struct func *f);
 static void cpp_parse_init_list(struct func *f, struct scope *fs);
 static void cpp_mangle_type(struct type *t, char *buf, size_t bufsz);
+static size_t cpp_requires_span_len(void);
 static void flush_pending_methods(void);
 static void cpp_emit_global_ctors(void);
 static void cpp_emit_global_dtor(struct func *f, struct decl *d);
@@ -4030,19 +4031,47 @@ cpp_template_decl(struct scope *s, struct type *owner)
 		strcpy((char *)tmpl->name, tokenstr(tok.kind));
 		next(); /* consume the concept name */
 		expect(TASSIGN, "after concept name");
-		/* buffer `expr;` — everything up to the ';' */
-		for (;;) {
-			if (tok.kind == TSEMICOLON)
-				break;
-			if (tok.kind == TEOF)
-				error(&tok.loc, "unterminated concept definition '%s'",
-				    tmpl->name);
-			if (cn >= ccap) {
-				ccap = ccap ? ccap * 2 : 64;
-				ctoks = xreallocarray(ctoks, ccap, sizeof *ctoks);
+		/* buffer `expr;` — everything up to the ';' at brace depth 0.
+		 * A requires-expression body (`requires (T a) { a+a; }`) brings
+		 * its own braces and semicolons, so those must not terminate the
+		 * concept definition. */
+		{
+			int cdepth = 0;
+			for (;;) {
+				if (tok.kind == TEOF)
+					error(&tok.loc,
+					    "unterminated concept definition '%s'",
+					    tmpl->name);
+				if (cdepth == 0 && tok.kind == TSEMICOLON)
+					break;
+				if (cdepth == 0 &&
+				    cpp_tok_kind() == CPP_TREQUIRES) {
+					/* a whole requires-expression: consume it
+					 * (including its body braces) as one unit */
+					size_t rn = cpp_requires_span_len();
+					while (rn-- > 0) {
+						if (cn >= ccap) {
+							ccap = ccap ? ccap * 2 : 64;
+							ctoks = xreallocarray(ctoks,
+							    ccap, sizeof *ctoks);
+						}
+						ctoks[cn++] = tok;
+						next();
+					}
+					continue;
+				}
+				if (tok.kind == TLBRACE)
+					++cdepth;
+				else if (tok.kind == TRBRACE && cdepth > 0)
+					--cdepth;
+				if (cn >= ccap) {
+					ccap = ccap ? ccap * 2 : 64;
+					ctoks = xreallocarray(ctoks, ccap,
+					    sizeof *ctoks);
+				}
+				ctoks[cn++] = tok;
+				next();
 			}
-			ctoks[cn++] = tok;
-			next();
 		}
 		next(); /* consume ';' */
 		tmpl->toks = ctoks;

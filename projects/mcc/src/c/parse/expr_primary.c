@@ -15,6 +15,7 @@
 #include "util.h"
 #include "mcc.h"
 #include "expr_internal.h"
+#include "cpp/cpp_tokens.h"
 
 /* designator() is file-local: only builtinfunc() in this translation
  * unit calls it. inttype() lives in expr_literal.c and is exported
@@ -140,6 +141,14 @@ primaryexpr(struct scope *s)
 		break;
 	default:
 		if (tok.kind >= TIDENT) {
+			/* C++20 requires-expression: `requires { ... }` /
+			 * `requires (params) { reqs }` is a boolean constant
+			 * expression (true when every requirement holds). */
+			extern int g_lang;
+			extern enum cpp_tokenkind cpp_tok_kind(void);
+			extern struct expr *cpp_requires_expr(struct scope *);
+			if (g_lang == 1 && cpp_tok_kind() == CPP_TREQUIRES)
+				return cpp_requires_expr(s);
 			/* C++ temporary-object construction: `Vec(expr)`.  A class
 			 * tag followed by '(' is a constructor call (the tag can't be
 			 * a function name). */

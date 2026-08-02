@@ -1770,8 +1770,8 @@ expandfunc(struct macro *m)
 	for (i = 0; i < m->nparam; ++i) {
 		fprintf(stderr, " arg%zu.ntoken=%zu[", i, arg[i].ntoken);
 		for (size_t k = 0; k < arg[i].ntoken; ++k)
-			fprintf(stderr, " %d:%s", arg[i].token[k].kind,
-				tokenspell(&arg[i].token[k]) ? tokenspell(&arg[i].token[k]) : "?");
+			fprintf(stderr, " %s@%zu:%zu", tokenspell(&arg[i].token[k]),
+				arg[i].token[k].loc.line, arg[i].token[k].loc.col);
 		fprintf(stderr, " ]");
 	}
 	fprintf(stderr, "\n");
