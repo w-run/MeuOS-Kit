@@ -230,11 +230,11 @@ eval(struct expr *expr)
 		}
 		break;
 	case EXPRCALL:
-		/* C++ constexpr function: fold the call when the callee is a
-		 * constexpr function and all arguments are integer constants. */
-		extern int g_lang;
-		extern struct expr *cpp_constexpr_eval(struct expr *);
-		if (g_lang == 1) {
+		/* constexpr function (C23, and C++): fold the call when the
+		 * callee is a constexpr function and all arguments are integer
+		 * constants. */
+		{
+			extern struct expr *cpp_constexpr_eval(struct expr *);
 			struct expr *r = cpp_constexpr_eval(expr);
 			if (r)
 				return r;

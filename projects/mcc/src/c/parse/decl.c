@@ -513,9 +513,10 @@ decl(struct scope *s, struct func *f)
 				d->u.func.isnoreturn = fs & FUNCNORETURN || a.kind & ATTRNORETURN;
 				{
 					extern int g_lang;
-					/* C++ constexpr function: the QUALCONSTEXPR qualifier is set
-					 * by the typequal() handling of the `constexpr` keyword */
-					if (g_lang == 1 && (base.qual & QUALCONSTEXPR))
+					/* constexpr function (C23, and C++): the
+					 * QUALCONSTEXPR qualifier is set by the typequal()
+					 * handling of the `constexpr` keyword */
+					if (base.qual & QUALCONSTEXPR)
 						d->u.func.isconstexpr = true;
 					/* C++20 consteval (immediate) function: like constexpr,
 					 * but every call must be evaluated at compile time */
@@ -535,13 +536,12 @@ decl(struct scope *s, struct func *f)
 					 * the definition label matches the call-site symbol */
 					f = mkfunc(d, d->asmname ? d->asmname : (char *)regname,
 					    t, s);
-					/* C++ constexpr function: buffer the body tokens for
-					 * compile-time evaluation, then replay them so the normal
-					 * runtime definition is also emitted. */
+					/* constexpr function (C23, and C++): buffer the body
+					 * tokens for compile-time evaluation, then replay them
+					 * so the normal runtime definition is also emitted. */
 					{
-						extern int g_lang;
 						extern void cpp_buffer_constexpr_body(struct decl *);
-						if (g_lang == 1 && d->u.func.isconstexpr)
+						if (d->u.func.isconstexpr)
 							cpp_buffer_constexpr_body(d);
 					}
 					stmt(f, s);
