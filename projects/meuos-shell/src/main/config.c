@@ -138,11 +138,18 @@ static char *git_branch(int *dirty) {
                     snprintf(head_path, sizeof(head_path), "%s/HEAD", gd);
                     fclose(f);
                     f = fopen(head_path, "r");
+                } else {
+                    /* 不是 gitdir 格式，无法使用 */
+                    fclose(f);
+                    f = NULL;
                 }
-            }
-            if (f) {
+            } else {
+                /* fgets 失败 */
                 fclose(f);
+                f = NULL;
             }
+            /* 注意：不在这里 fclose(f)，因为 f 可能指向 HEAD 文件，
+             * 需要在下面读取。之前的 fclose(f) 导致 use-after-free 段错误。 */
         } else {
             /* .git 是目录 */
             char head_path[4096];
