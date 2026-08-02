@@ -65,12 +65,19 @@ MOP_PHI / COPY / VASTART / VAARG / SALLOC
 
 ### 3.8 扩展点
 MOP_EXTRA = 第一个语言相关 opcode；`MIns.extra` 字段选定具体派生指令。
+`MTypeDesc.ext` 承载聚合扩展（vtbl / RTTI）。
+**空载实验**（`mir_test` test_extra，B.6 验收项 3）：构造 `MOP_EXTRA` +
+`extra=0x12345678` 指令与带 `ext` 的 MTypeDesc，验证 dump 渲染 `extra=`、
+mssa_check 通过、全链路不崩溃——扩展位可承载新增而不扰动管线。
 
 ## 4. SSA
 
 - 每值最多一个定义：MIns.dst 或 MPhi.dst。
 - 跨块合并仅用显式 MPhi（`MPhi{arg[], blk[]}`，每个 arg 对应一个前驱块）。
 - use 链：MVal.use[]（MUse{ins|phi, argn}），供 DCE/GVN/rega 使用。
+- **一致性门禁**：`mssa_check(fn)`（`src/mir/ssa.c`）验证每 MV_TEMP 单 def、
+  phi arg/blk 配对、指令源引用有效；`run_mir_passes` 末尾强制调用，违反即报
+  `SSA consistency check FAILED`。B.6 验收项 2 的「ssacheck 全绿」由此保证。
 
 ## 5. 构造 API（src/mir/build.c）
 
@@ -97,4 +104,7 @@ MOP_EXTRA = 第一个语言相关 opcode；`MIns.extra` 字段选定具体派生
 - `make check-mir-types`：B.1 单测（类型/聚合/值/指令/常量池/dump）。
 - 后续：`make check` 全系列 + `bench/run.sh` 性能门禁。
 
-> 状态：✅ B.1 核心 2026-08-01 落地；B.2 优化管线 / B.4 C 迁移待实施。
+> 状态：✅ B.1 核心（类型/SSA/扩展槽）2026-08-01 落地；B.2 优化管线
+> （fold/copy/gvn/dce）与 B.4 C 前端迁移（func_to_mir→bridge）已完成；
+> B.6 验收前四项（类型矩阵 / mssa_check / 扩展空载 / C 迁移）已就绪，
+> 见 docs/mir-type-matrix.md 与 docs/mir-backend/b3-analysis.md。

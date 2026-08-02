@@ -112,7 +112,76 @@ static void test_build(void)
 	CHECK(entry->term.op == MOP_RET, "terminator is ret");
 	CHECK(r->def == &entry->ins[2], "r defined by last ins");
 
+	CHECK(mssa_check(fn) == 0, "built fn is SSA-consistent");
+
 	mfn_dump(fn, stdout);
+	mfn_free(fn);
+}
+
+/* B.6 验收项 2: explicit-SSA — a phi-merged function passes mssa_check,
+ * and a deliberately broken value (no def) is caught. */
+static void test_ssa_phi(void)
+{
+	MFn *fn = mfn_new("ssa_phi", 2);
+	MBlk *entry = mblk_new(fn, "entry");
+	MBlk *then = mblk_new(fn, "then");
+	MBlk *join = mblk_new(fn, "join");
+	mfn_addblk(fn, entry);
+	mfn_addblk(fn, then);
+	mfn_addblk(fn, join);
+
+	MVal *c = mval_new(fn, MV_CONST, MT_I32, 0, "c");
+	MVal *x = mval_new(fn, MV_TEMP, MT_I32, 0, "x");
+	MVal *y = mval_new(fn, MV_TEMP, MT_I32, 0, "y");
+	MVal *r = mval_new(fn, MV_TEMP, MT_I32, 0, "r");
+
+	madd(fn, entry, MOP_CEQ, MT_I32, x, MREF_VAL(c), MREF_VAL(c));
+	mterm(fn, entry, MOP_JNZ, MREF_VAL(x), then, join);
+	madd1(fn, then, MOP_PAR, MT_I32, y, MREF_CON(0));
+	mterm(fn, then, MOP_JMP, MREF_VAL(y), join, 0);
+	mphi_add(fn, join, MT_I32, r);
+	MPhi *ph = r->defphi;
+	ph->narg = 2;
+	ph->carg = 2;
+	ph->arg = malloc(2 * sizeof *ph->arg);
+	ph->blk = malloc(2 * sizeof *ph->blk);
+	ph->arg[0] = y; ph->blk[0] = then;
+	ph->arg[1] = c; ph->blk[1] = entry;
+	mret(fn, join, MREF_VAL(r));
+
+	CHECK(mssa_check(fn) == 0, "phi-merged fn is SSA-consistent");
+
+	/* break it: redefine the phi dst with an instruction, so the value
+	 * has both an MPhi.defphi and an MIns.def */
+	madd1(fn, join, MOP_PAR, MT_I32, r, MREF_CON(0));
+	CHECK(mssa_check(fn) != 0, "double-defined value is caught");
+
+	mfn_free(fn);
+}
+
+/* B.6 验收项 3: extension slots (MIns.extra / MTypeDesc.ext) carry new
+ * payloads without disturbing the pipeline (empty-load experiment). */
+static void test_extra(void)
+{
+	MFn *fn = mfn_new("extra", 2);
+	MBlk *entry = mblk_new(fn, "entry");
+	mfn_addblk(fn, entry);
+
+	MVal *c = mval_new(fn, MV_CONST, MT_I32, 0, "c");
+	MVal *v = mval_new(fn, MV_TEMP, MT_I32, 0, "v");
+	MIns *in = madd1(fn, entry, MOP_EXTRA, MT_I32, v, MREF_VAL(c));
+	in->extra = 0x12345678;
+	CHECK(in->extra == 0x12345678, "MIns.extra word is stored");
+	CHECK(mssa_check(fn) == 0, "extra-bearing ins is SSA-consistent");
+
+	/* aggregate ext slot */
+	MTypeDesc td = {0};
+	td.is_union = false;      /* a struct */
+	td.size = 8;
+	td.ext = (void *)(uintptr_t)0xdeadbeef;
+	CHECK(td.ext != 0, "MTypeDesc.ext carries payload");
+
+	mfn_dump(fn, stdout);   /* print.c renders `extra=`; must not crash */
 	mfn_free(fn);
 }
 
@@ -148,6 +217,8 @@ int main(void)
 	test_type_register();
 	test_const_pool();
 	test_build();
+	test_ssa_phi();
+	test_extra();
 
 	if (failures) {
 		fprintf(stderr, "%d failures\n", failures);

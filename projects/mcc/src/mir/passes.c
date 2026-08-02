@@ -577,6 +577,8 @@ run_mir_pass(MFn *fn, enum MIRPass pass)
 			r += mdce_block(fn, b);
 		return r;
 	}
+	case MIR_PASS_SSA:
+		return mssa_check(fn);
 	default:
 		return 0;
 	}
@@ -594,4 +596,7 @@ run_mir_passes(MFn *fn, int optlevel)
 	run_mir_pass(fn, MIR_PASS_COPY);
 	run_mir_pass(fn, MIR_PASS_GVN);
 	run_mir_pass(fn, MIR_PASS_DCE);
+	/* B.6 验收项 2: explicit-SSA consistency gate after the pipeline. */
+	if (mssa_check(fn))
+		fprintf(stderr, "mcc: %s: SSA consistency check FAILED\n", fn->name);
 }

@@ -373,11 +373,13 @@ enum MIRPass {
 	MIR_PASS_COPY,   /* copy propagation + phi copy propagation */
 	MIR_PASS_GVN,    /* global value numbering */
 	MIR_PASS_DCE,    /* dead code elimination */
+	MIR_PASS_SSA,    /* SSA consistency check (mssa_check) */
 	MIR_PASS_N,
 };
 
 uint32_t run_mir_pass(MFn *fn, enum MIRPass pass);
 void run_mir_passes(MFn *fn, int optlevel);
+int mssa_check(MFn *fn);
 void build_uses(MFn *fn);
 uint32_t mcopy(MFn *fn);
 uint32_t mgvn(MFn *fn);

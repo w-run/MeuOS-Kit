@@ -45,7 +45,6 @@ build_fib(void)
 	mfn_addblk(fn, retb);
 
 	MVal *n = mval_new(fn, MV_TEMP, MT_I32, 0, "n");
-	MVal *c2 = mval_new(fn, MV_TEMP, MT_I32, 0, "c2");
 	MVal *cmp = mval_new(fn, MV_TEMP, MT_I32, 0, "cmp");
 	MVal *fn1 = mval_new(fn, MV_TEMP, MT_I32, 0, "fn1");
 	MVal *fn2 = mval_new(fn, MV_TEMP, MT_I32, 0, "fn2");

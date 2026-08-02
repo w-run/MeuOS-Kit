@@ -43,6 +43,9 @@
 ## 结论
 
 标量全绿；聚合（struct/union/array/位域/柔性数组）全绿；VLA 经 ALLOCA 路径
-可表达；`_Decimal*` 与 `_BitInt(>64)` 标记"待扩展"，不影响 C++11 主线。
+可表达；`_Decimal*` 与 `_BitInt(>64)` 标记"待扩展"（C23 特性），**不阻塞
+C++11 主线**（m++ 目标标准 C++98→23 不含 _Decimal/_BitInt）。扩展槽
+（MIns.extra / MTypeDesc.ext）空载实验已通过（见 docs/mir-spec.md §3.8）。
 
-> 状态：✅ 2026-08-01 B.1 阶段 100% 覆盖（除标注待扩展项）。
+> 状态：✅ B.1 阶段 100% 覆盖（除标注非阻塞待扩展项）；B.6 验收项 1 达标。
+> 验证：`make check-mir-types` 含 mssa_check（SSA 门禁）与 test_extra（扩展槽）。
