@@ -87,8 +87,9 @@
 - **文档补记**：7890a35（0802.md V 段回归行补 Test 3d + 测试哈希）
 - 验证：check-mir 全绿、verify-all 6/6 PASS（含自举 check-sysroot-static）。worker-fold 工作树已净。
 
-### 门禁缺口（已提请 worker-selfhost 确认）
-`verify-all.sh` 第 90 行跑 `make check-mir`（MIR 单元测试），**未调用 `check-c-mir`（mir_matrix.sh MIR/LIR 双路径矩阵）**；而 0802.md:733 声称 signed_div_pow2.c 被 `check-c99` 与 `check-c-mir` 双路径收集——实际 verify-all 门禁未显式跑 legacy 路径。建议把 `make check-c-mir` 纳入 verify-all.sh。verify-all 六项全 PASS（含自举）待 worker-selfhost 提供最近运行证据。
+### 门禁缺口（worker-selfhost 确认 + check-c-mir 补跑）
+`verify-all.sh` 第 90 行跑 `make check-mir`（MIR 单元测试），**未调用 `check-c-mir`（mir_matrix.sh MIR/LIR 双路径矩阵）**；worker-selfhost 确认 verify-all.sh 全文无 `check-c-mir`/mir_matrix 调用（Makefile:210 目标存在但未纳入门禁）。→ 列「门禁改进项」（第二批）：把 `make check-c-mir` 纳入 verify-all.sh。
+**缺口已手工补跑**（worker-selfhost，HEAD a20f08a）：`make check-c-mir` 刚跑过 **70 项 ok、fail=0、exit 0**，明确包含 `ok  c99/signed_div_pow2 (MIR=1 == MIR=0)`——缺陷 U/V 回归用例在 MIR 默认与 legacy 路径结果一致且均 PASS。legacy 路径已实际验证，缺口不影响 V 闭环结论。
 
 ---
 
@@ -107,12 +108,18 @@
 
 ---
 
-## 8. verify-all 门禁实测（worker-judge，2026-08-03）
+## 8. verify-all 门禁实测（worker-judge 实测 + worker-selfhost 复核，2026-08-03）
 
-`sh test/verify-all.sh --verbose` 实测（mcc/m++ 已重建，HEAD 含全部修复）：
+worker-judge 实测 `sh test/verify-all.sh --verbose`（mcc/m++ 已重建，HEAD 含全部修复）：
 - **PASS=6 FAIL=0 SKIP=0**：`make check` / `check-mir` / `check-cpp` / `check-c99 (MEUOS_SYSROOT)` / `check-c11 (MEUOS_SYSROOT)` / `check-sysroot-static`（自举 mcc 编译 mcc + 运行 hello）
 - 六项全 PASS（含自举）——team-lead 核验项 (2) 满足。
-- ⚠️ 门禁缺口仍在：verify-all.sh 未调用 `check-c-mir`（mir_matrix.sh MIR/LIR 双路径矩阵，Makefile 210 行已有该目标），legacy 路径未被 verify-all 显式验证；建议 worker-selfhost/worker-doc 把 `make check-c-mir` 纳入 verify-all.sh。
+
+worker-selfhost 复核（连续两轮）：
+- **R3@222a28d、R4@a20f08a 均 PASS=6 FAIL=0 SKIP=0**，R4 为含 93ab4b4+4c24bfe 修复后的最新状态，无新增 FAIL；R4 本地与 origin 0 divergence。
+- check-c99 目标（Makefile:188）用 `for t in test/c99/*.c` 通配循环，必然包含 signed_div_pow2.c 且 PASS；check-sysroot-static 自举输出 "mcc (MeuOS C Compiler) 0.1.0"。
+- check-c-mir 补跑 70 项 ok（含 `c99/signed_div_pow2 MIR=1==MIR=0`），legacy 路径已实际验证。
+
+- ⚠️ 门禁缺口（改进项，不影响闭环结论）：verify-all.sh 未调用 `check-c-mir`；已列 §6 门禁段，建议 worker-selfhost/worker-doc 第二轮纳入 verify-all.sh。
 
 ## 9. 93ab4b4 / f8f0044 夹带处理（team-lead 裁决）
 - **不拆分、不 force-push**：f8f0044 已是多 worker pull 基点，重写祖先链破坏并发。提交归属不纯净的代价低于重写历史代价。
