@@ -2590,9 +2590,11 @@ cpp_find_unique_member(struct type *t, const char *name,
 /* --- C.2.8 function templates (instantiate-on-first-use) --------------- */
 
 /* One template parameter (`T` in `template <typename T> ...`).  The
- * concrete type binding is filled in during instantiation. */
+ * concrete type binding is filled in during instantiation.  A parameter
+ * pack (`typename... Args`) collects the remaining instantiation types. */
 struct cpp_tmpl_param {
 	const char *name;
+	bool is_pack;            /* `typename... Args` */
 	struct cpp_tmpl_param *next;
 };
 
@@ -2639,6 +2641,19 @@ static struct cpp_template **g_cpp_templates_end = &g_cpp_templates;
  * their own pending name. */
 static const char *g_cpp_tmpl_stack[64];
 static int g_cpp_tmpl_depth;
+/* Parameter-pack element counts of templates being replayed (pushed by the
+ * variadic instantiation, popped when the replay completes).  `sizeof...`
+ * consults the innermost count. */
+static int g_cpp_pack_stack[64];
+static int g_cpp_pack_depth;
+
+/* Number of elements in the innermost replaying parameter pack, for
+ * `sizeof...(Args)`. */
+int
+cpp_sizeof_pack(void)
+{
+	return g_cpp_pack_depth > 0 ? g_cpp_pack_stack[g_cpp_pack_depth - 1] : 0;
+}
 
 const char *
 cpp_tmpl_lookup(const char *name)
@@ -2725,15 +2740,21 @@ cpp_template_decl(struct scope *s, struct type *owner)
 	tmpl->next = NULL;
 	pe = &tmpl->params;
 
-	/* template parameter list: `typename T` / `class T`, comma separated */
+	/* template parameter list: `typename T` / `class T`, comma separated;
+	 * a trailing parameter pack: `typename... Args` / `class... Args` */
 	for (;;) {
 		enum cpp_tokenkind k = cpp_tok_kind();
 		if (k != CPP_TTYPENAME && k != CPP_TCLASS)
 			error(&tok.loc, "expected 'typename' or 'class' in template parameter list");
 		next(); /* consume typename/class */
+		p = xmalloc(sizeof(*p));
+		p->is_pack = false;
+		if (tok.kind == TELLIPSIS) {
+			p->is_pack = true;
+			next();
+		}
 		if (tok.kind < TIDENT)
 			error(&tok.loc, "expected template parameter name");
-		p = xmalloc(sizeof(*p));
 		p->name = xmalloc(strlen(tokenstr(tok.kind)) + 1);
 		strcpy((char *)p->name, tokenstr(tok.kind));
 		p->next = NULL;
@@ -2743,6 +2764,8 @@ cpp_template_decl(struct scope *s, struct type *owner)
 		next();
 		if (tok.kind == TGREATER)
 			break;
+		if (p->is_pack)
+			error(&tok.loc, "template parameter pack must be the last parameter");
 		expect(TCOMMA, "',' or '>' in template parameter list");
 	}
 	next(); /* consume '>' */
@@ -2817,22 +2840,31 @@ cpp_template_decl(struct scope *s, struct type *owner)
 
 /* Deduce template arguments from the call-site argument list: parameter i
  * takes the type of argument i (positional; sufficient for the common
- * `T f(T a, T b)` / `T f(T a, U b)` forms). */
+ * `T f(T a, T b)` / `T f(T a, U b)` forms).  A trailing parameter pack
+ * collects every remaining argument type. */
 static bool
 cpp_tmpl_deduce(struct cpp_template *tmpl, struct expr *arglist,
                 struct type **out, int *nout)
 {
+	struct cpp_tmpl_param *p;
 	struct expr *a;
+	int nfix = 0;
 	int i = 0;
 
+	for (p = tmpl->params; p && !p->is_pack; p = p->next)
+		++nfix;
 	for (a = arglist; a; a = a->next) {
-		if (i < tmpl->nparams)
+		if (i < 16)
 			out[i] = a->type;
+		else
+			error(&tok.loc, "too many arguments for template '%s'", tmpl->name);
 		++i;
 	}
-	if (i < tmpl->nparams)
-		return false; /* too few arguments */
-	*nout = tmpl->nparams;
+	if (i < nfix)
+		return false; /* too few arguments for the fixed parameters */
+	if (i > 16)
+		error(&tok.loc, "too many arguments for template '%s'", tmpl->name);
+	*nout = i;
 	return true;
 }
 
@@ -2866,7 +2898,7 @@ cpp_tmpl_find_or_instantiate(struct scope *s, const char *name,
 
 	/* mangled name: name + "_" + type codes (e.g. max_i) */
 	snprintf(key, sizeof key, "%s", name);
-	for (i = 0; i < tmpl->nparams; ++i) {
+	for (i = 0; i < nt; ++i) {
 		char code[64];
 		cpp_mangle_type(types[i], code, sizeof code);
 		strncat(key, "_", sizeof key - strlen(key) - 1);
@@ -2882,18 +2914,112 @@ cpp_tmpl_find_or_instantiate(struct scope *s, const char *name,
 	 * The buffered tokens are shared across instantiations, so rename on
 	 * a private copy. */
 	bs = mkscope(s);
-	for (p = tmpl->params, i = 0; p; p = p->next, ++i) {
-		td = mkdecl((char *)p->name, DECLTYPE, types[i], QUALNONE, LINKNONE);
-		scopeputdecl(bs, td);
+	{
+		int nfix = 0, npack = 0;
+		/* fixed parameters bind positionally; a trailing parameter pack
+		 * binds its first element as a placeholder (the per-element types
+		 * are registered as __tp0..__tpN-1 for the pack expansion below) */
+		for (p = tmpl->params, i = 0; p && !p->is_pack; p = p->next, ++i, ++nfix) {
+			td = mkdecl((char *)p->name, DECLTYPE, types[i], QUALNONE, LINKNONE);
+			scopeputdecl(bs, td);
+		}
+		if (p && p->is_pack) {
+			npack = nt - nfix;
+			td = mkdecl((char *)p->name, DECLTYPE,
+			    nfix < nt ? types[nfix] : &typevoid, QUALNONE, LINKNONE);
+			scopeputdecl(bs, td);
+			for (i = 0; i < npack; ++i) {
+				char *tname = xmalloc(32);
+				snprintf(tname, 32, "__tp%d", i);
+				td = mkdecl(tname, DECLTYPE, types[nfix + i], QUALNONE, LINKNONE);
+				scopeputdecl(bs, td);
+			}
+			/* make the pack size visible to sizeof...(Args) while the
+			 * replay below is parsed */
+			if (g_cpp_pack_depth < (int)countof(g_cpp_pack_stack))
+				g_cpp_pack_stack[g_cpp_pack_depth++] = npack;
+		}
 	}
 	{
 		struct token *rtoks = xmalloc(tmpl->ntoks * sizeof *rtoks);
+		size_t ntoks = tmpl->ntoks;
 		memcpy(rtoks, tmpl->toks, tmpl->ntoks * sizeof *rtoks);
+		/* variadic pack expansion on a private copy:
+		 *   `Args ... args` (a pack in the parameter list) becomes
+		 *       `__tp0 args_0 , __tp1 args_1 , ...`
+		 *   `args ...` (a pack used as call arguments) becomes
+		 *       `args_0 , args_1 , ...` */
+		{
+			const char *ptname = NULL;
+			const char *pack_var = NULL;
+			int nfix = 0, npack;
+			struct cpp_tmpl_param *pp;
+			for (pp = tmpl->params; pp; pp = pp->next)
+				if (pp->is_pack) {
+					ptname = pp->name;
+					break;
+				}
+			if (ptname) {
+				struct token *wtoks = xmalloc((ntoks + 16 * 8 + 8) * sizeof *wtoks);
+				size_t wn = 0;
+				for (pp = tmpl->params; pp && !pp->is_pack; pp = pp->next)
+					++nfix;
+				npack = nt - nfix; /* pack element count */
+				for (i = 0; i < (int)ntoks; ++i) {
+					const char *nm = rtoks[i].kind >= TIDENT
+					    ? tokenstr(rtoks[i].kind) : NULL;
+					if (nm && strcmp(nm, ptname) == 0 &&
+					    i + 2 < (int)ntoks &&
+					    rtoks[i + 1].kind == TELLIPSIS &&
+					    rtoks[i + 2].kind >= TIDENT) {
+						/* parameter-list pack: `Args ... args` */
+						pack_var = tokenstr(rtoks[i + 2].kind);
+						for (int k = 0; k < npack; ++k) {
+							char tn[32], vn[32];
+							struct token tt = rtoks[i];
+							if (k) {
+								tt.kind = TCOMMA;
+								wtoks[wn++] = tt;
+							}
+							snprintf(tn, sizeof tn, "__tp%d", k);
+							tt.kind = tokenget(tn, strlen(tn));
+							wtoks[wn++] = tt;
+							snprintf(vn, sizeof vn, "%s_%d", pack_var, k);
+							tt.kind = tokenget(vn, strlen(vn));
+							wtoks[wn++] = tt;
+						}
+						i += 2;
+						continue;
+					}
+					if (pack_var && nm && strcmp(nm, pack_var) == 0 &&
+					    i + 1 < (int)ntoks && rtoks[i + 1].kind == TELLIPSIS) {
+						/* call-site pack: `args ...` */
+						for (int k = 0; k < npack; ++k) {
+							char vn[32];
+							struct token vt = rtoks[i];
+							if (k) {
+								vt.kind = TCOMMA;
+								wtoks[wn++] = vt;
+							}
+							snprintf(vn, sizeof vn, "%s_%d", pack_var, k);
+							vt.kind = tokenget(vn, strlen(vn));
+							wtoks[wn++] = vt;
+						}
+						++i;
+						continue;
+					}
+					wtoks[wn++] = rtoks[i];
+				}
+				free(rtoks);
+				rtoks = wtoks;
+				ntoks = wn;
+			}
+		}
 		/* rename the function token to the mangled instantiation name (the
 		 * parser resolves identifiers by their interned token kind, so
 		 * intern the mangled name and swap the kind) */
 		found = false;
-		for (i = 0; i < (int)tmpl->ntoks; ++i) {
+		for (i = 0; i < (int)ntoks; ++i) {
 			const char *nm;
 			if (rtoks[i].kind < TIDENT)
 				continue;
@@ -2917,13 +3043,15 @@ cpp_tmpl_find_or_instantiate(struct scope *s, const char *name,
 
 		cur = tok;
 		tokpush(&cur, 1);
-		tokpush(rtoks, tmpl->ntoks);
+		tokpush(rtoks, ntoks);
 		/* rtoks stays alive (tokpush stores pointers) until decl() consumes
 		 * it below; deliberately not freed (bounded per-instantiation). */
 	}
 	next();
 	if (!decl(bs, NULL))
 		error(&tok.loc, "failed to instantiate template '%s'", name);
+	if (g_cpp_pack_depth > 0)
+		--g_cpp_pack_depth;
 
 	fd = scopegetdecl(bs, fnname, 1);
 	if (!fd || fd->kind != DECLFUNC)

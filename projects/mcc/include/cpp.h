@@ -54,6 +54,9 @@ bool cpp_pending_is_mine(int depth);
 /* C++14 `auto` return type: record the return expression type of an
  * `auto f() {...}` body; the first return fixes the deduced type. */
 void cpp_auto_return(struct func *f, struct expr *e);
+/* Number of elements in the innermost replaying template parameter pack
+ * (for `sizeof...(Args)`); 0 outside a variadic instantiation. */
+int cpp_sizeof_pack(void);
 bool cpp_has_ctor(struct type *t, const char *tag);
 bool cpp_emit_default_ctor(struct func *f, struct decl *d);
 bool cpp_has_dtor(struct type *t);

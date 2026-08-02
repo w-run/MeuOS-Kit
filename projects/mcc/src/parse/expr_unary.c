@@ -81,6 +81,23 @@ unaryexpr(struct scope *s)
 	case TALIGNOF:
 	case T__ALIGNOF__:
 		next();
+		if (op == TSIZEOF && tok.kind == TELLIPSIS) {
+			/* C++11 `sizeof...(Pack)`: the number of elements in a
+			 * template parameter pack, resolved at instantiation-replay
+			 * time by the variadic-template machinery. */
+			extern int g_lang;
+			extern int cpp_sizeof_pack(void);
+			if (g_lang != 1)
+				error(&tok.loc, "'...' cannot appear here");
+			next(); /* consume ... */
+			expect(TLPAREN, "after 'sizeof...'");
+			if (tok.kind < TIDENT)
+				error(&tok.loc, "expected pack name after 'sizeof...('");
+			next(); /* consume the pack name */
+			expect(TRPAREN, "after pack name in 'sizeof...'");
+			e = mkconstexpr(&typeulong, cpp_sizeof_pack());
+			break;
+		}
 		if (consume(TLPAREN)) {
 			t = typename(s, NULL, NULL);
 			if (t) {
