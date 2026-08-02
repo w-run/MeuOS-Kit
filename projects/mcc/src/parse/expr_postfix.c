@@ -140,6 +140,52 @@ postfixexpr(struct scope *s, struct expr *r)
 					ae = &(*ae)->next;
 				}
 				next(); /* consume ')' */
+				/* C++ free-function overload resolution: `name(args...)`
+				 * where `name` resolves to a file-scope (free) function.
+				 * The plain-name decl is always the first-declared
+				 * overload; re-resolve from the argument types via the
+				 * parameter-encoded mangled name `name_<codes>` and
+				 * switch the callee to the matching overload (falling
+				 * back to the plain-name decl when no mangled variant
+				 * matches, e.g. the first overload itself or a plain C
+				 * function). */
+				{
+					extern int g_lang;
+					extern void cpp_free_mangle_name_args(const char *,
+					    struct expr *, char *, size_t, bool);
+					/* the callee is a decayed function identifier
+					 * (`&helper`); unwrap to the underlying decl */
+					struct decl *cd = NULL;
+					if (r->kind == EXPRIDENT)
+						cd = r->u.ident.decl;
+					else if (r->kind == EXPRUNARY && r->op == TBAND &&
+					    r->base && r->base->kind == EXPRIDENT)
+						cd = r->base->u.ident.decl;
+					if (g_lang == 1 && !g_cpp_member_class && cd &&
+					    cd->kind == DECLFUNC && cd->name) {
+						const char *fname = cd->name;
+						char m2[256];
+						struct decl *fd2;
+						/* reference overloads are preferred for lvalue
+						 * arguments; fall back to by-value binding */
+						cpp_free_mangle_name_args(fname, arglist, m2,
+						    sizeof m2, true);
+						fd2 = scopegetdecl(s, m2, 1);
+						if (!fd2 || fd2->kind != DECLFUNC) {
+							char mv[256];
+							cpp_free_mangle_name_args(fname, arglist, mv,
+							    sizeof mv, false);
+							fd2 = scopegetdecl(s, mv, 1);
+							if (fd2 && fd2->kind == DECLFUNC)
+								snprintf(m2, sizeof m2, "%s", mv);
+						}
+						if (fd2 && fd2->kind == DECLFUNC && fd2 != cd) {
+							r = mkexpr(EXPRIDENT, fd2->type, NULL);
+							r->u.ident.decl = fd2;
+							r = decay(r); /* &helper_ii */
+						}
+					}
+				}
 				/* C++ member-template call: `obj.get<int>(...)` was
 				 * recorded by cpp_tmpl_member_pend; instantiate the
 				 * template member from the explicit template arguments

@@ -42,13 +42,14 @@
   记录当前行为、已确认的正常对照路径、根因假设、期望行为）。
 - 不参与任何 glob 收集（子目录不匹配 `test/cpp/*.cc`），因此不会
   挂断 CI；实现侧修复后把文件移出 pending 并接入对应 check 目标。
-- 2026-08-02 已登记缺陷（详见各文件头注释）：
+- 2026-08-02 已登记缺陷（详见各文件头注释；已修复项移出 pending 并接入 check-cpp-func/check-cpp-neg）：
   - `value_param_member_call.cc` — size-0 类按值传参段错误
-  - `free_func_overload.cc` — 文件作用域自由函数重载被拒
-  - `ctor_base_dtor.cc` — 继承析构链缺失
-  - `static_void_method.cc` — static void 方法调用误判为构造
   - `ns_limits.cc` — namespace 四项限制（嵌套类路径/引用参数
     函数/类返回值拷贝/变量符号冲突）
+  - 已修复并移出：`free_func_overload.cc`（自由函数重载，
+    → `test/cpp/free_func_overload.cc`）、`ctor_base_dtor.cc`（继承
+    析构链，→ `ctor_dtor_order.cc`）、`static_void_method.cc`
+    （static void 方法，→ `static_void_method.cc`）
 
 ## 新增测试清单（2026-08-02，worker-test）
 

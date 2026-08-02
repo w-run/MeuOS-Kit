@@ -2074,6 +2074,64 @@ cpp_mangled_name_args(struct type *t, const char *name, struct expr *args,
 	}
 }
 
+/* --- free-function overloading (file/namespace scope) --------------- */
+
+/* Mangled name of a file-scope (free) function `name` whose function
+ * type is `funct`, with the parameter types appended exactly like the
+ * member scheme (`helper_ii` for `int helper(int, int)`).  Used at
+ * declaration time: a same-name free function with a different
+ * signature is registered under this name instead of being rejected as
+ * a conflicting redeclaration. */
+void
+cpp_free_mangle_name(const char *name, struct type *funct, char *buf,
+                     size_t bufsz)
+{
+	struct decl *cur;
+	size_t n;
+
+	snprintf(buf, bufsz, "%s_", name);
+	n = strlen(buf);
+	if (funct && funct->kind == TYPEFUNC) {
+		for (cur = funct->u.func.params; cur; cur = cur->next) {
+			char code[64];
+			size_t cl;
+			cpp_mangle_type(cur->type, code, sizeof code);
+			cl = strlen(code);
+			if (n + cl < bufsz) {
+				memcpy(buf + n, code, cl + 1);
+				n += cl;
+			}
+		}
+	}
+}
+
+/* Mangled name of a free-function call `name(args...)`, encoded from
+ * the argument expression types for overload resolution (`helper_ii`).
+ * `prefer_ref` marks lvalue arguments with the 'R' reference prefix,
+ * matching cpp_mangled_name_args so a `f(Vec&)` overload is preferred
+ * on lvalues while rvalues fall back to the by-value overload. */
+void
+cpp_free_mangle_name_args(const char *name, struct expr *args, char *buf,
+                          size_t bufsz, bool prefer_ref)
+{
+	size_t n;
+
+	snprintf(buf, bufsz, "%s_", name);
+	n = strlen(buf);
+	for (; args; args = args->next) {
+		char code[64];
+		size_t cl;
+		if (prefer_ref && args->lvalue && n + 1 < bufsz)
+			buf[n++] = 'R';
+		cpp_mangle_type(args->type, code, sizeof code);
+		cl = strlen(code);
+		if (n + cl < bufsz) {
+			memcpy(buf + n, code, cl + 1);
+			n += cl;
+		}
+	}
+}
+
 const char *
 cpp_mangled_name(struct type *t, const char *name, char *buf, size_t bufsz)
 {

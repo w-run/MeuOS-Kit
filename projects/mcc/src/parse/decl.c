@@ -22,6 +22,27 @@
 #include "cpp.h"
 struct decl *tentativedefns, **tentativedefnsend = &tentativedefns;
 
+/* C++ free-function overloading: two functions differ only in their
+ * parameter lists — never in their return type.  Compare only the
+ * parameter signatures (arity, varargs, and each parameter type). */
+static bool
+same_func_params(struct type *a, struct type *b)
+{
+	struct decl *pa, *pb;
+
+	if (!a || !b || a->kind != TYPEFUNC || b->kind != TYPEFUNC)
+		return false;
+	if (a->u.func.nparam != b->u.func.nparam ||
+	    a->u.func.isvararg != b->u.func.isvararg)
+		return false;
+	for (pa = a->u.func.params, pb = b->u.func.params;
+	     pa && pb; pa = pa->next, pb = pb->next) {
+		if (!typecompatible(pa->type, pb->type))
+			return false;
+	}
+	return true;
+}
+
 struct decl *
 mkdecl(char *name, enum declkind k, struct type *t, enum typequal tq, enum linkage linkage)
 {
@@ -386,64 +407,93 @@ decl(struct scope *s, struct func *f)
 					return true;
 				}
 			}
-			d = declcommon(s, kind, name, asmname, t, tq, sc, prior);
-			d->value = mkglobal(d);
-			d->u.func.inlinedefn = d->linkage == LINKEXTERN && fs & FUNCINLINE && !(sc & SCEXTERN) && (!prior || prior->u.func.inlinedefn);
-			d->u.func.isnoreturn = fs & FUNCNORETURN || a.kind & ATTRNORETURN;
+			/* C++ free-function overload: a same-name declaration with a
+			 * different parameter signature is an overload, not a
+			 * conflicting redeclaration.  Register it under the
+			 * parameter-encoded mangled name `name_<codes>` (mirroring
+			 * the member scheme) so all overloads coexist in the scope;
+			 * the call site resolves the right one from the argument
+			 * types.  The first overload keeps the plain name, so the
+			 * plain identifier still resolves for lookup and calls. */
 			{
 				extern int g_lang;
-				/* C++ constexpr function: the QUALCONSTEXPR qualifier is set
-				 * by the typequal() handling of the `constexpr` keyword */
-				if (g_lang == 1 && (base.qual & QUALCONSTEXPR))
-					d->u.func.isconstexpr = true;
-			}
-			if (tok.kind == TLBRACE) {
-				if (!allowfunc)
-					error(&tok.loc, "function definition not allowed");
-				if (d->defined)
-					error(&tok.loc, "function '%s' redefined", name);
-				/* re-open scope from function declarator */
-				assert(funcscope);
-				s = funcscope;
-				f = mkfunc(d, name, t, s);
-				/* C++ constexpr function: buffer the body tokens for
-				 * compile-time evaluation, then replay them so the normal
-				 * runtime definition is also emitted. */
-				{
-					extern int g_lang;
-					extern void cpp_buffer_constexpr_body(struct decl *);
-					if (g_lang == 1 && d->u.func.isconstexpr)
-						cpp_buffer_constexpr_body(d);
+				extern void cpp_free_mangle_name(const char *, struct type *,
+				    char *, size_t);
+				const char *regname = name;
+				char *mng = NULL;
+				if (g_lang == 1 && prior && prior->kind == DECLFUNC &&
+				    prior->type && !typecompatible(t, prior->type)) {
+					char buf[256];
+					/* overloading by return type alone is not allowed */
+					if (same_func_params(t, prior->type))
+						error(&tok.loc, "function '%s' redeclared with incompatible return type", name);
+					cpp_free_mangle_name(name, t, buf, sizeof buf);
+					mng = xmalloc(strlen(buf) + 1);
+					strcpy(mng, buf);
+					regname = mng;
+					prior = scopegetdecl(s, mng, false);
 				}
-				stmt(f, s);
-				/* C++14 `auto` return type: backfill the type deduced from
-				 * the body's return statement(s). */
+				d = declcommon(s, kind, (char *)regname, asmname, t, tq, sc, prior);
+				if (mng && d == prior)
+					free(mng); /* existing overload: name not retained */
+				d->value = mkglobal(d);
+				d->u.func.inlinedefn = d->linkage == LINKEXTERN && fs & FUNCINLINE && !(sc & SCEXTERN) && (!prior || prior->u.func.inlinedefn);
+				d->u.func.isnoreturn = fs & FUNCNORETURN || a.kind & ATTRNORETURN;
 				{
 					extern int g_lang;
-					extern struct type typeauto;
-					extern struct type *g_cpp_auto_ret_type;
-					extern struct func *g_cpp_auto_ret_func;
-					if (g_lang == 1 && t->base == &typeauto) {
-						if (!g_cpp_auto_ret_type)
-							error(&tok.loc, "'auto' function '%s' has no return statement to deduce its type from", name);
-						t->base = g_cpp_auto_ret_type;
-						g_cpp_auto_ret_type = NULL;
-						g_cpp_auto_ret_func = NULL;
+					/* C++ constexpr function: the QUALCONSTEXPR qualifier is set
+					 * by the typequal() handling of the `constexpr` keyword */
+					if (g_lang == 1 && (base.qual & QUALCONSTEXPR))
+						d->u.func.isconstexpr = true;
+				}
+				if (tok.kind == TLBRACE) {
+					if (!allowfunc)
+						error(&tok.loc, "function definition not allowed");
+					if (d->defined)
+						error(&tok.loc, "function '%s' redefined", name);
+					/* re-open scope from function declarator */
+					assert(funcscope);
+					s = funcscope;
+					f = mkfunc(d, (char *)regname, t, s);
+					/* C++ constexpr function: buffer the body tokens for
+					 * compile-time evaluation, then replay them so the normal
+					 * runtime definition is also emitted. */
+					{
+						extern int g_lang;
+						extern void cpp_buffer_constexpr_body(struct decl *);
+						if (g_lang == 1 && d->u.func.isconstexpr)
+							cpp_buffer_constexpr_body(d);
 					}
-				}
-				if (d->u.func.isnoreturn)
-					funchlt(f);
-				/* XXX: need to keep track of function in case a later declaration specifies extern */
-				if (!d->u.func.inlinedefn)
-					emitfunc(f, d->linkage == LINKEXTERN);
-				s = delscope(s);
-				delfunc(f);
-				d->defined = true;
-				return true;
-			} else if (funcscope) {
+					stmt(f, s);
+					/* C++14 `auto` return type: backfill the type deduced from
+					 * the body's return statement(s). */
+					{
+						extern int g_lang;
+						extern struct type typeauto;
+						extern struct type *g_cpp_auto_ret_type;
+						extern struct func *g_cpp_auto_ret_func;
+						if (g_lang == 1 && t->base == &typeauto) {
+							if (!g_cpp_auto_ret_type)
+								error(&tok.loc, "'auto' function '%s' has no return statement to deduce its type from", name);
+							t->base = g_cpp_auto_ret_type;
+							g_cpp_auto_ret_type = NULL;
+							g_cpp_auto_ret_func = NULL;
+						}
+					}
+					if (d->u.func.isnoreturn)
+						funchlt(f);
+					/* XXX: need to keep track of function in case a later declaration specifies extern */
+					if (!d->u.func.inlinedefn)
+						emitfunc(f, d->linkage == LINKEXTERN);
+					s = delscope(s);
+					delfunc(f);
+					d->defined = true;
+					return true;
+				} else if (funcscope) {
 				delscope(funcscope);
 			}
 			break;
+			}
 		}
 		if (consume(TSEMICOLON))
 			return true;
