@@ -65,6 +65,7 @@ postfixexpr(struct scope *s, struct expr *r)
 	extern void cpp_pending_clear_at_depth(int);
 	extern void cpp_pending_set_placeholder(void);
 	extern bool cpp_pending_was_placeholder(void);
+	extern void cpp_pending_record_depth(void);
 
 	++g_cpp_postfix_depth;
 	if (!r)
