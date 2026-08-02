@@ -566,6 +566,10 @@ run_mir_pass(MFn *fn, enum MIRPass pass)
 			r += msimp_block(fn, b);
 		return r;
 	}
+	case MIR_PASS_COPY:
+		return mcopy(fn);
+	case MIR_PASS_GVN:
+		return mgvn(fn);
 	case MIR_PASS_DCE: {
 		uint32_t r = 0;
 		build_uses(fn);
@@ -583,6 +587,11 @@ run_mir_passes(MFn *fn, int optlevel)
 {
 	if (optlevel < 1)
 		return;
+	/* B.2 pipeline: fold/simpl first so GVN sees canonical forms, then
+	 * copy propagation (forward copies so GVN keys are stable), then
+	 * global value numbering, then dead code elimination. */
 	run_mir_pass(fn, MIR_PASS_FOLD);
+	run_mir_pass(fn, MIR_PASS_COPY);
+	run_mir_pass(fn, MIR_PASS_GVN);
 	run_mir_pass(fn, MIR_PASS_DCE);
 }

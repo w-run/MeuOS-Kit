@@ -160,6 +160,112 @@ test_dce_sideeffect(void)
 	mfn_free(fn);
 }
 
+/* Test 6: copy propagation — `d = copy x` used within the block. */
+static void
+test_copy_prop(void)
+{
+	MFn *fn = mfn_new("copy_prop", 2);
+	MBlk *b = mblk_new(fn, "entry");
+	mfn_addblk(fn, b);
+
+	MVal *x = mval_new(fn, MV_TEMP, MT_I32, 0, "x");
+	MVal *d = mval_new(fn, MV_TEMP, MT_I32, 0, "d");
+	madd1(fn, b, MOP_PAR, MT_I32, x, MREF_CON(0));
+	madd1(fn, b, MOP_COPY, MT_I32, d, MREF_VAL(x));
+	mret(fn, b, MREF_VAL(d));
+
+	run_mir_pass(fn, MIR_PASS_COPY);
+	/* the copy is gone; ret references x directly */
+	CHECK(count_op(b, MOP_COPY) == 0, "copy eliminated");
+	CHECK(b->term.src[0].val == x, "ret references source directly");
+	mfn_free(fn);
+}
+
+/* Test 7: GVN — `a+b` computed twice in one block, second is redundant. */
+static void
+test_gvn(void)
+{
+	MFn *fn = mfn_new("gvn", 2);
+	MBlk *b = mblk_new(fn, "entry");
+	mfn_addblk(fn, b);
+
+	MVal *a = mval_new(fn, MV_TEMP, MT_I32, 0, "a");
+	MVal *bb = mval_new(fn, MV_TEMP, MT_I32, 0, "b");
+	MVal *r1 = mval_new(fn, MV_TEMP, MT_I32, 0, "r1");
+	MVal *r2 = mval_new(fn, MV_TEMP, MT_I32, 0, "r2");
+	madd1(fn, b, MOP_PAR, MT_I32, a, MREF_CON(0));
+	madd1(fn, b, MOP_PAR, MT_I32, bb, MREF_CON(0));
+	madd(fn, b, MOP_ADD, MT_I32, r1, MREF_VAL(a), MREF_VAL(bb));
+	madd(fn, b, MOP_ADD, MT_I32, r2, MREF_VAL(a), MREF_VAL(bb));
+	mret(fn, b, MREF_VAL(r2));
+
+	run_mir_pass(fn, MIR_PASS_GVN);
+	/* only one add remains; ret uses r1 */
+	CHECK(count_op(b, MOP_ADD) == 1, "redundant add eliminated");
+	CHECK(b->term.src[0].val == r1, "ret references first result");
+	mfn_free(fn);
+}
+
+/* Test 8: GVN with differing operands — no spurious elimination. */
+static void
+test_gvn_nomatch(void)
+{
+	MFn *fn = mfn_new("gvn_nomatch", 2);
+	MBlk *b = mblk_new(fn, "entry");
+	mfn_addblk(fn, b);
+
+	MVal *a = mval_new(fn, MV_TEMP, MT_I32, 0, "a");
+	MVal *bb = mval_new(fn, MV_TEMP, MT_I32, 0, "b");
+	MVal *c = mval_new(fn, MV_TEMP, MT_I32, 0, "c");
+	MVal *r1 = mval_new(fn, MV_TEMP, MT_I32, 0, "r1");
+	MVal *r2 = mval_new(fn, MV_TEMP, MT_I32, 0, "r2");
+	madd1(fn, b, MOP_PAR, MT_I32, a, MREF_CON(0));
+	madd1(fn, b, MOP_PAR, MT_I32, bb, MREF_CON(0));
+	madd1(fn, b, MOP_PAR, MT_I32, c, MREF_CON(0));
+	madd(fn, b, MOP_ADD, MT_I32, r1, MREF_VAL(a), MREF_VAL(bb));
+	madd(fn, b, MOP_ADD, MT_I32, r2, MREF_VAL(a), MREF_VAL(c));
+	mret(fn, b, MREF_VAL(r2));
+
+	run_mir_pass(fn, MIR_PASS_GVN);
+	CHECK(count_op(b, MOP_ADD) == 2, "different adds both kept");
+	mfn_free(fn);
+}
+
+/* Test 9: phi copy propagation — phi(v, v) collapses to v. */
+static void
+test_phi_copy(void)
+{
+	MFn *fn = mfn_new("phi_copy", 2);
+	MBlk *e = mblk_new(fn, "entry");
+	MBlk *j = mblk_new(fn, "join");
+	mfn_addblk(fn, e);
+	mfn_addblk(fn, j);
+
+	MVal *v = mval_new(fn, MV_TEMP, MT_I32, 0, "v");
+	MVal *p = mval_new(fn, MV_TEMP, MT_I32, 0, "p");
+	madd1(fn, e, MOP_PAR, MT_I32, v, MREF_CON(0));
+	mterm(fn, e, MOP_JMP, MREF_CON(0), j, 0);
+
+	/* phi p = phi(v, v) */
+	mphi_add(fn, j, MT_I32, p);
+	MPhi *phi = j->phi;
+	phi->narg = 2;
+	phi->carg = 2;
+	phi->arg = malloc(2 * sizeof *phi->arg);
+	phi->blk = malloc(2 * sizeof *phi->blk);
+	phi->arg[0] = v;
+	phi->arg[1] = v;
+	phi->blk[0] = e;
+	phi->blk[1] = e;
+
+	mret(fn, j, MREF_VAL(p));
+
+	run_mir_pass(fn, MIR_PASS_COPY);
+	CHECK(j->phi == NULL, "phi collapsed");
+	CHECK(j->term.src[0].val == v, "ret references v directly");
+	mfn_free(fn);
+}
+
 int main(void)
 {
 	test_fold_const();
@@ -167,6 +273,10 @@ int main(void)
 	test_simpl_udiv();
 	test_dce();
 	test_dce_sideeffect();
+	test_copy_prop();
+	test_gvn();
+	test_gvn_nomatch();
+	test_phi_copy();
 
 	if (failures) {
 		fprintf(stderr, "%d failures\n", failures);

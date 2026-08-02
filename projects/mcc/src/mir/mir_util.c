@@ -267,6 +267,41 @@ MConst *mconst_addr(MFn *fn, const char *sym, int64_t off,
 	return c;
 }
 
+/* ---- use rewriting (shared by copy/GVN passes) --------------------------- */
+
+/* Replace every use of `old` (an MV_TEMP) with `nr` (val or const).
+ * Rebuild use chains afterwards (caller runs build_uses).  `old` is left
+ * with zero recorded uses. */
+void
+mref_replace(MFn *fn, MVal *old, MRef nr)
+{
+	MVal *cv = 0;
+
+	if (!old || old->kind != MV_TEMP)
+		return;
+	for (uint32_t i = 0; i < old->nuse; i++) {
+		MUse *u = &old->use[i];
+		if (u->phi) {
+			/* phi args are MVal* only; materialize a const value once */
+			if (nr.val)
+				cv = nr.val;
+			else if (nr.con && !cv)
+				cv = mval_const(fn, nr.con->type, nr.con);
+			if (!cv)
+				continue;
+			for (uint32_t k = 0; k < u->phi->narg; k++)
+				if (u->phi->arg[k] == old)
+					u->phi->arg[k] = cv;
+		} else if (u->ins) {
+			if (u->argn == 0)
+				u->ins->src[0] = nr;
+			else if (u->argn == 1)
+				u->ins->src[1] = nr;
+		}
+	}
+	old->nuse = 0;
+}
+
 /* ---- aggregate types ---------------------------------------------------- */
 
 MTypeDesc *mtd_new(const char *name, bool is_union)
