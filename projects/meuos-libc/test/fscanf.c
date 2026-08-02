@@ -36,6 +36,21 @@ main(void)
 	if (fclose(stream) != 0)
 		return 6;
 
+	/* floating-point conversions: %f -> float, %lf -> double */
+	{
+		float f;
+		double d;
+		strcpy(buf, "3.5 1.25e2");
+		stream = fmemopen(buf, sizeof buf, "r");
+		if (!stream)
+			return 10;
+		if (fscanf(stream, "%f %lf", &f, &d) != 2
+		 || f != 3.5f || d != 125.0)
+			return 11;
+		if (fclose(stream) != 0)
+			return 12;
+	}
+
 	/* EOF on an empty stream (/dev/null reads EOF immediately) */
 	stream = fopen("/dev/null", "r");
 	if (!stream)

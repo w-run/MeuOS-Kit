@@ -8,6 +8,7 @@
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <limits.h>
 #include <string.h>
 #include <unistd.h>
@@ -99,6 +100,66 @@ vsscanf(const char *input, const char *format, va_list arguments)
 				*out = value > (unsigned)INT_MAX ? INT_MAX : (int)value;
 			++assigned;
 			++format;
+			continue;
+		}
+		if (*format == 'f' || *format == 'e' || *format == 'g'
+		 || *format == 'F' || *format == 'E' || *format == 'G'
+		 || *format == 'l') {
+			/* %f/%e/%g -> float*, %lf/%le/%lg -> double*; the token is a
+			 * decimal floating constant ([sign] digits [. digits] [eE
+			 * [sign] digits]) which we collect and hand to strtod. */
+			int is_long = 0;
+			char tmp[64];
+			int ti = 0, used = 0;
+			if (*format == 'l') {
+				if (format[1] == 'f' || format[1] == 'e' || format[1] == 'g'
+				 || format[1] == 'F' || format[1] == 'E' || format[1] == 'G')
+					is_long = 1;
+				else
+					break;
+			}
+#define FTOK_COND (width == 0 || used < width)
+			if ((*input == '+' || *input == '-') && FTOK_COND) {
+				tmp[ti++] = *input++;
+				used++;
+			}
+			while (*input >= '0' && *input <= '9' && FTOK_COND && ti < (int)sizeof(tmp) - 1) {
+				tmp[ti++] = *input++;
+				used++;
+			}
+			if (*input == '.' && FTOK_COND) {
+				tmp[ti++] = *input++;
+				used++;
+				while (*input >= '0' && *input <= '9' && FTOK_COND && ti < (int)sizeof(tmp) - 1) {
+					tmp[ti++] = *input++;
+					used++;
+				}
+			}
+			if ((*input == 'e' || *input == 'E') && FTOK_COND) {
+				tmp[ti++] = *input++;
+				used++;
+				if ((*input == '+' || *input == '-') && FTOK_COND) {
+					tmp[ti++] = *input++;
+					used++;
+				}
+				while (*input >= '0' && *input <= '9' && FTOK_COND && ti < (int)sizeof(tmp) - 1) {
+					tmp[ti++] = *input++;
+					used++;
+				}
+			}
+#undef FTOK_COND
+			if (ti == 0)
+				break;
+			tmp[ti] = 0;
+			if (is_long) {
+				double *out = va_arg(arguments, double *);
+				*out = strtod(tmp, NULL);
+			} else {
+				float *out = va_arg(arguments, float *);
+				*out = (float)strtod(tmp, NULL);
+			}
+			++assigned;
+			format += is_long ? 2 : 1;
 			continue;
 		}
 		break;
