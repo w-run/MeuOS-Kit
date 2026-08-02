@@ -152,6 +152,24 @@ bufaddutf8(struct buffer *b, unsigned long val)
 	}
 }
 
+/* Resolve a \N{...} character name (without braces) to its code point.
+ * Shipping the whole Unicode name table is not practical, so only the
+ * Latin letter names are recognised (C++23 P2361, shared by the string
+ * literal and identifier paths). */
+static unsigned long
+namedval(const char *name, size_t n)
+{
+	if (n == sizeof("LATIN CAPITAL LETTER A") - 1
+	    && memcmp(name, "LATIN CAPITAL LETTER ", 21) == 0
+	    && name[21] >= 'A' && name[21] <= 'Z')
+		return name[21];
+	if (n == sizeof("LATIN SMALL LETTER A") - 1
+	    && memcmp(name, "LATIN SMALL LETTER ", 19) == 0
+	    && name[19] >= 'A' && name[19] <= 'Z')
+		return name[19] - 'A' + 'a';
+	error(NULL, "unsupported named universal character '%.*s'", (int)n, name);
+}
+
 static int
 ident(struct scanner *s)
 {
@@ -163,15 +181,67 @@ ident(struct scanner *s)
 		    || (unsigned char)s->chr >= 0x80) {
 			nextchar(s);
 		} else if (s->chr == '\\') {
-			/* UCN: \uXXXX or \UXXXXXXXX in identifiers.
-			 * We read the UCN directly from file, add UTF-8 to
-			 * the buffer, and leave s->chr pointing to the next
-			 * character (so the loop can continue). */
-			int ucn_val = 0, ucn_n = 0, hexdig;
+			/* UCN in identifiers: \uXXXX, \UXXXXXXXX (fixed width),
+			 * or the C++23 P2290 delimited forms \u{...} / \U{...},
+			 * plus the C++23 P2361 named form \N{NAME}.  We read the
+			 * UCN directly from the file, add UTF-8 to the buffer and
+			 * leave s->chr on the character after the UCN. */
+			int ucn_val = 0, ucn_n = 0, hexdig, d;
 			int c1 = getc(s->file);
 			if (c1 == 'u') ucn_n = 4;
 			else if (c1 == 'U') ucn_n = 8;
-			else { ungetc(c1, s->file); break; }
+			else if (c1 == 'N') {
+				/* \N{NAME}: read the name then resolve it. */
+				int c2 = getc(s->file);
+				char name[64];
+				size_t nlen = 0;
+				if (c2 != '{') {
+					if (c2 != EOF)
+						ungetc(c2, s->file);
+					break;  /* not a UCN escape */
+				}
+				for (;;) {
+					int nc = getc(s->file);
+					if (nc == '}') {
+						s->chr = getc(s->file);
+						break;
+					}
+					if (nc == EOF || nc == '\n') {
+						error(&s->loc, "unterminated named universal character");
+					}
+					if (nlen == sizeof(name) - 1)
+						error(&s->loc, "named universal character is too long");
+					name[nlen++] = nc;
+				}
+				ucn_val = namedval(name, nlen);
+				bufaddutf8(&s->buf, ucn_val);
+				continue;
+			} else {
+				ungetc(c1, s->file);
+				break;
+			}
+			{
+				int c2 = getc(s->file);
+				if (c2 == '{') {
+					/* C++23 P2290 delimited form \u{...} / \U{...}. */
+					if ((d = hexdigval(s->chr = getc(s->file))) < 0)
+						error(&s->loc, "empty delimited universal character name");
+					while (d >= 0) {
+						if (ucn_val > 0x0fffffff)
+							error(&s->loc, "universal character name out of range");
+						ucn_val = ucn_val * 16 + d;
+						d = hexdigval(s->chr = getc(s->file));
+					}
+					if (s->chr != '}')
+						error(&s->loc, "unterminated delimited universal character name");
+					s->chr = getc(s->file);
+					if (ucn_val > 0x10ffff)
+						error(&s->loc, "universal character name out of range");
+					bufaddutf8(&s->buf, ucn_val);
+					continue;
+				}
+				ungetc(c2, s->file);
+			}
 			for (hexdig = 0; hexdig < ucn_n; hexdig++) {
 				int hc = getc(s->file);
 				if (hc >= '0' && hc <= '9') ucn_val = (ucn_val << 4) | (hc - '0');
@@ -352,8 +422,7 @@ delimited(struct scanner *s, const char *what)
 }
 
 /* C++23 P2361 named universal character: read "{NAME}" with s->chr on
- * the opening brace.  Shipping the whole Unicode name table is not
- * practical, so only the Latin letter names are recognised. */
+ * the opening brace, then resolve it via namedval(). */
 static unsigned long
 namedchar(struct scanner *s)
 {
@@ -372,16 +441,7 @@ namedchar(struct scanner *s)
 		nextchar(s);
 	}
 	nextchar(s);
-	name[n] = '\0';
-	if (n == sizeof("LATIN CAPITAL LETTER A") - 1
-	    && memcmp(name, "LATIN CAPITAL LETTER ", 21) == 0
-	    && name[21] >= 'A' && name[21] <= 'Z')
-		return name[21];
-	if (n == sizeof("LATIN SMALL LETTER A") - 1
-	    && memcmp(name, "LATIN SMALL LETTER ", 19) == 0
-	    && name[19] >= 'A' && name[19] <= 'Z')
-		return name[19] - 'A' + 'a';
-	error(&s->loc, "unsupported named universal character '%s'", name);
+	return namedval(name, n);
 }
 
 static void
@@ -664,11 +724,11 @@ again:
 		if (isalpha(s->chr) || s->chr == '_' || s->chr == '$'
 		    || (unsigned char)s->chr >= 0x80)
 			return ident(s);
-		/* UCN \u / \U at start of identifier */
+		/* UCN \u / \U, and C++23 \N{...}, at start of identifier */
 		if (s->chr == '\\') {
 			int peek = getc(s->file);
 			ungetc(peek, s->file);
-			if (peek == 'u' || peek == 'U')
+			if (peek == 'u' || peek == 'U' || peek == 'N')
 				return ident(s);
 		}
 		s->usebuf = true;
