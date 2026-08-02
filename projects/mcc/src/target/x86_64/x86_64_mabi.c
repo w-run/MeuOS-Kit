@@ -281,11 +281,15 @@ mabi_selpar(MFnM *fm, MOut *o, MInsM *parms, int n, uint32_t *vafa)
 	if (fm->retty) {
 		mabi_typclass(&aret, fm->retty);
 		if (aret.inmem) {
-			/* RDI = hidden sret pad; preserve it across the body so the
-			 * return blit in selret cannot be clobbered by regalloc */
+			/* RDI = hidden sret pad.  RDI is caller-saved: any call in the
+			 * body clobbers it, so stash it in an alloca slot (regalloc
+			 * manages the slot across calls) and reload it in selret. */
 			MVal *rdi = rarg(fm, &ni, &ns, false);
 			fm->sret_rdi = true;   /* RDI is the sret buffer; pin it for regalloc */
-			(void)rdi;
+			MVal *pad = tmp(fm, MT_PTR, "sret");
+			mout(o, MMOP_ALLOCA16, MT_PTR, pad, 0, 0);
+			mout_addr(o, MMOP_STORE, MT_PTR, 0, maddr(pad, 0, 1, 0), rdi);
+			fm->sret_pad = pad;
 		}
 		pa = &aret;
 	}
@@ -389,7 +393,14 @@ mabi_selcall(MFnM *fm, MOut *o, MInsM *args, int n, MInsM *call)
 	/* aggregate return */
 	if (pa) {
 		if (aret.inmem) {
-			/* hidden sret pointer in RDI */
+			/* hidden sret pointer in RDI: the call's dst is a fresh
+			 * value (SSA-defined by the call itself), so reserve a
+			 * pad in OUR frame, store its address into the call dst
+			 * (the post-call load reads the pad) and pass it in RDI */
+			MVal *pad = tmp(fm, MT_PTR, "abi");
+			mout_cst(o, MMOP_ALLOCA16, MT_PTR, pad, 0,
+			         mconst_int(fm->host, MT_I32, aret.size));
+			mout(o, MMOP_MOV, MT_PTR, call->dst, pad, 0);
 			MVal *rdi = rarg(fm, &ni, &ns, false);
 			mout(o, MMOP_MOV, MT_PTR, rdi, call->dst, 0);
 		} else {
@@ -489,8 +500,12 @@ mabi_selret(MFnM *fm, MOut *o, MInsM *term)
 			return;
 		}
 		if (aret.inmem) {
-			/* sret: copy the aggregate into the hidden return buffer
-			 * (RDI, pinned by regalloc via fm->sret_rdi), then return it */
+			/* sret: copy the aggregate into the hidden return buffer.
+			 * RDI may have been clobbered by body calls, so reload the
+			 * pad address from the alloca slot stashed by selpar. */
+			if (fm->sret_pad)
+				mout_addr(o, MMOP_LOAD, MT_PTR, reg(fm, X64MREG_RDI),
+				          maddr(fm->sret_pad, 0, 1, 0), 0);
 			mout_blit(fm, o, reg(fm, X64MREG_RDI), term->src[0], aret.size);
 			mout(o, MMOP_MOV, MT_PTR, reg(fm, X64MREG_RAX),
 			     reg(fm, X64MREG_RDI), 0);

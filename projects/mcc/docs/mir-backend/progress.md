@@ -39,7 +39,7 @@
 | P6d | 宽度修复：32 位位移/比较（call 返回值高 32 位） | ✅ | 已提交 0612242 |
 | P6e | regalloc：hint 跨 call 检查（caller-saved 拒绝） | ✅ | 已提交 da6aee4 |
 | P6f | regalloc：calls 数组去 64 上限（超大函数漏 call） | ✅ | 已提交 9718e44 |
-| P6g | Bug B 定位：declspecs 聚合 BLIT dst 未定义 | 🔄 | 调查中 |
+| P6g | Bug B 修复：selcall sret 分配 pad（qualtype 24B） | ✅ | 待提交 |
 | P4c | regalloc：线性扫描（mreg_scan，调用点双池） | ⏳ | — |
 | P4d | regalloc：phi 边移动（机器层 phi 已降级为 pred copy） | ⏳ | — |
 | P4e | regalloc 接管 emit（寄存器感知 + prologue/epilogue 保存 callee-saved） | ⏳ | — |
