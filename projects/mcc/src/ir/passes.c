@@ -64,6 +64,7 @@ run_passes(Fn *fn)
 	P(rega);
 	if (ol >= 1) P(postra);
 	P(fillcfg);
+	P(slotmerge);
 	P(simpljmp);
 	P(fillcfg);
 	/* link blocks in rpo order, terminating the last with link=0 */

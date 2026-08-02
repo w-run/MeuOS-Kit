@@ -437,6 +437,7 @@ spill(Fn *fn)
 	bsinit(mask[1], ntmp);
 	bsinit(maskkl, ntmp);
 	locs = fn->slot;
+	fn->front_slot = locs; /* frontend locals: slotmerge keeps these intact */
 	slot4 = 0;
 	slot8 = 0;
 	nallocgpr = T.ngpr - nreserved(T.gpr0, T.ngpr);

@@ -3449,6 +3449,8 @@ cpp_template_decl(struct scope *s, struct type *owner)
 	tmpl->insts_end = &tmpl->insts;
 	tmpl->cls_insts = NULL;
 	tmpl->cls_insts_end = &tmpl->cls_insts;
+	tmpl->constraint = NULL;
+	tmpl->nconstraint = 0;
 	tmpl->next = NULL;
 	pe = &tmpl->params;
 

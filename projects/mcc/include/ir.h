@@ -432,6 +432,7 @@ struct Fn {
 	Blk **rpo;
 	bits reg;
 	int slot;
+	int front_slot; /* slots owned by frontend locals (spill input frame) */
 	int salign;
 	char vararg;
 	char va_gpregs;
@@ -679,6 +680,9 @@ void rega(Fn *);
 
 /* postra.c */
 void postra(Fn *);
+
+/* slotmerge.c */
+void slotmerge(Fn *);
 
 /* emit.c */
 void emitfnlnk(char *, Lnk *, FILE *);
