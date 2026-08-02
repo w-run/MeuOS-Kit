@@ -1452,6 +1452,54 @@ emitins(Ins i, E *e)
 				fprintf(e->f, ".Lxsel%d:\n", l);
 				break;
 			}
+			if (INRANGE(i.op, Oflagieq, Oflagiult)) {
+				/* Kl (64-bit) integer flag set.  The preceding
+				 * Oxcmp Kl (decomposed above) already left EFLAGS
+				 * describing the full 64-bit comparison: if the
+				 * high halves differ, cmpl set flags from their
+				 * signed/unsigned difference; if equal, cmpl on
+				 * the low halves set flags from their unsigned
+				 * comparison.  For signed conditions (lt/le/gt/ge)
+				 * the high-half cmpl already produced the correct
+				 * sign flag, and for equality/unsigned the low-half
+				 * flags are correct, so a plain setCC matches the
+				 * 32-bit semantics.  Store the 0/1 result as a
+				 * 64-bit value (low half in EAX, high half 0). */
+				int o;
+				/* The setCC mnemonic lives in the omap entry's
+				 * format string ("set<s> %B=...").  Reuse the
+				 * same lookup as the Kw path so the condition
+				 * codes stay in one place. */
+				for (o=0;; o++) {
+					if (omap[o].op == NOp)
+						die("no match for %s(%c)",
+							optab[i.op].name, "wlsd"[i.cls]);
+					if (omap[o].op == i.op
+					&& (omap[o].cls == Ki
+					    || omap[o].cls == Ka))
+						break;
+				}
+				/* Extract the "set<cc>" suffix. */
+				{
+					const char *fmt = omap[o].fmt;
+					const char *p = strstr(fmt, "set");
+					char cc[8];
+					int n = 0;
+					assert(p);
+					p += 3;
+					while (*p && *p != ' ' && *p != '\t'
+					    && n < (int)sizeof cc - 1)
+						cc[n++] = *p++;
+					cc[n] = 0;
+					assert(kl_isslot(i.to));
+					fprintf(e->f, "\tset%s %%al\n", cc);
+					fprintf(e->f, "\tmovzbl %%al, %%eax\n");
+					kl_store_from(i.to, 0, EAX, e);
+					fprintf(e->f, "\txorl %%eax, %%eax\n");
+					kl_store_from(i.to, 1, EAX, e);
+				}
+				break;
+			}
 			die("i386: Kl op %s not yet supported",
 				optab[i.op].name);
 		}
