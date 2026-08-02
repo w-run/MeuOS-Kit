@@ -27,7 +27,8 @@
 | worker-mir-tests | MIR/C 测试缺口 |
 
 ### 缺陷队列（2026-08-03）
-A-N ✅ 全闭环（J 长期项禁用）；Q/R/S/T 🔄 open。状态只标 open/pending，修复 push 后由 worker-doc 周期 pull 补记 closed + 哈希。
+A-N ✅ 全闭环（J 长期项禁用）；Q/R/S/T/U/V 🔄 open。状态只标 open/pending，修复 push 后由 worker-doc 周期 pull 补记 closed + 哈希。
+- V：MIR msimp pow2 强度削减误编译有符号 div/rem（worker-fold 复检缺陷 F 时发现，修复在途）
 
 ## 团队架构（语义化管理）
 

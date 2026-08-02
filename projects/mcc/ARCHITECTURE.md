@@ -322,6 +322,8 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
 | R | concept 形参名 ≠ `T` 时被误判 undeclared | 🔄 open（worker-r） |
 | S | lambda 按值捕获类对象不调用拷贝构造 | 🔄 open（worker-lambda） |
 | T | 嵌套 lambda 无法再捕获外层已捕获变量 | 🔄 open（worker-lambda） |
+| U | 无数据成员类按值传参段错误（size-0 by-value SEGV，0802.md 记录纠错） | 🔄 open（待分配） |
+| V | MIR msimp pow2 强度削减误编译有符号 div/rem（负数错误，`-7/2=-4` 应 -3） | 🔄 open（worker-fold 修复在途） |
 
 > 状态规则：缺陷状态只标 open/pending；修复提交 push 后由 worker-doc 周期 pull 补记 closed + 哈希。C++ 覆盖状态见上表（C++98~23 收官 ✅，2026-08-02）。
 
