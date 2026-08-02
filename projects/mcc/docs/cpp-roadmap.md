@@ -76,8 +76,9 @@
   - **阶段 3**：constexpr 对象（含成员访问）→ 需要 mini 内存模型（aburi `EvalMemory` 思路）。⛔ 未做。
 - **风险**：求值器与 C 后端折叠逻辑重叠，需明确"谁负责"（建议求值器只读 expr 树、输出 MConst，不依赖 IR）。`constexpr` 递归深度、循环（C++14 放宽）需限制防止编译期挂起。✅ 已用 g_cpp_cexpr_depth=64 上限防挂起；求值器只读 eval() 折叠结果，不引入 IR。已知缺陷：早期 WIP 因「尾随 token 栈上悬垂指针 + eval 结果 use-after-free + fd 空解引用」段错误 139，均已修复（尾随 token 堆分配、折叠值先拷贝再释放、空检查前置）。
 
-### 2.5 移动语义（右值引用）
+### 2.5 移动语义（右值引用）（✅ 已完成，4491a27）
 - **机制**：`T&&` 类型 + 引用折叠 + 重载决议对「值类别（lvalue/rvalue）」的选择 + 移动构造/移动赋值。m++ 已有引用参数（`prefer_ref` mangle 'R' 标记）与重载决议雏形。
+- **实现（4491a27）**：`T&&` 解析（lexer `&&`=TLAND）+ `type.isrref` + mangle 区分 'R'/'V'（左值/右值引用重载）+ 实参值类别编码（lvalue→R、临时→V）+ 临时对象 rvalue 标记 + 右值引用绑定临时 + 构造引用参数传址修复。
 - **参考**：
   - `reference/aburiscript/collect/collect_overload.cpp`（重载候选排序，含引用限定符；1033-1340 行附近有参数绑定/候选生成）。
   - `reference/aburiscript/collect/collect_init.cpp`（初始化序列选择复制/移动构造）。
