@@ -10,7 +10,7 @@
 |---|---|---|---|
 | planner | 规划型 | 参考实现探索 + 社区调研 + 可行性分析 | ✅ 完成（cpp-roadmap.md e745f17） |
 | auditor | 验收检查型 | 代码验证 + 质量检测 + 审计 | ✅ 首轮闭环（25254fe→6003f47） |
-| worker-cpp | 工作型（m++ 前端） | C++ 特性实现 | 🔄 constexpr 半成品已 stash |
+| worker-cpp | 工作型（m++ 前端） | C++ 特性实现 | ✅ constexpr 完成（3ac233b）+ B/C/D/E 缺陷修复 |
 | worker-toolchain | 工作型（6 架构/mt-as） | 架构后端 + 汇编器修复 | 🔄 arm c99-float 在途已 stash |
 | worker-libc | 专项（libc 补全） | C99 标准库缺口 | ✅ C99 面完成（11 提交） |
 | worker-test | 专项（测试矩阵） | 测试扩充 + 缺陷发现 | ✅ 6 批完成 |
@@ -36,30 +36,31 @@
 | auto/decltype | 160e2a2 | ✅ |
 | 变参模板 | df0c489 | ✅ |
 | lambda | 877beed | ✅ |
-| constexpr | — | 🔄 半成品 stash@{0}（gp-3 网络失败遗留） |
+| constexpr | 3ac233b | ✅ |
 
 ## libc 补全（worker-libc，11 提交）
 
 转换：strtof/atof/atol/atoll/div/ldiv/rand/srand/mblen 家族/getppid；printf %f/%e/%g/%a（glibc 一致）+ 舍入修复；scanf 整数/浮点/长度修饰；time.h clock/asctime 等；Makefile .DEFAULT_GOAL 修复。
 C99 剩余缺口：strtold/%Lf（mcc 无 long double）、i386 完整构建（Kl flagislt）。
 
-## 缺陷队列（待修）
+## 缺陷队列（B/C/D/E 已闭环）
 
 | 编号 | 缺陷 | 状态 |
 |---|---|---|
-| B | m++ 自由函数重载被拒 | 待修（worker-cpp） |
-| C | 继承析构链缺失 | 待修 |
-| D | static void 方法误判构造 | 待修 |
-| E | ns 四项限制 | 待修 |
-| A/B | mcc atomic FAIL、fscanf 栈布局挂死 | 待排查 |
-| F | MIR fold shl/sar(x,0) 优化缺口 | 低优先 |
-| i386 | Kl flagislt/flagiult 未支持 | 待修（worker-toolchain） |
+| B | m++ 自由函数重载被拒 | ✅ 83db5ff |
+| C | 继承析构链缺失 | ✅ c19a351 |
+| D | static void 方法误判构造 | ✅ 16f1948 |
+| E | ns 四项限制 | ✅ 6f3d734 |
+| A/B | mcc atomic FAIL、fscanf 栈布局挂死 | ✅ 已闭环（840256c 判定不复现） |
+| F | MIR fold shl/sar(x,0) 优化缺口 | 低优先（未修） |
+| i386 | Kl flagislt/flagiult 未支持 | ✅ 400e0df |
+| MIR 后端 | va_list 溢出路径（va_arg/vastart） | 🔄 待 MIR 后端默认化前处理 |
 
 ## stash 说明
 
-- stash@{0} `constexpr-wip+gp2-inflight`：gp-3 constexpr 半成品 + gp-2 arm/i386 在途（网络失败遗留，新 worker 恢复用）
+- stash@{0} `constexpr-wip+gp2-inflight`：历史遗留。constexpr 已由 3ac233b 重新实现提交，gp-2 在途已恢复提交（bf39451/400e0df/arm 修复）；stash 内容已过时，可清理。
 - stash@{1} `gp2-inflight`：早期审计相关 stash
-- pending/：14 个复现测试文件（未跟踪，worker-test 产出）
+- pending/：10 个复现/待处置测试文件（未跟踪，worker-test 产出）。B/C/D/E 转正后 ctor_base_dtor/static_void_method/free_func_overload/ns_limits 已移出到 test/cpp/；余下含 value_param_member_call（缺陷 A 不复现可转正向）等。
 
 ## 会话注意
 
