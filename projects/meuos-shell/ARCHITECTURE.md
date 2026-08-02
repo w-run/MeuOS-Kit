@@ -66,7 +66,7 @@ meuos-shell/
 | 脚本模式 `msh script.sh` | ✅ | 完整解析执行 |
 | 注释行 (`#`) / 空行 | ✅ | 词法层处理 |
 | 交互模式（REPL） | ✅ | 行编辑 + 历史 + 作业回收 |
-| 内建命令 | ✅ | cd/export/unset/set/exit/echo/pwd/read/type/exec/jobs/fg/bg/wait 等 |
+| 内建命令 | ✅ | cd/export/unset/set/exit/echo/pwd/read/type/exec/jobs/fg/bg/wait + **Shell-Utils 联动：printf/test/[/sleep/seq** 等 |
 | 管道 (`\|`) | ✅ | N 级管道 |
 | 重定向 (`>` `<` `>>` `>&2` `<&N`) | ✅ | 含 fd 复制 |
 | 变量 (`$VAR` `${VAR}` 修饰符) | ✅ | `:-` `:=` `:+` `:?` `#` `##` `%` `%%` `/` 替换 `${#VAR}` |

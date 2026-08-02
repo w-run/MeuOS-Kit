@@ -251,9 +251,16 @@ meow / msh / 工具链 / sysroot
 
 ### Phase 7C — 优化
 - ✅ **mz 工具集成 libmz** — 封装 `meuos-compress` 库，提供 `.mz` 压缩/解压 + `.mxa` 归档创建/列表/提取/测试
+- ✅ **目录重构** — 按 core/text/file/arch/sys/net 分类重构 src/utils/ 目录（73 文件迁移 + Makefile VPATH 适配）
+- ✅ **网络工具集** — ifconfig/route/netstat/ping/curl/wget（6 个网络工具）
 - ⏳ 并行化（sort -jN/grep -jN）
 - ⏳ mmap 大文件处理
 - ⏳ SIMD 加速（grep 字节搜索等）
+
+### Phase 7E — Shell-Utils 联动（✅ 完成）
+- ✅ **高性能内建** — printf/test/[ /sleep/seq 作为 msh 内建，避免 fork+exec
+- ✅ **libutils.a 共享** — msh 链接 libutils.a，共享 xmalloc/color/getopt/version
+- ✅ **105 项回归测试** — 含 Shell-Utils 联动内建测试
 
 ### Phase 7D — 压缩统一架构（规划中）
 > **架构决策**：将所有压缩/解压算法收归 `meuos-compress` 库，
@@ -308,6 +315,12 @@ meow / msh / 工具链 / sysroot
 | chown | ✅ | 用户名/数字UID:GID+递归+--reference | — |
 | unzip | ✅ | PKZIP解压+stored/deflate+CRC32+列表+测试 | zip创建 |
 | **mz** | ✅ | libmz封装：.mz压缩/解压(L1-L9)+.mxa归档创建/列表/提取/测试 | — |
+| **ifconfig** | ✅ | 接口信息+统计+getifaddrs+MAC地址 | — |
+| **route** | ✅ | 路由表查看(/proc/net/route) | — |
+| **netstat** | ✅ | TCP/UDP/Unix套接字+路由+接口+统计 | — |
+| **ping** | ✅ | ICMP echo+RTT统计+超时 | IPv6 |
+| **curl** | ✅ | HTTP/1.1 GET/POST+重定向+头+输出 | HTTPS/TLS |
+| **wget** | ✅ | HTTP下载+断点续传+重试+进度 | HTTPS/TLS |
 
 ## 12. 实施笔记
 
