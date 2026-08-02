@@ -116,6 +116,366 @@ labelstmt(struct func *f, struct scope *s)
 	pending_label = NULL;
 }
 
+/* ---- C++ range-based `for` (`for (auto x : expr) stmt`) -----------------
+ * m++ has no native range-for; this lowers it to a traditional for loop
+ * over two iterator pointers plus a hidden copy of the range:
+ *
+ *   for (auto x : arr) BODY
+ *     =>
+ *   {
+ *     auto __c = arr;                          (hidden range copy)
+ *     for (auto __b = __c, __e = __c + N;      (array: [&__c[0], &__c[N)))
+ *          __b != __e; ++__b) {
+ *       auto x = *__b;                         (element binding)
+ *       BODY
+ *     }
+ *   }
+ *
+ * Member-style ranges (`begin()` / `end()` members) lower identically with
+ * `__c.begin()` / `__c.end()` supplying the iterator pair.  The rewritten
+ * statement is replayed through the normal for-loop parser, so break /
+ * continue / scope / destructor semantics come for free.  The whole thing
+ * is a C++ (g_lang == 1) only path; C for-loops are untouched.
+ */
+
+/* Grow-only token buffer used while rewriting the range-for statement. */
+struct tokbuf {
+	struct token *toks;
+	size_t n, cap;
+};
+
+static void
+tb_push(struct tokbuf *b, struct token t)
+{
+	if (b->n >= b->cap) {
+		b->cap = b->cap ? b->cap * 2 : 32;
+		b->toks = xreallocarray(b->toks, b->cap, sizeof *b->toks);
+	}
+	if (t.lit)
+		t.lit = strdup(t.lit);
+	b->toks[b->n++] = t;
+}
+
+static void
+tb_punct(struct tokbuf *b, struct location loc, enum tokenkind k)
+{
+	struct token t;
+	memset(&t, 0, sizeof t);
+	t.kind = k;
+	t.loc = loc;
+	tb_push(b, t);
+}
+
+static void
+tb_ident(struct tokbuf *b, struct location loc, const char *name)
+{
+	struct token t;
+	memset(&t, 0, sizeof t);
+	t.kind = tokenget(name, strlen(name));
+	t.loc = loc;
+	tb_push(b, t);
+}
+
+static void
+tb_num(struct tokbuf *b, struct location loc, unsigned long long v)
+{
+	struct token t;
+	char buf[32];
+	memset(&t, 0, sizeof t);
+	snprintf(buf, sizeof buf, "%llu", v);
+	t.kind = TNUMBER;
+	t.loc = loc;
+	t.lit = strdup(buf);
+	tb_push(b, t);
+}
+
+/* Collect the whole `for (...)` head up to and including its ')' into `h`,
+ * leaving the stream just past the ')'.  Records the token index of the
+ * range separator ':' (at head depth, not a ternary else) in *colon and,
+ * if present, the ';' that terminates an init-statement in *semi.
+ * Returns true if the head is a range-for. */
+static bool
+cpp_head_collect(struct tokbuf *h, int *colon, int *semi)
+{
+	int depth = 0, q = 0;
+	*colon = -1;
+	*semi = -1;
+	for (;;) {
+		if (tok.kind == TEOF)
+			error(&tok.loc, "unexpected end of file in 'for' header");
+		if (depth == 0 && tok.kind == TRPAREN) {
+			tb_push(h, tok);
+			next();
+			break;
+		}
+		if (depth == 0) {
+			if (tok.kind == TQUESTION)
+				++q;
+			else if (tok.kind == TCOLON) {
+				if (q > 0)
+					--q;
+				else if (*colon < 0)
+					*colon = (int)h->n;
+			} else if (tok.kind == TSEMICOLON && *semi < 0) {
+				*semi = (int)h->n;
+			}
+		}
+		if (tok.kind == TLPAREN || tok.kind == TLBRACK || tok.kind == TLBRACE)
+			++depth;
+		else if (tok.kind == TRPAREN || tok.kind == TRBRACK ||
+		    tok.kind == TRBRACE)
+			--depth;
+		tb_push(h, tok);
+		next();
+	}
+	return *colon >= 0;
+}
+
+static void body_buf_stmt(struct tokbuf *b); /* fwd */
+
+/* Buffer '(' ... matching ')' into `b`. */
+static void
+body_buf_paren(struct tokbuf *b)
+{
+	int depth = 0;
+	for (;;) {
+		if (tok.kind == TEOF)
+			error(&tok.loc, "unexpected end of file in statement");
+		tb_push(b, tok);
+		if (tok.kind == TLPAREN)
+			++depth;
+		else if (tok.kind == TRPAREN && --depth == 0) {
+			next();
+			return;
+		}
+		next();
+	}
+}
+
+/* Buffer one statement (the range-for body) into `b` at the token level.
+ * Compound statements brace-match; control statements recurse; anything
+ * else is a simple statement ending at the first ';'. */
+static void
+body_buf_stmt(struct tokbuf *b)
+{
+	switch (tok.kind) {
+	case TLBRACE: {
+		int depth = 0;
+		for (;;) {
+			tb_push(b, tok);
+			if (tok.kind == TLBRACE)
+				++depth;
+			else if (tok.kind == TRBRACE && --depth == 0) {
+				next();
+				return;
+			}
+			next();
+		}
+	}
+	case TIF:
+		tb_push(b, tok);
+		next();
+		body_buf_paren(b);
+		body_buf_stmt(b);
+		if (tok.kind == TELSE) {
+			tb_push(b, tok);
+			next();
+			body_buf_stmt(b);
+		}
+		return;
+	case TWHILE:
+	case TFOR:
+		tb_push(b, tok);
+		next();
+		body_buf_paren(b);
+		body_buf_stmt(b);
+		return;
+	case TDO:
+		tb_push(b, tok);
+		next();
+		body_buf_stmt(b);
+		tb_push(b, tok); /* 'while' */
+		next();
+		body_buf_paren(b);
+		if (tok.kind == TSEMICOLON) {
+			tb_push(b, tok);
+			next();
+		}
+		return;
+	case TSWITCH:
+		tb_push(b, tok);
+		next();
+		body_buf_paren(b);
+		body_buf_stmt(b);
+		return;
+	default:
+		for (;;) {
+			tb_push(b, tok);
+			if (tok.kind == TSEMICOLON) {
+				next();
+				return;
+			}
+			next();
+		}
+	}
+}
+
+/* Try to parse a C++ range-for starting at the current for-head token
+ * (right after the '(' of `for`).  Returns true and consumes the whole
+ * statement on success; returns false with the token stream restored if
+ * the head is not a range-for. */
+static bool
+cpp_range_for(struct scope *s, struct func *f)
+{
+	struct tokbuf h = {0}, out = {0};
+	struct expr *re;
+	struct type *rt;
+	struct location loc = tok.loc;
+	bool is_array, has_begin, has_end;
+	char mname[128];
+	unsigned long long n = 0;
+	int colon, semi;
+	size_t i;
+
+	if (!cpp_head_collect(&h, &colon, &semi)) {
+		/* not a range-for: restore the head for the C for-loop parser.
+		 * The head scan read one token past the ')', so push it below
+		 * the head tokens to keep the stream position intact, then
+		 * reload the first head token into `tok`.  The single past token
+		 * must outlive this function (tokpush keeps a pointer), so it
+		 * lives on the heap. */
+		struct token *past = xmalloc(sizeof *past);
+		*past = tok;
+		if (past->lit)
+			past->lit = strdup(past->lit);
+		tokpush(past, 1);
+		tokpush(h.toks, h.n);
+		next();
+		return false;
+	}
+	/* h.toks = `<head> )`; indices:
+	 *   init-statement:  [0 .. semi]  incl. its ';'  (if semi >= 0)
+	 *   range decl:      [semi+1 .. colon)           (or [0 .. colon))
+	 *   range expression:[colon+1 .. h.n-1)          (exclude the ')')  */
+
+	/* parse the range expression to learn its type.  The current token
+	 * (the first token of the loop body) must be preserved: it was read
+	 * one past the ')' by the head scan, so push it below the range
+	 * expression tokens before re-parsing the range expression. */
+	{
+		struct token *body_first = xmalloc(sizeof *body_first);
+		*body_first = tok;
+		if (body_first->lit)
+			body_first->lit = strdup(body_first->lit);
+		tokpush(body_first, 1);
+		tokpush(&h.toks[colon + 1], h.n - 1 - (colon + 1));
+	}
+	next(); /* load the first range-expression token from the push */
+	re = expr(s);
+	rt = re->type;
+	/* Array ranges arrive decayed to `&arr` (a pointer with the array
+	 * type on the operand); recover the array type for the element
+	 * count. */
+	if (re->kind == EXPRUNARY && re->op == TBAND &&
+	    re->base->type->kind == TYPEARRAY)
+		rt = re->base->type;
+	delexpr(re);
+
+	is_array = rt->kind == TYPEARRAY;
+	has_begin = has_end = false;
+	if (!is_array && (rt->kind == TYPESTRUCT || rt->kind == TYPEUNION) &&
+	    rt->scope) {
+		has_begin = cpp_find_unique_member(rt, "begin",
+		    mname, sizeof mname) != NULL;
+		has_end = cpp_find_unique_member(rt, "end",
+		    mname, sizeof mname) != NULL;
+	}
+	if (!is_array && !(has_begin && has_end))
+		error(&tok.loc, "range-based 'for' requires an array or a type with member 'begin()'/'end()'");
+	if (is_array)
+		n = rt->size / rt->base->size;
+
+	/* emit the rewritten statement */
+	tb_punct(&out, loc, TLBRACE);			/* { */
+	if (semi >= 0) {				/* init-statement */
+		for (i = 0; i <= (size_t)semi; ++i)
+			tb_push(&out, h.toks[i]);
+	}
+	tb_punct(&out, loc, TAUTO);			/* auto __c = <range>; */
+	tb_ident(&out, loc, "__c");
+	tb_punct(&out, loc, TASSIGN);
+	for (i = (size_t)colon + 1; i + 1 < h.n; ++i)
+		tb_push(&out, h.toks[i]);
+	tb_punct(&out, loc, TSEMICOLON);
+
+	tb_punct(&out, loc, TFOR);			/* for ( */
+	tb_punct(&out, loc, TLPAREN);
+	tb_punct(&out, loc, TAUTO);			/* auto __b = <begin>, */
+	tb_ident(&out, loc, "__b");
+	tb_punct(&out, loc, TASSIGN);
+	if (is_array) {
+		tb_ident(&out, loc, "__c");
+	} else {
+		tb_ident(&out, loc, "__c");
+		tb_punct(&out, loc, TPERIOD);
+		tb_ident(&out, loc, "begin");
+		tb_punct(&out, loc, TLPAREN);
+		tb_punct(&out, loc, TRPAREN);
+	}
+	tb_punct(&out, loc, TCOMMA);
+	tb_ident(&out, loc, "__e");			/* auto __b, __e = <end>; */
+	tb_punct(&out, loc, TASSIGN);
+	if (is_array) {
+		tb_ident(&out, loc, "__c");
+		tb_punct(&out, loc, TADD);
+		tb_num(&out, loc, n);
+	} else {
+		tb_ident(&out, loc, "__c");
+		tb_punct(&out, loc, TPERIOD);
+		tb_ident(&out, loc, "end");
+		tb_punct(&out, loc, TLPAREN);
+		tb_punct(&out, loc, TRPAREN);
+	}
+	tb_punct(&out, loc, TSEMICOLON);		/* __b != __e; */
+	tb_ident(&out, loc, "__b");
+	tb_punct(&out, loc, TNEQ);
+	tb_ident(&out, loc, "__e");
+	tb_punct(&out, loc, TSEMICOLON);
+	tb_punct(&out, loc, TINC);			/* ++__b) { */
+	tb_ident(&out, loc, "__b");
+	tb_punct(&out, loc, TRPAREN);
+	tb_punct(&out, loc, TLBRACE);
+
+	for (i = semi >= 0 ? (size_t)semi + 1 : 0;	/* <elem-decl> = *__b; */
+	    i < (size_t)colon; ++i)
+		tb_push(&out, h.toks[i]);
+	tb_punct(&out, loc, TASSIGN);
+	tb_punct(&out, loc, TMUL);
+	tb_ident(&out, loc, "__b");
+	tb_punct(&out, loc, TSEMICOLON);
+
+	body_buf_stmt(&out);				/* original body */
+
+	tb_punct(&out, loc, TRBRACE);			/* } } */
+	tb_punct(&out, loc, TRBRACE);
+
+	{
+		/* Preserve the token after the buffered body: body_buf_stmt
+		 * consumed it into `tok`, and the replay below would overwrite
+		 * it.  Push it below the rewritten statement tokens (heap copy:
+		 * tokpush keeps a pointer). */
+		struct token *after_body = xmalloc(sizeof *after_body);
+		*after_body = tok;
+		if (after_body->lit)
+			after_body->lit = strdup(after_body->lit);
+		tokpush(after_body, 1);
+		tokpush(out.toks, out.n);
+	}
+	next(); /* load the first rewritten token ('{') */
+	stmt(f, s);
+	return true;
+}
+
 /* 6.8 Statements and blocks */
 void
 stmt(struct func *f, struct scope *s)
@@ -322,6 +682,13 @@ stmt(struct func *f, struct scope *s)
 		next();
 		expect(TLPAREN, "after 'for'");
 		s = mkscope(s);
+		{
+			extern int g_lang;
+			if (g_lang == 1 && cpp_range_for(s, f)) {
+				s = delscope(s);
+				break;
+			}
+		}
 		if (!decl(s, f)) {
 			if (tok.kind != TSEMICOLON) {
 				e = expr(s);
