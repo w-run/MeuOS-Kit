@@ -134,3 +134,43 @@ scanf(const char *format, ...)
 	va_end(arguments);
 	return result;
 }
+
+/* vfscanf/fscanf/vscanf: read the whole stream into a buffer and run the
+ * string scanner on it (matches the existing scanf() approach; adequate
+ * for the console/pipe streams the libc supports). */
+static int
+stream_to_buffer(FILE *stream, char *input, size_t size)
+{
+	size_t n = 0;
+	int c;
+	while (n + 1 < size && (c = fgetc(stream)) != EOF)
+		input[n++] = (char)c;
+	input[n] = 0;
+	return (int)n;
+}
+
+int
+vfscanf(FILE *stream, const char *format, va_list arguments)
+{
+	char input[1024];
+	if (stream_to_buffer(stream, input, sizeof input) == 0)
+		return EOF;
+	return vsscanf(input, format, arguments);
+}
+
+int
+fscanf(FILE *stream, const char *format, ...)
+{
+	va_list arguments;
+	int result;
+	va_start(arguments, format);
+	result = vfscanf(stream, format, arguments);
+	va_end(arguments);
+	return result;
+}
+
+int
+vscanf(const char *format, va_list arguments)
+{
+	return vfscanf(stdin, format, arguments);
+}

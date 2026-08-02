@@ -299,6 +299,7 @@ check: $(ATOMIC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/strtod-hex test/strtod_hex.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/strtof test/strtof.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/fp-fmt test/fp_fmt.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/fscanf test/fscanf.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/libgen test/libgen.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/ctype test/ctype.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/assert test/assert.c
@@ -341,6 +342,7 @@ check: $(ATOMIC_LIB)
 	/tmp/meuos-libc-check/strtod-hex
 	/tmp/meuos-libc-check/strtof
 	/tmp/meuos-libc-check/fp-fmt
+	/tmp/meuos-libc-check/fscanf
 	/tmp/meuos-libc-check/libgen
 	/tmp/meuos-libc-check/ctype
 	/tmp/meuos-libc-check/assert
