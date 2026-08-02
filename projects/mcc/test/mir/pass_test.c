@@ -266,6 +266,152 @@ test_phi_copy(void)
 	mfn_free(fn);
 }
 
+/* Test 10: signed division / remainder folding with a negative operand.
+ * div(-7, 3) -> -2 (truncation toward zero), rem(-7, 3) -> -1. */
+static void
+test_fold_sdiv_neg(void)
+{
+	MFn *fn = mfn_new("fold_sdiv_neg", 2);
+	MBlk *b = mblk_new(fn, "entry");
+	mfn_addblk(fn, b);
+
+	MVal *a = mval_new(fn, MV_TEMP, MT_I32, 0, "a");
+	MVal *r = mval_new(fn, MV_TEMP, MT_I32, 0, "r");
+	MConst *cneg7 = mconst_int(fn, MT_I32, -7);
+	MConst *c3 = mconst_int(fn, MT_I32, 3);
+	madd1(fn, b, MOP_PAR, MT_I32, a, MREF_CON(0));
+	madd(fn, b, MOP_DIV, MT_I32, r, MREF_CON(cneg7), MREF_CON(c3));
+	mret(fn, b, MREF_VAL(r));
+
+	run_mir_pass(fn, MIR_PASS_FOLD);
+	CHECK(b->nins == 1, "sdiv folded away");
+	if (b->term.src[0].con)
+		CHECK(b->term.src[0].con->u.i == -2, "div(-7,3) folds to -2");
+	mfn_free(fn);
+}
+
+/* Test 11: signed remainder folding with a negative operand. */
+static void
+test_fold_rem_neg(void)
+{
+	MFn *fn = mfn_new("fold_rem_neg", 2);
+	MBlk *b = mblk_new(fn, "entry");
+	mfn_addblk(fn, b);
+
+	MVal *a = mval_new(fn, MV_TEMP, MT_I32, 0, "a");
+	MVal *r = mval_new(fn, MV_TEMP, MT_I32, 0, "r");
+	MConst *cneg7 = mconst_int(fn, MT_I32, -7);
+	MConst *c3 = mconst_int(fn, MT_I32, 3);
+	madd1(fn, b, MOP_PAR, MT_I32, a, MREF_CON(0));
+	madd(fn, b, MOP_REM, MT_I32, r, MREF_CON(cneg7), MREF_CON(c3));
+	mret(fn, b, MREF_VAL(r));
+
+	run_mir_pass(fn, MIR_PASS_FOLD);
+	CHECK(b->nins == 1, "srem folded away");
+	if (b->term.src[0].con)
+		CHECK(b->term.src[0].con->u.i == -1, "rem(-7,3) folds to -1");
+	mfn_free(fn);
+}
+
+/* Test 12: shift-by-zero is the identity — shl(x,0)/sar(x,0) -> x.
+ * NOTE: FOLD currently does NOT simplify these (verified 2026-08-02); the
+ * instructions are kept and the result is still correct.  This test pins
+ * the safe no-op behavior so a later simplification stays regression-checked:
+ * once fold handles shift-by-zero, tighten these to expect b->nins == 1. */
+static void
+test_fold_shift_zero(void)
+{
+	MFn *fn = mfn_new("fold_shift_zero", 2);
+	MBlk *b = mblk_new(fn, "entry");
+	mfn_addblk(fn, b);
+
+	MVal *x = mval_new(fn, MV_TEMP, MT_I32, 0, "x");
+	MVal *r1 = mval_new(fn, MV_TEMP, MT_I32, 0, "r1");
+	MVal *r2 = mval_new(fn, MV_TEMP, MT_I32, 0, "r2");
+	madd1(fn, b, MOP_PAR, MT_I32, x, MREF_CON(0));
+	MConst *c0 = mconst_int(fn, MT_I32, 0);
+	madd(fn, b, MOP_SHL, MT_I32, r1, MREF_VAL(x), MREF_CON(c0));
+	madd(fn, b, MOP_SAR, MT_I32, r2, MREF_VAL(x), MREF_CON(c0));
+	mret(fn, b, MREF_VAL(r1));
+
+	run_mir_pass(fn, MIR_PASS_FOLD);
+	/* currently not simplified: PAR + SHL + SAR remain, ret keeps r1 */
+	CHECK(count_op(b, MOP_SHL) == 1, "shl kept (not yet simplified)");
+	CHECK(count_op(b, MOP_SAR) == 1, "sar kept (not yet simplified)");
+	CHECK(b->term.src[0].val == r1, "ret still references r1");
+	mfn_free(fn);
+}
+
+/* Test 13: floating-point constant comparison folding.
+ * cflt(1.5, 2.5) -> 1, cfgt(2.5, 1.5) -> 1. */
+static void
+test_fold_fcmp(void)
+{
+	MFn *fn = mfn_new("fold_fcmp", 2);
+	MBlk *b = mblk_new(fn, "entry");
+	mfn_addblk(fn, b);
+
+	MVal *a = mval_new(fn, MV_TEMP, MT_I32, 0, "a");
+	MVal *r1 = mval_new(fn, MV_TEMP, MT_I32, 0, "r1");
+	MVal *r2 = mval_new(fn, MV_TEMP, MT_I32, 0, "r2");
+	MConst *c15 = mconst_flt(fn, MT_F64, 1.5);
+	MConst *c25 = mconst_flt(fn, MT_F64, 2.5);
+	madd1(fn, b, MOP_PAR, MT_I32, a, MREF_CON(0));
+	madd(fn, b, MOP_CFLT, MT_I32, r1, MREF_CON(c15), MREF_CON(c25));
+	madd(fn, b, MOP_CFGT, MT_I32, r2, MREF_CON(c25), MREF_CON(c15));
+	mret(fn, b, MREF_VAL(r1));
+
+	run_mir_pass(fn, MIR_PASS_FOLD);
+	CHECK(b->nins == 1, "both float compares folded away");
+	if (b->term.src[0].con)
+		CHECK(b->term.src[0].con->u.i == 1, "1.5 < 2.5 folds to 1");
+	mfn_free(fn);
+}
+
+/* Test 14: a call is a side effect and survives DCE even when its result
+ * is unused. */
+static void
+test_dce_call_sideeffect(void)
+{
+	MFn *fn = mfn_new("dce_call", 2);
+	MBlk *b = mblk_new(fn, "entry");
+	mfn_addblk(fn, b);
+
+	MVal *r = mval_new(fn, MV_TEMP, MT_I32, 0, "r");
+	MVal *sym = mval_global(fn, "side_effect", true, false);
+	MConst *c1 = mconst_int(fn, MT_I32, 1);
+	madd1(fn, b, MOP_ARG, MT_I32, 0, MREF_CON(c1));
+	madd1(fn, b, MOP_CALL, MT_I32, r, MREF_VAL(sym));
+	mretvoid(fn, b);
+
+	run_mir_pass(fn, MIR_PASS_DCE);
+	CHECK(count_op(b, MOP_CALL) == 1, "call kept (side effect)");
+	mfn_free(fn);
+}
+
+/* Test 15: an unused load is treated as side-effect-free and removed by
+ * DCE (passes.c marks only STORE/CALL/ALLOCA/VASTART/SALLOC as effects).
+ * NOTE: this pins current behavior; revisit if volatile/aliasing awareness
+ * is added. */
+static void
+test_dce_load_removed(void)
+{
+	MFn *fn = mfn_new("dce_load", 2);
+	MBlk *b = mblk_new(fn, "entry");
+	mfn_addblk(fn, b);
+
+	MVal *p = mval_new(fn, MV_TEMP, MT_PTR, 0, "p");
+	MVal *v = mval_new(fn, MV_TEMP, MT_I32, 0, "v");
+	madd1(fn, b, MOP_PAR, MT_PTR, p, MREF_CON(0));
+	madd1(fn, b, MOP_LOAD, MT_I32, v, MREF_VAL(p));
+	mretvoid(fn, b);
+
+	run_mir_pass(fn, MIR_PASS_DCE);
+	CHECK(count_op(b, MOP_LOAD) == 0, "unused load removed");
+	CHECK(count_op(b, MOP_PAR) == 1, "param kept");
+	mfn_free(fn);
+}
+
 int main(void)
 {
 	test_fold_const();
@@ -277,6 +423,12 @@ int main(void)
 	test_gvn();
 	test_gvn_nomatch();
 	test_phi_copy();
+	test_fold_sdiv_neg();
+	test_fold_rem_neg();
+	test_fold_shift_zero();
+	test_fold_fcmp();
+	test_dce_call_sideeffect();
+	test_dce_load_removed();
 
 	if (failures) {
 		fprintf(stderr, "%d failures\n", failures);
