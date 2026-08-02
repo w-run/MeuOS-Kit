@@ -48,7 +48,7 @@
 - f8f0044 混入 S/T，使 S/T「提交哈希」追踪不清晰（文档应注明）。
 - S 仅验证类拷贝 ctor 调用（lambda_capture_class.cc）；更复杂场景（捕获含 ctor 的类 + operator() 体引用、移动语义交互）待 `lambda_capture_boundary.cc` 转正后回归。
 - T 验证 2~3 层同形参名嵌套；混合捕获（`[a]` 外层 + `[b,a]` 内层）、引用捕获交互待补充边界用例。
-- 缺陷 V（MIR msimp 有符号 div/rem 误编译，负数用例 -7/2 等）：已随 93ab4b4（R 提交）夹带闭环，双路径实测 PASS；worker-fold 在途补充更精确回归（signed_div_pow2.c sdiv8/srem4 + pass_test.c `test_simpl_sdiv_pow2_exact`，注释标 defect V），建议尽快提交。缺陷 U（size-0 类按值传参段错误，探测文件 value_param_member_call.cc）**仍 open**（0802.md 703 行记录纠错，0802 队列表已重命名 U 并保留 pending/ 待修复）。
+- 缺陷 V（MIR msimp 有符号 div/rem 误编译，负数用例 -7/2 等）：已随 93ab4b4（R 提交）夹带闭环，双路径实测 PASS；回归收口 4c24bfe（signed_div_pow2.c 四实际用例 -7/2/-7%4/-17/8/-17%8 + pass_test Test 3c `test_simpl_sdiv_pow2_exact` 有符号 div/rem 不削减 + Test 3d `test_fold_signed_pow2_values` 常量折叠按值断言），文档补记 7890a35，均合入。缺陷 U（size-0 类按值传参段错误，探测文件 value_param_member_call.cc）**仍 open**（0802.md 703 行记录纠错，0802 队列表已重命名 U 并保留 pending/ 待修复）。
 - mxx-c2fix 合并冲突（见 §3.4）为最高优先级待处理项。
 
 ## 5. 第二批任务建议
@@ -80,6 +80,12 @@
 | legacy | `MCC_USE_MIR=0 ./mcc ...` | **PASS** |
 
 修复有效且不波及 legacy。回归测试 signed_div_pow2.c 已含负数+正数用例（-7/2=-3、-7%4=-3、-17/8=-2、-17%8=-1 等）。
+
+### 缺陷 V 回归收口（worker-fold，已合入）
+- **修复代码**：93ab4b4（passes.c msimp_block 削减限 UDIV/UREM，随 defect R 夹带）
+- **回归测试**：4c24bfe（signed_div_pow2.c 四实际用例 + pass_test Test 3c `test_simpl_sdiv_pow2_exact` + Test 3d `test_fold_signed_pow2_values` 常量折叠按值断言）
+- **文档补记**：7890a35（0802.md V 段回归行补 Test 3d + 测试哈希）
+- 验证：check-mir 全绿、verify-all 6/6 PASS（含自举 check-sysroot-static）。worker-fold 工作树已净。
 
 ### 门禁缺口（已提请 worker-selfhost 确认）
 `verify-all.sh` 第 90 行跑 `make check-mir`（MIR 单元测试），**未调用 `check-c-mir`（mir_matrix.sh MIR/LIR 双路径矩阵）**；而 0802.md:733 声称 signed_div_pow2.c 被 `check-c99` 与 `check-c-mir` 双路径收集——实际 verify-all 门禁未显式跑 legacy 路径。建议把 `make check-c-mir` 纳入 verify-all.sh。verify-all 六项全 PASS（含自举）待 worker-selfhost 提供最近运行证据。
