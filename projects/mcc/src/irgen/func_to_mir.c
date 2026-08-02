@@ -518,6 +518,14 @@ func_to_mir(struct func *f, int optlevel, bool export)
 				} else {
 					MType rt = in->class ?
 						fe_cls_to_mtype(in->class) : MT_NONE;
+					/* The call result's MVal type must reflect the
+					 * return class so the bridge can pick the right
+					 * conversion (Ostosi vs Odtosi) when the result
+					 * feeds a MOP_F2I/MOP_I2F.  Without this, res->type
+					 * stays MT_NONE and a double->long cast after a
+					 * double-returning call (e.g. `(long)addd(...)`)
+					 * is lowered as stosi instead of dtosi. */
+					fe_typ(res, in->class);
 					madd1(fn, mb, MOP_CALL, rt, res,
 					      MREF_VAL(callee));
 				}
