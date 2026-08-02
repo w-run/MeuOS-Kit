@@ -4017,14 +4017,19 @@ expand_concept_body(struct cpp_template *con, struct token *args,
 			}
 		}
 		/* a concept use inside the body: `Name < ... >` */
-		if (depth < MAX_CONSTRAINT_DEPTH && t.kind >= TIDENT &&
-		    i + 2 < con->ntoks && con->toks[i + 1].kind == TLESS) {
+		if (t.kind >= TIDENT && i + 2 < con->ntoks &&
+		    con->toks[i + 1].kind == TLESS) {
 			struct cpp_template *sub;
 			for (sub = g_cpp_templates; sub; sub = sub->next)
 				if (sub->is_concept &&
 				    strcmp(sub->name, tokenstr(t.kind)) == 0)
 					break;
 			if (sub) {
+				if (depth >= MAX_CONSTRAINT_DEPTH)
+					error(&tok.loc,
+					    "requires-clause evaluation too deep: "
+					    "concept reference chain exceeds %d levels",
+					    MAX_CONSTRAINT_DEPTH);
 				size_t j = i + 2;
 				int d = 1;
 				while (j < con->ntoks && d > 0) {
