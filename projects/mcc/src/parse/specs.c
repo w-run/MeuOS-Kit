@@ -448,7 +448,17 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 			break;
 		case TAUTO:
 			/* C23: auto as type deduction indicator.
-			 * Minimal: auto = int for now. */
+			 * C++11: `auto` is a placeholder type deduced from the
+			 * initializer (`auto x = expr;`) or the return statement
+			 * (`auto f() {...}`); the decl() path replaces it with the
+			 * concrete type.  Minimal: auto = int in C mode. */
+			if (g_lang == 1) {
+				extern struct type typeauto;
+				t = &typeauto;
+				++ntypes;
+				next();
+				break;
+			}
 			ts |= SPECINT;
 			++ntypes;
 			next();

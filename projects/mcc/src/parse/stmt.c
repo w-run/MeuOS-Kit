@@ -398,9 +398,23 @@ stmt(struct func *f, struct scope *s)
 		next();
 		t = functype(f);
 		if (t->base != &typevoid) {
-			e = exprassign(expr(s), t->base);
-			v = funcexpr(f, e);
-			delexpr(e);
+			/* C++14 `auto` return type: the declared return type is the
+			 * `auto` placeholder (&typeauto); deduce it from the return
+			 * expression (backfilled by the decl/method-body parser
+			 * after the body is parsed). */
+			if (t->base == &typeauto) {
+				extern int g_lang;
+				extern void cpp_auto_return(struct func *, struct expr *);
+				e = expr(s);
+				if (g_lang == 1)
+					cpp_auto_return(f, e);
+				v = funcexpr(f, e);
+				delexpr(e);
+			} else {
+				e = exprassign(expr(s), t->base);
+				v = funcexpr(f, e);
+				delexpr(e);
+			}
 		} else {
 			v = NULL;
 		}

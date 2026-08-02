@@ -495,6 +495,9 @@ extern struct type typellong, typeullong;
 extern struct type typefloat, typedouble, typeldouble;
 extern struct type typenullptr;
 extern struct type *typeadjvalist;
+/* C++11 `auto` placeholder type: `auto x = expr;` / `auto f() {...}`
+ * deduce the real type from the initializer / return statement. */
+extern struct type typeauto;
 
 /* targ */
 

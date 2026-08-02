@@ -34,6 +34,12 @@ bool g_cpp_member_const;
 /* The pending member call is a template-member call (`obj.get<int>(...)`);
  * set by cpp_tmpl_member_pend, cleared with the rest of the pending state. */
 bool g_cpp_member_tmpl;
+/* C++14 `auto` return type deduction: while parsing the body of a function
+ * whose declared return type is `auto`, the first return statement fixes
+ * the deduced type and later returns must be compatible.  Set/reset around
+ * each function body by the decl / method-body parsers. */
+struct type *g_cpp_auto_ret_type;
+struct func *g_cpp_auto_ret_func;
 /* postfixexpr nesting depth (set by expr_postfix.c); a pending member
  * call records the depth it was created at so nested argument expressions
  * (which run their own postfixexpr) don't clear it prematurely. */
@@ -78,6 +84,28 @@ cpp_pending_is_mine(int depth)
 {
 	return g_cpp_pending_depth == depth;
 }
+
+/* Record a return expression of an `auto`-returning function body.  The
+ * first return fixes the deduced type; later returns must be compatible.
+ * Called from the return-statement lowering (stmt.c) when the function's
+ * declared return type is the `auto` placeholder. */
+void
+cpp_auto_return(struct func *f, struct expr *e)
+{
+	struct type *et;
+
+	et = e ? e->type : NULL;
+	if (f != g_cpp_auto_ret_func) {
+		g_cpp_auto_ret_func = f;
+		g_cpp_auto_ret_type = NULL;
+	}
+	if (!et || et == &typeauto || et->kind == TYPEVOID)
+		error(&tok.loc, "unable to deduce the return type of an 'auto' function");
+	if (g_cpp_auto_ret_type && !typecompatible(g_cpp_auto_ret_type, et))
+		error(&tok.loc, "inconsistent deduced return types in 'auto' function");
+	g_cpp_auto_ret_type = et;
+}
+
 void cpp_define_method(struct scope *s, struct type *funct,
                               const char *mname, const char *class_tag,
                               bool is_const, bool is_static, bool is_virtual);
@@ -872,6 +900,15 @@ cpp_parse_method_body(struct cpp_pending_method *pm)
 	stmt(f, fs);
 	if (pm->d->u.func.isnoreturn)
 		funchlt(f);
+	/* C++14 `auto` return type: backfill the type deduced from the body's
+	 * return statement(s). */
+	if (pm->d->type->base == &typeauto) {
+		if (!g_cpp_auto_ret_type)
+			error(&tok.loc, "'auto' member function '%s' has no return statement to deduce its type from", pm->mname);
+		pm->d->type->base = g_cpp_auto_ret_type;
+		g_cpp_auto_ret_type = NULL;
+		g_cpp_auto_ret_func = NULL;
+	}
 	emitfunc(f, pm->d->linkage == LINKEXTERN);
 	delscope(fs);
 	delfunc(f);

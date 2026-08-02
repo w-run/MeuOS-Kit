@@ -249,6 +249,34 @@ decl(struct scope *s, struct func *f)
 			d = declcommon(s, kind, name, asmname, t, tq, sc, prior);
 			if (d->u.obj.align < align)
 				d->u.obj.align = align;
+			/* C++11 `auto x = expr;`: the placeholder type (&typeauto) is
+			 * deduced from the initializer before the storage/type
+			 * machinery (mkglobal, parseinit) runs. */
+			{
+				extern int g_lang;
+				if (g_lang == 1 && d->type == &typeauto) {
+					struct expr *auto_expr;
+					if (ctor_call)
+						error(&tok.loc, "'auto' cannot be initialized with a constructor call");
+					if (!consume(TASSIGN))
+						error(&tok.loc, "'auto' variable requires an initializer");
+					auto_expr = assignexpr(s);
+					if (!auto_expr->type || auto_expr->type == &typeauto ||
+					    auto_expr->type->kind == TYPEVOID)
+						error(&tok.loc,
+						    "unable to deduce the type of 'auto' variable '%s'",
+						    name);
+					t = auto_expr->type;
+					d->type = t;
+					d->qual = tq;
+					init = mkinit(0, t->size, (struct bitfield){0},
+					    auto_expr);
+					hasinit = true;
+				} else {
+					init = NULL;
+					hasinit = false;
+				}
+			}
 			if (d->linkage == LINKNONE && !(sc & SCSTATIC)) {
 				d->u.obj.storage = SDAUTO;
 			} else {
@@ -260,8 +288,6 @@ decl(struct scope *s, struct func *f)
 
 			if (base.expr)
 				funcexpr(f, base.expr);
-			init = NULL;
-			hasinit = false;
 			if (consume(TASSIGN)) {
 				if (f && d->linkage != LINKNONE)
 					error(&tok.loc, "object '%s' with block scope and %s linkage cannot have initializer", name, d->linkage == LINKEXTERN ? "external" : "internal");
@@ -269,9 +295,9 @@ decl(struct scope *s, struct func *f)
 					error(&tok.loc, "object '%s' redefined", name);
 				init = parseinit(s, d->type);
 				hasinit = true;
-			} else if (sc & SCEXTERN) {
+			} else if (!hasinit && sc & SCEXTERN) {
 				break;
-			} else if (d->linkage != LINKNONE && d->u.obj.storage == SDSTATIC) {
+			} else if (!hasinit && d->linkage != LINKNONE && d->u.obj.storage == SDSTATIC) {
 				if (!d->defined && !d->tentative) {
 					/* C++ global class object: defer construction to
 					 * __mxx_global_var_init (runs before main). */
@@ -366,6 +392,21 @@ decl(struct scope *s, struct func *f)
 				s = funcscope;
 				f = mkfunc(d, name, t, s);
 				stmt(f, s);
+				/* C++14 `auto` return type: backfill the type deduced from
+				 * the body's return statement(s). */
+				{
+					extern int g_lang;
+					extern struct type typeauto;
+					extern struct type *g_cpp_auto_ret_type;
+					extern struct func *g_cpp_auto_ret_func;
+					if (g_lang == 1 && t->base == &typeauto) {
+						if (!g_cpp_auto_ret_type)
+							error(&tok.loc, "'auto' function '%s' has no return statement to deduce its type from", name);
+						t->base = g_cpp_auto_ret_type;
+						g_cpp_auto_ret_type = NULL;
+						g_cpp_auto_ret_func = NULL;
+					}
+				}
 				if (d->u.func.isnoreturn)
 					funchlt(f);
 				/* XXX: need to keep track of function in case a later declaration specifies extern */

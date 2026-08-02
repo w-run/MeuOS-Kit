@@ -17,6 +17,12 @@
 
 struct type typevoid    = {.kind = TYPEVOID, .incomplete = true};
 
+/* C++11 `auto` placeholder.  Identified by pointer identity (`&typeauto`);
+ * replaced with the deduced type before the declaration is finished, so it
+ * never reaches code generation. */
+struct type typeauto    = {.kind = TYPEVOID, .align = 1, .size = 1,
+                           .incomplete = true};
+
 struct type typebool    = INTTYPE(TYPEBOOL, 1, false, 0);
 
 struct type typechar    = INTTYPE(TYPECHAR, 1, true, PROPCHAR);

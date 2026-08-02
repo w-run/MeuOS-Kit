@@ -51,6 +51,9 @@ void cpp_pending_clear_at_depth(int depth);
 void cpp_pending_set_placeholder(void);
 bool cpp_pending_was_placeholder(void);
 bool cpp_pending_is_mine(int depth);
+/* C++14 `auto` return type: record the return expression type of an
+ * `auto f() {...}` body; the first return fixes the deduced type. */
+void cpp_auto_return(struct func *f, struct expr *e);
 bool cpp_has_ctor(struct type *t, const char *tag);
 bool cpp_emit_default_ctor(struct func *f, struct decl *d);
 bool cpp_has_dtor(struct type *t);
