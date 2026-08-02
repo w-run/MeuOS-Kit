@@ -113,6 +113,23 @@ postfixexpr(struct scope *s, struct expr *r)
 					ae = &(*ae)->next;
 				}
 				next(); /* consume ')' */
+				/* C++ member-template call: `obj.get<int>(...)` was
+				 * recorded by cpp_tmpl_member_pend; instantiate the
+				 * template member from the explicit template arguments
+				 * and the call-site argument types, replacing the
+				 * placeholder callee. */
+				{
+					extern bool g_cpp_member_tmpl;
+					if (g_cpp_member_tmpl) {
+						extern struct expr *cpp_tmpl_member_instantiate(
+						    struct scope *, struct expr *,
+						    struct expr *);
+						r = cpp_tmpl_member_instantiate(s,
+						    g_cpp_member_this, arglist);
+						g_cpp_member_class = NULL;
+						g_cpp_member_name = NULL;
+						g_cpp_member_tmpl = false;
+					} else {
 				/* C++ overload resolution: re-resolve the member
 				 * function from the argument types. */
 				{
@@ -166,6 +183,8 @@ postfixexpr(struct scope *s, struct expr *r)
 					}
 					g_cpp_member_class = NULL;
 					g_cpp_member_name = NULL;
+				}
+				}
 				}
 				/* C++ function template call: instantiate the template
 				 * from the argument types (pending callee was recorded by
@@ -234,6 +253,51 @@ postfixexpr(struct scope *s, struct expr *r)
 				error(&tok.loc, "expected identifier after '%s' operator", tokenstr(op));
 			lvalue = op == TARROW || r->base->lvalue;
 			offset = 0;
+			/* C++ template member call: `obj.get<int>(...)` or
+			 * `obj.get(...)`.  The `<` would otherwise be parsed as a
+			 * comparison operator, so detect it here (peeking past the
+			 * member name); the pending call is instantiated by the
+			 * TLPAREN lowering from the explicit template arguments and
+			 * the call-site argument types. */
+			{
+				extern bool cpp_tmpl_member(struct type *, const char *);
+				extern void tokpush(struct token *, size_t);
+				extern int g_lang;
+				if (g_lang == 1 && cpp_tmpl_member(t, tokenstr(tok.kind))) {
+					struct token old = tok;
+					bool call;
+					next();
+					call = tok.kind == TLESS || tok.kind == TLPAREN;
+					if (call) {
+						extern void cpp_tmpl_member_pend(struct type *,
+						    const char *);
+						extern struct expr *cpp_tmpl_member_placeholder(void);
+						extern struct expr *g_cpp_member_this;
+						extern bool g_cpp_member_const;
+						extern bool g_cpp_member_tmpl;
+						struct token nxt = tok;
+						const char *mname = tokenstr(old.kind);
+						tok = old;
+						tokpush(&nxt, 1);
+						cpp_tmpl_member_pend(t, mname);
+						g_cpp_member_this = r;
+						g_cpp_member_class = t;
+						g_cpp_member_name = mname;
+						g_cpp_member_const = (tq & QUALCONST) != 0;
+						g_cpp_member_tmpl = true;
+						cpp_pending_record_depth();
+						cpp_pending_set_placeholder();
+						r = cpp_tmpl_member_placeholder();
+						e = r; /* keep the post-switch `r = e` stable */
+						break; /* tok is '('; TLPAREN instantiates */
+					}
+					{
+						struct token nxt = tok;
+						tok = old;
+						tokpush(&nxt, 1);
+					}
+				}
+			}
 			/* C++ multiple inheritance: a name defined by more than one
 			 * base subobject is ambiguous (and the base-class subobjects
 			 * are anonymous members here). */

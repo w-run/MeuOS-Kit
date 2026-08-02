@@ -120,5 +120,16 @@ const char *cpp_tmpl_class_lookup(const char *name);
  * explicit template arguments, defines the instantiated class, and returns
  * its type. */
 struct type *cpp_tmpl_class_instantiate(struct scope *s, const char *name);
+/* Member templates: is `name` a template member function of class `t`?
+ * `cpp_tmpl_member_pend` records the pending member-template call; the
+ * TLPAREN lowering calls cpp_tmpl_member_instantiate (with the this
+ * object and the explicit arguments) once the argument types are known. */
+bool cpp_tmpl_member(struct type *t, const char *name);
+void cpp_tmpl_member_pend(struct type *t, const char *name);
+struct expr *cpp_tmpl_member_instantiate(struct scope *s,
+    struct expr *thisp, struct expr *arglist);
+/* Placeholder callee for a pending member-template call (satisfies the
+ * TLPAREN "called object" checks until the instantiation replaces it). */
+struct expr *cpp_tmpl_member_placeholder(void);
 
 #endif /* MCC_CPP_H */
