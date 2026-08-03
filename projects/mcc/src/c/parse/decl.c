@@ -558,10 +558,20 @@ decl(struct scope *s, struct func *f)
 					 * so the normal runtime definition is also emitted. */
 					{
 						extern void cpp_buffer_constexpr_body(struct decl *);
+						extern int g_cexpr_body;
+						extern int g_lang;
+						/* C23 constexpr body purity: while the body is
+						 * parsed, flag calls to non-constexpr functions. */
 						if (d->u.func.isconstexpr)
 							cpp_buffer_constexpr_body(d);
+						if (g_lang == 0 && d->u.func.isconstexpr)
+							g_cexpr_body = 1;
 					}
 					stmt(f, s);
+					{
+						extern int g_cexpr_body;
+						g_cexpr_body = 0;
+					}
 					/* C++14 `auto` return type: backfill the type deduced from
 					 * the body's return statement(s). */
 					{

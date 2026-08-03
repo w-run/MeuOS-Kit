@@ -131,6 +131,37 @@ postfixexpr(struct scope *s, struct expr *r)
 				expect(TRPAREN, "after builtin parameters");
 				break;
 			}
+			/* C23 constexpr function body purity: reject calls to
+			 * non-constexpr functions (such a call makes the body not
+			 * constant-foldable).  Builtins above are compile-time safe
+			 * and allowed; recursive / constexpr callees are allowed. */
+			{
+				extern int g_cexpr_body;
+				if (g_cexpr_body) {
+					struct expr *cr = r;
+					struct decl *cd = NULL;
+					for (;;) {
+						if (cr->kind == EXPRIDENT) {
+							cd = cr->u.ident.decl;
+							break;
+						}
+						if (cr->kind == EXPRUNARY &&
+						    (cr->op == TBAND || cr->op == TMUL) &&
+						    cr->base) {
+							cr = cr->base;
+							continue;
+						}
+						break;
+					}
+					if (!cd || cd->kind != DECLFUNC ||
+					    !cd->u.func.isconstexpr)
+						error(&tok.loc,
+						    "constexpr function body must not call non-constexpr function%s%s%s",
+						    cd && cd->name ? " '" : "",
+						    cd && cd->name ? cd->name : "",
+						    cd && cd->name ? "'" : "");
+				}
+			}
 			if (r->type->kind != TYPEPOINTER || r->type->base->kind != TYPEFUNC) {
 				/* C++ functor call: `obj(args...)` lowers to
 				 * `obj.operator()(args...)` — a class object with an

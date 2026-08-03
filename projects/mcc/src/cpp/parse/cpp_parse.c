@@ -6259,6 +6259,13 @@ struct cpp_cexpr_fn {
 static struct cpp_cexpr_fn *g_cpp_cexpr_fns;
 static int g_cpp_cexpr_depth;   /* recursion limit */
 
+/* Non-zero while a C23 `constexpr` function definition body is being parsed
+ * (the runtime-definition replay in decl.c).  The call-expression parser
+ * consults it to reject calls to non-constexpr functions, which would make
+ * the body non-constant-foldable (C23 6.7.1, constexpr function body
+ * constraints). */
+int g_cexpr_body;
+
 /* Buffer a constexpr function's `{ ... }` body (called from decl() with
  * tok positioned on '{'), then replay it so the normal runtime definition
  * is still emitted by the caller's stmt(). */
