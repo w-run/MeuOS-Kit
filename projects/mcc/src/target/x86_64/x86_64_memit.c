@@ -16,6 +16,7 @@
 
 #include "mir.h"
 #include "x86_64_m.h"
+#include "ir.h"   /* extern Target T: T.pic selects the TLS access model */
 
 /* ---- width suffixes ----------------------------------------------------- */
 
@@ -257,12 +258,22 @@ emit_mval(FILE *f, MVal *v)
 	}
 }
 
-/* Emit the address of a TLS global into a scratch register: the thread
- * pointer (%fs:0) plus the link-time-resolved @tpoff offset (local-exec /
- * initial-exec TLS model, matching the legacy x86_64_emit.c path). */
+/* Emit the address of a TLS global into a scratch register.  Local-exec:
+ * thread pointer (%fs:0) + link-time-resolved @tpoff offset.  PIC / shared
+ * objects reject the local-exec relocation (R_X86_64_TPOFF32), so use the
+ * initial-exec GOT form (movq sym@gottpoff(%rip); addq %fs:0) — matching
+ * the legacy x86_64_emit.c Oaddr path. */
 static void
 emit_tls_addr(FILE *f, const char *sym, int64_t off, const char *reg)
 {
+	if (T.pic) {
+		fprintf(f, "\tmovq\t%s@gottpoff(%%rip), %%%s\n",
+		        sym ? sym : "0", reg);
+		fprintf(f, "\taddq\t%%fs:0, %%%s\n", reg);
+		if (off)
+			fprintf(f, "\taddq\t$%lld, %%%s\n", (long long)off, reg);
+		return;
+	}
 	fprintf(f, "\tmovq\t%%fs:0, %%%s\n", reg);
 	fprintf(f, "\tleaq\t%s@tpoff", sym ? sym : "0");
 	if (off)
@@ -346,11 +357,21 @@ mov_to_rax(FILE *f, MVal *v, MConst *c)
 	if (c) {
 		if (c->kind == MC_ADDR) {
 			if (c->u.addr.tls) {
-				fprintf(f, "\tleaq\t%s@tpoff", c->u.addr.sym ? c->u.addr.sym : "0");
-				if (c->u.addr.off)
-					fprintf(f, "%+lld", (long long)c->u.addr.off);
-				fprintf(f, "(%%rip), %%rax\n");
-				fputs("\taddq\t%fs:0, %rax\n", f);
+				if (T.pic) {
+					fprintf(f, "\tmovq\t%s@gottpoff(%%rip), %%rax\n",
+					        c->u.addr.sym ? c->u.addr.sym : "0");
+					fputs("\taddq\t%fs:0, %rax\n", f);
+					if (c->u.addr.off)
+						fprintf(f, "\taddq\t$%lld, %%rax\n",
+						        (long long)c->u.addr.off);
+				} else {
+					fprintf(f, "\tleaq\t%s@tpoff",
+					        c->u.addr.sym ? c->u.addr.sym : "0");
+					if (c->u.addr.off)
+						fprintf(f, "%+lld", (long long)c->u.addr.off);
+					fprintf(f, "(%%rip), %%rax\n");
+					fputs("\taddq\t%fs:0, %rax\n", f);
+				}
 			} else {
 				fprintf(f, "\tleaq\t%s%+lld(%%rip), %%rax\n",
 				        c->u.addr.sym ? c->u.addr.sym : "0",
