@@ -70,7 +70,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 | chloe | lite | 只读隔离副本 | /tmp/mcciso-chloe | 定位 chibicc B 类真 bug（常量折叠窄化 + va_end 类型检查） | **completed**（报告已收） | 只读不 push |
 | diana | lite | worktree-tmp-diana (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试扩充 | **completed**（db1451b 已合入主线 294e5c2） | 11 个 test/c23 文件 + 发现 F1-F3 |
 | eve | lite | worktree-tmp-eve (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵扩充 | **completed**（02d6684 已合入主线 b4cad7e） | 33 个 test/cpp 文件 |
-| grace | lite | worktree-tmp-grace-sema (自 worktree-mxx-work@d0a90c9) | /tmp/mxx-wt-grace | sema/decl 组 E1/E4/E5/E6 修复 | **completed**（已合入主线） | push worktree-tmp-grace-sema |
+| grace | lite | worktree-tmp-grace-sema + worktree-tmp-grace-loc (自 worktree-mxx-work@e010519) | /tmp/mxx-wt-grace | sema/decl 组 E1/E4/E5/E6 修复 + E4 行号定位到函数体 } | **completed**（已合入主线） | a8167d9 |
 | hazel | lite | worktree-tmp-hazel-c23 (自 worktree-mxx-work@d0a90c9) | /tmp/mxx-wt-hazel | C23 constexpr 组：F1/F2/F3 | **completed**（8e5aae3 已 push origin/worktree-tmp-hazel-c23，门禁全绿，已合入主线） | 8e5aae3 |
 
 ### 会话中断恢复速查（当前团队）
