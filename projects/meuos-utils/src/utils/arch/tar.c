@@ -1,11 +1,12 @@
 /* tar — POSIX pax 格式归档工具
- * 支持：创建/解包/列表，pax 扩展头，gzip 透传（-z）
+ * 支持：创建/解包/列表，pax 扩展头，gzip 透传（-z），mz 压缩（-Z）
  * 用法：tar {-c|-x|-t} [options] [files...]
  *   -c   创建归档
  *   -x   解包归档
  *   -t   列出内容
  *   -f FILE  指定归档文件（- 表示 stdin/stdout）
- *   -z   gzip 压缩/解压
+ *   -z   gzip 压缩/解压（透传外部 gzip 命令）
+ *   -Z   mz 压缩/解压（使用 libmz MZ_CODEC_MEUOS）
  *   -v   verbose
  *   -C DIR  切换到 DIR 目录
  *   --help / --version
@@ -27,10 +28,35 @@
 #include <time.h>
 #include <utime.h>
 
+#include "mz.h"
 #include "meuos/utils.h"
 
 #define BLOCK 512
 #define NAME_MAX_TAR 100
+
+/* Helper: write full data, handling partial writes */
+static ssize_t write_full(int fd, const void *buf, size_t len) {
+    const uint8_t *p = (const uint8_t *)buf;
+    size_t written = 0;
+    while (written < len) {
+        ssize_t n = write(fd, p + written, len - written);
+        if (n <= 0) return n;
+        written += n;
+    }
+    return written;
+}
+
+/* Helper: read full data, handling partial reads */
+static ssize_t read_full(int fd, void *buf, size_t len) {
+    uint8_t *p = (uint8_t *)buf;
+    size_t total = 0;
+    while (total < len) {
+        ssize_t n = read(fd, p + total, len - total);
+        if (n <= 0) return n;
+        total += n;
+    }
+    return total;
+}
 
 
 /* === pax 头部 === */
@@ -224,14 +250,19 @@ static void archive_dir(int fd, const char *path, const char *prefix, int verbos
 }
 
 static int do_create(const char *outfile, char **files, int nfiles,
-                     int use_gzip, int verbose, const char *chdir_dir) {
+                     int use_gzip, int use_mz, int verbose, const char *chdir_dir) {
     if (chdir_dir && chdir(chdir_dir) != 0)
         die("cannot chdir to %s: %s", chdir_dir, strerror(errno));
     
     int fd;
     int pipefd[2] = {-1, -1};
+    char tmppath[] = "/tmp/tar_mz_XXXXXX";
     
-    if (use_gzip) {
+    if (use_mz) {
+        /* Use a temp file to buffer tar data, then compress with libmz */
+        fd = mkstemp(tmppath);
+        if (fd < 0) die("cannot create temp file: %s", strerror(errno));
+    } else if (use_gzip) {
         if (pipe(pipefd) < 0) die("pipe failed");
         pid_t pid = fork();
         if (pid < 0) die("fork failed");
@@ -284,7 +315,36 @@ static int do_create(const char *outfile, char **files, int nfiles,
     char end[1024] = {0};
     write(fd, end, 1024);
     
-    if (fd != STDOUT_FILENO) close(fd);
+    if (use_mz) {
+        /* Close temp file, read it back, compress with mz, write to output */
+        close(fd);
+        int read_fd = open(tmppath, O_RDONLY);
+        if (read_fd < 0) die("cannot reopen temp file: %s", strerror(errno));
+        struct stat st;
+        fstat(read_fd, &st);
+        uint8_t *tar_data = malloc(st.st_size);
+        read_full(read_fd, tar_data, st.st_size);
+        close(read_fd);
+        unlink(tmppath);
+        
+        void *comp_out = NULL;
+        size_t comp_len = 0;
+        int rc = mz_gzip_compress(tar_data, st.st_size, &comp_out, &comp_len);
+        free(tar_data);
+        if (rc <= 0) die("mz compression failed: %s", mz_strerror(rc));
+        
+        if (strcmp(outfile, "-") == 0) {
+            fwrite(comp_out, 1, comp_len, stdout);
+        } else {
+            int out = open(outfile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (out < 0) die("cannot create %s: %s", outfile, strerror(errno));
+            write_full(out, comp_out, comp_len);
+            close(out);
+        }
+        free(comp_out);
+    } else if (fd != STDOUT_FILENO) {
+        close(fd);
+    }
     if (use_gzip && pipefd[1] >= 0) close(pipefd[1]);
     
     return 0;
@@ -539,12 +599,13 @@ static int do_list(int fd, int verbose) {
 
 static void usage(void) {
     fprintf(stderr,
-        "usage: tar {-c|-x|-t} [-f ARCHIVE] [-z] [-v] [-C DIR] [files...]\n"
+        "usage: tar {-c|-x|-t} [-f ARCHIVE] [-z|-Z] [-v] [-C DIR] [files...]\n"
         "  -c  create archive\n"
         "  -x  extract archive\n"
         "  -t  list contents\n"
         "  -f FILE  archive file (- for stdin/stdout)\n"
-        "  -z  gzip compress/decompress\n"
+        "  -z  gzip compress/decompress (external gzip)\n"
+        "  -Z  mz compress/decompress (libmz MZ_CODEC_MEUOS)\n"
         "  -v  verbose\n"
         "  -C DIR  change to DIR\n"
         "  --help     show help\n"
@@ -552,30 +613,40 @@ static void usage(void) {
 }
 
 int main(int argc, char **argv) {
+    set_program_name(argv[0]);
     int mode = 0; /* 'c', 'x', 't' */
     const char *archive = NULL;
     int use_gzip = 0;
+    int use_mz = 0;
     int verbose = 0;
     const char *chdir_dir = NULL;
     int oi = 1;
     
-    /* Parse options */
-    while (oi < argc && argv[oi][0] == '-' && argv[oi][1] != '\0') {
+    /* Parse options (accept both -cZf and cZf style) */
+    while (oi < argc) {
         const char *opt = argv[oi];
+        if (opt[0] == '\0') { oi++; continue; }
+        /* Skip non-option args (files) — stop at first file */
+        if (opt[0] != '-' && !(opt[0] == 'c' || opt[0] == 'x' || opt[0] == 't' ||
+              opt[0] == 'f' || opt[0] == 'z' || opt[0] == 'Z' ||
+              opt[0] == 'v' || opt[0] == 'C'))
+            break;
+        if (opt[0] == '-' && opt[1] == '\0') break;  /* "-" = stdin/stdout */
         if (strcmp(opt, "--help") == 0) { usage(); return 0; }
         if (strcmp(opt, "--version") == 0) {
             printf("tar (meuos-utils)\n");
             return 0;
         }
-        
-        /* Handle combined short options */
-        int j = 1;
+
+        /* Handle combined short options (skip leading - if present) */
+        int j = (opt[0] == '-') ? 1 : 0;
         while (opt[j]) {
             switch (opt[j]) {
                 case 'c': mode = 'c'; break;
                 case 'x': mode = 'x'; break;
                 case 't': mode = 't'; break;
                 case 'z': use_gzip = 1; break;
+                case 'Z': use_mz = 1; break;
                 case 'v': verbose = 1; break;
                 case 'f':
                     if (opt[j+1]) { archive = &opt[j+1]; j = strlen(opt) - 1; }
@@ -597,19 +668,56 @@ int main(int argc, char **argv) {
     
     if (!mode) { usage(); return 2; }
     if (!archive) archive = "-"; /* default to stdout/stdin */
+    if (use_gzip && use_mz) die("cannot use -z and -Z together");
     
     if (mode == 'c') {
         char **files = argv + oi;
         int nfiles = argc - oi;
         if (nfiles == 0) die("no files specified for -c");
-        return do_create(archive, files, nfiles, use_gzip, verbose, chdir_dir);
+        return do_create(archive, files, nfiles, use_gzip, use_mz, verbose, chdir_dir);
     }
     
     /* For -x and -t, open the archive */
     int fd;
     int pipefd[2] = {-1, -1};
     
-    if (use_gzip) {
+    if (use_mz) {
+        /* Decompress with libmz: read entire file, decompress, write to temp */
+        uint8_t *raw = NULL;
+        size_t raw_len = 0;
+        if (strcmp(archive, "-") == 0) {
+            /* Read from stdin */
+            fseek(stdin, 0, SEEK_END);
+            long sz = ftell(stdin);
+            fseek(stdin, 0, SEEK_SET);
+            raw = malloc(sz);
+            raw_len = fread(raw, 1, sz, stdin);
+        } else {
+            int in = open(archive, O_RDONLY);
+            if (in < 0) die("cannot open %s: %s", archive, strerror(errno));
+            struct stat st;
+            fstat(in, &st);
+            raw = malloc(st.st_size);
+            raw_len = read_full(in, raw, st.st_size);
+            close(in);
+        }
+        
+        void *tar_data = NULL;
+        size_t tar_len = 0;
+        int rc = mz_gzip_decompress(raw, raw_len, &tar_data, &tar_len);
+        free(raw);
+        if (rc <= 0) die("mz decompression failed: %s", mz_strerror(rc));
+        
+        /* Write to a real temp file, then open for reading */
+        char tmppath2[] = "/tmp/tar_mz2_XXXXXX";
+        fd = mkstemp(tmppath2);
+        if (fd < 0) die("cannot create temp file: %s", strerror(errno));
+        write_full(fd, tar_data, tar_len);
+        free(tar_data);
+        close(fd);
+        fd = open(tmppath2, O_RDONLY);
+        unlink(tmppath2);
+    } else if (use_gzip) {
         /* Need to decompress via gzip */
         if (strcmp(archive, "-") == 0) {
             if (pipe(pipefd) < 0) die("pipe failed");

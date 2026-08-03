@@ -272,15 +272,17 @@ meow / msh / 工具链 / sysroot
 - ✅ **libutils.a 共享** — msh 链接 libutils.a，共享 xmalloc/color/getopt/version
 - ✅ **105 项回归测试** — 含 Shell-Utils 联动内建测试
 
-### Phase 7D — 压缩统一架构（规划中）
+### Phase 7D — 压缩统一架构（✅ 完成）
 > **架构决策**：将所有压缩/解压算法收归 `meuos-compress` 库，
 > `gzip`/`unzip`/`tar` 等工具变为薄壳调用 libmz。
 
-- ⏳ 在 `meuos-compress` 中新增 DEFLATE codec（`MZ_CODEC_DEFLATE`），使 gzip/unzip 可直接调用 libz 而非自带 DEFLATE 实现
-- ⏳ 在 `meuos-compress` 中新增 PKZIP 容器格式，使 unzip 可直接调用 mxa API
-- ⏳ gzip.c 重构为薄壳：gzip header/footer + `mz_decompress(MZ_CODEC_DEFLATE)`
-- ⏳ unzip.c 重构为薄壳：PKZIP 解析 + `mxa_read_file` / `mz_decompress`
-- ⏳ tar.c 增加 `-Z` 选项：两步模式（tar 打包 → mz 压缩）或流式 pipe
+- ✅ 在 `meuos-compress` 中新增 DEFLATE codec（`MZ_CODEC_DEFLATE`）— RFC 1951 stored blocks 压缩 + 全块类型解压（stored/fixed Huffman/dynamic Huffman）
+- ✅ 在 `meuos-compress` 中新增 Gzip 容器格式（`mz_gzip.c`）— RFC 1952 header/footer + CRC32 校验 + 与系统 gzip 互操作
+- ✅ 在 `meuos-compress` 中新增 PKZIP 读取器（`mz_zip.c`）— EOCD 扫描 + 中央目录解析 + stored/deflate 提取 + CRC32 校验
+- ✅ gzip.c 重构为薄壳（311 行 → 311 行）：调用 `mz_gzip_compress`/`mz_gzip_decompress`
+- ✅ unzip.c 重构为薄壳（877 行 → 299 行）：调用 `mz_zip_reader_*` API
+- ✅ tar.c 增加 `-Z` 选项：使用 `mz_gzip_compress`/`mz_gzip_decompress`，输出标准 gzip 格式
+- ✅ LZ77 v2 token 格式修复：escape literal 前缀从 0x81 改为 0xFF，消除与 match token b0 的冲突
 
 ### Phase 7F — libutils 共享代码重构（✅ 完成）
 

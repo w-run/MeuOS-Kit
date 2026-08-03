@@ -47,7 +47,7 @@ TOOL_NAMES := $(notdir $(patsubst %.c,%,$(TOOL_SRCS)))
 TOOL_BINS := $(addprefix $(BUILD)/,$(TOOL_NAMES))
 
 # 需要特殊链接的工具（从通用规则中排除）
-SPECIAL_BINS := $(BUILD)/mz $(BUILD)/awk
+SPECIAL_BINS := $(BUILD)/mz $(BUILD)/awk $(BUILD)/gzip $(BUILD)/unzip $(BUILD)/tar
 GENERIC_BINS := $(filter-out $(SPECIAL_BINS),$(TOOL_BINS))
 
 .PHONY: all check check-cross clean install
@@ -58,6 +58,21 @@ all: $(LIBUTILS_LIB) $(GENERIC_BINS) $(SPECIAL_BINS)
 $(BUILD)/mz: src/utils/arch/mz.c $(LIBUTILS_LIB) $(MZ_LIB)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(BASE_CFLAGS) $(MZ_INC) -o $@ $< $(LIBUTILS_LIB) $(MZ_LIB) -ldl
+
+# tar: 依赖 libmz (-Z mz 压缩/解压)
+$(BUILD)/tar: src/utils/arch/tar.c $(LIBUTILS_LIB) $(MZ_LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(BASE_CFLAGS) $(MZ_INC) -o $@ src/utils/arch/tar.c $(LIBUTILS_LIB) $(MZ_LIB)
+
+# gzip: 依赖 libmz (mz_gzip_compress/decompress)
+$(BUILD)/gzip: src/utils/arch/gzip.c $(LIBUTILS_LIB) $(MZ_LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(BASE_CFLAGS) $(MZ_INC) -o $@ src/utils/arch/gzip.c $(LIBUTILS_LIB) $(MZ_LIB)
+
+# unzip: 依赖 libmz (mz_zip_*)
+$(BUILD)/unzip: src/utils/arch/unzip.c $(LIBUTILS_LIB) $(MZ_LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(BASE_CFLAGS) $(MZ_INC) -o $@ src/utils/arch/unzip.c $(LIBUTILS_LIB) $(MZ_LIB)
 
 # awk: -O2 optimization exposes UB in parser; use -O0 until fixed
 $(BUILD)/awk: src/utils/text/awk.c $(LIBUTILS_LIB)
