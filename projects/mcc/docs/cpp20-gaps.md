@@ -8,18 +8,24 @@
 > operator[] const 决议（da9e2bf）、空类传参（2be27a7）、inline+extern 发射（e9fae35）。下表状态列已按 e06a2b0
 > 重新实测更新；「范围 for」「constexpr 多语句」两行由 ⛔ 转 ✅/🟡。requires 表达式（§2.2）在复核时刻已有
 > 在途实现（worker-req2），但未合入 HEAD，表中仍记 ⛔。
+> **复核（worker-doc4，HEAD 2c474d4，2026-08-03）**：HEAD 已推进到 `2c474d4`（worktree-mxx-work）。
+> requires 表达式（§2.2）已由 worker-req4 实现（cpp_parse.c 在途未提交 + test/cpp/requires_min.cc 最小复现），
+> 待合入闭环；本表暂记「在途」。新增 4 项基线缺陷（const T& 运算符形参、急切实例化、#elifdef 前组求值、
+> 非空类按值返回错乱）见 §2.6，权威基线缺口表在 cpp23-gaps.md §2。门禁：check-chibicc 当前
+> PASS=0/COMPILEFAIL=41（chibicc 兼容性全灭，worker-chi4 调查）、check-pic-verify riscv64/i386 GOT 已知缺口。
 
 ---
 
 ## 0. 结论摘要
 
 m++ 已实现 C++20 基础（consteval 折叠、三向比较标量降级、concepts 命名概念 requires-clause、
-**range-for 全形态（71fbb35）**）。但 **C++20 完整覆盖仍有 ~10 项真实缺口**（截至 e06a2b0 复核）。
+**range-for 全形态（71fbb35）**）。但 **C++20 完整覆盖仍有 ~10 项真实缺口**（截至 HEAD 2c474d4 复核）。
+其中 requires 表达式（P0）已由 worker-req4 在途实现（未合入 HEAD），详见 §2.2。
 按"常见现代代码阻塞程度 × 修复成本"排序，Top5：
 
 | # | 缺口 | 证据 | 难度 | 优先级 |
 |---|---|---|---|---|
-| 1 | **requires 表达式（`requires { ... }`）** | 概念体/requires-clause 内 `requires(T a) { a+a; }` 均报错（复核时在途实现中，未合入 HEAD） | 高 | P0 |
+| 1 | **requires 表达式（`requires { ... }`）** | 概念体/requires-clause 内 `requires(T a) { a+a; }` 已由 worker-req4 实现（在途未提交：cpp_parse.c + test/cpp/requires_min.cc），待合入闭环；四类表达式（简单/类型/复合/嵌套）基本就绪 | 高 | P0（在途） |
 | 2 | **非类型模板参数（NTTP）** | `template<int N>` / `template<auto N>` / `template<T, T N>` 均报 `expected 'typename' or 'class'` | 中高 | P0 |
 | 3 | **consteval 只做折叠、无即时调用强制** | 非常量实参 `sq(v)` 静默降级为运行时调用（标准要求编译错误） | 中 | P1 |
 | 4 | **类类型三向比较（defaulted/成员 `operator<=>`/重写）** | `auto operator<=>(...) const = default` / 成员 `int operator<=>(...)` 均报 `unsupported operator for overloading` | 中高 | P1 |
@@ -45,7 +51,7 @@ m++ 已实现 C++20 基础（consteval 折叠、三向比较标量降级、conce
 | concepts：命名概念 requires-clause | ✅ | t17_concept_req / t51_fn_tmpl_requires_ok RUN=0 | `requires Concept<T>` 函数模板正常；组合/递归已修（8e07d08/b2da695/2755fe3） |
 | concepts：`template<Concept T>` 简写 | ⛔ | t01_abbrev_concept：`expected 'typename' or 'class'` | 模板参数解析只认 `typename`/`class`（cpp_parse.c:3713） |
 | concepts：缩写函数模板 `f(Concept auto)` | ⛔ | t19_abbrev_fn：`expected ',' or ')' after constructor argument, saw 'auto'` | 参数列表内 Concept+auto 未识别 |
-| concepts：requires 表达式 | ⛔ | t02_requires_expr / t61_concept_typename_req / t20_nested_requires | 概念体 `requires(T a){...}`、`requires{typename T::value;}`、requires-clause 内嵌 `requires` 全失败 |
+| concepts：requires 表达式 | 🟡 在途（已实现待合入） | test/cpp/requires_min.cc（`static_assert(requires(int a){ a+a; })` 最小复现通过）；t02/t61/t20 历史负例在 worker-req4 在途实现下应转过，待闭环后标注 ✅ | worker-req4 已实现（cpp_parse.c 在途未提交，HEAD 2c474d4 时未合入）；四类表达式语法（简单需求/类型需求/复合需求/嵌套需求）已接通 `cpp_check_constraint` |
 | concepts：类模板 + requires-clause | ⛔ | t33_class_tmpl_requires：`unexpected ';' at top-level` | `is_class` 检测在 requires 消费前（cpp_parse.c:3759 vs 3822），类模板被当函数模板缓冲 |
 | coroutines | 🚫 | t03_coroutine：`undeclared identifier: co_return` | 关键字已 lex 无解析；需状态机变换，不建议排期 |
 | modules | 🚫 | t04_module：`expected declaration or function definition` | `export module foo;` 失败；需分离编译/可达性，不建议排期 |
@@ -81,7 +87,7 @@ m++ 已实现 C++20 基础（consteval 折叠、三向比较标量降级、conce
 - **根因**：概念体缓冲只按 `;` 收 token，不做 `requires` 子句解析；requires-clause 缓冲器把内层 `requires(...)` 的括号当约束 token 消费掉。
 - **修复方向**：完整 requires-expression 语法（简单需求/类型需求/复合需求/嵌套需求）→ 编译为布尔约束表达式接入既有 `cpp_check_constraint`。
 - **影响**：concepts 的语义核心（类型检查、成员存在性、约束组合），无它概念只能写 sizeof/比较类简单约束。
-- **在途**：复核时刻 worker-req2 正在实现（未合入 HEAD）。
+- **在途（HEAD 2c474d4）**：worker-req4 已实现（cpp_parse.c 在途未提交 + test/cpp/requires_min.cc 最小复现 `static_assert(requires(int a){ a+a; })` 通过）。四类表达式语法（简单需求/类型需求/复合需求/嵌套需求）已接通 `cpp_check_constraint`。待 worker-req4 合入 HEAD 后，本行状态转 ✅ 并在 §1 总表同步。
 
 ### 2.3 非类型模板参数 NTTP（P0，难度中高）
 - **证据**：`template <int N>` / `template <typename T, T N>` / `template <auto N>` 一律 `expected 'typename' or 'class' in template parameter list`（t08/t18/t23/t35）。
@@ -98,6 +104,17 @@ m++ 已实现 C++20 基础（consteval 折叠、三向比较标量降级、conce
 - **证据**：成员 `int operator<=>(const S&) const` → `unsupported operator for overloading`（t22）；`auto operator<=>(...) const = default` 同（t09）。
 - **根因**：`cpp_op_mangle` 无 TSPACESHIP 分支（cpp_parse.c:1162-1179），运算符重载注册被拒。
 - **修复方向**：① 成员 operator<=> 重载（mangle 编码）；② defaulted 比较生成（按成员序生成 `<`/`==` 等）；③ 重写候选 `a < b` → `(a <=> b) < 0`。三者可分级交付。
+
+### 2.6 新增基线缺陷（HEAD 2c474d4，待修）
+
+以下 4 项为近期实测/交付中确认并已登记。权威的「阻塞 C++20/23 的基线缺口表」见 cpp23-gaps.md §2（其中 D1/D3/D4 已与 §2 同步，避免重复维护）。
+
+| # | 缺陷 | 证据（复现要点） | 状态 | 阻塞 |
+|:---:|:-----|:----------------|:-----|:-----|
+| D1 | **类类型运算符 `const T&` 形参失败** | `int operator==(const Vec& a, const Vec& b)` / 成员 `bool operator==(const A& o) const` → 「invalid operands to '=='」/「assignment to pointer must be from pointer…」；值形参 `int operator==(Vec a, Vec b)` 可跑。**比 P2468 更宽**：非仅重写候选缺失，引用形参运算符整体失败 | 待修 | 常见 `==`/`<` 写法、P2468 前驱 |
+| D2 | **急切实例化未使用成员函数** | m++ 在类模板实例化时**急切实例化全部成员函数**（含未 ODR-used 者）；标准要求仅 ODR-used 才实例化。后果：未使用成员函数体内的错误（未声明名/类型）被误报 | 待修 | 模板健壮性、惰性实例化语义 |
+| D3 | **`#elifdef`/`#elifndef` 前组未取误报** | `#if 0 … #elifdef FOO` → 「expected newline after preprocessing directive, saw identifier 'FOO'」；C/C++ 均复现（共享 pp） | worker-pp4 正在修 | P2334 完整 |
+| D4 | **P2266 非空类按值返回结果错乱** | `struct V{int n; V(int x):n(x){}}; V make(){V v(7); return v;}` 运行结果 ≠7；空类按值传参/返回已修（2be27a7），非空类仍错乱 | 待修 | P2266 简化隐式移动 |
 
 ---
 
@@ -128,21 +145,25 @@ m++ 已实现 C++20 基础（consteval 折叠、三向比较标量降级、conce
 
 ```
 P0（建议立即排期）
-  1. requires 表达式（简单需求起步）           —— concepts 语义核心（复核时在途：worker-req2）
+  1. requires 表达式（四类表达式）             —— concepts 语义核心（HEAD 2c474d4 在途：worker-req4 已实现未合入，待闭环后转 ✅）
   2. NTTP（int/枚举值参数起步）               —— 模板编译期常量地基
+  3. 类类型运算符 const T& 形参（D1）           —— 比 P2468 更宽，引用形参运算符整体失败，解锁常见 ==/< 写法
 
 P1
-  3. consteval 即时调用强制（行为修正）        —— 收紧语义，改动小
-  4. 类类型三向比较（成员 operator<=> → defaulted → 重写）—— 分级交付
-  5. 类模板 + requires-clause（bug 修）        —— cpp_parse.c 顺序调整，改动小
-  6. constinit                                —— 关键字 + 编译期初值检查，改动小
-  7. char8_t                                  —— 标量类型 + u8"" 字面量类型
-  8. 括号/直接列表初始化（C++11 连带）         —— 聚合构造 + 声明符 `{` 解析
+  4. consteval 即时调用强制（行为修正）        —— 收紧语义，改动小
+  5. 类类型三向比较（成员 operator<=> → defaulted → 重写）—— 分级交付
+  6. 类模板 + requires-clause（bug 修）        —— cpp_parse.c 顺序调整，改动小
+  7. 非空类按值返回错乱（D4 / P2266）         —— 空类已修（2be27a7），非空类返回路径推广
+  8. 急切实例化未使用成员函数（D2）            —— 改为仅 ODR-used 才实例化，模板健壮性
+  9. constinit                                —— 关键字 + 编译期初值检查，改动小
+ 10. char8_t                                  —— 标量类型 + u8"" 字面量类型
+ 11. 括号/直接列表初始化（C++11 连带）         —— 聚合构造 + 声明符 `{` 解析
+ 12. #elifdef 前组求值误报（D3）               —— worker-pp4 正在修（共享 pp）
 
 P2（按需）
-  9. explicit(bool)  /  lambda 模板参数  /  using enum
- 10. constexpr 对象 mini 内存模型（roadmap 阶段 3）
- 11. [[no_unique_address]] 等属性语义
+ 13. explicit(bool)  /  lambda 模板参数  /  using enum
+ 14. constexpr 对象 mini 内存模型（roadmap 阶段 3）
+ 15. [[no_unique_address]] 等属性语义
 
 明确不支持（标记，不排期）
   - coroutines：需协程状态机变换 + 承诺协议，后端大改造
@@ -161,8 +182,22 @@ P2（按需）
 | constinit 未 lex | `include/cpp/cpp_tokens.h`（无 CPP_TCONSTINIT）+ `src/cpp/lex/cpp_scan.c` |
 | 属性语义忽略 | `src/c/parse/attr.c`（ATTR 表只认 C 风格，`[[...]]` 静默跳过） |
 | ~~range-for~~ | ~~`src/c/parse/stmt.c` TFOR 分支（需加 `:` 处理）~~ → ✅ 已实现（71fbb35） |
-| requires 表达式 | `src/cpp/parse/cpp_parse.c` 概念体缓冲 + requires-clause 缓冲器（复核时在途：worker-req2） |
+| requires 表达式 | `src/cpp/parse/cpp_parse.c` 概念体缓冲 + requires-clause 缓冲器（HEAD 2c474d4 在途：worker-req4，未合入） |
 | `operator[]` mangle | `src/cpp/parse/cpp_parse.c:1225`（TLBRACK → "ix"，cfeadf9 已加；da9e2bf 修 const 决议） |
+| D1 类类型运算符 const T& 形参 | `src/cpp/parse/cpp_parse.c` 运算符重载注册/调用点的引用形参处理 |
+| D2 急切实例化 | `src/cpp/parse/cpp_template_decl` / 类模板实例化路径（应改为惰性，仅 ODR-used 实例化） |
+| D3 #elifdef 前组求值 | `src/c/lex/pp.c` 跳过组内 `#elifdef`/`#elifndef` 求值分支（worker-pp4 在修） |
+| D4 非空类按值返回 | 返回路径（空类已修 2be27a7，非空聚合返回路径待推广） |
+
+---
+
+## 7. 门禁状态（HEAD 2c474d4 实测）
+
+| 门禁 | 状态 | 说明 |
+|:-----|:-----|:-----|
+| check-chibicc | **PASS=0 / RUNFAIL=0 / COMPILEFAIL=41（共 41）** | chibicc 社区套件兼容性全灭（test/community/chibicc/results.log 现状）。失败形态含「cannot find -lc-meuos」（sysroot 未安装导致链接失败）与标准/C conformance 缺陷（见 cpp23-gaps.md 基线缺口）。**worker-chi4 调查中**，未纳入 verify-all.sh。 |
+| check-pic-verify | **FAIL（已知缺口）** | riscv64 不发射 GOT 序列（`%got_pcrel_hi` 缺失）、i386 缺 `@GOT(` 序列；x86_64/aarch64 OK。未纳入 verify-all.sh（脚本内标注 known gap）。 |
+| verify-all.sh | 17/17 PASS | HEAD 2c474d4 全量门禁通过（含自举 check-sysroot-static 与 MIR/LIR 双路径矩阵）；上述两门禁因已知缺口被显式排除。 |
 
 ---
 

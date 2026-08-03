@@ -3,12 +3,17 @@
 > 分支：`worktree-mxx-work`。日期：2026-08-02。
 > 目的：核对 mcc 对 C23 标准特性的覆盖完整性（goal「C 覆盖 90→23」）。
 > 方法：test/c23/ 现有测试 + 源码 grep + 临时编译/运行验证。只调研不改码。
+> **复核（worker-doc4，HEAD 2c474d4，2026-08-03）**：原 3 个差距已由 **226d31e** 闭环
+> （__VA_OPT__/__has_c_attribute/constexpr 函数求值，测试 test/c23/{va_opt,va_opt_boundary,
+> has_c_attribute,constexpr_func}.c），下表差距清单已同步。
 
 ## 结论摘要
 
 mcc 的 C23 覆盖**高度完整**：`make check-c23` 21 个测试全 PASS，绝大多数 C23
-语言特性已实现并有测试。确认 **3 个差距**：constexpr 函数编译期求值、
-`__VA_OPT__`、`__has_c_attribute`。
+语言特性已实现并有测试。原确认的 **3 个差距**（constexpr 函数编译期求值、
+`__VA_OPT__`、`__has_c_attribute`）已由 **226d31e 全部闭环**（2026-08-03，HEAD 2c474d4），
+新增 4 个差距测试全过；当前 **C23 无已知差距**。⚠️ 门禁提示：check-chibicc 当前
+PASS=0/COMPILEFAIL=41（chibicc 兼容性全灭，worker-chi4 调查），见文末「门禁状态」。
 
 ## 已支持特性（含证据）
 
@@ -36,26 +41,28 @@ mcc 的 C23 覆盖**高度完整**：`make check-c23` 21 个测试全 PASS，绝
 | 复合字面量 + _Generic（基线） | ✅ | 实测编译+运行 |
 | asm 语句 + 属性 | ✅ | test/c23/asm_pragma.c |
 
-## 差距清单（3 项）
+## 差距清单（3 项 → 全部已闭环）
 
-| # | 特性 | 现象 | 影响 | 工作量 |
-|:---:|:-----|:-----|:-----|:-----:|
-| 1 | **constexpr 函数编译期求值** | `constexpr int s = square(6)` 报「requires a constant expression initializer」；运行时调用 OK | 编译期常量计算（C23 §6.7.1/6.6）；影响用 constexpr 函数做常量折叠的代码 | 中（sema/eval 需支持常量上下文函数求值） |
-| 2 | **__VA_OPT__** | `#define F(fmt, ...) printf(fmt __VA_OPT__(,) __VA_ARGS__)` 报语法错误 | 变参宏条件展开（C23 §6.10.5）；影响标准库/变参宏 | 小（pp.c 宏展开） |
-| 3 | **__has_c_attribute** | 无实现（grep 无结果） | 属性存在性条件编译（C23 §6.10.1）；影响属性兼容代码 | 小 |
+| # | 特性 | 原现象 | 状态（HEAD 2c474d4） | 证据 |
+|:---:|:-----|:-----|:-----|:-----|
+| 1 | **constexpr 函数编译期求值** | `constexpr int s = square(6)` 报「requires a constant expression initializer」；运行时调用 OK | ✅ 已闭环（**226d31e**） | constexpr 函数调用在编译期折叠（整型常量实参委托 cpp_constexpr_eval）；test/c23/constexpr_func.c |
+| 2 | **__VA_OPT__** | `#define F(fmt, ...) printf(fmt __VA_OPT__(,) __VA_ARGS__)` 报语法错误 | ✅ 已闭环（**226d31e**） | 变参为空展开为空、否则展开为 tokens；test/c23/va_opt.c + va_opt_boundary.c |
+| 3 | **__has_c_attribute** | 无实现（grep 无结果） | ✅ 已闭环（**226d31e**） | 已知标准属性名返回 1（pp_expr 条件表达式宏，与 __has_include/__has_embed 同机制）；test/c23/has_c_attribute.c |
 
-## 推荐补全顺序
-
-1. **__VA_OPT__（优先，小成本）**：真实代码（尤其 `printf` 类变参宏、日志宏）常用，
-   是 GNU `,##__VA_ARGS__` 的标准化替代。pp.c 的宏展开处加 `__VA_OPT__(tokens)`
-   支持——当变参为空时展开为空，否则展开为 tokens。
-2. **__has_c_attribute（小成本）**：与 `__has_include`/`__has_embed` 同机制
-   （pp_expr 的条件表达式宏），仿现有实现加 `__has_c_attribute(name)`。
-3. **constexpr 函数编译期求值（中等，可按需）**：影响面小（编译期常量场景），
-   且与 C++ constexpr 机制可复用。建议在 sema/eval 的常量求值器加函数调用折叠。
+> 结论：**C23 三差距全部闭环，当前无已知差距**。验证：226d31e 隔离干净构建
+> check-c23（28 测试）/check-c99/check-c11 全 PASS。
 
 ## 验证方法
 
 ```sh
 MEUOS_SYSROOT=$(pwd)/../sysroot make check-c23   # 21 个测试全 PASS
 ```
+
+## 门禁状态（HEAD 2c474d4）
+
+| 门禁 | 状态 | 说明 |
+|:-----|:-----|:-----|
+| check-c23 | ✅ 全 PASS | 28 个测试（含 226d31e 新增 va_opt/va_opt_boundary/has_c_attribute/constexpr_func 4 个差距测试） |
+| check-chibicc | **PASS=0 / RUNFAIL=0 / COMPILEFAIL=41（共 41）** | chibicc 社区套件兼容性全灭（test/community/chibicc/results.log 现状）。失败形态含「cannot find -lc-meuos」（sysroot 未安装导致链接失败）与标准/C conformance 缺陷（如 100f 后缀、UINT64_MAX 字面量类型、宏重定义、_Atomic→void* 转换、__LINE__ 偏差等，见 test/community/chibicc/REPORT.md §5 分类）。**worker-chi4 调查中**，未纳入 verify-all.sh。 |
+| check-pic-verify | FAIL（已知缺口） | riscv64 不发射 GOT 序列（`%got_pcrel_hi` 缺失）、i386 缺 `@GOT(` 序列；x86_64/aarch64 OK。未纳入 verify-all.sh（脚本内标注 known gap）。 |
+| verify-all.sh | 17/17 PASS | HEAD 2c474d4 全量门禁通过；上述两门禁因已知缺口被显式排除。 |
