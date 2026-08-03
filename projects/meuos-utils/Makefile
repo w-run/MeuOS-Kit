@@ -26,6 +26,11 @@ MZ_DIR := ../meuos-compress
 MZ_LIB := $(MZ_DIR)/build/libmz.a
 MZ_INC := -I$(MZ_DIR)/include
 
+# libtui 库路径（jsonfmt 需要）
+LBTUI_DIR := ../meuos-libtui
+LBTUI_LIB := $(LBTUI_DIR)/build/libtui.a
+LBTUI_INC := -I$(LBTUI_DIR)/include
+
 # 公共编译选项
 BASE_CFLAGS := -Iinclude -Isrc
 
@@ -48,6 +53,10 @@ TOOL_BINS := $(addprefix $(BUILD)/,$(TOOL_NAMES))
 
 # 需要特殊链接的工具（从通用规则中排除）
 SPECIAL_BINS := $(BUILD)/mz $(BUILD)/awk $(BUILD)/gzip $(BUILD)/unzip $(BUILD)/tar
+# jsonfmt 需要 libtui，仅在 libtui 可用时加入
+ifeq ($(shell if [ -f $(LBTUI_LIB) ]; then echo 1; else echo 0; fi),1)
+SPECIAL_BINS += $(BUILD)/jsonfmt
+endif
 GENERIC_BINS := $(filter-out $(SPECIAL_BINS),$(TOOL_BINS))
 
 .PHONY: all check check-cross clean install
@@ -78,6 +87,15 @@ $(BUILD)/unzip: src/utils/arch/unzip.c $(LIBUTILS_LIB) $(MZ_LIB)
 $(BUILD)/awk: src/utils/text/awk.c $(LIBUTILS_LIB)
 	@mkdir -p $(dir $@)
 	$(CC) -O0 -g $(BASE_CFLAGS) -o $@ $< $(LIBUTILS_LIB) -lm
+
+# jsonfmt: 依赖 libtui (TUI JSON 查看器)
+$(BUILD)/jsonfmt: src/utils/text/jsonfmt.c $(LIBUTILS_LIB) $(LBTUI_LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(BASE_CFLAGS) $(LBTUI_INC) -o $@ $< $(LIBUTILS_LIB) $(LBTUI_LIB)
+
+# libtui 依赖
+$(LBTUI_LIB):
+	$(MAKE) -C $(LBTUI_DIR)
 
 # libmz 依赖
 $(MZ_LIB):
