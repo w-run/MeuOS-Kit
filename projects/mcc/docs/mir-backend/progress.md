@@ -359,3 +359,45 @@ Phase 3a 按 chloe 调研的移植顺序（riscv64→loongarch64→aarch64→arm
 - riscv64 后端补齐：聚合返回/参数（sret_reg 已就绪）、浮点（FP 寄存器
   池已建，emit 半成品）、varargs、TLS、VLA、动态 alloca。
 - 移植顺序下一目标：loongarch64（同样无 flags，复用 SETCCR 模型）。
+
+## Phase 3b：aarch64 MIR-native 移植（2026-08-03，hazel）
+
+按 Phase 3a 移植顺序的第二目标（riscv64 之后）。aarch64 有 NZCV flags
+（cmp 设置、b.cc 分支、cset 物化 0/1），但复用 riscv64 的 SETCCR 寄存器
+比较模型（isel 比较→MMOP_SETCCR、JNZ→JCC 布尔值），emit 用
+`cmp + cset` 与 `cbnz/cbz` 实现，避免 flags 跨指令存活问题——无需抽象
+扩展。
+
+### aarch64 标量后端（5 commit，branch worktree-tmp-hazel-aarch64）
+- **5163191** mtarget_aarch64 注册：include/aarch64_m.h（31 GPR x0-x30 +
+  32 V，x31=sp 不分配），machine.c regs 表（x19-x28/v8-v15 callee-saved、
+  x0-x18/v0-v7/v16-v31 caller-saved），rglob=fp/lr/sp，sret_reg=x8
+  （AAPCS64 间接结果），scratch=x9/x10/x11/ip0/ip1，argreg=x0-x7+v0-v7。
+- **3e2ca4d** aarch64_mabi.c（AAPCS64 标量）：selpar/selcall/selret；
+  溢出参数从 **fp+16** 加载（prologue `stp x29,x30` 推入后 fp=old_sp-16，
+  区别于 riscv64 的 fp+0）。
+- **9e2029e** aarch64_mbe.c（isel）：比较→SETCCR、JNZ→JCC 布尔值、
+  mbe_supported 限定标量整数（聚合/浮点/varargs/TLS/VLA 回退 legacy）。
+- **23eee7c** aarch64_memit.c：帧 `sub sp,#N + stp x29,x30,[sp,#N-16] +
+  add x29,sp,#N`；movz/movk 立即数；SETCCR=cmp+cset；JCC=cbnz/cbz 或
+  cmp+b.cc；REM=sdiv+mul+sub；MOVSX/MOVZX=sxtb/sxth/sxtw/uxtb/uxth；
+  返回 `ldr x30/x29 + add sp,x29,#0 + ret`（dynalloc 安全）。
+- **15d4261** gate 接入：emit.c mfnm_backend_aarch64、Makefile
+  MABI_SRC/check-mir-machine/abi、test/targets/regress.sh aarch64 返回
+  断言兼容 MIR-native（add x0 或 mov x0）。
+
+### 验证
+- 52/53 可编译 test/c99+c11 样例（MIR-native 或 legacy 回退）经
+  aarch64-linux-gnu-as 汇编全部通过（另 c23 61 样例单独验证通过）；
+  唯一失败 varargs_overflow 为 aarch64 legacy LIR 既有 `invalid class`
+  崩溃（MCC_MIR_BACKEND=0 同样复现，非 MIR-native 引入）。
+- 逻辑模式与 riscv64/x86_64 一致（参数落地、slot 寻址、SETCCR、帧
+  布局）；栈参数 fp+16 路径验证正确。
+- x86_64 无回归：verify-all 全 PASS（含 check-c-mir 双模式、自举、
+  check-targets 更新断言后兼容 MIR-native/legacy）。
+
+### 剩余工作（后续 Phase 3b）
+- aarch64 后端补齐：聚合（sret_reg=X8 已就绪）、浮点（V 寄存器池已建）、
+  varargs、TLS、VLA、动态 alloca。
+- 移植顺序下一目标：loongarch64。
+
