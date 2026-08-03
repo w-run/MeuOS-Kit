@@ -4431,13 +4431,6 @@ param_done:
 	}
 	next(); /* consume '>' */
 
-	/* class template: `template<...> class Foo { ... }` (struct/union too) */
-	{
-		enum cpp_tokenkind k = cpp_tok_kind();
-		if (k == CPP_TCLASS || k == CPP_TSTRUCT || k == CPP_TUNION)
-			tmpl->is_class = true;
-	}
-
 	/* C++20 concept definition: `template<...> concept Name = expr;`.
 	 * The concept body (a constant boolean expression over the template
 	 * parameters) is buffered; a use `requires Integral<T>` looks the
@@ -4566,6 +4559,17 @@ param_done:
 		}
 		tmpl->constraint = ctoks;
 		tmpl->nconstraint = cn;
+	}
+
+	/* class template: `template<...> class Foo { ... }` (struct/union too).
+	 * Checked *after* the requires-clause: with `template<...> requires C<T>
+	 * class Foo { ... };` the token following '>' is `requires`, not the
+	 * class-key, so probing before the clause is consumed would leave
+	 * is_class false and the trailing ';' of `};` unconsumed. */
+	{
+		enum cpp_tokenkind k = cpp_tok_kind();
+		if (k == CPP_TCLASS || k == CPP_TSTRUCT || k == CPP_TUNION)
+			tmpl->is_class = true;
 	}
 
 	/* buffer the rest of the declaration (return type .. body / ';') */
