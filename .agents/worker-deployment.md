@@ -68,7 +68,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 | alice | reasoning | worktree-tmp-alice-cpp (自 worktree-mxx-work@d0a90c9) | /tmp/mxx-wt-alice | cpp_parse 组 D1/D4/D2/E2/E3 修复（requires 续作已完成） | **completed**（已合入主线） | a3808b9 |
 | bella | lite | worktree-tmp-bella (自 worktree-mxx-work) | /tmp/mxx-wt-bella | m++ 测试矩阵扩充 + 门禁验证 | **completed**（1ed8c53 已合入主线 dd78366） | 16 个 test/cpp 文件 |
 | chloe | lite | 只读隔离副本 | /tmp/mcciso-chloe | 定位 chibicc B 类真 bug（常量折叠窄化 + va_end 类型检查） | **completed**（报告已收） | 只读不 push |
-| diana | lite | worktree-tmp-diana (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试扩充 | **completed**（db1451b 已合入主线 294e5c2） | 11 个 test/c23 文件 + 发现 F1-F3 |
+| diana | lite | worktree-tmp-diana-errcode (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23 边界测试 + check-pic-verify + 错误码体系/多错收集 | **completed**（db1451b C23 已合入；errcode da5a646/a561b36/c204bbe 已 push） | 11 test/c23 + F1-F3 + GOT 修复 + E####/caret 全跨/JSON 多错/fix-it |
 | eve | lite | worktree-tmp-eve (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵扩充 | **completed**（02d6684 已合入主线 b4cad7e） | 33 个 test/cpp 文件 |
 | grace | lite | worktree-tmp-grace-sema + worktree-tmp-grace-loc (自 worktree-mxx-work@e010519) | /tmp/mxx-wt-grace | sema/decl 组 E1/E4/E5/E6 修复 + E4 行号定位到函数体 } | **completed**（已合入主线） | a8167d9 |
 | hazel | lite | worktree-tmp-hazel-c23 (自 worktree-mxx-work@d0a90c9) | /tmp/mxx-wt-hazel | C23 constexpr 组：F1/F2/F3 | **completed**（8e5aae3 已 push origin/worktree-tmp-hazel-c23，门禁全绿，已合入主线） | 8e5aae3 |
@@ -116,6 +116,15 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 
 ### 文档同步（cpp20/cpp23-gaps.md、c23-review.md）
 - 状态：**已合入主线**（edb854b + eb8372d），已闭环
+
+### 错误码体系与多错收集（diana errcode 分支）
+- 状态：**已修复**（da5a646 错误码+caret 全跨 / a561b36 JSON 多错收集 / c204bbe fix-it，分支 worktree-tmp-diana-errcode，已 push）
+- 内容：
+  - `error: E%04d: <msg>`（E0001 语法/E0002 未声明/E0003 类型/E0004 重定义），`--error-json` 增 `code`/`end_col`
+  - caret 单 ^ → 覆盖 token 全跨（error_tok_code 按 token 文本宽度）
+  - `--error-json` 多错收集（上限 10，顶层循环 setjmp/longjmp 恢复 + err_sync 跳到下一 ';'/'}'），结束后出错仍 exit(1)
+  - fix-it：缺分号 `note: add ';' here` + 未声明标识符编辑距离拼写建议 `note: did you mean 'X'?`
+- 验证：verify-all.sh 17 PASS / 0 FAIL / 0 SKIP
 
 ---
 
