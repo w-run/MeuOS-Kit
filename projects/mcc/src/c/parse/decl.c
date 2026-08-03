@@ -703,7 +703,7 @@ decl(struct scope *s, struct func *f)
 						    t->base != &typeauto && !d->u.func.isnoreturn &&
 						    strcmp(d->name, "main") != 0 &&
 						    func_falls_off_end(f))
-							error(&bodyend,
+							error_code(E_STMT, &bodyend,
 							    "control reaches end of non-void function '%s'",
 							    name);
 					}
