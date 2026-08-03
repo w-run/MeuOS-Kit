@@ -620,3 +620,85 @@ commit：a4b28cd（聚合+varargs ABI）、2045931（浮点/TLS/BLIT 发射）�
 - check-c-mir 双模式 fail=0、check-cpp-func/neg rc=0、check-mir 全绿、
   check-olevel rc=0、verify-all 19/19（MIR-native + bridge 双路径）、
   自举 exit 0。
+
+## MIR alloca 提升 mem2reg（2026-08-03，chloe，#3）
+
+新增 `src/mir/mem2reg.c`（751 行）+ 管线注册 + 一处 bridge 预存在 bug
+修复。分支 worktree-wip-chloe-mem2reg（f1e56cb..e9712be），归并 b8225ad。
+
+### 动机与分工（与上节 LOADFWD 的关系）
+前端给每个标量（含参数）建 alloca 槽并全程 load/store 往返，循环内表现
+为 `mov r10,slot; mov (r10),eax` 的指针解引用。LOADFWD 只做**块内**转发，
+循环体每轮仍从内存重载归纳变量与参数。mem2reg 做完整提升：把非逃逸标量
+槽整体升为 SSA 值，连 alloca 一起消失，跨块（循环/分支/switch）全覆盖。
+
+**两者互补，不可互相替代。** 实测：禁 LOADFWD 只留 mem2reg，编译器自身
+90+ 源文件 asm 共 761824 行；两者都开 755840 行——**LOADFWD 边际仍减
+5984 行**。分工边界：mem2reg 吃干净标量槽；LOADFWD 收 mem2reg 主动拒绝
+的槽（地址逃逸/聚合/base+off/未定值读）——这些无法整体提升，但块内转发
+依然合法。**顺序必须 mem2reg 在前**，否则 LOADFWD 白做一遍马上被删的槽。
+
+### 算法
+自带 CFG 分析（前驱/RPO/迭代 idom/支配边界，照搬 gvn.c 写法但本文件
+私有），在存储块的迭代支配边界插 phi，再按支配树重命名（显式 worklist
++ 栈深度回退标记，不递归，深 CFG 不爆栈）。
+
+准入条件（全满足才提升）：① 直接 MOP_ALLOCA 结果（拒 base+off，可能
+别名）；② 标量（I8/16/32/64、F32/F64、PTR，拒 MT_AGG 与带 td）；
+③ **地址不逃逸**——只能出现在 load 的 src[0] 或 store 的 src[1]，出现在
+ARG/phi/store 值位/其它任何位置一律拒绝；④ 所有访问类型一致且无常量
+位移 cst（拒类型双关与子对象访问）；⑤ alloca 字节数为常量且等于该标量
+宽度（排除数组/带 padding 对象）。
+
+### 正确性关键（两个坑，与 LOADFWD 记录的同源）
+- **MVal.def 失效**：每次压缩块指令数组后统一刷 def 回指；删 store 时
+  **就地改 MOP_NOP** 不移动索引，把失效窗口压到最小，NOP 留给 DCE 收。
+- **别边遍历边删**：alloca 移除是跑完 rename 后统一压缩；phi 撤销也是
+  先标记再统一处理。候选判定全程靠开局 build_uses 后建的 slotof[] 映射，
+  不依赖会变陈旧的 def 指针（故不需要 LOADFWD 那张 is_alloca 位图）。
+
+### probe 预演：未定值读的槽不提升
+给"先读后写"路径合成零常量时，浮点常量 COPY 在目标被 spill 后会退化成
+`movss .Lxx(%rip), 12(%rsp)` 这种 mem→mem，汇编器报 operand size
+mismatch（自举编译 src/opt/fold.c 的 `float xs,ls,rs; double xd,ld,rd;`
+条件赋值时暴露）。读未初始化本属 UB，故加 probe 阶段：用完全相同的
+支配树走法空跑一遍，标记需要 undef 的槽并整体退出提升。**放弃提升永远
+安全**，正确性优先。
+
+### bridge.c 预存在 bug 修复（勿 revert）
+`src/lir/bridge.c` 原为 `phi->link = NULL; qb->phi = phi;`——**每轮覆盖**，
+一个块有多个 phi 时前面的全被丢弃，其余 phi 目标值变成 "used undefined"。
+改为 `Phi **phitail = &qb->phi;` 链式追加（约 10 行）。
+
+**根因**：此前 MIR 侧没有任何 pass 会在单块内造多个 phi，故该 bug 长期
+潜伏；mem2reg 是第一个（每个提升槽一个 phi），才把它暴露出来。症状为
+`ssa temporary %m2r.phi.N is used undefined in @<blk>`，命中 5 个 cpp
+用例。**后续任何多 phi pass 都依赖此修复；它看似与 mem2reg 无关，但不能
+随 mem2reg 一起回退。**
+
+### 效果
+- 样例 `sum_range(int lo,int hi,int step)`（MIR-native）：指针间接
+  `movl (%r10)` **15→0**；栈帧 **120→32 字节**；prologue 5 条
+  `leaq NN(%rsp)` 槽地址计算全消；callee-saved 压栈 4→3。
+- 编译器自身 90+ 源文件：`(%r10)` 间接访问 **92576→55005（-41%）**；
+  asm 总行数 **816020→755840（-7.4%）**。
+
+### 验证
+- verify-all 双模式各 **19/19**（含自举 check-sysroot-static）。
+- 全语料（test/c/*.c + test/cpp/*.cc）双模式扫描，`SSA consistency
+  check FAILED` **0 次**。
+- 13 函数用例（嵌套循环 break/continue、取地址局部量、struct 传参、
+  switch fallthrough、浮点递推、移位寄存器、全局变量、short/unsigned
+  窄类型）**bridge / MIR-native / gcc 三方输出一致**；-O2/-O3/-Os/-Oz
+  × 双模式全过。
+- 注：-O0/-O1/-Og 在 bridge 模式有 cvtsi2sd 报错与数值偏差，已在**基线
+  mcc 上复现相同现象**，属预存在缺陷；mem2reg 仅在 optlevel>=2 运行，
+  与本次改动无关。
+
+### 二期方向
+1. 未定值读的槽当前不提升。后端补浮点常量 materialize（先入 xmm 再
+   spill）或引入真正的 MOP_UNDEF 后可覆盖。
+2. 提升后残留的 `movl 20(%rsp)` 是 regalloc 对 phi 值的 spill，非指针
+   间接，属寄存器分配议题。
+3. 仅标量；聚合体 SROA（拆字段再提升）是独立的更大工作。
+4. 带常量位移的 load/store 一律拒绝略保守，位移为 0 时其实可放行。
