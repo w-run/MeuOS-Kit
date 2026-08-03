@@ -68,7 +68,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 | alice | reasoning | worktree-tmp-alice (自 worktree-requires-wip) | /tmp/mxx-wt-alice | 续作 requires 表达式四类需求 | **in_progress** | c9ca880 起点 |
 | bella | lite | worktree-tmp-bella (自 worktree-mxx-work) | /tmp/mxx-wt-bella | m++ 测试矩阵扩充 + 门禁验证 | **completed**（1ed8c53 已合入主线 dd78366） | 16 个 test/cpp 文件 |
 | chloe | lite | 只读隔离副本 | /tmp/mcciso-chloe | 定位 chibicc B 类真 bug（常量折叠窄化 + va_end 类型检查） | **completed**（报告已收） | 只读不 push |
-| diana | lite | worktree-tmp-diana (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试扩充 | **in_progress** | 3020962 起点 |
+| diana | lite | worktree-tmp-diana (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试扩充 | **completed**（db1451b 已合入主线 294e5c2） | 11 个 test/c23 文件 + 发现 F1-F3 |
 | eve | lite | worktree-tmp-eve (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵扩充 | **completed**（02d6684 已合入主线 b4cad7e） | 33 个 test/cpp 文件 |
 | grace | lite | worktree-tmp-grace (自 worktree-mxx-work) | /tmp/mxx-wt-grace | chibicc B 类两 bug 实施（**竞争**） | **in_progress** | c622f05 起点 |
 | hazel | lite | worktree-tmp-hazel (自 worktree-mxx-work) | /tmp/mxx-wt-hazel | chibicc B 类两 bug 实施（**竞争**） | **in_progress** | c622f05 起点 |
@@ -128,7 +128,10 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 - **D1** const T& operator 整体失败（def4 定位，cpp_try_operator_call）
 - **D4** ctor 标量成员 init-list 落地缺失（def4 定位，emit_base_ctors_for）
 - **D2** 急切实例化未使用成员（def4 定位，flush_pending_methods）
-- **chibicc B 类**：常量折叠窄化 + va_end 类型检查（verify2/gate3/chi4 定位）
+- **F1** constexpr 函数体纯度不诊断（constexpr 函数调用 printf 不报错，diana 发现，test/c23/neg/constexpr.neg.c）
+- **F2** `nullptr_t` 变量进真值条件 ICE（内部错误 unsupported conversion，diana 发现）
+- **F3** 具名 constexpr 变量不折叠进整数常量表达式（_Static_assert(K==9) 报非常量，diana 发现）
+- **chibicc B 类**：常量折叠窄化 + va_end 类型检查（verify2/gate3/chi4 定位，chloe 精确行号，grace/hazel 竞争中）
 
 ## 5. 纪律速查
 
