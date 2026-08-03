@@ -151,6 +151,13 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 - 验证：`MCC_MIR_BACKEND=1 sh test/verify-all.sh` **17/17**（含 check-driver shared/TLS、check-i386/loongarch64/targets 交叉目标）；默认模式亦 17/17
 - 备注：与 chloe 撞车为竞争融合正面案例，chloe 4aaa11f/fafa676 与其 Phase 2 分支（worktree-tmp-chloe-mirp2）无文件重叠
 
+### Phase 2：x86_64 默认强制 MIR-native（#80，chloe，worktree-tmp-chloe-mirp2）
+- 目标：MCC_USE_MIR=0 不再生效（g_use_mir 恒 1）；x86_64 默认走 MIR-native（g_use_mir_backend 默认 1）；删 emit.c 死 fallback 路径。
+- 提交：`e6f8c56`（main.c g_use_mir 恒 1 + g_use_mir_backend 默认 1；emit.c 删 NULL fall-through + `strcmp(T.name,"x86_64")` 目标门控）→ merge bella #94 收口 → `20e6988`（memit TLS PIC：新增 g_pic 全局镜像 T.pic，emit_tls_addr/mov_to_rax/emit_const 三处 @gottpoff 分叉，守 MIR 纯纪律优于 bella 16273af 的 T.pic 方案，已获 bella review 采纳）→ `0702745`（merge bella 72a04bd/16273af/e4b420b，memit 冲突以 g_pic 版为准）。
+- 验证：MCC_MIR_BACKEND=1 与默认模式双路径 verify-all 均 **19/19**（含 check-cpp-func/neg × MIR-native/bridge 双后端变体、check-driver TLS、自举）；此前 3 例 cpp 聚合返回段错误全修复。
+- verify-all.sh 改造：新增 `check-cpp-func/neg × MCC_MIR_BACKEND=1/0` 双后端显式复验步骤（补"cpp 套件只覆盖单一后端"缺口，17→19 步）。
+- 非 x86_64 target（aarch64/arm/riscv64/loongarch64/i386）仍走 MIR→bridge→LIR。
+
 ## 5. 纪律速查
 
 - 提交：文件级 `git add <文件>`，**禁止 `git add -A`**；建议 `git commit --only <path>` 规避共享 index 竞态

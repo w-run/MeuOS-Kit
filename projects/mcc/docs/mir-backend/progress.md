@@ -114,6 +114,22 @@ check-mir 全绿；bridge 路径 0 回归。
   check-driver 的 shared/TLS 回归、check-i386/loongarch64/targets 交叉
   目标）；默认模式 verify-all 亦 17/17，无回归。
 
+## Phase 2：x86_64 默认强制 MIR-native（2026-08-03，chloe，#80）
+
+### 内容
+- `g_use_mir` 恒 1（MCC_USE_MIR=0 不再生效）；`g_use_mir_backend` 默认 1
+  （x86_64 默认走 MIR-native）；emit.c 删 MIR lowering 的 NULL fall-through
+  死路径；MIR-native 调用按 `T.name` 门控限 x86_64（非 x86_64 仍走
+  MIR→bridge→LIR）。
+- TLS PIC 适配采用 `g_pic` 全局（main.c 与 T.pic 同步赋值）而非读 QBE
+  `Target T`——守 MIR 机器层纯 MIR 纪律，且补齐 emit_const MC_ADDR.tls
+  第三处发射点（bella 16273af 只补 2 处），已获 bella review 采纳为唯一正版。
+
+### 验证
+- `MCC_MIR_BACKEND=1` 与默认模式双路径 verify-all 均 **19/19**（新增
+  check-cpp-func/neg × MCC_MIR_BACKEND=1/0 双后端显式复验步骤，17→19）。
+- check-c-mir fail=0；check-cpp-func/neg、c99/c11/c23、自举全绿。
+
 ## 当前工作点
 
 - **P4 regalloc 全部完成（A-E）**；isel-debug 验证发现的 P3b 遗留 2 个边界

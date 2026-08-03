@@ -6,6 +6,9 @@
 #   1. check             冒烟：构建 mcc 并编译运行 hello
 #   2. check-mir         MIR 核心单元测试（types/passes/machine/abi/regalloc/bridge）
 #   3. check-cpp         m++ C++ 前端（lex/virtual/func/neg，含虚表与模板）
+#   3b. check-cpp × MIR-native/bridge 双后端显式复验（MCC_MIR_BACKEND=1/=0
+#       各跑一次 check-cpp-func/neg；Phase 2 后默认即 MIR-native，显式
+#       变体堵住"只覆盖单一后端"的覆盖缺口）
 #   4. check-c99         C 回归（c99 套，--specs=host 或 MEUOS_SYSROOT 模式按当前环境可用性）
 #   5. check-c11         C 回归（c11 套）
 #   6. check-c23         C 回归（c23 套，同样按环境选择 MEUOS_SYSROOT / --specs=host）
@@ -130,6 +133,15 @@ else
     run "make check-cpp (lex/func/neg, 跳过 virtual)" \
         make check-cpp-lex check-cpp-func check-cpp-neg
 fi
+
+# 3b. C++ 套件 × MIR-native/bridge 双后端显式复验（Phase 2 后默认即
+#     MIR-native，此处显式锁定 MCC_MIR_BACKEND=1/0，防环境变量或未来
+#     默认值变化漏网——补上"verify-all 不设 MCC_MIR_BACKEND 导致 cpp
+#     套件只覆盖单一后端"的缺口）。
+run "make check-cpp-func/neg (MCC_MIR_BACKEND=1)" \
+    env MCC_MIR_BACKEND=1 make check-cpp-func check-cpp-neg
+run "make check-cpp-func/neg (MCC_MIR_BACKEND=0)" \
+    env MCC_MIR_BACKEND=0 make check-cpp-func check-cpp-neg
 
 # 4. C 回归
 if [ "$SYSROOT_OK" = 1 ]; then
