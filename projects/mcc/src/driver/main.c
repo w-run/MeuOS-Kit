@@ -56,7 +56,7 @@ int opt_level = 2;    /* -O2 default */
  * 单测链接 libmcc.a 中的后端对象，全局必须落在后端层（ir.h extern）。
  * g_opt_size（-Os/-Oz）定义在 src/mir/passes.c（同理由）。 */
 int g_opt_z;      /* -Oz: aggressive size (same pipeline as -Os for now) */
-int g_fast_math;  /* -Ofast: -O3 + fast-math semantics (recorded only) */
+/* g_fast_math（-Ofast 门控）定义在 src/mir/passes.c（mir_test 独立链接） */
 /* warn_level and warn_as_error are defined in src/lex/token.c */
 enum tls_model tls_model = TLSM_DEFAULT;
 
