@@ -70,8 +70,8 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 | chloe | lite | 只读隔离副本 | /tmp/mcciso-chloe | 定位 chibicc B 类真 bug（常量折叠窄化 + va_end 类型检查） | **completed**（报告已收） | 只读不 push |
 | diana | lite | worktree-tmp-diana (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试扩充 | **completed**（db1451b 已合入主线 294e5c2） | 11 个 test/c23 文件 + 发现 F1-F3 |
 | eve | lite | worktree-tmp-eve (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵扩充 | **completed**（02d6684 已合入主线 b4cad7e） | 33 个 test/cpp 文件 |
-| grace | lite | worktree-tmp-grace (自 worktree-mxx-work) | /tmp/mxx-wt-grace | chibicc B 类两 bug 实施（**竞争**） | **in_progress** | c622f05 起点 |
-| hazel | lite | worktree-tmp-hazel (自 worktree-mxx-work) | /tmp/mxx-wt-hazel | chibicc B 类两 bug 实施（**竞争**） | **in_progress** | c622f05 起点 |
+| grace | lite | worktree-tmp-grace-sema (自 worktree-mxx-work) | /tmp/mxx-wt-grace | sema/decl 组 E1/E4/E5/E6 修复 | **completed**（fd222ad 后转 sema，B 类竞争由 hazel 胜出） | push worktree-tmp-grace-sema |
+| hazel | lite | worktree-tmp-hazel (自 worktree-mxx-work) | /tmp/mxx-wt-hazel | chibicc B 类两 bug 实施（**竞争**） | **completed**（a932c60 胜出，已合入主线 69a6f2c） | a932c60 |
 
 ### 会话中断恢复速查（当前团队）
 1. `git fetch origin`（在 /workspace/MeuOS-Kit）
@@ -111,7 +111,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 - 状态：**已合入主线**（f05633f），PASS=9/RUNFAIL=6/COMPILEFAIL=26，已闭环
 
 ### chibicc B 类真 bug（常量折叠窄化转换 + va_end 类型检查）
-- 状态：verify2/gate3/chi4 已定位，**待 requires 合入后派发**
+- 状态：**已合入主线**（hazel a932c60 胜出，覆盖窄化 IAND 掩码+符号扩展 + TYPEATOMIC 解包 + va_end no-op，已 merge 69a6f2c）
 
 ### 文档同步（cpp20/cpp23-gaps.md、c23-review.md）
 - 状态：**已合入主线**（edb854b + eb8372d），已闭环
@@ -119,12 +119,12 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 ---
 
 ### 缺陷队列（待修复）
-- **E1** 命名空间作用域变量重定义 `int a; int a;` 漏检（eve 发现，pending/redef_global_var.neg.cc）
+- **E1** 命名空间作用域变量重定义 `int a; int a;` 漏检（eve 发现，pending/redef_global_var.neg.cc）→ **done**（grace，decl.c 重定义诊断 + 测试转正 test/cpp/redef_global_var.neg.cc）
 - **E2** 类内重复成员 `int x; int x;` 漏检（pending/dup_member.neg.cc）
 - **E3** 重复枚举符 `enum E{a,a};` 漏检（pending/dup_enum.neg.cc）
-- **E4** 非 void 函数缺 return 漏检（pending/missing_return.neg.cc）
-- **E5** 引用未初始化 `int&r;` 漏检（pending/uninit_ref.neg.cc）
-- **E6** C++ 模式禁用 VLA 未生效（pending/vla.neg.cc）
+- **E4** 非 void 函数缺 return 漏检（pending/missing_return.neg.cc）→ **done**（grace，func_falls_off_end CFG 可达性 + decl.c 检查 + 测试转正 test/cpp/missing_return.neg.cc）
+- **E5** 引用未初始化 `int&r;` 漏检（pending/uninit_ref.neg.cc）→ **done**（grace，decl.c 声明处检查 + 测试转正 test/cpp/uninit_ref.neg.cc）
+- **E6** C++ 模式禁用 VLA 未生效（pending/vla.neg.cc）→ **done**（grace，decl.c PROPVM 检查 + 测试转正 test/cpp/vla.neg.cc）
 - **D1** const T& operator 整体失败（def4 定位，cpp_try_operator_call）
 - **D4** ctor 标量成员 init-list 落地缺失（def4 定位，emit_base_ctors_for）
 - **D2** 急切实例化未使用成员（def4 定位，flush_pending_methods）
