@@ -286,7 +286,12 @@ lir_bridge(MFn *mfn)
 			}
 		}
 
-		/* phis */
+		/* phis.  A block may carry several (mem2reg promotes each
+		 * scalar slot independently and places one phi per slot at a
+		 * join), so the LIR phis must be CHAINED — assigning qb->phi
+		 * per iteration would keep only the last one and leave the
+		 * other phi destinations undefined. */
+		Phi **phitail = &qb->phi;
 		for (MPhi *p = mb->phi; p; p = p->link) {
 			Phi *phi = alloc(sizeof *phi);
 			phi->to = valref(mfn, p->dst, fn);
@@ -300,7 +305,8 @@ lir_bridge(MFn *mfn)
 				phi->blk[k] = p->blk[k] ? lirblk[p->blk[k]->id] : qb;
 			}
 			phi->link = NULL;
-			qb->phi = phi;
+			*phitail = phi;
+			phitail = &phi->link;
 		}
 
 		/* instructions (calls lowered here; terminator handles control) */
