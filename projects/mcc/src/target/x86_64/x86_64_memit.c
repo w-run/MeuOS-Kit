@@ -710,6 +710,16 @@ emit_ins(FILE *f, MInsM *in)
 	case MMOP_LOAD: {
 		/* width + zero-extension for sub-32 loads */
 		emit_addr_loads(f, in->addr);
+		/* direct SSE load: an 8-byte movsd into the XMM register.  Do NOT
+		 * route through %rax — selret's two-register aggregate return
+		 * would let the second chunk's load clobber the first chunk just
+		 * placed in %rax (mixed {INTEGER,SSE} 16B returns). */
+		if (d && d->kind == MV_REG && in->dtype == MT_F64) {
+			fputs("\tmovsd\t", f);
+			emit_addr(f, in->addr);
+			fprintf(f, ", %%%s\n", d->name);
+			return;
+		}
 		/* 8-byte register destination: load straight there so a second
 		 * load (e.g. selret's RAX+RDX chunks) does not clobber %rax */
 		if (d && d->kind == MV_REG &&

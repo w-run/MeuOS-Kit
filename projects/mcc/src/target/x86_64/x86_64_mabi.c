@@ -416,7 +416,18 @@ mabi_selcall(MFnM *fm, MOut *o, MInsM *args, int n, MInsM *call)
 			MVal *rdi = rarg(fm, &ni, &ns, false);
 			mout(o, MMOP_MOV, MT_PTR, rdi, call->dst, 0);
 		} else {
-			/* ≤16B: result chunks land in RAX/RDX or XMM0/XMM1 */
+			/* ≤16B aggregate return: the SysV ABI returns the struct in
+			 * RAX/RDX (INTEGER/SSE eightbytes) or XMM0/XMM1 — the callee
+			 * side (selret) packs them there.  The post-call sequence
+			 * still treats call->dst as a pad pointer (store/load
+			 * pattern), so reserve a pad in OUR frame and point
+			 * call->dst at it; the "results" section below lands the
+			 * return registers into that pad.  No hidden RDI argument
+			 * for register returns (unlike the >16B sret case). */
+			MVal *pad = tmp(fm, MT_PTR, "abi");
+			mout_cst(o, MMOP_ALLOCA16, MT_PTR, pad, 0,
+			         mconst_int(fm->host, MT_I32, aret.size));
+			mout(o, MMOP_MOV, MT_PTR, call->dst, pad, 0);
 		}
 	}
 
@@ -481,20 +492,27 @@ mabi_selcall(MFnM *fm, MOut *o, MInsM *args, int n, MInsM *call)
 		if (aret.inmem) {
 			/* RAX returns the pad pointer */
 			mout(o, MMOP_MOV, MT_PTR, call->dst, reg(fm, X64MREG_RAX), 0);
-		} else {
-			if (aret.cls[0] != MT_NONE) {
-				bool isf = aret.cls[0] == MT_F64;
-				mout_addr(o, MMOP_STORE, isf ? MT_F64 : MT_I64, 0,
-				          maddr(call->dst, 0, 1, 0),
-				          reg(fm, isf ? X64MREG_XMM0 : X64MREG_RAX));
-			}
-			if (aret.size > 8 && aret.cls[1] != MT_NONE) {
-				bool isf = aret.cls[1] == MT_F64;
-				mout_addr(o, MMOP_STORE, isf ? MT_F64 : MT_I64, 0,
-				          maddr(call->dst, 0, 1, 8),
-				          reg(fm, isf ? X64MREG_XMM1 : X64MREG_RDX));
-			}
+	} else {
+		/* ≤16B register return: land the per-class SysV register
+		 * sequence (INTEGER: rax, rdx; SSE: xmm0, xmm1) into the pad —
+		 * mirrors LIR retr().  A positional slot1→XMM1/RDX map breaks
+		 * mixed {INTEGER,SSE} returns (the SSE eightbyte must use xmm0). */
+		static const int retreg[2][2] = {
+			{ X64MREG_RAX, X64MREG_RDX },
+			{ X64MREG_XMM0, X64MREG_XMM1 },
+		};
+		int nr[2] = { 0, 0 };
+		for (uint32_t n = 0; n * 8 < aret.size; n++) {
+			if (aret.cls[n] == MT_NONE)
+				continue;
+			int k = aret.cls[n] == MT_F64 ? 1 : 0;
+			MReg r = retreg[k][nr[k]++];
+			mout_addr(o, MMOP_STORE,
+			          aret.cls[n] == MT_F64 ? MT_F64 : MT_I64, 0,
+			          maddr(call->dst, 0, 1, n * 8),
+			          reg(fm, r));
 		}
+	}
 	} else if (call->dst) {
 		bool isf = call->dtype == MT_F32 || call->dtype == MT_F64;
 		mout(o, MMOP_MOV, call->dtype, call->dst,
@@ -530,17 +548,24 @@ mabi_selret(MFnM *fm, MOut *o, MInsM *term)
 			mout(o, MMOP_MOV, MT_PTR, reg(fm, X64MREG_RAX),
 			     reg(fm, X64MREG_RDI), 0);
 		} else {
-			if (aret.cls[0] != MT_NONE) {
-				bool isf = aret.cls[0] == MT_F64;
-				mout_addr(o, MMOP_LOAD, isf ? MT_F64 : MT_I64,
-				          reg(fm, isf ? X64MREG_XMM0 : X64MREG_RAX),
-				          maddr(term->src[0], 0, 1, 0), 0);
-			}
-			if (aret.size > 8 && aret.cls[1] != MT_NONE) {
-				bool isf = aret.cls[1] == MT_F64;
-				mout_addr(o, MMOP_LOAD, isf ? MT_F64 : MT_I64,
-				          reg(fm, isf ? X64MREG_XMM1 : X64MREG_RDX),
-				          maddr(term->src[0], 0, 1, 8), 0);
+			/* ≤16B register return: pack each eightbyte into its
+			 * per-class SysV register (INTEGER: rax, rdx; SSE: xmm0,
+			 * xmm1) — mirrors LIR retr().  A positional slot1→XMM1/RDX
+			 * map breaks mixed {INTEGER,SSE} returns. */
+			static const int retreg[2][2] = {
+				{ X64MREG_RAX, X64MREG_RDX },
+				{ X64MREG_XMM0, X64MREG_XMM1 },
+			};
+			int nr[2] = { 0, 0 };
+			for (uint32_t n = 0; n * 8 < aret.size; n++) {
+				if (aret.cls[n] == MT_NONE)
+					continue;
+				int k = aret.cls[n] == MT_F64 ? 1 : 0;
+				MReg r = retreg[k][nr[k]++];
+				mout_addr(o, MMOP_LOAD,
+				          aret.cls[n] == MT_F64 ? MT_F64 : MT_I64,
+				          reg(fm, r), maddr(term->src[0], 0, 1, n * 8),
+				          0);
 			}
 		}
 	} else if (term->src[0]) {
