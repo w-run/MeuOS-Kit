@@ -34,6 +34,12 @@ i386_memargs(int op)
 	.nfpr = NFPR, \
 	.rglob = BIT(EBP) | BIT(ESP), \
 	.nrglob = 2, \
+	.reserved = BIT(EBX), /* %ebx is the SysV PIC base register.  Reserve it
+	                       * unconditionally so -fPIC GOT access
+	                       * (`sym@GOT(%ebx)`, base set in the prologue via
+	                       * __x86.get_pc_thunk.bx) never clobbers an
+	                       * allocated value; non-PIC code simply loses one
+	                       * allocatable GPR. */ \
 	.kl_in_reg = 0, /* i386 has no 64-bit GPRs; Kl values always live in slots.
 			 * spill.c must never keep Kl temps in v (the live register
 			 * set) so that Kl operand/result handling is done through

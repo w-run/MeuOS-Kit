@@ -1714,19 +1714,28 @@ emitins(Ins i, E *e)
 				regtoa(i.to.val, SLong));
 			break;
 		case SExt:
-			/* Static (non-PIC) linking: load the symbol's absolute
-			 * address directly.  The previous @GOT(%ebx) form
-			 * required ebx to point at the GOT, which is only true
+			/* -fPIC: load the symbol's address from the GOT via the PIC
+			 * base register %ebx (set up in the prologue with
+			 * __x86.get_pc_thunk.bx).  Static (non-PIC) linking loads
+			 * the absolute address directly: the previous @GOT(%ebx)
+			 * form required ebx to point at the GOT, which is only true
 			 * under the SysV PIC register convention; static
 			 * executables never set ebx up, so the load faulted or
 			 * silently depended on the linker folding the GOT
 			 * relocation into an absolute address.  meuos builds
-			 * are always static, so use plain absolute addressing. */
+			 * are always static, so use plain absolute addressing
+			 * there. */
 			assert(!con->bits.i);
-			fprintf(e->f,
-				"\tmovl $%s%s, %%%s\n",
-				sym[0] == '"' ? "" : T.assym, sym,
-				regtoa(i.to.val, SLong));
+			if (T.pic)
+				fprintf(e->f,
+					"\tmovl %s%s@GOT(%%ebx), %%%s\n",
+					sym[0] == '"' ? "" : T.assym, sym,
+					regtoa(i.to.val, SLong));
+			else
+				fprintf(e->f,
+					"\tmovl $%s%s, %%%s\n",
+					sym[0] == '"' ? "" : T.assym, sym,
+					regtoa(i.to.val, SLong));
 			break;
 		case SGenThr:
 			/* General-dynamic TLS descriptor address for i386.
@@ -1833,6 +1842,8 @@ i386_framesz(E *e)
 	for (i=0; i<NCLR; i++)
 		if (e->fn->reg & BIT(i386_sysv_rclob[i]))
 			n++;
+	if (T.pic)
+		n++; /* -fPIC: %ebx is pushed as the PIC base register */
 
 	/* Frame layout with EBP:
 	 *   pushl %ebp  (4 bytes)
@@ -1871,11 +1882,20 @@ i386_sysv_emitfn(Fn *fn, FILE *f)
 	if (e->fsz)
 		fprintf(f, "\tsubl $%"PRIu64", %%esp\n", e->fsz);
 	for (r=i386_sysv_rclob; r<&i386_sysv_rclob[NCLR]; r++)
-		if (fn->reg & BIT(*r)) {
+		if (fn->reg & BIT(*r) || (T.pic && *r == EBX)) {
 			itmp.arg[0] = TMP(*r);
 			emitf("pushl %L0", &itmp, e);
 			e->nclob++;
 		}
+	if (T.pic) {
+		/* SysV i386 PIC: set %ebx to the GOT base.  __x86.get_pc_thunk.bx
+		 * is a linker-provided thunk (binutils >= 2.29) that returns its
+		 * own return address in %ebx; the R_386_GOTPC relocation on
+		 * _GLOBAL_OFFSET_TABLE_ then makes %ebx point at the GOT, which
+		 * every @GOT(%ebx) access below indexes. */
+		fputs("\tcall __x86.get_pc_thunk.bx\n", f);
+		fputs("\taddl $_GLOBAL_OFFSET_TABLE_, %ebx\n", f);
+	}
 
 	for (lbl=0, b=fn->start; b; b=b->link) {
 		if (lbl || b->npred > 1) {
@@ -1900,7 +1920,7 @@ i386_sysv_emitfn(Fn *fn, FILE *f)
 					"\tsubl $%"PRIu64", %%esp\n",
 					e->fsz + e->nclob * 4);
 			for (r=&i386_sysv_rclob[NCLR]; r>i386_sysv_rclob;)
-				if (fn->reg & BIT(*--r)) {
+				if (fn->reg & BIT(*--r) || (T.pic && *r == EBX)) {
 					itmp.arg[0] = TMP(*r);
 					emitf("popl %L0", &itmp, e);
 				}
