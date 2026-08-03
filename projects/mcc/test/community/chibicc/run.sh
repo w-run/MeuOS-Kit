@@ -19,13 +19,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 MCC="$ROOT/projects/mcc/mcc"
 # Sysroot layout is multiarch (sysroot/<arch>); prefer the explicit env var
-# (MEUOS_SYSROOT=/path/to/sysroot/<arch>) and fall back to the repo default.
+# (MEUOS_SYSROOT=/path/to/sysroot/<arch>).  The per-worktree sysroot built by
+# verify-all.sh lives at <repo>/projects/sysroot (flat usr/ layout), while the
+# legacy multiarch tree is at <repo>/sysroot/<arch>.  Probe in that order and
+# fail loudly if none is found (a silently-bogus --sysroot turns every test
+# into a linker error, which previously masked this suite as "41/41 fail").
 if [ -n "${MEUOS_SYSROOT:-}" ] && [ -d "$MEUOS_SYSROOT/usr/include" ]; then
   SYS="$MEUOS_SYSROOT"
-elif [ -d "$ROOT/sysroot/x86_64" ]; then
+elif [ -d "$ROOT/projects/sysroot/usr/include" ]; then
+  SYS="$ROOT/projects/sysroot"
+elif [ -d "$ROOT/sysroot/x86_64/usr/include" ]; then
   SYS="$ROOT/sysroot/x86_64"
-else
+elif [ -d "$ROOT/sysroot/usr/include" ]; then
   SYS="$ROOT/sysroot"
+else
+  echo "run.sh: error: no MeuOS sysroot found (tried \$MEUOS_SYSROOT, projects/sysroot, sysroot/x86_64, sysroot)" >&2
+  exit 1
 fi
 DIR="$SCRIPT_DIR"
 ADAPT="$DIR/assert_adapt.c"
