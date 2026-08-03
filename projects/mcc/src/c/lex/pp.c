@@ -330,7 +330,7 @@ define(void)
 		t = arrayadd(&repl, sizeof(*t));
 		scan(t);
 		if (t->kind == T__VA_ARGS__ && !macrovarargs(m))
-			error(&t->loc, "__VA_ARGS__ can only be used in variadic function-like macros");
+			error_code(E_SYNTAX, &t->loc, "__VA_ARGS__ can only be used in variadic function-like macros");
 		if (m->kind != MACROFUNC)
 			continue;
 		if (i != -1)
@@ -339,7 +339,7 @@ define(void)
 		if (prev == THASH) {
 			tokencheck(t, TPPIDENT, "after '#' operator");
 			if (i == -1)
-				error(&t->loc, "'%s' is not a macro parameter name", t->lit);
+				error_code(E_SYNTAX, &t->loc, "'%s' is not a macro parameter name", t->lit);
 			m->param[i].flags |= PARAMSTR;
 			i = -1;
 		}
@@ -488,12 +488,12 @@ evalexpr(void)
 			size_t nexti = i + 1;
 			if (nexti < n && ((struct token *)line.val)[nexti].kind == TLPAREN) {
 				if (nexti + 2 >= n)
-					error(&t->loc, "malformed defined()");
+					error_code(E_SYNTAX, &t->loc, "malformed defined()");
 				name = &((struct token *)line.val)[nexti + 1];
 				nexti = nexti + 3;
 			} else {
 				if (nexti >= n)
-					error(&t->loc, "macro name missing after 'defined'");
+					error_code(E_SYNTAX, &t->loc, "macro name missing after 'defined'");
 				name = &((struct token *)line.val)[nexti];
 				nexti = nexti + 1;
 			}
@@ -774,7 +774,7 @@ doinclude(void)
 		name = buf.val;
 		goto do_open;
 	} else {
-		error(&tok.loc, "expected \"filename\" or <filename> after #include");
+		error_code(E_SYNTAX, &tok.loc, "expected \"filename\" or <filename> after #include");
 	}
 	goto do_open;
 
@@ -799,7 +799,7 @@ read_angled:
 do_open:
 	f = openinclude(name, angled, &path);
 	if (!f)
-		error(&tok.loc, "cannot find include file '%s'", name);
+		error_code(E_SYNTAX, &tok.loc, "cannot find include file '%s'", name);
 	expectnewline();
 	/* Push the included file as a new scanner; on EOF it auto-pops
 	 * back to the including file. */
@@ -834,7 +834,7 @@ skipbody(void)
 	for (;;) {
 		scan(&tok);
 		if (tok.kind == TEOF)
-			error(&tok.loc, "unterminated conditional directive");
+			error_code(E_SYNTAX, &tok.loc, "unterminated conditional directive");
 		if (!atline || tok.kind != THASH) {
 			atline = (tok.kind == TNEWLINE);
 			continue;
@@ -1038,7 +1038,7 @@ directive(void)
 	case TELIF: {
 		struct condframe *f = arraylast(&condstack, sizeof *f);
 		if (!f)
-			error(&tok.loc, "#elif without #if");
+			error_code(E_SYNTAX, &tok.loc, "#elif without #if");
 		if (!f->parentactive) {
 			f->istaken = false;
 			expectnewline();
@@ -1059,7 +1059,7 @@ directive(void)
 	case TELIFNDEF: {
 		struct condframe *f = arraylast(&condstack, sizeof *f);
 		if (!f)
-			error(&tok.loc, "#elifdef without #if");
+			error_code(E_SYNTAX, &tok.loc, "#elifdef without #if");
 		if (!f->parentactive) {
 			f->istaken = false;
 			expectnewline();
@@ -1085,7 +1085,7 @@ directive(void)
 	case TELSE: {
 		struct condframe *f = arraylast(&condstack, sizeof *f);
 		if (!f)
-			error(&tok.loc, "#else without #if");
+			error_code(E_SYNTAX, &tok.loc, "#else without #if");
 		if (f) {
 			if (!f->parentactive) {
 				f->istaken = false;
@@ -1102,7 +1102,7 @@ directive(void)
 	case TENDIF: {
 		struct condframe *f = arraylast(&condstack, sizeof *f);
 		if (!f)
-			error(&tok.loc, "#endif without #if");
+			error_code(E_SYNTAX, &tok.loc, "#endif without #if");
 		condstack.len -= sizeof *f;
 		expectnewline();
 		break;
@@ -1130,7 +1130,7 @@ directive(void)
 		}
 		scan(&tok);
 		if (tok.kind != TSTRINGLIT)
-			error(&tok.loc, "#embed expects \"filename\"");
+			error_code(E_SYNTAX, &tok.loc, "#embed expects \"filename\"");
 		name = stripquotes(tok.lit);
 		/* Parse optional parameters: limit(N), prefix(...), suffix(...), if_empty(...) */
 		scan(&tok);  /* advance past filename to first param or newline */
@@ -1184,7 +1184,7 @@ directive(void)
 		/* Open and read the file */
 		f = openinclude(name, false, &path);
 		if (!f)
-			error(&tok.loc, "cannot open #embed file '%s'", name);
+			error_code(E_SYNTAX, &tok.loc, "cannot open #embed file '%s'", name);
 		while ((nread = fread(buf, 1, sizeof(buf), f)) > 0 && total < limit) {
 			size_t nwrite = nread;
 			if (total + nwrite > limit)
@@ -1287,7 +1287,7 @@ directive(void)
 			scan(&tok);
 		break;
 	default:
-		error(&tok.loc, "invalid preprocessor directive #%s", tokenstr(tok.kind));
+		error_code(E_SYNTAX, &tok.loc, "invalid preprocessor directive #%s", tokenstr(tok.kind));
 	}
 	tokencheck(&tok, TNEWLINE, "after preprocessing directive");
 	ppflags = oldflags;
@@ -1451,7 +1451,7 @@ expandbody(struct macro *m)
 			bool hasargs;
 
 			if (i + 1 >= m->ntoken || m->token[i + 1].kind != TLPAREN)
-				error(&current.loc, "'__VA_OPT__' must be followed by '('");
+				error_code(E_SYNTAX, &current.loc, "'__VA_OPT__' must be followed by '('");
 			vararg = (size_t)-1;
 			for (j = 0; j < m->nparam; ++j)
 				if (m->param[j].flags & PARAMVAR) {
@@ -1475,7 +1475,7 @@ expandbody(struct macro *m)
 				j++;
 			}
 			if (depth != 0)
-				error(&current.loc, "unbalanced '__VA_OPT__('");
+				error_code(E_SYNTAX, &current.loc, "unbalanced '__VA_OPT__('");
 			/* substitute content [i, j) only when the variadic arg is
 			 * non-empty; each token goes through the same #/##/param
 			 * handling as the main body. */
@@ -1487,7 +1487,7 @@ expandbody(struct macro *m)
 							break;
 						param = macroparam(m, &m->token[i]);
 						if (param == (size_t)-1)
-							error(&m->token[i].loc,
+							error_code(E_SYNTAX, &m->token[i].loc,
 								"'%s' is not a macro parameter name",
 								tokenspell(&m->token[i]));
 						arrayaddbuf(&out, &m->arg[param].str, sizeof ct);
@@ -1532,10 +1532,10 @@ expandbody(struct macro *m)
 		}
 		if (current.kind == THASH) {
 			if (++i == m->ntoken)
-				error(&current.loc, "missing macro parameter after '#' operator");
+				error_code(E_SYNTAX, &current.loc, "missing macro parameter after '#' operator");
 			param = macroparam(m, &m->token[i]);
 			if (param == (size_t)-1)
-				error(&m->token[i].loc, "'%s' is not a macro parameter name",
+				error_code(E_SYNTAX, &m->token[i].loc, "'%s' is not a macro parameter name",
 					tokenspell(&m->token[i]));
 			arrayaddbuf(&out, &m->arg[param].str, sizeof current);
 			continue;
@@ -1545,7 +1545,7 @@ expandbody(struct macro *m)
 			struct token *last;
 
 			if (++i == m->ntoken)
-				error(&current.loc, "'##' cannot appear at either end of a macro replacement list");
+				error_code(E_SYNTAX, &current.loc, "'##' cannot appear at either end of a macro replacement list");
 			body = &m->token[i];
 			param = macroparam(m, body);
 			if (param != (size_t)-1) {
@@ -1743,7 +1743,7 @@ expandfunc(struct macro *m)
 		arg[i].ntoken = 0;
 		for (;;) {
 			if (t->kind == TEOF)
-				error(&t->loc, "EOF when reading macro parameters");
+				error_code(E_SYNTAX, &t->loc, "EOF when reading macro parameters");
 			if (macrodepth <= depth) {
 				/* adjust current macro depth, in case it got shallower */
 				depth = macrodepth;
@@ -1782,10 +1782,10 @@ expandfunc(struct macro *m)
 			if (!(m->param[j].flags & PARAMVAR))
 				allvar = false;
 		if (!allvar)
-			error(&t->loc, "not enough arguments for macro '%s'", m->name);
+			error_code(E_SYNTAX, &t->loc, "not enough arguments for macro '%s'", m->name);
 	}
 	if (t->kind != TRPAREN)
-		error(&t->loc, "too many arguments for macro '%s'", m->name);
+		error_code(E_SYNTAX, &t->loc, "too many arguments for macro '%s'", m->name);
 	for (i = 0, t = tok.val; i < m->nparam; ++i) {
 		arg[i].token = t;
 		t += arg[i].ntoken;

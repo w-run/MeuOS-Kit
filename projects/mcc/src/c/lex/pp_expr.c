@@ -91,7 +91,7 @@ evalprimary(struct evalctx *e)
 	struct token *t = evalcur(e);
 
 	if (!t)
-		error(&tok.loc, "expected expression in #if directive");
+		error_code(E_SYNTAX, &tok.loc, "expected expression in #if directive");
 	switch (t->kind) {
 	case TNUMBER:
 		{ long long v = parseint(t); evaladv(e); return v; }
@@ -103,14 +103,14 @@ evalprimary(struct evalctx *e)
 		v = evalexpr_e(e);
 		t = evalcur(e);
 		if (!t || t->kind != TRPAREN)
-			error(&tok.loc, "expected ')' in #if expression");
+			error_code(E_SYNTAX, &tok.loc, "expected ')' in #if expression");
 		evaladv(e);
 		return v;
 	}
 	default:
 		/* remaining identifiers evaluate to 0 */
 		if (t->kind >= TIDENT) { evaladv(e); return 0; }
-		error(&tok.loc, "invalid token in #if expression: %s",
+		error_code(E_SYNTAX, &tok.loc, "invalid token in #if expression: %s",
 		      t->lit ? t->lit : tokenstr(t->kind));
 	}
 	return 0;
@@ -121,7 +121,7 @@ evalunary(struct evalctx *e)
 {
 	struct token *t = evalcur(e);
 	if (!t)
-		error(&tok.loc, "expected expression in #if directive");
+		error_code(E_SYNTAX, &tok.loc, "expected expression in #if directive");
 	switch (t->kind) {
 	case TLNOT: evaladv(e); return !evalunary(e);
 	case TBNOT: evaladv(e); return ~evalunary(e);
@@ -140,8 +140,8 @@ evalmul(struct evalctx *e)
 		if (!t) return l;
 		switch (t->kind) {
 		case TMUL: evaladv(e); l = l * evalunary(e); break;
-		case TDIV: { long long r; evaladv(e); r = evalunary(e); if (!r) error(&tok.loc, "division by zero in #if"); l = l / r; break; }
-		case TMOD: { long long r; evaladv(e); r = evalunary(e); if (!r) error(&tok.loc, "modulo by zero in #if"); l = l % r; break; }
+		case TDIV: { long long r; evaladv(e); r = evalunary(e); if (!r) error_code(E_SYNTAX, &tok.loc, "division by zero in #if"); l = l / r; break; }
+		case TMOD: { long long r; evaladv(e); r = evalunary(e); if (!r) error_code(E_SYNTAX, &tok.loc, "modulo by zero in #if"); l = l % r; break; }
 		default: return l;
 		}
 	}
@@ -279,7 +279,7 @@ evalexpr_e(struct evalctx *e)
 		a = evalexpr_e(e);
 		t = evalcur(e);
 		if (!t || t->kind != TCOLON)
-			error(&tok.loc, "expected ':' in #if conditional expression");
+			error_code(E_SYNTAX, &tok.loc, "expected ':' in #if conditional expression");
 		evaladv(e);
 		b = evalexpr_e(e);
 		return l ? a : b;
@@ -295,7 +295,7 @@ evalconst(struct token *t, size_t n)
 	struct token *after = evalcur(&e);
 
 	if (after)
-		error(&tok.loc, "unexpected token in #if expression: %s",
+		error_code(E_SYNTAX, &tok.loc, "unexpected token in #if expression: %s",
 		      after->lit ? after->lit : tokenstr(after->kind));
 	return v;
 }
