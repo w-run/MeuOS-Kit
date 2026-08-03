@@ -379,7 +379,13 @@ check-cpp-neg: $(MPP_BIN)
 
 check-cpp: check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg
 
-.PHONY: all clean check check-all check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-c23-neg check-c-mir check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir-bridge check-mir check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg check-cpp
+# mcc/m++ -O 优化级别语义分级回归（test/olevel/run.sh）：
+# -O0..-O3/-Os/-Oz/-Og 运行时正确性 + 级别差异（if 转换/强度削减/
+# 帧指针）+ 非法级别（-O9 钳制、-Ox 拒绝）。
+check-olevel: $(BIN)
+	@sh test/olevel/run.sh ./$(BIN)
+
+.PHONY: all clean check check-all check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-c23-neg check-c-mir check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir-bridge check-mir check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg check-cpp check-olevel
 
 # chibicc community functional test suite (C11/C23 conformance).
 # Runs test/community/chibicc/run.sh against the MeuOS sysroot.
