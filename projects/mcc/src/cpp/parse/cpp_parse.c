@@ -6837,6 +6837,72 @@ cpp_record_cexpr_aggregate(struct decl *d, struct init *init)
 		}
 	}
 }
+/* Member values of a class object returned by a constexpr function call
+ * (`constexpr P make_p(int x) { ... return p; }`, then `make_p(3).a`).
+ * Keyed by the call expression node; recorded by cpp_constexpr_eval and
+ * consulted by eval()'s member-access folding. */
+struct cexp_ret_member {
+	struct expr *call;
+	unsigned long long offset;
+	unsigned long long val;
+	struct cexp_ret_member *next;
+};
+static struct cexp_ret_member *g_cexp_ret_members;
+
+/* Look up a member of a constexpr call's class return value. */
+bool
+cpp_cexpr_ret_member_value(struct expr *call, unsigned long long offset,
+                           unsigned long long *out)
+{
+	struct cexp_ret_member *m;
+	for (m = g_cexp_ret_members; m; m = m->next)
+		if (m->call == call && m->offset == offset) {
+			*out = m->val;
+			return true;
+		}
+	return false;
+}
+
+/* Record the members of `obj` (a class object whose aggregate members were
+ * captured) as the return value of `call`. */
+void
+cpp_record_cexpr_return(struct expr *call, struct decl *obj)
+{
+	struct cexp_obj_member *m;
+	for (m = g_cexp_obj_members; m; m = m->next)
+		if (m->obj == obj) {
+			struct cexp_ret_member *rm = xmalloc(sizeof *rm);
+			rm->call = call;
+			rm->offset = m->offset;
+			rm->val = m->val;
+			rm->next = g_cexp_ret_members;
+			g_cexp_ret_members = rm;
+		}
+}
+
+/* Copy the member values recorded for a constexpr call's class return
+ * (`make_p(5)` -> `constexpr P q = make_p(5)`) onto `dst`'s mini-memory
+ * entries, so `q.b` can fold.  Returns true when any member was copied. */
+bool
+cpp_copy_cexpr_return(struct expr *call, struct decl *dst)
+{
+	struct cexp_ret_member *m;
+	bool any = false;
+	if (!dst || dst->kind != DECLOBJECT)
+		return false;
+	for (m = g_cexp_ret_members; m; m = m->next)
+		if (m->call == call) {
+			struct cexp_obj_member *nm = xmalloc(sizeof *nm);
+			nm->obj = dst;
+			nm->offset = m->offset;
+			nm->val = m->val;
+			nm->next = g_cexp_obj_members;
+			g_cexp_obj_members = nm;
+			any = true;
+		}
+	return any;
+}
+
 static int g_cpp_cexpr_depth;   /* recursion limit */
 
 /* Non-zero while a C23 `constexpr` function definition body is being parsed
@@ -6967,6 +7033,11 @@ cpp_buffer_constexpr_body(struct decl *d)
 
 /* per-evaluation loop-step budget: guards against compile-time hangs */
 #define CEXP_MAX_STEPS 100000
+
+/* Set by the RETURN statement interpreter when the returned value is a
+ * class-typed local object whose aggregate members were captured; consumed
+ * by cpp_constexpr_eval to record the call's class return value. */
+static struct decl *g_cexpr_class_ret;
 
 static int cpp_cexpr_stmt(struct scope *tmp, unsigned long long *ret,
                           int *steps);
@@ -7511,6 +7582,16 @@ cpp_cexpr_stmt(struct scope *tmp, unsigned long long *ret, int *steps)
 		expect(TSEMICOLON, "after return expression");
 		{
 			struct decl *temp = NULL;
+			/* class-typed return (`return p;` where p is a local whose
+			 * aggregate members were captured): carry the object */
+			if (e && e->kind == EXPRIDENT && e->u.ident.decl &&
+			    e->u.ident.decl->kind == DECLOBJECT &&
+			    e->u.ident.decl->type &&
+			    (e->u.ident.decl->type->kind == TYPESTRUCT ||
+			     e->u.ident.decl->type->kind == TYPEUNION)) {
+				g_cexpr_class_ret = e->u.ident.decl;
+				return CEXP_RET;
+			}
 			if (!cpp_cexpr_value(e, &temp, ret))
 				return CEXP_FAIL;
 		}
@@ -7618,19 +7699,39 @@ cpp_cexpr_stmt(struct scope *tmp, unsigned long long *ret, int *steps)
 				return CEXP_FAIL;
 			if (consume(TASSIGN)) {
 				struct decl *cd;
-				struct decl *temp = NULL;
-				unsigned long long v;
-				e = assignexpr(tmp);
-				if (!cpp_cexpr_value(e, &temp, &v))
-					return CEXP_FAIL;
-				/* bind as a mutable object (lvalue for ++/=) with
-				 * the folded value cached in u.obj.constval */
-				cd = mkdecl(name, DECLOBJECT, qt.type, qt.qual,
-				            LINKNONE);
-				cd->u.obj.storage = SDAUTO;
-				cd->u.obj.has_constval = true;
-				cd->u.obj.constval = v;
-				scopeputdecl(tmp, cd);
+				if (qt.type && (qt.type->kind == TYPESTRUCT ||
+				    qt.type->kind == TYPEUNION) &&
+				    tok.kind == TLBRACE) {
+					/* class-typed local with an aggregate
+					 * initializer `P p = {x, x*2};` — capture
+					 * each element's constant value in the mini
+					 * memory model so a later member access /
+					 * return of `p` can be folded. */
+					extern struct init *parseinit(struct scope *,
+					    struct type *);
+					extern void cpp_record_cexpr_aggregate(
+					    struct decl *, struct init *);
+					struct init *init = parseinit(tmp, qt.type);
+					cd = mkdecl(name, DECLOBJECT, qt.type,
+					    qt.qual, LINKNONE);
+					cd->u.obj.storage = SDAUTO;
+					cpp_record_cexpr_aggregate(cd, init);
+					scopeputdecl(tmp, cd);
+				} else {
+					struct decl *temp = NULL;
+					unsigned long long v;
+					e = assignexpr(tmp);
+					if (!cpp_cexpr_value(e, &temp, &v))
+						return CEXP_FAIL;
+					/* bind as a mutable object (lvalue for ++/=) with
+					 * the folded value cached in u.obj.constval */
+					cd = mkdecl(name, DECLOBJECT, qt.type, qt.qual,
+					            LINKNONE);
+					cd->u.obj.storage = SDAUTO;
+					cd->u.obj.has_constval = true;
+					cd->u.obj.constval = v;
+					scopeputdecl(tmp, cd);
+				}
 			} else {
 				/* uninitialized local: no constant value to bind */
 				return CEXP_FAIL;
@@ -7764,6 +7865,7 @@ cpp_constexpr_eval(struct expr *call)
 		struct func *saved = curfunc;
 		size_t base = tokctx_depth();
 		unsigned long long retv;
+		g_cexpr_class_ret = NULL;
 		cur = tok;
 		tokpush(&cur, 1);
 		tokpush(fn->toks, fn->ntoks);
@@ -7777,6 +7879,14 @@ cpp_constexpr_eval(struct expr *call)
 	}
 	--g_cpp_cexpr_depth;
 
+	if (g_cexpr_class_ret) {
+		/* class-typed return: record the returned object's members keyed
+		 * by this call so a member access `make_p(3).a` can fold it. */
+		extern void cpp_record_cexpr_return(struct expr *, struct decl *);
+		cpp_record_cexpr_return(call, g_cexpr_class_ret);
+		g_cexpr_class_ret = NULL;
+		e = NULL; /* no integer value; member folding uses the table */
+	}
 	if (e) {
 		struct expr *res = xmalloc(sizeof *res);
 		*res = *e;

@@ -153,26 +153,39 @@ eval(struct expr *expr)
 			}
 			break;
 		case TMUL:
-		/* C++ constexpr aggregate object: fold `*(&s + offset)` — a
-		 * member access on a constexpr object whose whole-object value
-		 * is stored in the decl's constval.  The offset is 0 for the
-		 * first member; multi-member aggregates would need a member
-		 * value table (mini memory model). */
+		/* C++ constexpr aggregate object / call-return value: fold a member
+		 * access.  An lvalue object `p.a` lowers to `*(&p + offset)`
+		 * (`&p` = EXPRUNARY TBAND of EXPRIDENT); an rvalue call result
+		 * `make_p(3).a` lowers to `*(make_p(3) + offset)` (the call is
+		 * the object address directly).  Both fold through the mini
+		 * memory model (member value tables). */
 		{
 			extern int g_lang;
 			struct expr *b = expr->base;
+			struct expr *objexpr = NULL;
+			unsigned long long off = 0;
 			if (g_lang == 1 && b && b->kind == EXPRBINARY &&
 			    b->op == TADD && b->u.binary.l && b->u.binary.r &&
-			    b->u.binary.l->kind == EXPRUNARY &&
-			    b->u.binary.l->op == TBAND && b->u.binary.l->base &&
-			    b->u.binary.l->base->kind == EXPRIDENT &&
 			    b->u.binary.r->kind == EXPRCONST) {
-				struct decl *obj = b->u.binary.l->base->u.ident.decl;
+				struct expr *l = b->u.binary.l;
+				if (l->kind == EXPRUNARY && l->op == TBAND &&
+				    l->base) {
+					/* `&p` or `&make_p(3)` (rvalue call
+					 * materialized as an address) */
+					if (l->base->kind == EXPRIDENT)
+						objexpr = l->base;
+					else if (l->base->kind == EXPRCALL)
+						objexpr = l->base;
+				} else if (l->kind == EXPRCALL) {
+					objexpr = l; /* make_p(3) */
+				}
+				off = b->u.binary.r->u.constant.u;
+			}
+			if (objexpr && objexpr->kind == EXPRIDENT) {
+				struct decl *obj = objexpr->u.ident.decl;
 				if (obj && obj->kind == DECLOBJECT &&
 				    obj->type && (obj->type->kind == TYPESTRUCT ||
 				    obj->type->kind == TYPEUNION)) {
-					unsigned long long off =
-					    b->u.binary.r->u.constant.u;
 					unsigned long long mv;
 					extern bool cpp_cexpr_member_value(
 					    struct decl *, unsigned long long,
@@ -190,6 +203,25 @@ eval(struct expr *expr)
 						    obj->u.obj.constval;
 						break;
 					}
+				}
+			} else if (objexpr && objexpr->kind == EXPRCALL) {
+				/* member access on a constexpr call's class return
+				 * value: fold the call (recording its return
+				 * members), then read the member at `off`. */
+				struct expr *call = objexpr;
+				unsigned long long mv;
+				extern struct expr *cpp_constexpr_eval(
+				    struct expr *);
+				extern bool cpp_cexpr_ret_member_value(
+				    struct expr *, unsigned long long,
+				    unsigned long long *);
+				struct expr *rv = cpp_constexpr_eval(call);
+				if (rv)
+					delexpr(rv);
+				if (cpp_cexpr_ret_member_value(call, off, &mv)) {
+					expr->kind = EXPRCONST;
+					expr->u.constant.u = mv;
+					break;
 				}
 			}
 		}

@@ -139,23 +139,42 @@ defineobj(struct decl *d, struct init *init, bool hasinit, struct func *f)
 	if ((d->qual & QUALCONSTEXPR) && hasinit && init->expr) {
 		extern int g_lang;
 		struct expr *e = eval(init->expr);
-		if (e->kind != EXPRCONST)
-			error(&tok.loc, "constexpr variable '%s' requires a constant expression initializer", d->name);
-		if (g_lang == 1 && !(e->type->prop & PROPINT))
-			error(&tok.loc, "constexpr variable '%s' requires a constant integer expression initializer", d->name);
-		/* remember the value so a later constant expression can reuse it */
-		d->u.obj.constval = e->u.constant.u;
-		d->u.obj.has_constval = true;
-		init->expr = e;
-		/* C++ constexpr aggregate object: record each member's value so a
-		 * constant-context member access (`p.b`) can be folded. */
-		{
-			extern int g_lang;
-			extern void cpp_record_cexpr_aggregate(struct decl *,
-			    struct init *);
+		if (e->kind != EXPRCONST) {
+			/* C++ constexpr variable of class type initialized by a
+			 * constexpr function returning that class (`constexpr P q
+			 * = make_p(5)`): fold the call, copy its return members. */
 			if (g_lang == 1 && (d->type->kind == TYPESTRUCT ||
-			    d->type->kind == TYPEUNION))
-				cpp_record_cexpr_aggregate(d, init);
+			    d->type->kind == TYPEUNION)) {
+				extern bool cpp_copy_cexpr_return(struct expr *,
+				    struct decl *);
+				if (init->expr->kind == EXPRCALL &&
+				    cpp_copy_cexpr_return(init->expr, d))
+					; /* members recorded */
+				else
+					error(&tok.loc,
+					    "constexpr variable '%s' requires a constant expression initializer",
+					    d->name);
+			} else
+				error(&tok.loc,
+				    "constexpr variable '%s' requires a constant expression initializer",
+				    d->name);
+		} else if (g_lang == 1 && !(e->type->prop & PROPINT))
+			error(&tok.loc, "constexpr variable '%s' requires a constant integer expression initializer", d->name);
+		else {
+			/* remember the value so a later constant expression can reuse it */
+			d->u.obj.constval = e->u.constant.u;
+			d->u.obj.has_constval = true;
+			init->expr = e;
+			/* C++ constexpr aggregate object: record each member's value so a
+			 * constant-context member access (`p.b`) can be folded. */
+			{
+				extern int g_lang;
+				extern void cpp_record_cexpr_aggregate(struct decl *,
+				    struct init *);
+				if (g_lang == 1 && (d->type->kind == TYPESTRUCT ||
+				    d->type->kind == TYPEUNION))
+					cpp_record_cexpr_aggregate(d, init);
+			}
 		}
 	}
 	if (d->u.obj.storage == SDAUTO)
