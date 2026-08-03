@@ -11,6 +11,7 @@
 #include "util.h"
 #include "mcc.h"
 #include "ir.h"
+#include "i18n.h"
 
 struct token tok;
 static struct map tokmap;  /* maps string to token */
@@ -313,6 +314,10 @@ error_common(enum errcode code, const struct location *loc, size_t width,
 {
 	char msg[1024];
 
+	/* i18n: 按当前语言翻译格式串与 fix-it 提示（未收录条目降级为 en）。 */
+	fmt = msg_tr(fmt);
+	fix = msg_tr_fix(fix);
+
 	vsnprintf(msg, sizeof(msg), fmt, ap);
 
 	/* Trial parse (SFINAE-style well-formedness check, e.g. C++20
@@ -354,8 +359,8 @@ error_common(enum errcode code, const struct location *loc, size_t width,
 		diagloc(loc);
 	else
 		fprintf(stderr, "%s%s: %s", dcol(DC_CYAN), argv0, dcol(DC_RESET));
-	fprintf(stderr, "%serror: %s%s%s%s ",
-	    dcol(DC_BOLD DC_RED), dcol(DC_RESET),
+	fprintf(stderr, "%s%s %s%s%s ",
+	    dcol(DC_BOLD DC_RED), msg_word_error(),
 	    dcol(DC_BOLD), errcode_str(code), dcol(DC_RESET));
 	fputs(msg, stderr);
 	putc('\n', stderr);
@@ -387,8 +392,8 @@ error_common(enum errcode code, const struct location *loc, size_t width,
 				fprintf(stderr, "%s\n", dcol(DC_RESET));
 				if (fix) {
 					/* inline fix-it: note + its own caret */
-					fprintf(stderr, "    %snote: %s%s\n",
-					    dcol(DC_BOLD DC_GREEN), fix,
+					fprintf(stderr, "    %s%s %s%s\n",
+					    dcol(DC_BOLD DC_GREEN), msg_word_note(), fix,
 					    dcol(DC_RESET));
 					fprintf(stderr, "    %s", dcol(DC_GREEN));
 					for (ci = 1; ci < loc->col; ci++)
@@ -454,28 +459,28 @@ void
 cc_warn(const struct location *loc, int kind, const char *fmt, ...)
 {
 	va_list ap;
+	const char *efmt = fmt;   /* 原始英文格式串（供 --explain 分类匹配） */
 
 	if (!(warn_level & kind))
 		return;
+
+	/* i18n: 正文按当前语言翻译；--explain 分类基于英文源串匹配，
+	 * 提示文本随语言选择（en/zh 一致）。 */
+	fmt = msg_tr(fmt);
 
 	if (loc)
 		fprintf(stderr, "%s%s:%zu:%zu:%s ", dcol(DC_CYAN), loc->file,
 		        loc->line + 1, loc->col, dcol(DC_RESET));
 	else
 		fprintf(stderr, "%s%s: %s", dcol(DC_CYAN), argv0, dcol(DC_RESET));
-	fprintf(stderr, "%swarning: %s", dcol(DC_BOLD DC_YELLOW), dcol(DC_RESET));
+	fprintf(stderr, "%s%s %s", dcol(DC_BOLD DC_YELLOW),
+	        msg_word_warning(), dcol(DC_RESET));
 	va_start(ap, fmt);
 	vfprintf(stderr, fmt, ap);
 	va_end(ap);
-	/* --explain: append a fix-hint suffix for common diagnostics. */
+	/* --explain: append a localized fix-hint suffix. */
 	if (g_error_explain) {
-		const char *hint = NULL;
-		if (strstr(fmt, "implicit declaration") || strstr(fmt, "隐式声明"))
-			hint = "  (建议: 包含声明该函数的头文件，或提供原型)";
-		else if (strstr(fmt, "unused") || strstr(fmt, "未使用"))
-			hint = "  (建议: 若有意保留，可加 (void)var; 或 __attribute__((unused)))";
-		else if (strstr(fmt, "type") || strstr(fmt, "类型"))
-			hint = "  (建议: 检查类型是否匹配，或显式转换)";
+		const char *hint = msg_explain(efmt);
 		if (hint)
 			fprintf(stderr, "%s%s%s", dcol(DC_CYAN), hint, dcol(DC_RESET));
 	}

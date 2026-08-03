@@ -27,6 +27,7 @@
 #include "arg.h"
 #include "mcc.h"
 #include "driver_internal.h"
+#include "i18n.h"
 
 extern int emit_debug;  /* from emit/emit.c */
 extern void emitdbgfile(char *, FILE *);  /* from emit/emit.c */
@@ -171,6 +172,16 @@ mcc_main(int argc, char *argv[])
 	 * (-W<w>, -f<f>, -m<m>) are left untouched. See arg_compat.c. */
 	argv = arg_normalize(argc, argv);
 	argv0 = progname(argv[0], "mcc");
+
+	/* i18n 默认语言：LANG/LC_MESSAGES 以 zh* 开头则推断中文，否则英文。
+	 * --lang=en|zh 显式参数在后面解析时覆盖此推断。 */
+	{
+		const char *lc = getenv("LC_MESSAGES");
+		if (!lc || !*lc)
+			lc = getenv("LANG");
+		if (lc && strncmp(lc, "zh", 2) == 0)
+			g_msg_lang = 1;
+	}
 
 	/* Fetch an option argument that may be attached (-Dfoo) or separated
 	 * (-D foo). `attached` points just past the option char(s). */
@@ -389,6 +400,17 @@ mcc_main(int argc, char *argv[])
 	}
 	if (strcmp(a, "--explain") == 0) {
 		g_error_explain = 1;
+		continue;
+	}
+	/* i18n：--lang=en|zh 选择诊断/帮助语言（覆盖 LANG 环境推断）。 */
+	if (strncmp(a, "--lang=", 7) == 0) {
+		const char *lg = a + 7;
+		if (strncmp(lg, "zh", 2) == 0)
+			g_msg_lang = 1;
+		else if (strncmp(lg, "en", 2) == 0)
+			g_msg_lang = 0;
+		else
+			fatal("unknown language '%s' (use en or zh)", lg);
 		continue;
 	}
 
