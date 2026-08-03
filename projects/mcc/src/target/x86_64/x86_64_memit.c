@@ -189,7 +189,10 @@ emit_const(FILE *f, MConst *c)
 		        fp_label(c));
 		break;
 	case MC_ADDR:
-		fprintf(f, "%s(%%rip)", c->u.addr.sym ? c->u.addr.sym : "0");
+		if (c->u.addr.tls)
+			fprintf(f, "%s@tpoff(%%rip)", c->u.addr.sym ? c->u.addr.sym : "0");
+		else
+			fprintf(f, "%s(%%rip)", c->u.addr.sym ? c->u.addr.sym : "0");
 		break;
 	default:
 		fputs("$0", f);
@@ -253,27 +256,47 @@ emit_mval(FILE *f, MVal *v)
 	}
 }
 
+/* Emit the address of a TLS global into a scratch register: the thread
+ * pointer (%fs:0) plus the link-time-resolved @tpoff offset (local-exec /
+ * initial-exec TLS model, matching the legacy x86_64_emit.c path). */
+static void
+emit_tls_addr(FILE *f, const char *sym, int64_t off, const char *reg)
+{
+	fprintf(f, "\tmovq\t%%fs:0, %%%s\n", reg);
+	fprintf(f, "\tleaq\t%s@tpoff", sym ? sym : "0");
+	if (off)
+		fprintf(f, "%+lld", (long long)off);
+	fprintf(f, "(%%%s), %%%s\n", reg, reg);
+}
+
 /* Emit loads of non-register base/index into r10/r11 (before the memory
  * instruction) so x86 addressing only sees registers.  Global symbols are
- * addresses -> leaq; virtual slots -> movq. */
+ * addresses -> leaq; TLS globals -> fs-relative address; virtual slots ->
+ * movq. */
 static void
 emit_addr_loads(FILE *f, MAddr a)
 {
 	if (a.base && a.base->kind != MV_REG) {
-		if (a.base->kind == MV_GLOBAL)
-			fprintf(f, "\tleaq\t%s(%%rip), %%r10\n",
-			        a.base->sym ? a.base->sym : "0");
-		else {
+		if (a.base->kind == MV_GLOBAL) {
+			if (a.base->tls)
+				emit_tls_addr(f, a.base->sym, 0, "r10");
+			else
+				fprintf(f, "\tleaq\t%s(%%rip), %%r10\n",
+				        a.base->sym ? a.base->sym : "0");
+		} else {
 			fputs("\tmovq\t", f);
 			emit_mval(f, a.base);
 			fputs(", %r10\n", f);
 		}
 	}
 	if (a.index && a.index->kind != MV_REG) {
-		if (a.index->kind == MV_GLOBAL)
-			fprintf(f, "\tleaq\t%s(%%rip), %%r11\n",
-			        a.index->sym ? a.index->sym : "0");
-		else {
+		if (a.index->kind == MV_GLOBAL) {
+			if (a.index->tls)
+				emit_tls_addr(f, a.index->sym, 0, "r11");
+			else
+				fprintf(f, "\tleaq\t%s(%%rip), %%r11\n",
+				        a.index->sym ? a.index->sym : "0");
+		} else {
 			fputs("\tmovq\t", f);
 			emit_mval(f, a.index);
 			fputs(", %r11\n", f);
@@ -321,9 +344,17 @@ mov_to_rax(FILE *f, MVal *v, MConst *c)
 {
 	if (c) {
 		if (c->kind == MC_ADDR) {
-			fprintf(f, "\tleaq\t%s%+lld(%%rip), %%rax\n",
-			        c->u.addr.sym ? c->u.addr.sym : "0",
-			        (long long)c->u.addr.off);
+			if (c->u.addr.tls) {
+				fprintf(f, "\tleaq\t%s@tpoff", c->u.addr.sym ? c->u.addr.sym : "0");
+				if (c->u.addr.off)
+					fprintf(f, "%+lld", (long long)c->u.addr.off);
+				fprintf(f, "(%%rip), %%rax\n");
+				fputs("\taddq\t%fs:0, %rax\n", f);
+			} else {
+				fprintf(f, "\tleaq\t%s%+lld(%%rip), %%rax\n",
+				        c->u.addr.sym ? c->u.addr.sym : "0",
+				        (long long)c->u.addr.off);
+			}
 		} else if (c->kind == MC_INT) {
 			fprintf(f, "\tmovq\t$%lld, %%rax\n", (long long)c->u.i);
 		} else {
@@ -340,7 +371,10 @@ mov_to_rax(FILE *f, MVal *v, MConst *c)
 		fprintf(f, "\tmovq\t%%%s, %%rax\n", v->name);
 		break;
 	case MV_GLOBAL:
-		fprintf(f, "\tleaq\t%s(%%rip), %%rax\n", v->sym ? v->sym : "0");
+		if (v->tls)
+			emit_tls_addr(f, v->sym, 0, "rax");
+		else
+			fprintf(f, "\tleaq\t%s(%%rip), %%rax\n", v->sym ? v->sym : "0");
 		break;
 	case MV_CONST:
 		mov_to_rax(f, 0, v->con);
