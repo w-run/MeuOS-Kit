@@ -65,7 +65,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 
 | Worker | 模型 | 分支 | Worktree | 任务 | 状态 | 上次 push |
 |---|---|---|---|---|---|---|
-| alice | reasoning | worktree-tmp-alice-cpp + worktree-tmp-alice-cpp20 + worktree-tmp-alice-cli (自 worktree-mxx-work) | /tmp/mxx-wt-alice | cpp_parse D1/D4/D2/E2/E3 + C++20 NTTP/consteval/<=>/聚合初始化/constexpr 成员 + **CLI 参数（-pg/--verbose/--color/-x/-std=/-fno-*/-W/-Wa/-Wl + [[_Noreturn]] 修复）** | **completed**（D1/D4 等已合入；cpp20 已合入 68d1222；cli 本次归并合入主线 **ac57402**） | push worktree-tmp-alice-cpp20 |
+| alice | reasoning | worktree-tmp-alice-cpp + worktree-tmp-alice-cpp20 + worktree-tmp-alice-cli + worktree-tmp-alice-mtld (自 worktree-mxx-work) | /tmp/mxx-wt-alice | cpp_parse D1/D4/D2/E2/E3 + C++20 NTTP/consteval/<=>/聚合初始化/constexpr 成员 + CLI 参数 + **mt/as imm64 截断修复（check-mt-integration 闭环）** | **completed**（D1/D4 等已合入；cpp20 68d1222；cli ac57402；mtld 本次归并合入主线 **ad52f9b**，verify-all 恢复 19/19） | push worktree-tmp-alice-cpp20 |
 | bella | lite | worktree-tmp-bella-mirp3a (自 worktree-mxx-work@5aa1154) | /tmp/mxx-wt-bella | x86_64 MIR-native（fallback/≤16B/cmov）+ Phase 3a 抽象扩展 + riscv64 MIR-native 试点（#111） | **completed**（#94 已合入；#97 cmov 已合入 49dbab6；#111 Phase 3a 本次归并合入主线 **36c20e9**，riscv64 交叉抽查通过） | 4a6d474 |
 | chloe | lite | worktree-tmp-chloe-mirp2 + worktree-tmp-chloe-memconst (自 worktree-mxx-work@9742e2f) | /tmp/mxx-wt-chloe | MIR Phase 2：强制 MIR-native + TLS PIC（g_pic 正版）+ verify-all 19 步 + **MIR-native -O1 内存常量传播（check-olevel 差距③）** | **completed**（6cafb11/0702745/318e184 已合入；memconst 本次归并合入主线 **8d0aace**，-O0/-O1 指令数断言转绿） | 81186b3 |
 | diana | lite | worktree-tmp-diana-pic + worktree-tmp-diana-errcode + worktree-tmp-diana-dwarf (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试 + check-pic-verify 修复 + 错误码体系/多错收集 + DWARF 调试信息 | **completed**（db1451b C23 已合入 294e5c2；6db1691 PIC 已合入主线 58016d2；errcode da5a646/a561b36/c204bbe 已合入；dwarf dfdb0db/381bfdd/ad4d69a 本次归并合入主线） | 11 test/c23 + F1-F3 + i386/riscv64 GOT + E#### + 最小 DWARF4 |
@@ -83,8 +83,8 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 - **check-olevel：三项已知差距已全部清零**（本批 6 分支归并）：① MIR-native if-conversion（cmov）→ **bella**（机器层 ifconv 通道 + MMOP_CMOV）；② -O2 省略叶函数帧指针 → **hazel**（a988893，worktree-tmp-hazel-fp）；③ -O1 内存局部常量传播 → **chloe**（worktree-tmp-chloe-memconst）。**check-olevel 实测 PASS（RC=0）**，含 -O0/-O1 指令数断言。
 - **check-pic-verify：已修复**（97d5467，x86_64 MIR-native -fPIC GOT 回归——MIR Phase 2 强制 MIR-native 后丢失外部符号 GOT，emit_global_addr + @gotpcrel + @plt 修复，四架构全过）。
 
-### 门禁已知失败（2026-08-03 bella Phase 3a 归并后）
-- **check-mt-integration：已闭环**（alice 3d3f91f）：根因是 mt/as x86_64 `movq $imm, %r64` 的 imm64 截断编码（encode.c 对 width==8 用 0xb8 movabs 形式但 imm 只写 4 字节，后续指令被吞进立即数 → 解码垃圾 → crt1 入口段错误 0x40101c）。修复后 check-mt-integration PASS、verify-all 恢复 19/19。
+### 门禁状态（2026-08-03 alice mt/ld 修复归并后）
+- **check-mt-integration：已闭环**（alice 3d3f91f，归并 ad52f9b）：根因是 mt/as x86_64 `movq $imm, %r64` 的 imm64 截断编码（encode.c 对 width==8 用 0xb8 movabs 形式但 imm 只写 4 字节，后续指令被吞进立即数 → 解码垃圾 → crt1 入口段错误 0x40101c）。**门禁已知失败清零：verify-all 恢复 19/19 全绿**。
 
 ---
 
