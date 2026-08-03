@@ -66,7 +66,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 | Worker | 模型 | 分支 | Worktree | 任务 | 状态 | 上次 push |
 |---|---|---|---|---|---|---|
 | alice | reasoning | worktree-tmp-alice-cpp + worktree-tmp-alice-cpp20 + worktree-tmp-alice-cli (自 worktree-mxx-work) | /tmp/mxx-wt-alice | cpp_parse D1/D4/D2/E2/E3 + C++20 NTTP/consteval/<=>/聚合初始化/constexpr 成员 + **CLI 参数（-pg/--verbose/--color/-x/-std=/-fno-*/-W/-Wa/-Wl + [[_Noreturn]] 修复）** | **completed**（D1/D4 等已合入；cpp20 已合入 68d1222；cli 本次归并合入主线 **ac57402**） | push worktree-tmp-alice-cpp20 |
-| bella | lite | worktree-tmp-bella-mirp3a (自 worktree-mxx-work@5aa1154) | /tmp/mxx-wt-bella | x86_64 MIR-native（fallback/≤16B/cmov）+ Phase 3a 抽象扩展 + riscv64 MIR-native 试点（#111） | **completed**（#94 已合入；#97 cmov 已合入 49dbab6；#111：258f303 抽象扩展 + af0d958 riscv64 标量后端 + 6c2a068 gate 泛化，已 push worktree-tmp-bella-mirp3a，verify-all 19/19） | 4a6d474 |
+| bella | lite | worktree-tmp-bella-mirp3a (自 worktree-mxx-work@5aa1154) | /tmp/mxx-wt-bella | x86_64 MIR-native（fallback/≤16B/cmov）+ Phase 3a 抽象扩展 + riscv64 MIR-native 试点（#111） | **completed**（#94 已合入；#97 cmov 已合入 49dbab6；#111 Phase 3a 本次归并合入主线 **36c20e9**，riscv64 交叉抽查通过） | 4a6d474 |
 | chloe | lite | worktree-tmp-chloe-mirp2 + worktree-tmp-chloe-memconst (自 worktree-mxx-work@9742e2f) | /tmp/mxx-wt-chloe | MIR Phase 2：强制 MIR-native + TLS PIC（g_pic 正版）+ verify-all 19 步 + **MIR-native -O1 内存常量传播（check-olevel 差距③）** | **completed**（6cafb11/0702745/318e184 已合入；memconst 本次归并合入主线 **8d0aace**，-O0/-O1 指令数断言转绿） | 81186b3 |
 | diana | lite | worktree-tmp-diana-pic + worktree-tmp-diana-errcode + worktree-tmp-diana-dwarf (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试 + check-pic-verify 修复 + 错误码体系/多错收集 + DWARF 调试信息 | **completed**（db1451b C23 已合入 294e5c2；6db1691 PIC 已合入主线 58016d2；errcode da5a646/a561b36/c204bbe 已合入；dwarf dfdb0db/381bfdd/ad4d69a 本次归并合入主线） | 11 test/c23 + F1-F3 + i386/riscv64 GOT + E#### + 最小 DWARF4 |
 | eve | lite | worktree-tmp-eve + worktree-tmp-eve-olevel + worktree-tmp-eve-i18n (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵 + -O 级别语义分级 + **i18n 消息目录与双语（--lang=en/zh、LANG 推断、--explain/usage/--error-json 双语、check-i18n 目标）** | **completed**（测试矩阵已合入 b4cad7e；eve-olevel 已合入 a1bbb85；eve-i18n 本次归并合入主线 **1ce1b33**，check-i18n 通过） | worktree-tmp-eve-i18n |
@@ -82,6 +82,9 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 ### 门禁已知差距（2026-08-03 归并后）
 - **check-olevel：三项已知差距已全部清零**（本批 6 分支归并）：① MIR-native if-conversion（cmov）→ **bella**（机器层 ifconv 通道 + MMOP_CMOV）；② -O2 省略叶函数帧指针 → **hazel**（a988893，worktree-tmp-hazel-fp）；③ -O1 内存局部常量传播 → **chloe**（worktree-tmp-chloe-memconst）。**check-olevel 实测 PASS（RC=0）**，含 -O0/-O1 指令数断言。
 - **check-pic-verify：已修复**（97d5467，x86_64 MIR-native -fPIC GOT 回归——MIR Phase 2 强制 MIR-native 后丢失外部符号 GOT，emit_global_addr + @gotpcrel + @plt 修复，四架构全过）。
+
+### 门禁已知失败（2026-08-03 bella Phase 3a 归并后）
+- **check-mt-integration：已知失败**（既有 meuos-toolchain 环境问题，非 mcc 归并引入；team-lead 已建 task 排查）：`mcc --specs=meuos` 走 MT_LD（meuos-toolchain ld 0.2.0）链接 crt1.o + libc-meuos.a 的 hello 在 crt1 入口段错误（0x40101c）。已在基 5aa1154 复现确认（bella 3a 归并前后行为一致）。check-sysroot-static（host ld 路径）exit 0 正常。verify-all 当前 18/19，该项为唯一失败。
 
 ---
 
