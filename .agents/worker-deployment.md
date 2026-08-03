@@ -123,8 +123,16 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 ### chibicc B 类真 bug（常量折叠窄化转换 + va_end 类型检查）
 - 状态：**已合入主线**（hazel a932c60 胜出，覆盖窄化 IAND 掩码+符号扩展 + TYPEATOMIC 解包 + va_end no-op，已 merge 69a6f2c）
 
+### C++20 标准缺口补齐（alice，分支 worktree-tmp-alice-cpp20）
+- **NTTP**（6fc4d57）：`template<int N>`/`template<auto N>` 支持（函数/类模板、显式实参、constexpr 折叠）；`template<T, T N>` 依赖类型 NTTP 仍缺。测试 test/cpp/nttp.cc；移除过时负向测试 nttp.neg.cc
+- **consteval 即时调用强制**：非常量实参编译报错；consteval 函数体为常量上下文跳过检查。测试 consteval_immediate.cc / consteval_nonconst.neg.cc；更新 consteval_boundary.cc
+- **类类型三向比较**：cpp_op_mangle 补 TSPACESHIP→'ss'，成员 operator<=> 重载与 a<=>b 调用。测试 spaceship_member.cc
+- **聚合初始化**：括号直接构造（聚合按成员序）+ 直接列表初始化（声明符后 '{'）。测试 aggregate_init.cc
+- **constexpr 聚合对象成员访问**（mini 内存模型）：成员值表 obj+offset->value，static_assert 内 p.a/p.b 可求值。测试 constexpr_obj_member.cc
+- 门禁 check-cpp-func/neg/c-mir 全绿
+
 ### 文档同步（cpp20/cpp23-gaps.md、c23-review.md）
-- 状态：**已合入主线**（edb854b + eb8372d），已闭环
+- 状态：**已合入主线**（edb854b + eb8372d），已闭环；cpp20-gaps.md 已由 alice 更新 5 项状态
 
 ### check-pic-verify 修复（i386/riscv64 GOT，-fPIC）
 - 状态：**已修复**（diana 6db1691，分支 worktree-tmp-diana-pic，已 push）

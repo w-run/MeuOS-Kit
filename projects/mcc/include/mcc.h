@@ -250,6 +250,7 @@ struct decl {
 			bool isnoreturn;
 			bool isnodiscard;   /* [[nodiscard]] function */
 			bool isconstexpr;   /* C++ constexpr function */
+			bool isconsteval;   /* C++20 consteval (immediate) function */
 			/* C99 6.7.4p6: an inline definition is not itself an external
 			 * definition.  The body is deferred here (with its function
 			 * scope held open) until a later `extern`/non-inline

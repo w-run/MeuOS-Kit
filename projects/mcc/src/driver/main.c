@@ -59,6 +59,17 @@ static const char *arm_mfloat_abi = "hard";
  * the input loop may also switch to C++ on .cc/.cpp suffixes. */
 int g_lang;
 
+/* Set by typequal() while a C++20 `consteval` function-specifier is being
+ * parsed (the C lexer sees it as an identifier); decl.c consumes it to mark
+ * the decl isconsteval so call sites can enforce immediate evaluation. */
+int g_cpp_func_consteval;
+
+/* Non-zero while a `consteval` function body is being parsed: the body is
+ * a constant context, so call sites inside it suspend the
+ * immediate-invocation check (recursion/helper calls are folded when the
+ * enclosing call is evaluated). */
+int g_cpp_in_consteval_body;
+
 /* Global target features bitmask (MT_FEATURE_*), set by -march=native or
  * -march=x86-64-vN. 0 = baseline only. Used by backend emit to gate ISA
  * levels (second phase); for now it records the user's intent. */

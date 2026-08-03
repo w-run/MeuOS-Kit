@@ -147,6 +147,16 @@ defineobj(struct decl *d, struct init *init, bool hasinit, struct func *f)
 		d->u.obj.constval = e->u.constant.u;
 		d->u.obj.has_constval = true;
 		init->expr = e;
+		/* C++ constexpr aggregate object: record each member's value so a
+		 * constant-context member access (`p.b`) can be folded. */
+		{
+			extern int g_lang;
+			extern void cpp_record_cexpr_aggregate(struct decl *,
+			    struct init *);
+			if (g_lang == 1 && (d->type->kind == TYPESTRUCT ||
+			    d->type->kind == TYPEUNION))
+				cpp_record_cexpr_aggregate(d, init);
+		}
 	}
 	if (d->u.obj.storage == SDAUTO)
 		funcinit(f, d, init, hasinit);
@@ -410,7 +420,13 @@ decl(struct scope *s, struct func *f)
 
 			if (base.expr)
 				funcexpr(f, base.expr);
-			if (consume(TASSIGN)) {
+			/* C++11 direct-list-initialization: `P q{3, 4}` — the `{`
+			 * after the declarator is an initializer list just like the
+			 * `= { ... }` copy-list-init form. */
+			extern int g_lang;
+			if (tok.kind == TASSIGN || (g_lang == 1 && tok.kind == TLBRACE)) {
+				if (tok.kind == TASSIGN)
+					next();
 				if (f && d->linkage != LINKNONE)
 					error(&tok.loc, "object '%s' with block scope and %s linkage cannot have initializer", name, d->linkage == LINKEXTERN ? "external" : "internal");
 				if (d->defined)
@@ -581,9 +597,17 @@ decl(struct scope *s, struct func *f)
 					if (base.qual & QUALCONSTEXPR)
 						d->u.func.isconstexpr = true;
 					/* C++20 consteval (immediate) function: like constexpr,
-					 * but every call must be evaluated at compile time */
-					if (g_lang == 1 && (fs & FUNCCONSTEVAL))
-						d->u.func.isconstexpr = true;
+					 * but every call must be evaluated at compile time.
+					 * typequal() consumes the keyword and sets
+					 * g_cpp_func_consteval (funcspec never sees it). */
+					{
+						extern int g_cpp_func_consteval;
+						if (g_cpp_func_consteval) {
+							d->u.func.isconstexpr = true;
+							d->u.func.isconsteval = true;
+							g_cpp_func_consteval = 0;
+						}
+					}
 				}
 				if (tok.kind == TLBRACE) {
 					if (!allowfunc)
@@ -611,11 +635,23 @@ decl(struct scope *s, struct func *f)
 							cpp_buffer_constexpr_body(d);
 						if (g_lang == 0 && d->u.func.isconstexpr)
 							g_cexpr_body = 1;
+						/* a consteval body is itself a constant context:
+						 * calls inside it (recursion, helpers) are folded
+						 * when the enclosing call is evaluated, so the
+						 * immediate-invocation check at the call site is
+						 * suspended while this body is parsed. */
+						{
+							extern int g_cpp_in_consteval_body;
+							if (d->u.func.isconsteval)
+								g_cpp_in_consteval_body = 1;
+						}
 					}
 					stmt(f, s);
 					{
 						extern int g_cexpr_body;
+						extern int g_cpp_in_consteval_body;
 						g_cexpr_body = 0;
+						g_cpp_in_consteval_body = 0;
 					}
 					/* C++14 `auto` return type: backfill the type deduced from
 					 * the body's return statement(s). */
