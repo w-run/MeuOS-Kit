@@ -4013,7 +4013,8 @@ struct cpp_tmpl_param {
 	const char *name;
 	bool is_pack;            /* `typename... Args` */
 	bool is_nttp;            /* non-type template parameter (`int N` / `auto N`) */
-	struct type *nttp_type;  /* fixed NTTP type (NULL for `auto N`) */
+	bool is_dep_nttp;        /* NTTP whose type names an earlier type parameter (`T N`) */
+	struct type *nttp_type;  /* fixed NTTP type (NULL for `auto N` / dependent `T N`) */
 	struct cpp_tmpl_param *next;
 };
 
@@ -4111,6 +4112,19 @@ cpp_tmpl_lookup(const char *name)
 	return NULL;
 }
 
+/* Find a template declaration by name (for explicit-argument parsing that
+ * needs the parameter kinds). */
+struct cpp_template *
+cpp_tmpl_find(const char *name)
+{
+	struct cpp_template *t;
+
+	for (t = g_cpp_templates; t; t = t->next)
+		if (strcmp(t->name, name) == 0)
+			return t;
+	return NULL;
+}
+
 /* Dummy function-pointer type + decl for the template-call placeholder
  * expression (satisfies the TLPAREN "called object" checks until the real
  * instantiation replaces it). */
@@ -4164,146 +4178,55 @@ cpp_tmpl_explicit_parse(struct scope *s)
 {
 	extern struct type *typename(struct scope *, enum typequal *,
 	    struct expr **);
-	extern void tokpush(struct token *, size_t);
+	extern struct cpp_template *cpp_tmpl_find(const char *);
 	enum typequal tq;
 	struct expr *toeval;
-	struct token guard = {0};
-	jmp_buf env;
+	struct cpp_template *tmpl;
+	struct cpp_tmpl_param *p = NULL;
 
-	guard.kind = TSEMICOLON;
 	g_cpp_tmpl_expl_n = 0;
 	expect(TLESS, "after template name");
-	/* Buffer the whole `< args... >` list first (the source stream is
-	 * advanced past the closing '>'), then parse each argument on a
-	 * private replay where a failed type/expr probe can rewind safely. */
-	{
-		struct token list[512];
-		size_t ln = 0;
-		int depth = 0;
-		for (;;) {
-			if (ln >= 512)
-				error(&tok.loc, "template argument list too long");
-			if (tok.kind == TLPAREN || tok.kind == TLBRACK)
-				++depth;
-			else if (tok.kind == TRPAREN || tok.kind == TRBRACK) {
-				if (depth)
-					--depth;
-			} else if (tok.kind == TGREATER && depth == 0) {
-				break;
-			}
-			list[ln++] = tok;
-			next();
+	/* Consult the template's parameter kinds so each explicit argument is
+	 * parsed directly as a type or a constant value (mirrors the class
+	 * template instantiation).  A type-dependent NTTP (`template<typename
+	 * T, T N>`) falls out naturally: N is a value of the *argument's*
+	 * concrete type, recorded here and bound at instantiation. */
+	if (g_cpp_tmpl_depth > 0)
+		tmpl = cpp_tmpl_find(g_cpp_tmpl_stack[g_cpp_tmpl_depth - 1]);
+	else
+		tmpl = NULL;
+	if (tmpl)
+		p = tmpl->params;
+	for (;;) {
+		if (g_cpp_tmpl_expl_n >= 16)
+			error(&tok.loc, "too many template arguments");
+		if (p && p->is_nttp) {
+			/* non-type parameter: a constant integer expression */
+			struct expr *ev = cpp_tmpl_const_arg(s);
+			g_cpp_tmpl_expl_types[g_cpp_tmpl_expl_n] = ev->type;
+			g_cpp_tmpl_expl_vals[g_cpp_tmpl_expl_n] =
+			    ev->u.constant.u;
+			g_cpp_tmpl_expl_isval[g_cpp_tmpl_expl_n] = true;
+		} else {
+			tq = QUALNONE;
+			toeval = NULL;
+			struct type *tt = typename(s, &tq, &toeval);
+			if (!tt || toeval)
+				error(&tok.loc,
+				    "template argument is not a type");
+			g_cpp_tmpl_expl_types[g_cpp_tmpl_expl_n] = tt;
+			g_cpp_tmpl_expl_isval[g_cpp_tmpl_expl_n] = false;
 		}
-		next(); /* consume '>' */
-		{
-			/* the source stream now sits just past the closing '>';
-			 * `after` is the caller's next token (e.g. '(' of a call) */
-			struct token after = tok;
-			size_t base = tokctx_depth();
-			tokpush(&guard, 1);
-			tokpush(list, ln);
-			next();
-			for (;;) {
-				if (g_cpp_tmpl_expl_n >= 16)
-					error(&tok.loc, "too many template arguments");
-				/* buffer one argument from the replayed list; the
-				 * guard token (list tail) terminates the last one */
-				struct token arg[256];
-				size_t an = 0;
-				int ad = 0;
-				struct token sep;
-				for (;;) {
-					if (an >= 256)
-						error(&tok.loc, "template argument too long");
-					if (tok.kind == TLPAREN || tok.kind == TLBRACK)
-						++ad;
-					else if (tok.kind == TRPAREN ||
-					    tok.kind == TRBRACK) {
-						if (ad)
-							--ad;
-					} else if ((tok.kind == TCOMMA ||
-					    tok.kind == TGREATER ||
-					    tok.kind == TSEMICOLON) && ad == 0) {
-						sep = tok;
-						break;
-					}
-					arg[an++] = tok;
-					next();
-				}
-				if (!an)
-					error(&tok.loc, "expected template argument");
-				{
-					size_t d = tokctx_depth();
-					bool ok = false;
-					/* probe as a type */
-					if (setjmp(env) == 0) {
-						cpp_trial_begin(env);
-						tokpush(&guard, 1);
-						tokpush(arg, an);
-						next();
-						tq = QUALNONE;
-						toeval = NULL;
-						struct type *tt = typename(s, &tq, &toeval);
-						if (!tt || toeval || tok.kind != TSEMICOLON)
-							error(&tok.loc,
-							    "template argument is not a type");
-						cpp_trial_end(env);
-						g_cpp_tmpl_expl_types[g_cpp_tmpl_expl_n] = tt;
-						g_cpp_tmpl_expl_isval[g_cpp_tmpl_expl_n] = false;
-						ok = true;
-					} else {
-						cpp_trial_end(env);
-						/* not a type: try a constant expression */
-						if (setjmp(env) == 0) {
-							cpp_trial_begin(env);
-							tokpush(&guard, 1);
-							tokpush(arg, an);
-							next();
-							{
-								extern struct expr *condexpr(struct scope *);
-								extern struct expr *eval(struct expr *);
-								struct expr *ev = eval(condexpr(s));
-								if (!ev || ev->kind != EXPRCONST ||
-								    !(ev->type->prop & PROPINT))
-									error(&tok.loc,
-									    "template argument is not a constant");
-								g_cpp_tmpl_expl_types[g_cpp_tmpl_expl_n] = ev->type;
-								g_cpp_tmpl_expl_vals[g_cpp_tmpl_expl_n] =
-								    ev->u.constant.u;
-								g_cpp_tmpl_expl_isval[g_cpp_tmpl_expl_n] = true;
-							}
-							cpp_trial_end(env);
-							ok = true;
-						} else {
-							cpp_trial_end(env);
-							error(&tok.loc,
-							    "template argument must be a type or a constant integer expression");
-						}
-					}
-					/* restore the stream to the separator; the source
-					 * tokens were never touched (list was buffered) */
-					tokctx_rewind(d);
-					tok = sep;
-				}
-				++g_cpp_tmpl_expl_n;
-				if (sep.kind == TSEMICOLON || sep.kind == TGREATER)
-					break;
-				expect(TCOMMA, "',' or '>' in template argument list");
-				next(); /* consume the ',' */
-			}
-			/* discard the replayed list and restore the caller's stream
-			 * to just past the closing '>' */
-			tokctx_rewind(base);
-			tok = after;
-		}
+		++g_cpp_tmpl_expl_n;
+		if (p)
+			p = p->next;
+		if (tok.kind == TGREATER)
+			break;
+		expect(TCOMMA, "',' or '>' in template argument list");
 	}
+	next(); /* consume '>' */
 }
 
-/* Parse a non-type template argument (a constant integer expression),
- * buffering its tokens so the enclosing template `>` — which is also a
- * binary greater-than operator — is not consumed by the expression
- * parser.  Parentheses are tracked so `(a > b)` keeps its `>`.  On
- * return `tok` is positioned just past the argument. */
 static struct expr *
 cpp_tmpl_const_arg(struct scope *s)
 {
@@ -4323,7 +4246,8 @@ cpp_tmpl_const_arg(struct scope *s)
 		else if (tok.kind == TRPAREN || tok.kind == TRBRACK) {
 			if (depth)
 				--depth;
-		} else if (tok.kind == TGREATER && depth == 0) {
+		} else if ((tok.kind == TGREATER || tok.kind == TCOMMA) &&
+		    depth == 0) {
 			sep = tok;
 			break;
 		}
@@ -4393,57 +4317,101 @@ cpp_template_decl(struct scope *s, struct type *owner)
 	 * `int N` / `auto N` (non-type template parameter, C++17/C++20),
 	 * comma separated; a trailing parameter pack: `typename... Args` /
 	 * `class... Args` */
-	for (;;) {
-		enum cpp_tokenkind k = cpp_tok_kind();
-		if (k == CPP_TTYPENAME || k == CPP_TCLASS) {
-			next(); /* consume typename/class */
-			p = xmalloc(sizeof(*p));
-			p->is_pack = false;
-			p->is_nttp = false;
-			p->nttp_type = NULL;
-			if (tok.kind == TELLIPSIS) {
-				p->is_pack = true;
+	/* Parameter-list scope: type parameters (`T`) are visible as DECLTYPE
+	 * decls so a later non-type parameter can name them (`template<typename T,
+	 * T N>` — P0847-dependent-type NTTP). */
+	{
+		extern struct scope *mkscope(struct scope *);
+		extern void scopeputdecl(struct scope *, struct decl *);
+		struct scope *ps = mkscope(s);
+		for (;;) {
+			enum cpp_tokenkind k = cpp_tok_kind();
+			if (k == CPP_TTYPENAME || k == CPP_TCLASS) {
+				next(); /* consume typename/class */
+				p = xmalloc(sizeof(*p));
+				p->is_pack = false;
+				p->is_dep_nttp = false;
+				p->is_nttp = false;
+				p->nttp_type = NULL;
+				if (tok.kind == TELLIPSIS) {
+					p->is_pack = true;
+					next();
+				}
+				if (tok.kind < TIDENT)
+					error(&tok.loc, "expected template parameter name");
+				p->name = xmalloc(strlen(tokenstr(tok.kind)) + 1);
+				strcpy((char *)p->name, tokenstr(tok.kind));
+				p->next = NULL;
+				*pe = p;
+				pe = &p->next;
+				++tmpl->nparams;
+				/* a non-pack type parameter is nameable as the type of a
+				 * later NTTP; put it in the parameter-list scope */
+				if (!p->is_pack) {
+					extern struct decl *mkdecl(char *, enum declkind,
+					    struct type *, enum typequal, enum linkage);
+					scopeputdecl(ps, mkdecl((char *)p->name,
+					    DECLTYPE, &typevoid, QUALNONE, LINKNONE));
+				}
 				next();
-			}
-			if (tok.kind < TIDENT)
-				error(&tok.loc, "expected template parameter name");
-			p->name = xmalloc(strlen(tokenstr(tok.kind)) + 1);
-			strcpy((char *)p->name, tokenstr(tok.kind));
-			p->next = NULL;
-			*pe = p;
-			pe = &p->next;
-			++tmpl->nparams;
-			next();
-		} else if (tok.kind == TAUTO) {
-			/* `template<auto N>`: deduced non-type parameter (the C
-			 * lexer emits the TAUTO storage-class token for `auto`) */
-			next(); /* consume auto */
-			p = xmalloc(sizeof(*p));
-			p->is_pack = false;
-			p->is_nttp = true;
-			p->nttp_type = NULL;
-			if (tok.kind < TIDENT)
-				error(&tok.loc, "expected template parameter name");
-			p->name = xmalloc(strlen(tokenstr(tok.kind)) + 1);
-			strcpy((char *)p->name, tokenstr(tok.kind));
-			p->next = NULL;
-			*pe = p;
-			pe = &p->next;
-			++tmpl->nparams;
-			next();
-		} else {
-			/* non-type template parameter with a fixed type: `int N`
-			 * (the type may reference an earlier type-parameter name,
-			 * which is in scope as a DECLTYPE).  parameter() parses
-			 * "type name" and stops before ',' or '>'. */
+			} else if (tok.kind == TAUTO) {
+				/* `template<auto N>`: deduced non-type parameter (the C
+				 * lexer emits the TAUTO storage-class token for `auto`) */
+				next(); /* consume auto */
+				p = xmalloc(sizeof(*p));
+				p->is_pack = false;
+				p->is_dep_nttp = false;
+				p->is_nttp = true;
+				p->nttp_type = NULL;
+				if (tok.kind < TIDENT)
+					error(&tok.loc, "expected template parameter name");
+				p->name = xmalloc(strlen(tokenstr(tok.kind)) + 1);
+				strcpy((char *)p->name, tokenstr(tok.kind));
+				p->next = NULL;
+				*pe = p;
+				pe = &p->next;
+				++tmpl->nparams;
+				next();
+			} else {
+			/* non-type template parameter with a fixed type: `int N`,
+			 * or a type-dependent one: `T N` where T is an earlier
+			 * type parameter (nameable in the parameter-list scope). */
 			extern struct decl *parameter(struct scope *);
-			struct decl *pd = parameter(s);
+			struct decl *pd = NULL;
+			if (tok.kind >= TIDENT) {
+				pd = scopegetdecl(ps, tokenstr(tok.kind), 1);
+				if (pd && pd->kind == DECLTYPE) {
+					/* `template<typename T, T N>`: dependent NTTP.
+					 * nttp_type stays NULL so instantiation binds
+					 * the concrete type of the argument. */
+					next(); /* consume the type-parameter name */
+					if (tok.kind < TIDENT)
+						error(&tok.loc,
+						    "expected non-type template parameter name");
+					p = xmalloc(sizeof(*p));
+					p->is_pack = false;
+					p->is_dep_nttp = true;
+					p->is_nttp = true;
+					p->nttp_type = NULL;
+					p->name = xmalloc(strlen(tokenstr(tok.kind)) + 1);
+					strcpy((char *)p->name, tokenstr(tok.kind));
+					p->next = NULL;
+					*pe = p;
+					pe = &p->next;
+					++tmpl->nparams;
+					next();
+					goto param_done;
+				}
+				pd = NULL;
+			}
+			pd = parameter(ps);
 			if (!pd || !pd->type ||
 			    !(pd->type->prop & (PROPINT | PROPREAL)))
 				error(&tok.loc,
 				    "non-type template parameter must have integer or enum type");
 			p = xmalloc(sizeof(*p));
 			p->is_pack = false;
+			p->is_dep_nttp = false;
 			p->is_nttp = true;
 			p->nttp_type = pd->type;
 			p->name = pd->name ?
@@ -4453,11 +4421,13 @@ cpp_template_decl(struct scope *s, struct type *owner)
 			pe = &p->next;
 			++tmpl->nparams;
 		}
+param_done:
 		if (tok.kind == TGREATER)
 			break;
 		if (p->is_pack)
 			error(&tok.loc, "template parameter pack must be the last parameter");
 		expect(TCOMMA, "',' or '>' in template parameter list");
+	}
 	}
 	next(); /* consume '>' */
 
