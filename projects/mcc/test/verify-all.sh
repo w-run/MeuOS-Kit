@@ -8,8 +8,22 @@
 #   3. check-cpp         m++ C++ 前端（lex/virtual/func/neg，含虚表与模板）
 #   4. check-c99         C 回归（c99 套，--specs=host 或 MEUOS_SYSROOT 模式按当前环境可用性）
 #   5. check-c11         C 回归（c11 套）
-#   6. check-sysroot-static 自举：mcc 编译 mcc + 运行 hello
-#   7. check-c-mir       C 功能回归 × MIR/LIR 双路径矩阵（mir_matrix.sh：MIR=1 与 MIR=0 编译运行且 stdout 一致）
+#   6. check-c23         C 回归（c23 套，同样按环境选择 MEUOS_SYSROOT / --specs=host）
+#   7. check-abi         聚合体 ABI 回归（相邻位域共享存储单元不膨胀布局）
+#   8. check-driver      driver 回归（sysroot 解析 + feature-regress）
+#   9. check-mt-integration MT_AS/MT_LD/MT_AR 重定向到 meuos-toolchain（未构建时自行 SKIP）
+#  10. check-i386 / check-loongarch64 / check-targets  交叉目标汇编回归
+#  11. check-arm / check-i386-runtime / check-aarch64-runtime  交叉运行时回归
+#                       （各自缺 sysroot / qemu 时脚本内自行 SKIP，退出 0）
+#  12. check-sysroot-static 自举：mcc 编译 mcc + 运行 hello
+#  13. check-c-mir       C 功能回归 × MIR/LIR 双路径矩阵（mir_matrix.sh：MIR=1 与 MIR=0 编译运行且 stdout 一致）
+#
+# 未纳入本门禁的目标及原因：
+#   check-pic-verify     riscv64/i386 GOT 已知缺口，当前必失败
+#   check-chibicc        社区套件（chibicc）当前 41/41 编译失败，见
+#                        test/community/chibicc/REPORT.md 的分类
+#   check-i386-qemu      需 qemu-system-i386 整机 VM，耗时过长，不适合门禁
+#   check-c11-atomic     已被 check-c11 全量覆盖
 #
 # 用法：
 #   sh test/verify-all.sh [--verbose]
@@ -80,6 +94,24 @@ run_c11_host() {
     done
 }
 
+# --specs=host 回退：复刻 Makefile check-c23 逻辑（默认 specs 为 meuos，
+# 需链接 -lc-meuos；无 sysroot 时改走宿主 libc）
+run_c23_host() {
+    local out
+    for t in test/c23/*.c; do
+        out="/tmp/mcc-verify-c23-$(basename "$t" .c)"
+        "$BIN" --specs=host -Itest/c23 -o "$out" "$t" || return 1
+        "$out" || return 1
+    done
+}
+
+# --specs=host 回退：复刻 Makefile check-abi 逻辑
+run_abi_host() {
+    "$BIN" --specs=host -o /tmp/mcc-verify-bitfield-aggregate \
+        test/abi/bitfield_aggregate.c || return 1
+    /tmp/mcc-verify-bitfield-aggregate
+}
+
 echo "== mcc/m++ 一键验收 (root=$ROOT) =="
 [ "$SYSROOT_OK" = 1 ] && echo "sysroot: $SYSROOT (MEUOS_SYSROOT 模式)" \
                       || echo "sysroot: 未找到 libc-meuos.a (C 回归走 --specs=host 回退)"
@@ -108,10 +140,33 @@ else
     run "check-c11 (--specs=host 回退)" run_c11_host
 fi
 
-# 5. 自举（内部自行构建 sysroot，任何环境下均执行）
+# 5. 补充门禁：C23/ABI/driver/MT 集成 + 交叉目标汇编回归
+#    （check-c23 与 check-abi 默认 specs 为 meuos、需链接 -lc-meuos，
+#     故按 sysroot 可用性在 MEUOS_SYSROOT 模式与 --specs=host 回退间选择。
+#     check-mt-integration 在 meuos-toolchain 未构建时自行 SKIP。）
+if [ "$SYSROOT_OK" = 1 ]; then
+    run "make check-c23 (MEUOS_SYSROOT)" env MEUOS_SYSROOT="$SYSROOT" make check-c23
+    run "make check-abi (MEUOS_SYSROOT)" env MEUOS_SYSROOT="$SYSROOT" make check-abi
+else
+    run "check-c23 (--specs=host 回退)" run_c23_host
+    run "check-abi (--specs=host 回退)" run_abi_host
+fi
+run "make check-driver" make check-driver
+run "make check-mt-integration" make check-mt-integration
+run "make check-i386" make check-i386
+run "make check-loongarch64" make check-loongarch64
+run "make check-targets" make check-targets
+
+# 6. 交叉运行时回归：各脚本在缺 sysroot / qemu 时自行打印 skipping 并退出 0，
+#    因此可无条件纳入门禁——环境齐备时它们才真正执行并守护 ABI 行为。
+run "make check-arm" make check-arm
+run "make check-i386-runtime" make check-i386-runtime
+run "make check-aarch64-runtime" make check-aarch64-runtime
+
+# 7. 自举（内部自行构建 sysroot，任何环境下均执行）
 run "make check-sysroot-static" make check-sysroot-static
 
-# 7. C 功能回归 × MIR/LIR 双路径矩阵（mir_matrix.sh：MIR=1 与 MIR=0 均编译运行且 stdout 一致）
+# 8. C 功能回归 × MIR/LIR 双路径矩阵（mir_matrix.sh：MIR=1 与 MIR=0 均编译运行且 stdout 一致）
 run "make check-c-mir" make check-c-mir
 
 # 汇总
