@@ -368,9 +368,9 @@ mcc_main(int argc, char *argv[])
 		 * wired; everything else is accepted (no-op) for gcc/clang
 		 * compatibility instead of being silently dropped. */
 		if (strcmp(a, "-fomit-frame-pointer") == 0)
-			g_force_fp = 1;
+			g_force_fp = 0;   /* permit omitting the frame pointer */
 		else if (strcmp(a, "-fno-omit-frame-pointer") == 0)
-			g_force_fp = 0;
+			g_force_fp = 1;   /* force keeping the frame pointer */
 		else if (strcmp(a, "-fno-strict-aliasing") == 0)
 			; /* accepted: no TBAA pass to disable */
 		continue;
