@@ -76,6 +76,7 @@ typedef enum {
 
     /* 修饰键组合 */
     TUI_KEY_S_TAB     = 0x1200,
+    TUI_KEY_UTF8      = 0x1201,  /* UTF-8 多字节字符，见 ev.text */
 
     /* 特殊事件 */
     TUI_KEY_TIMEOUT  = 0x1FFF,
@@ -97,6 +98,7 @@ typedef struct {
 typedef struct {
     tui_key_t   key;
     tui_mouse_t mouse;
+    char        text[8];  /* UTF-8 多字节字符（TUI_KEY_UTF8 时使用） */
 } tui_event_t;
 
 /* ── 颜色 ─────────────────────────────────────────── */

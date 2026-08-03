@@ -217,6 +217,7 @@ static int output_render(int fd, const tui_rect_t *area, void *udata)
         int bytes = tui_truncate(ll->text, inner.cols);
         write(fd, ll->text, (size_t)bytes);
         tui_reset_style(fd);
+        tui_clear_eol(fd);
     }
 
     for (int i = visible; i < max_lines; i++) {
@@ -255,9 +256,21 @@ static int input_render(int fd, const tui_rect_t *area, void *udata)
     tui_set_fg(fd, TUI_COLOR_WHITE);
     int bytes = tui_truncate(st->input_buf, text_w);
     write(fd, st->input_buf, (size_t)bytes);
+    tui_clear_eol(fd);  /* 清除输入区残留 */
+    tui_reset_style(fd);
 
-    /* 光标 */
-    tui_cursor_goto(fd, inner.row, text_x + st->input_cursor);
+    /* 光标：用 tui_strwidth 计算前缀显示宽度 */
+    int cursor_w = 0;
+    char save_ch;
+    if (st->input_cursor < (int)sizeof(st->input_buf)) {
+        save_ch = st->input_buf[st->input_cursor];
+        st->input_buf[st->input_cursor] = '\0';
+        cursor_w = tui_strwidth(st->input_buf);
+        st->input_buf[st->input_cursor] = save_ch;
+    } else {
+        cursor_w = tui_strwidth(st->input_buf);
+    }
+    tui_cursor_goto(fd, inner.row, text_x + cursor_w);
     tui_set_attr(fd, TUI_ATTR_REVERSE);
     tui_write(fd, " ");
     tui_reset_style(fd);
@@ -383,14 +396,35 @@ int msh_tui_main(void)
             case TUI_KEY_BS:
             case TUI_KEY_DEL:
                 if (st.input_cursor > 0) {
+                    /* 向后查找上一个 UTF-8 字符的起始字节 */
+                    int pos = st.input_cursor - 1;
+                    while (pos > 0 && ((unsigned char)st.input_buf[pos] & 0xC0) == 0x80)
+                        pos--;
+                    int char_bytes = st.input_cursor - pos;
                     int len = (int)strlen(st.input_buf);
-                    st.input_cursor--;
-                    memmove(st.input_buf + st.input_cursor,
-                            st.input_buf + st.input_cursor + 1,
-                            (size_t)(len - st.input_cursor));
-                    st.input_buf[len - 1] = '\0';
+                    memmove(st.input_buf + pos,
+                            st.input_buf + st.input_cursor,
+                            (size_t)(len - st.input_cursor + 1));
+                    st.input_cursor = pos;
+                    (void)char_bytes;
                 }
                 break;
+
+            case TUI_KEY_UTF8: {
+                /* UTF-8 多字节字符输入 */
+                int ulen = (int)strlen(ev.text);
+                int len = (int)strlen(st.input_buf);
+                if (len + ulen < (int)sizeof(st.input_buf) - 1) {
+                    st.input_buf[len] = '\0'; /* 确保 NUL 结尾 */
+                    /* 在 cursor 位置插入 */
+                    memmove(st.input_buf + st.input_cursor + ulen,
+                            st.input_buf + st.input_cursor,
+                            (size_t)(len - st.input_cursor + 1));
+                    memcpy(st.input_buf + st.input_cursor, ev.text, (size_t)ulen);
+                    st.input_cursor += ulen;
+                }
+                break;
+            }
 
             default:
                 if (ev.key >= 0x20 && ev.key <= 0x7E) {

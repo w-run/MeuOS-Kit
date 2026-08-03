@@ -264,6 +264,29 @@ int tui_getkey_timeout(int fd, tui_event_t *ev, int timeout_ms)
         ev->key = TUI_KEY_BS;
     } else if (c == 0x09) {
         ev->key = TUI_KEY_TAB;
+    } else if ((unsigned char)c >= 0x80) {
+        /* UTF-8 多字节序列 */
+        int need = 0;
+        unsigned char uc = (unsigned char)c;
+        if (uc >= 0xC0 && uc <= 0xDF) need = 1;       /* 2字节 */
+        else if (uc >= 0xE0 && uc <= 0xEF) need = 2;  /* 3字节：中文 */
+        else if (uc >= 0xF0 && uc <= 0xF7) need = 3;  /* 4字节：emoji */
+        else { ev->key = TUI_KEY_ERR; return TUI_OK; } /* 无效前导字节 */
+
+        ev->text[0] = c;
+        int ok = 1;
+        for (int j = 1; j <= need; j++) {
+            char cb;
+            if (read_byte(fd, &cb) != TUI_OK) { ok = 0; break; }
+            if (((unsigned char)cb & 0xC0) != 0x80) { ok = 0; break; }
+            ev->text[j] = cb;
+        }
+        if (ok) {
+            ev->text[need + 1] = '\0';
+            ev->key = TUI_KEY_UTF8;
+        } else {
+            ev->key = TUI_KEY_ERR;
+        }
     } else {
         ev->key = (tui_key_t)(unsigned char)c;
     }
@@ -390,10 +413,16 @@ int tui_input_handle(tui_input_t *in, tui_event_t *ev)
     case TUI_KEY_BS: {
         int len = (int)strlen(in->buffer);
         if (in->cursor > 0) {
-            in->cursor--;
-            memmove(in->buffer + in->cursor,
-                    in->buffer + in->cursor + 1,
-                    (size_t)(len - in->cursor));
+            /* 向后查找上一个 UTF-8 字符的起始字节 */
+            int pos = in->cursor - 1;
+            while (pos > 0 && ((unsigned char)in->buffer[pos] & 0xC0) == 0x80)
+                pos--;
+            int char_bytes = in->cursor - pos;
+            memmove(in->buffer + pos,
+                    in->buffer + in->cursor,
+                    (size_t)(len - in->cursor + 1));
+            in->cursor = pos;
+            (void)char_bytes;
         }
         return 1;
     }
@@ -425,6 +454,19 @@ int tui_input_handle(tui_input_t *in, tui_event_t *ev)
         return 1;
 
     default:
+        if (ev->key == TUI_KEY_UTF8 && ev->text[0]) {
+            /* UTF-8 多字节字符：追加到缓冲区 */
+            int ulen = (int)strlen(ev->text);
+            int len = (int)strlen(in->buffer);
+            if (len + ulen < (int)sizeof(in->buffer) - 1) {
+                memmove(in->buffer + in->cursor + ulen,
+                        in->buffer + in->cursor,
+                        (size_t)(len - in->cursor + 1));
+                memcpy(in->buffer + in->cursor, ev->text, (size_t)ulen);
+                in->cursor += ulen;
+            }
+            return 1;
+        }
         if (ev->key >= 0x20 && ev->key <= 0x7E) {
             int len = (int)strlen(in->buffer);
             if (len < (int)sizeof(in->buffer) - 1) {

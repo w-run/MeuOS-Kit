@@ -245,6 +245,7 @@ static int output_render(int fd, const tui_rect_t *area, void *udata)
         int bytes = tui_truncate(ll->text, inner.cols);
         write(fd, ll->text, (size_t)bytes);
         tui_reset_style(fd);
+        tui_clear_eol(fd);
     }
 
     /* 剩余行清空 */
@@ -297,6 +298,7 @@ static int input_render(int fd, const tui_rect_t *area, void *udata)
     int input_len = (int)strlen(st->input.buffer);
     int show_bytes = tui_truncate(st->input.buffer, text_w);
     write(fd, st->input.buffer, (size_t)show_bytes);
+    tui_clear_eol(fd);  /* 清除输入区残留 */
 
     /* 光标 */
     tui_cursor_goto(fd, inner.row, text_x + input_len);
