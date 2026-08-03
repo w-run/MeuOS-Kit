@@ -82,15 +82,17 @@ inttype(unsigned long long val, bool decimal, char *suffix)
 		if (typehasint(t, val, false))
 			return t;
 	}
-	/* C 6.4.4.1: decimal constant beyond signed max overflows to the
-	 * largest signed type (signed two's complement).  Hex/oct/bin
+	/* C 6.4.4.1: decimal constant beyond signed max has no type in its
+	 * signed-only list (the behaviour is undefined).  Hex/oct/bin
 	 * constants have unsigned types in their list so they reach
-	 * &typeullong naturally via the step=1 loop above. */
+	 * &typeullong naturally via the step=1 loop above.  For the decimal
+	 * case chibicc wraps the value into signed long long (two's
+	 * complement), e.g. 18446744073709551615 >> 63 == -1; match that so
+	 * the chibicc literal suite agrees. */
 	if (decimal && !(flags & U)) {
 		if (typehasint(&typellong, val, false))
 			return &typellong;
-		if (typehasint(&typeullong, val, false))
-			return &typeullong;
+		return &typellong;
 	}
 notype:
 	error(&tok.loc, "no suitable type for constant '%s'", tok.lit);
