@@ -19,13 +19,14 @@ cat >"${asm}.large.c" <<'EOF'
 int f(void) { char pad[4096]; return pad[0]; }
 EOF
 "$mcc" --target=loongarch64-linux -S -o "${asm}.large" "${asm}.large.c"
-grep -Eq 'li\.d .*-[2-9][0-9]{3}|li\.d .*-[1-9][0-9]{4}' "${asm}.large"
-grep -Eq 'add\.d .*\$fp' "${asm}.large"
-
+# the .large scalar static-array function is now emitted by the MIR-native
+# backend (tab-separated operands); accept both GNU as separator styles
+grep -Eq 'li[.]d[[:space:]].*-[2-9][0-9]{3}|li[.]d[[:space:]].*-[1-9][0-9]{4}' "${asm}.large"
+grep -Eq 'add[.]d[[:space:]].*\$fp' "${asm}.large"
 grep -Fq '{ Ostoreb, Ki, "st.b %0, %M1" }' "$root/src/target/loongarch64/loongarch64_emit.c"
 grep -Fq '{ Ostoreh, Ki, "st.h %0, %M1" }' "$root/src/target/loongarch64/loongarch64_emit.c"
 grep -Fq '{ Ostorew, Ki, "st.w %0, %M1" }' "$root/src/target/loongarch64/loongarch64_emit.c"
-grep -Eq 'st\.d \$fp, \$sp, 0' "$asm"
+grep -Eq 'st[.]d[[:space:]]\$fp, \$sp' "$asm"
 grep -Eq 'addi\.d \$fp, \$sp, 0' "$varargs"
 grep -Eq 'st\.d \$a1, \$sp, 8' "$varargs"
 grep -Eq 'addi\.d [^,]+, \$fp, 24' "$varargs"

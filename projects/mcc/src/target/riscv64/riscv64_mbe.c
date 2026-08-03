@@ -105,6 +105,12 @@ mval_of_ref(MFn *mf, MRef r)
 static bool
 mbe_supported(MFn *mf)
 {
+	/* thread-local globals need TLS address relocations the scalar core
+	 * does not emit; let the legacy backend handle them */
+	for (uint32_t i = 0; i < mf->nval; i++)
+		if (mf->val[i] && mf->val[i]->kind == MV_GLOBAL &&
+		    mf->val[i]->tls)
+			return false;
 	for (MBlk *mb = mf->link; mb; mb = mb->link) {
 		for (uint32_t k = 0; k < mb->nins; k++) {
 			MIns *in = &mb->ins[k];
