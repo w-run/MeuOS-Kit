@@ -111,9 +111,8 @@ class Screen:
         # 跳过 NUL
         if ch == "\x00":
             return
-        # 跳过孤立的高位字节（UTF-8 截断）
-        if ch and ord(ch[0]) >= 0x80 and len(ch) == 1:
-            return
+        # 注意：Python str 已是 Unicode，无需 UTF-8 截断检查。
+        # 所有非 ASCII 字符（框线、块元素、CJK）都应正常显示。
         self.cells[i] = [ch]
         self.styles[i] = style
         self.col += 1

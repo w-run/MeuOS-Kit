@@ -6,6 +6,7 @@ SRCS := $(sort $(wildcard src/*/*.c))
 OBJS := $(addprefix $(BUILD)/,$(notdir $(SRCS:.c=.o)))
 LIB := $(BUILD)/libtui.a
 TEST := $(BUILD)/test_tui
+RENDER_TEST := $(BUILD)/test_render_dump
 
 EXAMPLES := demo demo_dialog demo_list
 EXE := $(addprefix $(BUILD)/,$(EXAMPLES))
@@ -27,6 +28,13 @@ $(BUILD):
 
 check: $(TEST)
 	./$(TEST)
+
+# 渲染输出分析（灰盒测试：dump 字节流验证）
+check-render: $(RENDER_TEST)
+	./$(RENDER_TEST)
+
+$(RENDER_TEST): test/test_render_dump.c $(LIB) | $(BUILD)
+	$(CC) $(CFLAGS) -Iinclude -o $@ test/test_render_dump.c $(LIB)
 
 $(TEST): test/test.c $(LIB) | $(BUILD)
 	$(CC) $(CFLAGS) -Iinclude -o $@ test/test.c $(LIB)

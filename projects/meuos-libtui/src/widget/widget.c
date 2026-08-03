@@ -523,15 +523,19 @@ int tui_statusbar_render(int fd, const tui_rect_t *area, void *userdata)
     if (max_left < 0) max_left = 0;
 
     if (left_len > 0) {
-        int show = left_len < max_left ? left_len : max_left;
-        write(fd, sb->left, (size_t)show);
+        int show_w = left_len < max_left ? left_len : max_left;
+        int show_bytes = tui_truncate(sb->left, show_w);
+        write(fd, sb->left, (size_t)show_bytes);
     }
 
-    int pad = area->cols - 1 - (left_len < max_left ? left_len : max_left) - right_len;
+    int shown_left = left_len < max_left ? left_len : max_left;
+    int pad = area->cols - 1 - shown_left - right_len;
     if (pad > 0) tui_spaces(fd, pad);
 
-    if (right_len > 0)
-        write(fd, sb->right, (size_t)right_len);
+    if (right_len > 0) {
+        int right_bytes = tui_truncate(sb->right, right_len);
+        write(fd, sb->right, (size_t)right_bytes);
+    }
 
     /* 末尾留一列安全边距 */
     tui_reset_style(fd);
@@ -572,11 +576,7 @@ int tui_banner_render(int fd, const tui_rect_t *area, void *userdata)
     tui_set_fg(fd, c);
     tui_set_attr(fd, TUI_ATTR_BOLD);
     write(fd, tl, 3);
-    write(fd, " ", 1);
-    tui_set_fg(fd, c);
-    write(fd, hz, 3);
-    write(fd, hz, 3);
-    write(fd, hz, 3);
+    write(fd, hz, 3);   /* ┌─ (无额外空格) */
     tui_reset_style(fd);
     tui_set_fg(fd, TUI_COLOR_WHITE);
     tui_set_attr(fd, TUI_ATTR_BOLD);
@@ -750,7 +750,9 @@ int tui_label_render(int fd, const tui_rect_t *area, void *userdata)
     if (lb->attr) tui_set_attr(fd, lb->attr);
 
     int show = len < area->cols ? len : area->cols;
-    write(fd, lb->text, (size_t)show);
+    /* 使用 truncate 确保不截断多字节字符 */
+    int show_bytes = tui_truncate(lb->text, show);
+    write(fd, lb->text, (size_t)show_bytes);
 
     tui_reset_style(fd);
     return TUI_OK;

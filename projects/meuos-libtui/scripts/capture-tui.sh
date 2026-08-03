@@ -49,22 +49,21 @@ echo "输出: $HTML"
 echo ""
 
 # ── 1. 在伪终端中运行 demo ──
-# 使用 `script -q -f` 提供 PTY 环境，通过 TUI_DEMO_CAPTURE=1 触发一次性渲染
-# 注意：不要把 stdin 重定向到 /dev/null，会让 PTY 立即 EOF，导致 demo
-# 还没渲染完就关闭 PTY master
+# 使用 `script -q -f` 提供 PTY 环境，让 TUI 程序认为自己运行在真实终端。
+# TUI demo 在渲染后会阻塞等待按键，用 `timeout` 限制运行时间，
+# 此时渲染已完成，输出已写入 RAW 文件。
 echo "🎥 启动 PTY 捕获..."
 
 rm -f "$RAW"
 
-# 强制使用 80x30 终端尺寸，便于稳定截图
-# 注意：不要用 2>&1 把 stderr 推到文件，会污染 ANSI 输出
-TERMINAL_COLS=80 \
-TERMINAL_LINES=30 \
-LINES=30 \
-COLUMNS=80 \
-TERM=xterm-256color \
-TUI_DEMO_CAPTURE=1 \
-script -q -f -c "$EXE" "$RAW" || true
+# 使用 Python PTY (capture-pty.py) 提供真实 PTY 环境，非交互环境也能可靠工作。
+# TUI demo 渲染后阻塞等待按键，超时后自动退出。
+python3 "$SCRIPT_DIR/capture-pty.py" \
+    --program "$EXE" \
+    --output "$RAW" \
+    --width 80 \
+    --height 30 \
+    --timeout 10
 
 # ── 2. 校验输出 ──
 if [ ! -s "$RAW" ]; then

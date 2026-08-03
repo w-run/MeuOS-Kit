@@ -119,14 +119,6 @@ int tui_dialog_render(int fd, const tui_rect_t *area, void *userdata)
 
     tui_rect_t inner = *area;
 
-    /* ── 画背景遮罩 ── */
-    tui_set_bg(fd, TUI_COLOR_BLACK);
-    int r;
-    for (r = 0; r < inner.rows; r++) {
-        tui_cursor_goto(fd, inner.row + r, inner.col);
-        tui_spaces(fd, inner.cols);
-    }
-
     /* ── 边框 ── */
     tui_color_t col = type_color(dlg->type);
     tui_draw_border(fd, &inner, dlg->title, 2, col);
@@ -147,21 +139,23 @@ int tui_dialog_render(int fd, const tui_rect_t *area, void *userdata)
     if (y >= inner.row + inner.rows) { tui_reset_style(fd); return TUI_OK; }
 
     const char *msg = dlg->message;
-    int msg_len = tui_strwidth(msg);
     int line_w = inner.cols - 4;
     if (line_w < 1) line_w = 1;
 
-    /* 按宽度换行 */
-    int pos = 0;
-    while (pos < msg_len && y < inner.row + inner.rows - 2) {
-        int chunk = msg_len - pos;
-        if (chunk > line_w) chunk = line_w;
+    /* 按宽度换行（正确处理多字节字符） */
+    const char *cur = msg;
+    while (*cur && y < inner.row + inner.rows - 2) {
+        int bytes = tui_truncate(cur, line_w);
+        if (bytes <= 0) break;
 
         tui_cursor_goto(fd, y, inner.col + 2);
         tui_set_fg(fd, TUI_COLOR_DEFAULT);
-        write(fd, msg + pos, (size_t)chunk);
+        write(fd, cur, (size_t)bytes);
         tui_reset_style(fd);
-        pos += chunk;
+
+        cur += bytes;
+        /* 跳过换行符 */
+        if (*cur == '\n') cur++;
         y++;
     }
 
@@ -414,12 +408,31 @@ int tui_dialog_blocking(int fd, tui_rect_t area, const char *title,
     tui_raw_mode(fd, 1);
     tui_cursor_show(fd, 0);
 
+    /* 获取屏幕尺寸用于全屏遮罩 */
+    tui_size_t scr;
+    if (tui_get_size(fd, &scr) != TUI_OK) {
+        scr.rows = 24;
+        scr.cols = 80;
+    }
+
     tui_event_t ev;
     int done = 0;
     int result = 0;
 
     while (!done) {
-        /* 渲染对话框 */
+        /* ── 清屏并绘制全屏遮罩 ── */
+        /* 使用默认背景色清屏，确保完全覆盖底层内容 */
+        tui_cursor_goto(fd, 0, 0);
+        tui_set_attr(fd, TUI_ATTR_RESET);
+
+        int mr;
+        for (mr = 0; mr < scr.rows; mr++) {
+            tui_cursor_goto(fd, mr, 0);
+            /* 先用空格填充整行（使用默认背景） */
+            tui_spaces(fd, scr.cols);
+        }
+
+        /* 渲染对话框（在干净背景之上） */
         tui_dialog_render(fd, &area, &dlg);
 
         /* 等待按键 */

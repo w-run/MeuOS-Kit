@@ -176,13 +176,17 @@ int tui_list_render(int fd, const tui_rect_t *area, void *userdata)
 
         if (show_w > 0 && list->items[i].secondary[0]) {
             int remaining = area->cols - show_w - 4;
-            int sw = tui_strwidth(list->items[i].secondary);
-            int ss = sw < remaining ? sw : remaining;
-            if (ss > 0) {
-                tui_reset_style(fd);
-                tui_set_attr(fd, TUI_ATTR_DIM);
-                tui_spaces(fd, remaining - ss);
-                write(fd, list->items[i].secondary, (size_t)ss);
+            if (remaining > 2) {  /* 至少留 2 列给描述 */
+                int sw = tui_strwidth(list->items[i].secondary);
+                int ss = sw < remaining ? sw : remaining;
+                if (ss > 0) {
+                    tui_reset_style(fd);
+                    tui_set_attr(fd, TUI_ATTR_DIM);
+                    tui_spaces(fd, remaining - ss);
+                    /* 使用 truncate 确保不截断多字节字符 */
+                    int sbytes = tui_truncate(list->items[i].secondary, ss);
+                    write(fd, list->items[i].secondary, (size_t)sbytes);
+                }
             }
         }
 
