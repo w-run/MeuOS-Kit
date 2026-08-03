@@ -143,11 +143,14 @@ dwarf_end_func(void)
 }
 
 /* Emit the `.Ldwarf<N>_end:` label right after the function's assembly so
- * the subprogram's high_pc (size) is resolvable. */
+ * the subprogram's high_pc (size) is resolvable.  The function emission may
+ * finish inside a `.section .rodata` block (float literals), so force
+ * .text to keep the label in the same section as the function symbol
+ * (cross-section symbol subtraction is not resolvable by gas). */
 void
 dwarf_emit_func_end(FILE *f, int idx)
 {
-	fprintf(f, ".Ldwarf%d_end:\n", idx);
+	fprintf(f, ".text\n.Ldwarf%d_end:\n", idx);
 }
 
 /* --- finalize ------------------------------------------------------- */
