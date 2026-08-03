@@ -70,7 +70,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 | chloe | lite | 只读隔离副本 | /tmp/mcciso-chloe | 定位 chibicc B 类真 bug（常量折叠窄化 + va_end 类型检查） | **completed**（报告已收） | 只读不 push |
 | diana | lite | worktree-tmp-diana (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试扩充 | **completed**（db1451b 已合入主线 294e5c2） | 11 个 test/c23 文件 + 发现 F1-F3 |
 | eve | lite | worktree-tmp-eve (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵扩充 | **completed**（02d6684 已合入主线 b4cad7e） | 33 个 test/cpp 文件 |
-| grace | lite | worktree-tmp-grace-sema + worktree-tmp-grace-loc (自 worktree-mxx-work@e010519) | /tmp/mxx-wt-grace | sema/decl 组 E1/E4/E5/E6 修复 + E4 行号定位到函数体 } | **completed**（已合入主线） | a8167d9 |
+| grace | lite | worktree-tmp-grace-cpp23 (自 worktree-mxx-work@1ef0a9a) | /tmp/mxx-wt-grace | C++23 缺口补齐：P0849/P1774/P1401/P2360 + 属性语义 | **completed**（f7e313a+b54c8b9+16c2ca5+2a4d655+da7a107 已 push，门禁全绿） | push worktree-tmp-grace-cpp23 |
 | hazel | lite | worktree-tmp-hazel-c23 (自 worktree-mxx-work@d0a90c9) | /tmp/mxx-wt-hazel | C23 constexpr 组：F1/F2/F3 | **completed**（8e5aae3 已 push origin/worktree-tmp-hazel-c23，门禁全绿，已合入主线） | 8e5aae3 |
 
 ### 会话中断恢复速查（当前团队）
@@ -132,6 +132,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 - **F1** constexpr 函数体纯度不诊断（constexpr 函数调用 printf 不报错，diana 发现，test/c23/neg/constexpr.neg.c）— **done**（hazel 8e5aae3）
 - **F2** `nullptr_t` 变量进真值条件 ICE（内部错误 unsupported conversion，diana 发现）— **done**（hazel 8e5aae3）
 - **F3** 具名 constexpr 变量不折叠进整数常量表达式（_Static_assert(K==9) 报非常量，diana 发现）— **done**（hazel 8e5aae3）
+- **C++23 纯缺口 4 项** → **全部 done**（grace worktree-tmp-grace-cpp23）：P0849 `auto(x)`（f7e313a，expr_primary）、P1774 `[[assume]]`（b54c8b9，attr.c 要求括号参数形式 no-op）、P1401 if constexpr 窄化转 bool（16c2ca5，PROPINT→PROPSCALAR）、P2360 init 语句 alias + C++11 using 别名（2a4d655，cpp_using_decl 支持 `using Name=Type;` + if 头部 init-statement 扫描）。属性语义：alignas 本已生效、nodiscard 丢弃返回值警告（da7a107）；deprecated/fallthrough/maybe_unused 使用点警告留待后续。
 - **chibicc B 类**：常量折叠窄化 + va_end 类型检查（verify2/gate3/chi4 定位，chloe 精确行号，grace/hazel 竞争中）
 
 ## 5. 纪律速查
