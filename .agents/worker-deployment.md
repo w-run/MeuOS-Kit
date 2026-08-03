@@ -68,6 +68,8 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 | alice | reasoning | worktree-tmp-alice (自 worktree-requires-wip) | /tmp/mxx-wt-alice | 续作 requires 表达式四类需求 | **in_progress** | c9ca880 起点 |
 | bella | lite | worktree-tmp-bella (自 worktree-mxx-work) | /tmp/mxx-wt-bella | m++ 测试矩阵扩充 + 门禁验证 | **completed**（1ed8c53 已合入主线 dd78366） | 16 个 test/cpp 文件 |
 | chloe | lite | 只读隔离副本 | /tmp/mcciso-chloe | 定位 chibicc B 类真 bug（常量折叠窄化 + va_end 类型检查） | **in_progress** | 只读不 push |
+| diana | lite | worktree-tmp-diana (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试扩充 | **in_progress** | 3020962 起点 |
+| eve | lite | worktree-tmp-eve (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵扩充 | **completed**（02d6684 已合入主线 b4cad7e） | 33 个 test/cpp 文件 |
 
 ### 会话中断恢复速查（当前团队）
 1. `git fetch origin`（在 /workspace/MeuOS-Kit）
@@ -113,6 +115,18 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 - 状态：**已合入主线**（edb854b + eb8372d），已闭环
 
 ---
+
+### 缺陷队列（待修复）
+- **E1** 命名空间作用域变量重定义 `int a; int a;` 漏检（eve 发现，pending/redef_global_var.neg.cc）
+- **E2** 类内重复成员 `int x; int x;` 漏检（pending/dup_member.neg.cc）
+- **E3** 重复枚举符 `enum E{a,a};` 漏检（pending/dup_enum.neg.cc）
+- **E4** 非 void 函数缺 return 漏检（pending/missing_return.neg.cc）
+- **E5** 引用未初始化 `int&r;` 漏检（pending/uninit_ref.neg.cc）
+- **E6** C++ 模式禁用 VLA 未生效（pending/vla.neg.cc）
+- **D1** const T& operator 整体失败（def4 定位，cpp_try_operator_call）
+- **D4** ctor 标量成员 init-list 落地缺失（def4 定位，emit_base_ctors_for）
+- **D2** 急切实例化未使用成员（def4 定位，flush_pending_methods）
+- **chibicc B 类**：常量折叠窄化 + va_end 类型检查（verify2/gate3/chi4 定位）
 
 ## 5. 纪律速查
 
