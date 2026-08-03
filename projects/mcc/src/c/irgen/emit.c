@@ -857,7 +857,7 @@ emitdata(struct decl *d, struct init *init)
 				unsigned long long width, mask;
 				if (cur->expr->kind != EXPRCONST
 				 || !(cur->expr->type->prop & PROPINT))
-					error(&tok.loc, "bit-field initializer is not an integer constant expression");
+					error_code(E_DECL, &tok.loc, "bit-field initializer is not an integer constant expression");
 				width = unit_bits - cur->bits.before - cur->bits.after;
 				mask = width == 64 ? ~0ull : (1ull << width) - 1;
 				value |= (cur->expr->u.constant.u & mask) << cur->bits.before;
@@ -1005,22 +1005,22 @@ emitdata(struct decl *d, struct init *init)
 				    || cur->expr->u.binary.l->kind != EXPRUNARY
 				    || cur->expr->u.binary.l->op != TBAND
 				    || cur->expr->u.binary.r->kind != EXPRCONST)
-					error(&tok.loc, "initializer is not a constant expression");
+					error_code(E_DECL, &tok.loc, "initializer is not a constant expression");
 				base = cur->expr->u.binary.l;
 				off = (long long)cur->expr->u.binary.r->u.constant.i;
 			} else {
 				if (cur->expr->op != TBAND)
-					error(&tok.loc, "initializer is not a constant expression");
+					error_code(E_DECL, &tok.loc, "initializer is not a constant expression");
 				base = cur->expr;
 			}
 			if (base->base->kind != EXPRIDENT)
-				error(&tok.loc, "initializer is not a constant expression");
+				error_code(E_DECL, &tok.loc, "initializer is not a constant expression");
 			refdecl = base->base->u.ident.decl;
 			if (refdecl->kind == DECLOBJECT
 			    && refdecl->u.obj.storage != SDSTATIC
 			    && refdecl->linkage != LINKEXTERN
 			    && refdecl->linkage != LINKINTERN)
-				error(&tok.loc, "initializer is not a constant expression");
+				error_code(E_DECL, &tok.loc, "initializer is not a constant expression");
 			dat.type = typelong.size == 4 ? DW : DL;
 			dat.isref = 1;
 			dat.u.ref.name = globalname(refdecl->value);
@@ -1029,7 +1029,7 @@ emitdata(struct decl *d, struct init *init)
 			break;
 		}
 		default:
-			error(&tok.loc, "initializer is not a constant expression");
+			error_code(E_DECL, &tok.loc, "initializer is not a constant expression");
 		}
 		offset = end;
 	}

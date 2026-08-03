@@ -245,11 +245,11 @@ eval(struct expr *expr)
 			} else if (l->type->prop & PROPFLOAT && t->prop & PROPINT) {
 				if (t->u.arith.issigned) {
 					if (l->u.constant.f < -0x1p63 || l->u.constant.f >= 0x1p63)
-						error(&tok.loc, "integer part of floating-point constant %g cannot be represented as signed integer", l->u.constant.f);
+						error_code(E_CTYPE, &tok.loc, "integer part of floating-point constant %g cannot be represented as signed integer", l->u.constant.f);
 					expr->u.constant.i = l->u.constant.f;
 				} else {
 					if (l->u.constant.f < 0.0 || l->u.constant.f >= 0x1p64)
-						error(&tok.loc, "integer part of floating-point constant %g cannot be represented as unsigned integer", l->u.constant.f);
+						error_code(E_CTYPE, &tok.loc, "integer part of floating-point constant %g cannot be represented as unsigned integer", l->u.constant.f);
 					expr->u.constant.u = l->u.constant.f;
 				}
 			} else {
