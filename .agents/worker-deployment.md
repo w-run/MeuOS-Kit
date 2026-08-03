@@ -83,6 +83,20 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 - **check-olevel：三项已知差距已全部清零**（本批 6 分支归并）：① MIR-native if-conversion（cmov）→ **bella**（机器层 ifconv 通道 + MMOP_CMOV）；② -O2 省略叶函数帧指针 → **hazel**（a988893，worktree-tmp-hazel-fp）；③ -O1 内存局部常量传播 → **chloe**（worktree-tmp-chloe-memconst）。**check-olevel 实测 PASS（RC=0）**，含 -O0/-O1 指令数断言。
 - **check-pic-verify：已修复**（97d5467，x86_64 MIR-native -fPIC GOT 回归——MIR Phase 2 强制 MIR-native 后丢失外部符号 GOT，emit_global_addr + @gotpcrel + @plt 修复，四架构全过）。
 
+### r5 遗留 7 分支归并闭环（grace，mcc-team-r7 任务 #1）
+r5 会话遗留的 7 个 `worktree-tmp-*` 分支已**全部合入主线 worktree-mxx-work**：
+- 6 分支（eve-p4step1 / diana-errcode2 / hazel-bench / hazel-aafill /
+  bella-la64fill / chloe-arm）经中转分支 `worktree-tmp-grace-merge-wip`
+  （顶端 17829c8）恢复合入，无冲突。
+- 第 7 个 `worktree-tmp-bella-perf`（MIR 机器层性能优化 #156）合入，
+  合并 HEAD **c432b87**。冲突仅两个文档（worker-deployment.md 表格行、
+  progress.md 新增章节），手工保留双方内容；`src/mir/passes.c`、
+  `src/mir/regalloc.c`、`include/mir.h` 由 git 自动合并，未丢失任一方优化。
+- 验证：默认模式 verify-all **19/19**（含 check-sysroot-static 自举）、
+  `MCC_MIR_BACKEND=1` verify-all **19/19**、check-cpp-func/neg 双模式 rc=0、
+  check-olevel rc=0；MIR-native 交叉汇编 arm/aarch64/riscv64/loongarch64
+  各 **29/29** test/c99 样例经对应 GNU as 通过；错误码抽查 const 赋值报 E0009。
+
 ### 门禁状态（2026-08-03 alice mt/ld 修复归并后）
 - **check-mt-integration：已闭环**（alice 3d3f91f，归并 ad52f9b）：根因是 mt/as x86_64 `movq $imm, %r64` 的 imm64 截断编码（encode.c 对 width==8 用 0xb8 movabs 形式但 imm 只写 4 字节，后续指令被吞进立即数 → 解码垃圾 → crt1 入口段错误 0x40101c）。**门禁已知失败清零：verify-all 恢复 19/19 全绿**。
 
