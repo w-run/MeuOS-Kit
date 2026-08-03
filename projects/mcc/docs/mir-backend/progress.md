@@ -41,6 +41,7 @@
 | P6f | regalloc：calls 数组去 64 上限（超大函数漏 call） | ✅ | 已提交 9718e44 |
 | P6g | Bug B 修复：selcall sret 分配 pad（qualtype 24B） | ✅ | 已提交 eccf7ae |
 | P6h | Bug C 修复：meuos-libc strtod 不支持 hex float（0x1p63）→ self-mcc 编译 eval.c 崩溃。已修复并全量自举 105/105 | ✅ | 已提交 f412f75 |
+| P7 | x86_64 fallback 全部闭环（聚合实参/SALLOC、TLS、动态 alloca/VLA）：MCC_MIR_BACKEND=1 为完整路径，无 bridge fallback，自举通过 | ✅ | 4c908df, 1a1d599, 7e78598 |
 
 ## 验证结果（截至 P3b）
 
@@ -78,6 +79,14 @@ check-mir 全绿；bridge 路径 0 回归。
 - **P5 全部完成**。MIR 新后端独立可用（hello 走 MCC_MIR_BACKEND=1）。
 - MCC_MIR_BACKEND=1：标量函数走完整新后端（isel + ABI + regalloc + emit），
   聚合/varargs/TLS/VLA 动态 alloca fallback 到 bridge。
+- **P7（2026-08-03，bella）x86_64 fallback 全部闭环**：mbe_supported() 不再
+  有剩余 fallback——聚合实参（MOP_ARG/MOP_CALL MV_TYPE）、SALLOC、TLS 全局
+  （local-exec `%fs:0 + @tpoff`）、动态 alloca/VLA（MFnM.dynalloc + rsp 调整 +
+  epilogue 从 rbp 恢复）全部由 MIR-native 后端处理。验证：
+  - check-c-mir 默认与 MCC_MIR_BACKEND=1 双路径 fail=0；
+  - check-mir 全绿（mabi_test 45 / regalloc_test 45）；
+  - check-sysroot-static 自举默认路径与 MCC_MIR_BACKEND=1 均 exit 0
+    （self-mcc 全源码经 MIR-native 编译 + hello 运行正确）。
 
 ## Bug 修复记录（isel-debug 验证发现）
 
