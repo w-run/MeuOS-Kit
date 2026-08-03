@@ -69,7 +69,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 | bella | lite | worktree-tmp-bella (自 worktree-mxx-work) | /tmp/mxx-wt-bella | m++ 测试矩阵扩充 + 门禁验证 | **completed**（1ed8c53 已合入主线 dd78366） | 16 个 test/cpp 文件 |
 | chloe | lite | 只读隔离副本 | /tmp/mcciso-chloe | 定位 chibicc B 类真 bug（常量折叠窄化 + va_end 类型检查） | **completed**（报告已收） | 只读不 push |
 | diana | lite | worktree-tmp-diana-pic + worktree-tmp-diana-errcode (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试 + check-pic-verify 修复 + 错误码体系/多错收集 | **completed**（db1451b C23 已合入 294e5c2；6db1691 PIC 已合入主线 58016d2；errcode da5a646/a561b36/c204bbe 本次归并合入主线） | 11 test/c23 + F1-F3 + i386/riscv64 GOT + E####/caret 全跨/JSON 多错/fix-it |
-| eve | lite | worktree-tmp-eve (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵扩充 | **completed**（02d6684 已合入主线 b4cad7e） | 33 个 test/cpp 文件 |
+| eve | lite | worktree-tmp-eve + worktree-tmp-eve-olevel (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵扩充 + -O 优化级别语义分级（O0..O3/-Os/-Oz/-Og/-Ofast + 非法级别钳制）+ check-olevel 目标 | **completed**（02d6684 测试矩阵已合入 b4cad7e；eve-olevel 本次归并合入主线） | 33 test/cpp + check-olevel |
 | grace | lite | worktree-tmp-grace-cpp23 (自 worktree-mxx-work@1ef0a9a) | /tmp/mxx-wt-grace | sema/decl E1/E4/E5/E6（已合入）+ C++23 缺口：P0849/P1774/P1401/P2360/nodiscard | **completed**（sema 已合入；cpp23 f7e313a+b54c8b9+16c2ca5+2a4d655+da7a107 **已合入主线** ba6d9f8） | push worktree-tmp-grace-cpp23 |
 | hazel | lite | worktree-tmp-hazel-conform (自 worktree-mxx-work@1ef0a9a) | /workspace/MeuOS-Kit/.agents/worktrees/mxx-work | C23 constexpr F1/F2/F3（已合入）+ chibicc conformance 缺陷组（bitfield/浮点转换/字面量/宽字符） | **completed**（F1-F3 8e5aae3 已合入；conformance 5 commit **已合入主线** 09a9263，chibicc PASS 11→16、RUNFAIL 5→0） | 24596ee |
 

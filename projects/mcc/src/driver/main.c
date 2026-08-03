@@ -45,6 +45,17 @@ const char *msys_sysroot_path;
 Target T;
 char debug['Z' + 1];
 int opt_level = 2;    /* -O2 default */
+/* -O 级别语义标志（详见 usage.c 的 -O<level> 文档）：
+ *   -O0/-O1/-O2/-O3 用 opt_level 分级；
+ *   -Og = -O1 级别 + g_force_fp（保留帧指针，调试友好）；
+ *   -Os/-Oz = -O2 级别 + g_opt_size（尺寸导向；当前无尺寸优先指令
+ *   选择，与 -O2 同管线，差距已记录）；-Ofast = -O3 + g_fast_math
+ *   （当前无 fast-math 折叠语义，仅区分标志）。 */
+/* g_force_fp（-Og）定义在 src/target/x86_64/x86_64_emit.c：check-mir-*
+ * 单测链接 libmcc.a 中的后端对象，全局必须落在后端层（ir.h extern）。
+ * g_opt_size（-Os/-Oz）定义在 src/mir/passes.c（同理由）。 */
+int g_opt_z;      /* -Oz: aggressive size (same pipeline as -Os for now) */
+int g_fast_math;  /* -Ofast: -O3 + fast-math semantics (recorded only) */
 /* warn_level and warn_as_error are defined in src/lex/token.c */
 enum tls_model tls_model = TLSM_DEFAULT;
 
@@ -400,13 +411,44 @@ mcc_main(int argc, char *argv[])
 		case 'l': arrayaddptr(&libs, ARGVAL(a + 2)); break;
 		case 'O': {
 			const char *lv = a[2] ? a + 2 : "1";
-			if (lv[0] == 's' || lv[0] == 'f') {
-				opt_level = (lv[0] == 's') ? 2 : 3;
+			/* -Og: debug-friendly — O1-level passes, keep frame pointer */
+			if (lv[0] == 'g') {
+				opt_level = 1;
+				g_force_fp = 1;
 				break;
 			}
-			if (isdigit((unsigned char)lv[0]))
-				opt_level = lv[0] - '0';
-			break;
+			/* -Os: size-oriented (O2 level); -Oz: aggressive size (same
+			 * pipeline as -Os for now, see g_opt_z note above) */
+			if (lv[0] == 's') {
+				opt_level = 2;
+				g_opt_size = 1;
+				break;
+			}
+			if (lv[0] == 'z') {
+				opt_level = 2;
+				g_opt_size = 1;
+				g_opt_z = 1;
+				break;
+			}
+			/* -Ofast: O3 level + fast-math semantics (flag only for now) */
+			if (lv[0] == 'f') {
+				opt_level = 3;
+				g_fast_math = 1;
+				break;
+			}
+			if (isdigit((unsigned char)lv[0])) {
+				int n = lv[0] - '0';
+				if (n > 3) {
+					fprintf(stderr, "%s: warning: invalid optimization "
+					        "level '-O%d' (clamping to -O3)\n", argv0, n);
+					n = 3;
+				}
+				opt_level = n;
+				break;
+			}
+			fprintf(stderr, "%s: unknown optimization level '%s'\n",
+			        argv0, a);
+			usage();
 		}
 		default:
 			fprintf(stderr, "%s: unknown option '%s'\n", argv0, a);

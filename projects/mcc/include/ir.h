@@ -519,6 +519,10 @@ struct Dat {
 extern Target T;
 extern char debug['Z'+1];
 extern int opt_level;   /* -O0..3, default 2 */
+extern int g_force_fp;  /* -Og: keep a frame pointer (debug-friendly) */
+extern int g_opt_size;  /* -Os/-Oz: size-oriented codegen */
+extern int g_opt_z;     /* -Oz: aggressive size */
+extern int g_fast_math; /* -Ofast: fast-math semantics (recorded only) */
 extern int warn_level;  /* WARN_* bitmask, default WARN_ALL */
 
 /* TLS access model */
