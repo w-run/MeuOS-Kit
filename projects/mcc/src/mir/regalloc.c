@@ -145,6 +145,13 @@ mreg_intervals(MFnM *fm, MRegCtx *ctx)
 				if ((fm->host && fm->host->vararg) &&
 				    in->op == MMOP_ALLOCA16)
 					iv->phislot = true;
+				/* 32-bit targets (i386/arm, kl_in_reg==0): 64-bit
+				 * integer values cannot live in a single register.
+				 * Force them to stack slots so the emitter can
+				 * access low/high halves via EAX:EDX register pairs
+				 * or ARM's equivalent. */
+				if (in->dst->type == MT_I64 && !fm->mt->kl_in_reg)
+					iv->phislot = true;
 			}
 			for (int k = 0; k < 3; k++)
 				mreg_scan_use(ctx, in->src[k], in->pos);

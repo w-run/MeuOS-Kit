@@ -15,6 +15,7 @@
  * isel (mbe_supported), so this scalar core never sees them.
  */
 #include <stdlib.h>
+#include <string.h>
 
 #include "mir.h"
 #include "arm_m.h"
@@ -126,6 +127,7 @@ rarg(MFnM *fm, int *ni, int *ns, bool isf)
 static void
 mabi_selpar(MFnM *fm, MOut *o, MInsM *parms, int n, uint32_t *vafa)
 {
+	const MTargetM *mt = fm->mt;
 	int ni = 0, ns = 0;
 	int off = 8;   /* caller-pushed stack args sit at fp+8 (the prologue
 	                * pushed {r11, lr}, so fp = old_sp - 8) */
@@ -134,6 +136,45 @@ mabi_selpar(MFnM *fm, MOut *o, MInsM *parms, int n, uint32_t *vafa)
 		MInsM *p = &parms[i];
 		MVal *dst = p->dst;
 		bool isf = p->dtype == MT_F32 || p->dtype == MT_F64;
+		if (p->dtype == MT_I64) {
+			/* AAPCS: i64 needs even-aligned register pair.
+			 * If ni is odd, skip one register. */
+			if (ni < 4 && (ni & 1))
+				ni++;
+			int slot = dst->slot;
+			if (ni + 1 < 4) {
+				/* In registers r0:r1 or r2:r3 */
+				int lo_reg = mt->argreg[0 + ni];
+				int hi_reg = mt->argreg[0 + ni + 1];
+				ni += 2;
+				mout(o, MMOP_MOV, MT_I32, tmp(fm, MT_I32, "i64lo"),
+				     reg(fm, lo_reg), 0);
+				MVal *lov = o->ins[o->nins - 1].dst;
+				lov->slot = slot;
+				lov->reg = -1;
+				mout(o, MMOP_MOV, MT_I32, tmp(fm, MT_I32, "i64hi"),
+				     reg(fm, hi_reg), 0);
+				MVal *hiv = o->ins[o->nins - 1].dst;
+				hiv->slot = slot + 4;
+				hiv->reg = -1;
+			} else {
+				/* From stack */
+				mout_addr(o, MMOP_LOAD, MT_I32,
+				          tmp(fm, MT_I32, "i64lo"),
+				          maddr(reg(fm, ARM_R11), 0, 1, off), 0);
+				MVal *lov = o->ins[o->nins - 1].dst;
+				lov->slot = slot;
+				lov->reg = -1;
+				mout_addr(o, MMOP_LOAD, MT_I32,
+				          tmp(fm, MT_I32, "i64hi"),
+				          maddr(reg(fm, ARM_R11), 0, 1, off + 4), 0);
+				MVal *hiv = o->ins[o->nins - 1].dst;
+				hiv->slot = slot + 4;
+				hiv->reg = -1;
+				off += 8;
+			}
+			continue;
+		}
 		if (isf ? ns >= 8 : ni >= 4) {
 			mout_addr(o, MMOP_LOAD, p->dtype, dst,
 			          maddr(reg(fm, ARM_R11), 0, 1, off), 0);
@@ -150,15 +191,25 @@ mabi_selpar(MFnM *fm, MOut *o, MInsM *parms, int n, uint32_t *vafa)
 static void
 mabi_selcall(MFnM *fm, MOut *o, MInsM *args, int n, MInsM *call)
 {
+	const MTargetM *mt = fm->mt;
 	(void)call;
 	/* count stack-passed (overflow) arguments first */
 	int ni = 0, ns = 0, stk = 0;
 	for (int i = 0; i < n; i++) {
-		bool isf = args[i].dtype == MT_F32 || args[i].dtype == MT_F64;
-		if (isf ? ns >= 8 : ni >= 4)
-			stk += 8;
-		else
-			{ if (isf) ns++; else ni++; }
+		if (args[i].dtype == MT_I64) {
+			/* i64: needs even-aligned register pair */
+			if (ni < 4 && (ni & 1)) ni++;
+			if (ni + 1 < 4)
+				ni += 2;
+			else
+				stk += 8;
+		} else {
+			bool isf = args[i].dtype == MT_F32 || args[i].dtype == MT_F64;
+			if (isf ? ns >= 8 : ni >= 4)
+				stk += 8;
+			else
+				{ if (isf) ns++; else ni++; }
+		}
 	}
 	stk = (stk + 7) & ~7;    /* 8-align the overflow area (AAPCS) */
 	if (stk)
@@ -169,6 +220,37 @@ mabi_selcall(MFnM *fm, MOut *o, MInsM *args, int n, MInsM *call)
 	int soff = 0;
 	for (int i = 0; i < n; i++) {
 		MInsM *a = &args[i];
+		if (a->dtype == MT_I64) {
+			/* AAPCS: i64 needs even-aligned register pair */
+			if (ni < 4 && (ni & 1)) ni++;
+			if (ni + 1 < 4) {
+				/* In registers rN:rN+1 (low in rN, high in rN+1).
+				 * The value is slot-resident; load low/high from slot. */
+				int slot = a->src[0]->slot;
+				int lo_reg = mt->argreg[0 + ni];
+				int hi_reg = mt->argreg[0 + ni + 1];
+				ni += 2;
+				mout_addr(o, MMOP_LOAD, MT_I32, reg(fm, lo_reg),
+				          maddr(reg(fm, ARM_R11), 0, 1, slot), 0);
+				mout_addr(o, MMOP_LOAD, MT_I32, reg(fm, hi_reg),
+				          maddr(reg(fm, ARM_R11), 0, 1, slot + 4), 0);
+			} else {
+				/* Stack overflow: store low and high */
+				int slot = a->src[0]->slot;
+				mout_addr(o, MMOP_LOAD, MT_I32, tmp(fm, MT_I32, "i64tmp"),
+				          maddr(reg(fm, ARM_R11), 0, 1, slot), 0);
+				MVal *tmpv = o->ins[o->nins - 1].dst;
+				mout_addr(o, MMOP_STORE, MT_I32, 0,
+				          maddr(reg(fm, ARM_SP), 0, 1, soff), tmpv);
+				mout_addr(o, MMOP_LOAD, MT_I32, tmp(fm, MT_I32, "i64tmp"),
+				          maddr(reg(fm, ARM_R11), 0, 1, slot + 4), 0);
+				MVal *tmpv2 = o->ins[o->nins - 1].dst;
+				mout_addr(o, MMOP_STORE, MT_I32, 0,
+				          maddr(reg(fm, ARM_SP), 0, 1, soff + 4), tmpv2);
+				soff += 8;
+			}
+			continue;
+		}
 		bool isf = a->dtype == MT_F32 || a->dtype == MT_F64;
 		if (isf ? ns >= 8 : ni >= 4) {
 			mout_addr(o, MMOP_STORE, a->dtype, 0,
@@ -197,8 +279,18 @@ mabi_selret(MFnM *fm, MOut *o, MInsM *term)
 		return;
 	}
 	bool isf = s0->type == MT_F32 || s0->type == MT_F64;
-	mout(o, MMOP_MOV, s0->type, reg(fm, isf ? ARM_D0 : ARM_R0),
-	     s0, 0);
+	if (s0->type == MT_I64) {
+		/* i64 return: r0 (low 32) + r1 (high 32).
+		 * The register allocator forces i64 values to slot-resident
+		 * (kl_in_reg==0), so load the two halves from the slot. */
+		mout_addr(o, MMOP_LOAD, MT_I32, reg(fm, ARM_R0),
+		          maddr(reg(fm, ARM_R11), 0, 1, s0->slot), 0);
+		mout_addr(o, MMOP_LOAD, MT_I32, reg(fm, ARM_R1),
+		          maddr(reg(fm, ARM_R11), 0, 1, s0->slot + 4), 0);
+	} else {
+		MVal *rreg = isf ? reg(fm, ARM_D0) : reg(fm, ARM_R0);
+		mout(o, MMOP_MOV, s0->type, rreg, s0, 0);
+	}
 	/* the RET terminator now returns the value already in the register */
 	term->op = MMOP_RET;
 	term->src[0] = 0;

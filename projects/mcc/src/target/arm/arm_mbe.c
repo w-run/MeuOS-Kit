@@ -101,42 +101,20 @@ mval_of_ref(MFn *mf, MRef r)
 	return 0;
 }
 
-/* Scalar 32-bit integer + floating-point functions only for this round:
- * reject 64-bit integer values (long long needs register pairs on this
- * 32-bit target), aggregates, varargs, TLS and VLA — fall back to the
- * legacy LIR ARM backend.  MT_PTR is allowed: on this 32-bit target it
- * only carries function references (the callee of MOP_CALL), which the
- * emitter turns into a direct `bl`. */
+/* Scalar 32/64-bit integer + floating-point functions for the MIR-native
+ * ARM backend.  64-bit integer values (long long) need register pairs on
+ * this 32-bit target — they are handled via register pairs (r0:r1 etc.)
+ * at the ABI level and via two 32-bit loads/stores + adc/sbc at the
+ * emitter level.  Aggregates, varargs, TLS and VLA are still rejected
+ * and fall back to the legacy LIR ARM backend.  MT_PTR is allowed: on
+ * this 32-bit target it only carries function references (the callee of
+ * MOP_CALL), which the emitter turns into a direct `bl`. */
 static bool
 mbe_supported(MFn *mf)
 {
-	if (mf->rettype == MT_I64) {
-		if (getenv("MCC_DEBUG_ARMREJ"))
-			fprintf(stderr, "arm rej %s: rettype i64\n", mf->name);
-		return false;   /* 64-bit return: legacy */
-	}
 	for (MBlk *mb = mf->link; mb; mb = mb->link) {
 		for (uint32_t k = 0; k < mb->nins; k++) {
 			MIns *in = &mb->ins[k];
-			if (in->dtype == MT_I64) {
-				if (getenv("MCC_DEBUG_ARMREJ"))
-					fprintf(stderr, "arm rej %s: ins %d dtype i64\n",
-					        mf->name, (int)in->op);
-				return false;
-			}
-			for (int s = 0; s < 2; s++) {
-				if (in->src[s].val && in->src[s].val->type == MT_I64) {
-					if (getenv("MCC_DEBUG_ARMREJ"))
-						fprintf(stderr, "arm rej %s: src%d i64\n",
-						        mf->name, s);
-					return false;
-				}
-			}
-			if (in->dst && in->dst->type == MT_I64) {
-				if (getenv("MCC_DEBUG_ARMREJ"))
-					fprintf(stderr, "arm rej %s: dst i64\n", mf->name);
-				return false;
-			}
 			switch (in->op) {
 			case MOP_ARG:
 			case MOP_CALL:

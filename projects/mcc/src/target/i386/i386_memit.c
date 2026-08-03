@@ -408,6 +408,70 @@ emit_setccr(FILE *f, MInsM *in)
 	MVal *a = in->src[0];
 	MVal *b = in->src[1];
 	MCC cc = in->cc;
+
+	if (a && b && (a->type == MT_I64 || b->type == MT_I64)) {
+		/* i64 comparison: compare high 32 bits first; if equal, compare
+		 * low 32 bits with unsigned comparison.  Use a global counter
+		 * for unique labels across the whole assembly file. */
+		static uint32_t g_i64cc_id;
+		int sa = a->slot;
+		int sb = b->slot;
+		uint32_t id = g_i64cc_id++;
+		const char *suffix = i386_cc_suffix(cc);
+
+		/* Map signed CC -> unsigned CC for low 32-bit comparison */
+		const char *lsfx;
+		switch (cc) {
+		case MCC_EQ:  lsfx = "e";  break;
+		case MCC_NE:  lsfx = "ne"; break;
+		case MCC_GE:  lsfx = "ae"; break;
+		case MCC_LT:  lsfx = "b";  break;
+		case MCC_GT:  lsfx = "a";  break;
+		case MCC_LE:  lsfx = "be"; break;
+		case MCC_CS:  lsfx = "ae"; break;
+		case MCC_CC:  lsfx = "b";  break;
+		case MCC_HI:  lsfx = "a";  break;
+		case MCC_LS:  lsfx = "be"; break;
+		default:      lsfx = "e";  break;
+		}
+
+		fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sa + 4);
+		fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sb + 4);
+		fputs("\tcmpl\t%ecx, %eax\n", f);
+
+		if (cc == MCC_EQ) {
+			fprintf(f, "\tjne\t.Li64ne%u\n", id);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sa);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sb);
+			fputs("\tcmpl\t%ecx, %eax\n", f);
+			fputs("\tsete\t%al\n", f);
+			fprintf(f, "\tjmp\t.Li64d%u\n.Li64ne%u:\n"
+			        "\txorl\t%%eax, %%eax\n.Li64d%u:\n", id, id, id);
+		} else if (cc == MCC_NE) {
+			fprintf(f, "\tjne\t.Li64t%u\n", id);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sa);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sb);
+			fputs("\tcmpl\t%ecx, %eax\n", f);
+			fputs("\tsetne\t%al\n", f);
+			fputs("\tmovzbl\t%al, %eax\n", f);
+			fprintf(f, "\tjmp\t.Li64d%u\n.Li64t%u:\n"
+			        "\tmovl\t$1, %%eax\n.Li64d%u:\n", id, id, id);
+		} else {
+			fprintf(f, "\tjne\t.Li64hd%u\n", id);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sa);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sb);
+			fputs("\tcmpl\t%ecx, %eax\n", f);
+			fprintf(f, "\tset%s\t%%al\n", lsfx);
+			fputs("\tmovzbl\t%al, %eax\n", f);
+			fprintf(f, "\tjmp\t.Li64d%u\n.Li64hd%u:\n", id, id);
+			fprintf(f, "\tset%s\t%%al\n", suffix);
+			fputs("\tmovzbl\t%al, %eax\n", f);
+			fprintf(f, ".Li64d%u:\n", id);
+		}
+		scratch_to_dst(f, in->dst, "eax");
+		return;
+	}
+
 	mv_to_scratch(f, a, "eax");
 	mv_to_scratch(f, b, "ecx");
 	fputs("\tcmpl\t%ecx, %eax\n", f);
@@ -469,6 +533,29 @@ emit_load(FILE *f, MMOP op, MType dt, MAddr a, MVal *d)
 		fstore_scratch(f, d);
 		return;
 	}
+	if (dt == MT_I64) {
+		/* i64 load: two 32-bit loads from addr and addr+4 */
+		emit_addr_str(f, a, addr_buf, sizeof addr_buf);
+		fprintf(f, "\tmovl\t%s, %%eax\n", addr_buf);
+		if (d && d->kind == MV_TEMP) {
+			fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", d->slot);
+			/* high 32 bits: addr + 4 */
+			char addr2[64];
+			/* Build addr+4: append +4 to the offset or use offset+4 */
+			snprintf(addr2, sizeof addr2, "%d+%s",
+			         (int)(a.off + 4), /* actual offset + 4 */
+			         a.base ? "" : "");
+			/* Re-emit the address string with offset+4 */
+			if (a.base && a.base->kind == MV_REG) {
+				const char *rn = mreg_name(g_mt, a.base->reg);
+				snprintf(addr2, sizeof addr2, "%d(%%%s)",
+				         (int)(a.off + 4), rn ? rn : "ebp");
+			}
+			fprintf(f, "\tmovl\t%s, %%eax\n", addr2);
+			fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", d->slot + 4);
+		}
+		return;
+	}
 	emit_addr_str(f, a, addr_buf, sizeof addr_buf);
 	const char *lw = "movl";
 	switch (op) {
@@ -497,6 +584,26 @@ emit_store(FILE *f, MType dt, MAddr a, MVal *s0)
 			fprintf(f, "\tmovsd\t%%xmm0, %s\n", addr_buf);
 		return;
 	}
+	if (dt == MT_I64) {
+		/* i64 store: two 32-bit stores to addr and addr+4.
+		 * Source is slot-resident (kl_in_reg==0 forces spill). */
+		emit_addr_str(f, a, addr_buf, sizeof addr_buf);
+		fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", s0->slot);
+		fprintf(f, "\tmovl\t%%eax, %s\n", addr_buf);
+		/* high 32 bits: build addr+4 */
+		char addr2[64];
+		if (a.base && a.base->kind == MV_REG) {
+			const char *rn = mreg_name(g_mt, a.base->reg);
+			snprintf(addr2, sizeof addr2, "%d(%%%s)",
+			         (int)(a.off + 4), rn ? rn : "ebp");
+		} else {
+			snprintf(addr2, sizeof addr2, "%lld",
+			         (long long)(a.off + 4));
+		}
+		fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", s0->slot + 4);
+		fprintf(f, "\tmovl\t%%eax, %s\n", addr2);
+		return;
+	}
 	emit_addr_str(f, a, addr_buf, sizeof addr_buf);
 	mv_to_scratch(f, s0, "eax");
 	switch (dt) {
@@ -519,6 +626,23 @@ emit_ins(FILE *f, MInsM *in)
 		if (s0 && (s0->type == MT_F32 || s0->type == MT_F64)) {
 			fload_scratch(f, s0);
 			fstore_scratch(f, d);
+			return;
+		}
+		if (in->dtype == MT_I64 || (s0 && s0->type == MT_I64)) {
+			/* i64 on i386: two 32-bit moves.
+			 * Both source and destination are slot-resident
+			 * (kl_in_reg==0 forces spill).  Move low 32 bits
+			 * first, then high 32 bits at slot+4. */
+			int sslot = s0->slot;
+			int dslot = d ? d->slot : 0;
+			/* low 32 bits */
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot);
+			if (d)
+				fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot);
+			/* high 32 bits */
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot + 4);
+			if (d)
+				fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot + 4);
 			return;
 		}
 		mv_to_scratch(f, s0, "eax");
@@ -553,6 +677,46 @@ emit_ins(FILE *f, MInsM *in)
 	case MMOP_AND: case MMOP_OR:  case MMOP_XOR:
 	case MMOP_SHL: case MMOP_SHR: case MMOP_SAR:
 	case MMOP_DIV: case MMOP_UDIV: case MMOP_REM: case MMOP_UREM: {
+		/* i64 on i386: split into low/high with carry/borrow */
+		if (in->dtype == MT_I64) {
+			int sslot0 = s0 ? s0->slot : 0;
+			int sslot1 = s1 ? s1->slot : 0;
+			int dslot = d ? d->slot : 0;
+			if (op == MMOP_ADD) {
+				/* low: addl; high: adcl (add with carry) */
+				fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot0);
+				fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sslot1);
+				fputs("\taddl\t%ecx, %eax\n", f);
+				if (d) fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot);
+				fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot0 + 4);
+				fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sslot1 + 4);
+				fputs("\tadcl\t%ecx, %eax\n", f);
+				if (d) fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot + 4);
+			} else if (op == MMOP_SUB) {
+				/* low: subl; high: sbbl (subtract with borrow) */
+				fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot0);
+				fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sslot1);
+				fputs("\tsubl\t%ecx, %eax\n", f);
+				if (d) fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot);
+				fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot0 + 4);
+				fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sslot1 + 4);
+				fputs("\tsbbl\t%ecx, %eax\n", f);
+				if (d) fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot + 4);
+			} else {
+				/* fallback: load low, do 32-bit op, store; then
+				 * load high, do 32-bit op (no carry), store */
+				const char *opn = binop_name(op);
+				fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot0);
+				fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sslot1);
+				fprintf(f, "\t%s\t%%ecx, %%eax\n", opn);
+				if (d) fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot);
+				fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot0 + 4);
+				fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sslot1 + 4);
+				fprintf(f, "\t%s\t%%ecx, %%eax\n", opn);
+				if (d) fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot + 4);
+			}
+			return;
+		}
 		const char *opn = binop_name(op);
 		if (op == MMOP_DIV || op == MMOP_UDIV ||
 		    op == MMOP_REM || op == MMOP_UREM) {
@@ -581,11 +745,35 @@ emit_ins(FILE *f, MInsM *in)
 		return;
 	}
 	case MMOP_NEG:
+		if (in->dtype == MT_I64) {
+			/* i64 negation: low = 0 - low (sets CF), high = 0 - high - CF */
+			int sslot = s0->slot;
+			int dslot = d ? d->slot : 0;
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot);
+			fputs("\tnegl\t%eax\n", f);
+			if (d) fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot + 4);
+			fputs("\tsbbl\t$0, %eax\n", f);
+			if (d) fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot + 4);
+			return;
+		}
 		mv_to_scratch(f, s0, "eax");
 		fputs("\tnegl\t%eax\n", f);
 		scratch_to_dst(f, d, "eax");
 		return;
 	case MMOP_NOT:
+		if (in->dtype == MT_I64) {
+			/* i64 bitwise NOT: NOT both halves */
+			int sslot = s0->slot;
+			int dslot = d ? d->slot : 0;
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot);
+			fputs("\tnotl\t%eax\n", f);
+			if (d) fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot + 4);
+			fputs("\tnotl\t%eax\n", f);
+			if (d) fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot + 4);
+			return;
+		}
 		mv_to_scratch(f, s0, "eax");
 		fputs("\tnotl\t%eax\n", f);
 		scratch_to_dst(f, d, "eax");
@@ -696,15 +884,17 @@ emit_ins(FILE *f, MInsM *in)
 	}
 	case MMOP_CVTSI2SS_U: /* unsigned i32 -> f32 */
 	case MMOP_CVTSI2SD_U: {
+		static uint32_t g_u2f_id;
 		bool is32 = (op == MMOP_CVTSI2SS_U);
+		uint32_t id = g_u2f_id++;
 		mv_to_scratch(f, s0, "eax");
 		/* unsigned conversion: test if sign bit is set, handle via
 		 * float conversion trick */
-		fputs("\ttestl\t%eax, %eax\n", f);
-		fputs("\tjs\t.Lu2f\n", f);
+		fprintf(f, "\ttestl\t%%eax, %%eax\n");
+		fprintf(f, "\tjs\t.Lu2f%u\n", id);
 		fprintf(f, "\tcvtsi2%s\t%%eax, %%xmm0\n", is32 ? "ss" : "sd");
-		fputs("\tjmp\t.Lu2f_end\n", f);
-		fputs(".Lu2f:\n", f);
+		fprintf(f, "\tjmp\t.Lu2fe%u\n", id);
+		fprintf(f, ".Lu2f%u:\n", id);
 		/* push %eax, then convert via memory */
 		fputs("\tpushl\t%eax\n", f);
 		fputs("\tfildl\t(%esp)\n", f);
@@ -713,7 +903,7 @@ emit_ins(FILE *f, MInsM *in)
 			fputs("\tfstps\t-4(%esp)\n\tmovss\t-4(%esp), %xmm0\n", f);
 		else
 			fputs("\tfstpl\t-8(%esp)\n\tmovsd\t-8(%esp), %xmm0\n", f);
-		fputs(".Lu2f_end:\n", f);
+		fprintf(f, ".Lu2fe%u:\n", id);
 		fstore_scratch(f, d);
 		return;
 	}
@@ -790,6 +980,11 @@ emit_ins(FILE *f, MInsM *in)
 		if (d && !in->td) {
 			if (d->type == MT_F32 || d->type == MT_F64) {
 				fstore_scratch(f, d);
+			} else if (d->type == MT_I64) {
+				/* i64 return: EDX:EAX -> store both halves to slot */
+				int dslot = d->slot;
+				fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot);
+				fprintf(f, "\tmovl\t%%edx, %d(%%ebp)\n", dslot + 4);
 			} else {
 				scratch_to_dst(f, d, "eax");
 			}

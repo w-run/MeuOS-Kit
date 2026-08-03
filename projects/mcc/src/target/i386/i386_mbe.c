@@ -96,51 +96,38 @@ mval_of_ref(MFn *mf, MRef r)
 	return 0;
 }
 
-/* Scalar 32-bit integer + floating-point functions only: reject 64-bit
- * integer values (long long needs register pairs on this 32-bit target),
- * aggregates, varargs, TLS and VLA — fall back to the legacy LIR i386
- * backend.  MT_PTR is allowed (on 32-bit i386 it carries function refs). */
+/* Scalar integer + floating-point functions: reject aggregates, varargs,
+ * TLS and VLA — fall back to the legacy LIR i386 backend.  MT_PTR is
+ * allowed (on 32-bit i386 it carries function refs).  i64 values are
+ * supported via register pairs (EDX:EAX) and spill slots. */
 static bool
 mbe_supported(MFn *mf)
 {
-	if (mf->rettype == MT_I64) {
-		if (getenv("MCC_DEBUG_I386REJ"))
-			fprintf(stderr, "i386 rej %s: rettype i64\n", mf->name);
-		return false;
-	}
 	for (MBlk *mb = mf->link; mb; mb = mb->link) {
 		for (uint32_t k = 0; k < mb->nins; k++) {
 			MIns *in = &mb->ins[k];
-			if (in->dtype == MT_I64) {
-				if (getenv("MCC_DEBUG_I386REJ"))
-					fprintf(stderr, "i386 rej %s: ins %d dtype i64\n",
-					        mf->name, (int)in->op);
-				return false;
-			}
-			for (int s = 0; s < 2; s++) {
-				if (in->src[s].val && in->src[s].val->type == MT_I64) {
-					if (getenv("MCC_DEBUG_I386REJ"))
-						fprintf(stderr, "i386 rej %s: src%d i64\n",
-						        mf->name, s);
-					return false;
-				}
-			}
-			if (in->dst && in->dst->type == MT_I64) {
-				if (getenv("MCC_DEBUG_I386REJ"))
-					fprintf(stderr, "i386 rej %s: dst i64\n", mf->name);
-				return false;
-			}
 			switch (in->op) {
 			case MOP_ARG:
 			case MOP_CALL:
-				if (in->src[0].val && in->src[0].val->kind == MV_TYPE)
+				if (in->src[0].val && in->src[0].val->kind == MV_TYPE) {
+					if (getenv("MCC_DEBUG_I386REJ"))
+						fprintf(stderr, "i386 rej %s: aggregate\n",
+						        mf->name);
 					return false;   /* aggregate args/returns */
+				}
 				break;
 			case MOP_VASTART: case MOP_VAARG:
+				if (getenv("MCC_DEBUG_I386REJ"))
+					fprintf(stderr, "i386 rej %s: varargs\n",
+					        mf->name);
 				return false;       /* varargs: legacy for now */
 			case MOP_ALLOCA:
-				if (in->src[0].val && in->src[0].val->kind != MV_CONST)
+				if (in->src[0].val && in->src[0].val->kind != MV_CONST) {
+					if (getenv("MCC_DEBUG_I386REJ"))
+						fprintf(stderr, "i386 rej %s: VLA\n",
+						        mf->name);
 					return false;   /* VLA: legacy for now */
+				}
 				break;
 			default:
 				break;

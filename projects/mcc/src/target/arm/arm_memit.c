@@ -431,6 +431,79 @@ emit_setccr(FILE *f, MInsM *in)
 	MVal *a = in->src[0];
 	MVal *b = in->src[1];
 	MCC cc = in->cc;
+
+	if (a && b && (a->type == MT_I64 || b->type == MT_I64)) {
+		/* i64 comparison: compare high 32 bits first; if equal, compare
+		 * low 32 bits with unsigned comparison.  Use a global counter
+		 * for unique labels across the whole assembly file. */
+		static uint32_t g_i64cc_id;
+		int sa = a->slot;
+		int sb = b->slot;
+		uint32_t id = g_i64cc_id++;
+		const char *suffix = arm_cc_suffix(cc);
+
+		/* Map signed CC -> unsigned CC for low 32-bit comparison */
+		const char *lsfx;
+		switch (cc) {
+		case MCC_EQ:  lsfx = "eq";  break;
+		case MCC_NE:  lsfx = "ne"; break;
+		case MCC_GE:  lsfx = "cs"; break;  /* cs = carry set (unsigned >=) */
+		case MCC_LT:  lsfx = "cc";  break; /* cc = carry clear (unsigned <) */
+		case MCC_GT:  lsfx = "hi";  break; /* hi = unsigned > */
+		case MCC_LE:  lsfx = "ls"; break; /* ls = unsigned <= */
+		case MCC_CS:  lsfx = "cs"; break;
+		case MCC_CC:  lsfx = "cc";  break;
+		case MCC_HI:  lsfx = "hi";  break;
+		case MCC_LS:  lsfx = "ls"; break;
+		default:      lsfx = "eq";  break;
+		}
+
+		load_imm(f, "r10", sa + 4 + g_slot_base);
+		fprintf(f, "\tldr\tr10, [fp, r10]\n");
+		load_imm(f, "r12", sb + 4 + g_slot_base);
+		fprintf(f, "\tldr\tr12, [fp, r12]\n");
+		fputs("\tcmp\tr10, r12\n", f);
+
+		if (cc == MCC_EQ) {
+			fprintf(f, "\tbne\t.Li64ne%u\n", id);
+			load_imm(f, "r10", sa + g_slot_base);
+			fprintf(f, "\tldr\tr10, [fp, r10]\n");
+			load_imm(f, "r12", sb + g_slot_base);
+			fprintf(f, "\tldr\tr12, [fp, r12]\n");
+			fputs("\tcmp\tr10, r12\n", f);
+			fputs("\tmoveq\tr10, #1\n", f);
+			fputs("\tmovne\tr10, #0\n", f);
+			fprintf(f, "\tb\t.Li64d%u\n.Li64ne%u:\n"
+			        "\tmov\tr10, #0\n.Li64d%u:\n", id, id, id);
+		} else if (cc == MCC_NE) {
+			fprintf(f, "\tbne\t.Li64t%u\n", id);
+			load_imm(f, "r10", sa + g_slot_base);
+			fprintf(f, "\tldr\tr10, [fp, r10]\n");
+			load_imm(f, "r12", sb + g_slot_base);
+			fprintf(f, "\tldr\tr12, [fp, r12]\n");
+			fputs("\tcmp\tr10, r12\n", f);
+			fputs("\tmovne\tr10, #1\n", f);
+			fputs("\tmoveq\tr10, #0\n", f);
+			fprintf(f, "\tb\t.Li64d%u\n.Li64t%u:\n"
+			        "\tmov\tr10, #1\n.Li64d%u:\n", id, id, id);
+		} else {
+			fprintf(f, "\tbne\t.Li64hd%u\n", id);
+			load_imm(f, "r10", sa + g_slot_base);
+			fprintf(f, "\tldr\tr10, [fp, r10]\n");
+			load_imm(f, "r12", sb + g_slot_base);
+			fprintf(f, "\tldr\tr12, [fp, r12]\n");
+			fputs("\tcmp\tr10, r12\n", f);
+			fprintf(f, "\tmov%s\tr10, #1\n", lsfx);
+			fprintf(f, "\tmov%s\tr10, #0\n", lsfx[0] == 'e' ? "ne" : "eq");
+			fprintf(f, "\tb\t.Li64d%u\n.Li64hd%u:\n", id, id);
+			fprintf(f, "\tmov%s\tr10, #1\n", suffix);
+			fprintf(f, "\tmov%s\tr10, #0\n", suffix[0] == 'e' ? "ne" : "eq");
+			fprintf(f, ".Li64d%u:\n", id);
+		}
+		scratch_to_dst(f, in->dst, "r10");
+		return;
+	}
+
 	mv_to_scratch(f, a, "r10");
 	mv_to_scratch(f, b, "r12");
 	fputs("\tcmp\tr10, r12\n", f);
@@ -493,6 +566,26 @@ emit_load(FILE *f, MMOP op, MType dt, MAddr a, MVal *d)
 		fstore_scratch(f, d, is32);
 		return;
 	}
+	if (dt == MT_I64) {
+		/* i64 load: two 32-bit loads from addr and addr+4.
+		 * Destination is slot-resident (kl_in_reg==0). */
+		emit_addr_to_scratch(f, a, "r12");
+		fprintf(f, "\tldr\tr10, [r12]\n");           /* low 32 */
+		scratch_to_dst(f, d, "r10");                  /* store low to slot */
+		emit_addr_to_scratch(f, a, "r12");            /* recompute addr */
+		fprintf(f, "\tldr\tr10, [r12, #4]\n");        /* high 32 */
+		/* store high to slot+4 */
+		if (d) {
+			int off = d->slot + 4 + g_slot_base;
+			if (off >= -4095 && off <= 4095)
+				fprintf(f, "\tstr\tr10, [fp, #%d]\n", off);
+			else {
+				load_imm(f, "r12", off);
+				fprintf(f, "\tstr\tr10, [fp, r12]\n");
+			}
+		}
+		return;
+	}
 	const char *lw = "ldr";
 	switch (op) {
 	case MMOP_LOAD_S8:  lw = "ldrsb"; break;
@@ -524,6 +617,37 @@ emit_store(FILE *f, MType dt, MAddr a, MVal *s0)
 			fprintf(f, "\tvstr\t%s, [r12]\n", FR_A);
 		return;
 	}
+	if (dt == MT_I64) {
+		/* i64 store: two 32-bit stores to addr and addr+4.
+		 * Source is slot-resident (kl_in_reg==0 forces spill). */
+		int sslot = s0->slot;
+		/* Load low from slot into r10 */
+		{
+			int off = sslot + g_slot_base;
+			if (off >= -4095 && off <= 4095)
+				fprintf(f, "\tldr\tr10, [fp, #%d]\n", off);
+			else {
+				load_imm(f, "r12", off);
+				fprintf(f, "\tldr\tr10, [fp, r12]\n");
+			}
+		}
+		emit_addr_to_scratch(f, a, "r12");
+		fprintf(f, "\tstr\tr10, [r12]\n");              /* store low */
+		/* Load high from slot+4 into r10 */
+		{
+			int off = sslot + 4 + g_slot_base;
+			if (off >= -4095 && off <= 4095)
+				fprintf(f, "\tldr\tr10, [fp, #%d]\n", off);
+			else {
+				fputs("\tpush\t{r12}\n", f);
+				load_imm(f, "r12", off);
+				fprintf(f, "\tldr\tr10, [fp, r12]\n");
+				fputs("\tpop\t{r12}\n", f);
+			}
+		}
+		fprintf(f, "\tstr\tr10, [r12, #4]\n");          /* store high */
+		return;
+	}
 	emit_addr_to_scratch(f, a, "r12");
 	mv_to_scratch(f, s0, "r10");
 	switch (dt) {
@@ -543,6 +667,52 @@ emit_ins(FILE *f, MInsM *in)
 
 	switch (op) {
 	case MMOP_MOV:
+		if (in->dtype == MT_I64 || (s0 && s0->type == MT_I64)) {
+			/* i64 on arm: two 32-bit moves via slot.
+			 * Both source and destination are slot-resident
+			 * (kl_in_reg==0 forces spill). */
+			int sslot = s0->slot;
+			int dslot = d ? d->slot : 0;
+			/* low 32 bits */
+			{
+				int off = sslot + g_slot_base;
+				if (off >= -4095 && off <= 4095)
+					fprintf(f, "\tldr\tr10, [fp, #%d]\n", off);
+				else {
+					load_imm(f, "r12", off);
+					fprintf(f, "\tldr\tr10, [fp, r12]\n");
+				}
+			}
+			if (d) {
+				int off = dslot + g_slot_base;
+				if (off >= -4095 && off <= 4095)
+					fprintf(f, "\tstr\tr10, [fp, #%d]\n", off);
+				else {
+					load_imm(f, "r12", off);
+					fprintf(f, "\tstr\tr10, [fp, r12]\n");
+				}
+			}
+			/* high 32 bits */
+			{
+				int off = sslot + 4 + g_slot_base;
+				if (off >= -4095 && off <= 4095)
+					fprintf(f, "\tldr\tr10, [fp, #%d]\n", off);
+				else {
+					load_imm(f, "r12", off);
+					fprintf(f, "\tldr\tr10, [fp, r12]\n");
+				}
+			}
+			if (d) {
+				int off = dslot + 4 + g_slot_base;
+				if (off >= -4095 && off <= 4095)
+					fprintf(f, "\tstr\tr10, [fp, #%d]\n", off);
+				else {
+					load_imm(f, "r12", off);
+					fprintf(f, "\tstr\tr10, [fp, r12]\n");
+				}
+			}
+			return;
+		}
 		if (s0 && (s0->type == MT_F32 || s0->type == MT_F64)) {
 			bool is32 = in->dtype == MT_F32;
 			fload_scratch(f, s0, is32, is32 ? FS_A : FR_A);
@@ -578,6 +748,78 @@ emit_ins(FILE *f, MInsM *in)
 	case MMOP_AND: case MMOP_OR:  case MMOP_XOR:
 	case MMOP_SHL: case MMOP_SHR: case MMOP_SAR:
 	case MMOP_DIV: case MMOP_UDIV: case MMOP_REM: case MMOP_UREM: {
+		/* i64 on arm: split into low/high with carry/borrow */
+		if (in->dtype == MT_I64) {
+			int sslot0 = s0 ? s0->slot : 0;
+			int sslot1 = s1 ? s1->slot : 0;
+			int dslot = d ? d->slot : 0;
+			if (op == MMOP_ADD) {
+				/* low: adds; high: adc (add with carry).
+				 * adds sets the carry flag; movw/movt (load_imm)
+				 * does not clobber it. */
+				load_imm(f, "r10", sslot0 + g_slot_base);
+				fprintf(f, "\tldr\tr10, [fp, r10]\n");
+				load_imm(f, "r12", sslot1 + g_slot_base);
+				fprintf(f, "\tldr\tr12, [fp, r12]\n");
+				fputs("\tadds\tr10, r10, r12\n", f);
+				if (d) {
+					load_imm(f, "r12", dslot + g_slot_base);
+					fprintf(f, "\tstr\tr10, [fp, r12]\n");
+				}
+				load_imm(f, "r10", sslot0 + 4 + g_slot_base);
+				fprintf(f, "\tldr\tr10, [fp, r10]\n");
+				load_imm(f, "r12", sslot1 + 4 + g_slot_base);
+				fprintf(f, "\tldr\tr12, [fp, r12]\n");
+				fputs("\tadc\tr10, r10, r12\n", f);
+				if (d) {
+					load_imm(f, "r12", dslot + 4 + g_slot_base);
+					fprintf(f, "\tstr\tr10, [fp, r12]\n");
+				}
+			} else if (op == MMOP_SUB) {
+				/* low: subs; high: sbc (subtract with borrow) */
+				load_imm(f, "r10", sslot0 + g_slot_base);
+				fprintf(f, "\tldr\tr10, [fp, r10]\n");
+				load_imm(f, "r12", sslot1 + g_slot_base);
+				fprintf(f, "\tldr\tr12, [fp, r12]\n");
+				fputs("\tsubs\tr10, r10, r12\n", f);
+				if (d) {
+					load_imm(f, "r12", dslot + g_slot_base);
+					fprintf(f, "\tstr\tr10, [fp, r12]\n");
+				}
+				load_imm(f, "r10", sslot0 + 4 + g_slot_base);
+				fprintf(f, "\tldr\tr10, [fp, r10]\n");
+				load_imm(f, "r12", sslot1 + 4 + g_slot_base);
+				fprintf(f, "\tldr\tr12, [fp, r12]\n");
+				fputs("\tsbc\tr10, r10, r12\n", f);
+				if (d) {
+					load_imm(f, "r12", dslot + 4 + g_slot_base);
+					fprintf(f, "\tstr\tr10, [fp, r12]\n");
+				}
+			} else {
+				/* fallback: load low, do 32-bit op, store; then
+				 * load high, do 32-bit op (no carry), store */
+				const char *opn = binop_name(op);
+				load_imm(f, "r10", sslot0 + g_slot_base);
+				fprintf(f, "\tldr\tr10, [fp, r10]\n");
+				load_imm(f, "r12", sslot1 + g_slot_base);
+				fprintf(f, "\tldr\tr12, [fp, r12]\n");
+				fprintf(f, "\t%s\tr10, r10, r12\n", opn);
+				if (d) {
+					load_imm(f, "r12", dslot + g_slot_base);
+					fprintf(f, "\tstr\tr10, [fp, r12]\n");
+				}
+				load_imm(f, "r10", sslot0 + 4 + g_slot_base);
+				fprintf(f, "\tldr\tr10, [fp, r10]\n");
+				load_imm(f, "r12", sslot1 + 4 + g_slot_base);
+				fprintf(f, "\tldr\tr12, [fp, r12]\n");
+				fprintf(f, "\t%s\tr10, r10, r12\n", opn);
+				if (d) {
+					load_imm(f, "r12", dslot + 4 + g_slot_base);
+					fprintf(f, "\tstr\tr10, [fp, r12]\n");
+				}
+			}
+			return;
+		}
 		const char *opn = binop_name(op);
 		mv_to_scratch(f, s0, "r10");
 		mv_to_scratch(f, s1, "r12");
@@ -595,11 +837,53 @@ emit_ins(FILE *f, MInsM *in)
 		return;
 	}
 	case MMOP_NEG:
+		if (in->dtype == MT_I64) {
+			/* i64 negation: low = 0 - low (rsbs), high = 0 - high - !C (rsc).
+			 * rsbs sets the carry flag; movw/movt (load_imm) does not
+			 * clobber it. */
+			int sslot = s0->slot;
+			int dslot = d ? d->slot : 0;
+			load_imm(f, "r10", sslot + g_slot_base);
+			fprintf(f, "\tldr\tr10, [fp, r10]\n");
+			fputs("\trsbs\tr10, r10, #0\n", f);
+			if (d) {
+				load_imm(f, "r12", dslot + g_slot_base);
+				fprintf(f, "\tstr\tr10, [fp, r12]\n");
+			}
+			load_imm(f, "r10", sslot + 4 + g_slot_base);
+			fprintf(f, "\tldr\tr10, [fp, r10]\n");
+			fputs("\trsc\tr10, r10, #0\n", f);
+			if (d) {
+				load_imm(f, "r12", dslot + 4 + g_slot_base);
+				fprintf(f, "\tstr\tr10, [fp, r12]\n");
+			}
+			return;
+		}
 		mv_to_scratch(f, s0, "r10");
 		fputs("\trsb\tr10, r10, #0\n", f);
 		scratch_to_dst(f, d, "r10");
 		return;
 	case MMOP_NOT:
+		if (in->dtype == MT_I64) {
+			/* i64 bitwise NOT: mvn both halves */
+			int sslot = s0->slot;
+			int dslot = d ? d->slot : 0;
+			load_imm(f, "r10", sslot + g_slot_base);
+			fprintf(f, "\tldr\tr10, [fp, r10]\n");
+			fputs("\tmvn\tr10, r10\n", f);
+			if (d) {
+				load_imm(f, "r12", dslot + g_slot_base);
+				fprintf(f, "\tstr\tr10, [fp, r12]\n");
+			}
+			load_imm(f, "r10", sslot + 4 + g_slot_base);
+			fprintf(f, "\tldr\tr10, [fp, r10]\n");
+			fputs("\tmvn\tr10, r10\n", f);
+			if (d) {
+				load_imm(f, "r12", dslot + 4 + g_slot_base);
+				fprintf(f, "\tstr\tr10, [fp, r12]\n");
+			}
+			return;
+		}
 		mv_to_scratch(f, s0, "r10");
 		fputs("\tmvn\tr10, r10\n", f);
 		scratch_to_dst(f, d, "r10");
@@ -774,6 +1058,27 @@ emit_ins(FILE *f, MInsM *in)
 				else
 					fputs("\tvmov\td8, d0\n", f);
 				fstore_scratch(f, d, is32);
+			} else if (d->type == MT_I64) {
+				/* i64 return: r0 (low 32) + r1 (high 32) */
+				int dslot = d->slot;
+				{
+					int off = dslot + g_slot_base;
+					if (off >= -4095 && off <= 4095)
+						fprintf(f, "\tstr\tr0, [fp, #%d]\n", off);
+					else {
+						load_imm(f, "r12", off);
+						fprintf(f, "\tstr\tr0, [fp, r12]\n");
+					}
+				}
+				{
+					int off = dslot + 4 + g_slot_base;
+					if (off >= -4095 && off <= 4095)
+						fprintf(f, "\tstr\tr1, [fp, #%d]\n", off);
+					else {
+						load_imm(f, "r12", off);
+						fprintf(f, "\tstr\tr1, [fp, r12]\n");
+					}
+				}
 			} else {
 				scratch_to_dst(f, d, "r0");
 			}
