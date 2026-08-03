@@ -5342,10 +5342,16 @@ cpp_req_compound(struct scope *rs, struct token *sp, size_t n)
 				    strcmp(con->name, tokenstr(ct[0].kind)) == 0)
 					break;
 			if (con && cn >= 3 && ct[1].kind == TLESS) {
-				/* evaluate `C<decltype(e)>` */
+				/* `{ e } -> C<A...>` means `C<decltype((e)), A...>`:
+				 * the deduced expression type is *prepended* as
+				 * the first argument and the written arguments
+				 * shift right.  Substituting over `A[0]` instead
+				 * would silently drop an argument and make every
+				 * multi-parameter constraint (`SameAs<int>`) fail. */
 				char iname[64];
 				struct token *ntok;
-				size_t k;
+				size_t k, nn;
+				bool empty_args;
 				struct token tc;
 				struct decl *td;
 				int nd = 0;
@@ -5357,16 +5363,46 @@ cpp_req_compound(struct scope *rs, struct token *sp, size_t n)
 				td = mkdecl(iname, DECLTYPE, e->type,
 				    QUALNONE, LINKNONE);
 				scopeputdecl(rs, td);
-				ntok = xmalloc(cn * sizeof *ntok);
-				memcpy(ntok, ct, cn * sizeof *ntok);
+				/* `C<>` carries no written arguments: only the
+				 * placeholder is inserted (+1 token).  Otherwise
+				 * both a placeholder and a separating comma are
+				 * inserted (+2 tokens). */
+				empty_args = (ct[2].kind == TGREATER);
+				nn = empty_args ? cn + 1 : cn + 2;
+				ntok = xmalloc(nn * sizeof *ntok);
+				/* `C` `<` */
+				ntok[0] = ct[0];
+				ntok[1] = ct[1];
+				/* the deduced type placeholder */
+				ntok[2] = ct[2];
 				ntok[2].kind = tokenget(iname, strlen(iname));
-				/* validate the span is a plain concept-id */
+				if (empty_args) {
+					/* `C<__req>` — shift the closing `>`
+					 * right by one slot */
+					memcpy(&ntok[3], &ct[2],
+					    (cn - 2) * sizeof *ntok);
+				} else {
+					/* `C<__req, A...>` — comma then the
+					 * originally written arguments */
+					ntok[3] = ct[2];
+					ntok[3].kind = TCOMMA;
+					memcpy(&ntok[4], &ct[2],
+					    (cn - 2) * sizeof *ntok);
+				}
+				cn = nn;
+				/* validate the span is a plain concept-id.  A trailing `>` at
+				 * the very end of the buffer is the closing
+				 * template-arg-list delimiter of the original
+				 * `C<args>` and must not abort validation. */
 				for (k = 3; k < cn; k++) {
 					if (ntok[k].kind == TLESS)
 						++nd;
 					else if (ntok[k].kind == TGREATER) {
-						if (nd == 0)
+						if (nd == 0) {
+							if (k == cn - 1)
+								k = cn;
 							break;
+						}
 						--nd;
 					} else if (nd == 0 &&
 					    (ntok[k].kind == TSEMICOLON ||
@@ -5590,6 +5626,116 @@ cpp_requires_expr(struct scope *s)
 	tok = after;
 	free(sp);
 
+	e = mkexpr(EXPRCONST, &typebool, NULL);
+	e->u.constant.u = result;
+	return e;
+}
+
+/* C++20 concept-id as a primary expression: `Name<args>` in expression
+ * context is a boolean constant (the satisfaction result), not a runtime
+ * value.  Requires-clauses (`template<T> requires C<T>`) route through
+ * `eval_constraint`; this hook covers the standalone expression form
+ * (`static_assert(C<int>)`, `if constexpr (C<int>)`, etc.).
+ *
+ * Detection: identifier token immediately followed by `<` whose identifier
+ * names a previously-defined concept.  Returns NULL if not a concept-id
+ * so the caller falls back to the normal identifier path.  When matched,
+ * the whole `Name<args>` token span is consumed (advanced past) and an
+ * EXPRCONST(bool) is returned. */
+struct expr *
+cpp_concept_id_expr(struct scope *s)
+{
+	struct cpp_template *con;
+	struct expr *e;
+	struct token *sp;
+	size_t n, cap;
+	jmp_buf env;
+	bool result;
+	const char *iname;
+
+	if (tok.kind < TIDENT)
+		return NULL;
+	iname = tokenstr(tok.kind);
+	for (con = g_cpp_templates; con; con = con->next)
+if (con->is_concept && strcmp(con->name, iname) == 0)
+				break;
+		fprintf(stderr, "DBG prefilter name=%s matched=%d is_concept=%d\n", iname, con ? 1 : 0, con ? con->is_concept : -1);
+	if (!con)
+		return NULL;
+	/* Buffer `Name<...>` tokens (up to and including the matching `>`)
+	 * while advancing the global token stream.  Tracks nested `<>`
+	 * depth so a multi-token argument like `unsigned int` (single
+	 * arg, but containing no `<`) is captured intact and a nested
+	 * template-arg like `pair<int,int>` is captured together.  The
+	 * caller has already ensured `tok` names a known concept (above).
+	 *
+	 * If the token after the name is not `<`, the name matched a
+	 * concept but is not a concept-id (e.g. a function overload of the
+	 * same name); restore `tok` to the identifier so the caller can
+	 * fall through to ordinary name resolution. */
+	{
+		struct token first = tok;
+		n = 0;
+		cap = 16;
+		sp = xmalloc(cap * sizeof *sp);
+		if (tok.kind == TEOF || tok.kind < TIDENT)
+			goto done;
+		if (n >= cap) {
+			cap *= 2;
+			sp = xreallocarray(sp, cap, sizeof *sp);
+		}
+		sp[n++] = tok;
+		next();
+		if (tok.kind != TLESS) {
+			/* not a concept-id.  We consumed the token after the
+			 * name with `next()`; push it back onto the context
+			 * so the caller sees it next.  `tokpush` is the public
+			 * token-replay helper used elsewhere in this file for
+			 * the same purpose (e.g. `eval_concept_use`). */
+			extern void tokpush(struct token *, size_t);
+			struct token post = tok;
+			tok = first;
+			tokpush(&post, 1);
+			free(sp);
+			return NULL;
+		}
+		if (n >= cap) {
+			cap *= 2;
+			sp = xreallocarray(sp, cap, sizeof *sp);
+		}
+		sp[n++] = tok;
+		next();
+		{
+			int bd = 1;
+			while (bd > 0 && tok.kind != TEOF) {
+				if (n >= cap) {
+					cap *= 2;
+					sp = xreallocarray(sp, cap, sizeof *sp);
+				}
+				if (tok.kind == TLESS)
+					++bd;
+				else if (tok.kind == TGREATER)
+					--bd;
+				sp[n++] = tok;
+				next();
+			}
+		}
+	}
+done:
+	/* evaluate `Name<args>` via the existing concept evaluator: it
+	 * already handles arg-span parsing, body substitution, and concept
+	 * use expansion.  Wrapped in a trial so a failed evaluation
+	 * (semantic error in the substituted body) yields a clean false
+	 * rather than aborting the surrounding translation unit. */
+	if (setjmp(env) == 0) {
+		cpp_trial_begin(env);
+		result = eval_concept_use(sp, n, s);
+		cpp_trial_end(env);
+	} else {
+		cpp_trial_end(env);
+		result = false;
+	}
+	free(sp);
 	e = mkexpr(EXPRCONST, &typebool, NULL);
 	e->u.constant.u = result;
 	return e;

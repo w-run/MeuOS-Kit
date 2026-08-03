@@ -179,6 +179,12 @@ void cpp_if_constexpr(struct func *f, struct expr *cond, struct scope *s);
  * whole expression and returns a bool constant (`true` when every
  * requirement is well-formed). */
 struct expr *cpp_requires_expr(struct scope *s);
+/* If the current token starts a concept-id (`Name<args>` referring to a
+ * previously-defined `concept Name`), consume the tokens and return an
+ * EXPRCONST bool holding the result of evaluating the concept with those
+ * arguments.  Returns NULL if the current token is not a concept-id; the
+ * caller then proceeds with ordinary identifier parsing. */
+struct expr *cpp_concept_id_expr(struct scope *s);
 
 /* C++17 structured binding: `auto [x, y] = expr;` — create a hidden
  * object for the initializer and bind each name to a copy of the

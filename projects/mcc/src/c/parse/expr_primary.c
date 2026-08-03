@@ -227,8 +227,22 @@ primaryexpr(struct scope *s)
 			extern int g_lang;
 			extern enum cpp_tokenkind cpp_tok_kind(void);
 			extern struct expr *cpp_requires_expr(struct scope *);
+			extern struct expr *cpp_concept_id_expr(struct scope *);
+			struct expr *cid;
 			if (g_lang == 1 && cpp_tok_kind() == CPP_TREQUIRES)
 				return cpp_requires_expr(s);
+			/* C++20 concept-id: `Name<args>` in expression position
+			 * is a boolean constant (the satisfaction result).  Must
+			 * be checked before ordinary identifier lookup so a
+			 * concept name never gets mis-resolved to a value. */
+			if (g_lang == 1) {
+				fprintf(stderr, "DBG cpp_concept_id_expr called for %s\n",
+				    tokenstr(tok.kind));
+				cid = cpp_concept_id_expr(s);
+				fprintf(stderr, "DBG   returned %p\n", (void *)cid);
+				if (cid)
+					return cid;
+			}
 			/* C++ temporary-object construction: `Vec(expr)`.  A class
 			 * tag followed by '(' is a constructor call (the tag can't be
 			 * a function name). */
