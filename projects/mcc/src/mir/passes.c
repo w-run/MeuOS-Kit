@@ -1097,6 +1097,8 @@ run_mir_pass(MFn *fn, enum MIRPass pass)
 		return mcopy(fn);
 	case MIR_PASS_LOADFWD:
 		return mloadfwd(fn);
+	case MIR_PASS_MEM2REG:
+		return mmem2reg(fn);
 	case MIR_PASS_GVN:
 		return mgvn(fn);
 	case MIR_PASS_DCE: {
@@ -1136,6 +1138,13 @@ run_mir_passes(MFn *fn, int optlevel)
 	run_mir_pass(fn, MIR_PASS_FOLD);
 	run_mir_pass(fn, MIR_PASS_COPY);
 	if (optlevel >= 2) {
+		/* mem2reg first: promoting non-escaping scalar slots to SSA
+		 * values kills the load/store traffic across basic blocks that
+		 * LOADFWD (block-local) cannot reach — notably parameters and
+		 * induction variables reloaded on every loop iteration.  LOADFWD
+		 * then mops up the slots mem2reg conservatively declined. */
+		run_mir_pass(fn, MIR_PASS_MEM2REG);
+		run_mir_pass(fn, MIR_PASS_COPY);
 		run_mir_pass(fn, MIR_PASS_LOADFWD);
 		run_mir_pass(fn, MIR_PASS_GVN);
 		run_mir_pass(fn, MIR_PASS_COPY);   /* propagate load-forwarded copies */
