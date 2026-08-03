@@ -4,9 +4,10 @@
  *  - deep nesting of consteval calls (sq(sq(sq(2))))
  *  - consteval calls passed as arguments to another consteval call
  *  - consteval recursion with constant arguments (factorial)
- *  - a call with a non-constant argument: m++ degrades it to a normal
- *    runtime call (not a compile-time error) — the minimal-set behavior
  *  - consteval results used in larger constant arithmetic
+ *  - a call with a non-constant argument is now a compile-time error
+ *    (immediate invocation must be a constant expression); see
+ *    consteval_nonconst.neg.cc
  *
  * Each check returns a distinct exit code; exit 0 = all passed.
  */
@@ -42,17 +43,9 @@ main(void)
     if (fact(5) != 120) return 4;
     if (fact(8) != 40320) return 5;
 
-    /* non-constant argument: degrades to a runtime call */
-    int v = 3;
-    if (sq(v) != 9) return 6;
-    if (add(v, 4) != 7) return 7;
-
     /* results used in larger constant arithmetic */
-    if (sq(4) + sq(3) != 25) return 8;
-    if (fact(4) * 2 != 48) return 9;
-
-    /* mixed constant + non-constant operands */
-    if (sq(2) * v != 12) return 10;
+    if (sq(4) + sq(3) != 25) return 6;
+    if (fact(4) * 2 != 48) return 7;
 
     return 0;
 }

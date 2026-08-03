@@ -395,6 +395,44 @@ postfixexpr(struct scope *s, struct expr *r)
 				if (p && !t->u.func.isvararg)
 					error(&tok.loc,
 					    "not enough arguments for function call");
+				/* C++20 consteval (immediate function): every call must
+				 * be a constant expression — all arguments must fold to
+				 * constants, otherwise the call is rejected.  The
+				 * `this` argument of a consteval member is prepended
+				 * separately and is excluded (arglist is the explicit
+				 * argument list). */
+				{
+					extern int g_lang;
+					if (g_lang == 1) {
+						struct decl *cd = NULL;
+						if (r->kind == EXPRUNARY && r->op == TBAND &&
+						    r->base && r->base->kind == EXPRIDENT)
+							cd = r->base->u.ident.decl;
+						else if (r->kind == EXPRIDENT)
+							cd = r->u.ident.decl;
+					if (cd && cd->kind == DECLFUNC &&
+					    cd->u.func.isconsteval) {
+						/* calls inside a consteval body are a constant
+						 * context themselves (recursion, helpers); the
+						 * immediate-invocation check applies to ordinary
+						 * (runtime) call sites only */
+						extern int g_cpp_in_consteval_body;
+						struct expr *aa;
+						if (g_cpp_in_consteval_body)
+							goto consteval_checked;
+						for (aa = arglist; aa; aa = aa->next) {
+							extern struct expr *eval(struct expr *);
+							struct expr *ev = eval(aa);
+							if (!ev || ev->kind != EXPRCONST)
+								error(&tok.loc,
+								    "call to consteval function '%s' is not a constant expression",
+								    cd->name);
+						}
+					consteval_checked:
+						;
+					}
+					}
+				}
 			}
 			e = decay(e);
 			/* C++ reference return: the call result is a hidden pointer

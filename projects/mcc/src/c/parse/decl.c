@@ -568,9 +568,17 @@ decl(struct scope *s, struct func *f)
 					if (base.qual & QUALCONSTEXPR)
 						d->u.func.isconstexpr = true;
 					/* C++20 consteval (immediate) function: like constexpr,
-					 * but every call must be evaluated at compile time */
-					if (g_lang == 1 && (fs & FUNCCONSTEVAL))
-						d->u.func.isconstexpr = true;
+					 * but every call must be evaluated at compile time.
+					 * typequal() consumes the keyword and sets
+					 * g_cpp_func_consteval (funcspec never sees it). */
+					{
+						extern int g_cpp_func_consteval;
+						if (g_cpp_func_consteval) {
+							d->u.func.isconstexpr = true;
+							d->u.func.isconsteval = true;
+							g_cpp_func_consteval = 0;
+						}
+					}
 				}
 				if (tok.kind == TLBRACE) {
 					if (!allowfunc)
@@ -598,11 +606,23 @@ decl(struct scope *s, struct func *f)
 							cpp_buffer_constexpr_body(d);
 						if (g_lang == 0 && d->u.func.isconstexpr)
 							g_cexpr_body = 1;
+						/* a consteval body is itself a constant context:
+						 * calls inside it (recursion, helpers) are folded
+						 * when the enclosing call is evaluated, so the
+						 * immediate-invocation check at the call site is
+						 * suspended while this body is parsed. */
+						{
+							extern int g_cpp_in_consteval_body;
+							if (d->u.func.isconsteval)
+								g_cpp_in_consteval_body = 1;
+						}
 					}
 					stmt(f, s);
 					{
 						extern int g_cexpr_body;
+						extern int g_cpp_in_consteval_body;
 						g_cexpr_body = 0;
+						g_cpp_in_consteval_body = 0;
 					}
 					/* C++14 `auto` return type: backfill the type deduced from
 					 * the body's return statement(s). */

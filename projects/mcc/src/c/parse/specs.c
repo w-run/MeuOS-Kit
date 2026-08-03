@@ -71,12 +71,16 @@ typequal(enum typequal *tq)
 		/* C++20 `consteval` (immediate function): the C lexer treats it
 		 * as an identifier; reuse the constexpr machinery (isconstexpr
 		 * + the compile-time evaluator), which for a minimal set makes
-		 * consteval behave like a strict constexpr. */
+		 * consteval behave like a strict constexpr.  Record the
+		 * distinction (decl.c sets isconsteval) so call sites can
+		 * enforce immediate evaluation. */
 		if (tok.kind >= TIDENT) {
 			extern int g_lang;
+			extern int g_cpp_func_consteval;
 			const char *nm = tokenstr(tok.kind);
 			if (g_lang == 1 && strcmp(nm, "consteval") == 0) {
 				*tq |= QUALCONST | QUALCONSTEXPR;
+				g_cpp_func_consteval = 1;
 				break;
 			}
 		}
