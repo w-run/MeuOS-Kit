@@ -174,7 +174,8 @@ check-c11-atomic: $(BIN)
 # Full currently self-contained C11 matrix.  The installed libc headers are
 # a Phase 2 deliverable, so the atomic tests use test/c11/stdatomic.h.
 check-c11: $(BIN)
-	@for t in test/c11/*.c; do \
+	@export MEUOS_SYSROOT="$(abspath ../sysroot)"; \
+	for t in test/c11/*.c; do \
 		out=/tmp/mcc-c11-$$(basename $$t .c); \
 		case $$t in \
 			*atomic*|*thread_local*) ./$(BIN) -Itest/c11 -o $$out $$t -lpthread ;; \
@@ -186,7 +187,8 @@ check-c11: $(BIN)
 
 # C99 standard feature tests (§6).
 check-c99: $(BIN)
-	@for t in test/c99/*.c; do \
+	@export MEUOS_SYSROOT="$(abspath ../sysroot)"; \
+	for t in test/c99/*.c; do \
 		out=/tmp/mcc-c99-$$(basename $$t .c); \
 		case $$t in \
 			*extern_defs*) true ;; \
@@ -198,7 +200,8 @@ check-c99: $(BIN)
 	done
 
 check-c23: $(BIN)
-	@for t in test/c23/*.c; do \
+	@export MEUOS_SYSROOT="$(abspath ../sysroot)"; \
+	for t in test/c23/*.c; do \
 		out=/tmp/mcc-c23-$$(basename $$t .c); \
 		./$(BIN) -o $$out $$t 2>&1 || exit $$?; \
 		$$out || exit $$?; \
