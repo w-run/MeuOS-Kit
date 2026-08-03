@@ -77,6 +77,12 @@ mir_cmp_cc(MOP op)
 	case MOP_CULE: return MCC_LS;
 	case MOP_CUGT: return MCC_HI;
 	case MOP_CUGE: return MCC_CS;
+	case MOP_CFEQ: return MCC_EQ;
+	case MOP_CFNE: return MCC_NE;
+	case MOP_CFLT: return MCC_LT;   /* FP compare: signed-style names */
+	case MOP_CFLE: return MCC_LE;
+	case MOP_CFGT: return MCC_GT;
+	case MOP_CFGE: return MCC_GE;
 	default:       return MCC_EQ;
 	}
 }
@@ -101,26 +107,20 @@ mval_of_ref(MFn *mf, MRef r)
 	return 0;
 }
 
-/* Scalar integer functions only for this round: fall back to the legacy
- * aarch64 LIR backend for everything else (floats, aggregates, varargs,
- * TLS, VLA). */
+/* Scalar integer + floating-point functions: fall back to the legacy
+ * aarch64 LIR backend only for aggregates, varargs, TLS and VLA. */
 static bool
 mbe_supported(MFn *mf)
 {
 	for (MBlk *mb = mf->link; mb; mb = mb->link) {
 		for (uint32_t k = 0; k < mb->nins; k++) {
 			MIns *in = &mb->ins[k];
-			if (in->dtype == MT_F32 || in->dtype == MT_F64)
-				return false;   /* float codegen: legacy for now */
 			switch (in->op) {
 			case MOP_ARG:
 			case MOP_CALL:
 				if (in->src[0].val && in->src[0].val->kind == MV_TYPE)
 					return false;   /* aggregate args/returns */
 				break;
-			case MOP_F2I: case MOP_I2F: case MOP_UI2F:
-			case MOP_FEXT: case MOP_FTRUNC:
-				return false;
 			case MOP_VASTART: case MOP_VAARG:
 				return false;       /* varargs: legacy for now */
 			case MOP_ALLOCA:
@@ -200,6 +200,31 @@ mfnm_backend_aarch64(MFn *mf)
 						                  dst, a0, a1);
 						ci->cc = mir_cmp_cc(in->op);
 					}
+					break;
+				}
+				/* int<->fp conversions and fp widening/narrowing */
+				if (in->op == MOP_F2I || in->op == MOP_I2F ||
+				    in->op == MOP_UI2F || in->op == MOP_FEXT ||
+				    in->op == MOP_FTRUNC) {
+					MVal *a0 = mval_of_ref(mf, in->src[0]);
+					MMOP co;
+					switch (in->op) {
+					case MOP_F2I:
+						co = (a0 && a0->type == MT_F64)
+						         ? MMOP_CVTTSD2SI : MMOP_CVTTSS2SI;
+						break;
+					case MOP_I2F:
+						co = in->dtype == MT_F64 ? MMOP_CVTSI2SD
+						                         : MMOP_CVTSI2SS;
+						break;
+					case MOP_UI2F:
+						co = in->dtype == MT_F64 ? MMOP_CVTSI2SD_U
+						                         : MMOP_CVTSI2SS_U;
+						break;
+					case MOP_FEXT:   co = MMOP_CVTSS2SD; break;
+					default:         co = MMOP_CVTSD2SS; break;
+					}
+					maddm(fm, b, co, in->dtype, dst, a0, 0);
 					break;
 				}
 				MMOP mo = map_op(in->op,
