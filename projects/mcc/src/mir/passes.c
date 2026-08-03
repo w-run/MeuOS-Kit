@@ -781,6 +781,148 @@ msimp_block(MFn *fn, MBlk *b, const char *is_alloca)
 	return removed;
 }
 
+/* ---- load forwarding + dead-store elimination (mloadfwd) ---------------- */
+/* The frontend lowers every scalar into its variable slot (store) and
+ * reloads it (load); store→load pairs for non-escaping local slots are
+ * redundant.  Forwarding replaces the load with a copy of the stored value
+ * (COPY propagates it), and dead-store elimination drops stores whose slot
+ * is never read.  Together they let DCE collapse whole computation chains
+ * the frontend routed through memory. */
+
+typedef struct MLoadMap {
+	MVal *addr;          /* slot address value */
+	MVal *val;           /* last stored value */
+	struct MLoadMap *next;
+} MLoadMap;
+
+static MLoadMap *
+mloadfwd_get(MLoadMap *m, MVal *addr)
+{
+	for (; m; m = m->next)
+		if (m->addr == addr)
+			return m;
+	return 0;
+}
+
+/* Does `v` refer to a unique non-escaping local slot?  Only DIRECT alloca
+ * results qualify (tracked in the is_alloca bitmap computed up front —
+ * the MVal.def pointers may be stale after prior passes removed
+ * instructions): computed addresses (base+off for arrays/struct fields)
+ * can alias one another, so forwarding/dead-store on them is unsound.
+ * `v` must additionally not escape (every use is a load/store base). */
+static bool
+mloadfwd_slot(MFn *fn, const bool *is_alloca, MVal *v)
+{
+	if (!v || v->kind != MV_TEMP)
+		return false;
+	if (!is_alloca[v->id])
+		return false;
+	for (uint32_t i = 0; i < v->nuse; i++) {
+		MUse *u = &v->use[i];
+		if (u->phi || !u->ins)
+			return false;
+		MIns *in = u->ins;
+		bool base = (in->op == MOP_LOAD && u->argn == 0) ||
+		            (in->op == MOP_STORE && u->argn == 1);
+		if (!base)
+			return false;
+	}
+	return true;
+}
+
+uint32_t
+mloadfwd(MFn *fn)
+{
+	uint32_t r = 0;
+	bool *is_alloca = calloc(fn->nval ? fn->nval : 1, sizeof *is_alloca);
+	for (MBlk *b = fn->link; b; b = b->link)
+		for (uint32_t i = 0; i < b->nins; i++)
+			if (b->ins[i].op == MOP_ALLOCA && b->ins[i].dst)
+				is_alloca[b->ins[i].dst->id] = true;
+
+	/* pass 1: forward store→load within each block (unique slots) */
+	for (MBlk *b = fn->link; b; b = b->link) {
+		build_uses(fn);
+		MLoadMap *map = 0;
+		for (uint32_t i = 0; i < b->nins; i++) {
+			MIns *in = &b->ins[i];
+			if (in->op == MOP_STORE) {
+				MVal *addr = in->src[1].val;
+				if (!mloadfwd_slot(fn, is_alloca, addr))
+					continue;
+				MLoadMap *e = mloadfwd_get(map, addr);
+				if (!e) {
+					e = calloc(1, sizeof *e);
+					e->addr = addr;
+					e->next = map;
+					map = e;
+				}
+				e->val = in->src[0].val;
+			} else if (in->op == MOP_LOAD) {
+				MVal *addr = in->src[0].val;
+				if (!mloadfwd_slot(fn, is_alloca, addr))
+					continue;
+				MLoadMap *e = mloadfwd_get(map, addr);
+				if (e && e->val) {
+					/* %dst = load %addr  ->  %dst = copy %val */
+					in->op = MOP_COPY;
+					in->src[0].val = e->val;
+					in->src[0].con = 0;
+					in->src[1].val = 0;
+					in->src[1].con = 0;
+					r++;
+				}
+			}
+		}
+		while (map) {
+			MLoadMap *nx = map->next;
+			free(map);
+			map = nx;
+		}
+	}
+
+	/* pass 2: dead stores — a store to a unique slot whose address value
+	 * is used ONLY by stores (never loaded, never copied, never passed
+	 * on) writes memory nothing reads.  All decisions are taken BEFORE
+	 * any removal: shifting the block array invalidates the def pointers
+	 * that mloadfwd_slot() relies on. */
+	build_uses(fn);
+	for (MBlk *b = fn->link; b; b = b->link) {
+		bool *drop = calloc(b->nins ? b->nins : 1, sizeof *drop);
+		for (uint32_t i = 0; i < b->nins; i++) {
+			MIns *in = &b->ins[i];
+			if (in->op != MOP_STORE)
+				continue;
+			MVal *addr = in->src[1].val;
+			if (!mloadfwd_slot(fn, is_alloca, addr))
+				continue;
+			bool only_stores = true;
+			for (uint32_t j = 0; j < addr->nuse; j++) {
+				MUse *u = &addr->use[j];
+				if (!u->ins || u->ins->op != MOP_STORE ||
+				    u->argn != 1) {
+					only_stores = false;
+					break;
+				}
+			}
+			if (only_stores) {
+				drop[i] = true;
+				r++;
+			}
+		}
+		MIns *out = b->ins;
+		uint32_t nout = 0;
+		for (uint32_t i = 0; i < b->nins; i++)
+			if (!drop[i])
+				out[nout++] = b->ins[i];
+		b->nins = nout;
+		free(drop);
+	}
+	free(is_alloca);
+	build_uses(fn);
+	return r;
+}
+
 /* ---- dead code elimination (mdce) -------------------------------------- */
 
 static uint32_t
@@ -843,13 +985,22 @@ run_mir_pass(MFn *fn, enum MIRPass pass)
 	}
 	case MIR_PASS_COPY:
 		return mcopy(fn);
+	case MIR_PASS_LOADFWD:
+		return mloadfwd(fn);
 	case MIR_PASS_GVN:
 		return mgvn(fn);
 	case MIR_PASS_DCE: {
-		uint32_t r = 0;
-		build_uses(fn);
-		for (MBlk *b = fn->link; b; b = b->link)
-			r += mdce_block(fn, b);
+		/* iterate to fix-point: removing one dead instruction may leave
+		 * its operands' defs dead too (e.g. a chain a=b+c; b=x after
+		 * copy propagation) */
+		uint32_t r = 0, round;
+		do {
+			build_uses(fn);
+			round = 0;
+			for (MBlk *b = fn->link; b; b = b->link)
+				round += mdce_block(fn, b);
+			r += round;
+		} while (round);
 		return r;
 	}
 	case MIR_PASS_SSA:
@@ -875,7 +1026,9 @@ run_mir_passes(MFn *fn, int optlevel)
 	run_mir_pass(fn, MIR_PASS_FOLD);
 	run_mir_pass(fn, MIR_PASS_COPY);
 	if (optlevel >= 2) {
+		run_mir_pass(fn, MIR_PASS_LOADFWD);
 		run_mir_pass(fn, MIR_PASS_GVN);
+		run_mir_pass(fn, MIR_PASS_COPY);   /* propagate load-forwarded copies */
 		if (optlevel >= 3)
 			run_mir_pass(fn, MIR_PASS_FOLD);
 		run_mir_pass(fn, MIR_PASS_DCE);
