@@ -107,31 +107,12 @@ mval_of_ref(MFn *mf, MRef r)
 	return 0;
 }
 
-/* Scalar integer + floating-point functions: fall back to the legacy
- * aarch64 LIR backend only for aggregates, varargs, TLS and VLA. */
+/* Full coverage: scalar, float, aggregates, VLA and varargs all run
+ * MIR-native on aarch64. */
 static bool
 mbe_supported(MFn *mf)
 {
-	for (MBlk *mb = mf->link; mb; mb = mb->link) {
-		for (uint32_t k = 0; k < mb->nins; k++) {
-			MIns *in = &mb->ins[k];
-			switch (in->op) {
-			case MOP_ARG:
-			case MOP_CALL:
-				if (in->src[0].val && in->src[0].val->kind == MV_TYPE)
-					return false;   /* aggregate args/returns */
-				break;
-			case MOP_VASTART: case MOP_VAARG:
-				return false;       /* varargs: legacy for now */
-			case MOP_ALLOCA:
-				if (in->src[0].val && in->src[0].val->kind != MV_CONST)
-					return false;   /* VLA: legacy for now */
-				break;
-			default:
-				break;
-			}
-		}
-	}
+	(void)mf;
 	return true;
 }
 
