@@ -146,9 +146,11 @@ const MTargetM mtarget_riscv64 = {
 	.sret_reg = RV64MREG_A0,
 	.abi = mfnm_abi_riscv64,
 	/* emitter temporaries: t0/t1 (addressing scratch) + t6 (large
-	 * offsets / dynamic alloca) — never handed to the allocator. */
+	 * offsets / dynamic alloca) + f28/f29 (float scratch) — never
+	 * handed to the allocator. */
 	.scratch = (1ull << RV64MREG_T0) | (1ull << RV64MREG_T1) |
-	           (1ull << RV64MREG_T2) | (1ull << RV64MREG_T6),
+	           (1ull << RV64MREG_T2) | (1ull << RV64MREG_T6) |
+	           (1ull << RV64MREG_F28) | (1ull << RV64MREG_F29),
 };
 
 /* ---- x86-64 machine target (register descriptions) --------------------- */
