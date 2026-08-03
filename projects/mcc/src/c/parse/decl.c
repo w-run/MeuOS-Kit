@@ -147,6 +147,16 @@ defineobj(struct decl *d, struct init *init, bool hasinit, struct func *f)
 		d->u.obj.constval = e->u.constant.u;
 		d->u.obj.has_constval = true;
 		init->expr = e;
+		/* C++ constexpr aggregate object: record each member's value so a
+		 * constant-context member access (`p.b`) can be folded. */
+		{
+			extern int g_lang;
+			extern void cpp_record_cexpr_aggregate(struct decl *,
+			    struct init *);
+			if (g_lang == 1 && (d->type->kind == TYPESTRUCT ||
+			    d->type->kind == TYPEUNION))
+				cpp_record_cexpr_aggregate(d, init);
+		}
 	}
 	if (d->u.obj.storage == SDAUTO)
 		funcinit(f, d, init, hasinit);

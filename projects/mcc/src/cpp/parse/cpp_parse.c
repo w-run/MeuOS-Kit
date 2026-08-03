@@ -6778,6 +6778,63 @@ struct cpp_cexpr_fn {
 };
 
 static struct cpp_cexpr_fn *g_cpp_cexpr_fns;
+
+/* Mini memory model for C++ constexpr aggregate objects: each initialized
+ * member of a constexpr object records (object, byte-offset) -> value so
+ * a constant-context member access `*(&s + offset)` can be folded
+ * (phase-3 constexpr relaxation).  Populated by
+ * cpp_record_cexpr_aggregate at the constexpr object's definition. */
+struct cexp_obj_member {
+	struct decl *obj;
+	unsigned long long offset;
+	unsigned long long val;
+	struct cexp_obj_member *next;
+};
+static struct cexp_obj_member *g_cexp_obj_members;
+
+/* Look up the stored constant value of `obj`'s member at `offset`, or
+ * false when the object/member is not a recorded constexpr value. */
+bool
+cpp_cexpr_member_value(struct decl *obj, unsigned long long offset,
+                       unsigned long long *out)
+{
+	struct cexp_obj_member *m;
+	for (m = g_cexp_obj_members; m; m = m->next)
+		if (m->obj == obj && m->offset == offset) {
+			*out = m->val;
+			return true;
+		}
+	return false;
+}
+
+/* Record the member values of a constexpr aggregate object from its
+ * initializer list (`constexpr P p{1, 2}`).  Each init node spans
+ * [start, end) bytes of the object and holds one element's expression. */
+void
+cpp_record_cexpr_aggregate(struct decl *d, struct init *init)
+{
+	extern struct expr *eval(struct expr *);
+	struct init *it;
+
+	if (!d || d->kind != DECLOBJECT || !init)
+		return;
+	for (it = init; it; it = it->next) {
+		struct expr *e;
+		if (!it->expr)
+			continue;
+		e = eval(it->expr);
+		if (!e || e->kind != EXPRCONST || !(e->type->prop & PROPINT))
+			continue;
+		{
+			struct cexp_obj_member *m = xmalloc(sizeof *m);
+			m->obj = d;
+			m->offset = it->start;
+			m->val = e->u.constant.u;
+			m->next = g_cexp_obj_members;
+			g_cexp_obj_members = m;
+		}
+	}
+}
 static int g_cpp_cexpr_depth;   /* recursion limit */
 
 /* Non-zero while a C23 `constexpr` function definition body is being parsed

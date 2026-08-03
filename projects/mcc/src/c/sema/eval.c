@@ -153,14 +153,54 @@ eval(struct expr *expr)
 			}
 			break;
 		case TMUL:
-			break;
-		default:
-			if (l->kind != EXPRCONST)
-				break;
-			unary(expr, expr->op, l);
-			break;
+		/* C++ constexpr aggregate object: fold `*(&s + offset)` — a
+		 * member access on a constexpr object whose whole-object value
+		 * is stored in the decl's constval.  The offset is 0 for the
+		 * first member; multi-member aggregates would need a member
+		 * value table (mini memory model). */
+		{
+			extern int g_lang;
+			struct expr *b = expr->base;
+			if (g_lang == 1 && b && b->kind == EXPRBINARY &&
+			    b->op == TADD && b->u.binary.l && b->u.binary.r &&
+			    b->u.binary.l->kind == EXPRUNARY &&
+			    b->u.binary.l->op == TBAND && b->u.binary.l->base &&
+			    b->u.binary.l->base->kind == EXPRIDENT &&
+			    b->u.binary.r->kind == EXPRCONST) {
+				struct decl *obj = b->u.binary.l->base->u.ident.decl;
+				if (obj && obj->kind == DECLOBJECT &&
+				    obj->type && (obj->type->kind == TYPESTRUCT ||
+				    obj->type->kind == TYPEUNION)) {
+					unsigned long long off =
+					    b->u.binary.r->u.constant.u;
+					unsigned long long mv;
+					extern bool cpp_cexpr_member_value(
+					    struct decl *, unsigned long long,
+					    unsigned long long *);
+					if (cpp_cexpr_member_value(obj, off, &mv)) {
+						expr->kind = EXPRCONST;
+						expr->u.constant.u = mv;
+						break;
+					}
+					/* first member at offset 0: the object's
+					 * whole-value constval */
+					if (off == 0 && obj->u.obj.has_constval) {
+						expr->kind = EXPRCONST;
+						expr->u.constant.u =
+						    obj->u.obj.constval;
+						break;
+					}
+				}
+			}
 		}
 		break;
+	default:
+		if (l->kind != EXPRCONST)
+			break;
+		unary(expr, expr->op, l);
+		break;
+	}
+	break;
 	case EXPRCAST:
 		l = eval(expr->base);
 		if (l->kind == EXPRCONST) {
