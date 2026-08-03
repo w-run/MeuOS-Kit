@@ -336,7 +336,7 @@ decl(struct scope *s, struct func *f)
 			if (!prior)
 				scopeputdecl(s, mkdecl(name, DECLTYPE, t, tq, LINKNONE));
 			else if (!typesame(prior->type, t) || prior->qual != tq)
-				error(&tok.loc, "typedef '%s' redefined with different type", name);
+				error_tok_code(E_REDEF, &tok, "typedef '%s' redefined with different type", name);
 			break;
 		case DECLOBJECT:
 			if (align && align < t->align)
@@ -371,7 +371,7 @@ decl(struct scope *s, struct func *f)
 				if (g_lang == 1 && !f && prior && prior->kind == DECLOBJECT &&
 				    (prior->defined || prior->tentative) &&
 				    !(sc & SCEXTERN))
-					error(&tok.loc, "redefinition of '%s'", name);
+					error_tok_code(E_REDEF, &tok, "redefinition of '%s'", name);
 			}
 			/* C++: variable-length arrays are a C feature; a C++ program
 			 * must not use them (`int arr[n];` with a runtime n). */
@@ -430,7 +430,7 @@ decl(struct scope *s, struct func *f)
 				if (f && d->linkage != LINKNONE)
 					error(&tok.loc, "object '%s' with block scope and %s linkage cannot have initializer", name, d->linkage == LINKEXTERN ? "external" : "internal");
 				if (d->defined)
-					error(&tok.loc, "object '%s' redefined", name);
+					error_tok_code(E_REDEF, &tok, "object '%s' redefined", name);
 				init = parseinit(s, d->type);
 				hasinit = true;
 			}
@@ -613,7 +613,7 @@ decl(struct scope *s, struct func *f)
 					if (!allowfunc)
 						error(&tok.loc, "function definition not allowed");
 					if (d->defined)
-						error(&tok.loc, "function '%s' redefined", name);
+						error_tok_code(E_REDEF, &tok, "function '%s' redefined", name);
 					/* re-open scope from function declarator */
 					assert(funcscope);
 					s = funcscope;

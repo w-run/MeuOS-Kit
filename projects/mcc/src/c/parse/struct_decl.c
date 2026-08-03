@@ -87,7 +87,7 @@ addmember(struct structbuilder *b, struct qualtype mt, char *name, int align, un
 			for (it = b->type->u.structunion.members; it; it = it->next)
 				if (it->name && strcmp(it->name, name) == 0 &&
 				    it->type && it->type->kind != TYPEFUNC)
-					error(&tok.loc, "redefinition of member '%s'", name);
+					error_tok_code(E_REDEF, &tok, "redefinition of member '%s'", name);
 		}
 	}
 	if (name || width == -1) {

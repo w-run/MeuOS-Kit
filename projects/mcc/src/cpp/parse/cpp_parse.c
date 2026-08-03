@@ -641,7 +641,7 @@ cpp_class_decl(struct scope *s)
 	if (tok.kind != TLBRACE)
 		return true; /* forward declaration */
 	if (!t->incomplete)
-		error(&tok.loc, "redefinition of class '%s'", tag);
+		error_tok_code(E_REDEF, &tok, "redefinition of class '%s'", tag);
 	{
 		int bi;
 		for (bi = 0; bi < nbases; ++bi)
@@ -896,6 +896,17 @@ cpp_parse_translation_unit(void)
 	extern void emittentativedefns(void);
 
 	while (tok.kind != TEOF) {
+		/* Multi-error collection (--error-json): arm a recovery jump
+		 * buffer so error() longjmps back after each collected error
+		 * and parsing resumes at the next top-level item. */
+		if (g_error_json) {
+			if (setjmp(g_err_recovery) != 0) {
+				g_err_recovery_set = 0;
+				err_sync();
+				continue;
+			}
+			g_err_recovery_set = 1;
+		}
 		/* C++ class/struct/union with access control */
 		enum cpp_tokenkind k = cpp_tok_kind();
 		if (k == CPP_TCLASS || k == CPP_TSTRUCT || k == CPP_TUNION) {
@@ -907,27 +918,32 @@ cpp_parse_translation_unit(void)
 				cpp_class_decl(&filescope);
 			else
 				goto c_decl;
+			g_err_recovery_set = 0;
 			continue;
 		}
 		if (k == CPP_TNAMESPACE) {
 			cpp_namespace_decl(&filescope);
+			g_err_recovery_set = 0;
 			continue;
 		}
 		if (k == CPP_TUSING) {
 			cpp_using_decl(&filescope);
+			g_err_recovery_set = 0;
 			continue;
 		}
 		if (k == CPP_TTEMPLATE) {
 			cpp_template_decl(&filescope, NULL);
+			g_err_recovery_set = 0;
 			continue;
 		}
 
 	c_decl:
 		if (!decl(&filescope, NULL)) {
 			if (tok.kind == TSEMICOLON)
-				error(&tok.loc, "unexpected ';' at top-level");
-			error(&tok.loc, "expected declaration or function definition");
+				error_code(E_SYNTAX, &tok.loc, "unexpected ';' at top-level");
+			error_code(E_SYNTAX, &tok.loc, "expected declaration or function definition");
 		}
+		g_err_recovery_set = 0;
 	}
 	emittentativedefns();
 	cpp_emit_global_ctors();
@@ -1837,7 +1853,7 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname,
 		if (d && d->type && !typecompatible(mtype, d->type))
 			error(&tok.loc, "'%s' redeclared with incompatible type", mangled);
 		if (d && d->defined)
-			error(&tok.loc, "redefinition of member function '%s'", mangled);
+			error_tok_code(E_REDEF, &tok, "redefinition of member function '%s'", mangled);
 		if (!d) {
 			d = mkdecl(pmangled, DECLFUNC, mtype, QUALNONE, LINKEXTERN);
 			scopeputdecl(ms, d);

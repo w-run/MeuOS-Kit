@@ -68,7 +68,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 | alice | reasoning | worktree-tmp-alice-cpp (自 worktree-mxx-work@d0a90c9) | /tmp/mxx-wt-alice | cpp_parse 组 D1/D4/D2/E2/E3 修复（requires 续作已完成） | **completed**（已合入主线） | a3808b9 |
 | bella | lite | worktree-tmp-bella (自 worktree-mxx-work) | /tmp/mxx-wt-bella | m++ 测试矩阵扩充 + 门禁验证 | **completed**（1ed8c53 已合入主线 dd78366） | 16 个 test/cpp 文件 |
 | chloe | lite | 只读隔离副本 | /tmp/mcciso-chloe | 定位 chibicc B 类真 bug（常量折叠窄化 + va_end 类型检查） | **completed**（报告已收） | 只读不 push |
-| diana | lite | worktree-tmp-diana-pic (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试扩充 + check-pic-verify 修复 | **completed**（db1451b C23 已合入 294e5c2；**6db1691 PIC 已合入主线** 58016d2） | 11 个 test/c23 文件 + F1-F3 + i386/riscv64 GOT |
+| diana | lite | worktree-tmp-diana-pic + worktree-tmp-diana-errcode (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试 + check-pic-verify 修复 + 错误码体系/多错收集 | **completed**（db1451b C23 已合入 294e5c2；6db1691 PIC 已合入主线 58016d2；errcode da5a646/a561b36/c204bbe 本次归并合入主线） | 11 test/c23 + F1-F3 + i386/riscv64 GOT + E####/caret 全跨/JSON 多错/fix-it |
 | eve | lite | worktree-tmp-eve (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵扩充 | **completed**（02d6684 已合入主线 b4cad7e） | 33 个 test/cpp 文件 |
 | grace | lite | worktree-tmp-grace-cpp23 (自 worktree-mxx-work@1ef0a9a) | /tmp/mxx-wt-grace | sema/decl E1/E4/E5/E6（已合入）+ C++23 缺口：P0849/P1774/P1401/P2360/nodiscard | **completed**（sema 已合入；cpp23 f7e313a+b54c8b9+16c2ca5+2a4d655+da7a107 **已合入主线** ba6d9f8） | push worktree-tmp-grace-cpp23 |
 | hazel | lite | worktree-tmp-hazel-conform (自 worktree-mxx-work@1ef0a9a) | /workspace/MeuOS-Kit/.agents/worktrees/mxx-work | C23 constexpr F1/F2/F3（已合入）+ chibicc conformance 缺陷组（bitfield/浮点转换/字面量/宽字符） | **completed**（F1-F3 8e5aae3 已合入；conformance 5 commit **已合入主线** 09a9263，chibicc PASS 11→16、RUNFAIL 5→0） | 24596ee |
@@ -142,6 +142,15 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
   - riscv64：SExt 地址加载在 T.pic 下改 `auipc %got_pcrel_hi + ld %pcrel_lo(label)`（label 配对 R_RISCV_GOT_HI20 + R_RISCV_PCREL_LO12_I，gas 不接受 %got_pcrel_lo 修饰符）；extern 调用加 `@plt`
   - 非 PIC 路径不变（i386 绝对地址 / riscv64 plain `la`）
 - 验证：check-pic-verify 全绿（x86_64/aarch64/riscv64/i386）；check-c99 / check-c-mir / check-i386 无回归；i386 非 PIC 运行时（IA32 模拟）通过
+
+### 错误码体系与多错收集（diana errcode 分支）
+- 状态：**已修复**（da5a646 错误码+caret 全跨 / a561b36 JSON 多错收集 / c204bbe fix-it，分支 worktree-tmp-diana-errcode，已 push）
+- 内容：
+  - `error: E%04d: <msg>`（E0001 语法/E0002 未声明/E0003 类型/E0004 重定义），`--error-json` 增 `code`/`end_col`
+  - caret 单 ^ → 覆盖 token 全跨（error_tok_code 按 token 文本宽度）
+  - `--error-json` 多错收集（上限 10，顶层循环 setjmp/longjmp 恢复 + err_sync 跳到下一 ';'/'}'），结束后出错仍 exit(1)
+  - fix-it：缺分号 `note: add ';' here` + 未声明标识符编辑距离拼写建议 `note: did you mean 'X'?`
+- 验证：verify-all.sh 17 PASS / 0 FAIL / 0 SKIP
 
 ---
 
