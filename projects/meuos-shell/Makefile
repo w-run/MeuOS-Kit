@@ -8,12 +8,18 @@
 #   src/exec/            命令执行（占位，P6）
 #   src/builtin/         内建命令（占位，P6）
 #   src/var/             变量管理（占位，P6）
+#   src/tui/             TUI 终端模式（--tui，需要 libtui）
 #   test/                回归测试脚本
 
 CC ?= cc
 CFLAGS ?= -O2 -g -Wall -Wextra -Wpedantic -std=c11
 BUILD := build
 UTILS_LIB := ../meuos-utils/build/libutils.a
+LBTUI_LIB := ../meuos-libtui/build/libtui.a
+LBTUI_INC := -I../meuos-libtui/include
+
+# 检测 libtui 是否可用
+HAS_LIBTUI := $(shell if [ -f $(LBTUI_LIB) ]; then echo 1; else echo 0; fi)
 
 SRCS := $(sort $(wildcard src/*/*.c))
 OBJS := $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS))
@@ -21,17 +27,35 @@ BIN := $(BUILD)/msh
 
 BASE_CFLAGS := -Iinclude -I../meuos-utils/include
 
+# 如果 libtui 可用，添加 TUI 支持
+ifeq ($(HAS_LIBTUI),1)
+BASE_CFLAGS += $(LBTUI_INC)
+TUI_DEFS := -DHAVE_LIBTUI
+TUI_LIBS := $(LBTUI_LIB)
+else
+# 排除 tui_shell.c
+OBJS := $(filter-out $(BUILD)/tui/tui_shell.o,$(OBJS))
+TUI_DEFS :=
+TUI_LIBS :=
+endif
+
 .PHONY: all check check-pty check-qemu check-qemu-vm clean install
 
 all: $(BIN)
 
 $(BIN): $(OBJS) $(UTILS_LIB)
 	@mkdir -p $(BUILD)
+ifeq ($(HAS_LIBTUI),1)
+	@echo "  LINK $@ (with libtui TUI mode)"
+	$(CC) $(CFLAGS) $(BASE_CFLAGS) $(TUI_DEFS) -o $@ $^ $(UTILS_LIB) $(TUI_LIBS)
+else
+	@echo "  LINK $@ (no libtui, TUI mode disabled)"
 	$(CC) $(CFLAGS) $(BASE_CFLAGS) -o $@ $^ $(UTILS_LIB)
+endif
 
 $(BUILD)/%.o: src/%.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $(BASE_CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(BASE_CFLAGS) $(TUI_DEFS) -c -o $@ $<
 
 # 烟雾测试
 check: all

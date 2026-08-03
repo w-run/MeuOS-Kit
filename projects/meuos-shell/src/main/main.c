@@ -28,6 +28,10 @@
 #include "msh/msh.h"
 #include "msh/parse.h"
 
+#ifdef HAVE_LIBTUI
+#include "msh/tui.h"
+#endif
+
 const char *msh_version = "0.1.0-modern";
 const char *msh_license = "RFL v1.0";
 const char *msh_program_name = "msh";
@@ -197,6 +201,8 @@ static void usage(void) {
         "  --rc FILE     Load config file (default: ~/.config/msh/config.yaml)\n"
         "  --noprofile    Don't load user config\n"
         "  --posix        Strict POSIX mode\n"
+        "  --classic      Classic mode (no color, simple prompt)\n"
+        "  --tui          Start TUI terminal mode (AI Agent style)\n"
         "      --help    Display this help and exit\n"
         "      --version Output version information and exit\n\n"
         "If neither -c nor a SCRIPT is given, msh enters interactive mode.\n"
@@ -217,6 +223,7 @@ int main(int argc, char **argv) {
         { "rc",         required_argument, NULL, 1001 },
         { "posix",      no_argument, NULL, 1002 },
         { "classic",    no_argument, NULL, 1003 },
+        { "tui",         no_argument, NULL, 1004 },
         { NULL, 0, NULL, 0 },
     };
 
@@ -237,6 +244,13 @@ int main(int argc, char **argv) {
         case 1001: rcfile = optarg; break;
         case 1002: break;
         case 1003: msh_mode_classic = 1; break;
+        case 1004:
+#ifdef HAVE_LIBTUI
+            return msh_tui_main();
+#else
+            fprintf(stderr, "%s: TUI mode not available (libtui not linked)\n", msh_program_name);
+            return 2;
+#endif
         default:
             fprintf(stderr, "%s: try --help for more information\n", msh_program_name);
             return 2;
