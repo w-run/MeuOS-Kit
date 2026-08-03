@@ -227,7 +227,7 @@ emitdata(struct decl *d, struct init *init)
 		cur->expr = eval(cur->expr);
 
 	/* Build linkage from decl attributes. */
-	lnk.export = (d->linkage == LINKEXTERN);
+	lnk.export = (d->linkage == LINKEXTERN || d->linkage == LINKC);
 	lnk.thread = (d->kind == DECLOBJECT && d->u.obj.storage == SDTHREAD);
 	lnk.align = d->u.obj.align;
 
@@ -423,7 +423,8 @@ emitdata(struct decl *d, struct init *init)
 			if (refdecl->kind == DECLOBJECT
 			    && refdecl->u.obj.storage != SDSTATIC
 			    && refdecl->linkage != LINKEXTERN
-			    && refdecl->linkage != LINKINTERN)
+		    && refdecl->linkage != LINKINTERN
+		    && refdecl->linkage != LINKC)
 				error_code(E_DECL, &tok.loc, "initializer is not a constant expression");
 			dat.type = typelong.size == 4 ? DW : DL;
 			dat.isref = 1;

@@ -61,6 +61,7 @@ addmember(struct structbuilder *b, struct qualtype mt, char *name, int align, un
 				mf->is_mutable = false;
 				mf->is_virtual = b->member_virtual;
 				mf->is_const = b->member_const;
+				mf->is_explicit = b->member_explicit;
 				mf->vslot = -1;
 				if (b->last)
 					*b->last = mf;
@@ -210,6 +211,22 @@ structdecl(struct scope *s, struct structbuilder *b)
 	if (g_lang == 1 && cpp_tok_kind() == CPP_TVIRTUAL) {
 		b->member_virtual = true;
 		next();
+	}
+	/* C++ `explicit` constructor/conversion: `explicit S(int)` or
+	 * C++20 `explicit(bool)` — `explicit(true) S(int)`.  The `explicit`
+	 * keyword is a C++-only identifier; consume it and optionally parse
+	 * a constant-expression argument.  A `false` constant means the
+	 * constructor is NOT explicit (same as omitting `explicit`). */
+	if (g_lang == 1 && cpp_tok_kind() == CPP_TEXPLICIT) {
+		next(); /* consume `explicit` */
+		if (tok.kind == TLPAREN) {
+			/* C++20 explicit(bool): `explicit(constant-expression)`. */
+			next();
+			b->member_explicit = intconstexpr(s, false) != 0;
+			expect(TRPAREN, "to close explicit(bool)");
+		} else {
+			b->member_explicit = true;
+		}
 	}
 	/* C++ destructor: `~Class() { ... }`.  Detect it before declspecs
 	 * (which does not understand '~').  Lowered to `Class_dtor` via
@@ -373,6 +390,45 @@ structdecl(struct scope *s, struct structbuilder *b)
 			is_const = true;
 			b->member_const = true;
 			next();
+		}
+		/* C++20 `= default` / `= delete` on operators: consume the
+		 * trailing specifier (if present) so the declaration is accepted
+		 * without a body.  `= delete` marks the function as not callable;
+		 * `= default` on <=> is accepted syntactically (the defaulted
+		 * body generation is a future enhancement). */
+		if (tok.kind == TASSIGN) {
+			next();
+			/* `default` is a C keyword (TDEFAULT), so cpp_tok_kind()
+			 * does NOT map it to CPP_TDEFAULT — use tok.kind instead.
+			 * `delete` is a C++-only keyword and goes through TIDENT,
+			 * so cpp_tok_kind() works for it. */
+			if (tok.kind == TDEFAULT) {
+				next();
+				expect(TSEMICOLON, "after '= default'");
+				mname = xmalloc(strlen(opcode) + 10);
+				sprintf(mname, "operator_%s", opcode);
+				cpp_define_method(s, ft, mname,
+				    b->type->u.structunion.tag,
+				    is_const, false, false);
+				addmember(b, (struct qualtype){ft, QUALNONE, NULL},
+				    mname, 0, -1);
+				return;
+			} else if (cpp_tok_kind() == CPP_TDELETE) {
+				next();
+				expect(TSEMICOLON, "after '= delete'");
+				/* register the deleted function so name lookup
+				 * finds it, but mark it as deleted (no body). */
+				mname = xmalloc(strlen(opcode) + 10);
+				sprintf(mname, "operator_%s", opcode);
+				cpp_define_method(s, ft, mname,
+				    b->type->u.structunion.tag,
+				    is_const, false, false);
+				addmember(b, (struct qualtype){ft, QUALNONE, NULL},
+				    mname, 0, -1);
+				return;
+			}
+			error_code(E_SYNTAX, &tok.loc,
+			    "expected 'default' or 'delete' after '='");
 		}
 		mname = xmalloc(strlen(opcode) + 10);
 		sprintf(mname, "operator_%s", opcode);

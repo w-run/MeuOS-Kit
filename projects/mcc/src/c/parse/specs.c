@@ -640,6 +640,18 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 		default:
 			if (op < TIDENT || t || ts)
 				goto done;
+			/* C++20 char8_t: a keyword, not a typedef.  Handle it
+			 * before the scope-lookup path. */
+			{
+				extern int g_lang;
+				extern enum cpp_tokenkind cpp_tok_kind(void);
+				if (g_lang == 1 && cpp_tok_kind() == CPP_TCHAR8) {
+					t = &typechar8;
+					++ntypes;
+					next();
+					break;
+				}
+			}
 			d = scopegetdecl(s, tokenstr(tok.kind), 1);
 			if (!d || d->kind != DECLTYPE) {
 				/* C++: a class/struct/union tag is usable as a bare
@@ -784,6 +796,9 @@ istypename(struct scope *s, const char *name)
 	 * a type name inside a namespace. */
 	extern int g_lang;
 	if (g_lang == 1) {
+		/* C++20 char8_t keyword is a built-in type name. */
+		if (strcmp(name, "char8_t") == 0)
+			return 1;
 		t = scopegettag(s, name, 1);
 		if (t && (t->kind == TYPESTRUCT || t->kind == TYPEUNION))
 			return 1;

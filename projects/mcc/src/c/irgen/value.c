@@ -45,7 +45,7 @@ mkglobal(struct decl *d)
 
 	v = xmalloc(sizeof(*v));
 	v->kind = VALUE_GLOBAL;
-	if (d->linkage == LINKEXTERN)
+	if (d->linkage == LINKEXTERN || d->linkage == LINKC)
 		v->kind |= VALUE_EXTERN;
 	if (d->kind == DECLOBJECT && d->u.obj.storage == SDTHREAD)
 		v->kind |= VALUE_THREAD;

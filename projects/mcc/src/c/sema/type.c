@@ -28,6 +28,7 @@ struct type typebool    = INTTYPE(TYPEBOOL, 1, false, 0);
 struct type typechar    = INTTYPE(TYPECHAR, 1, true, PROPCHAR);
 struct type typeschar   = INTTYPE(TYPECHAR, 1, true, PROPCHAR);
 struct type typeuchar   = INTTYPE(TYPECHAR, 1, false, PROPCHAR);
+struct type typechar8   = INTTYPE(TYPECHAR8, 1, false, PROPCHAR);
 
 struct type typeshort   = INTTYPE(TYPESHORT, 2, true, 0);
 struct type typeushort  = INTTYPE(TYPESHORT, 2, false, 0);
@@ -71,6 +72,9 @@ mktype(enum typekind kind, enum typeprop prop)
 		t->u.structunion.vslots = NULL;
 		t->u.structunion.nvslots = 0;
 		t->u.structunion.primary_base = NULL;
+	}
+	if (kind == TYPEFUNC) {
+		t->u.func.is_noexcept = false;
 	}
 
 	return t;
@@ -203,6 +207,7 @@ typerank(struct type *t)
 	switch (t->kind) {
 	case TYPEBOOL:   return 0;
 	case TYPECHAR:   return 0x081;
+	case TYPECHAR8:  return 0x081;
 	case TYPESHORT:  return 0x101;
 	case TYPEINT:    return 0x201;
 	case TYPELONG:   return (t->size << 7) | 0x1;
@@ -303,6 +308,7 @@ typesame(struct type *t1, struct type *t2)
 
 	switch (t1->kind) {
 	case TYPECHAR:
+	case TYPECHAR8:
 	case TYPESHORT:
 	case TYPEINT:
 	case TYPELONG:

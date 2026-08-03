@@ -45,6 +45,10 @@ bool g_cpp_member_tmpl;
  * each function body by the decl / method-body parsers. */
 struct type *g_cpp_auto_ret_type;
 struct func *g_cpp_auto_ret_func;
+/* C++ `extern "C"` linkage context: non-zero when the current declaration
+ * is inside an `extern "C"` block or is preceded by `extern "C"`.  Used by
+ * getlinkage() in decl.c to assign LINKC instead of LINKEXTERN. */
+bool g_cpp_extern_c;
 /* postfixexpr nesting depth (set by expr_postfix.c); a pending member
  * call records the depth it was created at so nested argument expressions
  * (which run their own postfixexpr) don't clear it prematurely. */
@@ -835,6 +839,41 @@ void
 cpp_using_decl(struct scope *s)
 {
 	next(); /* consume 'using' */
+	/* C++20 `using enum E;` — bring all enumerators of E into
+	 * the current scope.  `enum` is a C keyword (TENUM), so the
+	 * C++ lexer token is used directly. */
+	if (tok.kind == TENUM) {
+		const char *etag;
+		struct type *et;
+		size_t i;
+		next(); /* consume 'enum' */
+		if (tok.kind < TIDENT)
+			error_code(E_SYNTAX, &tok.loc, "expected enum name after 'using enum'");
+		etag = tokenstr(tok.kind);
+		et = scopegettag(s, etag, 1);
+		if (!et || et->kind != TYPEENUM)
+			error_code(E_CTYPE, &tok.loc, "'%s' is not an enum type", etag);
+		next(); /* consume enum name */
+		expect(TSEMICOLON, "after using enum declaration");
+		if (et->incomplete)
+			error_code(E_INCOMPLETE, &tok.loc, "cannot use incomplete enum type '%s'", etag);
+		/* Bring all enumerators (DECLCONST decls) of this enum type
+		 * into the current scope.  Walk the scope chain looking for
+		 * DECLCONST decls whose type matches the enum.  Since the map
+		 * is a hash table, we iterate over the current scope's decl
+		 * map directly. */
+		for (i = 0; i < s->decls.cap; i++) {
+			if (s->decls.keys[i].str) {
+				struct decl *d = s->decls.vals[i].p;
+				if (d && d->kind == DECLCONST && d->type == et) {
+					/* Re-insert into the same scope (already
+					 * visible, but ensures lookup works). */
+					scopeputdecl(s, d);
+				}
+			}
+		}
+		return;
+	}
 	if (cpp_tok_kind() == CPP_TNAMESPACE) {
 		struct decl *nsd;
 		next(); /* consume 'namespace' */
@@ -894,6 +933,7 @@ cpp_parse_translation_unit(void)
 {
 	extern struct scope filescope;
 	extern void emittentativedefns(void);
+	extern int g_lang;
 
 	while (tok.kind != TEOF) {
 		/* Multi-error collection (--error-json): arm a recovery jump
@@ -936,6 +976,64 @@ cpp_parse_translation_unit(void)
 			g_err_recovery_set = 0;
 			continue;
 		}
+
+	/* C++ `extern "C"` linkage specification: `extern "C" { ... }` block
+	 * form or `extern "C" int f();` single-declaration form.  Intercept
+	 * before the C parser's decl() sees `extern` as a storage class. */
+	if (tok.kind == TEXTERN && g_lang == 1) {
+		struct token save = tok;
+		next();
+		/* The C lexer stores string literal content INCLUDING the
+		 * surrounding quotes in tok.lit, so we compare against "\"C\""
+		 * (the literal text `"C"` with quote characters). */
+		if (tok.kind == TSTRINGLIT && tok.lit &&
+		    tok.lit[0] == '"' && tok.lit[1] == 'C' && tok.lit[2] == '"' && tok.lit[3] == '\0') {
+			next(); /* consume the string literal */
+			char *saved = g_cpp_extern_c ? strdup("nested") : NULL;
+			if (tok.kind == TLBRACE) {
+				/* `extern "C" { ... }` — parse all declarations inside
+				 * the block with C linkage, then restore. */
+				next(); /* consume '{' */
+				g_cpp_extern_c = true;
+				while (tok.kind != TRBRACE && tok.kind != TEOF) {
+					enum cpp_tokenkind k2 = cpp_tok_kind();
+					if (k2 == CPP_TCLASS || k2 == CPP_TSTRUCT ||
+					    k2 == CPP_TUNION) {
+						if (k2 == CPP_TCLASS || cpp_struct_needs_class_decl())
+							cpp_class_decl(&filescope);
+						else
+							decl(&filescope, NULL);
+					} else if (k2 == CPP_TNAMESPACE) {
+						cpp_namespace_decl(&filescope);
+					} else if (k2 == CPP_TUSING) {
+						cpp_using_decl(&filescope);
+					} else if (k2 == CPP_TTEMPLATE) {
+						cpp_template_decl(&filescope, NULL);
+					} else {
+						decl(&filescope, NULL);
+					}
+				}
+				if (tok.kind == TRBRACE)
+					next(); /* consume '}' */
+				g_cpp_extern_c = saved ? true : false;
+				if (saved)
+					free(saved);
+			} else {
+				/* `extern "C" int f();` — single declaration with C linkage.
+				 * Set the flag, parse the declaration, then restore. */
+				g_cpp_extern_c = true;
+				decl(&filescope, NULL);
+				g_cpp_extern_c = saved ? true : false;
+				if (saved)
+					free(saved);
+			}
+			g_err_recovery_set = 0;
+			continue;
+		}
+		/* not `extern "C"` — push back and fall through to normal decl() */
+		tokpush(&tok, 1);
+		tok = save;
+	}
 
 	c_decl:
 		if (!decl(&filescope, NULL)) {
@@ -1172,7 +1270,7 @@ cpp_parse_method_body(struct cpp_pending_method *pm)
 			g_cpp_auto_ret_type = NULL;
 			g_cpp_auto_ret_func = NULL;
 		}
-		emitfunc(f, fs, pm->d->linkage == LINKEXTERN);
+		emitfunc(f, fs, pm->d->linkage == LINKEXTERN || pm->d->linkage == LINKC);
 		delscope(fs);
 		delfunc(f);
 		pm->d->defined = true;
@@ -2015,7 +2113,7 @@ cpp_parse_free_operator(struct scope *s, struct qualtype base)
 			scopeputdecl(fs, pd);
 	f = mkfunc(d, d->name, d->type, fs);
 	stmt(f, fs);
-	emitfunc(f, fs, d->linkage == LINKEXTERN);
+	emitfunc(f, fs, d->linkage == LINKEXTERN || d->linkage == LINKC);
 	delscope(fs);
 	delfunc(f);
 	d->defined = true;
@@ -3308,6 +3406,7 @@ cpp_mangle_type(struct type *t, char *buf, size_t bufsz)
 	case TYPEVOID:     *p++ = 'v'; break;
 	case TYPEBOOL:     *p++ = 'b'; break;
 	case TYPECHAR:     *p++ = t->u.arith.issigned ? 'c' : 'C'; break;
+	case TYPECHAR8:    *p++ = 'D'; break;   /* Itanium ABI for char8_t */
 	case TYPESHORT:    *p++ = t->u.arith.issigned ? 's' : 'S'; break;
 	case TYPEINT:      *p++ = t->u.arith.issigned ? 'i' : 'u'; break;
 	case TYPELONG:     *p++ = t->u.arith.issigned ? 'l' : 'L'; break;
@@ -6555,6 +6654,12 @@ cpp_lambda_expr(struct scope *s)
 	int ncap = 0;
 	struct token *ptoks = NULL, *rtoks = NULL, *btoks = NULL;
 	size_t pn = 0, pcap = 0, rn = 0, rcap = 0, bn = 0, bcap = 0;
+	/* C++20 lambda template parameter list: `[]<typename T>(T x) { ... }`.
+	 * Buffered like the parameter list, with `<`/`>` nesting for templates
+	 * that themselves contain template parameters (e.g. `template<typename T,
+	 * template<typename> class Container>`). */
+	struct token *ttoks = NULL;
+	size_t tn2 = 0, tcap = 0;
 	struct token *wtoks;
 	size_t wn = 0, wcap;
 	struct token tmpl = tok;
@@ -6615,6 +6720,29 @@ cpp_lambda_expr(struct scope *s)
 		expect(TCOMMA, "',' or ']' in lambda capture list");
 	}
 	next(); /* consume ']' */
+
+	/* --- C++20 lambda template parameter list `[captures]<typename T>(T x)`
+	 * (optional; buffer through the matching '>') --- */
+	if (tok.kind == TLESS) {
+		int tdepth = 0;
+		for (;;) {
+			if (tn2 >= tcap) {
+				tcap = tcap ? tcap * 2 : 16;
+				ttoks = xreallocarray(ttoks, tcap, sizeof *ttoks);
+			}
+			ttoks[tn2++] = tok;
+			if (tok.kind == TLESS)
+				++tdepth;
+			else if (tok.kind == TGREATER) {
+				--tdepth;
+				if (tdepth == 0) {
+					next();
+					break;
+				}
+			}
+			next();
+		}
+	}
 
 	/* --- parameter list `( params )` (optional in C++; buffer through
 	 * the matching ')') --- */
@@ -6754,13 +6882,22 @@ cpp_lambda_expr(struct scope *s)
 	 * generic lambda (`[](auto x) {...}`) has an `auto` parameter: the
 	 * operator() becomes a function template (`template<typename __T0>
 	 * operator()(__T0 x)`) so each call-site argument type instantiates
-	 * its own version. */
+	 * its own version.  A C++20 explicit template parameter list
+	 * (`[]<typename T>(T x)`) is emitted before the auto-parameter
+	 * template (if any). */
 	{
 		bool generic = false;
 		int i;
 		for (i = 0; i < (int)pn; ++i)
 			if (ptoks[i].kind == TAUTO)
 				generic = true;
+		/* C++20 explicit template parameter list, e.g. `<typename T>`. */
+		if (tn2) {
+			cpp_tb(wtoks, &wn, tmpl, 0, "template");
+			/* emit the buffered tokens (starting with '<', ending with '>') */
+			memcpy(wtoks + wn, ttoks, tn2 * sizeof *ttoks);
+			wn += tn2;
+		}
 		if (generic) {
 			cpp_tb(wtoks, &wn, tmpl, 0, "template");
 			cpp_tb(wtoks, &wn, tmpl, TLESS, NULL);

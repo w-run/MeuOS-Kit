@@ -69,10 +69,17 @@ mkdecl(char *name, enum declkind k, struct type *t, enum typequal tq, enum linka
 static enum linkage
 getlinkage(enum declkind kind, enum storageclass sc, struct decl *prior, bool filescope)
 {
+	/* C++ `extern "C"` linkage: a C++-mode global that indicates the
+	 * current declaration is inside an `extern "C"` context.  Non-zero
+	 * means the decl should get C language linkage (LINKC). */
+	extern bool g_cpp_extern_c;
 	if (sc & SCSTATIC)
 		return filescope ? LINKINTERN : LINKNONE;
-	if (sc & SCEXTERN || kind == DECLFUNC)
+	if (sc & SCEXTERN || kind == DECLFUNC) {
+		if (g_cpp_extern_c)
+			return LINKC;
 		return prior ? prior->linkage : LINKEXTERN;
+	}
 	return filescope ? LINKEXTERN : LINKNONE;
 }
 static struct decl *
@@ -458,7 +465,7 @@ decl(struct scope *s, struct func *f)
 				if (tok.kind == TASSIGN)
 					next();
 				if (f && d->linkage != LINKNONE)
-					error_code(E_DECL, &tok.loc, "object '%s' with block scope and %s linkage cannot have initializer", name, d->linkage == LINKEXTERN ? "external" : "internal");
+					error_code(E_DECL, &tok.loc, "object '%s' with block scope and %s linkage cannot have initializer", name, (d->linkage == LINKEXTERN || d->linkage == LINKC) ? "external" : "internal");
 				if (d->defined)
 					error_tok_code(E_REDEF, &tok, "object '%s' redefined", name);
 				init = parseinit(s, d->type);
@@ -571,9 +578,10 @@ decl(struct scope *s, struct func *f)
 				extern int g_lang;
 				extern void cpp_free_mangle_name(const char *, struct type *,
 				    char *, size_t);
+				extern bool g_cpp_extern_c;
 				const char *regname = name;
 				char *mng = NULL;
-				if (g_lang == 1 && prior && prior->kind == DECLFUNC &&
+				if (g_lang == 1 && !g_cpp_extern_c && prior && prior->kind == DECLFUNC &&
 				    prior->type && !typecompatible(t, prior->type)) {
 					char buf[256];
 					/* overloading by return type alone is not allowed */
@@ -605,7 +613,7 @@ decl(struct scope *s, struct func *f)
 				if (mng && d == prior)
 					free(mng); /* existing overload: name not retained */
 				d->value = mkglobal(d);
-				d->u.func.inlinedefn = d->linkage == LINKEXTERN && fs & FUNCINLINE && !(sc & SCEXTERN) && (!prior || prior->u.func.inlinedefn);
+				d->u.func.inlinedefn = (d->linkage == LINKEXTERN || d->linkage == LINKC) && fs & FUNCINLINE && !(sc & SCEXTERN) && (!prior || prior->u.func.inlinedefn);
 				d->u.func.isnoreturn = fs & FUNCNORETURN || a.kind & ATTRNORETURN;
 				d->u.func.isnodiscard = (a.kind & ATTRNODISCARD) != 0;
 				/* C99 6.7.4p6: an `extern` (or plain, non-inline) declaration
@@ -613,7 +621,7 @@ decl(struct scope *s, struct func *f)
 				 * that inline definition to an external definition — emit the
 				 * deferred body now (defect c-01). */
 				if (!d->u.func.inlinedefn && d->u.func.deferfn) {
-					emitfunc(d->u.func.deferfn, d->u.func.deferscope, d->linkage == LINKEXTERN);
+					emitfunc(d->u.func.deferfn, d->u.func.deferscope, d->linkage == LINKEXTERN || d->linkage == LINKC);
 					delscope(d->u.func.deferscope);
 					delfunc(d->u.func.deferfn);
 					d->u.func.deferfn = NULL;
@@ -729,7 +737,7 @@ decl(struct scope *s, struct func *f)
 					 * emission decision and keep the body (and its function
 					 * scope) alive until then. */
 					if (!d->u.func.inlinedefn) {
-						emitfunc(f, s, d->linkage == LINKEXTERN);
+						emitfunc(f, s, d->linkage == LINKEXTERN || d->linkage == LINKC);
 						s = delscope(s);
 						delfunc(f);
 					} else {

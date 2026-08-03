@@ -19,6 +19,7 @@
 #include "mcc.h"
 #include "decl_internal.h"
 #include "expr_internal.h"
+#include "cpp/cpp_tokens.h"
 
 /* Does the current token start a C++ constructor-call argument list
  * rather than a function parameter declaration?  `Point p(3)` — a numeric
@@ -313,6 +314,18 @@ declaratortypes(struct scope *s, struct list *result, char **name, int *align, s
 				t->u.func.nparam = 0;
 			}
 			listinsert(ptr->prev, &t->link);
+			/* C++ noexcept specifier: `int f() noexcept { ... }`.  The
+			 * keyword is a C++-only identifier, classified by the C++
+			 * lexer layer.  Consume it and record the flag on the
+			 * function type.  (noexcept is not stored in the symbol
+			 * table — it's a type-level attribute.) */
+			if (g_lang == 1 && tok.kind >= TIDENT) {
+				extern enum cpp_tokenkind cpp_tok_kind(void);
+				if (cpp_tok_kind() == CPP_TNOEXCEPT) {
+					t->u.func.is_noexcept = true;
+					next();
+				}
+			}
 			allowedattr = 0;
 			break;
 		case TLBRACK:  /* array declarator */

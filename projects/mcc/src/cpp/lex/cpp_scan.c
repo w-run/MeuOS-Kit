@@ -32,6 +32,7 @@ static const struct cpp_kw cpp_kws[] = {
 	{ "case", CPP_TCASE },
 	{ "catch", CPP_TCATCH },
 	{ "char", CPP_TCHAR },
+	{ "char8_t", CPP_TCHAR8 },
 	{ "class", CPP_TCLASS },
 	{ "co_await", CPP_TCO_AWAIT },
 	{ "co_return", CPP_TCO_RETURN },

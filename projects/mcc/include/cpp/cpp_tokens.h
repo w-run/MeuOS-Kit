@@ -85,6 +85,7 @@ enum cpp_tokenkind {
 	CPP_TCONSTEVAL,        /* C++20 consteval */
 	CPP_TCONSTINIT,        /* C++20 constinit */
 	CPP_TNOEXCEPT,         /* C++11 noexcept */
+	CPP_TCHAR8,            /* C++20 char8_t */
 	CPP_TNULLPTR_T,        /* C++11 nullptr_t */
 
 	/* C++20/23 concepts/modules */

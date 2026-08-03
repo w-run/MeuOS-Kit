@@ -46,6 +46,7 @@ enum typekind {
 	TYPEVOID,
 	TYPEBOOL,
 	TYPECHAR,
+	TYPECHAR8,
 	TYPESHORT,
 	TYPEINT,
 	TYPEENUM,
@@ -109,6 +110,10 @@ struct member {
 	bool is_virtual;
 	/* C++ const member function (trailing `const` qualifier). */
 	bool is_const;
+	/* C++ explicit constructor/conversion (C++11 `explicit`, C++20
+	 * `explicit(bool)`).  When true, the implicit conversion path
+	 * through the overload set is blocked. */
+	bool is_explicit;
 	/* C++ vtable slot index (valid once the class layout is finalized). */
 	int vslot;
 	struct member *next;
@@ -150,6 +155,7 @@ struct type {
 		} array;
 		struct {
 			bool isvararg;
+			bool is_noexcept;
 			struct decl *params;
 			size_t nparam;
 		} func;
@@ -185,6 +191,7 @@ enum linkage {
 	LINKNONE,
 	LINKINTERN,
 	LINKEXTERN,
+	LINKC,       /* C language linkage (extern "C") */
 };
 
 enum storageduration {
@@ -569,7 +576,7 @@ bool typehasint(struct type *, unsigned long long, bool);
 
 extern struct type typevoid;
 extern struct type typebool;
-extern struct type typechar, typeschar, typeuchar;
+extern struct type typechar, typeschar, typeuchar, typechar8;
 extern struct type typeshort, typeushort;
 extern struct type typeint, typeuint;
 extern struct type typelong, typeulong;

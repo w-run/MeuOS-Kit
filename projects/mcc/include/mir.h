@@ -383,6 +383,7 @@ enum MIRPass {
 	MIR_PASS_MEM2REG,/* alloca promotion (scalar slots -> SSA values) */
 	MIR_PASS_GVN,    /* global value numbering */
 	MIR_PASS_DCE,    /* dead code elimination */
+	MIR_PASS_IFCONV, /* constant-condition branch simplification */
 	MIR_PASS_SSA,    /* SSA consistency check (mssa_check) */
 	MIR_PASS_N,
 };
@@ -396,11 +397,6 @@ uint32_t mgvn(MFn *fn);
 uint32_t mloadfwd(MFn *fn);
 uint32_t mmem2reg(MFn *fn);
 void mref_replace(MFn *fn, MVal *old, MRef nr);
-
-/* ---- MIR → LIR bridge (src/lir/bridge.c) ------------------------------ */
-
-struct Fn;
-struct Fn *lir_bridge(MFn *mfn);
 
 /* arena helpers (mir_util.c) */
 void *m_alloc(MFn *fn, size_t size);

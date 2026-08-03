@@ -54,7 +54,8 @@ fe_scalar_mtype(struct type *t)
 {
 	switch (t->kind) {
 	case TYPEBOOL:
-	case TYPECHAR:    return MT_I8;
+	case TYPECHAR:
+	case TYPECHAR8:   return MT_I8;
 	case TYPESHORT:   return MT_I16;
 	case TYPEINT:
 	case TYPEENUM:    return MT_I32;

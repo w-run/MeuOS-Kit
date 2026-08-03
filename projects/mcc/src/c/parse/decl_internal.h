@@ -80,6 +80,8 @@ struct structbuilder {
 	bool member_virtual;
 	/* current member is a C++ const member function */
 	bool member_const;
+	/* current member is a C++ explicit constructor/conversion */
+	bool member_explicit;
 };
 
 /* Tentative-definition list: tracked in decl.c but drained by
