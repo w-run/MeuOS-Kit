@@ -54,6 +54,8 @@ projects/mcc/mcc
 # QEMU test environment (env/) - large binaries, not tracked
 reference/
 # Reference source trees (cproc + QBE), pulled read-only for design reference.
+# But .agents/reference/ IS tracked (project-level agent reference docs).
+!.agents/reference/
 *.s
 *.so
 *.so.*
@@ -64,6 +66,3 @@ stage/
 sysroot/
 .vscode/
 *.msys
-
-# Reference projects (cloned for study, not part of the build)
-reference/
