@@ -54,9 +54,21 @@ primaryexpr(struct scope *s)
 		assert(*src == '\'');
 		++src;
 		src += decodechar(src, &chr, &hexoct, "character constant", &tok.loc);
-		if (hexoct && !typehasint(t, chr, false))
-			error(&tok.loc, "character constant escape is out of range");
+		if (hexoct && !typehasint(t, chr, false)) {
+			/* The escape's value exceeds the character constant's type
+			 * range.  C11 6.4.4.4p10 says the resulting value is
+			 * implementation-defined, so wrap to the type width (the
+			 * low bits) rather than rejecting — chibicc keeps
+			 * e.g. L'\xffffffff' as the full 32-bit value (-1). */
+			if (t->u.arith.width < 32)
+				chr &= (1ull << t->u.arith.width) - 1;
+		}
 		val = chr;
+		if (t->prop & PROPINT && t->u.arith.issigned &&
+		    t->u.arith.width < 64 && (val >> (t->u.arith.width - 1)) & 1)
+			/* sign-extend a wide escape (e.g. L'\xffffffff' as int) so
+			 * the constant's 64-bit representation matches the type. */
+			val |= ~0ull << t->u.arith.width;
 		if (ordinary) {
 			if (typechar.u.arith.issigned)
 				val = (val ^ 0x80) - 0x80;
