@@ -80,7 +80,7 @@ parse_stmt_expr_body(struct scope *s)
 		base = declspecs(s, &sc, &fs, &align);
 		if (base.type) {
 			for (;;) {
-				qt = declarator(s, base, &name, &align, NULL, false);
+				qt = declarator(s, base, &name, &align, NULL, false, NULL);
 				if (sc & SCTYPEDEF) {
 					struct decl *prior = scopegetdecl(s, name, false);
 					if (!prior)

@@ -180,6 +180,10 @@ decl(struct scope *s, struct func *f)
 	base = declspecs(s, &sc, &fs, &align);
 	if (!base.type)
 		return false;
+	/* GNU `__attribute__((...))` appearing among the decl-specifiers
+	 * (e.g. `__attribute__((noreturn)) int f(void);`) is gathered by
+	 * declspecs into base.kind; fold it into the declaration attrs. */
+	a.kind |= base.kind;
 	/* C++ non-member operator overload: `Vec operator+(Vec a, Vec b)`.
 	 * The return type is already parsed; `operator` follows. */
 	{
@@ -223,7 +227,7 @@ decl(struct scope *s, struct func *f)
 		bool ctor_call = false;
 		struct expr *ctor_args = NULL;
 
-		qt = declarator(s, base, &name, NULL, &funcscope, false);
+		qt = declarator(s, base, &name, NULL, &funcscope, false, &a);
 		t = qt.type;
 		tq = qt.qual;
 		if (qt.expr == (struct expr *)1) {
@@ -335,6 +339,26 @@ decl(struct scope *s, struct func *f)
 			d = declcommon(s, kind, name, asmname, t, tq, sc, prior);
 			if (d->u.obj.align < align)
 				d->u.obj.align = align;
+			/* C++: a namespace-scope (or file-scope) object may be
+			 * defined only once — `int a; int a;` is ill-formed even
+			 * though C treats it as a tentative definition.  A prior
+			 * declaration with `extern` is not a definition, so
+			 * `extern int a; int a;` stays legal. */
+			{
+				extern int g_lang;
+				if (g_lang == 1 && !f && prior && prior->kind == DECLOBJECT &&
+				    (prior->defined || prior->tentative) &&
+				    !(sc & SCEXTERN))
+					error(&tok.loc, "redefinition of '%s'", name);
+			}
+			/* C++: variable-length arrays are a C feature; a C++ program
+			 * must not use them (`int arr[n];` with a runtime n). */
+			{
+				extern int g_lang;
+				if (g_lang == 1 && (t->prop & PROPVM))
+					error(&tok.loc,
+					    "variable-length array '%s' not allowed in C++", name);
+			}
 			/* C++11 `auto x = expr;`: the placeholder type (&typeauto) is
 			 * deduced from the initializer before the storage/type
 			 * machinery (mkglobal, parseinit) runs. */
@@ -381,7 +405,15 @@ decl(struct scope *s, struct func *f)
 					error(&tok.loc, "object '%s' redefined", name);
 				init = parseinit(s, d->type);
 				hasinit = true;
-			} else if (!hasinit && sc & SCEXTERN) {
+			}
+			/* C++: a reference must be bound to an object when it is
+			 * declared — `int &r;` is ill-formed. */
+			{
+				extern int g_lang;
+				if (g_lang == 1 && d->type->isref && !hasinit)
+					error(&tok.loc, "reference '%s' must be initialized", name);
+			}
+			if (!hasinit && sc & SCEXTERN) {
 				break;
 			} else if (!hasinit && d->linkage != LINKNONE && d->u.obj.storage == SDSTATIC) {
 				if (!d->defined && !d->tentative) {
@@ -579,6 +611,21 @@ decl(struct scope *s, struct func *f)
 					}
 					if (d->u.func.isnoreturn)
 						funchlt(f);
+					/* C++: a non-void function must not fall off the end of
+					 * its body (`int f(void) {}` is ill-formed).  `main`
+					 * implicitly returns 0, and `auto`-return functions
+					 * already require a return statement above. */
+					{
+						extern int g_lang;
+						extern struct type typeauto;
+						if (g_lang == 1 && t->base && t->base->kind != TYPEVOID &&
+						    t->base != &typeauto && !d->u.func.isnoreturn &&
+						    strcmp(d->name, "main") != 0 &&
+						    func_falls_off_end(f))
+							error(&tok.loc,
+							    "control reaches end of non-void function '%s'",
+							    name);
+					}
 					/* C99 6.7.4p6: a function defined `inline` (without
 					 * `extern`) has an inline definition, which provides an
 					 * alternative to — but is not itself — an external

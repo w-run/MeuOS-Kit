@@ -26,6 +26,7 @@ struct qualtype {
 	struct type *type;
 	enum typequal qual;
 	struct expr *expr;
+	enum attrkind kind;   /* attributes gathered by declspecs()/declarator() */
 };
 
 enum storageclass {
@@ -90,7 +91,7 @@ extern struct decl **tentativedefnsend;
 struct qualtype declspecs(struct scope *, enum storageclass *,
     enum funcspec *, int *);
 struct qualtype declarator(struct scope *, struct qualtype,
-    char **, int *, struct scope **, bool);
+    char **, int *, struct scope **, bool, struct attr *);
 struct type *typename(struct scope *, enum typequal *, struct expr **);
 struct type *tagspec(struct scope *);
 int typequal(enum typequal *);

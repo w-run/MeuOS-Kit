@@ -103,7 +103,7 @@ is_ctor_expr_start(struct scope *s)
 }
 
 void
-declaratortypes(struct scope *s, struct list *result, char **name, int *align, struct scope **funcscope, bool allowabstract)
+declaratortypes(struct scope *s, struct list *result, char **name, int *align, struct scope **funcscope, bool allowabstract, struct attr *attrout)
 {
 	struct list *ptr;
 	struct type *t;
@@ -155,7 +155,7 @@ declaratortypes(struct scope *s, struct list *result, char **name, int *align, s
 				goto func;
 			}
 		}
-		declaratortypes(s, result, name, align, funcscope, allowabstract);
+		declaratortypes(s, result, name, align, funcscope, allowabstract, attrout);
 		expect(TRPAREN, "after parenthesized declarator");
 		allowedattr = -1;
 		break;
@@ -356,6 +356,8 @@ declaratortypes(struct scope *s, struct list *result, char **name, int *align, s
 				if (a.kind & ATTRALIGNED && a.align > *align)
 					*align = a.align;
 			}
+			if (attrout)
+				attrout->kind |= a.kind;
 			break;
 		default:
 			return;
@@ -363,16 +365,19 @@ declaratortypes(struct scope *s, struct list *result, char **name, int *align, s
 	}
 }
 struct qualtype
-declarator(struct scope *s, struct qualtype base, char **name, int *align, struct scope **funcscope, bool allowabstract)
+declarator(struct scope *s, struct qualtype base, char **name, int *align, struct scope **funcscope, bool allowabstract, struct attr *attrout)
 {
 	struct type *t;
 	enum typequal tq;
 	struct expr *e;
 	struct list result = {&result, &result}, *l, *prev;
+	struct attr da = {0};
 
 	if (funcscope)
 		*funcscope = NULL;
-	declaratortypes(s, &result, name, align, funcscope, allowabstract);
+	declaratortypes(s, &result, name, align, funcscope, allowabstract, &da);
+	if (attrout)
+		attrout->kind |= da.kind;
 	for (l = result.prev; l != &result; l = prev) {
 		prev = l->prev;
 		t = listelement(l, struct type, link);
@@ -434,6 +439,7 @@ declarator(struct scope *s, struct qualtype base, char **name, int *align, struc
 		}
 	}
 
+	base.kind = da.kind;
 	return base;
 }
 struct decl *
@@ -450,7 +456,7 @@ parameter(struct scope *s)
 		error(&tok.loc, "no type in parameter declaration");
 	if (sc && sc != SCREGISTER)
 		error(&tok.loc, "parameter declaration has invalid storage-class specifier");
-	t = declarator(s, t, &name, NULL, NULL, true);
+	t = declarator(s, t, &name, NULL, NULL, true, NULL);
 	t.type = typeadjust(t.type, &t.qual);
 	d = mkdecl(name, DECLOBJECT, t.type, t.qual, LINKNONE);
 	d->u.obj.storage = SDAUTO;
