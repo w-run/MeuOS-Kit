@@ -129,7 +129,15 @@ mreg_intervals(MFnM *fm, MRegCtx *ctx)
 			MInsM *in = &b->ins[j];
 			if (in->dst && in->dst->kind == MV_TEMP) {
 				MRegInterval *iv = mreg_intv(ctx, in->dst);
-				iv->start = in->pos;
+				/* a value may be defined more than once in the machine
+				 * layer (e.g. mabi_selcall points the aggregate-return
+				 * call dst at a pad before the call, then the call
+				 * re-defines it).  The interval must start at the FIRST
+				 * def so the value stays live from its earliest write
+				 * through every use — otherwise the linear scan may hand
+				 * that register to a neighbour before the last def. */
+				if (in->pos < iv->start)
+					iv->start = in->pos;
 				if (in->extra == 1)
 					iv->phislot = true;   /* phi-edge copy dest */
 				/* varargs: keep va_list / stack-pad addresses in slots so
@@ -152,7 +160,7 @@ mreg_intervals(MFnM *fm, MRegCtx *ctx)
 	/* dead values: interval collapses to the def point */
 	for (uint32_t i = 0; i < ctx->nval; i++) {
 		MRegInterval *iv = &ctx->intv[i];
-		if (iv->v && iv->end <= iv->start)
+		if (iv->v && iv->start != UINT32_MAX && iv->end <= iv->start)
 			iv->end = iv->start + 1;
 	}
 }
@@ -337,7 +345,7 @@ mreg_scan(MFnM *fm, MRegCtx *ctx)
 		MRegInterval *cand = malloc(ctx->nval * sizeof *cand);
 		uint32_t ncand = 0;
 		for (uint32_t i = 0; i < ctx->nval; i++)
-			if (ctx->intv[i].v)
+			if (ctx->intv[i].v && ctx->intv[i].start < ctx->intv[i].end)
 				cand[ncand++] = ctx->intv[i];
 		qsort(cand, ncand, sizeof *cand, intv_cmp_start);
 
@@ -538,6 +546,7 @@ mfnm_regalloc(MFnM *fm)
 		if (v && v->kind == MV_TEMP) {
 			ctx.intv[i].v = v;
 			ctx.intv[i].reg = -1;
+			ctx.intv[i].start = UINT32_MAX;   /* sentinel: no def yet */
 		}
 	}
 

@@ -85,9 +85,15 @@ check-mir 全绿；bridge 路径 0 回归。
 - mabi_selret / mabi_selcall 的 ≤16B 分支改为按类寄存器序列
   （retreg[2][2] = {RAX,RDX}/{XMM0,XMM1}，逐 eightbyte 取类计数）。
 - emit MMOP_LOAD 增加 F64→XMM 寄存器的直接 `movsd` 路径（不再经 %rax）。
+- regalloc 区间起点取"首次 def"（sentinel UINT32_MAX + `min`）：聚合返回
+  call 的 dst 会被 mabi_selcall 先指向 pad、再由 call 重定义（multi-def），
+  区间必须从最早写入开始，否则线性扫描可能在该值最后一次 def 前把寄存器
+  让给邻居。
 - 回归测试：test/c11/aggregate_ret_small.c（8/12/16B int、16B SSE、
   16B 混合 {INTEGER,SSE}、嵌套访问）+ test/cpp/aggregate_ret_small.cc
-  （链式 operator+ 临时值回传 + 混合 16B 返回）。
+  （链式 operator+ 临时值回传 + 混合 16B 返回）+ test/c11/aggregate_return.c
+  与 test/cpp/aggregate_return.cc（含混合 {double,int}→XMM0+RDX、返回值直
+  接作实参、24B sret 对照）。
 
 ### 验证
 - 双路径（默认 bridge + MCC_MIR_BACKEND=1）：check-c-mir fail=0、
