@@ -84,6 +84,13 @@
 | 68 | 第八轮·调度器深化（三档同源调度 fair/EDF/RT·per-CPU runqueue+work-stealing·timer 绝对 deadline+slack 协同·CAP_RT bit45 门禁·Job 账本 fail-closed·五架构计时同源） | `68-调度器深化.md` |
 | 69 | 第八轮·虚拟化与guest支持（用户态VMM+薄内核guest设施·guest内存EPT/Stage-2·中断对象投影·virtio·五架构x86_64/aarch64优先） | `69-虚拟化与guest支持.md` |
 | 70 | 第八轮·收敛摘要（查缺补漏 C61-1/2/4·C60-1 bit49-55·C18·多 realm 边界 全部自主采纳闭环 + 63–69 新维度汇总 + 引用失真修正 + 待大喵拍板清单清零） | `70-第八轮收敛摘要.md` |
+| 71 | 第九轮·系统调用 ABI 与兼容层细化（五架构统一编号·mkit 薄层翻译 native capability·errno POSIX·结构体冻结 23·版本化随 .msys·native 径不经兼容层） | `71-系统调用ABI与兼容层细化.md` |
+| 72 | 第九轮·容器与沙箱运行时（Job 子树+namespace 视图·sandbox 默认 deny 显式 grant·OCI-ish 镜像投影 .mimg/.msys·多 realm 边界同构） | `72-容器与沙箱运行时.md` |
+| 73 | 第九轮·持久化快照与备份深化（.msys A/B repoint+C61-4 恢复指针·fs crash-consistent·VMO+COW 增量快照·device VMO 导出·度量进 .msys 度量基） | `73-持久化快照与备份深化.md` |
+| 74 | 第九轮·性能基准与回归方法论（五架构 perf counters 薄后端·benchmark 套件·回归门禁接入 22·与 68/63/59/27/40 协同·CI fail-closed） | `74-性能基准与回归方法论.md` |
+| 75 | 第九轮·形式化验证落地路径（Layer A 小核心承载 capability 核心+68 Sc9 调度核心证明·proof-carrying 边界·Rust 验证/Lean/Coq 精化·与 22 互补） | `75-形式化验证落地路径.md` |
+| 76 | 第九轮·内存管理深化-页分配与NUMA（VMO 逻辑对象 vs 物理页供给层·NUMA 拓扑感知·大页后端·页回收·device VMO 物理后端·确定性预留池 28） | `76-内存管理深化-页分配与NUMA.md` |
+| 77 | 第九轮·收敛摘要（63–69 待拍板 6 项全部自主采纳闭环 + 71–76 新维度汇总 + 全规划期待大喵拍板清单清零） | `77-第九轮收敛摘要.md` |
 | 00 | 总览与路线图 | `00-总览与路线图.md` |
 
 > 索引已补全：总览见 `00-总览与路线图.md`（合成 pass 产出，含跨域一致性矩阵、冲突登记表 C1–C14 与总路线图，第六轮 46–56 见其「第六轮核心子系统现代化探索成果」汇总节；粗合见 `56`）。
