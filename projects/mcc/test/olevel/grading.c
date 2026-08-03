@@ -39,6 +39,37 @@ const_arith(int x)
 	return x + (k + 1);
 }
 
+/* --- cmov / if-conversion 模式（-O2+ 生成条件移动，-O1 保留分支）--- */
+static int
+cmov_max(int a, int b)
+{
+	return a > b ? a : b;   /* 三元，INTEGER 选择 */
+}
+
+static int
+cmov_abs(int x)
+{
+	return x < 0 ? -x : x;  /* 三元，一侧为表达式 */
+}
+
+static unsigned
+cmov_umax(unsigned a, unsigned b)
+{
+	return a > b ? a : b;   /* 无符号比较（unsigned） */
+}
+
+static long
+cmov_lmin(long a, long b)
+{
+	return a < b ? a : b;   /* 64 位选择 */
+}
+
+static int
+cmov_bool(int c, int x, int y)
+{
+	return c ? x : y;       /* 直接布尔条件（无比较 setcc） */
+}
+
 int
 main(void)
 {
@@ -49,7 +80,17 @@ main(void)
 	s += mul8(5);              /* 40 */
 	s += leaf_add(7);          /* 8 */
 	s += const_arith(0);       /* 8 */
-	if (s != 62)
+	s += cmov_max(5, 9);       /* 9 */
+	s += cmov_max(9, 5);       /* 9 */
+	s += cmov_abs(-4);         /* 4 */
+	s += cmov_abs(4);          /* 4 */
+	s += (int)cmov_umax(3u, 9u);  /* 9 */
+	s += (int)cmov_umax(9u, 3u);  /* 9 */
+	s += (int)cmov_lmin(5L, 9L);  /* 5 */
+	s += (int)cmov_lmin(9L, 5L);  /* 5 */
+	s += cmov_bool(1, 7, 3);   /* 7 */
+	s += cmov_bool(0, 7, 3);   /* 3 */
+	if (s != 126)
 		return 1;
 	return 0;
 }
