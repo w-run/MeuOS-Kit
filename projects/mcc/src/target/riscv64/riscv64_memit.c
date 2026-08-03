@@ -63,6 +63,9 @@ alloca_total(MFnM *fm)
 
 /* ---- value printing ------------------------------------------------------ */
 
+static void emit_tls_addr(FILE *f, const char *sym, bool isext,
+                          const char *rn);
+
 static void
 emit_const(FILE *f, MConst *c)
 {
@@ -139,6 +142,10 @@ mv_to_scratch(FILE *f, MVal *v, const char *rn)
 		fprintf(f, "\tmv\t%s, %s\n", rn, mreg_name(g_mt, v->reg));
 		break;
 	case MV_GLOBAL:
+		if (v->tls) {
+			emit_tls_addr(f, v->sym ? v->sym : "0", v->isext, rn);
+			break;
+		}
 		fprintf(f, "\tlui\t%s, %%pcrel_hi(%s)\n"
 		            "\taddi\t%s, %s, %%pcrel_lo(%s)\n",
 		        rn, v->sym ? v->sym : "0", rn, rn, v->sym ? v->sym : "0");
@@ -254,6 +261,24 @@ scratch_to_dst_f(FILE *f, MVal *d, const char *rn)
 
 /* ---- load/store addressing ---------------------------------------------- */
 
+/* Emit the address of a TLS global into the scratch register rn:
+ *   - local-exec (internal symbol): lui %tprel_hi + add tp,%tprel_add +
+ *     addi %tprel_lo;
+ *   - initial-exec (external): la.tls.ie + add tp (GAS pseudo). */
+static void
+emit_tls_addr(FILE *f, const char *sym, bool isext, const char *rn)
+{
+	if (isext) {
+		fprintf(f, "\tla.tls.ie\t%s, %s\n\tadd\t%s, %s, tp\n",
+		        rn, sym, rn, rn);
+		return;
+	}
+	fprintf(f, "\tlui\t%s, %%tprel_hi(%s)\n"
+	            "\tadd\t%s, %s, tp, %%tprel_add(%s)\n"
+	            "\taddi\t%s, %s, %%tprel_lo(%s)\n",
+	        rn, sym, rn, rn, sym, rn, rn, sym);
+}
+
 /* Emit an address into the scratch register rn (t0/t1).  Symbolic targets
  * use the %pcrel_hi/lo pair. */
 static void
@@ -284,8 +309,12 @@ emit_addr_to_scratch(FILE *f, MAddr a, const char *rn)
 	if (base && base->kind == MV_GLOBAL) {
 		/* address of a global symbol (e.g. an array) */
 		const char *sym = base->sym ? base->sym : "0";
-		fprintf(f, "\tlui\t%s, %%pcrel_hi(%s)\n", rn, sym);
-		fprintf(f, "\taddi\t%s, %s, %%pcrel_lo(%s)\n", rn, rn, sym);
+		if (base->tls) {
+			emit_tls_addr(f, sym, base->isext, rn);
+		} else {
+			fprintf(f, "\tlui\t%s, %%pcrel_hi(%s)\n", rn, sym);
+			fprintf(f, "\taddi\t%s, %s, %%pcrel_lo(%s)\n", rn, rn, sym);
+		}
 		if (a.off)
 			fprintf(f, "\taddi\t%s, %s, %lld\n", rn, rn, (long long)a.off);
 		return;
