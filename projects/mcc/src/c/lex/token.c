@@ -246,6 +246,14 @@ static const char *const errcode_names[] = {
 	"E0002", /* E_UNDECLARED */
 	"E0003", /* E_TYPE */
 	"E0004", /* E_REDEF */
+	"E0005", /* E_DECL */
+	"E0006", /* E_STMT */
+	"E0007", /* E_CTYPE */
+	"E0008", /* E_INCOMPLETE */
+	"E0009", /* E_QUAL */
+	"E0010", /* E_ACCESS */
+	"E0011", /* E_TEMPLATE */
+	"E0012", /* E_OVERLOAD */
 };
 
 static const char *

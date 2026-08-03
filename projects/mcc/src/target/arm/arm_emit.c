@@ -1403,6 +1403,14 @@ arm32_emitfn(Fn *fn, FILE *f)
 	Ins *i;
 	int csgpr = 0; /* any callee-saved GPR (r4-r9) used by rega */
 	int csfp = 0;  /* count of callee-saved FPRs (d8-d15) used by rega */
+	static int hdr; /* .syntax/.arch/.fpu emitted once per output */
+
+	if (!hdr) {
+		hdr = 1;
+		fprintf(f, ".syntax unified\n");
+		fprintf(f, ".arch armv7ve\n");
+		fprintf(f, ".fpu neon\n");
+	}
 
 	emitfnlnk(fn->name, &fn->lnk, f);
 	/* Save every callee-saved GPR that rega assigned (r4-r9), plus the

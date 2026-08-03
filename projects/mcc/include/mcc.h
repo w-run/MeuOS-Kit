@@ -415,15 +415,29 @@ enum errcode {
 	E_UNDECLARED = 2,  /* undeclared identifier */
 	E_TYPE       = 3,  /* type mismatch / invalid operands */
 	E_REDEF      = 4,  /* redefinition of a name/tag/member/enumerator */
+	E_DECL       = 5,  /* declaration error: storage class / typedef / linkage / initializer */
+	E_STMT       = 6,  /* statement error: break/continue/label/return outside context */
+	E_CTYPE      = 7,  /* conversion / type-system error (sema/irgen): illegal conversion, invalid operands */
+	E_INCOMPLETE = 8,  /* use of an incomplete type */
+	E_QUAL       = 9,  /* const / volatile qualification violation */
+	E_ACCESS     = 10, /* C++ access control violation */
+	E_TEMPLATE   = 11, /* C++ template error */
+	E_OVERLOAD   = 12, /* C++ overload resolution error */
 };
 
 /* Coded diagnostics.  error_tok_code/error_fixit render the caret across
  * the whole token span (width derived from the token text); error() and
  * error_code use a single caret at the location.  error_fixit appends an
- * inline "note: <fix>" with its own caret after the primary diagnostic. */
-void error_code(enum errcode, const struct location *, const char *, ...);
-void error_tok_code(enum errcode, const struct token *, const char *, ...);
-void error_fixit(enum errcode, const struct token *, const char *,
+ * inline "note: <fix>" with its own caret after the primary diagnostic.
+ * All three are noreturn like error(): error_common always longjmps to the
+ * recovery point or exits(1), so the compiler must know the diagnostic
+ * path never falls through (a non-noreturn decl shifts the stack layout
+ * of hot parse functions and exposes latent stack bugs). */
+noreturn void error_code(enum errcode, const struct location *,
+    const char *, ...);
+noreturn void error_tok_code(enum errcode, const struct token *,
+    const char *, ...);
+noreturn void error_fixit(enum errcode, const struct token *, const char *,
     const char *, ...);
 
 /* JSON multi-error collection: the top-level parse loop arms g_err_recovery

@@ -19,6 +19,7 @@
 #include "riscv64_m.h"
 #include "loongarch64_m.h"
 #include "aarch64_m.h"
+#include "arm_m.h"
 
 /* ---- loongarch64 machine target (register descriptions) ---------------- */
 /* 32 GPRs (r0-r31, ABI names) + 32 FPRs (f0-f31).  Caller-saved: t0-t8,
@@ -418,6 +419,111 @@ const MTargetM mtarget_aarch64 = {
 	           (1ull << A64MREG_X11) | (1ull << A64MREG_IP0) |
 	           (1ull << A64MREG_IP1) | (1ull << A64MREG_V16) |
 	           (1ull << A64MREG_V17),
+};
+
+/* ---- ARM (armv7-a, 32-bit) machine target ------------------------------ */
+
+static const MRegInfo arm_regs[ARM_MREG_NREG] = {
+	[ARM_R0]  = { "r0",  MRC_GPR, true,  false, true  },
+	[ARM_R1]  = { "r1",  MRC_GPR, true,  false, true  },
+	[ARM_R2]  = { "r2",  MRC_GPR, true,  false, true  },
+	[ARM_R3]  = { "r3",  MRC_GPR, true,  false, true  },
+	[ARM_R4]  = { "r4",  MRC_GPR, false, true,  false },
+	[ARM_R5]  = { "r5",  MRC_GPR, false, true,  false },
+	[ARM_R6]  = { "r6",  MRC_GPR, false, true,  false },
+	[ARM_R7]  = { "r7",  MRC_GPR, false, true,  false },
+	[ARM_R8]  = { "r8",  MRC_GPR, false, true,  false },
+	[ARM_R9]  = { "r9",  MRC_GPR, false, true,  false },
+	[ARM_R10] = { "r10", MRC_GPR, true,  false, false },
+	[ARM_R11] = { "fp",  MRC_GPR, false, false, false },
+	[ARM_R12] = { "r12", MRC_GPR, true,  false, false },
+	[ARM_SP]  = { "sp",  MRC_GPR, false, false, false },
+	[ARM_LR]  = { "lr",  MRC_GPR, false, false, false },
+	[ARM_PC]  = { "pc",  MRC_GPR, false, false, false },
+	[ARM_D0]  = { "d0",  MRC_FPR, true,  false, true  },
+	[ARM_D1]  = { "d1",  MRC_FPR, true,  false, true  },
+	[ARM_D2]  = { "d2",  MRC_FPR, true,  false, true  },
+	[ARM_D3]  = { "d3",  MRC_FPR, true,  false, true  },
+	[ARM_D4]  = { "d4",  MRC_FPR, true,  false, true  },
+	[ARM_D5]  = { "d5",  MRC_FPR, true,  false, true  },
+	[ARM_D6]  = { "d6",  MRC_FPR, true,  false, true  },
+	[ARM_D7]  = { "d7",  MRC_FPR, true,  false, true  },
+	[ARM_D8]  = { "d8",  MRC_FPR, false, true,  false },
+	[ARM_D9]  = { "d9",  MRC_FPR, false, true,  false },
+	[ARM_D10] = { "d10", MRC_FPR, false, true,  false },
+	[ARM_D11] = { "d11", MRC_FPR, false, true,  false },
+	[ARM_D12] = { "d12", MRC_FPR, false, true,  false },
+	[ARM_D13] = { "d13", MRC_FPR, false, true,  false },
+	[ARM_D14] = { "d14", MRC_FPR, false, true,  false },
+	[ARM_D15] = { "d15", MRC_FPR, false, true,  false },
+	[ARM_D16] = { "d16", MRC_FPR, true,  false, false },
+	[ARM_D17] = { "d17", MRC_FPR, true,  false, false },
+	[ARM_D18] = { "d18", MRC_FPR, true,  false, false },
+	[ARM_D19] = { "d19", MRC_FPR, true,  false, false },
+	[ARM_D20] = { "d20", MRC_FPR, true,  false, false },
+	[ARM_D21] = { "d21", MRC_FPR, true,  false, false },
+	[ARM_D22] = { "d22", MRC_FPR, true,  false, false },
+	[ARM_D23] = { "d23", MRC_FPR, true,  false, false },
+	[ARM_D24] = { "d24", MRC_FPR, true,  false, false },
+	[ARM_D25] = { "d25", MRC_FPR, true,  false, false },
+	[ARM_D26] = { "d26", MRC_FPR, true,  false, false },
+	[ARM_D27] = { "d27", MRC_FPR, true,  false, false },
+	[ARM_D28] = { "d28", MRC_FPR, true,  false, false },
+	[ARM_D29] = { "d29", MRC_FPR, true,  false, false },
+	[ARM_D30] = { "d30", MRC_FPR, true,  false, false },
+	[ARM_D31] = { "d31", MRC_FPR, true,  false, false },
+};
+
+/* AAPCS32 argument order: 4 integer (r0-r3), 8 FP (d0-d7). */
+const int arm_argreg[13] = {
+	ARM_R0, ARM_R1, ARM_R2, ARM_R3,
+	ARM_D0, ARM_D1, ARM_D2, ARM_D3,
+	ARM_D4, ARM_D5, ARM_D6, ARM_D7,
+	-1
+};
+static const int arm_rsave[] = {
+	ARM_R0, ARM_R1, ARM_R2, ARM_R3, ARM_R12,
+	ARM_D0, ARM_D1, ARM_D2, ARM_D3, ARM_D4, ARM_D5, ARM_D6, ARM_D7,
+	ARM_D16, ARM_D17, ARM_D18, ARM_D19, ARM_D20, ARM_D21, ARM_D22,
+	ARM_D23, ARM_D24, ARM_D25, ARM_D26, ARM_D27, ARM_D28, ARM_D29,
+	ARM_D30, ARM_D31,
+	-1
+};
+static const int arm_rclob[] = {
+	ARM_R4, ARM_R5, ARM_R6, ARM_R7, ARM_R8, ARM_R9,
+	ARM_D10, ARM_D11, ARM_D12, ARM_D13, ARM_D14, ARM_D15,
+	-1
+};
+
+/* P3c ABI lowering for ARM AAPCS32 (arm_mabi.c). */
+extern void mfnm_abi_arm(MFnM *fm);
+const MTargetM mtarget_arm = {
+	.name = "arm",
+	.nreg = ARM_MREG_NREG,
+	.regs = arm_regs,
+	.gpr0 = ARM_R0,
+	.ngpr = 16,              /* r0-r15 */
+	.fpr0 = ARM_D0,
+	.nfpr = 32,              /* d0-d31 */
+	/* never allocated: fp/r11, sp/r13, lr/r14, pc/r15 */
+	.rglob = (1ull << ARM_R11) | (1ull << ARM_SP) |
+	         (1ull << ARM_LR) | (1ull << ARM_PC),
+	.reserved = 0,
+	.argreg = arm_argreg,
+	.rsave = arm_rsave,
+	.rclob = arm_rclob,
+	.ptrsize = 4,
+	.stackalign = 8,
+	.kl_in_reg = false,
+	.feat = 0,               /* no cmov, no scale-index addressing */
+	.sret_reg = ARM_R0,
+	.abi = mfnm_abi_arm,
+	/* emitter temporaries: r10/r12 (scratch) + d8/d9 (FP scratch; d8/d9
+	 * have single-precision views s16/s17 — d16-d31 have no s-view on
+	 * ARM — and being callee-saved they survive calls), never handed to
+	 * the allocator */
+	.scratch = (1ull << ARM_R10) | (1ull << ARM_R12) |
+	           (1ull << ARM_D8) | (1ull << ARM_D9),
 };
 
 /* ---- x86-64 machine target (register descriptions) --------------------- */

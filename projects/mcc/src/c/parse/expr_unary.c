@@ -66,7 +66,7 @@ unaryexpr(struct scope *s)
 		next();
 		e = castexpr(s);
 		if (!(e->type->prop & PROPARITH))
-			error(&tok.loc, "operand of unary '+' operator must have arithmetic type");
+			error_code(E_CTYPE, &tok.loc, "operand of unary '+' operator must have arithmetic type");
 		if (e->type->prop & PROPINT)
 			e = exprpromote(e);
 		break;
@@ -74,7 +74,7 @@ unaryexpr(struct scope *s)
 		next();
 		e = castexpr(s);
 		if (!(e->type->prop & PROPARITH))
-			error(&tok.loc, "operand of unary '-' operator must have arithmetic type");
+			error_code(E_CTYPE, &tok.loc, "operand of unary '-' operator must have arithmetic type");
 		if (e->type->prop & PROPINT)
 			e = exprpromote(e);
 		e = mkexpr(EXPRUNARY, e->type, e);
@@ -84,7 +84,7 @@ unaryexpr(struct scope *s)
 		next();
 		e = castexpr(s);
 		if (!(e->type->prop & PROPINT))
-			error(&tok.loc, "operand of '~' operator must have integer type");
+			error_code(E_CTYPE, &tok.loc, "operand of '~' operator must have integer type");
 		e = exprpromote(e);
 		e = mkbinaryexpr(&tok.loc, TXOR, e, mkconstexpr(e->type, -1));
 		break;
@@ -92,7 +92,7 @@ unaryexpr(struct scope *s)
 		next();
 		e = castexpr(s);
 		if (!(e->type->prop & PROPSCALAR))
-			error(&tok.loc, "operator '!' must have scalar operand");
+			error_code(E_CTYPE, &tok.loc, "operator '!' must have scalar operand");
 		e = mkbinaryexpr(&tok.loc, TEQL, e, mkconstexpr(&typeint, 0));
 		break;
 	case TSIZEOF:
@@ -106,11 +106,11 @@ unaryexpr(struct scope *s)
 			extern int g_lang;
 			extern int cpp_sizeof_pack(void);
 			if (g_lang != 1)
-				error(&tok.loc, "'...' cannot appear here");
+				error_code(E_SYNTAX, &tok.loc, "'...' cannot appear here");
 			next(); /* consume ... */
 			expect(TLPAREN, "after 'sizeof...'");
 			if (tok.kind < TIDENT)
-				error(&tok.loc, "expected pack name after 'sizeof...('");
+				error_code(E_SYNTAX, &tok.loc, "expected pack name after 'sizeof...('");
 			next(); /* consume the pack name */
 			expect(TRPAREN, "after pack name in 'sizeof...'");
 			e = mkconstexpr(&typeulong, cpp_sizeof_pack());
@@ -134,19 +134,19 @@ unaryexpr(struct scope *s)
 			t = NULL;
 			e = unaryexpr(s);
 		} else {
-			error(&tok.loc, "expected ')' after 'alignof'");
+			error_code(E_SYNTAX, &tok.loc, "expected ')' after 'alignof'");
 		}
 		if (!t) {
 			if (e->decayed)
 				e = e->base;
 			if (e->kind == EXPRBITFIELD)
-				error(&tok.loc, "%s operator applied to bitfield expression", tokenstr(op));
+				error_code(E_CTYPE, &tok.loc, "%s operator applied to bitfield expression", tokenstr(op));
 			t = e->type;
 		}
 		if (t->incomplete)
-			error(&tok.loc, "%s operator applied to incomplete type", tokenstr(op));
+			error_code(E_INCOMPLETE, &tok.loc, "%s operator applied to incomplete type", tokenstr(op));
 		if (t->kind == TYPEFUNC)
-			error(&tok.loc, "%s operator applied to function type", tokenstr(op));
+			error_code(E_DECL, &tok.loc, "%s operator applied to function type", tokenstr(op));
 		if (t->kind == TYPEARRAY && t->size == 0 && op == TSIZEOF) {
 			e = mkexpr(EXPRSIZEOF, &typeulong, e);
 			e->u.szof.type = t;
@@ -167,7 +167,7 @@ unaryexpr(struct scope *s)
 		e = unaryexpr(s);
 		realt = e->type->base ? e->type->base : e->type;
 		if (!realt)
-			error(&tok.loc, "complex type has no base type");
+			error_code(E_CTYPE, &tok.loc, "complex type has no base type");
 		e = mkexpr(EXPRUNARY, realt, e);
 		e->op = op;
 		e->lvalue = true;
@@ -223,7 +223,7 @@ castexpr(struct scope *s)
 			goto done;
 		}
 		if (t != &typevoid && !(t->prop & PROPSCALAR))
-			error(&tok.loc, "cast type must be scalar");
+			error_code(E_CTYPE, &tok.loc, "cast type must be scalar");
 		e = mkexpr(EXPRCAST, t, NULL);
 		e->toeval = toeval;
 		*end = e;
@@ -234,7 +234,7 @@ castexpr(struct scope *s)
 
 done:
 	if (ct && ct != &typevoid && !(e->type->prop & PROPSCALAR))
-		error(&tok.loc, "cast operand must have scalar type");
+		error_code(E_CTYPE, &tok.loc, "cast operand must have scalar type");
 	*end = e;
 	return r;
 }

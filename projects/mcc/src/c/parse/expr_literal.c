@@ -57,7 +57,7 @@ inttype(unsigned long long val, bool decimal, char *suffix)
 		case 'w': if (s[1] != 'b') goto invalid; ++s, new = WB; break;
 		case 'W': if (s[1] != 'B') goto invalid; ++s, new = WB; break;
 		default:
-		invalid: error(&tok.loc, "invalid integer constant suffix '%s'", suffix);
+		invalid: error_code(E_SYNTAX, &tok.loc, "invalid integer constant suffix '%s'", suffix);
 		}
 		if (flags & new || flags & ~U && new & ~U)
 			goto invalid;
@@ -95,7 +95,7 @@ inttype(unsigned long long val, bool decimal, char *suffix)
 		return &typellong;
 	}
 notype:
-	error(&tok.loc, "no suitable type for constant '%s'", tok.lit);
+	error_code(E_CTYPE, &tok.loc, "no suitable type for constant '%s'", tok.lit);
 }
 static int
 octval(int c)
@@ -145,7 +145,7 @@ decodechar(const char *src, uint_least32_t *chr, bool *hexoct, const char *desc,
 			assert(v >= 0);
 			do {
 				if (c > 0xffffffff / 16)
-					error(&tok.loc, "character constant escape is out of range");
+					error_code(E_SYNTAX, &tok.loc, "character constant escape is out of range");
 				c = c * 16 + v;
 				v = hexval(*++s);
 			} while (v >= 0);
@@ -158,7 +158,7 @@ decodechar(const char *src, uint_least32_t *chr, bool *hexoct, const char *desc,
 			i = 0;
 			do {
 				if (c > 0xffffffff / 8)
-					error(&tok.loc, "character constant escape is out of range");
+					error_code(E_SYNTAX, &tok.loc, "character constant escape is out of range");
 				c = c * 8 + v;
 				v = octval(*++s);
 			} while (v >= 0 && ++i < 3);
@@ -226,7 +226,7 @@ stringconcat(struct stringlit *str, bool forceutf8)
 		default: assert(0);
 		}
 		if (kind != newkind && kind && newkind)
-			error(&tok.loc, "adjacent string literals have differing prefixes");
+			error_code(E_SYNTAX, &tok.loc, "adjacent string literals have differing prefixes");
 		if (newkind)
 			kind = newkind;
 		p = arrayadd(&parts, sizeof(*p));

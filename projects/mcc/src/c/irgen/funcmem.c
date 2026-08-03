@@ -134,9 +134,9 @@ funcstore(struct func *f, struct type *t, enum typequal tq, struct lvalue lval,
 	int bits;
 
 	if (tq & QUALVOLATILE)
-		error(&tok.loc, "volatile store is not yet supported");
+		error_code(E_QUAL, &tok.loc, "volatile store is not yet supported");
 	if (tq & QUALCONST)
-		error(&tok.loc, "cannot store to 'const' object");
+		error_code(E_QUAL, &tok.loc, "cannot store to 'const' object");
 	tp = t->prop;
 	assert(!lval.bits.before && !lval.bits.after || tp & PROPINT);
 	r = v;

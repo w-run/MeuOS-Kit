@@ -1,28 +1,28 @@
-/* aarch64_mbe.c — aarch64 machine-backend entry (MIR-native).
+/* arm_mbe.c — ARM machine-backend entry (MIR-native).
  *
  * Translates MIR functions into the shared machine IR (MMOP) and runs the
- * aarch64 ABI lowering + register allocation + assembly emission.
+ * ARM ABI lowering + register allocation + assembly emission.
  *
- * Comparison model: aarch64 has NZCV condition flags (cmp sets them,
- * b.cc branches on them, cset materializes a 0/1).  The isel still
- * lowers MIR comparisons to MMOP_SETCCR ("dst = a cc b ? 1 : 0") and
- * `if (bool)` to MMOP_JCC with the boolean in src[0] — the emit layer
- * implements SETCCR with `cmp a, b; cset dst, cc` and JCC with cbnz/cbz.
- * This mirrors the riscv64 register-comparison scheme and avoids the
- * flags-liveness problem (a compare and its branch can never be separated
- * by a flag-clobbering instruction), at a small cost of one extra cset.
+ * Comparison model: ARM has the CPSR condition flags (cmp sets them,
+ * b.cc branches on them, conditional movs materialize 0/1).  The isel
+ * still lowers MIR comparisons to MMOP_SETCCR ("dst = a cc b ? 1 : 0")
+ * and `if (bool)` to MMOP_JCC with the boolean in src[0] — the emit
+ * layer implements SETCCR with `cmp a, b; mov rD,#0; movCC rD,#1` and
+ * JCC with `cmp a,#0; b.ne` — mirroring the riscv64/aarch64 register-
+ * comparison scheme.
  *
- * mbe_supported() restricts the MIR-native path to scalar integer
- * functions (no aggregates, floats, varargs, TLS, VLA) for this round;
- * everything else falls back to the legacy LIR aarch64 backend.
+ * mbe_supported() restricts the MIR-native path to scalar 32-bit
+ * integer + floating-point functions: 64-bit integer values (long long
+ * on this 32-bit target) need register pairs and are left to the legacy
+ * LIR ARM backend, as are aggregates, varargs, TLS and VLA.
  */
 #include <stdlib.h>
 
 #include "mir.h"
-#include "aarch64_m.h"
+#include "arm_m.h"
 
-extern void mfnm_abi_aarch64(MFnM *fm);
-extern void mfnm_emit_aarch64(MFnM *fm, FILE *f);
+extern void mfnm_abi_arm(MFnM *fm);
+extern void mfnm_emit_arm(MFnM *fm, FILE *f);
 
 /* forward-ordered block array (mf->link is reversed) */
 static MBlk **
@@ -67,22 +67,16 @@ static MCC
 mir_cmp_cc(MOP op)
 {
 	switch (op) {
-	case MOP_CEQ:  return MCC_EQ;
-	case MOP_CNE:  return MCC_NE;
-	case MOP_CSLT: return MCC_LT;
-	case MOP_CSLE: return MCC_LE;
-	case MOP_CSGT: return MCC_GT;
-	case MOP_CSGE: return MCC_GE;
+	case MOP_CEQ:  case MOP_CFEQ: return MCC_EQ;
+	case MOP_CNE:  case MOP_CFNE: return MCC_NE;
+	case MOP_CSLT: case MOP_CFLT: return MCC_LT;
+	case MOP_CSLE: case MOP_CFLE: return MCC_LE;
+	case MOP_CSGT: case MOP_CFGT: return MCC_GT;
+	case MOP_CSGE: case MOP_CFGE: return MCC_GE;
 	case MOP_CULT: return MCC_CC;
 	case MOP_CULE: return MCC_LS;
 	case MOP_CUGT: return MCC_HI;
 	case MOP_CUGE: return MCC_CS;
-	case MOP_CFEQ: return MCC_EQ;
-	case MOP_CFNE: return MCC_NE;
-	case MOP_CFLT: return MCC_LT;   /* FP compare: signed-style names */
-	case MOP_CFLE: return MCC_LE;
-	case MOP_CFGT: return MCC_GT;
-	case MOP_CFGE: return MCC_GE;
 	default:       return MCC_EQ;
 	}
 }
@@ -107,21 +101,68 @@ mval_of_ref(MFn *mf, MRef r)
 	return 0;
 }
 
-/* Full coverage: scalar, float, aggregates, VLA and varargs all run
- * MIR-native on aarch64. */
+/* Scalar 32-bit integer + floating-point functions only for this round:
+ * reject 64-bit integer values (long long needs register pairs on this
+ * 32-bit target), aggregates, varargs, TLS and VLA — fall back to the
+ * legacy LIR ARM backend.  MT_PTR is allowed: on this 32-bit target it
+ * only carries function references (the callee of MOP_CALL), which the
+ * emitter turns into a direct `bl`. */
 static bool
 mbe_supported(MFn *mf)
 {
-	(void)mf;
+	if (mf->rettype == MT_I64) {
+		if (getenv("MCC_DEBUG_ARMREJ"))
+			fprintf(stderr, "arm rej %s: rettype i64\n", mf->name);
+		return false;   /* 64-bit return: legacy */
+	}
+	for (MBlk *mb = mf->link; mb; mb = mb->link) {
+		for (uint32_t k = 0; k < mb->nins; k++) {
+			MIns *in = &mb->ins[k];
+			if (in->dtype == MT_I64) {
+				if (getenv("MCC_DEBUG_ARMREJ"))
+					fprintf(stderr, "arm rej %s: ins %d dtype i64\n",
+					        mf->name, (int)in->op);
+				return false;
+			}
+			for (int s = 0; s < 2; s++) {
+				if (in->src[s].val && in->src[s].val->type == MT_I64) {
+					if (getenv("MCC_DEBUG_ARMREJ"))
+						fprintf(stderr, "arm rej %s: src%d i64\n",
+						        mf->name, s);
+					return false;
+				}
+			}
+			if (in->dst && in->dst->type == MT_I64) {
+				if (getenv("MCC_DEBUG_ARMREJ"))
+					fprintf(stderr, "arm rej %s: dst i64\n", mf->name);
+				return false;
+			}
+			switch (in->op) {
+			case MOP_ARG:
+			case MOP_CALL:
+				if (in->src[0].val && in->src[0].val->kind == MV_TYPE)
+					return false;   /* aggregate args/returns */
+				break;
+			case MOP_VASTART: case MOP_VAARG:
+				return false;       /* varargs: legacy for now */
+			case MOP_ALLOCA:
+				if (in->src[0].val && in->src[0].val->kind != MV_CONST)
+					return false;   /* VLA: legacy for now */
+				break;
+			default:
+				break;
+			}
+		}
+	}
 	return true;
 }
 
 bool
-mfnm_backend_aarch64(MFn *mf)
+mfnm_backend_arm(MFn *mf)
 {
 	if (!mbe_supported(mf))
 		return false;
-	MFnM *fm = mfnm_new(mf, &mtarget_aarch64, mf->name);
+	MFnM *fm = mfnm_new(mf, &mtarget_arm, mf->name);
 	fm->retty = mf->rettyd;
 
 	uint32_t nblk = 0;
@@ -173,7 +214,7 @@ mfnm_backend_aarch64(MFn *mf)
 			}
 			default: {
 				if (in->op >= MOP_CEQ && in->op <= MOP_CFGE) {
-					/* comparison -> SETCCR (cmp + cset at emit) */
+					/* comparison -> SETCCR (cmp + conditional mov) */
 					MVal *a0 = mval_of_ref(mf, in->src[0]);
 					MVal *a1 = mval_of_ref(mf, in->src[1]);
 					if (a0 && a1) {
@@ -217,6 +258,10 @@ mfnm_backend_aarch64(MFn *mf)
 				                   mval_of_ref(mf, in->src[1]));
 				if (in->cst)
 					mi->cst = in->cst;
+				/* alloca: carry the size as cst so the emitter sizes the
+				 * static alloca area correctly */
+				if (in->op == MOP_ALLOCA && in->src[0].con)
+					mi->cst = in->src[0].con;
 				break;
 			}
 			}
@@ -229,7 +274,7 @@ mfnm_backend_aarch64(MFn *mf)
 			break;
 		case MOP_JNZ: {
 			/* branch on the boolean value: JCC carries it in src[0]
-			 * (cbnz/cbz at emit), no flags involved */
+			 * (cmp + b.ne at emit), no flags involved */
 			MVal *cond = mval_of_ref(mf, mb->term.src[0]);
 			MBlkM *t = mb->s1 ? mblk[mb->s1->id] : 0;
 			MBlkM *ft = mb->s2 ? mblk[mb->s2->id] : 0;
@@ -269,14 +314,14 @@ mfnm_backend_aarch64(MFn *mf)
 		}
 	}
 
-	mfnm_abi_aarch64(fm);
+	mfnm_abi_arm(fm);
 	mfnm_regalloc(fm);
 	if (getenv("MCC_DEBUG_MBE")) {
-		fprintf(stderr, "\n> MIR backend (aarch64) %s:\n",
+		fprintf(stderr, "\n> MIR backend (arm) %s:\n",
 		        fm->name ? fm->name : "?");
 		mfnm_dump(fm, stderr);
 	}
-	mfnm_emit_aarch64(fm, stdout);
+	mfnm_emit_arm(fm, stdout);
 
 	mfnm_free(fm);
 	free(mblk);

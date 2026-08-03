@@ -123,7 +123,7 @@ parse_stmt_expr_body(struct scope *s)
 		    tok.kind == TRETURN || tok.kind == TLBRACE ||
 		    tok.kind == T__ASM__) {
 			if (!curfunc)
-				error(&tok.loc, "control-flow in statement expression requires function context");
+				error_code(E_DECL, &tok.loc, "control-flow in statement expression requires function context");
 			stmt(curfunc, s);
 			continue;
 		}

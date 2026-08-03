@@ -1,20 +1,14 @@
-/* emit.c - Direct IR construction (replaces the frontend's text-IL emitter).
+/* emit.c — per-function lowering + global data emission.
  *
- * The legacy reference cproc/qbe.c file emitted IR text IL via emitname/emittype/
- * emitclass/emitinst/emitjump/emitfunc/emitdata. Per AGENTS.md §2.3, that
- * text serialization step is eliminated: `emitfunc` walks the frontend's
- * `struct func` AST and builds a IR `Fn` in memory via the IR construction
- * API (newtmp / getcon / newcon / emit / idup / newblk), then runs the
- * IR pass pipeline (T.abi0 → fillcfg → ssa → … → rega) and invokes
- * T.emitfn to produce target assembly. No text IL is produced.
+ * `emitfunc` lowers the frontend's `struct func` AST to MIR (func_to_mir,
+ * src/c/irgen/func_to_mir.c), runs the MIR pass pipeline, then either
+ * emits through the target's MIR-native machine backend (x86_64/riscv64/
+ * loongarch64/aarch64) or falls back to the MIR → LIR bridge + legacy LIR
+ * pipeline for targets without a machine backend yet.
  *
- * Note on `fn->retty` semantics (see also project_memory.md §11):
- *   - `fn->retty` is a typ[] index used by IR ABI passes for *aggregate*
- *     returns. It defaults to -1 (Kx) and is only set non-negative when
- *     a function returns struct/union (Phase 1c+).
- *   - The local `retty` variable below tracks the SCALAR class (Kw..Kd)
- *     so the jump type can be encoded as `Jretw + retty`. Unrelated to
- *     `fn->retty`.
+ * The legacy direct-LIR Fn construction (previously the body of this
+ * function) was removed in Phase 4 step 1 — it was unreachable since
+ * Phase 2 forced g_use_mir=1 (MCC_USE_MIR=0 no longer exists).
  *
  * `emitdata` translates a global/static object initializer into a stream
  * of IR `Dat` records emitted via `emitdat()` (DStart/DB/DH/DW/DL/DZ/DEnd),
@@ -30,6 +24,7 @@ extern bool mfnm_backend_x86_64(struct MFn *);   /* x86_64_mbe.c (P3b machine ba
 extern bool mfnm_backend_riscv64(struct MFn *);   /* riscv64_mbe.c (P3a machine backend) */
 extern bool mfnm_backend_loongarch64(struct MFn *); /* loongarch64_mbe.c (P3b) */
 extern bool mfnm_backend_aarch64(struct MFn *);   /* aarch64_mbe.c (P3b machine backend) */
+extern bool mfnm_backend_arm(struct MFn *);       /* arm_mbe.c (P3c machine backend) */
 
 /* DWARF variable-type classification for the base-type DIEs. */
 static int
@@ -78,7 +73,7 @@ dwarf_collect_vars(struct func *f, struct MFn *mf, Fn *fn)
 }
 
 /* MIR-only switch (Phase 2): always 1 — set in main.c (MCC_USE_MIR env
- * removed).  The legacy direct-LIR path is unreachable. */
+ * removed).  The legacy direct-LIR path was removed in Phase 4 step 1. */
 int g_use_mir;
 
 /* P2+ MIR-native backend switch (Phase 2): x86_64 defaults to the machine
@@ -87,241 +82,10 @@ int g_use_mir;
  * targets keep the bridge path. */
 int g_use_mir_backend;
 
-/* Translate a frontend class char ('w','l','s','d') to IR's class enum. */
-static int
-char_to_cls(int c)
-{
-	switch (c) {
-	case 'w': return Kw;
-	case 'l': return Kl;
-	case 's': return Ks;
-	case 'd': return Kd;
-	case  0 : return Kx;
-	default:  die("mcc: invalid class '%c'", c);
-	}
-}
-
-/* Translate a frontend IR op (enum instkind, IXXX) to a IR op (Oxxx).
- * The two share the same op vocabulary modulo the I/O prefix. */
-static int
-fe_to_ir_op(int op)
-{
-	switch (op) {
-	/* arithmetic / bits */
-	case IADD:    return Oadd;
-	case ISUB:    return Osub;
-	case IMUL:    return Omul;
-	case IDIV:    return Odiv;
-	case IUDIV:   return Oudiv;
-	case IREM:    return Orem;
-	case IUREM:   return Ourem;
-	case INEG:    return Oneg;
-	case IAND:    return Oand;
-	case IOR:     return Oor;
-	case IXOR:    return Oxor;
-	case ISAR:    return Osar;
-	case ISHR:    return Oshr;
-	case ISHL:    return Oshl;
-	/* sign/zero extensions */
-	case IEXTUB:  return Oextub;
-	case IEXTSB:  return Oextsb;
-	case IEXTUH:  return Oextuh;
-	case IEXTSH:  return Oextsh;
-	case IEXTUW:  return Oextuw;
-	case IEXTSW:  return Oextsw;
-	/* float conversions */
-	case IEXTS:   return Oexts;
-	case ITRUNCD: return Otruncd;
-	case ISTOSI:  return Ostosi;
-	case ISTOUI:  return Ostoui;
-	case IDTOSI:  return Odtosi;
-	case IDTOUI:  return Odtoui;
-	case ISWTOF:  return Oswtof;
-	case IUWTOF:  return Ouwtof;
-	case ISLTOF:  return Osltof;
-	case IULTOF:  return Oultof;
-	/* cast / copy */
-	case ICAST:   return Ocast;
-	case ICOPY:   return Ocopy;
-	/* memory store */
-	case ISTOREB: return Ostoreb;
-	case ISTOREH: return Ostoreh;
-	case ISTOREW: return Ostorew;
-	case ISTOREL: return Ostorel;
-	case ISTORES: return Ostores;
-	case ISTORED: return Ostored;
-	/* memory load (frontend distinguishes width by op; IR's Oload takes
-	 * width from the instruction's cls field, so all map to Oload except
-	 * the sign/zero-extending byte/halfword loads). */
-	case ILOADUB: return Oloadub;
-	case ILOADSB: return Oloadsb;
-	case ILOADUH: return Oloaduh;
-	case ILOADSH: return Oloadsh;
-	case ILOADW:  return Oload;   /* 32-bit load (cls=Kw) */
-	case ILOADL:  return Oload;   /* 64-bit load (cls=Kl) */
-	case ILOADS:  return Oload;   /* float load (cls=Ks) */
-	case ILOADD:  return Oload;   /* double load (cls=Kd) */
-	/* stack alloc */
-	case IALLOC4:  return Oalloc4;
-	case IALLOC8:  return Oalloc8;
-	case IALLOC16: return Oalloc16;
-	/* comparisons (w) */
-	case ICEQW: return Oceqw;
-	case ICNEW: return Ocnew;
-	case ICSLEW:return Ocslew;
-	case ICSLTW:return Ocsltw;
-	case ICSGEW:return Ocsgew;
-	case ICSGTW:return Ocsgtw;
-	case ICULEW:return Oculew;
-	case ICULTW:return Ocultw;
-	case ICUGEW:return Ocugew;
-	case ICUGTW:return Ocugtw;
-	/* comparisons (l) */
-	case ICEQL: return Oceql;
-	case ICNEL: return Ocnel;
-	case ICSLEL:return Ocslel;
-	case ICSLTL:return Ocsltl;
-	case ICSGEL:return Ocsgel;
-	case ICSGTL:return Ocsgtl;
-	case ICULEL:return Oculel;
-	case ICULTL:return Ocultl;
-	case ICUGEL:return Ocugel;
-	case ICUGTL:return Ocugtl;
-	/* comparisons (s) */
-	case ICEQS: return Oceqs;
-	case ICNES: return Ocnes;
-	case ICLES: return Ocles;
-	case ICLTS: return Oclts;
-	case ICGES: return Ocges;
-	case ICGTS: return Ocgts;
-	case ICOS:  return Ocos;
-	case ICUOS: return Ocuos;
-	/* comparisons (d) */
-	case ICEQD: return Oceqd;
-	case ICNED: return Ocned;
-	case ICLED: return Ocled;
-	case ICLTD: return Ocltd;
-	case ICGED: return Ocged;
-	case ICGTD: return Ocgtd;
-	case ICOD:  return Ocod;
-	case ICUOD: return Ocuod;
-	/* variadic */
-	case IVASTART: return Ovastart;
-	case IVAARG:   return Ovaarg;
-	default:
-		die("mcc: IR op %d not mapped to IR", op);
-	}
-}
-
-/* Translate a frontend `struct value *` to a IR `Ref`.
- * For VALUE_TEMP we assume temp IDs were pre-allocated in emitfunc
- * (IR tmp index = Tmp0 + v->id - 1, since frontend IDs start at 1). */
-static Ref
-valref(struct value *v, Fn *fn)
-{
-	Con c;
-	char *fullname;
-
-	if (!v)
-		return R;
-	switch (v->kind & 0xf) {
-	case VALUE_TEMP:
-		return TMP(Tmp0 + v->id - 1);
-	case VALUE_INTCONST:
-		return getcon((int64_t)v->u.i, fn);
-	case VALUE_FLTCONST:
-		memset(&c, 0, sizeof c);
-		c.type = CBits;
-		c.flt = 1;
-		c.bits.s = (float)v->u.f;
-		return newcon(&c, fn);
-	case VALUE_DBLCONST:
-		memset(&c, 0, sizeof c);
-		c.type = CBits;
-		c.flt = 2;
-		c.bits.d = v->u.f;
-		return newcon(&c, fn);
-	case VALUE_GLOBAL:
-		/* The legacy emitter printed "$[.L]name[.id]"; reconstruct the
-		 * bare global identifier that IR's intern() expects (no $
-		 * sigil). Static globals (LINKNONE) carry a positive id and
-		 * get a ".L<name>.<id>" symbol; externs use the bare name. */
-		if (v->id)
-			fullname = strf(PFn, ".L%s.%u", v->u.name, v->id);
-		else
-			fullname = v->u.name;
-		memset(&c, 0, sizeof c);
-		c.type = CAddr;
-		c.sym.id = intern(fullname);
-		if (v->kind & VALUE_THREAD) {
-			switch (tls_model) {
-			case TLSM_GLOBAL_DYNAMIC:
-				c.sym.type = SGenThr;
-				break;
-			case TLSM_INITIAL_EXEC:
-				c.sym.type = SExt | SThr;
-				break;
-			case TLSM_LOCAL_EXEC:
-				c.sym.type = SThr;
-				break;
-			case TLSM_DEFAULT:
-			default:
-				if (v->kind & VALUE_EXTERN && T.pic)
-					c.sym.type = SGenThr;
-				else if (v->kind & VALUE_EXTERN)
-					c.sym.type = SExt | SThr;
-				else
-					c.sym.type = SThr;
-				break;
-			}
-		} else {
-			if (v->kind & VALUE_EXTERN) c.sym.type |= SExt;
-		}
-		return newcon(&c, fn);
-	case VALUE_TYPE:
-		/* IR encodes aggregate-type references as TYPE(n) where n is the
-		 * typ[] index; emittype() assigned v->id when it built the Typ. */
-		return TYPE(v->id);
-	default:
-		die("mcc: unsupported value kind 0x%x", v->kind & 0xf);
-	}
-}
-
-/* If `r` references an SGenThr constant, emit Oarg + Ocall(__tls_get_addr)
- * and return the result temp (the TLS address). Otherwise return r unchanged. */
-static Ref
-expand_gd_tls(Ref r, Fn *fn)
-{
-	Con *c;
-	if (rtype(r) != RCon)
-		return r;
-	c = &fn->con[r.val];
-	if (c->type != CAddr || c->sym.type != SGenThr)
-		return r;
-
-	Con cc;
-	memset(&cc, 0, sizeof cc);
-	cc.type = CAddr;
-	cc.sym.id = intern("__tls_get_addr");
-	cc.sym.type = SExt;
-
-	Ref result = newtmp("tlsgd", Kl, fn);
-	*curi++ = (Ins){.op = Oarg, .cls = Kl, .to = R, .arg = {r, R}};
-	*curi++ = (Ins){.op = Ocall, .cls = Kl, .to = result, .arg = {newcon(&cc, fn), R}};
-	fn->leaf = 0;
-	return result;
-}
-
 void
 emitfunc(struct func *f, struct scope *fs, bool global)
 {
-	struct block *b;
-	struct inst **instp, **instend;
-	struct inst *in;
 	Fn *fn;
-	int retty;
-	uint nblk = 0;
-	int *tempcls;
 	int dwarf_idx = -1;
 
 	/* DWARF debug info: record the function (name, declaration line). */
@@ -345,7 +109,7 @@ emitfunc(struct func *f, struct scope *fs, bool global)
 	 * the x86_64 target uses the MIR-native machine backend (sole asm
 	 * producer; all fallbacks closed in Phase 1) and every other target
 	 * bridges to the LIR pipeline.  The legacy direct-LIR Fn construction
-	 * below is unreachable (scheduled for removal in Phase 3). */
+	 * was deleted in Phase 4 step 1 (emit.c, previously unreachable). */
 	if (g_use_mir) {
 		MFn *mf = func_to_mir(f, opt_level, global);
 		if (debug['X']) {
@@ -368,7 +132,9 @@ emitfunc(struct func *f, struct scope *fs, bool global)
 		     (strcmp(T.name, "riscv64") == 0 && mfnm_backend_riscv64(mf)) ||
 		     (strcmp(T.name, "loongarch64") == 0 &&
 		      mfnm_backend_loongarch64(mf)) ||
-		     (strcmp(T.name, "aarch64") == 0 && mfnm_backend_aarch64(mf)))) {
+		     (strcmp(T.name, "aarch64") == 0 && mfnm_backend_aarch64(mf)) ||
+		     ((strcmp(T.name, "arm") == 0 || strcmp(T.name, "armv7") == 0) &&
+		      mfnm_backend_arm(mf)))) {
 
 			if (g_dwarf_level > 0) {
 				dwarf_collect_vars(f, mf, NULL);
@@ -397,361 +163,12 @@ emitfunc(struct func *f, struct scope *fs, bool global)
 		mfn_free(mf);
 		return;
 	}
-
-	/* Legacy direct-LIR path: unreachable since Phase 2 (MIR is forced;
-	 * func_to_mir never returns NULL).  Retained pending Phase 3 removal. */
-
-	/* Allocate Fn per the qbe parse.c L910-932 init pattern. */
-	fn = alloc(sizeof *fn);
-	fn->ntmp = 0;
-	fn->ncon = 2;
-	fn->nmem = 0;
-	fn->tmp = vnew(fn->ntmp, sizeof fn->tmp[0], PFn);
-	fn->con = vnew(fn->ncon, sizeof fn->con[0], PFn);
-	fn->mem = vnew(0, sizeof fn->mem[0], PFn);
-	/* Physical-register placeholder tmps [0..Tmp0-1]. */
-	for (int i = 0; i < Tmp0; i++) {
-		if (T.fpr0 <= i && i < T.fpr0 + T.nfpr)
-			newtmp(0, Kd, fn);
-		else
-			newtmp(0, Kl, fn);
-	}
-	/* con[0] = UNDEF, con[1] = 0 (CON_Z). */
-	fn->con[0].type = CBits;
-	fn->con[0].bits.i = 0xdeaddead;
-	fn->con[1].type = CBits;
-	fn->con[1].bits.i = 0;
-
-	/* Fn name + linkage. */
-	fn->name = f->name;
-	fn->lnk = (Lnk){0};
-	fn->lnk.export = global;
-	fn->leaf = 1;
-	fn->vararg = f->type->u.func.isvararg;
-	fn->optlevel = opt_level;
-	fn->warnlevel = warn_level;
-	/* `slot` counts the stack frame size in 4-byte units; the IR
-	 * parser zero-inits it via alloc() (parse.c parsefn). mcc builds
-	 * Fn directly so we must match: 0, not -1. Leaving it negative
-	 * makes amd64_isel.c's `sz > INT_MAX - fn->slot` overflow check
-	 * trip on the first Oalloc4 emitted by sysv.c for an in-reg
-	 * aggregate parameter. */
-	fn->slot = 0;
-	fn->salign = 0;
-	fn->dynalloc = 0;
-	fn->retr = R;
-
-	/* Return type → fn->retty + local class. See file header note. */
-	if (f->type->base == &typevoid) {
-		fn->retty = -1;
-		retty = -1;
-	} else if (f->type->base->value) {
-		/* aggregate (struct/union) return: fn->retty is the typ[] index
-		 * (set by emittype, called from mkfunc). The return jump uses
-		 * Jretc, not Jretw+retty, so the local retty is left unused. */
-		fn->retty = f->type->base->value->id;
-		retty = -1;
-	} else {
-		fn->retty = -1;
-		retty = char_to_cls(irtype(f->type->base).base);
-	}
-
-	/* Pre-pass: collect temp classes from defining instructions.
-	 * The frontend assigns sequential IDs starting at 1; IR tmps live
-	 * at index Tmp0..Tmp0+lastid-1. Pre-allocate them with the right
-	 * cls so valref()'s TMP(Tmp0+v->id-1) mapping is consistent. */
-	tempcls = xmalloc(sizeof(*tempcls) * (f->lastid + 1));
-	for (unsigned i = 0; i <= f->lastid; i++)
-		tempcls[i] = Kx;
-	for (b = f->start; b; b = b->next) {
-		instend = (struct inst **)((char *)b->insts.val + b->insts.len);
-		for (instp = b->insts.val; instp != instend; ++instp) {
-			in = *instp;
-			if (in->res.kind == VALUE_TEMP && in->class)
-				tempcls[in->res.id] = char_to_cls(in->class);
-		}
-		/* Phi result temps are assigned via functemp but not via
-		 * inst->res, so they aren't caught by the loop above. */
-		if (b->phi.res.kind == VALUE_TEMP)
-			tempcls[b->phi.res.id] = char_to_cls(b->phi.class);
-	}
-	/* Parameter temps are not defined by any instruction in the body —
-	 * they're implicitly defined by Opar at function entry (emitted in
-	 * Pass 2 below). Set their class here so newtmp() pre-allocates
-	 * them with the right IR class. */
-	{
-		struct decl *p;
-		struct value *v;
-		for (p = f->type->u.func.params, v = f->paramtemps;
-		     p; p = p->next, ++v) {
-			tempcls[v->id] = char_to_cls(irtype(p->type).base);
-		}
-	}
-	for (unsigned i = 1; i <= f->lastid; i++)
-		newtmp(0, tempcls[i], fn);
-
-	/* Pass 1: create a IR Blk for each frontend block, store the
-	 * mapping in b->ir for Pass 2 to consume when resolving jump
-	 * targets. Also chain all blocks via Blk->link — fillrpo()/fillcfg()
-	 * traverse this chain to enumerate reachable blocks. */
-	{
-		Blk *prev = NULL;
-		for (b = f->start; b; b = b->next) {
-			b->ir = newblk();
-			b->ir->id = nblk++;
-			b->ir->name = strf(PFn, "%s", b->label.u.name);
-			b->ir->loop = 0;
-			b->ir->link = NULL;
-			if (prev)
-				prev->link = b->ir;
-			prev = b->ir;
-		}
-	}
-	fn->nblk = nblk;
-	fn->start = f->start->ir;
-	/* rpo will be (re)sized by fillrpo, but fillcfg expects a valid Vec
-	 * pointer on entry — initialize to a zero-length Vec. */
-	fn->rpo = vnew(nblk, sizeof fn->rpo[0], PFn);
-
-	/* Pass 2: translate instructions and jumps.
-	 *
-	 * Unlike IR optimization passes (which use BACKWARD emit() because
-	 * they regenerate instructions in reverse), here we CONSTRUCT initial
-	 * IR — so we use FORWARD writes (`*curi++ = (Ins){...}`) matching
-	 * IR's parse.c convention (the parser also builds IR forward). This
-	 * produces instructions in source order without the inversion that
-	 * pairing BACKWARD emit() with forward iteration would cause.
-	 *
-	 * The shared `curi`/`insb` buffer is large (NIns = 1<<20); IR passes
-	 * later reset `curi = &insb[NIns]` and use emit() independently. */
-	curi = insb;
-	for (b = f->start; b; b = b->next) {
-		Blk *qb = b->ir;
-
-		/* For the entry block, emit Opar instructions FIRST (FORWARD
-		 * writes put first-emitted at the lowest position, so Opar
-		 * lands at the start of qb->ins). The frontend creates param
-		 * temps (mkfunc, func.c L33) and stores them into stack slots,
-		 * but never emits a defining instruction — that was implicit
-		 * in the frontend's text IL via the function signature
-		 * `function w $foo(w %.1, ...)`. In direct IR mode we must
-		 * emit Opar explicitly or ssacheck reports the param as
-		 * "used undefined". See qbe/parse.c parserefl() for the
-		 * parser-side equivalent. */
-		if (b == f->start) {
-			struct decl *p;
-			struct value *v;
-			for (p = f->type->u.func.params, v = f->paramtemps;
-			     p; p = p->next, ++v) {
-				struct irtype qt = irtype(p->type);
-				int cls = char_to_cls(qt.base);
-				if (p->type->value) {
-					/* aggregate parameter: Oparc lowers to a stack
-					 * copy the callee addresses by value. arg[0]
-					 * carries TYPE(idx) (read by argsclass); the
-					 * param temp (a Kl pointer) is the stack pad. */
-					*curi++ = (Ins){.op = Oparc, .cls = Kl,
-					                .to = valref(v, fn),
-					                .arg = {TYPE(p->type->value->id), R}};
-				} else {
-					*curi++ = (Ins){.op = Opar, .cls = cls,
-					                .to = valref(v, fn), .arg = {R, R}};
-				}
-			}
-		}
-
-		/* Translate frontend binary phi to a IR Phi node and link it
-		 * as the head of qb->phi. The frontend only emits 2-arg
-		 * phis (one per merge block) for short-circuit logic / if-else
-		 * result merging, so a single Phi node suffices. */
-		if (b->phi.res.kind != VALUE_NONE) {
-			Phi *phi = alloc(sizeof *phi);
-			phi->to = valref(&b->phi.res, fn);
-			phi->cls = char_to_cls(b->phi.class);
-			phi->visit = 0;
-			phi->narg = 2;
-			phi->arg = vnew(2, sizeof phi->arg[0], PFn);
-			phi->arg[0] = valref(b->phi.val[0], fn);
-			phi->arg[1] = valref(b->phi.val[1], fn);
-			phi->blk = vnew(2, sizeof phi->blk[0], PFn);
-			phi->blk[0] = b->phi.blk[0]->ir;
-			phi->blk[1] = b->phi.blk[1]->ir;
-			phi->link = NULL;
-			qb->phi = phi;
-		}
-
-		/* instructions — FORWARD writes in source order */
-		instend = (struct inst **)((char *)b->insts.val + b->insts.len);
-		for (instp = b->insts.val; instp != instend; ++instp) {
-			in = *instp;
-
-			/* IARG/IVARARG outside ICALL context — defensive skip
-			 * (shouldn't happen since ICALL handler consumes them). */
-			if (in->kind == IARG || in->kind == IVARARG)
-				continue;
-
-			if (in->kind == ICALL) {
-				/* ICALL layout (from funcexpr, expr.c L76-82):
-				 *   ICALL  cls=ret  res=retval  arg[0]=callee  arg[1]=functype
-				 *   [IVARARG]                      (varargs marker)
-				 *   IARG   cls=argtype  arg[0]=argval
-				 *   ...
-				 *
-				 * IR order: Oarg*, [Oargv], Ocall.
-				 * FORWARD writes produce this directly (in
-				 * source order). See qbe/parse.c L712-725. */
-				Ref callee = valref(in->arg[0], fn);
-				Ref result = in->res.kind ? valref(&in->res, fn) : R;
-				Ref call_arg1 = R;
-				int call_cls;
-				struct inst **argp = instp + 1;
-
-				/* Aggregate return: arg[1] is the VALUE_TYPE for the
-				 * returned struct/union. IR encodes this as the call's
-				 * second operand TYPE(idx) and uses cls=Kl (the result
-				 * is a pointer to the return pad). selcall lowers the
-				 * hidden-pointer / register-copy sequence. parse.c L718. */
-				if (in->arg[1] && (in->arg[1]->kind & 0xf) == VALUE_TYPE) {
-					call_cls = Kl;
-					call_arg1 = valref(in->arg[1], fn);
-				} else {
-					call_cls = in->class ? char_to_cls(in->class) : Kw;
-					call_arg1 = R;
-				}
-
-				while (argp != instend) {
-					struct inst *ai = *argp;
-					if (ai->kind == IARG) {
-						if (ai->arg[1] && (ai->arg[1]->kind & 0xf) == VALUE_TYPE) {
-							/* aggregate argument: Oargc copies from
-							 * the source pointer. arg[0]=TYPE(idx)
-							 * (read by argsclass), arg[1]=source ptr
-							 * (used by selcall). parse.c L717. */
-							*curi++ = (Ins){
-								.op = Oargc, .cls = Kl,
-								.to = R,
-							.arg = {TYPE(ai->arg[1]->id),
-							        expand_gd_tls(valref(ai->arg[0], fn), fn)}
-							};
-						} else {
-							*curi++ = (Ins){
-								.op = Oarg,
-								.cls = char_to_cls(ai->class),
-								.to = R,
-								.arg = {expand_gd_tls(valref(ai->arg[0], fn), fn), R}
-							};
-						}
-					} else if (ai->kind == IVARARG) {
-						*curi++ = (Ins){
-							.op = Oargv, .cls = 0,
-							.to = R, .arg = {R, R}
-						};
-					} else {
-						break;
-					}
-					argp++;
-				}
-				*curi++ = (Ins){
-					.op = Ocall, .cls = call_cls,
-					.to = result, .arg = {callee, call_arg1}
-				};
-				instp = argp - 1;
-				fn->leaf = 0;
-				continue;
-			}
-
-			int qop = fe_to_ir_op(in->kind);
-			int cls = char_to_cls(in->class);
-
-			/* Store instructions have no result, so the frontend records no
-			 * result class for them.  Their data class is nevertheless fixed
-			 * by the opcode.  Leaving it as Kx lets later IR passes infer an
-			 * arbitrary class from the address operand; a VLA store can then
-			 * reach a RISC selector as (for example) Ostorew(Kd). */
-			if (cls == Kx)
-				switch (qop) {
-				case Ostoreb:
-				case Ostoreh:
-				case Ostorew: cls = Kw; break;
-				case Ostorel: cls = Kl; break;
-				case Ostores: cls = Ks; break;
-				case Ostored: cls = Kd; break;
-				}
-		Ref to = in->res.kind ? valref(&in->res, fn) : R;
-		Ref a0 = in->arg[0] ? valref(in->arg[0], fn) : R;
-		Ref a1 = in->arg[1] ? valref(in->arg[1], fn) : R;
-		a0 = expand_gd_tls(a0, fn);
-		a1 = expand_gd_tls(a1, fn);
-		*curi++ = (Ins){.op = qop, .cls = cls, .to = to, .arg = {a0, a1}};
-		}
-
-		/* Pre-evaluate jump args that need GD-TLS expansion BEFORE
-		 * idup/reset, so the Oarg+Ocall they emit get committed to
-		 * qb->ins (valref() alone would orphan them in insb[0..1]). */
-		Ref retval = R;   /* for JUMP_RET */
-		Ref jnz_val = R;  /* for JUMP_JNZ */
-		if (b->jump.kind == JUMP_RET && b->jump.arg)
-			retval = expand_gd_tls(valref(b->jump.arg, fn), fn);
-		if (b->jump.kind == JUMP_JNZ && b->jump.arg)
-			jnz_val = expand_gd_tls(valref(b->jump.arg, fn), fn);
-
-		idup(qb, insb, curi - insb);
-		curi = insb;
-
-		/* jump */
-		switch (b->jump.kind) {
-		case JUMP_NONE:
-			/* Frontend relies on block ordering for fallthrough. */
-			qb->jmp.type = Jjmp;
-			qb->s1 = b->next ? b->next->ir : 0;
-			break;
-		case JUMP_RET:
-			if (b->jump.arg) {
-				if (f->type->base->value) {
-					/* aggregate return: Jretc uses the typ[] entry
-					 * at fn->retty; selret lowers the copy-out. */
-					qb->jmp.type = Jretc;
-				} else {
-					/* Jretw + retty works for retty in {0..3}
-					 * (Kw..Kd).  Void returns take Jret0 below. */
-					qb->jmp.type = Jretw + retty;
-				}
-				qb->jmp.arg = retval;
-			} else {
-				qb->jmp.type = Jret0;
-			}
-			break;
-		case JUMP_JMP:
-			qb->jmp.type = Jjmp;
-			qb->s1 = b->jump.blk[0]->ir;
-			break;
-		case JUMP_JNZ:
-			qb->jmp.type = Jjnz;
-			qb->jmp.arg = jnz_val;
-			qb->s1 = b->jump.blk[0]->ir;
-			qb->s2 = b->jump.blk[1]->ir;
-			break;
-		case JUMP_HLT:
-			qb->jmp.type = Jhlt;
-			break;
-		default:
-			assert(0);
-		}
-	}
-
-	/* Run optimization + codegen pipeline, then emit asm. */
-	run_passes(fn);
-	if (emit_debug)
-		emitdbgloc(1, 0, stdout);  /* .loc 1 line col (line=1 as placeholder) */
-	T.emitfn(fn, stdout);
-	freeall();
 }
 
-/* Return the assembly symbol name for a global value. Mirrors valref()'s
- * VALUE_GLOBAL handling: static globals (LINKNONE, positive id) get
- * ".L<name>.<id>", externs use the bare name, and asm-quoted names are
- * wrapped in double quotes (emitdat/emitlnk suppress T.assym for names
- * beginning with '"'). */
+/* Return the assembly symbol name for a global value.  Static globals
+ * (LINKNONE, positive id) get ".L<name>.<id>", externs use the bare name,
+ * and asm-quoted names are wrapped in double quotes (emitdat/emitlnk
+ * suppress T.assym for names beginning with '"'). */
 static char *
 globalname(struct value *v)
 {
@@ -857,7 +274,7 @@ emitdata(struct decl *d, struct init *init)
 				unsigned long long width, mask;
 				if (cur->expr->kind != EXPRCONST
 				 || !(cur->expr->type->prop & PROPINT))
-					error(&tok.loc, "bit-field initializer is not an integer constant expression");
+					error_code(E_DECL, &tok.loc, "bit-field initializer is not an integer constant expression");
 				width = unit_bits - cur->bits.before - cur->bits.after;
 				mask = width == 64 ? ~0ull : (1ull << width) - 1;
 				value |= (cur->expr->u.constant.u & mask) << cur->bits.before;
@@ -1005,22 +422,22 @@ emitdata(struct decl *d, struct init *init)
 				    || cur->expr->u.binary.l->kind != EXPRUNARY
 				    || cur->expr->u.binary.l->op != TBAND
 				    || cur->expr->u.binary.r->kind != EXPRCONST)
-					error(&tok.loc, "initializer is not a constant expression");
+					error_code(E_DECL, &tok.loc, "initializer is not a constant expression");
 				base = cur->expr->u.binary.l;
 				off = (long long)cur->expr->u.binary.r->u.constant.i;
 			} else {
 				if (cur->expr->op != TBAND)
-					error(&tok.loc, "initializer is not a constant expression");
+					error_code(E_DECL, &tok.loc, "initializer is not a constant expression");
 				base = cur->expr;
 			}
 			if (base->base->kind != EXPRIDENT)
-				error(&tok.loc, "initializer is not a constant expression");
+				error_code(E_DECL, &tok.loc, "initializer is not a constant expression");
 			refdecl = base->base->u.ident.decl;
 			if (refdecl->kind == DECLOBJECT
 			    && refdecl->u.obj.storage != SDSTATIC
 			    && refdecl->linkage != LINKEXTERN
 			    && refdecl->linkage != LINKINTERN)
-				error(&tok.loc, "initializer is not a constant expression");
+				error_code(E_DECL, &tok.loc, "initializer is not a constant expression");
 			dat.type = typelong.size == 4 ? DW : DL;
 			dat.isref = 1;
 			dat.u.ref.name = globalname(refdecl->value);
@@ -1029,7 +446,7 @@ emitdata(struct decl *d, struct init *init)
 			break;
 		}
 		default:
-			error(&tok.loc, "initializer is not a constant expression");
+			error_code(E_DECL, &tok.loc, "initializer is not a constant expression");
 		}
 		offset = end;
 	}

@@ -68,7 +68,7 @@ parseattr(struct attr *a, enum attrkind allowed, enum attrprefix prefix)
 			 * argument form is required (and its balanced token list is
 			 * consumed by the generic skip below). */
 			if (tok.kind != TLPAREN)
-				error(&tok.loc,
+				error_code(E_DECL, &tok.loc,
 				    "'assume' attribute requires a parenthesized expression");
 		} else if (strcmp(name, "deprecated") == 0) {
 			kind = ATTRDEPRECATED;
@@ -88,7 +88,7 @@ parseattr(struct attr *a, enum attrkind allowed, enum attrprefix prefix)
 
 				i = intconstexpr(&filescope, false);
 				if (!i || i & i - 1 || i > INT_MAX)
-					error(&tok.loc, "invalid alignment %llu", i);
+					error_code(E_DECL, &tok.loc, "invalid alignment %llu", i);
 				if (a)
 					a->align = i;
 				expect(TRPAREN, "after alignment");
@@ -135,7 +135,7 @@ parseattr(struct attr *a, enum attrkind allowed, enum attrprefix prefix)
 	}
 	if (kind) {
 		if (!(kind & allowed))
-			error(&tok.loc, "%sattribute '%s' is not supported here", prefixname, name);
+			error_code(E_DECL, &tok.loc, "%sattribute '%s' is not supported here", prefixname, name);
 		if (a)
 			a->kind |= kind;
 	} else if (consume(TLPAREN)) {

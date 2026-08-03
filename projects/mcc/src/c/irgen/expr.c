@@ -45,7 +45,7 @@ atomicrmw(struct func *f, enum builtinkind kind, struct type *t,
 
 	if (!(t->prop & PROPINT) || (t->size != 1 && t->size != 2 &&
 	    t->size != 4 && t->size != 8))
-		error(&tok.loc, "atomic fetch operation currently requires an integer type up to 64 bits");
+		error_code(E_CTYPE, &tok.loc, "atomic fetch operation currently requires an integer type up to 64 bits");
 	const char *opname;
 	int slot;
 
@@ -83,7 +83,7 @@ atomiccompareexchange(struct func *f, struct type *t, struct value *object,
 	struct value *v;
 
 	if (!(t->prop & PROPSCALAR) || t->size > 8)
-		error(&tok.loc, "atomic compare exchange currently requires a scalar type up to 64 bits");
+		error_code(E_CTYPE, &tok.loc, "atomic compare exchange currently requires a scalar type up to 64 bits");
 	qt = irtype(t);
 	callee.name = strf(PHeap, "__atomic_compare_exchange_%llu", t->size);
 	callee.kind = DECLFUNC;
@@ -106,7 +106,7 @@ atomicload(struct func *f, struct type *t, struct value *addr)
 	struct value *v;
 
 	if (!(t->prop & PROPSCALAR) || t->size > 8)
-		error(&tok.loc, "atomic load currently requires a scalar type up to 64 bits");
+		error_code(E_CTYPE, &tok.loc, "atomic load currently requires a scalar type up to 64 bits");
 	qt = irtype(t);
 	callee.name = strf(PHeap, "__atomic_load_%llu", t->size);
 	callee.kind = DECLFUNC;
@@ -124,7 +124,7 @@ atomicstore(struct func *f, struct type *t, struct value *addr, struct value *va
 	struct irtype qt;
 
 	if (!(t->prop & PROPSCALAR) || t->size > 8)
-		error(&tok.loc, "atomic store currently requires a scalar type up to 64 bits");
+		error_code(E_CTYPE, &tok.loc, "atomic store currently requires a scalar type up to 64 bits");
 	qt = irtype(t);
 	callee.name = strf(PHeap, "__atomic_store_%llu", t->size);
 	callee.kind = DECLFUNC;
@@ -179,7 +179,7 @@ funcexpr(struct func *f, struct expr *e)
 		if (e->base->qual & QUALATOMIC) {
 			t = e->type;
 			if (t->kind == TYPEPOINTER || !(t->prop & PROPINT))
-				error(&tok.loc, "atomic increment/decrement currently requires an integer type");
+				error_code(E_CTYPE, &tok.loc, "atomic increment/decrement currently requires an integer type");
 			r = mkintconst(1);
 			l = atomicrmw(f, e->op == TINC ? BUILTINATOMICFETCHADD : BUILTINATOMICFETCHSUB,
 			              t, lval, r);
@@ -459,7 +459,7 @@ funcexpr(struct func *f, struct expr *e)
 				funcexpr(f, e->toeval);
 			/* https://todo.sr.ht/~mcf/cproc/52 */
 			if (!(e->type->prop & PROPSCALAR))
-				error(&tok.loc, "va_arg with non-scalar type is not yet supported");
+				error_code(E_CTYPE, &tok.loc, "va_arg with non-scalar type is not yet supported");
 			l = funcexpr(f, e->base);
 			return funcinst(f, IVAARG, irtype(e->type).base, l, NULL);
 		case BUILTINALLOCA:

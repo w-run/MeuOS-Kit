@@ -66,12 +66,12 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 | Worker | 模型 | 分支 | Worktree | 任务 | 状态 | 上次 push |
 |---|---|---|---|---|---|---|
 | alice | reasoning | worktree-tmp-alice-cpp + worktree-tmp-alice-cpp20 + worktree-tmp-alice-cli + worktree-tmp-alice-mtld (自 worktree-mxx-work) | /tmp/mxx-wt-alice | cpp_parse D1/D4/D2/E2/E3 + C++20 NTTP/consteval/<=>/聚合初始化/constexpr 成员 + CLI 参数 + **mt/as imm64 截断修复（check-mt-integration 闭环）** | **completed**（D1/D4 等已合入；cpp20 68d1222；cli ac57402；mtld 本次归并合入主线 **ad52f9b**，verify-all 恢复 19/19） | push worktree-tmp-alice-cpp20 |
-| bella | lite | worktree-tmp-bella-la64 (自 worktree-mxx-work@fc1f279) | /tmp/mxx-wt-bella | x86_64 MIR-native（fallback/≤16B/cmov）+ Phase 3a riscv64 + Phase 3b loongarch64 MIR-native 试点（#117） | **completed**（#94/#97/#111 已合入；#117 本次归并合入主线，loongarch64 MIR-native 上线；交叉汇编通过，verify-all 19/19） | b68447c |
-| chloe | lite | worktree-tmp-chloe-mirp2 + worktree-tmp-chloe-memconst + worktree-tmp-chloe-rv64fill | /tmp/mxx-wt-chloe | MIR Phase 2 + **riscv64 MIR-native 全功能补齐（浮点/聚合/TLS/VLA/varargs，qemu-riscv64 运行时通过）** | **completed**（memconst 已合入 8d0aace；rv64fill 本次归并合入主线，riscv64 全功能 MIR-native 上线） | 49c2ac1 |
-| diana | lite | worktree-tmp-diana-dwarfloc + worktree-tmp-diana-fastmath | /tmp/mxx-wt-diana | C23/C11 边界测试 + check-pic-verify + 错误码体系/多错收集 + DWARF 调试信息 + **DWARF 变量位置 + fast-math 折叠与 -Oz 尺寸优化** | **completed**（C23/PIC/errcode/dwarf 均已合入主线；dwarfloc 与 fastmath 本次归并合入主线：DW_AT_location fbreg、-Ofast 折叠、-Oz movl） | 11 test/c23 + F1-F3 + GOT + E#### + DWARF4 + DW_AT_location + -Ofast + -Oz |
-| eve | lite | worktree-tmp-eve + worktree-tmp-eve-olevel + worktree-tmp-eve-i18n (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵 + -O 级别语义分级 + **i18n 消息目录与双语（--lang=en/zh、LANG 推断、--explain/usage/--error-json 双语、check-i18n 目标）** | **completed**（测试矩阵已合入 b4cad7e；eve-olevel 已合入 a1bbb85；eve-i18n 本次归并合入主线 **1ce1b33**，check-i18n 通过） | worktree-tmp-eve-i18n |
+| bella | lite | worktree-tmp-bella-la64fill (自 worktree-mxx-work@43d1507) | /tmp/mxx-wt-bella | x86_64 MIR-native + Phase 3a riscv64 + Phase 3b loongarch64（#117 试点 + #141 全功能补齐） | **completed**（#94/#97/#111/#117 已合入；#141：a4b28cd 聚合+varargs ABI + 2045931 浮点/TLS/BLIT 发射 + 052fcb2 门禁适配，已 push worktree-tmp-bella-la64fill；check-loongarch64 双后端转绿，verify-all 19/19） | 925681a |
+| chloe | lite | worktree-tmp-chloe-mirp2 + worktree-tmp-chloe-memconst + worktree-tmp-chloe-rv64fill + worktree-tmp-chloe-arm | /tmp/mxx-wt-chloe | MIR Phase 2 + **riscv64 MIR-native 全功能补齐（浮点/聚合/TLS/VLA/varargs，qemu-riscv64 运行时通过）** + **arm armv7-a MIR-native（AAPCS32 标量整数+浮点，qemu-arm 运行时通过）** | **completed**（memconst 已合入 8d0aace；rv64fill 已合入主线；arm 分支 6cdd504/8dec5a1 已合入主线，c99+c11 54 样例交叉汇编全过 49 走 MIR-native） | 49c2ac1 / 8dec5a1 |
+| diana | lite | worktree-tmp-diana-dwarfloc + worktree-tmp-diana-fastmath + worktree-tmp-diana-errcode2 (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试 + check-pic-verify + 错误码体系/多错收集 + DWARF 调试信息 + **DWARF 变量位置 + fast-math 折叠与 -Oz 尺寸优化 + 错误码全覆盖 E0005-E0012（~400 站点）** | **completed**（C23/PIC/errcode/dwarf/dwarfloc/fastmath/errcode2 均已合入主线） | 11 test/c23 + F1-F3 + GOT + E#### + DWARF4 + DW_AT_location + -Ofast + -Oz + 错误码全覆盖 |
+| eve | lite | worktree-tmp-eve + worktree-tmp-eve-olevel + worktree-tmp-eve-i18n + worktree-tmp-eve-p4step1 (自 worktree-mxx-work@43d1507) | /tmp/mxx-wt-eve | 负向测试矩阵 + -O 分级 + i18n 双语 + **MIR Phase 4 step1：删 emit.c 直接-LIR 构造块** | **completed**（矩阵已合 b4cad7e；olevel 已合 a1bbb85；i18n 已合 1ce1b33；p4step1 已合入主线，verify-all 19/19 + 自举通过） | worktree-tmp-eve-p4step1 |
 | grace | lite | worktree-tmp-grace-cpp23 + worktree-tmp-grace-cpprest (自 worktree-mxx-work@fc1f279) | /tmp/mxx-wt-grace | sema/decl E1/E4/E5/E6 + C++23 缺口 + **C++ 剩余缺口：依赖类型 NTTP / constexpr 返回类对象 / consteval 模板边界** | **completed**（cpp23 已合入 ba6d9f8；cpprest 本次归并合入主线：ef89d22+3ae5a04+d061167） | worktree-tmp-grace-cpprest |
-| hazel | lite | worktree-tmp-hazel-aarch64 + worktree-tmp-hazel-fpfill | /tmp/mxx-wt-hazel | MIR Phase 3b aarch64 移植 + riscv64/aarch64 浮点补齐 | **completed**（aarch64 已合入第一批；fpfill 本次归并合入主线，浮点路径上线，c99 浮点样例双 target as 通过，verify-all 19/19） | ab7e500 |
+| hazel | lite | worktree-tmp-hazel-bench + worktree-tmp-hazel-aafill (自 worktree-mxx-work@43d1507) | /tmp/mxx-wt-hazel | 性能基准对比 GCC（MIR-native 产物质量量化）+ **aarch64 MIR-native 全功能补齐（聚合/varargs/TLS/VLA）** | **completed**（bench 633a949 + aafill 2fd881c 均已合入主线；benchmark 集 test/bench/ + 报告 bench-report.md；aarch64 c99+c11 全量 54/54 as 通过，verify-all 19/19） | 633a949 + 2fd881c |
 
 ### 会话中断恢复速查（当前团队）
 1. `git fetch origin`（在 /workspace/MeuOS-Kit）
@@ -170,6 +170,15 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
   - `--error-json` 多错收集（上限 10，顶层循环 setjmp/longjmp 恢复 + err_sync 跳到下一 ';'/'}'），结束后出错仍 exit(1)
   - fix-it：缺分号 `note: add ';' here` + 未声明标识符编辑距离拼写建议 `note: did you mean 'X'?`
 - 验证：verify-all.sh 17 PASS / 0 FAIL / 0 SKIP
+
+### 错误码全覆盖批量补码（diana errcode2 分支）
+- 状态：**已修复**（29de481 C 语法/声明 / d08b136 类型系统 / 4c3c8c9 词法+const / a4a2eff C++ 语义 / 481110f noreturn / a421749 码名表 / e72cfea 收尾，分支 worktree-tmp-diana-errcode2，已 push）
+- 内容：
+  - 扩展 enum errcode：E0005 声明 / E0006 语句 / E0007 类型转换 / E0008 不完整类型 / E0009 const-volatile / E0010 访问控制 / E0011 模板 / E0012 重载
+  - src/c/parse、sema、irgen、lex + cpp_parse 全部 error() 按消息分类批量补码（~404 处）：E_SYNTAX 120 / E_CTYPE 113 / E_DECL 94 / E_TEMPLATE 25 / E_REDEF 16 / E_STMT 13 / E_INCOMPLETE 9 / E_QUAL 7 / E_OVERLOAD 6 / E_ACCESS 1；剩余 0 处 E0000
+  - **关键修复**：error_code/error_tok_code/error_fixit 补 noreturn 声明（error() 有而编码 API 缺）——否则编译器视错误路径可达，改动 castexpr/unaryexpr 栈帧布局，暴露 C++ Class::method 解析既有栈布局敏感问题（tok.kind 被堆指针覆写，tokenstr 断言间歇崩溃）；补后 check-cpp-func 3/3、static_void_method 0/20 崩溃
+  - errcode_names 表补齐 E0005-E0012（此前新码全部回退 E0000）
+- 验证：check-c99/c11/c23/c23-neg/cpp/cpp-neg/cpp-func 全绿；verify-all.sh **19 PASS / 0 FAIL / 0 SKIP**；双模式（MCC_USE_MIR=0）无回归
 
 ### DWARF 调试信息支持（diana dwarf 分支）
 - 状态：**已修复**（dfdb0db -g 分级 / 381bfdd 最小 DWARF4 / ad4d69a bootstrap 修复，分支 worktree-tmp-diana-dwarf，已 push）

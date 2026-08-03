@@ -234,9 +234,9 @@ mkunaryexpr(enum tokenkind op, struct expr *base)
 		since we take their address when compiling member access.
 		*/
 		if (!base->lvalue && base->type->kind != TYPEFUNC && base->type->kind != TYPESTRUCT && base->type->kind != TYPEUNION)
-			error(&tok.loc, "'&' operand is not an lvalue or function designator");
+			error_code(E_DECL, &tok.loc, "'&' operand is not an lvalue or function designator");
 		if (base->kind == EXPRBITFIELD)
-			error(&tok.loc, "cannot take address of bit-field");
+			error_code(E_CTYPE, &tok.loc, "cannot take address of bit-field");
 		expr = mkexpr(EXPRUNARY, mkpointertype(base->type, base->qual), base);
 		expr->op = op;
 		return expr;
@@ -390,9 +390,9 @@ mkbinaryexpr(struct location *loc, enum tokenkind op, struct expr *l, struct exp
 	case TLOR:
 	case TLAND:
 		if (!(lp & PROPSCALAR))
-			error(loc, "left operand of '%s' operator must be scalar", tokenstr(op));
+			error_code(E_CTYPE, loc, "left operand of '%s' operator must be scalar", tokenstr(op));
 		if (!(rp & PROPSCALAR))
-			error(loc, "right operand of '%s' operator must be scalar", tokenstr(op));
+			error_code(E_CTYPE, loc, "right operand of '%s' operator must be scalar", tokenstr(op));
 		t = &typeint;
 		break;
 	case TEQL:
@@ -434,12 +434,12 @@ mkbinaryexpr(struct location *loc, enum tokenkind op, struct expr *l, struct exp
 				r = other;
 				break;
 			}
-			error(loc, "invalid operands to '%s' operator", tokenstr(op));
+			error_code(E_CTYPE, loc, "invalid operands to '%s' operator", tokenstr(op));
 		}
 		if (l->type->kind != TYPEPOINTER)
 			e = l, l = r, r = e;
 		if (l->type->kind != TYPEPOINTER)
-			error(loc, "invalid operands to '%s' operator", tokenstr(op));
+			error_code(E_CTYPE, loc, "invalid operands to '%s' operator", tokenstr(op));
 		if (nullpointer(eval(r))) {
 			r = exprconvert(r, l->type);
 			break;
@@ -449,13 +449,13 @@ mkbinaryexpr(struct location *loc, enum tokenkind op, struct expr *l, struct exp
 			break;
 		}
 		if (r->type->kind != TYPEPOINTER)
-			error(loc, "invalid operands to '%s' operator", tokenstr(op));
+			error_code(E_CTYPE, loc, "invalid operands to '%s' operator", tokenstr(op));
 		if (l->type->base->kind == TYPEVOID)
 			e = l, l = r, r = e;
 		if (r->type->base->kind == TYPEVOID && l->type->base->kind != TYPEFUNC)
 			r = exprconvert(r, l->type);
 		else if (!typecompatible(l->type->base, r->type->base))
-			error(loc, "pointer operands to '%s' operator are to incompatible types", tokenstr(op));
+			error_code(E_CTYPE, loc, "pointer operands to '%s' operator are to incompatible types", tokenstr(op));
 		break;
 	case TLESS:
 	case TGREATER:
@@ -467,9 +467,9 @@ mkbinaryexpr(struct location *loc, enum tokenkind op, struct expr *l, struct exp
 			commonreal(&l, &r);
 		} else if (l->type->kind == TYPEPOINTER && r->type->kind == TYPEPOINTER) {
 			if (!typecompatible(l->type->base, r->type->base) || l->type->base->kind == TYPEFUNC)
-				error(loc, "pointer operands to '%s' operator must be to compatible object types", tokenstr(op));
+				error_code(E_CTYPE, loc, "pointer operands to '%s' operator must be to compatible object types", tokenstr(op));
 		} else {
-			error(loc, "invalid operands to '%s' operator", tokenstr(op));
+			error_code(E_CTYPE, loc, "invalid operands to '%s' operator", tokenstr(op));
 		}
 		break;
 	case TBOR:
@@ -485,10 +485,10 @@ mkbinaryexpr(struct location *loc, enum tokenkind op, struct expr *l, struct exp
 		if (r->type->kind == TYPEPOINTER)
 			e = l, l = r, r = e, rp = lp;
 		if (l->type->kind != TYPEPOINTER || !(rp & PROPINT))
-			error(loc, "invalid operands to '+' operator");
+			error_code(E_CTYPE, loc, "invalid operands to '+' operator");
 		t = l->type;
 		if (t->base->incomplete || t->base->kind == TYPEFUNC)
-			error(loc, "pointer operand to '+' must be to complete object type");
+			error_code(E_CTYPE, loc, "pointer operand to '+' must be to complete object type");
 		r = mkbinaryexpr(loc, TMUL, exprconvert(r, &typeulong), mksizeofexpr(t->base));
 		break;
 	case TSUB:
@@ -497,15 +497,15 @@ mkbinaryexpr(struct location *loc, enum tokenkind op, struct expr *l, struct exp
 			break;
 		}
 		if (l->type->kind != TYPEPOINTER || !(rp & PROPINT) && r->type->kind != TYPEPOINTER)
-			error(loc, "invalid operands to '-' operator");
+			error_code(E_CTYPE, loc, "invalid operands to '-' operator");
 		if (l->type->base->incomplete || l->type->base->kind == TYPEFUNC)
-			error(loc, "pointer operand to '-' must be to complete object type");
+			error_code(E_CTYPE, loc, "pointer operand to '-' must be to complete object type");
 		if (rp & PROPINT) {
 			t = l->type;
 			r = mkbinaryexpr(loc, TMUL, exprconvert(r, &typeulong), mksizeofexpr(t->base));
 		} else {
 			if (!typecompatible(l->type->base, r->type->base))
-				error(&tok.loc, "pointer operands to '-' are to incompatible types");
+				error_code(E_CTYPE, &tok.loc, "pointer operands to '-' are to incompatible types");
 			op = TDIV;
 			t = &typelong;
 			e = mkbinaryexpr(loc, TSUB, exprconvert(l, &typelong), exprconvert(r, &typelong));
@@ -515,19 +515,19 @@ mkbinaryexpr(struct location *loc, enum tokenkind op, struct expr *l, struct exp
 		break;
 	case TMOD:
 		if (!(lp & PROPINT) || !(rp & PROPINT))
-			error(loc, "operands to '%%' operator must be integer");
+			error_code(E_CTYPE, loc, "operands to '%%' operator must be integer");
 		t = commonreal(&l, &r);
 		break;
 	case TMUL:
 	case TDIV:
 		if (!(lp & PROPARITH) || !(rp & PROPARITH))
-			error(loc, "operands to '%s' operator must be arithmetic", tokenstr(op));
+			error_code(E_CTYPE, loc, "operands to '%s' operator must be arithmetic", tokenstr(op));
 		t = commonreal(&l, &r);
 		break;
 	case TSHL:
 	case TSHR:
 		if (!(lp & PROPINT) || !(rp & PROPINT))
-			error(loc, "operands to '%s' operator must be integer", tokenstr(op));
+			error_code(E_CTYPE, loc, "operands to '%s' operator must be integer", tokenstr(op));
 		l = exprpromote(l);
 		r = exprpromote(r);
 		t = l->type;
@@ -616,7 +616,7 @@ assignexpr(struct scope *s)
 		return l;
 	}
 	if (!l->lvalue)
-		error(&tok.loc, "left side of assignment expression is not an lvalue");
+		error_code(E_CTYPE, &tok.loc, "left side of assignment expression is not an lvalue");
 	next();
 	r = assignexpr(s);
 	if (!op)

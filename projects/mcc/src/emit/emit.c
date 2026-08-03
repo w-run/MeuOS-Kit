@@ -210,7 +210,12 @@ elf_emitfin(FILE *f)
 	static char *sec[3] = { ".rodata", ".rodata", ".rodata" };
 
 	emitfin(f ,sec);
-	fprintf(f, ".section .note.GNU-stack,\"\",@progbits\n");
+	/* The empty-attribute form is rejected by the ARM GNU assembler
+	 * ("junk at end of line"), which accepts the plain form. */
+	if (strncmp(T.name, "arm", 3) == 0)
+		fprintf(f, ".section .note.GNU-stack\n");
+	else
+		fprintf(f, ".section .note.GNU-stack,\"\",@progbits\n");
 }
 
 void

@@ -42,6 +42,7 @@
 | P6g | Bug B 修复：selcall sret 分配 pad（qualtype 24B） | ✅ | 已提交 eccf7ae |
 | P6h | Bug C 修复：meuos-libc strtod 不支持 hex float（0x1p63）→ self-mcc 编译 eval.c 崩溃。已修复并全量自举 105/105 | ✅ | 已提交 f412f75 |
 | P7 | x86_64 fallback 全部闭环（聚合实参/SALLOC、TLS、动态 alloca/VLA）：MCC_MIR_BACKEND=1 为完整路径，无 bridge fallback，自举通过 | ✅ | 4c908df, 1a1d599, 7e78598 |
+| Phase4-1 | **legacy 直接-LIR 构造块删除**：src/c/irgen/emit.c 的不可达直接-LIR Fn 构造（原 emitfunc 尾部）+ 仅服务该路径的 char_to_cls/fe_to_ir_op/valref/expand_gd_tls 静态函数删除；MIR 路径（func_to_mir → run_mir_passes → MIR-native/bridge → T.emitfn）完整保留。verify-all 19/19 + 自举通过 | ✅ | 见 worktree-tmp-eve-p4step1 |
 
 ## 验证结果（截至 P3b）
 
@@ -494,3 +495,98 @@ f0-f31 / aarch64 v0-v31）与 mabi 的 isf 槽此前已建。
 - riscv64/aarch64 聚合（sret）与 varargs/TLS/VLA；移植顺序下一目标
   loongarch64。
 
+## Phase 3b：aarch64 全功能补齐（2026-08-03，hazel）
+
+aarch64 在标量+浮点之后补齐聚合/varargs/TLS/VLA，MIR-native 全功能
+（对齐 chloe 的 riscv64 补齐 49c2ac1）。AAPCS64 差异：sret 用 X8、
+栈参数 fp+16、va_list 为 32 字节双指针结构（__stack/__gr_top/__vr_top/
+__gr_offs/__vr_offs）。
+
+### 提交（branch worktree-tmp-hazel-aafill，基于主线 43d1507）
+- **c74f59b** aarch64_mabi.c 聚合 + varargs：A64Class 分类器（≤16B 拆
+  8 字节块，all-FP → v0/v1，否则 x0/x1；>16B sret X8）；selpar/selcall/
+  selret 聚合参数/返回 + sret 缓冲跨调用保存；varargs 192B reg_save_area
+  （8 GP + 8 V）+ AAPCS64 双指针 va_list + 无分支 va_arg select。
+- **2df2c8d** aarch64_memit.c：MMOP_BLIT（8 字节块 + 字节余数）；TLS
+  emit_tls_addr（mrs tpidr_el0 + :tprel_hi12/lo12 local-exec、:gottprel
+  initial-exec）；emit_setccr i32 用 w 比较（va_arg 负偏移判断）。
+- **411dcc1** aarch64 mbe_supported 全放开（聚合/varargs/TLS/VLA 不再
+  回退 legacy）。
+- **2fd881c** 回归测试：test/targets/aggva.c + fpfill.sh 扩展（aarch64
+  全功能编译 + as + tpidr_el0 断言）。
+
+### 验证
+- aarch64 c99+c11 全量 54/54 样例 MIR-native 汇编通过 aarch64-linux-gnu-as
+  （含 varargs/vla/varargs_overflow——后者 legacy 曾崩溃 invalid class，
+  现由 MIR-native 处理）。
+- 聚合（≤16B 块、all-FP v 块、>16B sret）、varargs（GP/FP/混合）、TLS
+  （tpidr_el0 + tprel 重定位）、VLA 专项样例 as 通过。
+- x86_64 无回归：verify-all PASS=19 FAIL=0、自举 exit 0。
+
+### 剩余工作（后续）
+- aarch64 浮点 va_arg 的 FP 块宽度（16B 槽 vs 实际 8B）边界、聚合块
+  分类的混合块（int+float 同一 8B 块）细化；loongarch64 已由 bella
+  补齐（见下）。
+
+## Phase 3b（续）：loongarch64 MIR-native 全功能补齐（2026-08-03，bella，#141）
+
+loongarch64 从标量整数扩展到全功能（参照 chloe 的 riscv64 补齐 49c2ac1）。
+commit：a4b28cd（聚合+varargs ABI）、2045931（浮点/TLS/BLIT 发射）、
+052fcb2（门禁适配）。
+
+### 聚合
+- LvClass 分类器：≤16B 拆 8B 块——全 FP 结构用 fa0/fa1，否则 a0/a1；
+  >16B/不完整走 sret（a0 隐藏缓冲，selpar 存槽、selret 重载 + BLIT）。
+- selpar/selcall/selret 聚合参数/返回 + 寄存器回填 pad。
+
+### varargs
+- 单指针 va_list：selpar 建 64B va_save 区存 a0-a7；vastart 指向首个
+  未消费 GP 寄存器或栈参数；vaarg 读 *ap 并步进 8。
+
+### 浮点
+- fadd/fsub/fmul/fdiv/fneg/fsqrt.s/d；movgr2fr+ffint（int→fp）、
+  ftintrz+movfr2gr（fp→int 截断 = C cast）；fcvt.s/d 互转。
+- 浮点比较：fcmp.clt/cle/ceq.s/d $fcc0 + movcf2gr（结果落 GPR）。
+- 踩坑：工具链 as（2.41）缺无符号 ffint.*.u——32 位无符号源已零扩展，
+  用有符号转换精确。
+
+### TLS
+- local-exec（lu12i.w %le_hi20/ori %le_lo12/lu32i.d %le64_lo20/
+  lu52i.d %le64_hi12/add.d $tp）与 initial-exec。
+
+### 验证
+- 29 个可编译 test/c99 样例（含 float/float_expr/hex_float/complex）
+  全部经 loongarch64-linux-gnu-as 汇编通过。
+- 综合样例（聚合 float 返回 fa0/fa1、>16B sret、varargs 含 double、
+  VLA、TLS）汇编通过。
+- check-loongarch64 门禁双后端（MIR-native 默认 + bridge）均转绿。
+- x86_64 无回归：verify-all 19/19（双路径）、自举 exit 0。
+
+### 下一目标
+- aarch64 已由 hazel 补齐（见上）；arm 已由 chloe 补齐（见下）。
+
+### Phase 3c：arm（armv7-a）MIR-native 移植（#154，chloe，worktree-tmp-chloe-arm）
+按 grace i386/arm 决策（16 GPR + 32 D 扁平寄存器、AAPCS32 R0-R3/D0-D7
+传参、CPSR flags 存在），复用 aarch64 骨架裁剪为 32 位：
+- **标量整数后端**（`6cdd504`）：arm_m.h 寄存器枚举 + mtarget_arm
+  （gpr0=r0/ngpr=16、fpr0=d0/nfpr=32、rglob=fp/sp/lr/pc、argreg=
+  r0-r3+d0-d7、sret_reg=r0、ptrsize=4、stackalign=8）；arm_mabi.c
+  AAPCS32 标量核；arm_mbe.c isel（SETCCR cmp+条件 mov、JNZ→JCC）；
+  arm_memit.c 发射（ldr/str/ldrb/ldrh/ldrsb/ldrsh、movw/movt、sdiv/
+  udiv/rem、mul Rd!=Rm、rsb/mvn；帧 push+vpush+sub sp+add fp；头
+  .syntax unified/.arch armv7ve/.fpu neon）。emit.c 分派
+  mfnm_backend_arm（T.name="armv7"）。附带：emit.c GNU-stack 行对
+  arm as 改简单形式、legacy arm_emit.c 补 VFP 头、Makefile MABI_SRC。
+- **浮点使能**（`8dec5a1`）：mbe_supported 只拒 MT_I64（放行 MT_PTR，
+  仅函数引用）；VFP 运算/转换/比较（vcmp+vmrs+条件 mov）；浮点常量
+  位 memcpy、fload_scratch 目标 scratch 参数化（修两操作数同寄存器）、
+  CALL 浮点返回 d0→dst、静态 alloca 去 +g_slot_base、浮点 store 先装
+  值再取地址。
+- mbe_supported：32 位标量整数 + 浮点走 MIR-native；MT_I64（long
+  long 需寄存器对）、聚合、varargs、TLS、VLA 回退 legacy。
+- 验证：qemu-arm-static 运行时全过（浮点运算/转换/比较/循环/Newton
+  迭代/unsigned 转换/浮点函数调用传参返回 + 标量 fib/divmod/数组/
+  移位）；test/c99+c11 54 样例交叉汇编全过（49 走 MIR-native）；
+  x86_64 verify-all 19/19 + 自举 exit 0。
+- 已知限制（与 legacy 一致）：long long 算术、聚合、varargs、TLS、
+  VLA 走 legacy；legacy TLS 的 tprel 修饰符需对应 as 支持。
