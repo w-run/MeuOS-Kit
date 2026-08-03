@@ -130,29 +130,15 @@ mval_of_ref(MFn *mf, MRef r)
 
 /* P3b scope: scalar functions only.  Returns false (caller falls back to
  * the bridge path) when the function uses constructs the machine backend
- * does not yet lower.  Phase 1 (2026-08-03) closed: aggregate
- * params/returns/args, SALLOC, TLS globals; remaining fallback: dynamic
- * alloca (VLA).  Set MCC_DEBUG_MBE=1 to log fallback reasons. */
+ * does not yet lower.  Phase 1 (2026-08-03) closed all x86_64 fallbacks:
+ * aggregate params/returns/args, SALLOC, TLS globals, dynamic alloca
+ * (VLA) — MCC_MIR_BACKEND=1 is now the complete x86_64 path.  (A future
+ * backend/feature that needs to fall back can re-add a check here.) */
 static bool
 mbe_supported(MFn *mf)
 {
-	bool ok = true;
-	const char *why = 0;
-	for (MBlk *mb = mf->link; ok && mb; mb = mb->link) {
-		for (uint32_t k = 0; k < mb->nins; k++) {
-			MIns *in = &mb->ins[k];
-			/* dynamic alloca (VLAs): size is a runtime value */
-			if (in->op == MOP_ALLOCA && in->src[0].val) {
-				ok = false;
-				why = "dynamic alloca";
-				break;
-			}
-		}
-	}
-	if (!ok && getenv("MCC_DEBUG_MBE"))
-		fprintf(stderr, "mbe: fallback %s (%s)\n",
-		        mf->name ? mf->name : "?", why ? why : "?");
-	return ok;
+	(void)mf;
+	return true;
 }
 
 bool

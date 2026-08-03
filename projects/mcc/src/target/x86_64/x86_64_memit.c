@@ -54,6 +54,7 @@ cc_suffix(MCC cc)
 
 static const MTargetM *g_mt;
 static int g_alloca_cur;   /* frame-relative cursor for static allocas */
+static MFnM *g_fm;         /* current function (for the VLA/dynalloc flag) */
 
 static int
 alloca_size(MMOP op)
@@ -789,6 +790,21 @@ emit_ins(FILE *f, MInsM *in)
 	case MMOP_ALLOCA4:
 	case MMOP_ALLOCA8:
 	case MMOP_ALLOCA16: {
+		/* dynamic alloca (VLA): the size is a runtime value; reserve the
+		 * space below the current rsp (16-aligned) and return the new
+		 * rsp as the block pointer.  The epilogue restores rsp from rbp
+		 * for such functions (fm->dynalloc). */
+		if (in->src[0] && in->src[0]->kind != MV_CONST) {
+			mov_to_rax(f, in->src[0], 0);      /* size */
+			fputs("\taddq\t$15, %rax\n", f);   /* round up */
+			fputs("\tandq\t$-16, %rax\n", f);
+			fputs("\tsubq\t%rax, %rsp\n", f);
+			fputs("\tleaq\t0(%rsp), %rax\n", f);
+			rax_to_dst(f, d);
+			if (g_fm)
+				g_fm->dynalloc = true;
+			return;
+		}
 		/* static alloca: address a reserved frame slot below the spill
 		 * area (never touch %rsp: it must stay balanced at calls) */
 		g_alloca_cur -= alloca_size_ins(in);
@@ -958,6 +974,22 @@ void
 mfnm_emit_x86_64(MFnM *fm, FILE *f)
 {
 	g_mt = fm->mt;
+	g_fm = fm;
+	/* Blocks are emitted in reversed link order, so the epilogue of a
+	 * later-emitted (earlier in CFG) return block may be printed before
+	 * the dynamic-alloca instruction would set the flag.  Pre-scan so
+	 * every return path restores rsp correctly. */
+	fm->dynalloc = false;
+	for (MBlkM *b = fm->link; !fm->dynalloc && b; b = b->link)
+		for (uint32_t i = 0; i < b->nins; i++) {
+			MMOP op = b->ins[i].op;
+			if ((op == MMOP_ALLOCA4 || op == MMOP_ALLOCA8 ||
+			     op == MMOP_ALLOCA16) &&
+			    b->ins[i].src[0] && b->ins[i].src[0]->kind != MV_CONST) {
+				fm->dynalloc = true;
+				break;
+			}
+		}
 	int extra = assign_extra_slots(fm);
 	nfp = 0;   /* fresh float pool per function */
 	g_fname = fm->name;
@@ -1024,8 +1056,15 @@ mfnm_emit_x86_64(MFnM *fm, FILE *f)
 			        b->s2 ? b->s2->id : 0);
 			break;
 		case MMOP_RET:
-			if (framesize > 0)
+			if (g_fm && g_fm->dynalloc) {
+				/* rsp was lowered by a runtime VLA alloca: restore it
+				 * from the frame pointer, then rewind past the
+				 * callee-saved pushes so the pops below work. */
+				fprintf(f, "\tmovq\t%%rbp, %%rsp\n");
+				fprintf(f, "\tsubq\t$%d, %%rsp\n", csaves * 8);
+			} else if (framesize > 0) {
 				fprintf(f, "\taddq\t$%d, %%rsp\n", framesize);
+			}
 			/* restore callee-saved registers in reverse push order */
 			{
 				int used[16], n = 0;
