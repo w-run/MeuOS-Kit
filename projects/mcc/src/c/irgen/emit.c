@@ -28,6 +28,42 @@ extern int emit_debug;  /* from emit/emit.c */
 extern void emitdbgloc(uint, uint, FILE *);  /* from emit/emit.c */
 extern bool mfnm_backend_x86_64(struct MFn *);  /* x86_64_mbe.c (P3b machine backend) */
 
+/* DWARF variable-type classification for the base-type DIEs. */
+static int
+dwarf_type_of(struct type *t)
+{
+	if (!t)
+		return 0; /* DT_INT */
+	if (t->kind == TYPEPOINTER)
+		return 3; /* DT_PTR */
+	if (t->kind == TYPECHAR || (t->prop & PROPCHAR))
+		return 1; /* DT_CHAR */
+	if (t->prop & PROPINT) {
+		if (t->u.arith.issigned)
+			return 0; /* DT_INT */
+		return 2; /* DT_UINT */
+	}
+	return 0;
+}
+
+/* Record the function's local variables / parameters for DWARF variable
+ * DIEs.  Every variable recorded by funcalloc() gets a DIE (name, type,
+ * declaration line); locations are not yet emitted (the backend's final
+ * frame offsets are not exposed back to the frontend), so gdb knows the
+ * variables but cannot yet print their values. */
+static void
+dwarf_collect_vars(struct func *f, struct MFn *mf, Fn *fn)
+{
+	int i;
+
+	(void)mf;
+	(void)fn;
+	if (!f || g_dwarf_level <= 0)
+		return;
+	for (i = 0; i < f->ndvars; i++)
+		dwarf_add_var(f->dvars[i].name, dwarf_type_of(f->dvars[i].type));
+}
+
 /* MIR-only switch (Phase 2): always 1 — set in main.c (MCC_USE_MIR env
  * removed).  The legacy direct-LIR path is unreachable. */
 int g_use_mir;
@@ -264,7 +300,7 @@ expand_gd_tls(Ref r, Fn *fn)
 }
 
 void
-emitfunc(struct func *f, bool global)
+emitfunc(struct func *f, struct scope *fs, bool global)
 {
 	struct block *b;
 	struct inst **instp, **instend;
@@ -273,6 +309,14 @@ emitfunc(struct func *f, bool global)
 	int retty;
 	uint nblk = 0;
 	int *tempcls;
+	int dwarf_idx = -1;
+
+	/* DWARF debug info: record the function (name, declaration line). */
+	if (g_dwarf_level > 0) {
+		const char *fname = f->name;
+		int fline = f->declloc.file ? f->declloc.line + 1 : 1;
+		dwarf_idx = dwarf_begin_func(fname, fline, 1);
+	}
 
 	/* C99 5.1.2.2.3: implicit `return 0;` from main */
 	if (f->end->jump.kind == JUMP_NONE) {
@@ -305,6 +349,11 @@ emitfunc(struct func *f, bool global)
 		 * the MIR -> bridge -> LIR path. */
 		if (g_use_mir_backend && strcmp(T.name, "x86_64") == 0 &&
 		    mfnm_backend_x86_64(mf)) {
+			if (g_dwarf_level > 0) {
+				dwarf_collect_vars(f, mf, NULL);
+				dwarf_emit_func_end(stdout, dwarf_idx);
+				dwarf_end_func();
+			}
 			freeall();
 			mfn_free(mf);
 			return;
@@ -318,6 +367,11 @@ emitfunc(struct func *f, bool global)
 		if (emit_debug)
 			emitdbgloc(1, 0, stdout);
 		T.emitfn(fn, stdout);
+		if (g_dwarf_level > 0) {
+			dwarf_collect_vars(f, mf, fn);
+			dwarf_emit_func_end(stdout, dwarf_idx);
+			dwarf_end_func();
+		}
 		freeall();
 		mfn_free(mf);
 		return;

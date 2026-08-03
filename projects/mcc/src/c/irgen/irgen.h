@@ -103,6 +103,14 @@ struct switchcase {
 	struct block *body;
 };
 
+/* DWARF variable record: a local/parameter captured at funcalloc() time,
+ * mapped to its MIR value (via value id) for the final stack location. */
+struct dwarf_vrec {
+	const char *name;
+	struct type *type;
+	int value_id;
+};
+
 struct func {
 	struct decl *decl, *namedecl;
 	char *name;
@@ -115,6 +123,13 @@ struct func {
 	 * statement, recorded by stmt() so diagnostics can point at the
 	 * function body's end rather than the following token */
 	struct location bodyend;
+	/* source location of the function name (declaration), recorded by
+	 * mkfunc() for DWARF subprogram DIEs */
+	struct location declloc;
+	/* local variables / parameters recorded by funcalloc() for DWARF
+	 * variable DIEs (name, type, frontend value id -> MIR slot) */
+	struct dwarf_vrec *dvars;
+	int ndvars, capdvars;
 };
 
 /* Pointer width follows the selected ABI: i386 is ILP32, the remaining

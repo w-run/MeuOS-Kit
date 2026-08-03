@@ -25,6 +25,12 @@ mkfunc(struct decl *decl, char *name, struct type *t, struct scope *s)
 	f->name = name;
 	f->type = t;
 	f->bodyend = (struct location){0};
+	/* function-name source location (DWARF subprogram decl_line/file);
+	 * `tok` is positioned at the function name's declarator here */
+	f->declloc = tok.loc;
+	f->dvars = NULL;
+	f->ndvars = 0;
+	f->capdvars = 0;
 	f->start = f->end = mkblock("start");
 	f->lastid = 0;
 	mapinit(&f->gotos, 8);

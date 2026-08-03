@@ -750,8 +750,10 @@ mcc_main(int argc, char *argv[])
 		}
 	} else {
 		scopeinit();
-		if (emit_debug && first_input)
+		if (emit_debug && first_input) {
 			emitdbgfile(first_input, stdout);
+			dwarf_set_file(first_input);
+		}
 		if (g_lang == 1) {
 			/* C++ translation unit: the C++ frontend parser drives the
 			 * declaration loop (C++ grammar layered over the C parser). */
@@ -789,6 +791,9 @@ mcc_main(int argc, char *argv[])
 		/* Emit ELF footer (sections, etc.). */
 		if (T.emitfin)
 			T.emitfin(stdout);
+		/* DWARF debug info (when -g with a level). */
+		if (g_dwarf_level > 0)
+			dwarf_finalize(stdout);
 	}
 
 	fflush(stdout);

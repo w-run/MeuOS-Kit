@@ -1028,7 +1028,7 @@ cpp_emit_global_ctors(void)
 	extern struct func *mkfunc(struct decl *, char *, struct type *,
 	    struct scope *);
 	extern void delfunc(struct func *);
-	extern void emitfunc(struct func *, bool);
+	extern void emitfunc(struct func *, struct scope *, bool);
 	extern void funcret(struct func *, struct value *);
 	extern struct scope *delscope(struct scope *);
 	extern void tokpush(struct token *, size_t);
@@ -1055,7 +1055,7 @@ cpp_emit_global_ctors(void)
 	for (g = g_cpp_global_ctors; g; g = g->next)
 		cpp_emit_ctor_call(f, g->d, g->args);
 	funcret(f, NULL);
-	emitfunc(f, true);
+	emitfunc(f, fs, true);
 	delfunc(f);
 	delscope(fs);
 
@@ -1090,7 +1090,7 @@ cpp_emit_global_ctors(void)
 			cpp_emit_global_dtor(f, g->d);
 	}
 	funcret(f, NULL);
-	emitfunc(f, true);
+	emitfunc(f, fs, true);
 	delfunc(f);
 	delscope(fs);
 
@@ -1107,7 +1107,7 @@ cpp_parse_method_body(struct cpp_pending_method *pm)
 	    struct scope *);
 	extern void delfunc(struct func *);
 	extern void stmt(struct func *, struct scope *);
-	extern void emitfunc(struct func *, bool);
+	extern void emitfunc(struct func *, struct scope *, bool);
 	extern void funchlt(struct func *);
 	extern struct scope *delscope(struct scope *);
 
@@ -1158,7 +1158,7 @@ cpp_parse_method_body(struct cpp_pending_method *pm)
 			g_cpp_auto_ret_type = NULL;
 			g_cpp_auto_ret_func = NULL;
 		}
-		emitfunc(f, pm->d->linkage == LINKEXTERN);
+		emitfunc(f, fs, pm->d->linkage == LINKEXTERN);
 		delscope(fs);
 		delfunc(f);
 		pm->d->defined = true;
@@ -1909,7 +1909,7 @@ cpp_parse_free_operator(struct scope *s, struct qualtype base)
 	    struct scope *);
 	extern void delfunc(struct func *);
 	extern void stmt(struct func *, struct scope *);
-	extern void emitfunc(struct func *, bool);
+	extern void emitfunc(struct func *, struct scope *, bool);
 	extern struct scope *delscope(struct scope *);
 
 	const char *opcode;
@@ -1987,7 +1987,7 @@ cpp_parse_free_operator(struct scope *s, struct qualtype base)
 			scopeputdecl(fs, pd);
 	f = mkfunc(d, d->name, d->type, fs);
 	stmt(f, fs);
-	emitfunc(f, d->linkage == LINKEXTERN);
+	emitfunc(f, fs, d->linkage == LINKEXTERN);
 	delscope(fs);
 	delfunc(f);
 	d->defined = true;
