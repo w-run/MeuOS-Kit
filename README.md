@@ -103,7 +103,8 @@ Phase 7  用户空间      构建 meuos-utils + meuos-shell
 | 4 | sysroot 内自重建 Kit | `make -C meuos-libc check-aarch64-bootstrap`（aarch64 跨 ISA 端到端） + `env/` QEMU |
 | 5 | meuos-toolchain + mcc driver 集成 mt | `make -C meuos-toolchain check` |
 | 6 | meuos-buildtools (m4/bison/flex/gperf) | 已规划，待启动 |
-| 7 | meuos-utils + meuos-shell | 待启动 |
+| 7A | meuos-utils + meuos-shell 骨架 | `make -C projects/meuos-utils check` + `make -C projects/meuos-shell check`（烟雾测试通过）|
+| 7B | POSIX sh 子集 + coreutils 主流工具 | `projects/meuos-{utils,shell}/.todo/` 各自任务集 |
 
 ## meow 构建系统
 
