@@ -21,11 +21,17 @@
 #include "mir.h"
 #include "riscv64_m.h"
 
+/* PIC/shared flag, mirrored from the driver (main.c) — the MIR machine
+ * layer does not read the QBE `Target T` global (purity rule, same as
+ * x86_64_memit.c).  Defined in x86_64_memit.c. */
+extern int g_pic;
+
 static const MTargetM *g_mt;
 static MFnM *g_fm;
 static int g_alloca_cur;   /* frame-relative cursor for static allocas */
 static const char *g_fname;
 static int g_slot_base;    /* -16: fp+ra save area above the slots */
+static int g_got_id;       /* label counter for %pcrel_lo pairing under PIC */
 
 /* ---- width helpers ------------------------------------------------------ */
 
@@ -79,6 +85,27 @@ emit_const(FILE *f, MConst *c)
 	case MC_ADDR: fprintf(f, "%s", c->u.addr.sym ? c->u.addr.sym : "0"); break;
 	default:      fputs("0", f); break;
 	}
+}
+
+/* Load a non-TLS global symbol's address into `rn` (t0/t1/...).
+ *   - PIC: auipc %got_pcrel_hi + ld %pcrel_lo(label) — the canonical
+ *     PC-relative GOT access (R_RISCV_GOT_HI20 + R_RISCV_PCREL_LO12_I).
+ *     %pcrel_lo references a label placed at the auipc so the assembler
+ *     pairs the two relocations (gas rejects the %got_pcrel_lo modifier;
+ *     this paired form matches riscv64_emit.c and gcc/gas output).
+ *   - non-PIC: lui %pcrel_hi + addi %pcrel_lo (R_RISCV_PCREL_HI20 + LO12_I). */
+static void
+emit_global_addr(FILE *f, const char *sym, const char *rn)
+{
+	if (g_pic) {
+		fprintf(f, ".Lgot%d:\n", ++g_got_id);
+		fprintf(f, "\tauipc\t%s, %%got_pcrel_hi(%s)\n", rn, sym);
+		fprintf(f, "\tld\t%s, %%pcrel_lo(.Lgot%d)(%s)\n",
+		        rn, g_got_id, rn);
+		return;
+	}
+	fprintf(f, "\tlui\t%s, %%pcrel_hi(%s)\n", rn, sym);
+	fprintf(f, "\taddi\t%s, %s, %%pcrel_lo(%s)\n", rn, rn, sym);
 }
 
 /* Print a register, or a slot as fp-relative memory (only valid as a
@@ -146,9 +173,7 @@ mv_to_scratch(FILE *f, MVal *v, const char *rn)
 			emit_tls_addr(f, v->sym ? v->sym : "0", v->isext, rn);
 			break;
 		}
-		fprintf(f, "\tlui\t%s, %%pcrel_hi(%s)\n"
-		            "\taddi\t%s, %s, %%pcrel_lo(%s)\n",
-		        rn, v->sym ? v->sym : "0", rn, rn, v->sym ? v->sym : "0");
+		emit_global_addr(f, v->sym ? v->sym : "0", rn);
 		break;
 	default:
 		fprintf(f, "\tmv\t%s, zero\n", rn);
@@ -280,15 +305,14 @@ emit_tls_addr(FILE *f, const char *sym, bool isext, const char *rn)
 }
 
 /* Emit an address into the scratch register rn (t0/t1).  Symbolic targets
- * use the %pcrel_hi/lo pair. */
+ * use the %pcrel_hi/lo pair, or the GOT under -fPIC. */
 static void
 emit_addr_to_scratch(FILE *f, MAddr a, const char *rn)
 {
 	MVal *base = a.base;
 	if (a.offcon) {
-		const char *sym = a.offcon->u.addr.sym;
-		fprintf(f, "\tlui\t%s, %%pcrel_hi(%s)\n", rn, sym);
-		fprintf(f, "\taddi\t%s, %s, %%pcrel_lo(%s)\n", rn, rn, sym);
+		const char *sym = a.offcon->u.addr.sym ? a.offcon->u.addr.sym : "0";
+		emit_global_addr(f, sym, rn);
 		if (a.off)
 			fprintf(f, "\taddi\t%s, %s, %lld\n", rn, rn, (long long)a.off);
 		return;
@@ -312,12 +336,10 @@ emit_addr_to_scratch(FILE *f, MAddr a, const char *rn)
 	if (base && base->kind == MV_GLOBAL) {
 		/* address of a global symbol (e.g. an array) */
 		const char *sym = base->sym ? base->sym : "0";
-		if (base->tls) {
+		if (base->tls)
 			emit_tls_addr(f, sym, base->isext, rn);
-		} else {
-			fprintf(f, "\tlui\t%s, %%pcrel_hi(%s)\n", rn, sym);
-			fprintf(f, "\taddi\t%s, %s, %%pcrel_lo(%s)\n", rn, rn, sym);
-		}
+		else
+			emit_global_addr(f, sym, rn);
 		if (a.off)
 			fprintf(f, "\taddi\t%s, %s, %lld\n", rn, rn, (long long)a.off);
 		return;
@@ -713,7 +735,10 @@ emit_ins(FILE *f, MInsM *in)
 	}
 	case MMOP_CALL: {
 		if (s0 && s0->kind == MV_GLOBAL)
-			fprintf(f, "\tcall\t%s\n", s0->sym ? s0->sym : "?");
+			/* -fPIC: external calls go through the PLT (R_RISCV_CALL_PLT),
+			 * matching riscv64_emit.c and gcc -fPIC output. */
+			fprintf(f, "\tcall\t%s%s\n", s0->sym ? s0->sym : "?",
+			        g_pic && s0->isext ? "@plt" : "");
 		else if (s0) {
 			mv_to_scratch(f, s0, "t0");
 			fputs("\tjalr\tra, 0(t0)\n", f);

@@ -22,7 +22,8 @@
 #  13. check-c-mir       C 功能回归 × MIR/LIR 双路径矩阵（mir_matrix.sh：MIR=1 与 MIR=0 编译运行且 stdout 一致）
 #
 # 未纳入本门禁的目标及原因：
-#   check-pic-verify     riscv64/i386 GOT 已知缺口，当前必失败
+#   check-pic-verify     PIC GOT 验证（x86_64/aarch64/riscv64/i386 四架构
+#                        已修复通过；独立目标，未纳入本汇总门禁）
 #   check-chibicc        社区套件（chibicc）当前 41/41 编译失败，见
 #                        test/community/chibicc/REPORT.md 的分类
 #   check-i386-qemu      需 qemu-system-i386 整机 VM，耗时过长，不适合门禁
