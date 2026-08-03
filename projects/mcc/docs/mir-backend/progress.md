@@ -494,3 +494,36 @@ f0-f31 / aarch64 v0-v31）与 mabi 的 isf 槽此前已建。
 - riscv64/aarch64 聚合（sret）与 varargs/TLS/VLA；移植顺序下一目标
   loongarch64。
 
+## Phase 3b：aarch64 全功能补齐（2026-08-03，hazel）
+
+aarch64 在标量+浮点之后补齐聚合/varargs/TLS/VLA，MIR-native 全功能
+（对齐 chloe 的 riscv64 补齐 49c2ac1）。AAPCS64 差异：sret 用 X8、
+栈参数 fp+16、va_list 为 32 字节双指针结构（__stack/__gr_top/__vr_top/
+__gr_offs/__vr_offs）。
+
+### 提交（branch worktree-tmp-hazel-aafill，基于主线 43d1507）
+- **c74f59b** aarch64_mabi.c 聚合 + varargs：A64Class 分类器（≤16B 拆
+  8 字节块，all-FP → v0/v1，否则 x0/x1；>16B sret X8）；selpar/selcall/
+  selret 聚合参数/返回 + sret 缓冲跨调用保存；varargs 192B reg_save_area
+  （8 GP + 8 V）+ AAPCS64 双指针 va_list + 无分支 va_arg select。
+- **2df2c8d** aarch64_memit.c：MMOP_BLIT（8 字节块 + 字节余数）；TLS
+  emit_tls_addr（mrs tpidr_el0 + :tprel_hi12/lo12 local-exec、:gottprel
+  initial-exec）；emit_setccr i32 用 w 比较（va_arg 负偏移判断）。
+- **411dcc1** aarch64 mbe_supported 全放开（聚合/varargs/TLS/VLA 不再
+  回退 legacy）。
+- **2fd881c** 回归测试：test/targets/aggva.c + fpfill.sh 扩展（aarch64
+  全功能编译 + as + tpidr_el0 断言）。
+
+### 验证
+- aarch64 c99+c11 全量 54/54 样例 MIR-native 汇编通过 aarch64-linux-gnu-as
+  （含 varargs/vla/varargs_overflow——后者 legacy 曾崩溃 invalid class，
+  现由 MIR-native 处理）。
+- 聚合（≤16B 块、all-FP v 块、>16B sret）、varargs（GP/FP/混合）、TLS
+  （tpidr_el0 + tprel 重定位）、VLA 专项样例 as 通过。
+- x86_64 无回归：verify-all PASS=19 FAIL=0、自举 exit 0。
+
+### 剩余工作（后续）
+- aarch64 浮点 va_arg 的 FP 块宽度（16B 槽 vs 实际 8B）边界、聚合块
+  分类的混合块（int+float 同一 8B 块）细化；移植顺序下一目标
+  loongarch64（bella 在途）。
+
