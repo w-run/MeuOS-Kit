@@ -1308,9 +1308,29 @@ cpp_try_operator_call(struct scope *s, struct expr *l, enum tokenkind op,
 		return false;
 	snprintf(mname, sizeof mname, "operator_%s", opcode);
 	if (cpp_is_member_function(t, mname)) {
-		cpp_mangled_name_args(t, mname, r, mangled, sizeof mangled, false);
-		fd = scopegetdecl(t->scope ? t->scope : &filescope, mangled, 1);
-		if (!fd || fd->kind != DECLFUNC)
+		/* const-K × reference-R 级联查找：声明侧形如 `Vec_operator_eqKRoVec`
+		 *（const 成员函数追加 K，引用形参前缀 R）。调用侧按实参编码，缺
+		 * K/R 会查不到（D1）。依次尝试 4 种变体：对象 const 匹配的 K 态优
+		 * 先，引用编码（prefer_ref 给 lvalue 加 'R'、rvalue 加 'V'）与裸
+		 * 编码各试一轮，命中即用。 */
+		bool obj_const = (l->qual & QUALCONST) != 0;
+		bool found = false;
+		int kk;
+		for (kk = 0; kk < 2 && !found; kk++) {
+			/* kk=0 先试与对象 const 性匹配的 K 态，kk=1 回退另一态 */
+			const char *ks = (kk == 0) == obj_const ? "K" : "";
+			char mnameQ[64];
+			int rref;
+			snprintf(mnameQ, sizeof mnameQ, "%s%s", mname, ks);
+			for (rref = 0; rref < 2 && !found; rref++) {
+				cpp_mangled_name_args(t, mnameQ, r, mangled,
+				    sizeof mangled, rref != 0);
+				fd = scopegetdecl(t->scope ? t->scope : &filescope,
+				    mangled, 1);
+				found = fd && fd->kind == DECLFUNC;
+			}
+		}
+		if (!found)
 			return false;
 
 		fn = mkexpr(EXPRIDENT, fd->type, NULL);
@@ -1325,7 +1345,14 @@ cpp_try_operator_call(struct scope *s, struct expr *l, enum tokenkind op,
 		call->u.call.nargs = 1;
 		end = &obj->next;
 		if (r) {
-			*end = exprassign(r, fd->type->u.func.params->next->type);
+			struct decl *pp = fd->type->u.func.params ?
+			    fd->type->u.func.params->next : NULL;
+			struct expr *arg = r;
+			/* C++ reference parameter: bind the address
+			 * (expr_postfix.c:352-354 惯例) */
+			if (pp && pp->type && pp->type->isref)
+				arg = mkunaryexpr(TBAND, r);
+			*end = exprassign(arg, pp ? pp->type : NULL);
 			end = &(*end)->next;
 			++call->u.call.nargs;
 		}
@@ -1346,15 +1373,23 @@ cpp_try_operator_call(struct scope *s, struct expr *l, enum tokenkind op,
 	call->u.call.args = NULL;
 	call->u.call.nargs = 0;
 	end = &call->u.call.args;
-	*end = exprassign(l, fd->type->u.func.params->type);
-	end = &(*end)->next;
-	++call->u.call.nargs;
-	if (r) {
-		*end = exprassign(r,
-		    fd->type->u.func.params->next
-		    ? fd->type->u.func.params->next->type : NULL);
+	{
+		struct decl *pp = fd->type->u.func.params;
+		struct expr *arg = l;
+		if (pp && pp->type && pp->type->isref)
+			arg = mkunaryexpr(TBAND, l);
+		*end = exprassign(arg, pp ? pp->type : NULL);
 		end = &(*end)->next;
 		++call->u.call.nargs;
+		pp = pp ? pp->next : NULL;
+		if (r) {
+			arg = r;
+			if (pp && pp->type && pp->type->isref)
+				arg = mkunaryexpr(TBAND, r);
+			*end = exprassign(arg, pp ? pp->type : NULL);
+			end = &(*end)->next;
+			++call->u.call.nargs;
+		}
 	}
 	*out = call;
 	return true;
@@ -2086,8 +2121,30 @@ emit_base_ctors_for(struct func *f, struct type *classt, struct expr *thisp)
 		if (m->name && m->name[0] == '~')
 			continue;
 		bt = m->type;
-		if (!bt || (bt->kind != TYPESTRUCT && bt->kind != TYPEUNION))
+		if (!bt || (bt->kind != TYPESTRUCT && bt->kind != TYPEUNION)) {
+			/* scalar member: no ctor call, but a ctor initializer-list
+			 * item `: x(v)` must land the value — emit
+			 * `*(this + offset) = v`.  Previously the item was dropped
+			 * by the `continue`, leaving the scalar member unwritten
+			 * (D4: by-value returns of such classes were garbage). */
+			if (m->name && bt && bt->kind != TYPEFUNC) {
+				struct cpp_init_item *it;
+				for (it = g_cpp_init_items; it; it = it->next)
+					if (strcmp(it->name, m->name) == 0)
+						break;
+				if (it && it->args) {
+					struct expr *base = mkbinaryexpr(&tok.loc,
+					    TADD, exprconvert(thisp, &typeulong),
+					    mkconstexpr(&typeulong, m->offset));
+					base->type = mkpointertype(bt, QUALNONE);
+					struct expr *dst = mkunaryexpr(TMUL, base);
+					dst->type = bt;
+					dst->lvalue = true;
+					funcexpr(f, mkassignexpr(dst, it->args));
+				}
+			}
 			continue;
+		}
 		if (m->name && m->type && m->type->kind == TYPEFUNC)
 			continue; /* member functions occupy no storage */
 		if (m->offset) {
