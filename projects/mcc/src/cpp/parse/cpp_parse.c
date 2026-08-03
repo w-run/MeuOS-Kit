@@ -5966,6 +5966,11 @@ cpp_tmpl_class_do_inst(struct scope *s, struct cpp_template *tmpl,
 			    QUALNONE, LINKNONE);
 		}
 		scopeputdecl(&filescope, td);
+		/* Snapshot this binding so a deferred method body can be
+		 * re-bound when parsed later (see cpp_ensure_method_defined).
+		 * `binds[16]` matches the template parameter limit enforced
+		 * above (tmpl->nparams > 16 is rejected as a syntax error),
+		 * so the buffer can never be overrun here. */
 		if (g_cpp_tmpl_nbinds < 16)
 			g_cpp_tmpl_binds[g_cpp_tmpl_nbinds++] = td;
 	}

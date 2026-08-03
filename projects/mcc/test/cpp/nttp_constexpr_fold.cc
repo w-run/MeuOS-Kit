@@ -6,6 +6,14 @@
  * when its type is a dependent one (`template<typename T, T N>`) and the
  * concrete type only becomes known at instantiation.
  *
+ * This file is primarily a *coverage* test for NTTP constant folding, but
+ * the `Val` class template near the bottom also acts as a *regression*
+ * probe for T06: its member body is parsed lazily (after the
+ * instantiation has returned), and two instantiations of the same
+ * template (`Val<int,5>` then `Val<int,7>`) would otherwise clobber the
+ * file-scope binding so `a.val()` returns the wrong value.  If that bug
+ * ever regresses, this test fails.
+ *
  * Returns 0 on success. */
 
 /* constexpr function templates parameterised by a dependent NTTP */
@@ -27,6 +35,15 @@ template<typename T, T N>
 struct Buf {
     T data[N];
     int cap() { return (int)N; }
+};
+
+/* Regression probe for T06 (lazy method-body binding).  The member body
+ * is buffered at instantiation and parsed only when val() is called, by
+ * which point a second instantiation would have overwritten the `N`
+ * binding.  Two instances with distinct NTTPs must read distinct values. */
+template<typename T, T N>
+struct Val {
+    T val() { return N; }
 };
 
 int main(void) {
@@ -64,6 +81,13 @@ int main(void) {
     /* runtime use of the same values agrees with the folded ones */
     if (value_of<int, 5>() != 5) return 5;
     if (twice<int, 5>() != 10) return 6;
+
+    /* T06 regression probe: each instantiation's val() must see its own
+     * NTTP binding, not the last one written to file scope. */
+    Val<int, 5> v1;
+    Val<int, 7> v2;
+    if (v1.val() != 5) return 7;
+    if (v2.val() != 7) return 8;
 
     return 0;
 }
