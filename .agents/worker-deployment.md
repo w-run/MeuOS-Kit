@@ -68,7 +68,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 | alice | reasoning | worktree-tmp-alice-cpp + worktree-tmp-alice-cpp20 + worktree-tmp-alice-cli + worktree-tmp-alice-mtld (自 worktree-mxx-work) | /tmp/mxx-wt-alice | cpp_parse D1/D4/D2/E2/E3 + C++20 NTTP/consteval/<=>/聚合初始化/constexpr 成员 + CLI 参数 + **mt/as imm64 截断修复（check-mt-integration 闭环）** | **completed**（D1/D4 等已合入；cpp20 68d1222；cli ac57402；mtld 本次归并合入主线 **ad52f9b**，verify-all 恢复 19/19） | push worktree-tmp-alice-cpp20 |
 | bella | lite | worktree-tmp-bella-la64 (自 worktree-mxx-work@fc1f279) | /tmp/mxx-wt-bella | x86_64 MIR-native（fallback/≤16B/cmov）+ Phase 3a riscv64 + Phase 3b loongarch64 MIR-native 试点（#117） | **completed**（#94/#97/#111 已合入；#117 本次归并合入主线，loongarch64 MIR-native 上线；交叉汇编通过，verify-all 19/19） | b68447c |
 | chloe | lite | worktree-tmp-chloe-mirp2 + worktree-tmp-chloe-memconst (自 worktree-mxx-work@9742e2f) | /tmp/mxx-wt-chloe | MIR Phase 2：强制 MIR-native + TLS PIC（g_pic 正版）+ verify-all 19 步 + **MIR-native -O1 内存常量传播（check-olevel 差距③）** | **completed**（6cafb11/0702745/318e184 已合入；memconst 本次归并合入主线 **8d0aace**，-O0/-O1 指令数断言转绿） | 81186b3 |
-| diana | lite | worktree-tmp-diana-dwarfloc (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试 + check-pic-verify + 错误码体系/多错收集 + DWARF 调试信息 + **DWARF 变量位置** | **completed**（db1451b C23、6db1691 PIC、errcode、dwarf 均已合入主线；dwarfloc 本次归并合入主线，-g 编译 readelf 确认 DW_AT_location DW_OP_fbreg） | 11 test/c23 + F1-F3 + GOT + E#### + DWARF4 + DW_AT_location |
+| diana | lite | worktree-tmp-diana-dwarfloc + worktree-tmp-diana-fastmath | /tmp/mxx-wt-diana | C23/C11 边界测试 + check-pic-verify + 错误码体系/多错收集 + DWARF 调试信息 + **DWARF 变量位置 + fast-math 折叠与 -Oz 尺寸优化** | **completed**（C23/PIC/errcode/dwarf 均已合入主线；dwarfloc 与 fastmath 本次归并合入主线：DW_AT_location fbreg、-Ofast 折叠、-Oz movl） | 11 test/c23 + F1-F3 + GOT + E#### + DWARF4 + DW_AT_location + -Ofast + -Oz |
 | eve | lite | worktree-tmp-eve + worktree-tmp-eve-olevel + worktree-tmp-eve-i18n (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵 + -O 级别语义分级 + **i18n 消息目录与双语（--lang=en/zh、LANG 推断、--explain/usage/--error-json 双语、check-i18n 目标）** | **completed**（测试矩阵已合入 b4cad7e；eve-olevel 已合入 a1bbb85；eve-i18n 本次归并合入主线 **1ce1b33**，check-i18n 通过） | worktree-tmp-eve-i18n |
 | grace | lite | worktree-tmp-grace-cpp23 (自 worktree-mxx-work@1ef0a9a) | /tmp/mxx-wt-grace | sema/decl E1/E4/E5/E6（已合入）+ C++23 缺口：P0849/P1774/P1401/P2360/nodiscard | **completed**（sema 已合入；cpp23 f7e313a+b54c8b9+16c2ca5+2a4d655+da7a107 **已合入主线** ba6d9f8） | push worktree-tmp-grace-cpp23 |
 | hazel | lite | worktree-tmp-hazel-aarch64 + worktree-tmp-hazel-fpfill | /tmp/mxx-wt-hazel | MIR Phase 3b aarch64 移植 + riscv64/aarch64 浮点补齐 | **completed**（aarch64 已合入第一批；fpfill 本次归并合入主线，浮点路径上线，c99 浮点样例双 target as 通过，verify-all 19/19） | ab7e500 |
@@ -187,6 +187,14 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 - 产出：栈变量 `DW_OP_fbreg(offset)`，寄存器变量 `DW_OP_regN`（预留）；帧基在 dwarf_end_func 捕获
 - 验证：readelf 显示 a=fbreg -24/b=-40/s=-56 与 asm 帧偏移一致；gdb 单步后 `print a`=42 / `print b`=8 读取正确
 - 已知限制：legacy bridge 路径（MCC_USE_MIR=0）无 memit 记录，变量保持无 location（统一处理）
+
+### fast-math 折叠与 -Oz 尺寸优化（diana fastmath 分支）
+- 状态：**已修复**（6de7248 -Ofast 折叠 / ec40f0d -Oz movl，分支 worktree-tmp-diana-fastmath，已 push）
+- -Ofast：passes.c 新增 mfast_simp（g_fast_math 门控、仅浮点 dtype）：x*1.0→x / 1.0*x→x / x+0.0→x / 0.0+x→x / x-0.0→x / x*0.0→0.0 / 0.0*x→0.0 / x/1.0→x / x-x→0.0 / x/x→1.0（同一 SSA 值或同槽相邻两次 load）/-(-x)→x；g_fast_math 定义移至 passes.c（mir_test 独立链接）；test/olevel/fastmath.c
+  - 样例：-O3 f1 出 `mulsd .Lf1.lc0(%rip),%xmm0`；-Ofast f1-f8 全部折叠（15→7 条浮点指令，剩余为主函数累加）
+- -Oz：x86_64_memit mov_to_rax 对 0..0xFFFFFFFF 整数常量用 `movl $imm,%eax`（5B）替代 `movq`（7B）；常量 0 不用 xorl（mov 不改标志位而 xor 置位，破坏 cmp->cmovcc）；test/olevel/sizez.c
+  - 样例：-Os 582B → -Oz 566B（-16B，-2.7%）
+- 验证：check-olevel 全绿（新断言 + 既有），verify-all.sh **19 PASS / 0 FAIL / 0 SKIP**
 
 ---
 

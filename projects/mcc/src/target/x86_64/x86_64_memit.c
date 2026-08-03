@@ -69,6 +69,7 @@ static int g_fp_off;       /* rsp-based slot offset adjustment when omitted */
 extern int g_dwarf_level;
 extern void dwarf_set_framebase(int);
 extern void dwarf_loc_set_stack(uint32_t, int32_t);
+extern int g_opt_z;        /* -Oz: aggressive size (driver/main.c) */
 
 static int
 alloca_size(MMOP op)
@@ -411,7 +412,18 @@ mov_to_rax(FILE *f, MVal *v, MConst *c)
 				emit_global_addr(f, c->u.addr.sym, c->u.addr.off, "rax");
 			}
 		} else if (c->kind == MC_INT) {
-			fprintf(f, "\tmovq\t$%lld, %%rax\n", (long long)c->u.i);
+			uint64_t uv = (uint64_t)c->u.i;
+			/* NOTE: movl (not xorl) for zero — mov never touches the
+			 * flags, but xor sets ZF/SF/OF/CF and would corrupt a
+			 * cmp->cmovcc sequence that reads the flags set by an
+			 * earlier compare.  movl $0,%eax is still 5 bytes vs
+			 * movq $0 (7 bytes). */
+			if (g_opt_z && uv <= 0xFFFFFFFFULL)
+				/* movl zero-extends, so safe only for values whose 64-bit
+				 * form equals the 32-bit immediate (5 bytes vs 7) */
+				fprintf(f, "\tmovl\t$%llu, %%eax\n", (unsigned long long)uv);
+			else
+				fprintf(f, "\tmovq\t$%lld, %%rax\n", (long long)c->u.i);
 		} else {
 			fputs("\tmovq\t$0, %rax\n", f);
 		}

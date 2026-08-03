@@ -8,6 +8,8 @@
 #      -O1 保留分支、-O2 if 转换出 cmov
 #      -O2 出 imul、-O3/-Os/-Oz 出 shl（mul 2^n 强度削减）
 #      -Og 叶函数保留 pushq %rbp（帧指针），-O2 省略
+#      -Ofast 折叠浮点恒等式（x*1.0→x 等），-O3 保留 mulsd
+#      -Oz .text ≤ -Os .text（常量 0/32 位小常量用 movl）
 #   3) 非法级别：-O9 钳制到 -O3（警告不静默），-Ox 报错
 #
 # 用法：sh test/olevel/run.sh [mcc 二进制]
@@ -64,6 +66,35 @@ $BIN -Og --specs=host -S -o /tmp/olevel-og.s "$DIR/leaf.c" 2>/dev/null
 $BIN -O2 --specs=host -S -o /tmp/olevel-o2leaf.s "$DIR/leaf.c" 2>/dev/null
 grep -q 'pushq.*%rbp' /tmp/olevel-og.s || fail "-Og should keep frame pointer for leaf function"
 if grep -q 'pushq.*%rbp' /tmp/olevel-o2leaf.s; then fail "-O2 leaf should omit frame pointer"; fi
+
+# -Ofast fast-math 折叠：x*1.0 等恒等式在 -Ofast 折叠（无浮点运算），
+# -O3（无 g_fast_math）保留 mulsd
+$BIN -O3 --specs=host -S -o /tmp/olevel-fm3.s "$DIR/fastmath.c" 2>/dev/null
+$BIN -Ofast --specs=host -S -o /tmp/olevel-fm.s "$DIR/fastmath.c" 2>/dev/null
+grep -q mulsd /tmp/olevel-fm3.s || fail "-O3 should keep x*1.0 as mulsd (no fast-math)"
+if grep -qE 'mulsd|addsd|subsd|divsd' /tmp/olevel-fm.s; then
+	fail "-Ofast should fold fast-math identities (x*1.0/x+0.0/x-x/x/x etc.)"
+fi
+# -Ofast 运行时正确性（非 NaN 场景折叠结果与 IEEE 一致）
+$BIN -Ofast --specs=host -o /tmp/olevel-fm.bin "$DIR/fastmath.c" 2>/dev/null \
+	|| fail "-Ofast fastmath.c compile failed"
+/tmp/olevel-fm.bin || fail "-Ofast fastmath.c runtime wrong"
+
+# -Oz 尺寸优先：-Oz 的 .text 必须 ≤ -Os 的 .text
+$BIN -Os --specs=host -c -o /tmp/olevel-sizez-os.o "$DIR/sizez.c" 2>/dev/null \
+	|| fail "-Os sizez.c compile failed"
+$BIN -Oz --specs=host -c -o /tmp/olevel-sizez-oz.o "$DIR/sizez.c" 2>/dev/null \
+	|| fail "-Oz sizez.c compile failed"
+szos=$(size /tmp/olevel-sizez-os.o | awk 'NR==2{print $1}')
+szoz=$(size /tmp/olevel-sizez-oz.o | awk 'NR==2{print $1}')
+[ "$szoz" -le "$szos" ] || fail "-Oz text ($szoz) should be <= -Os text ($szos)"
+# -Oz 运行时正确性（与 -Os 结果一致）
+$BIN -Os --specs=host -o /tmp/olevel-sizez-os.bin "$DIR/sizez.c" 2>/dev/null \
+	|| fail "-Os sizez.c link failed"
+$BIN -Oz --specs=host -o /tmp/olevel-sizez-oz.bin "$DIR/sizez.c" 2>/dev/null \
+	|| fail "-Oz sizez.c link failed"
+/tmp/olevel-sizez-os.bin || fail "-Os sizez.c runtime wrong"
+/tmp/olevel-sizez-oz.bin || fail "-Oz sizez.c runtime wrong"
 
 # --- 3) 非法级别 ---
 if $BIN -O9 --specs=host -c -o /tmp/olevel-o9.o "$DIR/grading.c" 2>/tmp/olevel-o9.log; then

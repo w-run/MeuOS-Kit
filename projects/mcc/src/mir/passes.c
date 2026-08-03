@@ -27,6 +27,11 @@
  * 链接范围内；ir.h 中 extern 声明，driver 在 -Os/-Oz 时置位。 */
 int g_opt_size;
 
+/* -Ofast: fast-math 折叠门控（同样定义在本文件以支持 mir_test 独立
+ * 链接）。driver 在 -Ofast 时置位，msimp_block 据此应用无 NaN/Inf/
+ * 符号零语义的代数恒等式折叠。 */
+int g_fast_math;
+
 /* Aggressive folding level gate: when nonzero, msimp_block applies
  * strength-reduction rules that -O2 keeps disabled (e.g. mul-by-power-of-2
  * -> shift, which shrinks code: imul is 7 bytes, shl is 4).  Set by
@@ -346,6 +351,80 @@ defined_outside(MFn *fn, MVal *v, MBlk *b)
 	return v->def != 0;
 }
 
+/* ---- -Ofast fast-math algebraic simplification --------------------------
+ * Applies only when g_fast_math is set and the operation's dtype is
+ * floating point, assuming no NaN/Inf/signed-zero semantics:
+ *   x + 0.0 -> x, 0.0 + x -> x, x - 0.0 -> x
+ *   x * 1.0 -> x, 1.0 * x -> x, x * 0.0 -> 0.0, 0.0 * x -> 0.0
+ *   x / 1.0 -> x, x / x -> 1.0 (x != 0), x - x -> 0.0
+ *   -(-x) -> x
+ * Returns a replacement ref or a null MRef when nothing applies. */
+static MRef
+mfast_simp(MFn *fn, MBlk *b, MOP op, MType dt, MRef a0, MRef a1)
+{
+	double dv;
+
+	if (!g_fast_math)
+		return (MRef){0};
+	if (dt != MT_F32 && dt != MT_F64)
+		return (MRef){0};
+
+	/* right-operand constant */
+	if (a1.con && a1.con->kind == MC_FLT) {
+		dv = a1.con->type == MT_F32 ? a1.con->u.s : a1.con->u.d;
+		if ((op == MOP_ADD || op == MOP_SUB) && dv == 0.0)
+			return a0;
+		if (op == MOP_MUL && dv == 1.0)
+			return a0;
+		if (op == MOP_MUL && dv == 0.0)
+			return MREF_CON(mconst_flt(fn, dt, 0.0));
+		if (op == MOP_DIV && dv == 1.0)
+			return a0;
+	}
+	/* left-operand constant */
+	if (a0.con && a0.con->kind == MC_FLT) {
+		dv = a0.con->type == MT_F32 ? a0.con->u.s : a0.con->u.d;
+		if (op == MOP_ADD && dv == 0.0)
+			return a1;
+		if (op == MOP_MUL && dv == 1.0)
+			return a1;
+		if (op == MOP_MUL && dv == 0.0)
+			return MREF_CON(mconst_flt(fn, dt, 0.0));
+	}
+	/* x - x -> 0.0, x / x -> 1.0: same SSA value, or two adjacent loads
+	 * of the same slot (a local read twice — no store can intervene
+	 * between adjacent loads, so the two reads are equal) */
+	if (a0.val && a1.val) {
+		if (a0.val == a1.val) {
+			if (op == MOP_SUB)
+				return MREF_CON(mconst_flt(fn, dt, 0.0));
+			if (op == MOP_DIV)
+				return MREF_CON(mconst_flt(fn, dt, 1.0));
+		} else if (op == MOP_SUB || op == MOP_DIV) {
+			MIns *d0 = a0.val->def, *d1 = a1.val->def;
+			if (d0 && d1 && d0 != d1 && d0->op == MOP_LOAD &&
+			    d1->op == MOP_LOAD &&
+			    d0->src[0].val == d1->src[0].val &&
+			    d0 >= b->ins && d0 < b->ins + b->nins &&
+			    d1 >= b->ins && d1 < b->ins + b->nins) {
+				int i0 = (int)(d0 - b->ins), i1 = (int)(d1 - b->ins);
+				if (i1 == i0 + 1 || i0 == i1 + 1) {
+					if (op == MOP_SUB)
+						return MREF_CON(mconst_flt(fn, dt, 0.0));
+					return MREF_CON(mconst_flt(fn, dt, 1.0));
+				}
+			}
+		}
+	}
+	/* -(-x) -> x */
+	if (op == MOP_NEG && a0.val && a0.val->def &&
+	    a0.val->def->op == MOP_NEG &&
+	    a0.val->def->dst == a0.val)
+		return a0.val->def->src[0];
+
+	return (MRef){0};
+}
+
 /* ---- memory constant propagation (block-local) ---------------------------
  * Forward a constant store to a stack slot (MOP_ALLOCA result) into a later
  * load from the same slot address within the same block — the C pattern
@@ -516,6 +595,23 @@ msimp_block(MFn *fn, MBlk *b, const char *is_alloca)
 			/* a load never invalidates (reads do not modify memory) */
 		} else if (in->op == MOP_CALL) {
 			nmemc = 0;   /* callee may write through an escaped slot */
+		}
+
+		/* algebraic simplifications on non-constant operands.  Only when
+		 * the result is used in-block AND the operands are also defined
+		 * in-block: substituting a cross-block operand would change the
+		 * SSA dependency structure for promote/ssa. */
+		/* -Ofast fast-math folding: the result is a copy or constant, so
+		 * it is safe even when operands come from other blocks (e.g.
+		 * function params) — the defined_outside SSA constraint below is
+		 * for restructuring rules, not copies. */
+		if (in->dst && in->op < MOP_JMP && !used_outside(fn, in->dst, b)) {
+			MRef fastr = mfast_simp(fn, b, in->op, in->dtype, a0, a1);
+			if (fastr.val || fastr.con) {
+				map_set(tab, in->dst, fastr);
+				removed++;
+				continue;
+			}
 		}
 
 		/* algebraic simplifications on non-constant operands.  Only when
