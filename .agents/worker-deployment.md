@@ -71,7 +71,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 | diana | lite | worktree-tmp-diana (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试扩充 | **completed**（db1451b 已合入主线 294e5c2） | 11 个 test/c23 文件 + 发现 F1-F3 |
 | eve | lite | worktree-tmp-eve (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵扩充 | **completed**（02d6684 已合入主线 b4cad7e） | 33 个 test/cpp 文件 |
 | grace | lite | worktree-tmp-grace (自 worktree-mxx-work) | /tmp/mxx-wt-grace | chibicc B 类两 bug 实施（**竞争**） | **in_progress** | c622f05 起点 |
-| hazel | lite | worktree-tmp-hazel (自 worktree-mxx-work) | /tmp/mxx-wt-hazel | chibicc B 类两 bug 实施（**竞争**） | **in_progress** | c622f05 起点 |
+| hazel | lite | worktree-tmp-hazel-c23 (自 worktree-mxx-work@d0a90c9) | /tmp/mxx-wt-hazel | C23 constexpr 组：F1/F2/F3 | **completed**（8e5aae3 已 push origin/worktree-tmp-hazel-c23，门禁全绿） | 8e5aae3 |
 
 ### 会话中断恢复速查（当前团队）
 1. `git fetch origin`（在 /workspace/MeuOS-Kit）
@@ -128,9 +128,9 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 - **D1** const T& operator 整体失败（def4 定位，cpp_try_operator_call）
 - **D4** ctor 标量成员 init-list 落地缺失（def4 定位，emit_base_ctors_for）
 - **D2** 急切实例化未使用成员（def4 定位，flush_pending_methods）
-- **F1** constexpr 函数体纯度不诊断（constexpr 函数调用 printf 不报错，diana 发现，test/c23/neg/constexpr.neg.c）
-- **F2** `nullptr_t` 变量进真值条件 ICE（内部错误 unsupported conversion，diana 发现）
-- **F3** 具名 constexpr 变量不折叠进整数常量表达式（_Static_assert(K==9) 报非常量，diana 发现）
+- **F1** constexpr 函数体纯度不诊断（constexpr 函数调用 printf 不报错，diana 发现，test/c23/neg/constexpr.neg.c）— **done**（8e5aae3）
+- **F2** `nullptr_t` 变量进真值条件 ICE（内部错误 unsupported conversion，diana 发现）— **done**（8e5aae3）
+- **F3** 具名 constexpr 变量不折叠进整数常量表达式（_Static_assert(K==9) 报非常量，diana 发现）— **done**（8e5aae3）
 - **chibicc B 类**：常量折叠窄化 + va_end 类型检查（verify2/gate3/chi4 定位，chloe 精确行号，grace/hazel 竞争中）
 
 ## 5. 纪律速查
