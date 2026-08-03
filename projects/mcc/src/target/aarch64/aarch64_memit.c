@@ -30,6 +30,9 @@ static int g_alloca_cur;   /* frame-relative cursor for static allocas */
 static const char *g_fname;
 static int g_slot_base;    /* -16: fp+lr save area above the slots */
 
+static void emit_tls_addr(FILE *f, const char *sym, bool isext,
+                          const char *rn);
+
 /* ---- width helpers ------------------------------------------------------ */
 
 static int
@@ -161,6 +164,10 @@ mv_to_scratch(FILE *f, MVal *v, const char *rn)
 		fprintf(f, "\tmov\t%s, %s\n", rn, mreg_name(g_mt, v->reg));
 		break;
 	case MV_GLOBAL: {
+		if (v->tls) {
+			emit_tls_addr(f, v->sym ? v->sym : "0", v->isext, rn);
+			break;
+		}
 		const char *sym = v->sym ? v->sym : "0";
 		fprintf(f, "\tadrp\t%s, %s\n", rn, sym);
 		fprintf(f, "\tadd\t%s, %s, :lo12:%s\n", rn, rn, sym);
@@ -223,8 +230,12 @@ emit_addr_to_scratch(FILE *f, MAddr a, const char *rn)
 	}
 	if (base && base->kind == MV_GLOBAL) {
 		const char *sym = base->sym ? base->sym : "0";
-		fprintf(f, "\tadrp\t%s, %s\n", rn, sym);
-		fprintf(f, "\tadd\t%s, %s, :lo12:%s\n", rn, rn, sym);
+		if (base->tls) {
+			emit_tls_addr(f, sym, base->isext, rn);
+		} else {
+			fprintf(f, "\tadrp\t%s, %s\n", rn, sym);
+			fprintf(f, "\tadd\t%s, %s, :lo12:%s\n", rn, rn, sym);
+		}
 		if (off)
 			fprintf(f, "\tadd\t%s, %s, #%lld\n", rn, rn, (long long)off);
 		return;
@@ -240,6 +251,24 @@ emit_addr_to_scratch(FILE *f, MAddr a, const char *rn)
 }
 
 /* ---- floating point ----------------------------------------------------- */
+
+/* Emit the address of a TLS global into the scratch register rn:
+ *   - local-exec (internal symbol): tpidr_el0 + tprel_hi/lo;
+ *   - initial-exec (external): GOTTPREL pair + tpidr_el0. */
+static void
+emit_tls_addr(FILE *f, const char *sym, bool isext, const char *rn)
+{
+	if (isext) {
+		fprintf(f, "\tadrp\t%s, :gottprel:%s\n", rn, sym);
+		fprintf(f, "\tldr\t%s, [%s, :gottprel_lo12:%s]\n", rn, rn, sym);
+		fprintf(f, "\tmrs\tx11, tpidr_el0\n");
+		fprintf(f, "\tadd\t%s, %s, x11\n", rn, rn);
+		return;
+	}
+	fprintf(f, "\tmrs\t%s, tpidr_el0\n", rn);
+	fprintf(f, "\tadd\t%s, %s, #:tprel_hi12:%s\n", rn, rn, sym);
+	fprintf(f, "\tadd\t%s, %s, #:tprel_lo12:%s\n", rn, rn, sym);
+}
 
 /* FP scratch registers (excluded from the allocator): v16/v17.  Emitted
  * through their s/d views (s16/d16/s17/d17). */
@@ -397,10 +426,12 @@ emit_setccr(FILE *f, MInsM *in)
 	MVal *a = in->src[0];
 	MVal *b = in->src[1];
 	MCC cc = in->cc;
+	bool is32 = a && a->type == MT_I32;
 	mv_to_scratch(f, a, "x9");
 	mv_to_scratch(f, b, "x10");
-	fputs("\tcmp\tx9, x10\n", f);
-	fprintf(f, "\tcset\tx9, %s\n", a64_cc_suffix(cc));
+	fprintf(f, "\tcmp\t%s9, %s10\n", is32 ? "w" : "x", is32 ? "w" : "x");
+	fprintf(f, "\tcset\t%s9, %s\n", is32 ? "w" : "x",
+	        a64_cc_suffix(cc));
 	scratch_to_dst(f, in->dst, "x9");
 }
 
@@ -713,6 +744,26 @@ emit_ins(FILE *f, MInsM *in)
 				scratch_to_dst(f, d, "x0");
 			}
 		}
+		return;
+	}
+	case MMOP_BLIT: {
+		/* aggregate copy: src[1] -> src[0], cst bytes.  Unrolled 8-byte
+		 * chunks with a byte remainder (sizes are struct smalls). */
+		int64_t sz = in->cst ? in->cst->u.i : 0;
+		if (sz <= 0)
+			return;
+		mv_to_scratch(f, s0, "x9");   /* dst pointer */
+		mv_to_scratch(f, s1, "x10");  /* src pointer */
+		int64_t n8 = sz / 8;
+		for (int64_t i = 0; i < n8; i++) {
+			fprintf(f, "\tldr\tx11, [x10, #%lld]\n"
+			            "\tstr\tx11, [x9, #%lld]\n",
+			        (long long)(i * 8), (long long)(i * 8));
+		}
+		for (int64_t i = n8 * 8; i < sz; i++)
+			fprintf(f, "\tldrb\tw11, [x10, #%lld]\n"
+			            "\tstrb\tw11, [x9, #%lld]\n",
+			        (long long)i, (long long)i);
 		return;
 	}
 	case MMOP_RET:
