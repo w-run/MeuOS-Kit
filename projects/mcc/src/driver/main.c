@@ -681,14 +681,32 @@ mcc_main(int argc, char *argv[])
 			extern void cpp_parse_translation_unit(void);
 			cpp_parse_translation_unit();
 		} else {
+			/* Multi-error collection (--error-json): the loop arms a
+			 * recovery jump buffer so error() can longjmp back after
+			 * emitting each collected error and parsing resumes at the
+			 * next top-level item (err_sync skips to the next ';'/'}').
+			 * Without --error-json, error() exits on the first error. */
 			while (tok.kind != TEOF) {
+				if (g_error_json) {
+					if (setjmp(g_err_recovery) != 0) {
+						g_err_recovery_set = 0;
+						err_sync();
+						continue;
+					}
+					g_err_recovery_set = 1;
+				}
 				if (!decl(&filescope, NULL)) {
 					if (tok.kind == TSEMICOLON)
-						error(&tok.loc, "unexpected ';' at top-level");
-					error(&tok.loc, "expected declaration or function definition");
+						error_code(E_SYNTAX, &tok.loc,
+						    "unexpected ';' at top-level");
+					error_code(E_SYNTAX, &tok.loc,
+					    "expected declaration or function definition");
 				}
+				g_err_recovery_set = 0;
 			}
 		}
+		if (g_error_json && g_error_count > 0)
+			exit(1); /* errors were collected: fail even if under the limit */
 		emittentativedefns();
 
 		/* Emit ELF footer (sections, etc.). */
