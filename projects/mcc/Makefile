@@ -220,9 +220,8 @@ check-c23-neg: $(BIN)
 		fi; \
 	done
 
-# C 功能回归 × MIR/LIR 双路径矩阵：把 c99/c11/c23 三套正向用例分别在
-# MCC_USE_MIR=1（MIR 默认路径）与 MCC_USE_MIR=0（legacy 直接 LIR 路径）
-# 下编译运行，要求两路径均通过且 stdout 一致。守护双路径不回归、不分化。
+# C 功能回归 × MIR 单路径：c99/c11/c23 三套正向用例在 MIR 路径下编译
+# 运行。MIR 是唯一汇编生产者（LIR 桥接层已移除）。
 check-c-mir: $(BIN)
 	@sh test/mir_matrix.sh ./$(BIN)
 
@@ -319,26 +318,8 @@ check-mir-abi: $(MIR_SRCS) $(MABI_SRC)
 		src/mir/machine.c src/mir/print.c $(MABI_SRC)
 	./build/mabi_test
 
-# MIR → LIR bridge end-to-end: build a fib MFn, run MIR passes, bridge to
-# the LIR Fn, run the LIR pipeline and emit x86-64 asm.  Assemble+link+run
-# the output to verify the emitted code actually works.
-check-mir-bridge: $(BIN)
-	@mkdir -p build
-	$(HOST_CC) $(CFLAGS) -Iinclude -o build/bridge_test \
-		test/mir/bridge_test.c src/mir/build.c src/mir/mir_util.c \
-		src/mir/passes.c src/mir/print.c src/lir/bridge.c \
-		build/libmcc.a -L../meuos-sysroot/build -lmsys
-	@./build/bridge_test > /tmp/bridge_fib.s 2>&1
-	@echo "=== 生成的 fib 汇编 ==="
-	@head -40 /tmp/bridge_fib.s
-	@# assemble a driver + the emitted asm, run it
-	@printf 'extern int fib(int); int main(void){ return fib(5)==5 ? 0 : 1; }\n' \
-		> /tmp/bridge_main.c
-	@$(HOST_CC) -c -o /tmp/bridge_main.o /tmp/bridge_main.c
-	@$(HOST_CC) -o /tmp/bridge_fib /tmp/bridge_main.o /tmp/bridge_fib.s
-	@/tmp/bridge_fib; echo "bridge exit=$$? (0 = fib(5)==5)"
-
-check-mir: check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir-regalloc check-mir-bridge
+# MIR 单元测试套件（LIR 桥接层已移除，check-mir-bridge 已删除）。
+check-mir: check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir-regalloc
 
 # m++ C++ lexer unit tests (C.1.2: keyword classification).
 CPP_SRCS := $(wildcard src/cpp/lex/*.c)
@@ -393,7 +374,7 @@ check-olevel: $(BIN)
 check-i18n: $(BIN) $(MPP_BIN)
 	@sh test/i18n/run.sh ./$(BIN) ./$(MPP_BIN)
 
-.PHONY: all clean check check-all check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-c23-neg check-c-mir check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir-bridge check-mir check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg check-cpp check-olevel check-i18n
+.PHONY: all clean check check-all check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-c23-neg check-c-mir check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg check-cpp check-olevel check-i18n
 
 # chibicc community functional test suite (C11/C23 conformance).
 # Runs test/community/chibicc/run.sh against the MeuOS sysroot.

@@ -726,7 +726,6 @@ mfn_reg(MFn *fn, const MTargetM *mt, MReg r)
 		v->reg = r;
 		v->slot = -1;
 		v->hint = -1;
-		v->lirtmp = -1;
 		v->name = mx_strdup(mt->regs[r].name);
 		fn->reg[r] = v;
 	}

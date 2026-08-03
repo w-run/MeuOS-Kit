@@ -1065,6 +1065,35 @@ mdce_block(MFn *fn, MBlk *b)
 	return removed;
 }
 
+/* ---- if-conversion: constant-condition branch simplification (mifconv) ---- */
+
+static uint32_t
+mifconv(MFn *fn)
+{
+	uint32_t r = 0;
+	for (MBlk *b = fn->link; b; b = b->link) {
+		if (b->term.op != MOP_JNZ)
+			continue;
+		MRef cond = b->term.src[0];
+		if (!cond.con)
+			continue;
+		/* constant condition: fold JNZ to simple JMP */
+		if (cond.con->kind == MC_INT) {
+			bool taken = cond.con->u.i != 0;
+			b->term.op = MOP_JMP;
+			b->term.src[0] = (MRef){0};
+			if (taken) {
+				b->s2 = 0;          /* s1 is the taken target */
+			} else {
+				b->s1 = b->s2;      /* s2 is the fallthrough (always taken) */
+				b->s2 = 0;
+			}
+			r++;
+		}
+	}
+	return r;
+}
+
 /* ---- pass pipeline ----------------------------------------------------- */
 
 uint32_t
@@ -1101,6 +1130,8 @@ run_mir_pass(MFn *fn, enum MIRPass pass)
 		return mmem2reg(fn);
 	case MIR_PASS_GVN:
 		return mgvn(fn);
+	case MIR_PASS_IFCONV:
+		return mifconv(fn);
 	case MIR_PASS_DCE: {
 		/* iterate to fix-point: removing one dead instruction may leave
 		 * its operands' defs dead too (e.g. a chain a=b+c; b=x after
@@ -1136,6 +1167,7 @@ run_mir_passes(MFn *fn, int optlevel)
 	 *   g_mir_fold_aggressive 按级别门控 msimp_block 的激进规则。 */
 	g_mir_fold_aggressive = (optlevel >= 3 || g_opt_size);
 	run_mir_pass(fn, MIR_PASS_FOLD);
+	run_mir_pass(fn, MIR_PASS_IFCONV);  /* fold constant-condition JNZ -> JMP */
 	run_mir_pass(fn, MIR_PASS_COPY);
 	if (optlevel >= 2) {
 		/* mem2reg first: promoting non-escaping scalar slots to SSA
@@ -1147,12 +1179,14 @@ run_mir_passes(MFn *fn, int optlevel)
 		run_mir_pass(fn, MIR_PASS_COPY);
 		run_mir_pass(fn, MIR_PASS_LOADFWD);
 		run_mir_pass(fn, MIR_PASS_GVN);
+		run_mir_pass(fn, MIR_PASS_IFCONV);  /* GVN may expose new constants */
 		run_mir_pass(fn, MIR_PASS_COPY);   /* propagate load-forwarded copies */
 		if (optlevel >= 3) {
 			/* -O3/-Os/-Oz 增量：有符号 div/rem 按 2 的幂强度削减
 			 * （含向零舍入修正序列），再做一轮 FOLD 清扫 */
 			msdiv_pow2(fn);
 			run_mir_pass(fn, MIR_PASS_FOLD);
+			run_mir_pass(fn, MIR_PASS_IFCONV);
 			run_mir_pass(fn, MIR_PASS_COPY);
 		}
 		run_mir_pass(fn, MIR_PASS_DCE);
