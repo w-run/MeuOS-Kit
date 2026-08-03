@@ -135,6 +135,18 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 - **constexpr 聚合对象成员访问**（mini 内存模型）：成员值表 obj+offset->value，static_assert 内 p.a/p.b 可求值。测试 constexpr_obj_member.cc
 - 门禁 check-cpp-func/neg/c-mir 全绿
 
+### CLI 参数与产物控制补充（alice，分支 worktree-tmp-alice-cli，commit b480024）
+- **-pg**：接受（gprof no-op），不再 unknown option
+- **--verbose**：-v 长形式别名，打印驱动各阶段命令
+- **--color[=auto|always|never]**：诊断颜色参数可控（token.c g_diag_color，取代 isatty 独占）
+- **-x c/c++**：强制语言解析，覆盖默认与后缀推断
+- **-std= 语义化**：c89..c23 与 c++98..c++23 映射 g_std_mode，ppinit 定义 __STDC_VERSION__/__cplusplus
+- **-fno-omit-frame-pointer/-fomit-frame-pointer**：映射 g_force_fp；其它 -f/-fno- 接受 no-op
+- **-W 细粒度**：-Wno-error/-Wno-all 取消对应组
+- **-Wa,/-Wl, 透传**：汇编/链接选项转发 host 工具链（run_host_cc/run_host_link 加参）
+- 测试：test/driver/cli-args.sh（check-driver 接入）；usage.c 帮助同步
+- 门禁：check-driver 全绿；verify-all 见状态行
+
 ### 文档同步（cpp20/cpp23-gaps.md、c23-review.md）
 - 状态：**已合入主线**（edb854b + eb8372d），已闭环；cpp20-gaps.md 已由 alice 更新 5 项状态
 
