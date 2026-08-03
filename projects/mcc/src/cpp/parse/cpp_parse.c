@@ -967,6 +967,14 @@ struct cpp_pending_method {
 	struct decl *d;          /* mangled function decl */
 	struct scope *s;         /* class's declaration scope */
 	bool is_static;          /* static member: no `this` */
+	/* Class-template instantiation context: the template parameter
+	 * bindings (type params and NTTP constants) in effect when this body
+	 * was buffered.  A deferred body is parsed long after the
+	 * instantiation returned, by which time a later instantiation of the
+	 * same template (`C<int,5>` then `C<int,7>`) has overwritten the
+	 * file-scope bindings — so they are re-installed before the replay. */
+	struct decl *binds[16];
+	int nbinds;
 	struct cpp_pending_method *next;
 };
 
@@ -985,6 +993,12 @@ static bool g_cpp_tmpl_instantiating;
 static struct cpp_pending_method *g_cpp_deferred_methods;
 static struct cpp_pending_method **g_cpp_deferred_end =
     &g_cpp_deferred_methods;
+
+/* Template parameter bindings of the instantiation currently being
+ * replayed (see cpp_pending_method::binds).  Valid only while
+ * g_cpp_tmpl_instantiating is set. */
+static struct decl *g_cpp_tmpl_binds[16];
+static int g_cpp_tmpl_nbinds;
 
 /* Global class-typed objects with user constructors; their construction
  * calls are collected and emitted into __mxx_global_var_init (wired to
@@ -1189,7 +1203,13 @@ buffer_method_body(struct scope *s, struct type *classt, struct type *mtype,
 	pm->d = d;
 	pm->s = s;
 	pm->is_static = is_static;
+	pm->nbinds = 0;
 	pm->next = NULL;
+	if (g_cpp_tmpl_instantiating) {
+		pm->nbinds = g_cpp_tmpl_nbinds;
+		memcpy(pm->binds, g_cpp_tmpl_binds,
+		    (size_t)g_cpp_tmpl_nbinds * sizeof *pm->binds);
+	}
 
 	/* a ctor init list (`: Base(v) { ... }`) has no opening brace right
 	 * after the declarator: buffer through the body's closing '}'.
@@ -1306,9 +1326,17 @@ cpp_ensure_method_defined(struct decl *fd)
 				 * current function being emitted. */
 				extern void tokpush(struct token *, size_t);
 				extern struct func *curfunc;
+				extern struct scope filescope;
 				struct func *saved_cf = curfunc;
 				struct token cur = tok;
 				size_t depth = tokctx_depth();
+				int bi;
+				/* Re-install this instantiation's template parameter
+				 * bindings: a later instantiation of the same template
+				 * (`C<int,5>` then `C<int,7>`) has since overwritten the
+				 * file-scope names, and this body must see its own. */
+				for (bi = 0; bi < pm->nbinds; ++bi)
+					scopeputdecl(&filescope, pm->binds[bi]);
 				tokpush(&cur, 1);
 				tokpush(pm->toks, pm->ntoks);
 				next(); /* position tok at the first replayed token ('{') */
@@ -5917,6 +5945,7 @@ cpp_tmpl_class_do_inst(struct scope *s, struct cpp_template *tmpl,
 	/* bind the parameters as type names / constants (re-put replaces the
 	 * previous binding; the names are generic template params and stay
 	 * benignly in file scope) */
+	g_cpp_tmpl_nbinds = 0;
 	for (p = tmpl->params, i = 0; p; p = p->next, ++i) {
 		if (p->is_nttp) {
 			td = mkdecl((char *)p->name, DECLCONST,
@@ -5929,6 +5958,8 @@ cpp_tmpl_class_do_inst(struct scope *s, struct cpp_template *tmpl,
 			    QUALNONE, LINKNONE);
 		}
 		scopeputdecl(&filescope, td);
+		if (g_cpp_tmpl_nbinds < 16)
+			g_cpp_tmpl_binds[g_cpp_tmpl_nbinds++] = td;
 	}
 	/* rename the class-name token to the mangled tag, and every
 	 * constructor/destructor token (which spells the original class name)
