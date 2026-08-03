@@ -33,6 +33,12 @@ static_assert(requires(int a, int b) { { a + b } -> Addable; });
 static_assert(requires(int a) { { a + a }; });
 static_assert(requires(int a) { { a + a } noexcept; });
 static_assert(requires(int a) { { a + a } noexcept(true); });
+// 复合需求：返回类型约束为普通类型 / decltype
+static_assert(requires(int a) { { a + a } -> int; });
+static_assert(requires(int a) { { a + a } -> decltype(a + a); });
+static_assert(requires(int a) { { a + a } noexcept -> int; });
+static_assert(requires(int a) { { a + a } noexcept -> decltype(a + a); });
+static_assert(!requires(double a) { { a + a } -> decltype((int)0); });
 
 // 嵌套需求
 static_assert(requires(int a) { requires Addable<int>; });

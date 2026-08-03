@@ -4915,6 +4915,43 @@ cpp_req_compound(struct scope *rs, struct token *sp, size_t n)
 				return eval_concept_use(ntok, 4, rs);
 			}
 		}
+		/* `-> decltype(expr)` : a return-type requirement whose
+		 * type-constraint is a decltype-specifier.  The compound
+		 * expression's type must match the decltype'd expression's
+		 * type (`{ e } -> decltype(e2)` holds iff the two types are
+		 * the same).  We evaluate `e2` in the requires scope (where the
+		 * parameters are visible) and compare types. */
+		if (cn >= 1 && cpp_classify_token(ct[0]) == CPP_TDECLTYPE) {
+			size_t k = 1, close = 0;
+			int d = 0;
+			if (cn < 3 || ct[1].kind != TLPAREN)
+				return false;
+			for (k = 1; k < cn; k++) {
+				if (ct[k].kind == TLPAREN)
+					++d;
+				else if (ct[k].kind == TRPAREN && --d == 0) {
+					close = k;
+					break;
+				}
+			}
+			if (close == 0)
+				return false;
+			{
+				extern struct expr *expr(struct scope *);
+				size_t d2 = tokctx_depth();
+				struct token guard = {0};
+				struct expr *e2;
+				guard.kind = TSEMICOLON;
+				tokpush(&guard, 1);
+				tokpush(ct + 2, close - 2);
+				next();
+				e2 = expr(rs);
+				tokctx_rewind(d2);
+				if (!e2 || !e2->type)
+					return false;
+				return typesame(e->type, e2->type);
+			}
+		}
 		/* otherwise a type constraint: the type must be valid */
 		return cpp_req_type_ok(rs, ct, cn);
 	}
