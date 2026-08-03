@@ -80,6 +80,7 @@ mir_to_op(MOP op)
 	case MOP_CAST:  return Ocast;
 	case MOP_F2I:   return Ostosi;
 	case MOP_I2F:   return Oswtof;
+	case MOP_UI2F:  return Ouwtof;
 	case MOP_FEXT:  return Oexts;
 	case MOP_FTRUNC:return Otruncd;
 
@@ -378,20 +379,33 @@ lir_bridge(MFn *mfn)
 				                .arg = {a0, R}};
 				continue;
 			}
-			if (in->op == MOP_I2F) {
-				/* source width selects the LIR op; dst width the class */
-				bool src64 = in->src[0].val &&
-					in->src[0].val->type == MT_I64;
-				bool is64 = in->dtype == MT_F64;
-				qop = src64 ? (is64 ? Osltof : Oultof)
-				             : (is64 ? Oswtof : Ouwtof);
-				cls = is64 ? Kd : Ks;
-				Ref to = in->dst ? valref(mfn, in->dst, fn) : R;
-				Ref a0 = refval(mfn, in->src[0], fn);
-				*curi++ = (Ins){.op = qop, .cls = cls, .to = to,
-				                .arg = {a0, R}};
-				continue;
-			}
+		if (in->op == MOP_I2F) {
+			/* source width selects the LIR op; dst width the class */
+			bool src64 = in->src[0].val &&
+				in->src[0].val->type == MT_I64;
+			bool is64 = in->dtype == MT_F64;
+			qop = src64 ? (is64 ? Osltof : Oultof)
+			             : (is64 ? Oswtof : Ouwtof);
+			cls = is64 ? Kd : Ks;
+			Ref to = in->dst ? valref(mfn, in->dst, fn) : R;
+			Ref a0 = refval(mfn, in->src[0], fn);
+			*curi++ = (Ins){.op = qop, .cls = cls, .to = to,
+			                .arg = {a0, R}};
+			continue;
+		}
+		if (in->op == MOP_UI2F) {
+			/* unsigned int -> fp: select the unsigned LIR convert op */
+			bool src64 = in->src[0].val &&
+				in->src[0].val->type == MT_I64;
+			bool is64 = in->dtype == MT_F64;
+			qop = src64 ? Oultof : Ouwtof;
+			cls = is64 ? Kd : Ks;
+			Ref to = in->dst ? valref(mfn, in->dst, fn) : R;
+			Ref a0 = refval(mfn, in->src[0], fn);
+			*curi++ = (Ins){.op = qop, .cls = cls, .to = to,
+			                .arg = {a0, R}};
+			continue;
+		}
 			/* sign/zero extensions: the MIR dst dtype sets the result class,
 			 * but the LIR opcode must be selected from the *source* operand's
 			 * width.  The opcode table maps both MOP_SEXT/MOP_ZEXT to a fixed

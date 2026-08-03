@@ -220,6 +220,7 @@ typedef enum MOP {
 	MOP_SEXT, MOP_ZEXT, MOP_TRUNC,       /* integer widening/narrowing */
 	MOP_CAST,                              /* pointer/float bit-preserving */
 	MOP_F2I, MOP_I2F,                     /* float<->int with rounding */
+	MOP_UI2F,                             /* unsigned int -> float */
 	MOP_FEXT, MOP_FTRUNC,                 /* f32<->f64 */
 
 	/* control (terminators) */
@@ -494,6 +495,8 @@ typedef enum MMOP {
 	/* conversions */
 	MMOP_CVTSI2SS, MMOP_CVTSI2SD, MMOP_CVTSS2SD, MMOP_CVTSD2SS,
 	MMOP_CVTTSS2SI, MMOP_CVTTSD2SI,
+	MMOP_CVTSI2SD_U,                       /* unsigned int -> double (64-bit trick) */
+	MMOP_CVTSI2SS_U,                       /* unsigned int -> float */
 	/* memory */
 	MMOP_LOAD,             /* width from dtype; operand = addr */
 	MMOP_LOAD_S8, MMOP_LOAD_S16, MMOP_LOAD_S32,   /* sign-extending loads */

@@ -113,13 +113,31 @@ mfold_const(MConst *res, MOP op, int w, MConst *cl, MConst *cr)
 		res->u.d = (double)cl->u.i;
 		return 0;
 	}
+	if (op == MOP_UI2F && cl && cl->kind == MC_INT) {
+		res->kind = MC_FLT;
+		res->type = MT_F64;
+		res->u.d = (cl->type == MT_I32)
+		           ? (double)(uint32_t)cl->u.i
+		           : (double)(uint64_t)cl->u.i;
+		return 0;
+	}
 	if (op == MOP_F2I && cl && cl->kind == MC_FLT) {
 		res->kind = MC_INT;
-		res->type = MT_I32;
-		if (cl->type == MT_F32)
-			res->u.i = (int32_t)cl->u.s;
-		else
-			res->u.i = (int32_t)cl->u.d;
+		if (w) {
+			/* 64-bit destination: keep the full range (long)2e15
+			 * must fold to 2000000000000000, not truncate to int32. */
+			res->type = MT_I64;
+			if (cl->type == MT_F32)
+				res->u.i = (int64_t)(double)cl->u.s;
+			else
+				res->u.i = (int64_t)cl->u.d;
+		} else {
+			res->type = MT_I32;
+			if (cl->type == MT_F32)
+				res->u.i = (int32_t)cl->u.s;
+			else
+				res->u.i = (int32_t)cl->u.d;
+		}
 		return 0;
 	}
 	if (op == MOP_NEG && cl && cl->kind == MC_FLT) {
@@ -352,7 +370,8 @@ msimp_block(MFn *fn, MBlk *b)
 				MConst *z = mconst_int(fn, cl->type, 0);
 				if (mfold_const(&cr, MOP_NEG, w, cl, z) == 0)
 					folded = true;
-			} else if (in->op == MOP_I2F || in->op == MOP_F2I) {
+			} else if (in->op == MOP_I2F || in->op == MOP_UI2F ||
+			           in->op == MOP_F2I) {
 				/* single-operand conversions */
 				MConst *z = mconst_int(fn, MT_I64, 0);
 				if (mfold_const(&cr, in->op, w, cl, z) == 0)
@@ -369,8 +388,8 @@ msimp_block(MFn *fn, MBlk *b)
 			if (folded) {
 				/* I2F folding produces a double; if the MIR destination
 				 * is f32, narrow the folded constant accordingly. */
-				if (in->op == MOP_I2F && cr.kind == MC_FLT &&
-				    in->dtype == MT_F32) {
+				if ((in->op == MOP_I2F || in->op == MOP_UI2F) &&
+				    cr.kind == MC_FLT && in->dtype == MT_F32) {
 					cr.u.s = (float)cr.u.d;
 					cr.type = MT_F32;
 				}

@@ -218,6 +218,8 @@ mmop_name(MMOP op)
 		[MMOP_FSQRT]    = "fsqrt",
 		[MMOP_CVTSI2SS] = "cvtsi2ss",
 		[MMOP_CVTSI2SD] = "cvtsi2sd",
+		[MMOP_CVTSI2SS_U] = "cvtsi2ss_u",
+		[MMOP_CVTSI2SD_U] = "cvtsi2sd_u",
 		[MMOP_CVTSS2SD] = "cvtss2sd",
 		[MMOP_CVTSD2SS] = "cvtsd2ss",
 		[MMOP_CVTTSS2SI]= "cvttss2si",
