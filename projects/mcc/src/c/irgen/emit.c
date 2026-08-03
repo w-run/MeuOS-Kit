@@ -302,8 +302,13 @@ emitfunc(struct func *f, bool global)
 			}
 			/* P3b MIR-native backend: when MCC_MIR_BACKEND=1, the machine
 			 * backend emits the assembly for functions in scope (scalar);
-			 * otherwise (aggregate/varargs) it falls back to the bridge. */
-			if (g_use_mir_backend && mfnm_backend_x86_64(mf)) {
+			 * otherwise (aggregate/varargs) it falls back to the bridge.
+			 * The MIR-native backend is x86_64-only, so gate on the
+			 * selected target: MCC_MIR_BACKEND=1 must not hijack i386 /
+			 * loongarch64 / riscv64 / aarch64 compiles (they would emit
+			 * x86-64 instructions and fail the assembler). */
+			if (g_use_mir_backend && strcmp(T.name, "x86_64") == 0 &&
+			    mfnm_backend_x86_64(mf)) {
 				freeall();
 				mfn_free(mf);
 				return;
