@@ -84,7 +84,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 - **check-pic-verify：已修复**（97d5467，x86_64 MIR-native -fPIC GOT 回归——MIR Phase 2 强制 MIR-native 后丢失外部符号 GOT，emit_global_addr + @gotpcrel + @plt 修复，四架构全过）。
 
 ### 门禁已知失败（2026-08-03 bella Phase 3a 归并后）
-- **check-mt-integration：已知失败**（既有 meuos-toolchain 环境问题，非 mcc 归并引入；team-lead 已建 task 排查）：`mcc --specs=meuos` 走 MT_LD（meuos-toolchain ld 0.2.0）链接 crt1.o + libc-meuos.a 的 hello 在 crt1 入口段错误（0x40101c）。已在基 5aa1154 复现确认（bella 3a 归并前后行为一致）。check-sysroot-static（host ld 路径）exit 0 正常。verify-all 当前 18/19，该项为唯一失败。
+- **check-mt-integration：已闭环**（alice 3d3f91f）：根因是 mt/as x86_64 `movq $imm, %r64` 的 imm64 截断编码（encode.c 对 width==8 用 0xb8 movabs 形式但 imm 只写 4 字节，后续指令被吞进立即数 → 解码垃圾 → crt1 入口段错误 0x40101c）。修复后 check-mt-integration PASS、verify-all 恢复 19/19。
 
 ---
 
