@@ -71,7 +71,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 | diana | lite | worktree-tmp-diana (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试扩充 | **completed**（db1451b 已合入主线 294e5c2） | 11 个 test/c23 文件 + 发现 F1-F3 |
 | eve | lite | worktree-tmp-eve (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵扩充 | **completed**（02d6684 已合入主线 b4cad7e） | 33 个 test/cpp 文件 |
 | grace | lite | worktree-tmp-grace-sema + worktree-tmp-grace-loc (自 worktree-mxx-work@e010519) | /tmp/mxx-wt-grace | sema/decl 组 E1/E4/E5/E6 修复 + E4 行号定位到函数体 } | **completed**（已合入主线） | a8167d9 |
-| hazel | lite | worktree-tmp-hazel-c23 (自 worktree-mxx-work@d0a90c9) | /tmp/mxx-wt-hazel | C23 constexpr 组：F1/F2/F3 | **completed**（8e5aae3 已 push origin/worktree-tmp-hazel-c23，门禁全绿，已合入主线） | 8e5aae3 |
+| hazel | lite | worktree-tmp-hazel-conform (自 worktree-mxx-work@1ef0a9a) | /workspace/MeuOS-Kit/.agents/worktrees/mxx-work | chibicc conformance 缺陷组：bitfield 打包/浮点转换/字面量/宽字符 | **completed**（5 commit 已 push origin/worktree-tmp-hazel-conform，chibicc PASS 11→16、RUNFAIL 5→0） | 24596ee |
 
 ### 会话中断恢复速查（当前团队）
 1. `git fetch origin`（在 /workspace/MeuOS-Kit）
@@ -110,6 +110,15 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 
 ### chibicc run.sh sysroot 修复
 - 状态：**已合入主线**（f05633f），PASS=9/RUNFAIL=6/COMPILEFAIL=26，已闭环
+
+### chibicc conformance 缺陷组（hazel，worktree-tmp-hazel-conform）
+- 状态：**completed**（5 commit 已 push origin/worktree-tmp-hazel-conform，chibicc PASS 11→16、RUNFAIL 5→0、COMPILEFAIL 25 不变）
+- cd7e5d5 bitfield：全局位域静态初始化打包（emitdata 单元重叠非位域成员时右移保留）
+- 2d179b1 浮点转换：MOP_F2I 折叠按目标宽度（64 位）；新增 MOP_UI2F 无符号 int→float（折叠 + x86_64 技巧发射 + bridge）
+- 0ab75ff 字面量：十进制超范围回绕 signed long long（18446744073709551615>>63 == -1，对齐 chibicc）
+- 0feff81 宽字符：越界回绕（C11 6.4.4.4 实现定义）+ 有符号宽 escape 符号扩展
+- 24596ee commonsym 测试适配：commonsym_ext.c 提供 common_ext2=3 强定义（跨 TU common 合并）
+- 剩余 25 COMPILEFAIL 均为 GNU 扩展（({})/alloca/asm/attribute）、chibicc 宽松指针（char16_t*→char* 等，非标准）、测试自身偏差（extern/function/tls 重声明）与环境（pragma-once 路径），不属 mcc conformance 缺陷
 
 ### chibicc B 类真 bug（常量折叠窄化转换 + va_end 类型检查）
 - 状态：**已合入主线**（hazel a932c60 胜出，覆盖窄化 IAND 掩码+符号扩展 + TYPEATOMIC 解包 + va_end no-op，已 merge 69a6f2c）
