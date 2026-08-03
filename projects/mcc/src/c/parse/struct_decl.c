@@ -76,6 +76,20 @@ addmember(struct structbuilder *b, struct qualtype mt, char *name, int align, un
 	if (mt.type->prop & PROPVM)
 		error(&tok.loc, "struct member '%s' has variably modified type", name);
 	assert(mt.type->align > 0);
+	/* C++ (E2): duplicate data members in one class are ill-formed
+	 * (`struct A { int x; int x; };`).  Member functions are registered
+	 * earlier (the TYPEFUNC branch returns above) and may legitimately
+	 * overload, so only check data members here. */
+	{
+		extern int g_lang;
+		if (g_lang == 1 && name) {
+			struct member *it;
+			for (it = b->type->u.structunion.members; it; it = it->next)
+				if (it->name && strcmp(it->name, name) == 0 &&
+				    it->type && it->type->kind != TYPEFUNC)
+					error(&tok.loc, "redefinition of member '%s'", name);
+		}
+	}
 	if (name || width == -1) {
 		m = xmalloc(sizeof(*m));
 		m->type = mt.type;
