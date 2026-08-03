@@ -22,6 +22,57 @@
  * via expr_internal.h, so no forward decl is needed here. */
 static void designator(struct scope *, struct type *, unsigned long long *);
 
+/* Bounded Levenshtein distance for the "did you mean?" spelling
+ * suggestion (identifiers are short, so a small DP table suffices). */
+static size_t
+err_edit_dist(const char *a, size_t n, const char *b, size_t m)
+{
+	size_t d[16][16], i, j;
+	if (n > 15) n = 15;
+	if (m > 15) m = 15;
+	for (i = 0; i <= n; i++) d[i][0] = i;
+	for (j = 0; j <= m; j++) d[0][j] = j;
+	for (i = 1; i <= n; i++)
+		for (j = 1; j <= m; j++)
+			d[i][j] = a[i-1] == b[j-1]
+			    ? d[i-1][j-1]
+			    : 1 + (d[i-1][j] < d[i][j-1]
+			        ? (d[i-1][j] < d[i-1][j-1] ? d[i-1][j] : d[i-1][j-1])
+			        : (d[i][j-1] < d[i-1][j-1] ? d[i][j-1] : d[i-1][j-1]));
+	return d[n][m];
+}
+
+/* Find a declared identifier in `s` (walking parents) whose spelling is
+ * within edit distance 2 of `name`; used to suggest a fix for an
+ * undeclared identifier.  Returns NULL when nothing is close. */
+static const char *
+err_spelling_suggest(struct scope *s, const char *name)
+{
+	size_t n = strlen(name);
+	size_t best_d = 3; /* suggest only within distance <= 2 */
+	const char *best = NULL;
+
+	for (; s; s = s->parent) {
+		struct map *m = &s->decls;
+		size_t i;
+		/* entries are scattered across the hash table: walk all slots */
+		for (i = 0; i < m->cap; i++) {
+			const char *cand = m->keys[i].str;
+			size_t clen;
+			size_t d;
+			if (!cand)
+				continue; /* empty slot */
+			clen = m->keys[i].len;
+			d = err_edit_dist(name, n, cand, clen);
+			if (d < best_d) {
+				best_d = d;
+				best = cand;
+			}
+		}
+	}
+	return best;
+}
+
 struct expr *
 primaryexpr(struct scope *s)
 {
@@ -346,7 +397,19 @@ primaryexpr(struct scope *s)
 					next();
 					break;
 				}
-				error(&tok.loc, "undeclared identifier: %s", tokenstr(tok.kind));
+				const char *sugg = err_spelling_suggest(s,
+				    tokenstr(tok.kind));
+				if (sugg) {
+					char fixbuf[96];
+					snprintf(fixbuf, sizeof fixbuf,
+					    "did you mean '%s'?", sugg);
+					error_fixit(E_UNDECLARED, &tok, fixbuf,
+					    "undeclared identifier: %s",
+					    tokenstr(tok.kind));
+				} else
+					error_tok_code(E_UNDECLARED, &tok,
+					    "undeclared identifier: %s",
+					    tokenstr(tok.kind));
 			}
 			e = mkexpr(EXPRIDENT, d->type, NULL);
 			e->qual = d->qual;
