@@ -65,13 +65,13 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 
 | Worker | 模型 | 分支 | Worktree | 任务 | 状态 | 上次 push |
 |---|---|---|---|---|---|---|
-| alice | reasoning | worktree-tmp-alice (自 worktree-requires-wip) | /tmp/mxx-wt-alice | 续作 requires 表达式四类需求 | **in_progress** | c9ca880 起点 |
+| alice | reasoning | worktree-tmp-alice-cpp (自 worktree-mxx-work@d0a90c9) | /tmp/mxx-wt-alice | cpp_parse 组 D1/D4/D2/E2/E3 修复（requires 续作已完成） | **completed**（已合入主线） | a3808b9 |
 | bella | lite | worktree-tmp-bella (自 worktree-mxx-work) | /tmp/mxx-wt-bella | m++ 测试矩阵扩充 + 门禁验证 | **completed**（1ed8c53 已合入主线 dd78366） | 16 个 test/cpp 文件 |
 | chloe | lite | 只读隔离副本 | /tmp/mcciso-chloe | 定位 chibicc B 类真 bug（常量折叠窄化 + va_end 类型检查） | **completed**（报告已收） | 只读不 push |
 | diana | lite | worktree-tmp-diana (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试扩充 | **completed**（db1451b 已合入主线 294e5c2） | 11 个 test/c23 文件 + 发现 F1-F3 |
 | eve | lite | worktree-tmp-eve (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵扩充 | **completed**（02d6684 已合入主线 b4cad7e） | 33 个 test/cpp 文件 |
-| grace | lite | worktree-tmp-grace-sema (自 worktree-mxx-work) | /tmp/mxx-wt-grace | sema/decl 组 E1/E4/E5/E6 修复 | **completed**（fd222ad 后转 sema，B 类竞争由 hazel 胜出） | push worktree-tmp-grace-sema |
-| hazel | lite | worktree-tmp-hazel (自 worktree-mxx-work) | /tmp/mxx-wt-hazel | chibicc B 类两 bug 实施（**竞争**） | **completed**（a932c60 胜出，已合入主线 69a6f2c） | a932c60 |
+| grace | lite | worktree-tmp-grace-sema (自 worktree-mxx-work@d0a90c9) | /tmp/mxx-wt-grace | sema/decl 组 E1/E4/E5/E6 修复 | **completed**（已合入主线） | push worktree-tmp-grace-sema |
+| hazel | lite | worktree-tmp-hazel-c23 (自 worktree-mxx-work@d0a90c9) | /tmp/mxx-wt-hazel | C23 constexpr 组：F1/F2/F3 | **completed**（8e5aae3 已 push origin/worktree-tmp-hazel-c23，门禁全绿，已合入主线） | 8e5aae3 |
 
 ### 会话中断恢复速查（当前团队）
 1. `git fetch origin`（在 /workspace/MeuOS-Kit）
@@ -129,9 +129,9 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 - **D1** const T& operator 整体失败（**已修复** alice 608f31c，cpp_try_operator_call 4-way 级联）
 - **D4** ctor 标量成员 init-list 落地缺失（**已修复** alice 608f31c，emit_base_ctors_for）
 - **D2** 急切实例化未使用成员（**已修复** alice d28c744，flush_pending_methods 延迟表）
-- **F1** constexpr 函数体纯度不诊断（constexpr 函数调用 printf 不报错，diana 发现，test/c23/neg/constexpr.neg.c）
-- **F2** `nullptr_t` 变量进真值条件 ICE（内部错误 unsupported conversion，diana 发现）
-- **F3** 具名 constexpr 变量不折叠进整数常量表达式（_Static_assert(K==9) 报非常量，diana 发现）
+- **F1** constexpr 函数体纯度不诊断（constexpr 函数调用 printf 不报错，diana 发现，test/c23/neg/constexpr.neg.c）— **done**（hazel 8e5aae3）
+- **F2** `nullptr_t` 变量进真值条件 ICE（内部错误 unsupported conversion，diana 发现）— **done**（hazel 8e5aae3）
+- **F3** 具名 constexpr 变量不折叠进整数常量表达式（_Static_assert(K==9) 报非常量，diana 发现）— **done**（hazel 8e5aae3）
 - **chibicc B 类**：常量折叠窄化 + va_end 类型检查（verify2/gate3/chi4 定位，chloe 精确行号，grace/hazel 竞争中）
 
 ## 5. 纪律速查

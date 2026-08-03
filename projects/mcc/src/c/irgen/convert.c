@@ -43,6 +43,11 @@ convert(struct func *f, struct type *dst, struct type *src, struct value *l)
 		dst = dst->base;
 	if (src == dst)
 		return l;
+	if (src->kind == TYPENULLPTR && (dst->kind == TYPEBOOL ||
+	    dst->kind == TYPEPOINTER || dst->kind == TYPENULLPTR))
+		/* nullptr_t holds only the null pointer constant: converting it
+		 * to bool (false), to a pointer (null) or to nullptr_t yields 0. */
+		return mkintconst(0);
 	if (src->kind == TYPEPOINTER)
 		src = &typeulong;
 	if (dst->kind == TYPEPOINTER)

@@ -112,11 +112,13 @@ eval(struct expr *expr)
 	case EXPRIDENT:
 		d = expr->u.ident.decl;
 		if (d->kind != DECLCONST) {
-			/* C++ constexpr variable: its (integer) value is usable in
-			 * later constant expressions. */
+			/* C++ constexpr variable or C23 constexpr object: its
+			 * (integer) value is usable in later constant expressions
+			 * (e.g. _Static_assert, array dimensions). */
 			extern int g_lang;
-			if (g_lang == 1 && d->kind == DECLOBJECT &&
-			    d->u.obj.has_constval) {
+			if (d->kind == DECLOBJECT && d->u.obj.has_constval &&
+			    (d->type->prop & PROPINT) &&
+			    (g_lang == 1 || (d->qual & QUALCONSTEXPR))) {
 				expr->kind = EXPRCONST;
 				expr->u.constant.u = d->u.obj.constval;
 			}
