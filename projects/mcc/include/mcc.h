@@ -415,6 +415,14 @@ enum errcode {
 	E_UNDECLARED = 2,  /* undeclared identifier */
 	E_TYPE       = 3,  /* type mismatch / invalid operands */
 	E_REDEF      = 4,  /* redefinition of a name/tag/member/enumerator */
+	E_DECL       = 5,  /* declaration error: storage class / typedef / linkage / initializer */
+	E_STMT       = 6,  /* statement error: break/continue/label/return outside context */
+	E_CTYPE      = 7,  /* conversion / type-system error (sema/irgen): illegal conversion, invalid operands */
+	E_INCOMPLETE = 8,  /* use of an incomplete type */
+	E_QUAL       = 9,  /* const / volatile qualification violation */
+	E_ACCESS     = 10, /* C++ access control violation */
+	E_TEMPLATE   = 11, /* C++ template error */
+	E_OVERLOAD   = 12, /* C++ overload resolution error */
 };
 
 /* Coded diagnostics.  error_tok_code/error_fixit render the caret across

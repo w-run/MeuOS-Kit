@@ -89,14 +89,14 @@ declcommon(struct scope *s, enum declkind kind, char *name, char *asmname, struc
 
 	if (prior) {
 		if (prior->linkage == LINKNONE)
-			error(&tok.loc, "%s '%s' with no linkage redeclared", kindstr, name);
+			error_code(E_REDEF, &tok.loc, "%s '%s' with no linkage redeclared", kindstr, name);
 		linkage = getlinkage(kind, sc, prior, fscope);
 		if (prior->linkage != linkage)
-			error(&tok.loc, "%s '%s' redeclared with different linkage", kindstr, name);
+			error_code(E_REDEF, &tok.loc, "%s '%s' redeclared with different linkage", kindstr, name);
 		if (!typecompatible(t, prior->type) || tq != prior->qual)
-			error(&tok.loc, "%s '%s' redeclared with incompatible type", kindstr, name);
+			error_code(E_REDEF, &tok.loc, "%s '%s' redeclared with incompatible type", kindstr, name);
 		if (asmname && (!prior->asmname || strcmp(prior->asmname, asmname) != 0))
-			error(&tok.loc, "%s '%s' redeclared with different assembler name", kindstr, name);
+			error_code(E_REDEF, &tok.loc, "%s '%s' redeclared with different assembler name", kindstr, name);
 		prior->type = typecomposite(t, prior->type);
 		return prior;
 	}
@@ -109,15 +109,15 @@ declcommon(struct scope *s, enum declkind kind, char *name, char *asmname, struc
 			prior = scopegetdecl(&filescope, name, false);
 		if (prior && prior->linkage != LINKNONE) {
 			if (prior->kind != kind)
-				error(&tok.loc, "'%s' redeclared with different kind", name);
+				error_code(E_REDEF, &tok.loc, "'%s' redeclared with different kind", name);
 			if (prior->linkage != linkage)
-				error(&tok.loc, "%s '%s' redeclared with different linkage", kindstr, name);
+				error_code(E_REDEF, &tok.loc, "%s '%s' redeclared with different linkage", kindstr, name);
 			if (!typecompatible(t, prior->type) || tq != prior->qual)
-				error(&tok.loc, "%s '%s' redeclared with incompatible type", kindstr, name);
+				error_code(E_REDEF, &tok.loc, "%s '%s' redeclared with incompatible type", kindstr, name);
 			if (!asmname)
 				asmname = prior->asmname;
 			else if (!prior->asmname || strcmp(prior->asmname, asmname) != 0)
-				error(&tok.loc, "%s '%s' redeclared with different assembler name", kindstr, name);
+				error_code(E_REDEF, &tok.loc, "%s '%s' redeclared with different assembler name", kindstr, name);
 			t = typecomposite(t, prior->type);
 		}
 	}
@@ -130,7 +130,7 @@ static void
 defineobj(struct decl *d, struct init *init, bool hasinit, struct func *f)
 {
 	if (d->type->incomplete)
-		error(&tok.loc, "object '%s' has incomplete type", d->name);
+		error_code(E_INCOMPLETE, &tok.loc, "object '%s' has incomplete type", d->name);
 	if (d->u.obj.align < d->type->align)
 		d->u.obj.align = d->type->align;
 	/* C23/C++ constexpr variable: must have a constant expression
@@ -151,15 +151,15 @@ defineobj(struct decl *d, struct init *init, bool hasinit, struct func *f)
 				    cpp_copy_cexpr_return(init->expr, d))
 					; /* members recorded */
 				else
-					error(&tok.loc,
+					error_code(E_QUAL, &tok.loc,
 					    "constexpr variable '%s' requires a constant expression initializer",
 					    d->name);
 			} else
-				error(&tok.loc,
+				error_code(E_QUAL, &tok.loc,
 				    "constexpr variable '%s' requires a constant expression initializer",
 				    d->name);
 		} else if (g_lang == 1 && !(e->type->prop & PROPINT))
-			error(&tok.loc, "constexpr variable '%s' requires a constant integer expression initializer", d->name);
+			error_code(E_DECL, &tok.loc, "constexpr variable '%s' requires a constant integer expression initializer", d->name);
 		else {
 			/* remember the value so a later constant expression can reuse it */
 			d->u.obj.constval = e->u.constant.u;
@@ -239,13 +239,13 @@ decl(struct scope *s, struct func *f)
 	}
 	if (f) {
 		if (sc == SCTHREADLOCAL)
-			error(&tok.loc, "block scope declaration containing 'thread_local' must contain 'static' or 'extern'");
+			error_code(E_DECL, &tok.loc, "block scope declaration containing 'thread_local' must contain 'static' or 'extern'");
 	} else {
 		/* 6.9p2 */
 		if (sc & SCAUTO)
-			error(&tok.loc, "external declaration must not contain 'auto'");
+			error_code(E_DECL, &tok.loc, "external declaration must not contain 'auto'");
 		if (sc & SCREGISTER)
-			error(&tok.loc, "external declaration must not contain 'register'");
+			error_code(E_DECL, &tok.loc, "external declaration must not contain 'register'");
 	}
 	if (consume(TSEMICOLON)) {
 		/* XXX 6.7p2 error unless in function parameter/struct/union, or tag/enum members are declared */
@@ -297,7 +297,7 @@ decl(struct scope *s, struct func *f)
 					    g_cpp_ctad_tmpl, ctor_args);
 					tok = ctok;
 					if (!inst)
-						error(&tok.loc,
+						error_code(E_TEMPLATE, &tok.loc,
 						    "cannot deduce template arguments for '%s'",
 						    g_cpp_ctad_tmpl);
 					t = inst;
@@ -323,7 +323,7 @@ decl(struct scope *s, struct func *f)
 		kind = sc & SCTYPEDEF ? DECLTYPE : t->kind == TYPEFUNC ? DECLFUNC : DECLOBJECT;
 		prior = scopegetdecl(s, name, false);
 		if (prior && prior->kind != kind)
-			error(&tok.loc, "'%s' redeclared with different kind", name);
+			error_code(E_REDEF, &tok.loc, "'%s' redeclared with different kind", name);
 		/* C++ `Class::name` qualified declarator: consumed by the
 		 * DECLFUNC path (out-of-line method definition); anything else
 		 * (static data members, typedefs) is not supported yet.  Only
@@ -343,15 +343,15 @@ decl(struct scope *s, struct func *f)
 					return true;
 				}
 				if (qclass)
-					error(&tok.loc, "qualified name in non-function declaration is not supported yet");
+					error_code(E_DECL, &tok.loc, "qualified name in non-function declaration is not supported yet");
 			}
 		}
 		switch (kind) {
 		case DECLTYPE:
 			if (align)
-				error(&tok.loc, "typedef '%s' declared with alignment specifier", name);
+				error_code(E_DECL, &tok.loc, "typedef '%s' declared with alignment specifier", name);
 			if (asmname)
-				error(&tok.loc, "typedef '%s' declared with assembler label", name);
+				error_code(E_DECL, &tok.loc, "typedef '%s' declared with assembler label", name);
 			if (!prior)
 				scopeputdecl(s, mkdecl(name, DECLTYPE, t, tq, LINKNONE));
 			else if (!typesame(prior->type, t) || prior->qual != tq)
@@ -359,7 +359,7 @@ decl(struct scope *s, struct func *f)
 			break;
 		case DECLOBJECT:
 			if (align && align < t->align)
-				error(&tok.loc, "object '%s' requires alignment %d, which is stricter than specified alignment %d", name, t->align, align);
+				error_code(E_DECL, &tok.loc, "object '%s' requires alignment %d, which is stricter than specified alignment %d", name, t->align, align);
 			/* C++ namespace-scope object: give it a namespace-qualified
 			 * assembler symbol (`Geo_version`) so it does not collide with
 			 * a same-named global (`version`).  The plain name is kept for
@@ -397,7 +397,7 @@ decl(struct scope *s, struct func *f)
 			{
 				extern int g_lang;
 				if (g_lang == 1 && (t->prop & PROPVM))
-					error(&tok.loc,
+					error_code(E_DECL, &tok.loc,
 					    "variable-length array '%s' not allowed in C++", name);
 			}
 			/* C++11 `auto x = expr;`: the placeholder type (&typeauto) is
@@ -408,13 +408,13 @@ decl(struct scope *s, struct func *f)
 				if (g_lang == 1 && d->type == &typeauto) {
 					struct expr *auto_expr;
 					if (ctor_call)
-						error(&tok.loc, "'auto' cannot be initialized with a constructor call");
+						error_code(E_DECL, &tok.loc, "'auto' cannot be initialized with a constructor call");
 					if (!consume(TASSIGN))
-						error(&tok.loc, "'auto' variable requires an initializer");
+						error_code(E_DECL, &tok.loc, "'auto' variable requires an initializer");
 					auto_expr = assignexpr(s);
 					if (!auto_expr->type || auto_expr->type == &typeauto ||
 					    auto_expr->type->kind == TYPEVOID)
-						error(&tok.loc,
+						error_code(E_TEMPLATE, &tok.loc,
 						    "unable to deduce the type of 'auto' variable '%s'",
 						    name);
 					t = auto_expr->type;
@@ -433,7 +433,7 @@ decl(struct scope *s, struct func *f)
 			} else {
 				d->u.obj.storage = sc & SCTHREADLOCAL ? SDTHREAD : SDSTATIC;
 				if (t->prop & PROPVM)
-					error(&tok.loc, "object '%s' with %s storage duration cannot have variably modified type", name, d->u.obj.storage == SDSTATIC ? "static" : "thread");
+					error_code(E_DECL, &tok.loc, "object '%s' with %s storage duration cannot have variably modified type", name, d->u.obj.storage == SDSTATIC ? "static" : "thread");
 				d->value = mkglobal(d);
 			}
 
@@ -447,7 +447,7 @@ decl(struct scope *s, struct func *f)
 				if (tok.kind == TASSIGN)
 					next();
 				if (f && d->linkage != LINKNONE)
-					error(&tok.loc, "object '%s' with block scope and %s linkage cannot have initializer", name, d->linkage == LINKEXTERN ? "external" : "internal");
+					error_code(E_DECL, &tok.loc, "object '%s' with block scope and %s linkage cannot have initializer", name, d->linkage == LINKEXTERN ? "external" : "internal");
 				if (d->defined)
 					error_tok_code(E_REDEF, &tok, "object '%s' redefined", name);
 				init = parseinit(s, d->type);
@@ -458,7 +458,7 @@ decl(struct scope *s, struct func *f)
 			{
 				extern int g_lang;
 				if (g_lang == 1 && d->type->isref && !hasinit)
-					error(&tok.loc, "reference '%s' must be initialized", name);
+					error_code(E_DECL, &tok.loc, "reference '%s' must be initialized", name);
 			}
 			if (!hasinit && sc & SCEXTERN) {
 				break;
@@ -523,9 +523,9 @@ decl(struct scope *s, struct func *f)
 			break;
 		case DECLFUNC:
 			if (align)
-				error(&tok.loc, "function '%s' declared with alignment specifier", name);
+				error_code(E_DECL, &tok.loc, "function '%s' declared with alignment specifier", name);
 			if (f && sc && sc != SCEXTERN)  /* 6.7.1p7 */
-				error(&tok.loc, "function '%s' with block scope may only have storage class 'extern'", name);
+				error_code(E_DECL, &tok.loc, "function '%s' with block scope may only have storage class 'extern'", name);
 			/* C++ out-of-line member-function definition:
 			 * `void Class::method(...) { ... }`.  The declarator mangled
 			 * the name to `Class_method`; route through cpp_define_method
@@ -567,7 +567,7 @@ decl(struct scope *s, struct func *f)
 					char buf[256];
 					/* overloading by return type alone is not allowed */
 					if (same_func_params(t, prior->type))
-						error(&tok.loc, "function '%s' redeclared with incompatible return type", name);
+						error_code(E_REDEF, &tok.loc, "function '%s' redeclared with incompatible return type", name);
 					cpp_free_mangle_name(name, t, buf, sizeof buf);
 					mng = xmalloc(strlen(buf) + 1);
 					strcpy(mng, buf);
@@ -630,7 +630,7 @@ decl(struct scope *s, struct func *f)
 				}
 				if (tok.kind == TLBRACE) {
 					if (!allowfunc)
-						error(&tok.loc, "function definition not allowed");
+						error_code(E_DECL, &tok.loc, "function definition not allowed");
 					if (d->defined)
 						error_tok_code(E_REDEF, &tok, "function '%s' redefined", name);
 					/* re-open scope from function declarator */
@@ -681,7 +681,7 @@ decl(struct scope *s, struct func *f)
 						extern struct func *g_cpp_auto_ret_func;
 						if (g_lang == 1 && t->base == &typeauto) {
 							if (!g_cpp_auto_ret_type)
-								error(&tok.loc, "'auto' function '%s' has no return statement to deduce its type from", name);
+								error_code(E_DECL, &tok.loc, "'auto' function '%s' has no return statement to deduce its type from", name);
 							t->base = g_cpp_auto_ret_type;
 							g_cpp_auto_ret_type = NULL;
 							g_cpp_auto_ret_func = NULL;

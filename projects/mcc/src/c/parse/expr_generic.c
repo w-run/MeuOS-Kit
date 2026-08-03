@@ -36,24 +36,24 @@ generic(struct scope *s)
 	do {
 		if (consume(TDEFAULT)) {
 			if (def)
-				error(&tok.loc, "multiple default expressions in generic association list");
+				error_code(E_CTYPE, &tok.loc, "multiple default expressions in generic association list");
 			expect(TCOLON, "after 'default'");
 			def = assignexpr(s);
 		} else {
 			t = typename(s, NULL, NULL);
 			if (!t)
-				error(&tok.loc, "expected typename for generic association");
+				error_code(E_SYNTAX, &tok.loc, "expected typename for generic association");
 			if (t->kind == TYPEFUNC)
-				error(&tok.loc, "generic association must have object type");
+				error_code(E_CTYPE, &tok.loc, "generic association must have object type");
 			if (t->incomplete)
-				error(&tok.loc, "generic association must have complete type");
+				error_code(E_CTYPE, &tok.loc, "generic association must have complete type");
 			if (t->prop & PROPVM)
-				error(&tok.loc, "generic association has variably modified type");
+				error_code(E_CTYPE, &tok.loc, "generic association has variably modified type");
 			expect(TCOLON, "after type name");
 			e = assignexpr(s);
 			if (typecompatible(t, want)) {
 				if (match)
-					error(&tok.loc, "generic selector matches multiple associations");
+					error_code(E_CTYPE, &tok.loc, "generic selector matches multiple associations");
 				match = e;
 			} else {
 				delexpr(e);
@@ -63,7 +63,7 @@ generic(struct scope *s)
 	expect(TRPAREN, "after generic assocation list");
 	if (!match) {
 		if (!def)
-			error(&tok.loc, "generic selector matches no associations and no default was specified");
+			error_code(E_CTYPE, &tok.loc, "generic selector matches no associations and no default was specified");
 		match = def;
 	} else if (def) {
 		delexpr(def);
@@ -77,8 +77,8 @@ intconstexpr(struct scope *s, bool allowneg)
 
 	e = eval(condexpr(s));
 	if (e->kind != EXPRCONST || !(e->type->prop & PROPINT))
-		error(&tok.loc, "not an integer constant expression");
+		error_code(E_CTYPE, &tok.loc, "not an integer constant expression");
 	if (!allowneg && e->type->u.arith.issigned && e->u.constant.u >> 63)
-		error(&tok.loc, "integer constant expression cannot be negative");
+		error_code(E_CTYPE, &tok.loc, "integer constant expression cannot be negative");
 	return e->u.constant.u;
 }

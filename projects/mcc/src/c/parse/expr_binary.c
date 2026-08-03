@@ -129,11 +129,11 @@ condexpr(struct scope *s)
 			} else if (typecompatible(lt, rt)) {
 				t = typecomposite(lt, rt);
 			} else {
-				error(&tok.loc, "operands of conditional operator must have compatible types");
+				error_code(E_CTYPE, &tok.loc, "operands of conditional operator must have compatible types");
 			}
 			t = mkpointertype(t, tq);
 		} else {
-			error(&tok.loc, "invalid operands to conditional operator");
+			error_code(E_CTYPE, &tok.loc, "invalid operands to conditional operator");
 		}
 	}
 	e = eval(e);

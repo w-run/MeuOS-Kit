@@ -27,10 +27,10 @@ addmember(struct structbuilder *b, struct qualtype mt, char *name, int align, un
 	size_t end;
 
 	if (t->kind == TYPESTRUCT && t->prop & PROPFLEX)
-		error(&tok.loc, "struct has member '%s' after flexible array member", name);
+		error_code(E_DECL, &tok.loc, "struct has member '%s' after flexible array member", name);
 	if (mt.type->incomplete) {
 		if (mt.type->kind != TYPEARRAY)
-			error(&tok.loc, "struct member '%s' has incomplete type", name);
+			error_code(E_INCOMPLETE, &tok.loc, "struct member '%s' has incomplete type", name);
 		t->prop |= PROPFLEX;
 	}
 	if (mt.type->prop & PROPFLEX) {
@@ -71,10 +71,10 @@ addmember(struct structbuilder *b, struct qualtype mt, char *name, int align, un
 			/* the body is consumed by structdecl's TYPEFUNC branch */
 			return;
 		}
-		error(&tok.loc, "struct member '%s' has function type", name);
+		error_code(E_DECL, &tok.loc, "struct member '%s' has function type", name);
 	}
 	if (mt.type->prop & PROPVM)
-		error(&tok.loc, "struct member '%s' has variably modified type", name);
+		error_code(E_CTYPE, &tok.loc, "struct member '%s' has variably modified type", name);
 	assert(mt.type->align > 0);
 	/* C++ (E2): duplicate data members in one class are ill-formed
 	 * (`struct A { int x; int x; };`).  Member functions are registered
@@ -111,7 +111,7 @@ addmember(struct structbuilder *b, struct qualtype mt, char *name, int align, un
 		m->bits.after = 0;
 		if (align < mt.type->align) {
 			if (align)
-				error(&tok.loc, "specified alignment of struct member '%s' is less strict than is required by type", name);
+				error_code(E_DECL, &tok.loc, "specified alignment of struct member '%s' is less strict than is required by type", name);
 			align = b->pack ? 1 : mt.type->align;
 		}
 		if (t->kind == TYPESTRUCT) {
@@ -125,15 +125,15 @@ addmember(struct structbuilder *b, struct qualtype mt, char *name, int align, un
 		b->bits = 0;
 	} else {  /* bit-field */
 		if (!(mt.type->prop & PROPINT))
-			error(&tok.loc, "bit-field '%s' has invalid type", name);
+			error_code(E_CTYPE, &tok.loc, "bit-field '%s' has invalid type", name);
 		if (align)
-			error(&tok.loc, "alignment specified for bit-field '%s'", name);
+			error_code(E_DECL, &tok.loc, "alignment specified for bit-field '%s'", name);
 		if (b->pack)
-			error(&tok.loc, "bit-field '%s' in packed struct is not supported", name);
+			error_code(E_DECL, &tok.loc, "bit-field '%s' in packed struct is not supported", name);
 		if (!width && name)
-			error(&tok.loc, "bit-field '%s' with zero width must not have declarator", name);
+			error_code(E_DECL, &tok.loc, "bit-field '%s' with zero width must not have declarator", name);
 		if (width > mt.type->u.arith.width)
-			error(&tok.loc, "bit-field '%s' exceeds width of underlying type", name);
+			error_code(E_CTYPE, &tok.loc, "bit-field '%s' exceeds width of underlying type", name);
 		align = mt.type->align;
 		if (t->kind == TYPESTRUCT) {
 			/* calculate end of the storage-unit for this bit-field */
@@ -175,9 +175,9 @@ staticassert(struct scope *s)
 		tokencheck(&tok, TSTRINGLIT, "after static assertion expression");
 		stringconcat(&msg, true);
 		if (!c)
-			error(&tok.loc, "static assertion failed: %.*s", (int)(msg.size - 1), (char *)msg.data);
+			error_code(E_DECL, &tok.loc, "static assertion failed: %.*s", (int)(msg.size - 1), (char *)msg.data);
 	} else if (!c) {
-		error(&tok.loc, "static assertion failed");
+		error_code(E_DECL, &tok.loc, "static assertion failed");
 	}
 	expect(TRPAREN, "after static assertion");
 	expect(TSEMICOLON, "after static assertion");
@@ -248,11 +248,11 @@ structdecl(struct scope *s, struct structbuilder *b)
 			addmember(b, mt, name, align, width);
 			return;
 		}
-		error(&tok.loc, "expected class name after '~'");
+		error_code(E_SYNTAX, &tok.loc, "expected class name after '~'");
 	}
 	base = declspecs(s, &sc, &fs, &align);
 	if (!base.type)
-		error(&tok.loc, "no type in struct member declaration");
+		error_code(E_CTYPE, &tok.loc, "no type in struct member declaration");
 	/* C++ constructor: `ClassName(...) { ... }`.  declspecs parsed the
 	 * class tag as a bare type name; a following '(' means it was really
 	 * the constructor name (which has no return type).  Parse the
@@ -339,7 +339,7 @@ structdecl(struct scope *s, struct structbuilder *b)
 		next(); /* consume 'operator' */
 		opcode = cpp_op_mangle(tok.kind);
 		if (!opcode)
-			error(&tok.loc, "unsupported operator for overloading");
+			error_code(E_OVERLOAD, &tok.loc, "unsupported operator for overloading");
 		next(); /* consume the operator token */
 		/* operator()/operator[]: the closing ')' or ']' of the operator
 		 * token follows (`operator()`, `operator[]`); the next '(' is the
@@ -383,7 +383,7 @@ structdecl(struct scope *s, struct structbuilder *b)
 	}
 	if (tok.kind == TSEMICOLON) {
 		if ((base.type->kind != TYPESTRUCT && base.type->kind != TYPEUNION) || base.type->u.structunion.tag)
-			error(&tok.loc, "struct declaration must declare at least one member");
+			error_code(E_DECL, &tok.loc, "struct declaration must declare at least one member");
 		next();
 		addmember(b, base, NULL, align, -1);
 		return;

@@ -33,9 +33,9 @@ mkincdecexpr(enum tokenkind op, struct expr *base, bool post)
 	struct expr *e;
 
 	if (!base->lvalue)
-		error(&tok.loc, "operand of '%s' operator must be an lvalue", tokenstr(op));
+		error_code(E_CTYPE, &tok.loc, "operand of '%s' operator must be an lvalue", tokenstr(op));
 	if (base->qual & QUALCONST)
-		error(&tok.loc, "operand of '%s' operator is const qualified", tokenstr(op));
+		error_code(E_QUAL, &tok.loc, "operand of '%s' operator is const qualified", tokenstr(op));
 	e = mkexpr(EXPRINCDEC, base->type, base);
 	e->op = op;
 	e->u.incdec.post = post;
@@ -106,21 +106,21 @@ postfixexpr(struct scope *s, struct expr *r)
 							e = mkunaryexpr(TMUL, e);
 						break;
 					}
-					error(&tok.loc, "class type has no matching operator[]");
+					error_code(E_CTYPE, &tok.loc, "class type has no matching operator[]");
 				}
 			}
 			idx = expr(s);
 			if (arr->type->kind != TYPEPOINTER) {
 				if (idx->type->kind != TYPEPOINTER)
-					error(&tok.loc, "either array or index must be pointer type");
+					error_code(E_CTYPE, &tok.loc, "either array or index must be pointer type");
 				tmp = arr;
 				arr = idx;
 				idx = tmp;
 			}
 			if (arr->type->base->incomplete)
-				error(&tok.loc, "array is pointer to incomplete type");
+				error_code(E_INCOMPLETE, &tok.loc, "array is pointer to incomplete type");
 			if (!(idx->type->prop & PROPINT))
-				error(&tok.loc, "index is not an integer type");
+				error_code(E_CTYPE, &tok.loc, "index is not an integer type");
 			e = mkunaryexpr(TMUL, mkbinaryexpr(&tok.loc, TADD, arr, idx));
 			expect(TRBRACK, "after array index");
 			break;
@@ -155,7 +155,7 @@ postfixexpr(struct scope *s, struct expr *r)
 					}
 					if (!cd || cd->kind != DECLFUNC ||
 					    !cd->u.func.isconstexpr)
-						error(&tok.loc,
+						error_code(E_QUAL, &tok.loc,
 						    "constexpr function body must not call non-constexpr function%s%s%s",
 						    cd && cd->name ? " '" : "",
 						    cd && cd->name ? cd->name : "",
@@ -199,7 +199,7 @@ postfixexpr(struct scope *s, struct expr *r)
 						g_cpp_member_tmpl = true;
 					cpp_pending_record_depth();
 				} else {
-					error(&tok.loc, "called object is not a function");
+					error_code(E_DECL, &tok.loc, "called object is not a function");
 				}
 			}
 			{
@@ -334,7 +334,7 @@ postfixexpr(struct scope *s, struct expr *r)
 							snprintf(mname2, sizeof mname2, "%s", mval2);
 					}
 					if (!fd2 || fd2->kind != DECLFUNC)
-						error(&tok.loc,
+						error_code(E_DECL, &tok.loc,
 						    "no matching member function for '%s'",
 						    g_cpp_member_name);
 					t = fd2->type;
@@ -376,7 +376,7 @@ postfixexpr(struct scope *s, struct expr *r)
 					struct expr *arg;
 					an = a->next; /* exprassign may replace the node */
 					if (!p && !t->u.func.isvararg)
-						error(&tok.loc,
+						error_code(E_SYNTAX, &tok.loc,
 						    "too many arguments for function call");
 					if (t->u.func.isvararg && !p) {
 						arg = exprpromote(a);
@@ -393,7 +393,7 @@ postfixexpr(struct scope *s, struct expr *r)
 						p = p->next;
 				}
 				if (p && !t->u.func.isvararg)
-					error(&tok.loc,
+					error_code(E_SYNTAX, &tok.loc,
 					    "not enough arguments for function call");
 				/* C++20 consteval (immediate function): every call must
 				 * be a constant expression — all arguments must fold to
@@ -424,7 +424,7 @@ postfixexpr(struct scope *s, struct expr *r)
 							extern struct expr *eval(struct expr *);
 							struct expr *ev = eval(aa);
 							if (!ev || ev->kind != EXPRCONST)
-								error(&tok.loc,
+								error_code(E_QUAL, &tok.loc,
 								    "call to consteval function '%s' is not a constant expression",
 								    cd->name);
 						}
@@ -446,14 +446,14 @@ postfixexpr(struct scope *s, struct expr *r)
 		case TARROW:
 			op = tok.kind;
 			if (r->type->kind != TYPEPOINTER)
-				error(&tok.loc, "'%s' operator must be applied to pointer to struct/union", tokenstr(op));
+				error_code(E_CTYPE, &tok.loc, "'%s' operator must be applied to pointer to struct/union", tokenstr(op));
 			t = r->type->base;
 			tq = r->type->qual;
 			if (t->kind != TYPESTRUCT && t->kind != TYPEUNION)
-				error(&tok.loc, "'%s' operator must be applied to pointer to struct/union", tokenstr(op));
+				error_code(E_CTYPE, &tok.loc, "'%s' operator must be applied to pointer to struct/union", tokenstr(op));
 			next();
 			if (tok.kind < TIDENT)
-				error(&tok.loc, "expected identifier after '%s' operator", tokenstr(op));
+				error_code(E_SYNTAX, &tok.loc, "expected identifier after '%s' operator", tokenstr(op));
 			lvalue = op == TARROW || r->base->lvalue;
 			offset = 0;
 			qualified = false;
@@ -539,7 +539,7 @@ postfixexpr(struct scope *s, struct expr *r)
 							qualified = true;
 							next(); /* consume '::' */
 							if (tok.kind < TIDENT)
-								error(&tok.loc,
+								error_code(E_SYNTAX, &tok.loc,
 								    "expected member name after '::'");
 							goto member_lookup;
 						}
@@ -561,7 +561,7 @@ postfixexpr(struct scope *s, struct expr *r)
 				    const char *);
 				if (g_lang == 1 &&
 				    cpp_member_ambiguous(t, tokenstr(tok.kind)))
-					error(&tok.loc, "request for member '%s' is "
+					error_code(E_CTYPE, &tok.loc, "request for member '%s' is "
 					    "ambiguous (multiple base classes define it)",
 					    tokenstr(tok.kind));
 			}
@@ -579,7 +579,7 @@ postfixexpr(struct scope *s, struct expr *r)
 				/* identifier text lives in the token-string table
 				 * (tokenstr), not tok.lit — tok.lit is NULL for
 				 * identifiers and would print '(null)' */
-				error(&tok.loc, "struct/union has no member named '%s'",
+				error_code(E_CTYPE, &tok.loc, "struct/union has no member named '%s'",
 				    tokenstr(tok.kind));
 			/* C++ access control: private/protected members are only
 			 * reachable from within the member's own class. */
@@ -588,7 +588,7 @@ postfixexpr(struct scope *s, struct expr *r)
 				extern bool cpp_member_accessible(struct type *,
 				    struct member *);
 				if (g_lang == 1 && !cpp_member_accessible(t, m))
-					error(&tok.loc, "'%s' is not accessible from this context (member is private/protected)", tokenstr(tok.kind));
+					error_code(E_ACCESS, &tok.loc, "'%s' is not accessible from this context (member is private/protected)", tokenstr(tok.kind));
 			}
 			/* C++ member function call: `obj.meth` lowers to a call of
 			 * `Class_meth` with the object address as the implicit this
@@ -739,7 +739,7 @@ postfixexpr(struct scope *s, struct expr *r)
 						--g_cpp_postfix_depth;
 						return r;
 					}
-					error(&tok.loc,
+					error_code(E_DECL, &tok.loc,
 					    "address of overloaded member function is ambiguous (use an explicit cast)");
 				}
 			}
