@@ -207,7 +207,7 @@ is_pure(MOP op)
 	case MOP_CFEQ: case MOP_CFNE: case MOP_CFLT: case MOP_CFLE:
 	case MOP_CFGT: case MOP_CFGE:
 	case MOP_SEXT: case MOP_ZEXT: case MOP_TRUNC:
-	case MOP_CAST: case MOP_F2I: case MOP_I2F:
+	case MOP_CAST: case MOP_F2I: case MOP_I2F: case MOP_UI2F:
 	case MOP_FEXT: case MOP_FTRUNC:
 		return true;
 	default:

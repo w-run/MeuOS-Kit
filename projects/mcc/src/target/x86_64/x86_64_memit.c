@@ -854,6 +854,7 @@ emit_ins(FILE *f, MInsM *in)
 		return;
 	}
 	case MMOP_CVTSI2SS: case MMOP_CVTSI2SD:
+	case MMOP_CVTSI2SS_U: case MMOP_CVTSI2SD_U:
 	case MMOP_CVTTSS2SI: case MMOP_CVTTSD2SI:
 	case MMOP_CVTSS2SD: case MMOP_CVTSD2SS: {
 		/* int<->fp conversions: sources/targets live in stack slots;
@@ -873,6 +874,29 @@ emit_ins(FILE *f, MInsM *in)
 			emit_mval(f, d);
 			fputs("\n", f);
 			break;
+		case MMOP_CVTSI2SS_U:
+		case MMOP_CVTSI2SD_U: {
+			/* unsigned int -> fp.  cvtsi2ss/sd interprets the 64-bit
+			 * register as signed, so values with the high bit set need
+			 * the identity (double)u == (double)(u>>1)*2 + (double)(u&1)
+			 * (mov_to_rax zero-extends 32-bit values into %rax). */
+			bool isd = (in->op == MMOP_CVTSI2SD_U);
+			const char *conv = isd ? "cvtsi2sdq" : "cvtsi2ssq";
+			const char *add  = isd ? "addsd" : "addss";
+			const char *movr = isd ? "movsd" : "movss";
+			mov_to_rax(f, s0, 0);
+			fputs("\tshrq\t$1, %rax\n", f);              /* u >> 1 */
+			fprintf(f, "\t%s\t%%rax, %%xmm0\n", conv);
+			fprintf(f, "\t%s\t%%xmm0, %%xmm0\n", add);   /* x2 */
+			mov_to_rax(f, s0, 0);
+			fputs("\tandq\t$1, %rax\n", f);              /* u & 1 */
+			fprintf(f, "\t%s\t%%rax, %%xmm1\n", conv);
+			fprintf(f, "\t%s\t%%xmm1, %%xmm0\n", add);
+			fprintf(f, "\t%s\t%%xmm0, ", movr);
+			emit_mval(f, d);
+			fputs("\n", f);
+			break;
+		}
 		case MMOP_CVTTSS2SI:
 			fputs("\tcvttss2sil\t", f);
 			emit_mval(f, s0);

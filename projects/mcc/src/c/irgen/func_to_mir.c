@@ -167,9 +167,9 @@ fe_to_mir_op(int op)
 	case IDTOSI:  return MOP_F2I;
 	case IDTOUI:  return MOP_F2I;
 	case ISWTOF:  return MOP_I2F;
-	case IUWTOF:  return MOP_I2F;
+	case IUWTOF:  return MOP_UI2F;
 	case ISLTOF:  return MOP_I2F;
-	case IULTOF:  return MOP_I2F;
+	case IULTOF:  return MOP_UI2F;
 	/* cast / copy */
 	case ICAST:   return MOP_CAST;
 	case ICOPY:   return MOP_COPY;

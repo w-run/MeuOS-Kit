@@ -790,6 +790,18 @@ emitdata(struct decl *d, struct init *init)
 				cur = init;
 				init = init->next;
 			}
+			/* The storage unit can begin inside a byte range already
+			 * emitted by an earlier non-bit-field member that shares the
+			 * unit (e.g. `char a; int b : 5;` — b's 4-byte unit starts at
+			 * byte 0 and overlaps a's byte 0).  funcstore() preserves the
+			 * overlapping member's bits via masked insert; emitdata must
+			 * mirror that by right-shifting the packed value to the
+			 * still-unemitted part of the unit instead of re-emitting the
+			 * whole unit and clobbering the earlier member. */
+			if (offset > unit_start) {
+				value >>= (offset - unit_start) * 8;
+				unit_start = offset;
+			}
 			if (offset < unit_start) {
 				dat.type = DZ;
 				dat.isstr = 0;
@@ -797,8 +809,32 @@ emitdata(struct decl *d, struct init *init)
 				dat.u.num = unit_start - offset;
 				emitdat(&dat, stdout);
 			}
-			emitintegerdata(&dat, unit_end - unit_start, value);
-			emitdat(&dat, stdout);
+			/* emit the remaining bytes (width need not be 1/2/4/8). */
+			{
+				unsigned long long len = unit_end - unit_start;
+				if (len >= 8) {
+					emitintegerdata(&dat, 8, value & ~0ull);
+					emitdat(&dat, stdout);
+					len -= 8;
+					value = 0;   /* the packed unit is at most 64 bits */
+				}
+				while (len >= 4) {
+					emitintegerdata(&dat, 4, value & 0xffffffffull);
+					emitdat(&dat, stdout);
+					value >>= 32;
+					len -= 4;
+				}
+				while (len >= 2) {
+					emitintegerdata(&dat, 2, value & 0xffffull);
+					emitdat(&dat, stdout);
+					value >>= 16;
+					len -= 2;
+				}
+				if (len == 1) {
+					emitintegerdata(&dat, 1, value & 0xffull);
+					emitdat(&dat, stdout);
+				}
+			}
 			offset = unit_end;
 			continue;
 		}
