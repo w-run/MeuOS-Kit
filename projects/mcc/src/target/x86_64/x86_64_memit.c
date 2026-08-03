@@ -292,6 +292,23 @@ emit_tls_addr(FILE *f, const char *sym, int64_t off, const char *reg)
 	fprintf(f, "(%%%s), %%%s\n", reg, reg);
 }
 
+/* Load a global symbol's address into `reg`.  PIC: via the GOT
+ * (`movq sym@gotpcrel(%rip), %reg` — the base LIR path does the same);
+ * otherwise a RIP-relative `leaq`. */
+static void
+emit_global_addr(FILE *f, const char *sym, int64_t off, const char *reg)
+{
+	if (g_pic) {
+		fprintf(f, "\tmovq\t%s@gotpcrel(%%rip), %%%s\n",
+		        sym ? sym : "0", reg);
+		if (off)
+			fprintf(f, "\taddq\t$%lld, %%%s\n", (long long)off, reg);
+	} else {
+		fprintf(f, "\tleaq\t%s%+lld(%%rip), %%%s\n",
+		        sym ? sym : "0", (long long)off, reg);
+	}
+}
+
 /* Emit loads of non-register base/index into r10/r11 (before the memory
  * instruction) so x86 addressing only sees registers.  Global symbols are
  * addresses -> leaq; TLS globals -> fs-relative address; virtual slots ->
@@ -304,8 +321,7 @@ emit_addr_loads(FILE *f, MAddr a)
 			if (a.base->tls)
 				emit_tls_addr(f, a.base->sym, 0, "r10");
 			else
-				fprintf(f, "\tleaq\t%s(%%rip), %%r10\n",
-				        a.base->sym ? a.base->sym : "0");
+				emit_global_addr(f, a.base->sym, 0, "r10");
 		} else {
 			fputs("\tmovq\t", f);
 			emit_mval(f, a.base);
@@ -317,8 +333,7 @@ emit_addr_loads(FILE *f, MAddr a)
 			if (a.index->tls)
 				emit_tls_addr(f, a.index->sym, 0, "r11");
 			else
-				fprintf(f, "\tleaq\t%s(%%rip), %%r11\n",
-				        a.index->sym ? a.index->sym : "0");
+				emit_global_addr(f, a.index->sym, 0, "r11");
 		} else {
 			fputs("\tmovq\t", f);
 			emit_mval(f, a.index);
@@ -383,9 +398,7 @@ mov_to_rax(FILE *f, MVal *v, MConst *c)
 					fputs("\taddq\t%fs:0, %rax\n", f);
 				}
 			} else {
-				fprintf(f, "\tleaq\t%s%+lld(%%rip), %%rax\n",
-				        c->u.addr.sym ? c->u.addr.sym : "0",
-				        (long long)c->u.addr.off);
+				emit_global_addr(f, c->u.addr.sym, c->u.addr.off, "rax");
 			}
 		} else if (c->kind == MC_INT) {
 			fprintf(f, "\tmovq\t$%lld, %%rax\n", (long long)c->u.i);
@@ -811,7 +824,8 @@ emit_ins(FILE *f, MInsM *in)
 	}
 	case MMOP_CALL: {
 		if (s0 && s0->kind == MV_GLOBAL)
-			fprintf(f, "\tcall\t%s\n", s0->sym);
+			fprintf(f, "\tcall\t%s%s\n", s0->sym,
+			        g_pic && s0->isext ? "@plt" : "");
 		else {
 			mov_to_rax(f, s0, 0);
 			fputs("\tcall\t*%rax\n", f);
