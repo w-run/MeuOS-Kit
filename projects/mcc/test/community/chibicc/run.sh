@@ -44,10 +44,16 @@ LOG="$DIR/results.log"
 PASS=0; RF=0; CF=0
 for t in "$DIR"/*.c; do
   [ "$(basename "$t")" = "assert_adapt.c" ] && continue
+  [ "$(basename "$t")" = "commonsym_ext.c" ] && continue
   name=$(basename "$t" .c)
   out=$(mktemp /tmp/chibicc.XXXXXX)
   cerr=$(mktemp /tmp/chibicc.XXXXXX)
-  if "$MCC" --specs=meuos --sysroot="$SYS" -I"$DIR" -o "$out" "$t" "$ADAPT" >"$cerr" 2>&1; then
+  # commonsym.c tests cross-TU common-symbol merging: link its companion
+  # TU, which strongly defines common_ext2 (=3) that the tentative
+  # definition in commonsym.c must merge with.
+  extra=""
+  [ "$name" = "commonsym" ] && extra="$DIR/commonsym_ext.c"
+  if "$MCC" --specs=meuos --sysroot="$SYS" -I"$DIR" -o "$out" "$t" "$ADAPT" $extra >"$cerr" 2>&1; then
     if "$out" >/dev/null 2>&1; then
       echo "PASS        $name" | tee -a "$LOG"
       PASS=$((PASS+1))
