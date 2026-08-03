@@ -66,7 +66,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 | Worker | 模型 | 分支 | Worktree | 任务 | 状态 | 上次 push |
 |---|---|---|---|---|---|---|
 | alice | reasoning | worktree-tmp-alice-cpp (自 worktree-mxx-work@d0a90c9) | /tmp/mxx-wt-alice | cpp_parse 组 D1/D4/D2/E2/E3 修复（requires 续作已完成） | **completed**（已合入主线） | a3808b9 |
-| bella | lite | worktree-tmp-bella (自 worktree-mxx-work) | /tmp/mxx-wt-bella | m++ 测试矩阵扩充 + 门禁验证 | **completed**（1ed8c53 已合入主线 dd78366） | 16 个 test/cpp 文件 |
+| bella | lite | worktree-tmp-bella-mirp1 (自 worktree-mxx-work) | /tmp/mxx-wt-bella | x86_64 MIR-native fallback 闭环（聚合实参/SALLOC、TLS、动态 alloca/VLA） | **completed**（4c908df/1a1d599/7e78598/c5235b1 已 push origin/worktree-tmp-bella-mirp1，verify-all 17/17 全绿，双路径自举通过） | c5235b1 |
 | chloe | lite | 只读隔离副本 | /tmp/mcciso-chloe | 定位 chibicc B 类真 bug（常量折叠窄化 + va_end 类型检查） | **completed**（报告已收） | 只读不 push |
 | diana | lite | worktree-tmp-diana-pic + worktree-tmp-diana-errcode (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试 + check-pic-verify 修复 + 错误码体系/多错收集 | **completed**（db1451b C23 已合入 294e5c2；6db1691 PIC 已合入主线 58016d2；errcode da5a646/a561b36/c204bbe 本次归并合入主线） | 11 test/c23 + F1-F3 + i386/riscv64 GOT + E####/caret 全跨/JSON 多错/fix-it |
 | eve | lite | worktree-tmp-eve + worktree-tmp-eve-olevel (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵扩充 + -O 优化级别语义分级（O0..O3/-Os/-Oz/-Og/-Ofast + 非法级别钳制）+ check-olevel 目标 | **completed**（02d6684 测试矩阵已合入 b4cad7e；eve-olevel 本次归并合入主线） | 33 test/cpp + check-olevel |
@@ -169,6 +169,16 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 - **F3** 具名 constexpr 变量不折叠进整数常量表达式（_Static_assert(K==9) 报非常量，diana 发现）— **done**（hazel 8e5aae3）
 - **C++23 纯缺口 4 项** → **全部 done**（grace worktree-tmp-grace-cpp23）：P0849 `auto(x)`（f7e313a，expr_primary）、P1774 `[[assume]]`（b54c8b9，attr.c 要求括号参数形式 no-op）、P1401 if constexpr 窄化转 bool（16c2ca5，PROPINT→PROPSCALAR）、P2360 init 语句 alias + C++11 using 别名（2a4d655，cpp_using_decl 支持 `using Name=Type;` + if 头部 init-statement 扫描）。属性语义：alignas 本已生效、nodiscard 丢弃返回值警告（da7a107）；deprecated/fallthrough/maybe_unused 使用点警告留待后续。
 - **chibicc B 类**：常量折叠窄化 + va_end 类型检查（verify2/gate3/chi4 定位，chloe 精确行号，grace/hazel 竞争中）
+
+### x86_64 MIR-native fallback 闭环（bella，worktree-tmp-bella-mirp1）
+- 分支：`worktree-tmp-bella-mirp1`（自 worktree-mxx-work），已 push origin
+- 目标：MCC_MIR_BACKEND=1 从"标量为主、聚合/TLS/VLA fallback 到 bridge"变成 x86_64 完整路径
+- 三个提交：
+  - `4c908df` 聚合实参 + SALLOC：mbe_supported() 放开 MOP_ARG/MOP_CALL(MV_TYPE) 与 MOP_SALLOC（SysV 分类/BLIT/栈传参在 mabi 已就绪）；新增 test/c11/aggregate_arg.c
+  - `1a1d599` TLS：emit 增加 emit_tls_addr()（movq %fs:0 + leaq sym@tpoff，local-exec），覆盖地址取址/寻址基址/MC_ADDR；新增 test/c11/tls_basic.c
+  - `7e78598` 动态 alloca/VLA：MFnM.dynalloc 标志 + emit 动态序列（subq rsp/16 对齐/leaq 0(rsp)）+ 前置扫描（块逆序输出问题）+ epilogue 从 rbp 恢复 rsp；新增 test/c11/vla_boundary.c
+- 验证：check-c-mir 默认与 MCC_MIR_BACKEND=1 双路径 fail=0；check-mir 全绿（mabi 45/regalloc 45）；check-sysroot-static 自举默认路径 exit 0（MIR_BACKEND=1 自举另验）
+- 说明：check-c99/c11/c23 默认 specs 需要 meuos-sysroot libc（-lc-meuos），本 worktree 未装 sysroot 属环境问题，与 MIR 改动无关（mir_matrix 显式 --specs=host 全绿）
 
 ## 5. 纪律速查
 

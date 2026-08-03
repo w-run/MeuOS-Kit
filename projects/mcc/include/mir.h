@@ -590,6 +590,7 @@ struct MFnM {
 	int32_t salign;          /* frame alignment */
 	uint64_t regsused;       /* bitmask of used physical registers (bit = MReg) */
 	uint32_t nspill;         /* number of stack spill slots */
+	bool dynalloc;           /* function performs a runtime (VLA) alloca */
 };
 
 /* ---- Machine construction API (src/mir/machine.c) --------------------- */

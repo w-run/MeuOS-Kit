@@ -28,15 +28,14 @@ extern int emit_debug;  /* from emit/emit.c */
 extern void emitdbgloc(uint, uint, FILE *);  /* from emit/emit.c */
 extern bool mfnm_backend_x86_64(struct MFn *);  /* x86_64_mbe.c (P3b machine backend) */
 
-/* B.4.2 MIR-first switch: when nonzero, emitfunc lowers the frontend tree
- * to MIR (func_to_mir), runs the MIR passes, bridges to LIR, and runs the
- * LIR pipeline.  Set from MCC_USE_MIR in main.c at startup. */
+/* MIR-only switch (Phase 2): always 1 — set in main.c (MCC_USE_MIR env
+ * removed).  The legacy direct-LIR path is unreachable. */
 int g_use_mir;
 
-/* P2+ MIR-native backend switch: when nonzero, each function is additionally
- * run through the MIR machine backend (convert to MFnM, ABI-lower, dump).
- * The bridge path stays the default producer of assembly; this is a
- * parallel-validation hook until P3-P5 supply isel/regalloc/emit. */
+/* P2+ MIR-native backend switch (Phase 2): x86_64 defaults to the machine
+ * backend (convert to MFnM, ABI-lower, regalloc, emit) as its sole asm
+ * producer.  MCC_MIR_BACKEND=0 may disable it for testing; non-x86_64
+ * targets keep the bridge path. */
 int g_use_mir_backend;
 
 /* Translate a frontend class char ('w','l','s','d') to IR's class enum. */
@@ -283,46 +282,49 @@ emitfunc(struct func *f, bool global)
 		funcret(f, v);
 	}
 
-	/* B.4.2 MIR-first path: lower the frontend tree to MIR, run the MIR
-	 * passes, bridge to the LIR Fn, and run the LIR pipeline.  Enabled by
-	 * MCC_USE_MIR=1 (kept opt-in while the MIR layer is being validated
-	 * against real C workloads; the default remains the direct-LIR path
-	 * until the migration completes). */
+	/* MIR-only path (Phase 2): the frontend tree is always lowered to MIR
+	 * (func_to_mir never fails — unmapped ops die), MIR passes run, then
+	 * the x86_64 target uses the MIR-native machine backend (sole asm
+	 * producer; all fallbacks closed in Phase 1) and every other target
+	 * bridges to the LIR pipeline.  The legacy direct-LIR Fn construction
+	 * below is unreachable (scheduled for removal in Phase 3). */
 	if (g_use_mir) {
 		MFn *mf = func_to_mir(f, opt_level, global);
-		if (mf) {
-			if (emit_debug) {
-				fprintf(stderr, "\n> MIR (pre-pass) %s:\n", f->name);
-				mfn_dump(mf, stderr);
-			}
-			run_mir_passes(mf, opt_level);
-			if (emit_debug) {
-				fprintf(stderr, "\n> MIR (post-pass) %s:\n", f->name);
-				mfn_dump(mf, stderr);
-			}
-			/* P3b MIR-native backend: when MCC_MIR_BACKEND=1, the machine
-			 * backend emits the assembly for functions in scope (scalar);
-			 * otherwise (aggregate/varargs) it falls back to the bridge. */
-			if (g_use_mir_backend && mfnm_backend_x86_64(mf)) {
-				freeall();
-				mfn_free(mf);
-				return;
-			}
-			fn = lir_bridge(mf);
-			if (emit_debug) {
-				fprintf(stderr, "\n> LIR (bridged) %s:\n", f->name);
-				printfn(fn, stderr);
-			}
-			run_passes(fn);
-			if (emit_debug)
-				emitdbgloc(1, 0, stdout);
-			T.emitfn(fn, stdout);
+		if (emit_debug) {
+			fprintf(stderr, "\n> MIR (pre-pass) %s:\n", f->name);
+			mfn_dump(mf, stderr);
+		}
+		run_mir_passes(mf, opt_level);
+		if (emit_debug) {
+			fprintf(stderr, "\n> MIR (post-pass) %s:\n", f->name);
+			mfn_dump(mf, stderr);
+		}
+		/* MIR-native backend (Phase 2): x86_64 only — g_use_mir_backend
+		 * defaults to 1 for the host target, and mfnm_backend_x86_64
+		 * covers the complete x86_64 codegen scope.  Other targets keep
+		 * the MIR -> bridge -> LIR path. */
+		if (g_use_mir_backend && strcmp(T.name, "x86_64") == 0 &&
+		    mfnm_backend_x86_64(mf)) {
 			freeall();
 			mfn_free(mf);
 			return;
 		}
-		/* fall through to direct-LIR path if MIR lowering failed */
+		fn = lir_bridge(mf);
+		if (emit_debug) {
+			fprintf(stderr, "\n> LIR (bridged) %s:\n", f->name);
+			printfn(fn, stderr);
+		}
+		run_passes(fn);
+		if (emit_debug)
+			emitdbgloc(1, 0, stdout);
+		T.emitfn(fn, stdout);
+		freeall();
+		mfn_free(mf);
+		return;
 	}
+
+	/* Legacy direct-LIR path: unreachable since Phase 2 (MIR is forced;
+	 * func_to_mir never returns NULL).  Retained pending Phase 3 removal. */
 
 	/* Allocate Fn per the qbe parse.c L910-932 init pattern. */
 	fn = alloc(sizeof *fn);

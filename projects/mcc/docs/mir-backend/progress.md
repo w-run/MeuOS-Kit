@@ -41,6 +41,7 @@
 | P6f | regalloc：calls 数组去 64 上限（超大函数漏 call） | ✅ | 已提交 9718e44 |
 | P6g | Bug B 修复：selcall sret 分配 pad（qualtype 24B） | ✅ | 已提交 eccf7ae |
 | P6h | Bug C 修复：meuos-libc strtod 不支持 hex float（0x1p63）→ self-mcc 编译 eval.c 崩溃。已修复并全量自举 105/105 | ✅ | 已提交 f412f75 |
+| P7 | x86_64 fallback 全部闭环（聚合实参/SALLOC、TLS、动态 alloca/VLA）：MCC_MIR_BACKEND=1 为完整路径，无 bridge fallback，自举通过 | ✅ | 4c908df, 1a1d599, 7e78598 |
 
 ## 验证结果（截至 P3b）
 
@@ -63,6 +64,42 @@
 修复验证：fadd/fdiv/fneg 浮点参数、printf 7 参数全过；c99/c11 仍全过；
 check-mir 全绿；bridge 路径 0 回归。
 
+## ≤16B 聚合按值返回修复（2026-08-03，bella，Phase 2 验证发现）
+
+### 现象
+- `struct Foo{int a,b;} make(void){...}` + `struct Foo f = make()` 在
+  MCC_MIR_BACKEND=1 下 SIGSEGV（8/12/16B 全崩；24B+ sret 正常）。
+- 覆盖缺口：verify-all.sh 不设 MCC_MIR_BACKEND（当时默认 0）→ cpp 套件
+  实际走 bridge；c99/c11/c23 无 ≤16B 聚合按值返回测试。
+
+### 根因（两处，均在 x86_64_mabi.c / x86_64_memit.c）
+1. **混合类返回寄存器映射错误**：selret/selcall 用"位置式"映射
+   （slot1→XMM1/RDX），而 SysV 用**按类计数**（INTEGER: rax,rdx；
+   SSE: xmm0,xmm1）。`{int i; double d}`（{INTEGER,SSE}）的 SSE eightbyte
+   应回 XMM0 而非 XMM1（对照 LIR retr()）。
+2. **emit LOAD 浮点经 %rax 中转**：MMOP_LOAD 对 F64 目标先 `movq addr,%rax`
+   再 `movq %rax,%xmmN`。selret 两个返回块连续 load 时，第二块（F64）的
+   load 会把第一块刚放进 %rax 的 INTEGER 块覆盖。
+
+### 修复
+- mabi_selret / mabi_selcall 的 ≤16B 分支改为按类寄存器序列
+  （retreg[2][2] = {RAX,RDX}/{XMM0,XMM1}，逐 eightbyte 取类计数）。
+- emit MMOP_LOAD 增加 F64→XMM 寄存器的直接 `movsd` 路径（不再经 %rax）。
+- regalloc 区间起点取"首次 def"（sentinel UINT32_MAX + `min`）：聚合返回
+  call 的 dst 会被 mabi_selcall 先指向 pad、再由 call 重定义（multi-def），
+  区间必须从最早写入开始，否则线性扫描可能在该值最后一次 def 前把寄存器
+  让给邻居。
+- 回归测试：test/c11/aggregate_ret_small.c（8/12/16B int、16B SSE、
+  16B 混合 {INTEGER,SSE}、嵌套访问）+ test/cpp/aggregate_ret_small.cc
+  （链式 operator+ 临时值回传 + 混合 16B 返回）+ test/c11/aggregate_return.c
+  与 test/cpp/aggregate_return.cc（含混合 {double,int}→XMM0+RDX、返回值直
+  接作实参、24B sret 对照）。
+
+### 验证
+- 双路径（默认 bridge + MCC_MIR_BACKEND=1）：check-c-mir fail=0、
+  check-cpp-func/neg rc=0；cpp 套件在 MCC_MIR_BACKEND=1 下全绿。
+- 覆盖门禁建议：check-cpp 增加 MCC_MIR_BACKEND=1 变体。
+
 ## 当前工作点
 
 - **P4 regalloc 全部完成（A-E）**；isel-debug 验证发现的 P3b 遗留 2 个边界
@@ -78,6 +115,14 @@ check-mir 全绿；bridge 路径 0 回归。
 - **P5 全部完成**。MIR 新后端独立可用（hello 走 MCC_MIR_BACKEND=1）。
 - MCC_MIR_BACKEND=1：标量函数走完整新后端（isel + ABI + regalloc + emit），
   聚合/varargs/TLS/VLA 动态 alloca fallback 到 bridge。
+- **P7（2026-08-03，bella）x86_64 fallback 全部闭环**：mbe_supported() 不再
+  有剩余 fallback——聚合实参（MOP_ARG/MOP_CALL MV_TYPE）、SALLOC、TLS 全局
+  （local-exec `%fs:0 + @tpoff`）、动态 alloca/VLA（MFnM.dynalloc + rsp 调整 +
+  epilogue 从 rbp 恢复）全部由 MIR-native 后端处理。验证：
+  - check-c-mir 默认与 MCC_MIR_BACKEND=1 双路径 fail=0；
+  - check-mir 全绿（mabi_test 45 / regalloc_test 45）；
+  - check-sysroot-static 自举默认路径与 MCC_MIR_BACKEND=1 均 exit 0
+    （self-mcc 全源码经 MIR-native 编译 + hello 运行正确）。
 
 ## Bug 修复记录（isel-debug 验证发现）
 
