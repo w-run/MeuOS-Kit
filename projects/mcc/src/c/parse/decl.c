@@ -177,6 +177,17 @@ defineobj(struct decl *d, struct init *init, bool hasinit, struct func *f)
 			}
 		}
 	}
+	/* C++20 constinit: the initializer must be a constant expression,
+	 * but the object itself stays mutable (no QUALCONST implied). */
+	if ((d->qual & QUALCONSTINIT) && hasinit && init->expr) {
+		struct expr *e = eval(init->expr);
+		if (e->kind != EXPRCONST)
+			error_code(E_QUAL, &tok.loc,
+			    "constinit variable '%s' requires a constant initializer",
+			    d->name);
+		else
+			init->expr = e;
+	}
 	if (d->u.obj.storage == SDAUTO)
 		funcinit(f, d, init, hasinit);
 	else

@@ -36,7 +36,8 @@ enum typequal {
 	QUALRESTRICT = 1<<2,
 	QUALVOLATILE = 1<<3,
 	QUALATOMIC   = 1<<4,
-	QUALCONSTEXPR = 1<<5
+	QUALCONSTEXPR = 1<<5,
+	QUALCONSTINIT = 1<<6
 };
 
 enum typekind {

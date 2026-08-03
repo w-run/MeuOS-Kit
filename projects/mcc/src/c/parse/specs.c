@@ -83,6 +83,15 @@ typequal(enum typequal *tq)
 				g_cpp_func_consteval = 1;
 				break;
 			}
+			/* C++20 `constinit`: requires constant initialization but,
+			 * unlike constexpr, does NOT make the object const — it
+			 * stays mutable.  Use a distinct qualifier bit so the
+			 * constant-initializer check in decl.c applies without
+			 * pulling in QUALCONST. */
+			if (g_lang == 1 && strcmp(nm, "constinit") == 0) {
+				*tq |= QUALCONSTINIT;
+				break;
+			}
 		}
 		return 0;
 	}

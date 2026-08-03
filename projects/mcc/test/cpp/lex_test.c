@@ -53,6 +53,7 @@ test_keywords(void)
 
 	/* C++20 */
 	CHECK(cpp_classify_ident("concept", 7) == CPP_TCONCEPT, "concept");
+	CHECK(cpp_classify_ident("constinit", 9) == CPP_TCONSTINIT, "constinit");
 	CHECK(cpp_classify_ident("requires", 8) == CPP_TREQUIRES, "requires");
 	CHECK(cpp_classify_ident("co_await", 8) == CPP_TCO_AWAIT, "co_await");
 	CHECK(cpp_classify_ident("module", 6) == CPP_TMODULE, "module");
