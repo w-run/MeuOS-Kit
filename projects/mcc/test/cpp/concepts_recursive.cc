@@ -2,10 +2,10 @@
  * recursively (m++).
  *
  * A concept body may name other concepts; the reference chain is expanded
- * recursively at instantiation time (guarded by MAX_CONSTRAINT_DEPTH = 16).
+ * recursively at instantiation time (guarded by MAX_CONSTRAINT_DEPTH = 256).
  *
  * Covers:
- *  - a long reference chain (C0..C16, a 16-level nesting, the depth limit):
+ *  - a long reference chain (C0..C16, a 16-level nesting):
  *    every level is a single-concept body referencing the previous one, so
  *    the whole chain folds down to `sizeof(T) == 4`
  *  - `&&`/`||` composition across two levels of recursion (D1 uses D0 by
