@@ -628,11 +628,14 @@ decl(struct scope *s, struct func *f)
 					{
 						extern int g_lang;
 						extern struct type typeauto;
+						/* point at the function body's closing brace
+						 * rather than the next token */
+						struct location bodyend = funcget_bodyend(f);
 						if (g_lang == 1 && t->base && t->base->kind != TYPEVOID &&
 						    t->base != &typeauto && !d->u.func.isnoreturn &&
 						    strcmp(d->name, "main") != 0 &&
 						    func_falls_off_end(f))
-							error(&tok.loc,
+							error(&bodyend,
 							    "control reaches end of non-void function '%s'",
 							    name);
 					}

@@ -499,6 +499,9 @@ stmt(struct func *f, struct scope *s)
 			if (!label(f, s) && !decl(s, f))
 				stmt(f, s);
 		}
+		/* record the closing brace so diagnostics for the enclosing
+		 * function body can point at `}` instead of the next token */
+		funcset_bodyend(f, tok.loc);
 		/* C++: run destructors for local class objects on block exit. */
 		{
 			extern int g_lang;

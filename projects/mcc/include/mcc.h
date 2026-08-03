@@ -666,6 +666,8 @@ void funcret(struct func *, struct value *);
 void funchlt(struct func *);
 struct gotolabel *funcgoto(struct func *, char *);
 bool func_falls_off_end(struct func *);
+void funcset_bodyend(struct func *, struct location);
+struct location funcget_bodyend(struct func *);
 void funcswitch(struct func *, struct value *, struct switchcases *, struct block *);
 void funcinit(struct func *, struct decl *, struct init *, bool);
 

@@ -24,6 +24,7 @@ mkfunc(struct decl *decl, char *name, struct type *t, struct scope *s)
 	f->decl = decl;
 	f->name = name;
 	f->type = t;
+	f->bodyend = (struct location){0};
 	f->start = f->end = mkblock("start");
 	f->lastid = 0;
 	mapinit(&f->gotos, 8);
@@ -158,6 +159,18 @@ funcgoto(struct func *f, char *name)
 	}
 
 	return f->gotos.vals[idx].p;
+}
+
+void
+funcset_bodyend(struct func *f, struct location loc)
+{
+	f->bodyend = loc;
+}
+
+struct location
+funcget_bodyend(struct func *f)
+{
+	return f->bodyend;
 }
 
 /* Return true if control can reach the end of the function body without a
