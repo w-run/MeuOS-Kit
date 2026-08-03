@@ -272,6 +272,22 @@ mreg_pool_build(const MTargetM *mt, MRegPool *pc, MRegPool *px)
 	}
 }
 
+/* Is register r a callee-saved register of the given class? */
+static bool
+mreg_in_callee(const MTargetM *mt, int r, int cls)
+{
+	if (cls == 0) {
+		for (int c = mt->gpr0; c < mt->gpr0 + mt->ngpr; c++)
+			if (c == r)
+				return mt->regs[c].callee_saved;
+	} else {
+		for (int c = mt->fpr0; c < mt->fpr0 + mt->nfpr; c++)
+			if (c == r)
+				return mt->regs[c].callee_saved;
+	}
+	return false;
+}
+
 static bool
 interval_crosses_call(uint32_t s, uint32_t e, uint32_t *calls, uint32_t nc)
 {
@@ -349,7 +365,7 @@ mreg_scan(MFnM *fm, MRegCtx *ctx)
 				cand[ncand++] = ctx->intv[i];
 		qsort(cand, ncand, sizeof *cand, intv_cmp_start);
 
-		typedef struct { uint32_t end; int reg; MVal *v; } MActive;
+		typedef struct { uint32_t end; int reg; MVal *v; uint32_t candidx; } MActive;
 		MActive act[256];
 		uint32_t nact = 0;
 		bool busy[64] = { 0 };
@@ -409,7 +425,50 @@ mreg_scan(MFnM *fm, MRegCtx *ctx)
 				act[nact].end = e;
 				act[nact].reg = chosen;
 				act[nact].v = iv->v;
+				act[nact].candidx = i;
 				nact++;
+			} else if (!iv->phislot && nact < 256) {
+				/* spill-either heuristic: no free register — reuse the
+				 * register of an active interval (same class) whose live
+				 * range extends PAST the new interval AND whose register
+				 * suits the new interval (no fixed conflict; callee-saved
+				 * when the new value crosses a call).  The spilled value
+				 * keeps its slot: the emitter stores every def and loads
+				 * every use of a slot-resident temp, so a mid-scan spill
+				 * stays correct (the earlier def still writes the slot).
+				 * Keeping short-lived values in registers over long-lived
+				 * ones cuts total spills on pressure-heavy functions. */
+				int victim = -1;
+				uint32_t victim_end = iv->end;
+				for (uint32_t k = 0; k < nact; k++) {
+					if (act[k].end <= victim_end ||
+					    mreg_class(act[k].v->type) != cls)
+						continue;
+					int r = act[k].reg;
+					if (fixed_conflict(&fixed[r], s, e))
+						continue;
+					if (cross && mreg_in_callee(mt, r, cls) == false)
+						continue;
+					victim_end = act[k].end;
+					victim = (int)k;
+				}
+				if (victim >= 0) {
+					MVal *vv = act[victim].v;
+					vv->slot = mreg_slot_alloc(&slots, vv->type) -
+					           (vararg ? 176 : 0);
+					vv->reg = -1;
+					cand[act[victim].candidx].reg = -1;
+					iv->reg = act[victim].reg;
+					fm->regsused |= 1ull << act[victim].reg;
+					act[victim].end = e;      /* the register now holds iv */
+					act[victim].v = iv->v;
+					act[victim].candidx = i;
+				} else {
+					/* spill the new interval */
+					iv->v->slot = mreg_slot_alloc(&slots, iv->v->type) -
+					              (vararg ? 176 : 0);
+					iv->v->reg = -1;
+				}
 			} else {
 				/* spill to a stack slot below the reg_save_area */
 				iv->v->slot = mreg_slot_alloc(&slots, iv->v->type) -
