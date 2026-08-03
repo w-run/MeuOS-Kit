@@ -50,8 +50,8 @@ done
 # -Og 保留叶函数帧指针，-O2 省略（leaf.c 只含叶函数，无 main 噪声）
 $BIN -Og --specs=host -S -o /tmp/olevel-og.s "$DIR/leaf.c" 2>/dev/null
 $BIN -O2 --specs=host -S -o /tmp/olevel-o2leaf.s "$DIR/leaf.c" 2>/dev/null
-grep -q 'pushq %rbp' /tmp/olevel-og.s || fail "-Og should keep frame pointer for leaf function"
-if grep -q 'pushq %rbp' /tmp/olevel-o2leaf.s; then fail "-O2 leaf should omit frame pointer"; fi
+grep -q 'pushq.*%rbp' /tmp/olevel-og.s || fail "-Og should keep frame pointer for leaf function"
+if grep -q 'pushq.*%rbp' /tmp/olevel-o2leaf.s; then fail "-O2 leaf should omit frame pointer"; fi
 
 # --- 3) 非法级别 ---
 if $BIN -O9 --specs=host -c -o /tmp/olevel-o9.o "$DIR/grading.c" 2>/tmp/olevel-o9.log; then

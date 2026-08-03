@@ -61,6 +61,8 @@ cc_suffix(MCC cc)
 static const MTargetM *g_mt;
 static int g_alloca_cur;   /* frame-relative cursor for static allocas */
 static MFnM *g_fm;         /* current function (for the VLA/dynalloc flag) */
+static bool g_omit_fp;     /* -O2+ leaf: frame pointer elided, rsp base */
+static int g_fp_off;       /* rsp-based slot offset adjustment when omitted */
 
 static int
 alloca_size(MMOP op)
@@ -254,6 +256,8 @@ emit_mval(FILE *f, MVal *v)
 	case MV_TEMP:
 		if (v->reg >= 0)
 			fprintf(f, "%%%s", mreg_name(g_mt, v->reg));
+		else if (g_omit_fp)
+			fprintf(f, "%d(%%rsp)", v->slot + g_fp_off);
 		else
 			fprintf(f, "%d(%%rbp)", v->slot);
 		break;
@@ -863,7 +867,10 @@ emit_ins(FILE *f, MInsM *in)
 		/* static alloca: address a reserved frame slot below the spill
 		 * area (never touch %rsp: it must stay balanced at calls) */
 		g_alloca_cur -= alloca_size_ins(in);
-		fprintf(f, "\tleaq\t%d(%%rbp), %%rax\n", g_alloca_cur);
+		if (g_omit_fp)
+			fprintf(f, "\tleaq\t%d(%%rsp), %%rax\n", g_alloca_cur + g_fp_off);
+		else
+			fprintf(f, "\tleaq\t%d(%%rbp), %%rax\n", g_alloca_cur);
 		rax_to_dst(f, d);
 		return;
 	}
@@ -1076,6 +1083,29 @@ mfnm_emit_x86_64(MFnM *fm, FILE *f)
 	g_alloca_cur = -(fm->slot + extra +
 	                 ((fm->host && fm->host->vararg) ? 176 : 0));
 
+	/* Leaf functions at -O2+ may omit the frame pointer (rsp base), as the
+	 * legacy LIR backend does.  Keep rbp when debugging (-Og / g_force_fp),
+	 * when the function calls others, when rsp moves at runtime (dynamic
+	 * VLA alloca), for varargs, or when the ABI lowering addressed the
+	 * caller-pushed stack arguments / sret pad via %rbp (mabi_selpar). */
+	{
+		extern int g_force_fp;
+		bool hascall = false, hasrbp = false;
+		for (MBlkM *b = fm->link; b && !(hascall && hasrbp); b = b->link)
+			for (uint32_t i = 0; i < b->nins; i++) {
+				MInsM *in = &b->ins[i];
+				if (in->op == MMOP_CALL)
+					hascall = true;
+				if (in->addr.base && in->addr.base->kind == MV_REG &&
+				    in->addr.base->reg == X64MREG_RBP)
+					hasrbp = true;
+			}
+		g_omit_fp = fm->host->optlevel >= 2 && !g_force_fp &&
+		            !hascall && !hasrbp && !fm->dynalloc &&
+		            !(fm->host && fm->host->vararg);
+	}
+	g_fp_off = 0;
+
 	/* frame covers spill slots + allocas, plus (for varargs) the 176-byte
 	 * reg_save_area that the allocas sit below.  Align so that every call
 	 * sees rsp % 16 == 0: after push rbp + the callee-saved pushes the
@@ -1091,9 +1121,13 @@ mfnm_emit_x86_64(MFnM *fm, FILE *f)
 	/* this backend observes every function (including main, as launched
 	 * by the host runtime) entering with rsp % 16 == 8 */
 	int entryoff = 8;
-	int postpush = (entryoff - 8 * (csaves + 1)) & 15;   /* after pushes */
+	int postpush = (entryoff - 8 * (csaves + (g_omit_fp ? 0 : 1))) & 15;
 	int align = (16 - postpush) & 15;
 	framesize += align;   /* align must survive: subq restores %16 */
+	/* rsp-based slot addressing: a rbp-relative slot (negative) sits at
+	 * rsp + slot + csaves*8 + framesize - 8 (the elided pushq %rbp). */
+	if (g_omit_fp)
+		g_fp_off = csaves * 8 + framesize - 8;
 
 	fprintf(f, ".text\n");
 	if (fm->name) {
@@ -1101,8 +1135,10 @@ mfnm_emit_x86_64(MFnM *fm, FILE *f)
 			fprintf(f, ".globl %s\n", fm->name);
 		fprintf(f, "%s:\n", fm->name);
 	}
-	fputs("\tpushq\t%rbp\n", f);
-	fputs("\tmovq\t%rsp, %rbp\n", f);
+	if (!g_omit_fp) {
+		fputs("\tpushq\t%rbp\n", f);
+		fputs("\tmovq\t%rsp, %rbp\n", f);
+	}
 	/* save callee-saved registers used by the allocator */
 	for (int i = 0; fm->mt->rclob && fm->mt->rclob[i] >= 0; i++) {
 		int r = fm->mt->rclob[i];
@@ -1155,7 +1191,10 @@ mfnm_emit_x86_64(MFnM *fm, FILE *f)
 					fprintf(f, "\tpopq\t%%%s\n",
 					        mreg_name(fm->mt, used[--n]));
 			}
-			fputs("\tpopq\t%rbp\n\tret\n", f);
+			if (g_omit_fp)
+				fputs("\tret\n", f);
+			else
+				fputs("\tpopq\t%rbp\n\tret\n", f);
 			break;
 		default:
 			break;
