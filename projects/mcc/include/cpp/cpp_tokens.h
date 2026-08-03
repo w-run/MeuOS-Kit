@@ -83,6 +83,7 @@ enum cpp_tokenkind {
 	CPP_TSTATIC_ASSERT,    /* C++11 static_assert */
 	CPP_TCONSTEXPR,        /* C++11 constexpr */
 	CPP_TCONSTEVAL,        /* C++20 consteval */
+	CPP_TCONSTINIT,        /* C++20 constinit */
 	CPP_TNOEXCEPT,         /* C++11 noexcept */
 	CPP_TNULLPTR_T,        /* C++11 nullptr_t */
 
