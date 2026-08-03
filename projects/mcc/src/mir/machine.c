@@ -242,6 +242,7 @@ mmop_name(MMOP op)
 		[MMOP_CMP]      = "cmp",
 		[MMOP_TEST]     = "test",
 		[MMOP_SETCC]    = "setcc",
+		[MMOP_CMOV]     = "cmov",
 		[MMOP_PARM]     = "parm",
 		[MMOP_ARG]      = "arg",
 		[MMOP_JMP]      = "jmp",

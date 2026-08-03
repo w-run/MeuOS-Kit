@@ -66,7 +66,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 | Worker | 模型 | 分支 | Worktree | 任务 | 状态 | 上次 push |
 |---|---|---|---|---|---|---|
 | alice | reasoning | worktree-tmp-alice-cpp + worktree-tmp-alice-cpp20 (自 worktree-mxx-work) | /tmp/mxx-wt-alice | cpp_parse D1/D4/D2/E2/E3 + C++20 NTTP/consteval/<=>/聚合初始化/constexpr 成员 | **completed**（D1/D4 等已合入；cpp20 本次归并合入主线 **68d1222**） | push worktree-tmp-alice-cpp20 |
-| bella | lite | worktree-tmp-bella-mirp1 (自 worktree-mxx-work) | /tmp/mxx-wt-bella | x86_64 MIR-native fallback 闭环 + ≤16B 聚合返回修复（#94） | **completed**（#94 已随 chloe-mirp2 **0702745** 合入主线；memit.c TLS 按 g_pic 正版裁决） | 16273af |
+| bella | lite | worktree-tmp-bella-cmov (自 worktree-mxx-work@9742e2f) | /tmp/mxx-wt-bella | x86_64 MIR-native fallback 闭环 + ≤16B 聚合返回（#94）+ MIR-native if-conversion cmov（#97） | **completed**（#94 已随 chloe-mirp2 合入；#97 bcd61f5/9f7682d/05567e8 已 push worktree-tmp-bella-cmov，verify-all 19/19） | 05567e8 |
 | chloe | lite | worktree-tmp-chloe-mirp2 (自 worktree-mxx-work) | /tmp/mxx-wt-chloe | MIR Phase 2：强制 MIR-native + TLS PIC（g_pic 正版）+ verify-all 19 步 | **completed**（6cafb11 v1 + 0702745/318e184 更新已合入主线；TLS 采用 g_pic 版，无 T.pic/ir.h） | 318e184 |
 | diana | lite | worktree-tmp-diana-pic + worktree-tmp-diana-errcode + worktree-tmp-diana-dwarf (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试 + check-pic-verify 修复 + 错误码体系/多错收集 + DWARF 调试信息 | **completed**（db1451b C23 已合入 294e5c2；6db1691 PIC 已合入主线 58016d2；errcode da5a646/a561b36/c204bbe 已合入；dwarf dfdb0db/381bfdd/ad4d69a 本次归并合入主线） | 11 test/c23 + F1-F3 + i386/riscv64 GOT + E#### + 最小 DWARF4 |
 | eve | lite | worktree-tmp-eve + worktree-tmp-eve-olevel + worktree-tmp-eve-i18n (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵 + -O 级别语义分级 + **i18n 消息目录与双语（--lang=en/zh、LANG 推断、--explain/usage/--error-json 双语、check-i18n 目标）** | **completed**（测试矩阵已合入 b4cad7e；eve-olevel 已合入 a1bbb85；eve-i18n 本次 4 commit，verify-all 19/19） | worktree-tmp-eve-i18n |
@@ -80,7 +80,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 4. 半成品保护范例：`worktree-requires-wip` = requires 半成品恢复点（网络故障时保护成功）
 
 ### 门禁已知差距（2026-08-03 归并后）
-- **check-olevel：已知差距 2 项**（MIR-native 后端真实未实现，非测试 bug；按 team-lead 裁决从归并门禁排除，已排 MIR 迭代 task）：① MIR-native if-conversion（cmov，x86_64_mbe.c isel 仍为 P2 seed）；③ -O1 内存局部常量传播（`int k=7; x+(k+1)` 的 k 走栈槽，FOLD 不跨内存折叠）。**② -O2 省略叶函数帧指针已修复（hazel a988893，worktree-tmp-hazel-fp）**。已通过断言保留：O2 imul/O3 shl 强度削减、O9 钳制、Ox 拒绝、各级别运行时正确；另 -O0/-O1 指令数断言当前也失败（-O0 未禁用优化，243=243，非记录项）。
+- **check-olevel：三项已知差距已全部清零**（本批 6 分支归并）：① MIR-native if-conversion（cmov）→ **bella**（机器层 ifconv 通道 + MMOP_CMOV）；② -O2 省略叶函数帧指针 → **hazel**（a988893，worktree-tmp-hazel-fp）；③ -O1 内存局部常量传播 → **chloe**（worktree-tmp-chloe-memconst）。-O0/-O1 指令数断言与 cmov/帧指针/内存折叠断言随本批转绿（以 check-olevel 实测为准）。
 - **check-pic-verify：已修复**（97d5467，x86_64 MIR-native -fPIC GOT 回归——MIR Phase 2 强制 MIR-native 后丢失外部符号 GOT，emit_global_addr + @gotpcrel + @plt 修复，四架构全过）。
 
 ---

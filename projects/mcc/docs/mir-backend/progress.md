@@ -303,3 +303,22 @@ P5/P6 已彻底修复；regalloc（线性扫描，依据 regalloc-design.md）�
   libc 缺失特性，而 host 动态链接 glibc 掩盖。自举回归是 libc 完备性的
   第一道防线。
 
+
+## MIR-native if-conversion（cmov）闭环（2026-08-03，bella，check-olevel 差距①）
+
+- 现象：check-olevel 断言 -O2 应 if 转换出 cmov 失败——x86_64_mbe.c isel
+  无分支到条件移动（三元/短 if-else 赋值仍发分支）。
+- 实现：机器层 ifconv 通道（src/mir/ifconv.c，`mfnm_ifconv`，isel 后、
+  ABI 前运行）：
+  - 识别分支 diamond（cmp/setcc/cmp bool,jcc + 双臂各为单写），整数选择
+    才转换（x86 无 FP cmov）；新增 MMOP_CMOV + mcc_neg。
+  - 发射要点（两个真实坑）：gas 拒绝 mem-dst cmov → 槽位 dst 经 %r9 中转
+    且按宽度匹配（8 字节写 4 字节槽覆盖相邻 callee-saved 保存区，曾致
+    template.cc/自举段错误）；global 源是地址须先 leaq 物化（emit_mval
+    打 sym(%rip) 会误读符号内容，曾致 self-mcc 的 vnew 崩溃）。
+- 验证：check-olevel cmov 断言转绿（O2=cmov/O1=分支）；grading.c 扩充
+  cmov 运行时模式（三元/abs/无符号/64位/直接布尔）7 级别全过；check-c-mir
+  双模式 fail=0、check-cpp-func 双模式 rc=0、自举 exit 0、verify-all
+  **19/19**（MIR-native + bridge 双路径）。commit bcd61f5 + 9f7682d。
+- 剩余 check-olevel 差距：② -O2 叶函数帧指针省略、③ -O1 内存局部常量
+  传播（均 MIR-native 后端，另有 task）。

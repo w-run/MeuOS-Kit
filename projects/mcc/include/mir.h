@@ -511,6 +511,7 @@ typedef enum MMOP {
 	MMOP_CMP,              /* compare src[0] vs src[1], set flags */
 	MMOP_TEST,             /* and src[0], src[1], set flags */
 	MMOP_SETCC,            /* dst = flags.cc ? 1 : 0 */
+	MMOP_CMOV,             /* dst = flags.cc ? src[0] : dst (if-conversion) */
 	/* parameter passing (pre-ABI markers consumed by the ABI lowering) */
 	MMOP_PARM,             /* function parameter (entry block); td = agg type */
 	MMOP_ARG,              /* call argument; td = agg type for aggregates */
@@ -546,6 +547,29 @@ typedef enum MCC {
 } MCC;
 
 const char *mcc_name(MCC cc);
+
+/* Inverse condition (cmov complement / branch negation). */
+static inline MCC
+mcc_neg(MCC cc)
+{
+	switch (cc) {
+	case MCC_EQ:  return MCC_NE;
+	case MCC_NE:  return MCC_EQ;
+	case MCC_CS:  return MCC_CC;
+	case MCC_CC:  return MCC_CS;
+	case MCC_MI:  return MCC_PL;
+	case MCC_PL:  return MCC_MI;
+	case MCC_VS:  return MCC_VC;
+	case MCC_VC:  return MCC_VS;
+	case MCC_HI:  return MCC_LS;
+	case MCC_LS:  return MCC_HI;
+	case MCC_GE:  return MCC_LT;
+	case MCC_LT:  return MCC_GE;
+	case MCC_GT:  return MCC_LE;
+	case MCC_LE:  return MCC_GT;
+	default:      return MCC_AL;   /* AL/NONE: no inverse */
+	}
+}
 
 /* ---- Machine functions / blocks / instructions ------------------------ */
 
@@ -637,5 +661,10 @@ int32_t mreg_slot_total(const MRegSlots *s);
  * Fills MVal.reg (physical register) or MVal.slot (spill), plus fm->slot /
  * fm->regsused for frame emission. */
 void mfnm_regalloc(MFnM *fm);
+
+/* If-conversion: replace simple branch diamonds (ternary / short if-else
+ * assignments) with MMOP_CMOV conditional moves.  Runs after isel, before
+ * the ABI lowering. */
+void mfnm_ifconv(MFnM *fm);
 
 #endif /* MCC_MIR_H */
