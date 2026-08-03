@@ -2582,7 +2582,32 @@ cpp_emit_ctor_call(struct func *f, struct decl *d, struct expr *args)
 		return;
 	tag = t ? t->u.structunion.tag : NULL;
 	if (!tag || !cpp_has_ctor(t, tag)) {
-		error(&tok.loc, "no matching constructor for object '%s'", d->name);
+		/* aggregate (no user ctor): direct-initialize the data members
+		 * positionally — `P p(1, 2)` lowers to `p.a = 1; p.b = 2;` */
+		struct expr *obj;
+		struct member *m;
+		struct expr *a;
+		obj = mkexpr(EXPRIDENT, d->type, NULL);
+		obj->qual = d->qual;
+		obj->lvalue = true;
+		obj->u.ident.decl = d;
+		obj = mkunaryexpr(TBAND, obj); /* &p */
+		for (m = t ? t->u.structunion.members : NULL, a = args;
+		     m && a; m = m->next, a = a->next) {
+			struct expr *base, *dst;
+			if (m->name && m->name[0] == '~')
+				continue;
+			if (m->type && m->type->kind == TYPEFUNC)
+				continue;
+			base = mkbinaryexpr(&tok.loc, TADD,
+			    exprconvert(obj, &typeulong),
+			    mkconstexpr(&typeulong, m->offset));
+			base->type = mkpointertype(m->type, QUALNONE);
+			dst = mkunaryexpr(TMUL, base);
+			dst->type = m->type;
+			dst->lvalue = true;
+			funcexpr(f, mkassignexpr(dst, a));
+		}
 		return;
 	}
 	/* overload resolution: append the encoded argument types (reference

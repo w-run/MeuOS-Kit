@@ -398,7 +398,13 @@ decl(struct scope *s, struct func *f)
 
 			if (base.expr)
 				funcexpr(f, base.expr);
-			if (consume(TASSIGN)) {
+			/* C++11 direct-list-initialization: `P q{3, 4}` — the `{`
+			 * after the declarator is an initializer list just like the
+			 * `= { ... }` copy-list-init form. */
+			extern int g_lang;
+			if (tok.kind == TASSIGN || (g_lang == 1 && tok.kind == TLBRACE)) {
+				if (tok.kind == TASSIGN)
+					next();
 				if (f && d->linkage != LINKNONE)
 					error(&tok.loc, "object '%s' with block scope and %s linkage cannot have initializer", name, d->linkage == LINKEXTERN ? "external" : "internal");
 				if (d->defined)
