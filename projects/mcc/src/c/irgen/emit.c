@@ -24,6 +24,7 @@ extern bool mfnm_backend_x86_64(struct MFn *);   /* x86_64_mbe.c (P3b machine ba
 extern bool mfnm_backend_riscv64(struct MFn *);   /* riscv64_mbe.c (P3a machine backend) */
 extern bool mfnm_backend_loongarch64(struct MFn *); /* loongarch64_mbe.c (P3b) */
 extern bool mfnm_backend_aarch64(struct MFn *);   /* aarch64_mbe.c (P3b machine backend) */
+extern bool mfnm_backend_arm(struct MFn *);       /* arm_mbe.c (P3c machine backend) */
 
 /* DWARF variable-type classification for the base-type DIEs. */
 static int
@@ -131,7 +132,9 @@ emitfunc(struct func *f, struct scope *fs, bool global)
 		     (strcmp(T.name, "riscv64") == 0 && mfnm_backend_riscv64(mf)) ||
 		     (strcmp(T.name, "loongarch64") == 0 &&
 		      mfnm_backend_loongarch64(mf)) ||
-		     (strcmp(T.name, "aarch64") == 0 && mfnm_backend_aarch64(mf)))) {
+		     (strcmp(T.name, "aarch64") == 0 && mfnm_backend_aarch64(mf)) ||
+		     ((strcmp(T.name, "arm") == 0 || strcmp(T.name, "armv7") == 0) &&
+		      mfnm_backend_arm(mf)))) {
 
 			if (g_dwarf_level > 0) {
 				dwarf_collect_vars(f, mf, NULL);

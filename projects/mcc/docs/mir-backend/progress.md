@@ -563,4 +563,30 @@ commit：a4b28cd（聚合+varargs ABI）、2045931（浮点/TLS/BLIT 发射）�
 - x86_64 无回归：verify-all 19/19（双路径）、自举 exit 0。
 
 ### 下一目标
-- aarch64 已由 hazel 补齐（见上）；arm 移植由 chloe 在途。
+- aarch64 已由 hazel 补齐（见上）；arm 已由 chloe 补齐（见下）。
+
+### Phase 3c：arm（armv7-a）MIR-native 移植（#154，chloe，worktree-tmp-chloe-arm）
+按 grace i386/arm 决策（16 GPR + 32 D 扁平寄存器、AAPCS32 R0-R3/D0-D7
+传参、CPSR flags 存在），复用 aarch64 骨架裁剪为 32 位：
+- **标量整数后端**（`6cdd504`）：arm_m.h 寄存器枚举 + mtarget_arm
+  （gpr0=r0/ngpr=16、fpr0=d0/nfpr=32、rglob=fp/sp/lr/pc、argreg=
+  r0-r3+d0-d7、sret_reg=r0、ptrsize=4、stackalign=8）；arm_mabi.c
+  AAPCS32 标量核；arm_mbe.c isel（SETCCR cmp+条件 mov、JNZ→JCC）；
+  arm_memit.c 发射（ldr/str/ldrb/ldrh/ldrsb/ldrsh、movw/movt、sdiv/
+  udiv/rem、mul Rd!=Rm、rsb/mvn；帧 push+vpush+sub sp+add fp；头
+  .syntax unified/.arch armv7ve/.fpu neon）。emit.c 分派
+  mfnm_backend_arm（T.name="armv7"）。附带：emit.c GNU-stack 行对
+  arm as 改简单形式、legacy arm_emit.c 补 VFP 头、Makefile MABI_SRC。
+- **浮点使能**（`8dec5a1`）：mbe_supported 只拒 MT_I64（放行 MT_PTR，
+  仅函数引用）；VFP 运算/转换/比较（vcmp+vmrs+条件 mov）；浮点常量
+  位 memcpy、fload_scratch 目标 scratch 参数化（修两操作数同寄存器）、
+  CALL 浮点返回 d0→dst、静态 alloca 去 +g_slot_base、浮点 store 先装
+  值再取地址。
+- mbe_supported：32 位标量整数 + 浮点走 MIR-native；MT_I64（long
+  long 需寄存器对）、聚合、varargs、TLS、VLA 回退 legacy。
+- 验证：qemu-arm-static 运行时全过（浮点运算/转换/比较/循环/Newton
+  迭代/unsigned 转换/浮点函数调用传参返回 + 标量 fib/divmod/数组/
+  移位）；test/c99+c11 54 样例交叉汇编全过（49 走 MIR-native）；
+  x86_64 verify-all 19/19 + 自举 exit 0。
+- 已知限制（与 legacy 一致）：long long 算术、聚合、varargs、TLS、
+  VLA 走 legacy；legacy TLS 的 tprel 修饰符需对应 as 支持。
