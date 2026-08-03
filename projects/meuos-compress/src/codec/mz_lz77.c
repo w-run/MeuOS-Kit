@@ -10,19 +10,25 @@
  *
  * Token format (v1, backward compat):
  *   Literal: 0bbbbbbb (bit7=0, low 7 bits = value)
- *            0x81 + byte (escaped literal for values >= 128)
+ *            0x80 + byte (escaped literal for values >= 128)
  *   Match:   1ooooooo oooooooo llllllll (3 bytes)
  *            offset = ((b0 & 0x7F) << 8) | b1    (15 bits, 0..32767)
  *            length = b2 + MZ_MIN_MATCH           (8 bits, 3..258)
  *            offset=0 signals end marker
  *
  * Token format (v2, 16-bit offset):
- *   Literal: same as v1
- *   Match:   1ooooooo oooooooo oollllll (3 bytes)
- *            offset = ((b0 & 0x7F) << 9) | (b1 << 1) | ((b2 >> 7) & 1)
- *                      (16 bits, 0..65535)
- *            length = (b2 & 0x7F) + MZ_MIN_MATCH (7 bits, 3..130)
- *            offset=0 signals end marker
+ *   Literal: 0bbbbbbb (bit7=0, low 7 bits = value) for values 0..127
+ *            0xFF + byte (escaped literal for values >= 128)
+ *   Match:   1mmmmmmm mmmmmmmm mlllllll (3 bytes)
+ *            b0 = 0x80 | (offset >> 8)   -- bits 8-14 of offset (offset >> 8 must be <= 0x7E)
+ *            b1 = offset & 0xFF          -- bits 0-7 of offset
+ *            b2 = ((offset >> 15) & 1) << 7 | ((length - 3) & 0x7F)  -- bit 15 + length
+ *            offset = ((b0 & 0x7F) << 8) | b1 | (((b2 >> 7) & 1) << 15)
+ *                      (16 bits, 1..65279)
+ *            length = (b2 & 0x7F) + 3 (7 bits, 3..130)
+ *
+ * Note: escape literal uses 0xFF as prefix, match tokens use 0x80..0xFE.
+ * Offsets >= 65280 (top 256 of 64KB window) are encoded as literals.
  *
  * v2 improvements:
  *   - 64KB hash window (v1: 4KB)
@@ -180,20 +186,22 @@ static inline void
 write_literal(uint8_t *out, size_t *op, uint8_t val)
 {
     if (val >= 0x80) {
-        out[(*op)++] = 0x81;
+        out[(*op)++] = 0xFF;
         out[(*op)++] = val;
     } else {
         out[(*op)++] = val;
     }
 }
 
-/* Emit v2 match token: 3 bytes, 16-bit offset, 7-bit length */
+/* Emit v2 match token: 3 bytes, 16-bit offset, 7-bit length
+ * b0 = 0x80 | (offset >> 8), b1 = bits 0-7, b2 bit 7 = bit 15 of offset
+ * Precondition: offset >> 8 <= 0x7E (offset < 65280) */
 static inline void
 write_match_v2(uint8_t *out, size_t *op, size_t offset, int length)
 {
-    out[(*op)++] = (uint8_t)(0x80 | ((offset >> 9) & 0x7F));
-    out[(*op)++] = (uint8_t)((offset >> 1) & 0xFF);
-    out[(*op)++] = (uint8_t)(((offset & 1) << 7) | ((length - MZ_MIN_MATCH) & 0x7F));
+    out[(*op)++] = (uint8_t)(0x80 | (offset >> 8));
+    out[(*op)++] = (uint8_t)(offset & 0xFF);
+    out[(*op)++] = (uint8_t)(((offset >> 15) & 1) << 7 | ((length - MZ_MIN_MATCH) & 0x7F));
 }
 
 /* Slide n bytes into window and insert each into hash */
@@ -241,11 +249,7 @@ mz_compress_lz77(const void *input, size_t inlen, void **result, size_t *result_
         int match_len;
         size_t match_off;
 
-        if (mz_find(&state, ip, in, inlen, &match_len, &match_off, 1) &&
-            /* 偏移 0x200-0x3FF 时 match token 首字节为 0x81，与转义字面量
-             * 标记 (0x81 <val>) 冲突，解码器无法区分 → 数据损坏。此类匹配
-             * 退化为字面量（字面量编码无歧义）。 */
-            !(match_off >= 0x200 && match_off <= 0x3FF)) {
+        if (mz_find(&state, ip, in, inlen, &match_len, &match_off, 1)) {
             /* Lazy matching: for levels >= 4, check if the NEXT position
              * has a longer match.  If yes, emit current byte as literal
              * and let the next iteration handle the better match. */
@@ -268,36 +272,26 @@ mz_compress_lz77(const void *input, size_t inlen, void **result, size_t *result_
                 }
             }
 
-            /* v2 match encode with fallback */
+            /* v2 match encode */
             if (op + 3 > max_out) { free(out); return MZ_ERR_STREAM; }
             int len = match_len > MZ_MAX_MATCH_V2 ? MZ_MAX_MATCH_V2 : match_len;
-            {
-                int _ok = 1;
-                size_t _n = (size_t)len;
-                if (_n > inlen - ip) _n = inlen - ip;
-                for (size_t _vi = 0; _vi < _n; _vi++) {
-                    if (in[ip + _vi] != in[ip - match_off + _vi]) { _ok = 0; break; }
+            /* Clamp len to remaining input */
+            if ((size_t)len > inlen - ip) len = (int)(inlen - ip);
+            /* If remaining input is too short for a match, emit literals */
+            if (len < MZ_MIN_MATCH) {
+                for (int li = 0; li < (int)(inlen - ip); li++) {
+                    write_literal(out, &op, in[ip]);
+                    slide_and_insert(&state, in, &ip, inlen, 1);
                 }
-                if (!_ok) {
-                    /* Fallback literal emission writes up to 2 bytes per
-                     * literal (0x81 escape marker + value), for at most
-                     * `len` literals.  Bound the whole sequence up front
-                     * so a degenerate input cannot overflow the output
-                     * buffer mid-loop. */
-                    if (op + 2 * (size_t)len > max_out) {
-                        free(out); return MZ_ERR_STREAM;
-                    }
-                    for (int _lj = 0; _lj < len && ip < inlen; _lj++) {
-                        unsigned char _bv = in[ip];
-                        if (_bv >= 128) { out[op++] = 0x81; }
-                        out[op++] = _bv;
-                        state.win[state.win_pos] = _bv;
-                        state.win_pos = (state.win_pos + 1) & MZ_WMASK;
-                        mz_insert(&state, ip, in, inlen);
-                        ip++;
-                    }
-                    continue;
+                continue;
+            }
+            /* If offset is too large for v2 encoding, emit literals */
+            if (match_off >> 8 > 0x7E) {
+                for (int li = 0; li < len && ip < inlen; li++) {
+                    write_literal(out, &op, in[ip]);
+                    slide_and_insert(&state, in, &ip, inlen, 1);
                 }
+                continue;
             }
             write_match_v2(out, &op, match_off, len);
             slide_and_insert(&state, in, &ip, inlen, (size_t)len);
@@ -310,10 +304,7 @@ emit_literal:
         }
     }
 
-    /* End marker: match with offset=0 */
-    if (op + 3 > max_out) { free(out); return MZ_ERR_STREAM; }
-    out[op++] = 0x80; out[op++] = 0; out[op++] = 0;
-
+    /* v2 format: no end marker needed (decoder stops at uncompsz) */
     *result = out;
     *result_len = op;
     return (int)op;
@@ -351,15 +342,30 @@ mz_decompress_lz77(const void *input, size_t inlen, void **result, size_t *resul
     while (ip < inlen && op < uncompsz) {
         uint8_t b0 = in[ip++];
 
-        if (b0 == 0x81) {
-            /* Escape literal */
+        if (b0 < 0x80) {
+            /* Literal (bit 7 = 0) */
+            if (op >= uncompsz) break;
+            out[op++] = b0;
+            win[wp] = b0;
+            wp = (wp + 1) & MZ_WMASK;
+        } else if (b0 == 0xFF && is_v2) {
+            /* v2 escape literal: 0xFF followed by value (for values >= 128) */
             if (ip >= inlen) { free(out); return MZ_ERR_DATA; }
             uint8_t val = in[ip++];
+            if (op >= uncompsz) break;
             out[op++] = val;
             win[wp] = val;
             wp = (wp + 1) & MZ_WMASK;
-        } else if (b0 & 0x80) {
-            /* Match token */
+        } else if (b0 == 0x80 && !is_v2) {
+            /* v1 escape literal: 0x80 followed by value (for values >= 0x80) */
+            if (ip >= inlen) { free(out); return MZ_ERR_DATA; }
+            uint8_t val = in[ip++];
+            if (op >= uncompsz) break;
+            out[op++] = val;
+            win[wp] = val;
+            wp = (wp + 1) & MZ_WMASK;
+        } else {
+            /* Match token: v2 b0 in [0x80,0xFE], v1 b0 >= 0x81 */
             if (ip + 2 > inlen) { free(out); return MZ_ERR_DATA; }
             uint8_t b1 = in[ip++];
             uint8_t b2 = in[ip++];
@@ -368,16 +374,18 @@ mz_decompress_lz77(const void *input, size_t inlen, void **result, size_t *resul
             int length;
 
             if (is_v2) {
-                offset = ((size_t)(b0 & 0x7F) << 9)
-                       | ((size_t)b1 << 1)
-                       | ((b2 >> 7) & 1);
+                /* v2: b0 = 0x80 | (offset >> 8), b1 = bits 0-7, b2 bit 7 = bit 15 */
+                offset = ((size_t)(b0 & 0x7F) << 8)
+                       | (size_t)b1
+                       | (((size_t)((b2 >> 7) & 1)) << 15);
                 length = (b2 & 0x7F) + MZ_MIN_MATCH;
             } else {
                 offset = ((size_t)(b0 & 0x7F) << 8) | b1;
                 length = b2 + MZ_MIN_MATCH;
             }
 
-            if (offset == 0) break;  /* End marker */
+            /* v2 has no end marker (relies on uncompsz), v1 uses offset==0 */
+            if (!is_v2 && offset == 0) break;
 
             for (int i = 0; i < length && op < uncompsz; i++) {
                 size_t read_pos = (wp + MZ_WSIZE - offset) % MZ_WSIZE;
@@ -386,11 +394,6 @@ mz_decompress_lz77(const void *input, size_t inlen, void **result, size_t *resul
                 win[wp] = b;
                 wp = (wp + 1) & MZ_WMASK;
             }
-        } else {
-            /* Literal (bit 7 = 0) */
-            out[op++] = b0;
-            win[wp] = b0;
-            wp = (wp + 1) & MZ_WMASK;
         }
     }
 

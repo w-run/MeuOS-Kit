@@ -268,9 +268,9 @@ Kit 组件是构建其他软件的基础设施，必须由 Kit 自己实现，�
 | Binutils                      | meuos-toolchain                            | ✅ P0-P4（as/ld/ar/ranlib/nm/readelf/strip/objcopy/objdump + mt 集成） |
 | Make                          | meow                                       | ✅                     |
 | M4/Bison/Flex/Gperf           | meuos-buildtools                           | 待启动                 |
-| Coreutils/Diffutils/Findutils | meuos-utils                                | 待启动                 |
-| Gawk/Sed/Grep                 | meuos-utils（文本处理）                    | 待启动                 |
-| Bash                          | meuos-shell (msh)                          | 待启动                 |
+| Coreutils/Diffutils/Findutils | meuos-utils                                | 🟡 骨架（P1 烟雾 5 工具）|
+| Gawk/Sed/Grep                 | meuos-utils（文本处理）                    | ⏳ 待启动                |
+| Bash                          | meuos-shell (msh)                          | 🟡 骨架（-c + script + REPL）|
 | Autoconf/Automake/Libtool     | 被 meow 取代（特性检测/包查询/库构建内置） | 内置                   |
 | CMake/Ninja                   | 被 meow 取代（并行构建/多平台内置）        | 内置                   |
 
@@ -425,8 +425,8 @@ MeuOS-Kit/
 │   ├── meow/               构建系统（取代 make + autoconf）
 │   ├── meuos-toolchain/    底层工具链（as/ld/ar/ranlib/nm/readelf/strip/objcopy/objdump）
 │   ├── meuos-sysroot/      .msys 单文件 sysroot 系统（libmsys + mkmsys + msysctl CLI + Python 绑定，已集成到 mcc）
-│   ├── meuos-utils/        核心工具集（待启动）
-│   ├── meuos-shell/        Shell 终端（待启动）
+│   ├── meuos-utils/        核心工具集（骨架：libutils.a + 5 烟雾工具）
+│   ├── meuos-shell/        Shell 终端（骨架：-c/script/REPL 三模式）
 │   ├── meuos-buildtools/   构建工具（m4/gperf/flex/bison）
 <<<<<<< Updated upstream
 │   └── meuos-compress/       压缩库（libmz.a，LZ77）
@@ -1112,8 +1112,8 @@ for item in data:
 | -------------------------------------- | -------- | ---------------------------------------------------------------- |
 | m++ C++ 前端（阶段 B/C/D）              | ⏳ 待启动 | 阶段 A（libmcc 分离）已完成；子阶段待 m++ 启动时实施               |
 | meuos-buildtools（m4/bison/flex/gperf） | ⏳ 待启动 | Phase 6；替换 GNU 构建工具依赖                                    |
-| meuos-utils（coreutils 等）             | ⏳ 待启动 | Phase 7；coreutils/diffutils/findutils 替代                       |
-| meuos-shell (msh)                       | ⏳ 待启动 | Phase 7；POSIX sh + 可选 bash/zsh 兼容                            |
+| meuos-utils（coreutils 等）             | 🟡 骨架  | Phase 7；worktree-shell-utils 启动，libutils.a + 5 工具烟雾通过；P1-P5 见 `projects/meuos-utils/.todo/` |
+| meuos-shell (msh)                       | 🟡 骨架  | Phase 7；worktree-shell-utils 启动，三模式烟雾通过；P6-P8 POSIX sh + 交互层 + bash 兼容陆续推进 |
 | meow `meowctl` 配置界面                | ⏳ 待设计 | `.meow` 格式已可用，配置/查询 CLI 待设计                           |
 | meow 原生 shell 替代                   | 🔄 进行中 | 用 msh 替代 /bin/sh（阻塞于 msh 可用性）                          |
 | mt DWARF 调试信息（P8）                 | ⏳ 待启动 | 调试信息生成                                                       |
@@ -1142,20 +1142,21 @@ for item in data:
 | `projects/meow/ARCHITECTURE.md`                    | 构建系统模块职责与数据流                |
 | `projects/meuos-toolchain/ARCHITECTURE.md`         | 工具链架构、P0-P11 分阶段任务           |
 | `projects/meuos-sysroot/ARCHITECTURE.md`           | .msys 格式设计与依赖关系               |
+| `projects/meuos-utils/ARCHITECTURE.md`             | 核心工具集架构 + libutils.a + 工具路线图（Phase 7 骨架已建） |
+| `projects/meuos-shell/ARCHITECTURE.md`             | msh 架构 + 三模式 + P6-P8 路线图（Phase 7 骨架已建） |
 | `env/README.md`                                    | QEMU 测试环境使用说明                  |
-<<<<<<< Updated upstream
-| `.issues/`                                        | 待办任务跟踪（日期编号，如 0728.md）   |
-=======
+| `.issues/`                                        | 待办任务跟踪（日期编号 + 各 worktree 独立 INDEX/AGENT） |
 | `projects/mcc/.todo/cpp-shared-backend.md`         | mcc/m++ 共享后端架构计划               |
 | `projects/mcc/.todo/gd-tls.md`                     | i386 TLS 模型选择设计笔记              |
 | `projects/mcc/.todo/arm.md`                        | ARM 后端状态与待启动项                 |
 | `projects/meow/.todo/dag-dedup.md`                 | DAG 去重待实现项                       |
 | `projects/meow/.todo/native-shell.md`              | 原生 shell 替代待实现                  |
 | `projects/meuos-sysroot/.todo/msys.md`             | .msys 实现任务清单                     |
+| `projects/meuos-utils/.todo/`                      | 核心工具集子任务设计文档（按工具分文件） |
+| `projects/meuos-shell/.todo/`                      | msh 子任务设计文档（按模块分文件）     |
 | `issue/0729.md`                                   | 跨组件待实现清单 + 102 项深度代码审查结果（mcc/libc/toolchain/meow/sysroot） |
-| `.issues/INDEX.md`                                | worktree-stable-enhance 完整任务队列与设计原则 |
-| `.issues/AGENT.md`                                | worktree-stable-enhance agent 入口上下文与工作纪律 |
->>>>>>> Stashed changes
+| `.issues/INDEX.md`                                | 当前 worktree 任务队列（worktree-stable-enhance / worktree-shell-utils 等各自独立） |
+| `.issues/AGENT.md`                                | 当前 worktree agent 入口上下文与工作纪律 |
 | IMA 知识库（通过 `ima-skill` 访问）                 | 设计笔记、移植记录、调试踩坑           |
 | `.github/workflows/ci.yml`                            | CI 管道定义                            |
 
