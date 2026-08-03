@@ -942,6 +942,18 @@ static struct cpp_pending_method *g_cpp_pending_methods;
 static struct cpp_pending_method **g_cpp_pending_methods_end =
     &g_cpp_pending_methods;
 
+/* Class-template instantiation: while the buffered class definition is
+ * replayed, member-function bodies are queued but NOT parsed — an unused
+ * member whose body is ill-formed for the concrete type (e.g.
+ * `void bad() { val.nonexistent(); }` inside `Box<int>`) must not break
+ * the whole instantiation (D2).  Such bodies go into the deferred table
+ * and are parsed lazily by cpp_ensure_method_defined when the member is
+ * actually called. */
+static bool g_cpp_tmpl_instantiating;
+static struct cpp_pending_method *g_cpp_deferred_methods;
+static struct cpp_pending_method **g_cpp_deferred_end =
+    &g_cpp_deferred_methods;
+
 /* Global class-typed objects with user constructors; their construction
  * calls are collected and emitted into __mxx_global_var_init (wired to
  * the .init_array section so the runtime runs them before main). */
@@ -1199,6 +1211,22 @@ flush_pending_methods(void)
 	extern void tokpush(struct token *, size_t);
 	struct cpp_pending_method *head, *pm;
 
+	/* D2: during a class-template instantiation, defer every method body
+	 * instead of parsing it now.  The deferred bodies are parsed lazily
+	 * (cpp_ensure_method_defined) when the member is actually called, so
+	 * an unused member with an ill-formed body does not fail the
+	 * instantiation. */
+	if (g_cpp_tmpl_instantiating) {
+		if (g_cpp_pending_methods) {
+			*g_cpp_deferred_end = g_cpp_pending_methods;
+			while (*g_cpp_deferred_end)
+				g_cpp_deferred_end = &(*g_cpp_deferred_end)->next;
+			g_cpp_pending_methods = NULL;
+			g_cpp_pending_methods_end = &g_cpp_pending_methods;
+		}
+		return;
+	}
+
 	/* Detach the pending list first: a method body that defines an inner
 	 * class (or a lambda closure) queues more methods, and an inner
 	 * class's flush must not re-process the methods already being handled
@@ -1217,6 +1245,51 @@ flush_pending_methods(void)
 		next(); /* position tok at the first replayed token ('{') */
 		cpp_parse_method_body(pm);
 	}
+}
+
+/* Parse a deferred method body (D2) now that the member is actually
+ * used.  `fd` is the mangled member decl whose body was deferred during
+ * a class-template instantiation; the matching buffered body is removed
+ * from the deferred table and parsed.  Returns true when the member is
+ * defined afterwards (already-defined members are a no-op success). */
+bool
+cpp_ensure_method_defined(struct decl *fd)
+{
+	struct cpp_pending_method *pm, **prev;
+
+	if (!fd || fd->defined)
+		return true;
+	for (prev = &g_cpp_deferred_methods; (pm = *prev); prev = &pm->next)
+		if (pm->d == fd) {
+			*prev = pm->next;
+			/* removing the tail node would leave g_cpp_deferred_end
+			 * dangling (later flushes would append to a detached node
+			 * and lose the methods); re-anchor it to the new tail */
+			if (!pm->next)
+				g_cpp_deferred_end = prev;
+			{
+				/* Unlike flush_pending_methods (parse-phase), this may
+				 * run mid-emit (funcexpr EXPRCALL), so the replayed body
+				 * must not disturb the caller's token stream or the
+				 * current function being emitted. */
+				extern void tokpush(struct token *, size_t);
+				extern struct func *curfunc;
+				struct func *saved_cf = curfunc;
+				struct token cur = tok;
+				size_t depth = tokctx_depth();
+				tokpush(&cur, 1);
+				tokpush(pm->toks, pm->ntoks);
+				next(); /* position tok at the first replayed token ('{') */
+				cpp_parse_method_body(pm);
+				tokctx_rewind(depth);
+				tok = cur;
+				curfunc = saved_cf;
+			}
+			free(pm->toks);
+			free(pm);
+			return true;
+		}
+	return fd->defined;
 }
 
 /* Operator-overload mangling code for a punctuation token: `operator+`
@@ -5549,7 +5622,10 @@ cpp_tmpl_class_do_inst(struct scope *s, struct cpp_template *tmpl,
 		 * keeps targeting the right function. */
 		extern struct func *curfunc;
 		struct func *saved_cf = curfunc;
+		bool saved_inst = g_cpp_tmpl_instantiating;
+		g_cpp_tmpl_instantiating = true;
 		cpp_class_decl(&filescope);
+		g_cpp_tmpl_instantiating = saved_inst;
 		curfunc = saved_cf;
 	}
 	/* restore the caller's token position (the replayed definition has

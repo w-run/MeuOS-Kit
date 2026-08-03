@@ -206,6 +206,23 @@ funcexpr(struct func *f, struct expr *e)
 		v = funcstore(f, e->type, e->qual, lval, v);
 		return e->u.incdec.post ? l : v;
 	case EXPRCALL:
+		/* C++ template instantiation (D2): a member of an instantiated
+		 * class template whose body was deferred must be parsed before its
+		 * first call, or the callee symbol has no emitted body. */
+		{
+			extern int g_lang;
+			struct expr *cal = e->base;
+			if (g_lang == 1 && cal &&
+			    cal->kind == EXPRUNARY && cal->op == TBAND)
+				cal = cal->base;
+			if (g_lang == 1 && cal && cal->kind == EXPRIDENT &&
+			    cal->u.ident.decl &&
+			    cal->u.ident.decl->kind == DECLFUNC &&
+			    !cal->u.ident.decl->defined) {
+				extern bool cpp_ensure_method_defined(struct decl *);
+				cpp_ensure_method_defined(cal->u.ident.decl);
+			}
+		}
 		argvals = xreallocarray(NULL, e->u.call.nargs, sizeof(argvals[0]));
 		for (arg = e->u.call.args, i = 0; arg; arg = arg->next, ++i) {
 			emittype(arg->type);

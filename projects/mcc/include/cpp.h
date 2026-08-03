@@ -185,4 +185,11 @@ struct expr *cpp_requires_expr(struct scope *s);
 bool cpp_struct_binding(struct func *f, struct scope *s,
     struct qualtype base);
 
+/* C++ template instantiation (D2): parse the deferred body of a member
+ * function that was buffered (but not parsed) during a class-template
+ * instantiation, now that the member is actually called.  Called from
+ * the generic call emit for any DECLFUNC whose body is still undefined.
+ * Returns true when the member is defined afterwards. */
+bool cpp_ensure_method_defined(struct decl *fd);
+
 #endif /* MCC_CPP_H */
