@@ -211,3 +211,140 @@ meu-idldef (capability.fidl / ipc/*.fidl / job-manifest.fidl / device.fidl)
 ---
 
 > 文档状态：规划草案 v1（新范围拓展调研员产出，lite / hy3）。采用**修订式追加、不删**；跨域项以 `00-总览与路线图.md` 的 `C1`–`C16` 及 `31` 为准。
+
+---
+
+## 第五轮裁决回写（37-待决1/2/3）
+
+> 裁决者：MeuOS 内核规划调研员（lite / hy3，自主采纳，无需大喵拍板）。
+> 依据：`38` §4（37-待决1/2/3 建议立场）、本文 §1–§5、`23`（三层稳定性分级 + IPC 版本协商）、`36`（静态 TCB + 用户态组件化热升级）、`07`（capability / rights 位图）。
+> 方法论铁律：解构型思维 → 多系统参照（Linux UAPI 稳定性规则 / Windows Win32·WinRT 契约 / Android NDK·NDK ABI / macOS SDK 契约 / Fuchsia FIDL 唯一 IDL 出口）→ 非缝合怪 → 修订式追加不删。
+> 性质：**修订式追加**，不删既有结论。
+
+### 0. 一句话裁决（先给结论）
+
+三项待决**全部自主采纳**，采纳立场与 `38` 建议完全一致，并进一步收口为可执行纪律：
+
+1. **37-待决1（SDK 唯一出口）— 采纳**：强制「所有出树系统能力只经 `meu-idldef` 生成的 SDK 暴露、禁止任何其他出口」；内核内部（TCB / Rust）可直连内部原语，但其类型仍由 IDL 生成以保证单一真相源。
+2. **37-待决2（亚稳契约纳入 IDL）— 采纳**：rights 位图与 Job manifest 纳入 IDL 单一真相源，作为「亚稳契约」受比裸 syscall（②）更严的弃用窗口——因其被 SDK / 调试（`12`）/ 审计工具跨 `.msys` 版本大量消费。
+3. **37-待决3（IPC 版本号双轨）— 采纳**：平台保留 IDL 命名空间 + 服务私有 IDL 命名空间双轨（仿 Fuchsia 平台 FIDL vs 服务私有 FIDL）；平台命名空间协议版本由系统统一分配，私有命名空间由服务自管但须在 Service Registry 声明 `protocol_version` / `min_compatible_version`。
+
+**对任务聚焦三问的明确结论**：
+- **是否承诺稳定 syscall ABI？** —— **否（对原生 syscall 不承诺稳定）**。稳定承诺只落在 `23` 三层里的 ① Linux 兼容 ABI（仅声明子集）与 ③ IPC 协议（版本协商）。原生 syscall / capability API（②）演进期明确不稳、保留破坏权，靠 `meuos-libc` / `mkit` 屏蔽。即 MeuOS 的「稳定面」是 **SDK / IDL 生成物 + 兼容层 + 版本化 IPC**，而非裸 syscall 号——与 Fuchsia「明确不承诺 syscall 稳定」完全同构，比 Windows Win32 / WinRT 的「用户态 ABI 刚性稳定」更克制。
+- **版本化机制？** —— 三层映射：① 兼容 ABI 锚 `uname`（`23` §7）；② 原生 API 随 `.msys` 走、不绑定 uname；③ IPC 协议走 `protocol_version`/`min_compatible_version` 协商（`23` §6）+ 亚稳契约受更严弃用窗口（本裁决 待决2）。弃用窗口与 `.msys` 发布节奏绑定（声明于 N、移除于 N+2，`23` §6.3）。
+- **是否单一 IDL / 头文件生成源？** —— **是**。`meu-idldef` 为唯一机器可读契约真相源，经 `meu-codegen` / `meu-docgen` / `meu-vergen` 生成 C / Rust 头、文档、版本元数据，根除「内核头即契约」的 Linux 教训。
+
+### 1. 37-待决1：SDK 唯一出口边界 — 采纳
+
+**裁决结论**：强制「SDK 唯一出口（Single-Export-Gate）」为硬纪律，边界划定为：
+
+- **出树开发者（第三方 app / 出树服务）**：所有系统能力只经 `meu-idldef` 生成的 SDK 暴露。**禁止** ① 直接 `#include` 内核内部头；② 直接发裸原生 syscall；③ 自行 memcpy 内核结构体内存布局。违反者不被 SDK 支持、跨 `.msys` 版本不保证（`23` §2 ②）。
+- **内核内部（TCB / Rust 实现）**：允许直连内部原语以提升性能与可验证性（对齐 `02` §4.4 能力类型由 Rust 强制、seL4 静态心态）；但**其类型仍由 IDL 生成**（如 capability / rights 枚举、Job manifest 结构），保证「单一真相源」——内部实现可读 IDL 生成的同一份类型定义，而非手写第二份。即「内部可绕过 SDK 调用路径，但不可绕过 IDL 类型真相源」。
+- **Linux 兼容层（`08`）**：作为副线，其对外稳定面由 ① 兼容 ABI 承载，不暴露原生 SDK 能力（`37` §4.2）。
+
+**理由（解构 + 多系统参照）**：
+- **Linux 教训**：UAPI 头散落、ABI 稳定性靠「Linus 铁律」人治兜底、内部 API 无官方文档——这是「契约即 C 头」的失败范式。MeuOS 用 IDL 单一真相源 + 三产物同步根除该教训（`37` §1.1 / §1.3）。
+- **Fuchsia 范本**：FIDL 即契约文档、系统 API 经 SDK 唯一出口、原生 API 不承诺稳（`37` §2 / `23` §3）——直接同构，采纳其边界。
+- **Windows Win32 / WinRT 契约**：Win32 用户态 ABI 强稳定 + WDK 驱动 SDK 版本化（`23` §3）——借其「强文档 + 版本化 SDK」思想，但不借其「用户态 syscall 刚性稳定」包袱（MeuOS 原生 API 不稳，靠 libc 屏蔽）。
+- **macOS SDK 契约**：libSystem 屏蔽原生不稳 syscall（`23` §3）——印证「原生不稳 + lib 屏蔽」路线。
+- **与 `36` 一致性**：静态 TCB（`36` Tier A）不运行期加载，SDK 表面在构建期由 IDL 固定生成并随 `.msys` 分发，运行期无「动态扩面」需求——唯一出口纪律与「TCB 静态」天然咬合。
+
+### 2. 37-待决2：亚稳契约（rights 位图 / Job manifest）纳入 IDL — 采纳
+
+**裁决结论**：rights 位图与 Job manifest 字段**纳入 `meu-idldef` 单一真相源生成**，并定为「亚稳契约」：
+- **亚稳定义**：比裸 syscall（② 原生 API）更稳，但比 ① 兼容 ABI 弱。即原生单点 syscall 可随时改号 / 改语义（靠 libc 屏蔽），但 rights 位语义、Job 账本字段这类「被全平台工具横向消费」的契约，变更须走**版本号 + 更严弃用窗口**。
+- **弃用窗口**：亚稳契约变更窗口严于 ②（原生 API 可随时破），建议对齐 ① 的严度方向但不必等同 `uname` 级——具体值由 `07` / `04` 在 `meu-vergen` 输出里声明 `rights_revision` / `job_manifest_revision`（`23` §6.3 同构，与 `.msys` 发布节奏绑定）。
+- **版本元数据**：`meu-vergen` 产出 `rights_revision` / `job_manifest_revision`，调试器（`12`）、审计工具、跨 `.msys` 迁移工具据此对齐，杜绝「rights 位改了头没改」的静默错配（`37` §1.4）。
+
+**理由（解构 + 多系统参照）**：
+- **seL4「规格即文档、证明即规格」**：接口小而边界清、规格机器可读——亚稳契约经 IDL 生成即「规格同源」，与 seL4 纪律同构（`37` §2）。
+- **Android NDK ABI / Treble**：只在必要边界画稳定接口——亚稳契约正是「必要边界」的子集（rights / Job manifest 是 capability 模型骨架，必稳），与 Treble 边界化思想一致（`23` §3）。
+- **与 `23` §8 待决1 协同**：本裁决正面回答 `23` 待决1——原生 API（②）确有亚稳子面，即 rights 位语义与 Job 账本字段；二者经 IDL 生成后受更严弃用窗口，既保住「内部柔性」杠杆（`23` §5），又给跨 `.msys` 调试 / 审计工具（`12`）一个可对齐锚点。
+- **与 `36` 一致性**：热升级滚动期（`36` Tier B/C，跨版本 IPC 共存 `23` §6.4）新老进程需就 rights 语义达成一致——亚稳契约的 `rights_revision` 让 revoke / derivation tree（`07` §4.5）在跨版本灰度中可观测、可协商，避免悬垂。
+
+### 3. 37-待决3：IPC 协议版本号归属 — 采纳双轨
+
+**裁决结论**：IDL 命名空间与版本号归属采用**双轨**，仿 Fuchsia 平台 FIDL vs 服务私有 FIDL（`37` §5.2 / `23` §8 待决2）：
+
+| 轨道 | 命名空间 | 版本号权威 | 承载对象 | 协商机制 |
+|------|----------|------------|----------|----------|
+| **平台保留轨** | `meu.platform.*`（系统保留，禁止私有占用） | **系统统一分配**（`00` / `05` 管理，保证向前兼容基线、防冲突） | 系统服务：devmgr、fs、pkg-loader、supervisor、netstack、audio-service 等（`10` / `25` / `35`） | `23` §6.1 `protocol_version` / `min_compatible_version`，Service Registry（`05` §4.4）登记 |
+| **服务私有轨** | `meu.app.<owner>.*` | **服务自管**（owner 自主升版本） | 第三方 / 在树业务服务 | 同上，私有命名空间内自由演进，跨服务经各自 manifest 协商 |
+
+- **平台轨版本号统一分配的理由**：系统服务协议是「跨 `.msys` 稳定基线」的承载者，统一分配可避免各系统服务协议号撞车、保证 MeuOS 升级时平台 IPC 面有可控的向前兼容基线（类比 Fuchsia 平台 FIDL 由 SDK 统一管控）。
+- **私有轨自管的理由**：业务服务演进自由，不与平台升级节奏耦合；但其 `protocol_version` 仍须在 Service Registry 声明以便 `23` §6.2 协商与 `06` §4.3e 灰度共存。
+- **IDL 工具强制**：双轨命名空间均由 `meu-idldef` 定义、`meu-codegen` 生成 stub / proxy——即「命名空间可双轨，但生成源仍单一」（回扣 待决1 唯一出口）。
+
+**理由（解构 + 多系统参照）**：
+- **Fuchsia FIDL 双命名空间**：平台 FIDL 与组件私有 FIDL 分离，平台面由 SDK 统一版本管控——直接范本（`37` §2 / `23` §3）。
+- **Android Binder / 版本化接口**：跨进程接口走版本协商而非全局冻结——印证「版本协商式稳」（`23` §3）。
+- **Windows COM / WinRT 契约**：接口带版本与契约元数据——印证「协议须携带版本元数据」思想。
+- **与 `36` / `06` 一致性**：双轨 + Service Registry 协商，使 `36` Tier B/C 滚动更新（新老服务跨版本共存 `23` §6.4）能按命名空间区分「平台基线服务」与「业务服务」，灰度切割更干净。
+
+### 4. 三裁决的联合收口（与 23 / 36 / 07 一致性声明）
+
+- **稳定承诺总图（重申）**：① 兼容 ABI 稳（锚 uname）｜② 原生 syscall / API 不稳（靠 libc 屏蔽，保留破坏权）｜③ IPC 版本协商稳（本裁决 待决3 双轨）｜**亚稳契约（待决2）介于 ②③ 之间、受更严窗口**。四者全部由 `meu-idldef` 单一真相源生成（待决1）——MeuOS 因此既「该稳的稳（兼容层 + IPC + 亚稳契约）」又「该破的明破（原生 syscall）」，无 Linux 式「一刀切全稳锁死演进」包袱，也无「全不稳生态碎」风险。
+- **与 `36` 热升级**：静态 TCB（Tier A）使 SDK 表面构建期固定、随 `.msys` 整体分发；Tier B/C 滚动更新靠 ③ 协商 + 亚稳契约 `rights_revision` 对齐——唯一出口纪律与「用户态组件化热升级」互为支撑，无运行期扩面需求。
+- **与 `07` capability**：rights 位图经 IDL 生成（待决2），与 `38` §3 统一 rights bit 表（单一真相源）直接咬合；`LOAD` / `VERIFY` 等新增 right（`36` §4.2 待决3）同样进 IDL，不手写第二份。
+- **待 `05` / `04` / `07` 协同回填**：本裁决不替 `05`（Service Registry 版本权威落地）、`04`（Job manifest 字段冻结）、`07`（rights 位图定稿）下结论，仅确认「双轨 + 亚稳 + 唯一 IDL 源」方向，待其设计级回填。
+
+### 5. 对 00 冲突表 / 待升级候选区状态
+
+- 37-待决1 / 37-待决2 / 37-待决3 三项**第五轮自主采纳**，状态升级为「已采纳」；`00` 待升级候选区对应项标注「已采纳（第五轮）」。
+- 关联 `38` §4 候选清单中「IDL 唯一出口 / 亚稳契约覆盖 / IPC 版本号双轨」三项同步结案。
+
+---
+
+> 本文档状态：规划草案 v1 + 第五轮裁决回写（lite / hy3，自主采纳）。遵循修订式追加、不删；跨域项以 `00-总览与路线图.md` 的 `C1`–`C16` 及 `31` / `38` 为准。
+
+---
+
+## 第五轮裁决回写（IDL 唯一出口）
+
+> 第五轮调研 agent（lite / hy3，自主采纳）依据 `38-第四轮收敛摘要.md` §4 / §5 的待升级候选 **37-待决1（IDL 唯一出口）** 与关联项 **37-待决2（亚稳契约）/ 37-待决3（IPC 版本命名空间）**，自主采纳如下。铁律：仅追加、不删改原章节；原 §1.3 / §3.2 / §5.2 待决 1–3 的「待裁决」表述升级为「已采纳」，原内容保留。
+> 方法论：解构型思维（先推演「契约应该是什么样」→ 单一真相源消灭「内核头即契约」）+ 多系统参照（Fuchsia FIDL 即契约文档+SDK 唯一出口、seL4 证明即规格、Android AIDL/Treble 边界、Windows IDL/COM+WDF 版本化、D-Bus XML、Cap'n Proto）+ 现代化 + 中文。
+> 关联：`07-安全模型.md`（rights 位图）、`05-IPC机制.md`（Service Registry / 协议版本）、`04-进程与调度.md`（Job manifest）、`10-设备驱动模型.md`（设备能力）、`23-ABI稳定性与版本.md`（三层稳定性 / IPC 版本协商）、`21-迁移路线图.md`（Kit 工具链 / sysroot 双重身份）。
+
+### 采纳结论：单一 IDL（meu-idldef）= 系统能力的「唯一真相源」+「唯一生成源」
+
+**核心裁决**：采用**单一机器可读 IDL（`meu-idldef`）**作为 MeuOS 全部系统能力的**唯一真相源（single source of truth）**与**唯一生成源（single export gate）**——syscall/服务契约（IPC 协议）、capability/rights 规格、Job manifest、设备能力规格**全部由 IDL 定义**，经 `meu-codegen`→libc/Rust 绑定、`meu-docgen`→人类文档、`meu-vergen`→版本元数据统一生成。**彻底根除「内核头即契约」的 Linux 式泄漏**。
+
+#### 1. 唯一真相源：四类规格全部进 IDL（已采纳）
+
+| IDL 规格类别 | 描述对象 | 生成产物 | 对应子文档 |
+|--------------|----------|----------|------------|
+| **capability / rights 规格** | rights 位图（基础 7 + `KEY_*` + `DBG_*` + `CFG_*` + `LOAD`/`VERIFY` 等）、对象类型→rights 约束、mint 上限 | C/Rust rights 常量头 + SDK + 文档 | `07`（§第四轮裁决回写） |
+| **IPC 协议规格** | Channel 消息 schema、type tag、服务协议 `protocol_version`/`min_compatible_version` | stub/proxy 绑定 + 文档 + 协商元数据 | `05`、`23` §6 |
+| **Job manifest 规格** | spawn 输入清单：资源配额 / 初始 capability 集 / namespace 模板 / `debug_policy` | manifest schema + 校验器 + 文档 | `04`、`07` §4.3 C3 |
+| **设备能力规格** | 设备能力（MMIO/IRQ/DMA/IO port）schema、驱动协议 | 驱动 SDK 绑定 + 文档 | `10`、`23` §4.2 |
+
+> IDL 改一处，三产物（头/绑定/文档）+ 版本元数据**同步生成**，根除「rights 改了头没改」「IPC 字段增删文档滞后」「Job manifest 与实现漂移」三类 Linux 教训（`37` §1.4）。
+
+#### 2. 唯一出口边界：出树强制、内核内部可直连但类型仍由 IDL 生成（已采纳，回应待决1 张力）
+
+- **出树开发者（Out-of-tree）：硬纪律，零例外**。所有系统能力**只经 IDL 生成的 SDK 暴露**：禁止裸 syscall 号、禁止 `#include` 内核内部头、禁止文档化泄漏内部 rights 位布局/结构体内存布局（§3.3 执行纪律 1）。开发者只见「被授权的 SDK 表面」——把 `07`「无隐式权限」延伸到文档/API 层（§1.3）。违反者不被 SDK 支持、跨 `.msys` 不保证（`23` §2）。
+- **内核 TCB / 内部实现（In-tree）：可直连内部原语，但类型仍由 IDL 生成**。内核 Rust/C 为性能与正确性可**直接调用**内部原语（不强制绕一层 IDL 运行时 indirection），但 capability/rights/IPC 的**权威类型定义必须来自 IDL 生成**（或经 `meu-codegen` 产出、或与 IDL 同源校验），确保「单一真相源不漂移」——这正是原待决 1 张力的解法：**IDL 是 single source of truth，不是 single runtime indirection layer**。内部直连不破坏「真相源唯一」，因为类型定义的权威仍在 IDL。
+- **出树第三方服务契约边界**（`23` §8 待决 3）：出树第三方服务要么经 libc（屏蔽原生不稳定 syscall）要么经 IPC（版本协商），**禁止直接发裸原生 syscall**——失去 `.msys` 同版本保护即违约（§3.3 执行纪律 3）。
+
+#### 3. 亚稳契约覆盖（待决2，已采纳）：rights 位图 + Job manifest 受更严弃用窗口
+
+- `37` 待决 2 采纳：**IDL 必须覆盖「亚稳契约」（rights 位图 / Job 账本字段）**，且因其被 SDK/调试/`12` 审计工具大量消费、跨 `.msys` 被外部工具依赖，经 IDL 生成后应**比裸 syscall 更稳**——受**更严弃用窗口**（deprecation window 长于原生 API 的「演进期明确不稳」，`23` ②）。
+- 这与「原生 API 不稳靠 libc 屏蔽」（`23` ②）不冲突：原生 syscall 表面可随 `.msys` 演进，但 rights 语义 / Job manifest 字段作为「被工具广泛消费的契约」走亚稳承诺——层数分清。
+
+#### 4. IPC 版本命名空间双轨（待决3，已采纳）：平台保留 + 服务私有
+
+- `37` 待决 3 采纳：**IDL 工具提供「平台保留 IDL 命名空间 + 服务私有 IDL 命名空间」双轨**（仿 Fuchsia 平台 FIDL vs 服务私有 FIDL），需 `05` 协同。平台命名空间承载系统契约（syscall/IPC 协议/rights/Job manifest/设备能力），服务私有命名空间承载各服务自管协议——版本号归属双轨：`protocol_version` 系统契约由平台统一分配、服务私有协议由服务自管（`23` §6.1）。
+
+#### 5. 工具链归属（设计协同，采纳建议）：meu-idldef 入 Kit
+
+- `meu-idldef` / `meu-codegen` / `meu-docgen` / `meu-vergen` 归入 **Kit 工具链**（`21` §1.1，与 mcc/mt 同级），随 `.msys` sysroot 一并产出与分发；bootstrap Phase K 除产内核镜像，额外产「匹配该 `.msys` 版本的 SDK 包」（头+绑定+文档+版本元数据），实现「内核+libc+服务+SDK 同版本整体交付」（`23` §5 杠杆在 DX 维度的延伸）。IDL 工具自身自举（吃自己狗粮）路径随 Kit 演进。
+
+### 与周边文档的衔接（交叉引用）
+
+- **`07`**：rights 位图（含 `KEY_*`/`DBG_*`/`CFG_*`/`LOAD`/`VERIFY`）由 `meu-idldef` 生成 SDK/头/文档，单一真相源消除「位图改头没改」漂移；`07` §第四轮裁决回写已冻结的 bit 分配（`38` §3 统一表）即 IDL 的 rights 规格权威。
+- **`05`/`23`**：IPC 协议 `protocol_version`/`min_compatible_version` 由 IDL 生成（`23` §6.1）；双轨命名空间需 `05` Service Registry 协同。
+- **`04`/`10`**：Job manifest 与设备能力 schema 由 IDL 生成，分别供 `04` spawn 与 `10` 驱动 SDK 消费。
+- **`21`/`23`**：SDK 包与 `.msys` 同版本绑定（`23` §5）；IDL 工具归 Kit（`21`）。
+- **`12`**：`DBG_*` 调试权经 IDL 生成为 capability SDK，默认 deny、经 Channel 守护（`37` §4.3）。
+
+> 范围边界：本裁决覆盖 **37-待决1（IDL 唯一出口）+ 待决2（亚稳契约）+ 待决3（IPC 版本双轨命名空间）** 三项，且将「SDK 唯一出口」由 §1.3 的建议升级为**硬纪律已采纳**。其余待决 4–7（工具链归属仓库、SDK 版本绑定粒度、驱动协议版本并入、codegen 五架构一致性）为设计/实测协同项，维持原 §5.2 协同安排、不在本裁决新开结论。
