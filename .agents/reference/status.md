@@ -49,9 +49,10 @@
 | meow 原生 shell 替代                   | 🔄 进行中 | 用 msh 替代 /bin/sh（阻塞于 msh 可用性）                          |
 | mt DWARF 调试信息（P8）                 | ⏳ 待启动 | 调试信息生成                                                       |
 | arm-multiver emit 多版本分支            | 🟡 待补 | ARM emit 层 `g_arm_arch_ver` 已就绪，v6/v7+/v8 指令分支待落地        |
-| mcc atomic 窄类型符号扩展缺陷           | 🔴 回归 | 2026-08-04 审计：`atomic_fetch_add` 对 `atomic_short` 返回值零扩展(65534)而非符号扩展(-2)，致 libc `test/atomic.c` FAIL。verify-all 19/19 未覆盖。详见 `.todo/mcc/defect-atomic-narrow-signext.md` |
-| mcc TLS 局部静态符号不一致缺陷          | 🔴 回归 | 2026-08-04 审计：`static _Thread_local` 变量 `.tbss` 段定义为 `.L<name>.N`，函数体引用 `<name>`，符号不一致致链接 `undefined reference`。meow `make check` 失败。详见 `.todo/mcc/defect-tls-static-local-symbol.md` |
-| check-pic-verify aarch64/riscv64 GOT    | 🔴 缺口 | 2026-08-04 审计：x86_64/i386 PIC GOT ✅，aarch64/riscv64 仍失败。diana 6db1691 仅修 i386+riscv64（riscv64 实测仍失败），aarch64 从未覆盖。`worker-deployment.md` §3/§4 "四架构全过"为错误声明 |
+| mcc atomic 窄类型符号扩展缺陷           | ✅ 已修 | 2026-08-04 审计发现并修复（`fix/mcc-atomic-signext` `407d326`，`expr.c` `atomicresult`）。根因：ICALL 返回 MT_I32，MOP_SEXT 选 Oextsw 读 %eax 高16位零。已合入 mcc-toolchain `7ff1fc5` |
+| mcc TLS 局部静态符号不一致缺陷          | ✅ 已修 | 2026-08-04 审计发现并修复（`fix/mcc-tls-static-symbol` `82a6202`，`func_to_mir.c` `fe_val`）。根因：`!tls` 条件把 TLS 排除出 `.L` 路径。已合入 mcc-toolchain `7ff1fc5` |
+| check-pic-verify aarch64/riscv64 GOT    | ✅ 已修 | 2026-08-04 审计发现并修复（`fix/mcc-pic-verify-got` `db6c88c`，riscv64/aarch64 `memit.c`）。根因：diana 6db1691 改旧 QBE emit 但 mcc 走 MIR memit 从未生效。四架构全过。已合入 mcc-toolchain `7ff1fc5` |
+| libc vfprintf 浮点格式化缺陷             | 🔴 新发现 | 2026-08-04 atomic 修复后暴露：`printf("%.2f",-3.14)` 输出 `0.00`（应 `-3.14`），46 个浮点 printf 失败。`%f`/`%e` 正数正常。根因在 libc `vfprintf`/`__float_to_str` 负数+精度处理（参数传递正确，非 mcc）。详见 `.todo/meuos-libc/defect-fp-printf-negative.md` |
 
 ### 10.3 各架构支持矩阵
 

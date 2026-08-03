@@ -34,7 +34,10 @@
 
 ### mcc
 
+> 2026-08-04 审计发现的 2 个缺陷（atomic 窄类型符号扩展 / TLS 局部静态符号不一致）已闭环修复，合入 mcc-toolchain `7ff1fc5`。详见 `worker-deployment.md` "修复闭环"小节。
+
+### meuos-libc
+
 | 任务 | 状态 | 说明 |
 |------|------|------|
-| [defect-atomic-narrow-signext](mcc/defect-atomic-narrow-signext.md) | 🔴 回归 | 2026-08-04 审计：`atomic_fetch_add` 对 `atomic_short` 返回值零扩展(65534)而非符号扩展(-2)，致 libc `test/atomic.c` FAIL |
-| [defect-tls-static-local-symbol](mcc/defect-tls-static-local-symbol.md) | 🔴 回归 | 2026-08-04 审计：`static _Thread_local` 局部静态变量 `.tbss` 定义 `.L<name>.N` vs 函数体引用 `<name>`，符号不一致致 meow 链接失败 |
+| [defect-fp-printf-negative](meuos-libc/defect-fp-printf-negative.md) | 🔴 新发现 | 2026-08-04：vfprintf `%.2f` 负数浮点输出 `0.00`（应 `-3.14`），46 个浮点 printf 失败。正数 `%f`/`%e` 正常 |

@@ -125,6 +125,26 @@ r5 会话遗留的 7 个 `worktree-tmp-*` 分支已**全部合入主线 worktree
 
 **审计结论**：mcc 存在 2 个真实代码生成缺陷（atomic 窄类型符号扩展 + TLS 局部静态符号不一致），被 verify-all 19/19 掩盖（verify-all 不含 libc atomic 全流程与 meow 链接）。已建 `.todo/mcc/` 待办。check-pic-verify aarch64/riscv64 GOT 缺口未修。
 
+### 修复闭环（2026-08-04 — 大喵指示拉团队并行修 3 缺陷）
+
+> 3 个 fix 分支并行修复（独立 worktree，各 `fix/mcc-*` 分支），合并到 mcc-toolchain 主线 HEAD `7ff1fc5`。全量回归通过。
+
+| 缺陷 | 分支 / commit | 修复文件 | 根因 | 验收 |
+|---|---|---|---|---|
+| atomic 窄类型符号扩展 | `fix/mcc-atomic-signext` `407d326` | `src/c/irgen/expr.c`（`atomicresult`） | ICALL 返回 MVal 是 MT_I32，`bridge.c` MOP_SEXT 按源 MType 选 `Oextsw`（`movslq %eax,%rax`）读 %eax 高16位零而非 %ax 符号位；改用 IAND+ISHL+ISAR 显式符号扩展 | atomic.c PASS；verify-all 19/19 |
+| TLS 局部静态符号不一致 | `fix/mcc-tls-static-symbol` `82a6202` | `src/c/irgen/func_to_mir.c`（`fe_val`） | `globalname()` 对 `v->id!=0` 一律 `.L<name>.<id>`，但 `fe_val` 的 `!tls` 条件把 TLS 排除出 `.L` 路径，引用用原名；去掉 `!tls`，`mval_global` 传 `tls` | meow make check PASS；verify-all 19/19 |
+| check-pic-verify aarch64/riscv64 GOT | `fix/mcc-pic-verify-got` `db6c88c` | `riscv64_memit.c` + `aarch64_memit.c` + `pic_verify.sh` + `verify-all.sh` | diana `6db1691` 改旧 QBE `riscv64_emit.c` 但 mcc 走 MIR 层 `riscv64_memit.c` 从未生效；`pic_verify.sh` riscv64 不设 `fail=1` 静默 pass 掩盖；aarch64 从未覆盖。新增 `emit_global_addr`（riscv64 `auipc %got_pcrel_hi`+`ld %pcrel_lo`；aarch64 `adrp :got:`+`ldr :got_lo12:`） | check-pic-verify 四架构全过；verify-all 19/19 |
+
+**合并后全量回归**（mcc-toolchain HEAD `7ff1fc5`）：
+- `bash test/verify-all.sh` ✅ **19/19 全绿**
+- `make check-pic-verify` ✅ **四架构全过**（x86_64/aarch64/riscv64/i386）
+- `make -C projects/meow check` ✅ **PASS**（需 `make clean` 后重编译，否则用旧 graph.o 缓存报 undefined reference）
+- `make -C projects/meuos-libc check` ⚠️ atomic 已修（PASS），但暴露**下一个预存缺陷 fp_fmt**（46 个浮点 printf 失败，`%.2f` 负数输出 `0.00`）——根因在 libc `vfprintf` 浮点格式化（参数传递正确，非 mcc），见 `.todo/meuos-libc/defect-fp-printf-negative.md`
+
+**新发现缺陷**：libc `vfprintf` 的 `%.2f`（带精度的负数浮点）格式化输出 `0.00` 而非 `-3.14`；`%f`/`%e` 正数正常。根因方向：libc `__float_to_str`/`vfprintf` 对负数+精度的处理。已建 `.todo/meuos-libc/` 待办。
+
+**已删除待办**：`.todo/mcc/defect-atomic-narrow-signext.md`、`.todo/mcc/defect-tls-static-local-symbol.md`（闭环）。
+
 ---
 
 ## 4. 任务队列（当前在途）
