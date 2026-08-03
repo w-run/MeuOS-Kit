@@ -239,6 +239,137 @@ emit_addr_to_scratch(FILE *f, MAddr a, const char *rn)
 		fprintf(f, "\tadd\t%s, %s, #%lld\n", rn, rn, (long long)off);
 }
 
+/* ---- floating point ----------------------------------------------------- */
+
+/* FP scratch registers (excluded from the allocator): v16/v17.  Emitted
+ * through their s/d views (s16/d16/s17/d17). */
+#define FR_A "16"
+#define FR_B "17"
+
+static const char *a64_cc_suffix(MCC cc);   /* defined below */
+
+/* Print a floating value's operand: "sN"/"dN" view of a V register, or a
+ * slot as fp-relative memory (for ldr/str).  Returns NULL for regs. */
+static const char *
+freg_name(MVal *v, bool is32)
+{
+	static char buf[16];
+	int r = v->reg;
+	if (v->kind == MV_REG || (v->kind == MV_TEMP && v->reg >= 0)) {
+		if (r >= A64MREG_V0)
+			snprintf(buf, sizeof buf, "%s%d", is32 ? "s" : "d",
+			         r - A64MREG_V0);
+		else
+			snprintf(buf, sizeof buf, "%s", mreg_name(g_mt, r));
+		return buf;
+	}
+	return NULL;
+}
+
+/* Load a floating value into a FP scratch register (constants via their
+ * bit pattern in a GPR + fmov, slots via ldr s/d). */
+static void
+fload_scratch(FILE *f, MVal *v, const char *rn)
+{
+	if (!v) {
+		fprintf(f, "\tfmov\ts%s, wzr\n", rn);   /* 0.0f */
+		return;
+	}
+	switch (v->kind) {
+	case MV_CONST: {
+		MConst *c = v->con;
+		if (c && c->kind == MC_FLT) {
+			if (c->type == MT_F32) {
+				load_imm(f, "x9", (int64_t)(uint32_t)c->u.s);
+				fprintf(f, "\tfmov\ts%s, w9\n", rn);
+			} else {
+				uint64_t bits;
+				memcpy(&bits, &c->u.d, 8);
+				load_imm(f, "x9", (int64_t)bits);
+				fprintf(f, "\tfmov\td%s, x9\n", rn);
+			}
+			return;
+		}
+		fprintf(f, "\tfmov\ts%s, wzr\n", rn);
+		return;
+	}
+	case MV_TEMP:
+		if (v->reg >= 0) {
+			bool is32 = v->type == MT_F32;
+			fprintf(f, "\tfmov\t%s%s, %s\n",
+			        is32 ? "s" : "d", rn, freg_name(v, is32));
+		} else {
+			int off = v->slot + g_slot_base;
+			const char *rw = v->type == MT_F32 ? "s" : "d";
+			if (off >= -256 && off <= 255)
+				fprintf(f, "\tldr\t%s%s, [x29, #%d]\n", rw, rn, off);
+			else {
+				load_imm(f, "x16", off);
+				fprintf(f, "\tldr\t%s%s, [x29, x16]\n", rw, rn);
+			}
+		}
+		return;
+	case MV_REG: {
+		bool is32 = v->type == MT_F32;
+		fprintf(f, "\tfmov\t%s%s, %s\n",
+		        is32 ? "s" : "d", rn, freg_name(v, is32));
+		return;
+	}
+	default:
+		fprintf(f, "\tfmov\ts%s, wzr\n", rn);
+		return;
+	}
+}
+
+/* Store a FP scratch register into the destination value. */
+static void
+fstore_scratch(FILE *f, MVal *d, const char *rn)
+{
+	if (!d)
+		return;
+	switch (d->kind) {
+	case MV_TEMP:
+		if (d->reg >= 0) {
+			bool is32 = d->type == MT_F32;
+			fprintf(f, "\tfmov\t%s, %s%s\n",
+			        freg_name(d, is32), is32 ? "s" : "d", rn);
+		} else {
+			int off = d->slot + g_slot_base;
+			const char *rw = d->type == MT_F32 ? "s" : "d";
+			if (off >= -256 && off <= 255)
+				fprintf(f, "\tstr\t%s%s, [x29, #%d]\n", rw, rn, off);
+			else {
+				load_imm(f, "x16", off);
+				fprintf(f, "\tstr\t%s%s, [x29, x16]\n", rw, rn);
+			}
+		}
+		return;
+	case MV_REG: {
+		bool is32 = d->type == MT_F32;
+		fprintf(f, "\tfmov\t%s, %s%s\n",
+		        freg_name(d, is32), is32 ? "s" : "d", rn);
+		return;
+	}
+	default:
+		return;
+	}
+}
+
+/* dst = (a cc b) ? 1 : 0 for floating operands — fcmp + cset (NZCV). */
+static void
+emit_setccr_fp(FILE *f, MInsM *in)
+{
+	MVal *a = in->src[0];
+	MVal *b = in->src[1];
+	MCC cc = in->cc;
+	const char *w = (a && a->type == MT_F32) ? "s" : "d";
+	fload_scratch(f, a, FR_A);
+	fload_scratch(f, b, FR_B);
+	fprintf(f, "\tfcmp\t%s%s, %s%s\n", w, FR_A, w, FR_B);
+	fprintf(f, "\tcset\tw9, %s\n", a64_cc_suffix(cc));
+	scratch_to_dst(f, in->dst, "x9");
+}
+
 /* ---- condition suffix ---------------------------------------------------- */
 
 static const char *
@@ -317,6 +448,13 @@ static void
 emit_load(FILE *f, MMOP op, MType dt, MAddr a, MVal *d)
 {
 	const char *lw = "ldr";
+	if (dt == MT_F32 || dt == MT_F64) {
+		/* floating-point load into the FP scratch (s16/d16) */
+		emit_addr_to_scratch(f, a, "x16");
+		fprintf(f, "\tldr\t%s16, [x16]\n", dt == MT_F32 ? "s" : "d");
+		fstore_scratch(f, d, FR_A);
+		return;
+	}
 	switch (op) {
 	case MMOP_LOAD_S8:  lw = "ldrsb"; break;
 	case MMOP_LOAD_S16: lw = "ldrsh"; break;
@@ -339,6 +477,13 @@ static void
 emit_store(FILE *f, MType dt, MAddr a, MVal *s0)
 {
 	const char *sw = dt == MT_I32 ? "str" : "str";
+	if (dt == MT_F32 || dt == MT_F64) {
+		/* floating-point store from the FP scratch (s16/d16) */
+		emit_addr_to_scratch(f, a, "x16");
+		fload_scratch(f, s0, FR_A);
+		fprintf(f, "\tstr\t%s16, [x16]\n", dt == MT_F32 ? "s" : "d");
+		return;
+	}
 	emit_addr_to_scratch(f, a, "x16");
 	mv_to_scratch(f, s0, "x9");
 	if (dt == MT_I8)  sw = "strb";
@@ -357,6 +502,11 @@ emit_ins(FILE *f, MInsM *in)
 
 	switch (op) {
 	case MMOP_MOV:
+		if (s0 && (s0->type == MT_F32 || s0->type == MT_F64)) {
+			fload_scratch(f, s0, FR_A);
+			fstore_scratch(f, d, FR_A);
+			return;
+		}
 		mv_to_scratch(f, s0, "x9");
 		scratch_to_dst(f, d, "x9");
 		return;
@@ -413,8 +563,74 @@ emit_ins(FILE *f, MInsM *in)
 		scratch_to_dst(f, d, "x9");
 		return;
 	case MMOP_SETCCR:
+		if (s0 && (s0->type == MT_F32 || s0->type == MT_F64)) {
+			emit_setccr_fp(f, in);
+			return;
+		}
 		emit_setccr(f, in);
 		return;
+	case MMOP_FADD: case MMOP_FSUB: case MMOP_FMUL:
+	case MMOP_FDIV: case MMOP_FNEG: case MMOP_FSQRT: {
+		const char *w = (in->dtype == MT_F32) ? "s" : "d";
+		const char *opn;
+		switch (op) {
+		case MMOP_FADD:  opn = "fadd";  break;
+		case MMOP_FSUB:  opn = "fsub";  break;
+		case MMOP_FMUL:  opn = "fmul";  break;
+		case MMOP_FDIV:  opn = "fdiv";  break;
+		case MMOP_FNEG:  opn = "fneg";  break;
+		default:         opn = "fsqrt"; break;
+		}
+		if (op == MMOP_FNEG || op == MMOP_FSQRT) {
+			fload_scratch(f, s0, FR_A);
+			fprintf(f, "\t%s\t%s%s, %s%s\n",
+			        opn, w, FR_A, w, FR_A);
+		} else {
+			fload_scratch(f, s0, FR_A);
+			fload_scratch(f, s1, FR_B);
+			fprintf(f, "\t%s\t%s%s, %s%s, %s%s\n",
+			        opn, w, FR_A, w, FR_A, w, FR_B);
+		}
+		fstore_scratch(f, d, FR_A);
+		return;
+	}
+	case MMOP_CVTSS2SD:   /* f32 -> f64 */
+		fload_scratch(f, s0, FR_A);
+		fputs("\tfcvt\td16, s16\n", f);
+		fstore_scratch(f, d, FR_A);
+		return;
+	case MMOP_CVTSD2SS:   /* f64 -> f32 */
+		fload_scratch(f, s0, FR_A);
+		fputs("\tfcvt\ts16, d16\n", f);
+		fstore_scratch(f, d, FR_A);
+		return;
+	case MMOP_CVTTSS2SI:  /* f32 -> i32/i64 (trunc) */
+	case MMOP_CVTTSD2SI: {
+		const char *ww = (op == MMOP_CVTTSS2SI) ? "s" : "d";
+		const char *rw = (in->dtype == MT_I32) ? "w" : "x";
+		fload_scratch(f, s0, FR_A);
+		fprintf(f, "\tfcvtzs\t%s9, %s%s\n", rw, ww, FR_A);
+		scratch_to_dst(f, d, "x9");
+		return;
+	}
+	case MMOP_CVTSI2SS:   /* i32/i64 -> f32 */
+	case MMOP_CVTSI2SD: {
+		const char *ww = (op == MMOP_CVTSI2SS) ? "s" : "d";
+		const char *rw = (s0 && s0->type == MT_I32) ? "w" : "x";
+		mv_to_scratch(f, s0, "x9");
+		fprintf(f, "\tscvtf\t%s%s, %s9\n", ww, FR_A, rw);
+		fstore_scratch(f, d, FR_A);
+		return;
+	}
+	case MMOP_CVTSI2SS_U: /* unsigned i32/i64 -> f32 */
+	case MMOP_CVTSI2SD_U: {
+		const char *ww = (op == MMOP_CVTSI2SS_U) ? "s" : "d";
+		const char *rw = (s0 && s0->type == MT_I32) ? "w" : "x";
+		mv_to_scratch(f, s0, "x9");
+		fprintf(f, "\tucvtf\t%s%s, %s9\n", ww, FR_A, rw);
+		fstore_scratch(f, d, FR_A);
+		return;
+	}
 	case MMOP_LOAD:
 	case MMOP_LOAD_S8: case MMOP_LOAD_S16: case MMOP_LOAD_S32:
 	case MMOP_LOAD_Z8: case MMOP_LOAD_Z16: case MMOP_LOAD_Z32:
@@ -489,8 +705,14 @@ emit_ins(FILE *f, MInsM *in)
 			mv_to_scratch(f, s0, "x9");
 			fputs("\tblr\tx9\n", f);
 		}
-		if (d)
-			scratch_to_dst(f, d, "x0");
+		if (d) {
+			if (d->type == MT_F32 || d->type == MT_F64) {
+				/* float return in v0 (s0/d0) */
+				fstore_scratch(f, d, "0");
+			} else {
+				scratch_to_dst(f, d, "x0");
+			}
+		}
 		return;
 	}
 	case MMOP_RET:
@@ -504,6 +726,19 @@ emit_ins(FILE *f, MInsM *in)
 }
 
 static int csave_idx(const MTargetM *mt, int r);
+
+/* Callee-saved register operand: GPRs keep their name, V regs use the d64
+ * view (AAPCS64 only preserves the low 64 bits of v8-v15). */
+static const char *
+csave_reg_name(const MTargetM *mt, int r)
+{
+	static char buf[16];
+	if (r >= A64MREG_V0) {
+		snprintf(buf, sizeof buf, "d%d", r - A64MREG_V0);
+		return buf;
+	}
+	return mreg_name(mt, r);
+}
 
 static void
 emit_block(FILE *f, MBlkM *b)
@@ -527,8 +762,7 @@ emit_block(FILE *f, MBlkM *b)
 		t.blk = b;
 		/* return value move: x0 (int) / v0 (float) */
 		if (t.src[0] && (t.src[0]->type == MT_F32 || t.src[0]->type == MT_F64)) {
-			mv_to_scratch(f, t.src[0], "x9");
-			fprintf(f, "\tfmov\tv0.d, x9\n");
+			fload_scratch(f, t.src[0], "0");   /* -> v0 (s0/d0) */
 		} else if (t.src[0]) {
 			mv_to_scratch(f, t.src[0], "x0");
 		}
@@ -538,11 +772,11 @@ emit_block(FILE *f, MBlkM *b)
 				int off = -24 - 8 * csave_idx(g_mt, g_mt->rclob[i]);
 				if (off >= -256 && off <= 255)
 					fprintf(f, "\tldr\t%s, [x29, #%d]\n",
-					        mreg_name(g_mt, g_mt->rclob[i]), off);
+					        csave_reg_name(g_mt, g_mt->rclob[i]), off);
 				else {
 					load_imm(f, "x16", off);
 					fprintf(f, "\tldr\t%s, [x29, x16]\n",
-					        mreg_name(g_mt, g_mt->rclob[i]));
+					        csave_reg_name(g_mt, g_mt->rclob[i]));
 				}
 			}
 		fputs("\tldr\tx30, [x29, #-8]\n", f);
@@ -611,11 +845,11 @@ mfnm_emit_aarch64(MFnM *fm, FILE *f)
 			int off = -24 - 8 * csave_idx(fm->mt, fm->mt->rclob[i]);
 			if (off >= -256 && off <= 255)
 				fprintf(f, "\tstr\t%s, [x29, #%d]\n",
-				        mreg_name(fm->mt, fm->mt->rclob[i]), off);
+				        csave_reg_name(fm->mt, fm->mt->rclob[i]), off);
 			else {
 				load_imm(f, "x16", off);
 				fprintf(f, "\tstr\t%s, [x29, x16]\n",
-				        mreg_name(fm->mt, fm->mt->rclob[i]));
+				        csave_reg_name(fm->mt, fm->mt->rclob[i]));
 			}
 		}
 
