@@ -159,3 +159,64 @@ funcgoto(struct func *f, char *name)
 
 	return f->gotos.vals[idx].p;
 }
+
+/* Return true if control can reach the end of the function body without a
+ * return — i.e. the final block is reachable and falls off (JUMP_NONE).
+ * Walks the block CFG from the entry: JUMP_JMP/JUMP_JNZ follow their
+ * targets, JUMP_NONE falls through to the next block (or off the function
+ * for the final block), JUMP_RET/JUMP_HLT are terminal.  Dead blocks after
+ * a return, and the unreachable join of an infinite loop (`while (1) {}`),
+ * are correctly treated as non-fall-through. */
+bool
+func_falls_off_end(struct func *f)
+{
+	struct array work = {0}, seen = {0};
+	struct block **s;
+	size_t i;
+
+	if (f->end->jump.kind != JUMP_NONE)
+		return false;
+	arrayaddptr(&work, f->start);
+	while (work.len) {
+		struct block **w = work.val;
+		struct block *b = w[work.len / sizeof b - 1];
+		bool skip = false;
+
+		work.len -= sizeof b;   /* struct array len is a byte count */
+		arrayforeach (&seen, s)
+			if (*s == b) {
+				skip = true;
+				break;
+			}
+		if (skip)
+			continue;
+		arrayaddptr(&seen, b);
+		if (b == f->end)
+			return true;   /* reachable final block falls off the function */
+		switch (b->jump.kind) {
+		case JUMP_JMP:
+			arrayaddptr(&work, b->jump.blk[0]);
+			break;
+		case JUMP_JNZ:
+			/* A constant condition (e.g. `while (1)`, `if (0)`) makes
+			 * the untaken branch unreachable, so do not follow it. */
+			if (b->jump.arg && b->jump.arg->kind == VALUE_INTCONST)
+				arrayaddptr(&work,
+				    b->jump.arg->u.i ? b->jump.blk[0] : b->jump.blk[1]);
+			else {
+				arrayaddptr(&work, b->jump.blk[0]);
+				arrayaddptr(&work, b->jump.blk[1]);
+			}
+			break;
+		case JUMP_NONE:
+			if (b->next)
+				arrayaddptr(&work, b->next);
+			break;
+		default: /* JUMP_RET / JUMP_HLT are terminal */
+			break;
+		}
+	}
+	free(work.val);
+	free(seen.val);
+	return false;
+}
