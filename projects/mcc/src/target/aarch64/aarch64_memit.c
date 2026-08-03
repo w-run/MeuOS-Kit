@@ -24,6 +24,11 @@
 #include "mir.h"
 #include "aarch64_m.h"
 
+/* PIC/shared flag, mirrored from the driver (main.c) — the MIR machine
+ * layer does not read the QBE `Target T` global (purity rule, same as
+ * x86_64_memit.c).  Defined in x86_64_memit.c. */
+extern int g_pic;
+
 static const MTargetM *g_mt;
 static MFnM *g_fm;
 static int g_alloca_cur;   /* frame-relative cursor for static allocas */
@@ -82,6 +87,22 @@ emit_const(FILE *f, MConst *c)
 	case MC_ADDR: fprintf(f, "%s", c->u.addr.sym ? c->u.addr.sym : "0"); break;
 	default:      fputs("0", f); break;
 	}
+}
+
+/* Load a non-TLS global symbol's address into `rn` (x9/x10/x16/...).
+ *   - PIC: adrp :got: + ldr :got_lo12: — the AArch64 PC-relative GOT
+ *     access (R_AARCH64_ADR_GOT_PAGE + R_AARCH64_LD64_GOT_LO12_NC);
+ *   - non-PIC: adrp + add :lo12: (R_AARCH64_ADR_PREL_PG_HI21 + LO12). */
+static void
+emit_global_addr(FILE *f, const char *sym, const char *rn)
+{
+	if (g_pic) {
+		fprintf(f, "\tadrp\t%s, :got:%s\n", rn, sym);
+		fprintf(f, "\tldr\t%s, [%s, :got_lo12:%s]\n", rn, rn, sym);
+		return;
+	}
+	fprintf(f, "\tadrp\t%s, %s\n", rn, sym);
+	fprintf(f, "\tadd\t%s, %s, :lo12:%s\n", rn, rn, sym);
 }
 
 /* Print a register, or a slot as fp-relative memory (only valid as a
@@ -168,9 +189,7 @@ mv_to_scratch(FILE *f, MVal *v, const char *rn)
 			emit_tls_addr(f, v->sym ? v->sym : "0", v->isext, rn);
 			break;
 		}
-		const char *sym = v->sym ? v->sym : "0";
-		fprintf(f, "\tadrp\t%s, %s\n", rn, sym);
-		fprintf(f, "\tadd\t%s, %s, :lo12:%s\n", rn, rn, sym);
+		emit_global_addr(f, v->sym ? v->sym : "0", rn);
 		break;
 	}
 	default:
@@ -230,12 +249,10 @@ emit_addr_to_scratch(FILE *f, MAddr a, const char *rn)
 	}
 	if (base && base->kind == MV_GLOBAL) {
 		const char *sym = base->sym ? base->sym : "0";
-		if (base->tls) {
+		if (base->tls)
 			emit_tls_addr(f, sym, base->isext, rn);
-		} else {
-			fprintf(f, "\tadrp\t%s, %s\n", rn, sym);
-			fprintf(f, "\tadd\t%s, %s, :lo12:%s\n", rn, rn, sym);
-		}
+		else
+			emit_global_addr(f, sym, rn);
 		if (off)
 			fprintf(f, "\tadd\t%s, %s, #%lld\n", rn, rn, (long long)off);
 		return;
