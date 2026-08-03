@@ -22,6 +22,17 @@
 
 #include "mir.h"
 
+/* -Os/-Oz: size-oriented codegen。定义在本文件（而非 main.c）是因为
+ * check-mir-* 单元测试把 passes.c 单独链接成 mir_test，main.c 不在
+ * 链接范围内；ir.h 中 extern 声明，driver 在 -Os/-Oz 时置位。 */
+int g_opt_size;
+
+/* Aggressive folding level gate: when nonzero, msimp_block applies
+ * strength-reduction rules that -O2 keeps disabled (e.g. mul-by-power-of-2
+ * -> shift, which shrinks code: imul is 7 bytes, shl is 4).  Set by
+ * run_mir_passes for -O3 and -Os/-Oz (optlevel >= 3 || g_opt_size). */
+int g_mir_fold_aggressive;
+
 /* ---- use chain construction ------------------------------------------- */
 
 static void
@@ -415,6 +426,27 @@ msimp_block(MFn *fn, MBlk *b)
 					removed++;
 					continue;
 				}
+				/* -O3/-Os/-Oz 强度削减：x * 2^n -> x << n。乘法按 2 的
+				 * 补码回绕，与移位逐位等价（有符号溢出本就是 UB）。
+				 * imul $k（7 字节）换成 shl $n（4 字节），同时减体积。 */
+				if (g_mir_fold_aggressive && a1.con &&
+				    a1.con->kind == MC_INT && a1.con->u.i > 0) {
+					uint64_t v = (uint64_t)a1.con->u.i;
+					if ((v & (v - 1)) == 0) {
+						int n = 0;
+						while (!(v & 1)) {
+							v >>= 1;
+							n++;
+						}
+						/* in-place rewrite：SSA 顺序保持不变（移位
+						 * 量常量必须在定义前已存在；madd 会把定义
+						 * 移到使用之后）。 */
+						in->op = MOP_SHL;
+						in->src[0] = a0;
+						in->src[1] = MREF_CON(mconst_int(fn, MT_I32, n));
+						a1 = in->src[1];
+					}
+				}
 				break;
 			case MOP_AND:
 				if (a1.con && a1.con->kind == MC_INT && a1.con->u.i == 0) {
@@ -605,13 +637,22 @@ run_mir_passes(MFn *fn, int optlevel)
 {
 	if (optlevel < 1)
 		return;
-	/* B.2 pipeline: fold/simpl first so GVN sees canonical forms, then
-	 * copy propagation (forward copies so GVN keys are stable), then
-	 * global value numbering, then dead code elimination. */
+	/* -O 级别语义分级（对照 src/ir/passes.c 的 legacy ol>=1/ol>=2 分级，
+	 * 但只作用于 MIR 管线，不改动 legacy LIR pass 门控）：
+	 *   -O1: fold + copy（基础：常量折叠 + 复制传播）
+	 *   -O2（默认）: + GVN + DCE（全套）
+	 *   -O3: 在 -O2 基础上多跑一轮 FOLD，并开启强度削减（mul 2^n ->
+	 *        shift）；-Os/-Oz 同样开启强度削减（体积导向）。
+	 *   g_mir_fold_aggressive 按级别门控 msimp_block 的激进规则。 */
+	g_mir_fold_aggressive = (optlevel >= 3 || g_opt_size);
 	run_mir_pass(fn, MIR_PASS_FOLD);
 	run_mir_pass(fn, MIR_PASS_COPY);
-	run_mir_pass(fn, MIR_PASS_GVN);
-	run_mir_pass(fn, MIR_PASS_DCE);
+	if (optlevel >= 2) {
+		run_mir_pass(fn, MIR_PASS_GVN);
+		if (optlevel >= 3)
+			run_mir_pass(fn, MIR_PASS_FOLD);
+		run_mir_pass(fn, MIR_PASS_DCE);
+	}
 	/* B.6 验收项 2: explicit-SSA consistency gate after the pipeline. */
 	if (mssa_check(fn))
 		fprintf(stderr, "mcc: %s: SSA consistency check FAILED\n", fn->name);
