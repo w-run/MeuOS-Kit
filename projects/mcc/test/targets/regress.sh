@@ -9,7 +9,8 @@ trap 'rm -f "$aarch" "$riscv"' EXIT HUP INT TERM
 "$mcc" --target=aarch64-linux -S -o "$aarch" "$root/test/targets/int_abi.c"
 grep -Eq 'stp[[:space:]]+x29, x30' "$aarch"
 grep -Eq 'bl[[:space:]]+pair' "$aarch"
-grep -Eq 'add[[:space:]]+x0' "$aarch"
+# return value: legacy LIR uses `add x0, ...`, MIR-native uses `mov x0, ...`
+grep -Eq 'add[[:space:]]+x0|mov[[:space:]]+x0' "$aarch"
 
 "$mcc" --target=riscv64-linux -S -o "$riscv" "$root/test/targets/int_abi.c"
 grep -Eq 'sd[[:space:]]+ra' "$riscv"
