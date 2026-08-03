@@ -15,7 +15,7 @@ switchcase(struct switchcases *cases, unsigned long long i, struct block *b)
 
 	c = treeinsert(&cases->root, i, sizeof(*c));
 	if (!c->node.new)
-		error(&tok.loc, "multiple 'case' labels with same value");
+		error_code(E_STMT, &tok.loc, "multiple 'case' labels with same value");
 	c->body = b;
 }
 

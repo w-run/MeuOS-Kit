@@ -162,7 +162,7 @@ declaratortypes(struct scope *s, struct list *result, char **name, int *align, s
 	default:
 		if (tok.kind >= TIDENT) {
 			if (!name)
-				error(&tok.loc, "identifier not allowed in abstract declarator");
+				error_code(E_SYNTAX, &tok.loc, "identifier not allowed in abstract declarator");
 			*name = tokenstr(tok.kind);
 			next();
 			/* C++ qualified method name: `Class::method` or
@@ -183,7 +183,7 @@ declaratortypes(struct scope *s, struct list *result, char **name, int *align, s
 						struct type *ct;
 						const char *comp;
 						if (tok.kind < TIDENT)
-							error(&tok.loc, "expected name after '::'");
+							error_code(E_SYNTAX, &tok.loc, "expected name after '::'");
 						comp = tokenstr(tok.kind);
 						d = scopegetdecl(cur, comp, 1);
 						ct = scopegettag(cur, comp, 1);
@@ -199,7 +199,7 @@ declaratortypes(struct scope *s, struct list *result, char **name, int *align, s
 							next(); /* consume class name */
 							expect(TCOLONCOLON, "after class name");
 							if (tok.kind < TIDENT)
-								error(&tok.loc, "expected member name after '::'");
+								error_code(E_SYNTAX, &tok.loc, "expected member name after '::'");
 							mname = xmalloc(strlen(qclass) + strlen(tokenstr(tok.kind)) + 2);
 							sprintf(mname, "%s_%s", qclass, tokenstr(tok.kind));
 							*name = mname;
@@ -208,14 +208,14 @@ declaratortypes(struct scope *s, struct list *result, char **name, int *align, s
 							next();
 							break;
 						}
-						error(&tok.loc, "'%s' is not a class or namespace", comp);
+						error_code(E_CTYPE, &tok.loc, "'%s' is not a class or namespace", comp);
 					}
 				} else {
 					const char *qclass = *name;
 					char *mname;
 					next(); /* consume '::' */
 					if (tok.kind < TIDENT)
-						error(&tok.loc, "expected member name after '::'");
+						error_code(E_SYNTAX, &tok.loc, "expected member name after '::'");
 					mname = xmalloc(strlen(qclass) + strlen(tokenstr(tok.kind)) + 2);
 					sprintf(mname, "%s_%s", qclass, tokenstr(tok.kind));
 					*name = mname;
@@ -224,7 +224,7 @@ declaratortypes(struct scope *s, struct list *result, char **name, int *align, s
 				}
 			}
 		} else if (!allowabstract) {
-			error(&tok.loc, "expected '(' or identifier");
+			error_code(E_SYNTAX, &tok.loc, "expected '(' or identifier");
 		}
 		/*
 		the aligned attribute is used in the definition of
@@ -328,7 +328,7 @@ declaratortypes(struct scope *s, struct list *result, char **name, int *align, s
 			} else if (!consume(TRBRACK)) {
 				e = assignexpr(s);
 				if (!(e->type->prop & PROPINT))
-					error(&tok.loc, "array length expression must have integer type");
+					error_code(E_CTYPE, &tok.loc, "array length expression must have integer type");
 				t->u.array.length = e;
 				t->incomplete = false;
 				expect(TRBRACK, "after array length");
@@ -341,7 +341,7 @@ declaratortypes(struct scope *s, struct list *result, char **name, int *align, s
 			break;
 		case T__ATTRIBUTE__:
 			if (allowedattr == -1)
-				error(&tok.loc, "attribute not allowed after parenthesized declarator");
+				error_code(E_CTYPE, &tok.loc, "attribute not allowed after parenthesized declarator");
 			/* GNU attributes: allow all recognized GNU attrs */
 			{
 				enum attrkind gnu_allowed = (enum attrkind)(ATTRALIGNED | ATTRSECTION |
@@ -388,22 +388,22 @@ declarator(struct scope *s, struct qualtype base, char **name, int *align, struc
 		switch (t->kind) {
 		case TYPEFUNC:
 			if (base.type->kind == TYPEFUNC)
-				error(&tok.loc, "function declarator specifies function return type");
+				error_code(E_DECL, &tok.loc, "function declarator specifies function return type");
 			if (base.type->kind == TYPEARRAY)
-				error(&tok.loc, "function declarator specifies array return type");
+				error_code(E_DECL, &tok.loc, "function declarator specifies array return type");
 			break;
 		case TYPEARRAY:
 			if (base.type->incomplete)
-				error(&tok.loc, "array element has incomplete type");
+				error_code(E_INCOMPLETE, &tok.loc, "array element has incomplete type");
 			if (base.type->kind == TYPEFUNC)
-				error(&tok.loc, "array element has function type");
+				error_code(E_DECL, &tok.loc, "array element has function type");
 			if (t->u.array.ptrqual) {
 				/* TODO: check if we are in a function prototype
 				if (?)
-					error(&tok.loc, "array type has qualifiers outside of a function prototype");
+					error_code(E_DECL, &tok.loc, "array type has qualifiers outside of a function prototype");
 				*/
 				if (prev != &result)
-					error(&tok.loc, "nested array type has qualifiers");
+					error_code(E_CTYPE, &tok.loc, "nested array type has qualifiers");
 			}
 			t->align = base.type->align;
 			t->size = 0;
@@ -411,9 +411,9 @@ declarator(struct scope *s, struct qualtype base, char **name, int *align, struc
 				e = eval(t->u.array.length);
 				if (e->kind == EXPRCONST && base.type->size) {
 					if (e->type->u.arith.issigned && e->u.constant.u >> 63)
-						error(&tok.loc, "array length must be non-negative");
+						error_code(E_CTYPE, &tok.loc, "array length must be non-negative");
 					if (e->u.constant.u > ULLONG_MAX / base.type->size)
-						error(&tok.loc, "array length is too large");
+						error_code(E_CTYPE, &tok.loc, "array length is too large");
 					t->size = base.type->size * e->u.constant.u;
 				} else {
 					t->prop |= PROPVM;
@@ -453,9 +453,9 @@ parameter(struct scope *s)
 	attr(NULL, 0);
 	t = declspecs(s, &sc, NULL, NULL);
 	if (!t.type)
-		error(&tok.loc, "no type in parameter declaration");
+		error_code(E_CTYPE, &tok.loc, "no type in parameter declaration");
 	if (sc && sc != SCREGISTER)
-		error(&tok.loc, "parameter declaration has invalid storage-class specifier");
+		error_code(E_DECL, &tok.loc, "parameter declaration has invalid storage-class specifier");
 	t = declarator(s, t, &name, NULL, NULL, true, NULL);
 	t.type = typeadjust(t.type, &t.qual);
 	d = mkdecl(name, DECLOBJECT, t.type, t.qual, LINKNONE);

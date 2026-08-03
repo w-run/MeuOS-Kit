@@ -127,7 +127,7 @@ primaryexpr(struct scope *s)
 		}
 		e = mkconstexpr(t, val);
 		if (*src != '\'')
-			error(&tok.loc, "character constant contains more than one character: %c", *src);
+			error_code(E_SYNTAX, &tok.loc, "character constant contains more than one character: %c", *src);
 		next();
 		break;
 	case TNUMBER:
@@ -147,7 +147,7 @@ primaryexpr(struct scope *s)
 			/* floating constant */
 			e->u.constant.f = strtod(tok.lit, &end);
 			if (end == tok.lit)
-				error(&tok.loc, "invalid floating constant '%s'", tok.lit);
+				error_code(E_SYNTAX, &tok.loc, "invalid floating constant '%s'", tok.lit);
 			if (!end[0])
 				e->type = &typedouble;
 			else if ((end[0] == 'f' || end[0] == 'F') && !end[1])
@@ -155,7 +155,7 @@ primaryexpr(struct scope *s)
 			else if ((end[0] == 'l' || end[0] == 'L') && !end[1])
 				e->type = &typeldouble;
 			else
-				error(&tok.loc, "invalid floating constant suffix '%s'", end);
+				error_code(E_SYNTAX, &tok.loc, "invalid floating constant suffix '%s'", end);
 		} else {
 			src = tok.lit;
 			if (base == 2)
@@ -163,7 +163,7 @@ primaryexpr(struct scope *s)
 			/* integer constant */
 			e->u.constant.u = strtoull(src, &end, base);
 			if (end == src)
-				error(&tok.loc, "invalid integer constant '%s'", tok.lit);
+				error_code(E_SYNTAX, &tok.loc, "invalid integer constant '%s'", tok.lit);
 			e->type = inttype(e->u.constant.u, base == 10, end);
 		}
 		next();
@@ -193,7 +193,7 @@ primaryexpr(struct scope *s)
 			e->qual &= ~(QUALCONST | QUALVOLATILE);
 			break;
 		}
-		error(&tok.loc, "expected primary expression");
+		error_code(E_SYNTAX, &tok.loc, "expected primary expression");
 		break;
 	}
 	case TLPAREN:
@@ -257,7 +257,7 @@ primaryexpr(struct scope *s)
 							    struct expr *, char *, size_t);
 							next(); /* consume '::' */
 							if (tok.kind < TIDENT)
-								error(&tok.loc,
+								error_code(E_SYNTAX, &tok.loc,
 								    "expected member name after '::'");
 							{
 								const char *m = tokenstr(tok.kind);
@@ -302,7 +302,7 @@ primaryexpr(struct scope *s)
 									pp = sfd->type->u.func.params;
 									for (a = args; a; a = a->next) {
 										if (!pp && !sfd->type->u.func.isvararg)
-											error(&tok.loc,
+											error_code(E_SYNTAX, &tok.loc,
 											    "too many arguments for function call");
 										if (sfd->type->u.func.isvararg && !pp)
 											*end = exprpromote(a);
@@ -315,7 +315,7 @@ primaryexpr(struct scope *s)
 											pp = pp->next;
 									}
 									if (pp && !sfd->type->u.func.isvararg)
-										error(&tok.loc,
+										error_code(E_SYNTAX, &tok.loc,
 										    "not enough arguments for function call");
 									e = call;
 									break;
@@ -384,13 +384,13 @@ primaryexpr(struct scope *s)
 				next(); /* consume namespace name */
 				for (;;) {
 					if (tok.kind != TCOLONCOLON)
-						error(&tok.loc, "expected '::' after namespace name");
+						error_code(E_SYNTAX, &tok.loc, "expected '::' after namespace name");
 					next(); /* consume '::' */
 					if (tok.kind < TIDENT)
-						error(&tok.loc, "expected name after '::'");
+						error_code(E_SYNTAX, &tok.loc, "expected name after '::'");
 					md = scopegetdecl(nss, tokenstr(tok.kind), 1);
 					if (!md)
-						error(&tok.loc, "no member named '%s' in namespace '%s'",
+						error_code(E_CTYPE, &tok.loc, "no member named '%s' in namespace '%s'",
 						      tokenstr(tok.kind), d->name);
 					next();
 					if (md->kind != DECLNAMESPACE)
@@ -474,7 +474,7 @@ primaryexpr(struct scope *s)
 			break;
 		}
 		}
-		error(&tok.loc, "expected primary expression");
+		error_code(E_SYNTAX, &tok.loc, "expected primary expression");
 	}
 
 	return e;
@@ -490,7 +490,7 @@ designator(struct scope *s, struct type *t, unsigned long long *offset)
 		switch (tok.kind) {
 		case TLBRACK:
 			if (t->kind != TYPEARRAY)
-				error(&tok.loc, "index designator is only valid for array types");
+				error_code(E_CTYPE, &tok.loc, "index designator is only valid for array types");
 			next();
 			i = intconstexpr(s, false);
 			expect(TRBRACK, "for index designator");
@@ -499,12 +499,12 @@ designator(struct scope *s, struct type *t, unsigned long long *offset)
 			break;
 		case TPERIOD:
 			if (t->kind != TYPESTRUCT && t->kind != TYPEUNION)
-				error(&tok.loc, "member designator only valid for struct/union types");
+				error_code(E_CTYPE, &tok.loc, "member designator only valid for struct/union types");
 			next();
 			name = expect(TIDENT, "for member designator");
 			m = typemember(t, name, offset);
 			if (!m)
-				error(&tok.loc, "%s has no member named '%s'", t->kind == TYPEUNION ? "union" : "struct", name);
+				error_code(E_CTYPE, &tok.loc, "%s has no member named '%s'", t->kind == TYPEUNION ? "union" : "struct", name);
 			t = m->type;
 			break;
 		default:
@@ -545,7 +545,7 @@ builtinfunc(struct scope *s, enum builtinkind kind)
 	case BUILTINNANF:
 		e = assignexpr(s);
 		if (!e->decayed || e->base->kind != EXPRSTRING || e->base->u.string.size > 1)
-			error(&tok.loc, "__builtin_nanf currently only supports empty string literals");
+			error_code(E_CTYPE, &tok.loc, "__builtin_nanf currently only supports empty string literals");
 		e = mkexpr(EXPRCONST, &typefloat, NULL);
 		/* TODO: use NAN here when we can handle musl's math.h */
 		e->u.constant.f = strtod("nan", NULL);
@@ -555,11 +555,11 @@ builtinfunc(struct scope *s, enum builtinkind kind)
 		expect(TCOMMA, "after type name");
 		name = expect(TIDENT, "after ','");
 		if (t->kind != TYPESTRUCT && t->kind != TYPEUNION)
-			error(&tok.loc, "type is not a struct/union type");
+			error_code(E_CTYPE, &tok.loc, "type is not a struct/union type");
 		offset = 0;
 		m = typemember(t, name, &offset);
 		if (!m)
-			error(&tok.loc, "struct/union has no member named '%s'", name);
+			error_code(E_CTYPE, &tok.loc, "struct/union has no member named '%s'", name);
 		designator(s, m->type, &offset);
 		e = mkconstexpr(&typeulong, offset);
 		break;
@@ -576,7 +576,7 @@ builtinfunc(struct scope *s, enum builtinkind kind)
 		e = mkexpr(EXPRBUILTIN, NULL, assignexpr(s));
 		e->u.builtin.kind = BUILTINVAARG;
 		if (!typesame(e->base->type, typeadjvalist))
-			error(&tok.loc, "va_arg argument must have type va_list");
+			error_code(E_CTYPE, &tok.loc, "va_arg argument must have type va_list");
 		if (typeadjvalist == targ->typevalist)
 			e->base = mkunaryexpr(TBAND, e->base);
 		expect(TCOMMA, "after va_list");
@@ -587,13 +587,13 @@ builtinfunc(struct scope *s, enum builtinkind kind)
 		e = mkexpr(EXPRASSIGN, &typevoid, NULL);
 		e->u.assign.l = assignexpr(s);
 		if (!typesame(e->u.assign.l->type, typeadjvalist))
-			error(&tok.loc, "va_copy destination must have type va_list");
+			error_code(E_CTYPE, &tok.loc, "va_copy destination must have type va_list");
 		if (typeadjvalist != targ->typevalist)
 			e->u.assign.l = mkunaryexpr(TMUL, e->u.assign.l);
 		expect(TCOMMA, "after target va_list");
 		e->u.assign.r = assignexpr(s);
 		if (!typesame(e->u.assign.r->type, typeadjvalist))
-			error(&tok.loc, "va_copy source must have type va_list");
+			error_code(E_CTYPE, &tok.loc, "va_copy source must have type va_list");
 		if (typeadjvalist != targ->typevalist)
 			e->u.assign.r = mkunaryexpr(TMUL, e->u.assign.r);
 		break;
@@ -612,7 +612,7 @@ builtinfunc(struct scope *s, enum builtinkind kind)
 		e = mkexpr(EXPRBUILTIN, &typevoid, assignexpr(s));
 		e->u.builtin.kind = BUILTINVASTART;
 		if (!typesame(e->base->type, typeadjvalist))
-			error(&tok.loc, "va_start argument must have type va_list");
+			error_code(E_CTYPE, &tok.loc, "va_start argument must have type va_list");
 		if (typeadjvalist == targ->typevalist)
 			e->base = mkunaryexpr(TBAND, e->base);
 		if (consume(TCOMMA))
@@ -630,7 +630,7 @@ builtinfunc(struct scope *s, enum builtinkind kind)
 		e = mkexpr(EXPRBUILTIN, NULL, assignexpr(s));
 		if (e->base->type->kind != TYPEPOINTER ||
 		    !(e->base->type->qual & QUALATOMIC))
-			error(&tok.loc, "atomic fetch operation requires pointer to _Atomic object");
+			error_code(E_CTYPE, &tok.loc, "atomic fetch operation requires pointer to _Atomic object");
 		e->type = e->base->type->base;
 		expect(TCOMMA, "after atomic object");
 		e->base->next = exprassign(assignexpr(s), e->type);
@@ -645,11 +645,11 @@ builtinfunc(struct scope *s, enum builtinkind kind)
 		e = mkexpr(EXPRBUILTIN, &typeint, assignexpr(s));
 		if (e->base->type->kind != TYPEPOINTER ||
 		    !(e->base->type->qual & QUALATOMIC))
-			error(&tok.loc, "atomic compare exchange requires pointer to _Atomic object");
+			error_code(E_CTYPE, &tok.loc, "atomic compare exchange requires pointer to _Atomic object");
 		expect(TCOMMA, "after atomic object");
 		e->base->next = assignexpr(s);
 		if (e->base->next->type->kind != TYPEPOINTER)
-			error(&tok.loc, "atomic compare exchange expected argument must be a pointer");
+			error_code(E_SYNTAX, &tok.loc, "atomic compare exchange expected argument must be a pointer");
 		expect(TCOMMA, "after expected value");
 		e->base->next->next = exprassign(assignexpr(s), e->base->type->base);
 		expect(TCOMMA, "after desired value");

@@ -137,9 +137,9 @@ cpp_auto_return(struct func *f, struct expr *e)
 		g_cpp_auto_ret_type = NULL;
 	}
 	if (!et || et == &typeauto || et->kind == TYPEVOID)
-		error(&tok.loc, "unable to deduce the return type of an 'auto' function");
+		error_code(E_DECL, &tok.loc, "unable to deduce the return type of an 'auto' function");
 	if (g_cpp_auto_ret_type && !typecompatible(g_cpp_auto_ret_type, et))
-		error(&tok.loc, "inconsistent deduced return types in 'auto' function");
+		error_code(E_DECL, &tok.loc, "inconsistent deduced return types in 'auto' function");
 	g_cpp_auto_ret_type = et;
 }
 
@@ -376,7 +376,7 @@ cpp_member_ident(struct scope *s, const char *name)
 	if (!t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
 		return NULL;
 	if (cpp_member_ambiguous(t, name))
-		error(&tok.loc, "request for member '%s' is ambiguous "
+		error_code(E_CTYPE, &tok.loc, "request for member '%s' is ambiguous "
 		      "(multiple base classes define it)", name);
 	m = typemember(t, name, &offset);
 	if (!m) {
@@ -592,7 +592,7 @@ cpp_class_decl(struct scope *s)
 	/* class/struct/union keyword consumed here */
 	next();
 	if (tok.kind < TIDENT)
-		error(&tok.loc, "expected class name");
+		error_code(E_SYNTAX, &tok.loc, "expected class name");
 	tag = tokenstr(tok.kind);
 	next();
 
@@ -606,13 +606,13 @@ cpp_class_decl(struct scope *s)
 			if (bk == CPP_TPUBLIC || bk == CPP_TPRIVATE || bk == CPP_TPROTECTED)
 				next();
 			if (tok.kind < TIDENT)
-				error(&tok.loc, "expected base class name after ':'");
+				error_code(E_SYNTAX, &tok.loc, "expected base class name after ':'");
 			if (nbases >= (int)countof(bases))
-				error(&tok.loc, "too many base classes");
+				error_code(E_SYNTAX, &tok.loc, "too many base classes");
 			bases[nbases] = scopegettag(s, tokenstr(tok.kind), true);
 			if (!bases[nbases] ||
 			    (bases[nbases]->kind != TYPESTRUCT && bases[nbases]->kind != TYPEUNION))
-				error(&tok.loc, "'%s' is not a class type", tokenstr(tok.kind));
+				error_code(E_CTYPE, &tok.loc, "'%s' is not a class type", tokenstr(tok.kind));
 			++nbases;
 			next();
 			if (tok.kind == TCOMMA) {
@@ -627,7 +627,7 @@ cpp_class_decl(struct scope *s)
 	t = scopegettag(s, tag, tok.kind != TLBRACE && tok.kind != TSEMICOLON);
 	if (t) {
 		if (t->kind != TYPESTRUCT && t->kind != TYPEUNION)
-			error(&tok.loc, "redeclaration of tag '%s' with different kind", tag);
+			error_code(E_REDEF, &tok.loc, "redeclaration of tag '%s' with different kind", tag);
 	} else {
 		t = mktype(TYPESTRUCT, 0);
 		t->size = 0;
@@ -646,7 +646,7 @@ cpp_class_decl(struct scope *s)
 		int bi;
 		for (bi = 0; bi < nbases; ++bi)
 			if (bases[bi]->incomplete)
-				error(&tok.loc, "base class '%s' has incomplete type",
+				error_code(E_INCOMPLETE, &tok.loc, "base class '%s' has incomplete type",
 				      bases[bi]->u.structunion.tag);
 	}
 	t->scope = s; /* member symbols are registered here */
@@ -764,7 +764,7 @@ cpp_namespace_decl(struct scope *s)
 
 	next(); /* consume 'namespace' */
 	if (tok.kind < TIDENT)
-		error(&tok.loc, "expected namespace name");
+		error_code(E_SYNTAX, &tok.loc, "expected namespace name");
 	name = tokenstr(tok.kind);
 	next();
 	expect(TLBRACE, "after namespace name");
@@ -793,7 +793,7 @@ cpp_namespace_decl(struct scope *s)
 			continue;
 		}
 		if (!decl(ns, NULL))
-			error(&tok.loc, "expected declaration in namespace body");
+			error_code(E_SYNTAX, &tok.loc, "expected declaration in namespace body");
 	}
 	next(); /* consume '}' */
 	/* deliberately keep ns alive for later NAME::name lookups */
@@ -839,10 +839,10 @@ cpp_using_decl(struct scope *s)
 		struct decl *nsd;
 		next(); /* consume 'namespace' */
 		if (tok.kind < TIDENT)
-			error(&tok.loc, "expected namespace name after 'using namespace'");
+			error_code(E_SYNTAX, &tok.loc, "expected namespace name after 'using namespace'");
 		nsd = scopegetdecl(s, tokenstr(tok.kind), 1);
 		if (!nsd || nsd->kind != DECLNAMESPACE)
-			error(&tok.loc, "'%s' is not a namespace", tokenstr(tok.kind));
+			error_code(E_CTYPE, &tok.loc, "'%s' is not a namespace", tokenstr(tok.kind));
 		cpp_add_visible_ns(nsd->u.ns);
 		next();
 		expect(TSEMICOLON, "after using directive");
@@ -853,7 +853,7 @@ cpp_using_decl(struct scope *s)
 		struct decl *nsd;
 		const char *nm;
 		if (tok.kind < TIDENT)
-			error(&tok.loc, "expected namespace name in using declaration");
+			error_code(E_SYNTAX, &tok.loc, "expected namespace name in using declaration");
 		nm = tokenstr(tok.kind);
 		nsd = scopegetdecl(s, nm, 1);
 		next();
@@ -863,20 +863,20 @@ cpp_using_decl(struct scope *s)
 			next(); /* consume '=' */
 			at = typename(s, NULL, NULL);
 			if (!at)
-				error(&tok.loc, "expected type name in alias declaration");
+				error_code(E_SYNTAX, &tok.loc, "expected type name in alias declaration");
 			expect(TSEMICOLON, "after alias declaration");
 			scopeputdecl(s, mkdecl((char *)nm, DECLTYPE, at, QUALNONE, LINKNONE));
 			return;
 		}
 		expect(TCOLONCOLON, "after namespace name in using declaration");
 		if (tok.kind < TIDENT)
-			error(&tok.loc, "expected member name after '::'");
+			error_code(E_SYNTAX, &tok.loc, "expected member name after '::'");
 		if (!nsd || nsd->kind != DECLNAMESPACE)
-			error(&tok.loc, "'%s' is not a namespace", nsd ? nsd->name : "?");
+			error_code(E_CTYPE, &tok.loc, "'%s' is not a namespace", nsd ? nsd->name : "?");
 		{
 			struct decl *md = scopegetdecl(nsd->u.ns, tokenstr(tok.kind), 1);
 			if (!md)
-				error(&tok.loc, "no member named '%s' in namespace '%s'",
+				error_code(E_CTYPE, &tok.loc, "no member named '%s' in namespace '%s'",
 				      tokenstr(tok.kind), nsd->name);
 			scopeputdecl(s, md);
 		}
@@ -1153,7 +1153,7 @@ cpp_parse_method_body(struct cpp_pending_method *pm)
 		 * body's return statement(s). */
 		if (pm->d->type->base == &typeauto) {
 			if (!g_cpp_auto_ret_type)
-				error(&tok.loc, "'auto' member function '%s' has no return statement to deduce its type from", pm->mname);
+				error_code(E_DECL, &tok.loc, "'auto' member function '%s' has no return statement to deduce its type from", pm->mname);
 			pm->d->type->base = g_cpp_auto_ret_type;
 			g_cpp_auto_ret_type = NULL;
 			g_cpp_auto_ret_func = NULL;
@@ -1371,10 +1371,10 @@ cpp_define_static_data(struct scope *s, const char *qclass, const char *name)
 
 	ct = scopegettag(s, qclass, true);
 	if (!ct || (ct->kind != TYPESTRUCT && ct->kind != TYPEUNION))
-		error(&tok.loc, "'%s' is not a class type", qclass);
+		error_code(E_CTYPE, &tok.loc, "'%s' is not a class type", qclass);
 	d = scopegetdecl(ct->scope ? ct->scope : &filescope, name, 1);
 	if (!d || d->kind != DECLOBJECT) {
-		error(&tok.loc, "no static data member '%s' in class '%s'",
+		error_code(E_DECL, &tok.loc, "no static data member '%s' in class '%s'",
 		      name, qclass);
 		return;
 	}
@@ -1696,7 +1696,7 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname,
 		classt = scopegettag(qns ? qns : s, class_tag, true);
 	}
 	if (!classt || (classt->kind != TYPESTRUCT && classt->kind != TYPEUNION))
-		error(&tok.loc, "'%s' is not a class type", class_tag);
+		error_code(E_CTYPE, &tok.loc, "'%s' is not a class type", class_tag);
 
 	/* C++ virtual member (C.2.5): register the slot identity in the
 	 * class's own_virtuals list (deduped across in-class decl + out-of-line
@@ -1849,9 +1849,9 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname,
 		struct scope *ms = classt->scope ? classt->scope : s;
 		d = scopegetdecl(ms, mangled, false);
 		if (d && d->kind != DECLFUNC)
-			error(&tok.loc, "'%s' redeclared with different kind", mangled);
+			error_code(E_REDEF, &tok.loc, "'%s' redeclared with different kind", mangled);
 		if (d && d->type && !typecompatible(mtype, d->type))
-			error(&tok.loc, "'%s' redeclared with incompatible type", mangled);
+			error_code(E_REDEF, &tok.loc, "'%s' redeclared with incompatible type", mangled);
 		if (d && d->defined)
 			error_tok_code(E_REDEF, &tok, "redefinition of member function '%s'", mangled);
 		if (!d) {
@@ -1921,11 +1921,11 @@ cpp_parse_free_operator(struct scope *s, struct qualtype base)
 	struct func *f;
 
 	if (cpp_tok_kind() != CPP_TOPERATOR)
-		error(&tok.loc, "expected 'operator'");
+		error_code(E_SYNTAX, &tok.loc, "expected 'operator'");
 	next(); /* consume 'operator' */
 	opcode = cpp_op_mangle(tok.kind);
 	if (!opcode)
-		error(&tok.loc, "unsupported operator for overloading");
+		error_code(E_OVERLOAD, &tok.loc, "unsupported operator for overloading");
 	next(); /* consume the operator token */
 	/* operator()/operator[]: the closing ')' / ']' of the operator token
 	 * follows; the next '(' is the parameter list. */
@@ -1962,9 +1962,9 @@ cpp_parse_free_operator(struct scope *s, struct qualtype base)
 
 	d = scopegetdecl(s, mname, false);
 	if (d && d->kind != DECLFUNC)
-		error(&tok.loc, "'%s' redeclared with different kind", mname);
+		error_code(E_REDEF, &tok.loc, "'%s' redeclared with different kind", mname);
 	if (d && d->type && !typecompatible(ft, d->type))
-		error(&tok.loc, "'%s' redeclared with incompatible type", mname);
+		error_code(E_REDEF, &tok.loc, "'%s' redeclared with incompatible type", mname);
 	if (!d) {
 		d = mkdecl(pmangled, DECLFUNC, ft, QUALNONE, LINKEXTERN);
 		scopeputdecl(s, d);
@@ -2296,7 +2296,7 @@ emit_base_ctors_for(struct func *f, struct type *classt, struct expr *thisp)
 					    code, true);
 				}
 				if (!fd || fd->kind != DECLFUNC)
-					error(&tok.loc, "no matching constructor for '%s' in initializer list", key);
+					error_code(E_DECL, &tok.loc, "no matching constructor for '%s' in initializer list", key);
 			} else {
 				/* no explicit initializer: default construction */
 				if (!bt->u.structunion.tag ||
@@ -2365,7 +2365,7 @@ cpp_parse_init_list(struct func *f, struct scope *fs)
 	next(); /* consume ':' */
 	for (;;) {
 		if (tok.kind < TIDENT)
-			error(&tok.loc, "expected member or base name in ctor initializer list");
+			error_code(E_DECL, &tok.loc, "expected member or base name in ctor initializer list");
 		it = xmalloc(sizeof *it);
 		it->name = tokenstr(tok.kind);
 		it->args = NULL;
@@ -2658,7 +2658,7 @@ cpp_emit_ctor_call(struct func *f, struct decl *d, struct expr *args)
 			snprintf(mname, sizeof mname, "%s", code2);
 	}
 	if (!fd || fd->kind != DECLFUNC) {
-		error(&tok.loc, "no matching constructor for object '%s'", d->name);
+		error_code(E_DECL, &tok.loc, "no matching constructor for object '%s'", d->name);
 		return;
 	}
 
@@ -2850,10 +2850,10 @@ cpp_parse_new_expr(struct scope *s)
 	}
 	base = declspecs(s, &sc, NULL, &align);
 	if (!base.type)
-		error(&tok.loc, "expected type in 'new' expression");
+		error_code(E_SYNTAX, &tok.loc, "expected type in 'new' expression");
 	t = base.type;
 	if (t->incomplete)
-		error(&tok.loc, "'new' on incomplete type");
+		error_code(E_INCOMPLETE, &tok.loc, "'new' on incomplete type");
 	if (tok.kind == TLBRACK) {
 		/* new T[n]: malloc(sizeof(size_t) + n*sizeof(T)), store n as a
 		 * cookie before the array, then default-construct each element
@@ -2863,7 +2863,7 @@ cpp_parse_new_expr(struct scope *s)
 		cnt = assignexpr(s);
 		expect(TRBRACK, "after array size in 'new'");
 		if (!curfunc)
-			error(&tok.loc, "'new' outside of a function body is not supported");
+			error_code(E_DECL, &tok.loc, "'new' outside of a function body is not supported");
 		pt = mkpointertype(t, QUALNONE);
 		tmp = mkdecl("tmp", DECLOBJECT, pt, QUALNONE, LINKNONE);
 		tmp->u.obj.storage = SDAUTO;
@@ -2964,7 +2964,7 @@ cpp_parse_new_expr(struct scope *s)
 					}
 					ctor = cpp_ctor_expr(t, ptr, NULL);
 					if (!ctor)
-						error(&tok.loc,
+						error_code(E_OVERLOAD, &tok.loc,
 						    "no matching constructor for 'new %s[]'",
 						    t->u.structunion.tag);
 					funcexpr(curfunc, ctor);
@@ -2976,12 +2976,12 @@ cpp_parse_new_expr(struct scope *s)
 					funcjmp(curfunc, bloop);
 					funclabel(curfunc, bdone);
 				} else if (args) {
-					error(&tok.loc,
+					error_code(E_OVERLOAD, &tok.loc,
 					    "'%s' has no constructor for 'new' with arguments",
 					    t->u.structunion.tag);
 				}
 			} else if (args) {
-				error(&tok.loc,
+				error_code(E_CTYPE, &tok.loc,
 				    "'new' with arguments requires a class type");
 			}
 		}
@@ -3002,7 +3002,7 @@ cpp_parse_new_expr(struct scope *s)
 		next();
 	}
 	if (!curfunc)
-		error(&tok.loc, "'new' outside of a function body is not supported");
+		error_code(E_DECL, &tok.loc, "'new' outside of a function body is not supported");
 
 	pt = mkpointertype(t, QUALNONE);
 	if (place) {
@@ -3012,17 +3012,17 @@ cpp_parse_new_expr(struct scope *s)
 				struct expr *thisp = mkexpr(EXPRCAST, pt, place);
 				ctor = cpp_ctor_expr(t, thisp, args);
 				if (!ctor)
-					error(&tok.loc,
+					error_code(E_OVERLOAD, &tok.loc,
 					    "no matching constructor for 'new (ptr) %s'",
 					    t->u.structunion.tag);
 				funcexpr(curfunc, ctor);
 			} else if (args) {
-				error(&tok.loc,
+				error_code(E_OVERLOAD, &tok.loc,
 				    "'%s' has no constructor for 'new' with arguments",
 				    t->u.structunion.tag);
 			}
 		} else if (args) {
-			error(&tok.loc,
+			error_code(E_CTYPE, &tok.loc,
 			    "'new' with arguments requires a class type");
 		}
 		e = mkexpr(EXPRCAST, pt, place);
@@ -3050,15 +3050,15 @@ cpp_parse_new_expr(struct scope *s)
 			thisp->u.ident.decl = tmp;
 			ctor = cpp_ctor_expr(t, thisp, args);
 			if (!ctor)
-				error(&tok.loc, "no matching constructor for 'new %s'",
+				error_code(E_DECL, &tok.loc, "no matching constructor for 'new %s'",
 				    t->u.structunion.tag);
 			funcexpr(curfunc, ctor);
 		} else if (args) {
-			error(&tok.loc, "'%s' has no constructor for 'new' with arguments",
+			error_code(E_DECL, &tok.loc, "'%s' has no constructor for 'new' with arguments",
 			    t->u.structunion.tag);
 		}
 	} else if (args) {
-		error(&tok.loc, "'new' with arguments requires a class type");
+		error_code(E_CTYPE, &tok.loc, "'new' with arguments requires a class type");
 	}
 	/* the new-expression's value: the pointer stored in tmp */
 	e = mkexpr(EXPRIDENT, pt, NULL);
@@ -3108,7 +3108,7 @@ cpp_parse_delete_expr(struct scope *s)
 		expect(TRBRACK, "after 'delete['");
 		e = castexpr(s);
 		if (!e || e->type->kind != TYPEPOINTER)
-			error(&tok.loc, "delete operand must be a pointer");
+			error_code(E_CTYPE, &tok.loc, "delete operand must be a pointer");
 		t = e->type->base;
 		/* __dl_fp = (void*)0; set to (char*)e - sizeof(size_t) only
 		 * inside the null-guard, so the returned free(NULL) is a
@@ -3219,7 +3219,7 @@ cpp_parse_delete_expr(struct scope *s)
 	}
 	e = castexpr(s);
 	if (!e || e->type->kind != TYPEPOINTER)
-		error(&tok.loc, "delete operand must be a pointer");
+		error_code(E_CTYPE, &tok.loc, "delete operand must be a pointer");
 	t = e->type->base;
 	if (t && (t->kind == TYPESTRUCT || t->kind == TYPEUNION) &&
 	    (tag = t->u.structunion.tag) && cpp_has_dtor(t)) {
@@ -4156,7 +4156,7 @@ cpp_tmpl_placeholder(const char *name)
 	struct expr *e;
 
 	if (g_cpp_tmpl_depth >= 64)
-		error(&tok.loc, "template call nesting too deep");
+		error_code(E_TEMPLATE, &tok.loc, "template call nesting too deep");
 	g_cpp_tmpl_stack[g_cpp_tmpl_depth++] = name;
 	e = mkexpr(EXPRIDENT, mkpointertype(cpp_tmpl_dummy_callee()->type, QUALNONE),
 	           NULL);
@@ -4199,7 +4199,7 @@ cpp_tmpl_explicit_parse(struct scope *s)
 		p = tmpl->params;
 	for (;;) {
 		if (g_cpp_tmpl_expl_n >= 16)
-			error(&tok.loc, "too many template arguments");
+			error_code(E_SYNTAX, &tok.loc, "too many template arguments");
 		if (p && p->is_nttp) {
 			/* non-type parameter: a constant integer expression */
 			struct expr *ev = cpp_tmpl_const_arg(s);
@@ -4212,7 +4212,7 @@ cpp_tmpl_explicit_parse(struct scope *s)
 			toeval = NULL;
 			struct type *tt = typename(s, &tq, &toeval);
 			if (!tt || toeval)
-				error(&tok.loc,
+				error_code(E_TEMPLATE, &tok.loc,
 				    "template argument is not a type");
 			g_cpp_tmpl_expl_types[g_cpp_tmpl_expl_n] = tt;
 			g_cpp_tmpl_expl_isval[g_cpp_tmpl_expl_n] = false;
@@ -4240,7 +4240,7 @@ cpp_tmpl_const_arg(struct scope *s)
 
 	for (;;) {
 		if (bn >= 256)
-			error(&tok.loc, "template argument too long");
+			error_code(E_TEMPLATE, &tok.loc, "template argument too long");
 		if (tok.kind == TLPAREN || tok.kind == TLBRACK)
 			++depth;
 		else if (tok.kind == TRPAREN || tok.kind == TRBRACK) {
@@ -4255,7 +4255,7 @@ cpp_tmpl_const_arg(struct scope *s)
 		next();
 	}
 	if (!bn)
-		error(&tok.loc, "expected template argument");
+		error_code(E_SYNTAX, &tok.loc, "expected template argument");
 	{
 		/* replay the buffered expression in front of a guard so the
 		 * parser stops at the end of it instead of consuming the source
@@ -4268,7 +4268,7 @@ cpp_tmpl_const_arg(struct scope *s)
 		next(); /* position tok at the first buffered token */
 		struct expr *ev = eval(condexpr(s));
 		if (!ev || ev->kind != EXPRCONST || !(ev->type->prop & PROPINT))
-			error(&tok.loc,
+			error_code(E_TEMPLATE, &tok.loc,
 			    "non-type template argument must be a constant integer expression");
 		/* restore the stream to the source '>' (never consumed) */
 		tokctx_rewind(d);
@@ -4338,7 +4338,7 @@ cpp_template_decl(struct scope *s, struct type *owner)
 					next();
 				}
 				if (tok.kind < TIDENT)
-					error(&tok.loc, "expected template parameter name");
+					error_code(E_SYNTAX, &tok.loc, "expected template parameter name");
 				p->name = xmalloc(strlen(tokenstr(tok.kind)) + 1);
 				strcpy((char *)p->name, tokenstr(tok.kind));
 				p->next = NULL;
@@ -4364,7 +4364,7 @@ cpp_template_decl(struct scope *s, struct type *owner)
 				p->is_nttp = true;
 				p->nttp_type = NULL;
 				if (tok.kind < TIDENT)
-					error(&tok.loc, "expected template parameter name");
+					error_code(E_SYNTAX, &tok.loc, "expected template parameter name");
 				p->name = xmalloc(strlen(tokenstr(tok.kind)) + 1);
 				strcpy((char *)p->name, tokenstr(tok.kind));
 				p->next = NULL;
@@ -4386,7 +4386,7 @@ cpp_template_decl(struct scope *s, struct type *owner)
 					 * the concrete type of the argument. */
 					next(); /* consume the type-parameter name */
 					if (tok.kind < TIDENT)
-						error(&tok.loc,
+						error_code(E_TEMPLATE, &tok.loc,
 						    "expected non-type template parameter name");
 					p = xmalloc(sizeof(*p));
 					p->is_pack = false;
@@ -4407,7 +4407,7 @@ cpp_template_decl(struct scope *s, struct type *owner)
 			pd = parameter(ps);
 			if (!pd || !pd->type ||
 			    !(pd->type->prop & (PROPINT | PROPREAL)))
-				error(&tok.loc,
+				error_code(E_TEMPLATE, &tok.loc,
 				    "non-type template parameter must have integer or enum type");
 			p = xmalloc(sizeof(*p));
 			p->is_pack = false;
@@ -4425,7 +4425,7 @@ param_done:
 		if (tok.kind == TGREATER)
 			break;
 		if (p->is_pack)
-			error(&tok.loc, "template parameter pack must be the last parameter");
+			error_code(E_TEMPLATE, &tok.loc, "template parameter pack must be the last parameter");
 		expect(TCOMMA, "',' or '>' in template parameter list");
 	}
 	}
@@ -4461,7 +4461,7 @@ param_done:
 		tmpl = ct;
 		next(); /* consume 'concept' */
 		if (tok.kind < TIDENT)
-			error(&tok.loc, "expected concept name after 'concept'");
+			error_code(E_SYNTAX, &tok.loc, "expected concept name after 'concept'");
 		tmpl->name = xmalloc(strlen(tokenstr(tok.kind)) + 1);
 		strcpy((char *)tmpl->name, tokenstr(tok.kind));
 		next(); /* consume the concept name */
@@ -4474,7 +4474,7 @@ param_done:
 			int cdepth = 0;
 			for (;;) {
 				if (tok.kind == TEOF)
-					error(&tok.loc,
+					error_code(E_CTYPE, &tok.loc,
 					    "unterminated concept definition '%s'",
 					    tmpl->name);
 				if (cdepth == 0 && tok.kind == TSEMICOLON)
@@ -4639,7 +4639,7 @@ param_done:
 		}
 	}
 	if (!tmpl->name)
-		error(&tok.loc, "unable to determine template function name");
+		error_code(E_DECL, &tok.loc, "unable to determine template function name");
 
 	*g_cpp_templates_end = tmpl;
 	g_cpp_templates_end = &tmpl->next;
@@ -4689,7 +4689,7 @@ cpp_tmpl_deduce(struct cpp_template *tmpl, struct expr *arglist,
 				struct expr *ev = eval(a);
 				if (!ev || ev->kind != EXPRCONST ||
 				    !(ev->type->prop & PROPINT))
-					error(&tok.loc,
+					error_code(E_TEMPLATE, &tok.loc,
 					    "non-type template argument must be a constant integer expression");
 				out[i] = ev->type;
 				if (nttp_vals)
@@ -4698,7 +4698,7 @@ cpp_tmpl_deduce(struct cpp_template *tmpl, struct expr *arglist,
 				out[i] = a->type;
 			}
 		} else {
-			error(&tok.loc, "too many arguments for template '%s'", tmpl->name);
+			error_code(E_SYNTAX, &tok.loc, "too many arguments for template '%s'", tmpl->name);
 		}
 		if (p)
 			p = p->next;
@@ -4706,7 +4706,7 @@ cpp_tmpl_deduce(struct cpp_template *tmpl, struct expr *arglist,
 	if (i < nfix)
 		return false; /* too few arguments for the fixed parameters */
 	if (i > 16)
-		error(&tok.loc, "too many arguments for template '%s'", tmpl->name);
+		error_code(E_SYNTAX, &tok.loc, "too many arguments for template '%s'", tmpl->name);
 	*nout = i;
 	return true;
 }
@@ -4824,7 +4824,7 @@ expand_concept_body(struct cpp_template *con, struct token *args,
 					break;
 			if (csub) {
 				if (depth >= MAX_CONSTRAINT_DEPTH)
-					error(&tok.loc,
+					error_code(E_TEMPLATE, &tok.loc,
 					    "requires-clause evaluation too deep: "
 					    "concept reference chain exceeds %d levels",
 					    MAX_CONSTRAINT_DEPTH);
@@ -4935,10 +4935,10 @@ eval_concept_use(struct token *c, size_t n, struct scope *bs)
 	size_t en;
 
 	if (n == 0 || c[0].kind < TIDENT)
-		error(&tok.loc, "requires-clause must name a concept");
+		error_code(E_TEMPLATE, &tok.loc, "requires-clause must name a concept");
 	exp = expand_constraint_tokens(c, n, bs, &en);
 	if (!exp || !en)
-		error(&tok.loc, "requires-clause must name a concept");
+		error_code(E_TEMPLATE, &tok.loc, "requires-clause must name a concept");
 
 	{
 		extern struct expr *expr(struct scope *);
@@ -4962,7 +4962,7 @@ eval_concept_use(struct token *c, size_t n, struct scope *bs)
 		next();
 		e = eval(e);
 		if (!e || !(e->type->prop & PROPINT) || e->kind != EXPRCONST)
-			error(&tok.loc,
+			error_code(E_TEMPLATE, &tok.loc,
 			    "requires-clause is not a constant boolean expression");
 		return e->u.constant.u != 0;
 	}
@@ -5521,7 +5521,7 @@ cpp_requires_expr(struct scope *s)
 	 * the stream positioned after it */
 	n = cpp_requires_span_len(&sp);
 	if (n == 0)
-		error(&tok.loc, "malformed requires-expression");
+		error_code(E_CTYPE, &tok.loc, "malformed requires-expression");
 	/* `after` is the first token past the requires-expression; the caller
 	 * resumes here.  Captured before the trial, because a failed trial
 	 * may leave the global token anywhere. */
@@ -5585,9 +5585,9 @@ cpp_tmpl_find_or_instantiate(struct scope *s, const char *name,
 	if (!tmpl)
 		return NULL;
 	if (tmpl->nparams > 16)
-		error(&tok.loc, "template '%s' has too many parameters", name);
+		error_code(E_SYNTAX, &tok.loc, "template '%s' has too many parameters", name);
 	if (!cpp_tmpl_deduce(tmpl, arglist, types, &nt, nttp_vals))
-		error(&tok.loc, "too few arguments for template '%s'", name);
+		error_code(E_TEMPLATE, &tok.loc, "too few arguments for template '%s'", name);
 
 	/* mangled name: name + "_" + type codes / NTTP values (e.g. max_i,
 	 * cpp20_nttp_42).  NTTP arguments are distinct by value, so the
@@ -5749,7 +5749,7 @@ cpp_tmpl_find_or_instantiate(struct scope *s, const char *name,
 			}
 		}
 		if (!found)
-			error(&tok.loc, "cannot locate function name in template '%s'", name);
+			error_code(E_DECL, &tok.loc, "cannot locate function name in template '%s'", name);
 
 		cur = tok;
 		tokpush(&cur, 1);
@@ -5763,7 +5763,7 @@ cpp_tmpl_find_or_instantiate(struct scope *s, const char *name,
 	{
 		bool cok = cpp_check_constraint(tmpl, bs);
 			if (!cok)
-			error(&tok.loc,
+			error_code(E_TEMPLATE, &tok.loc,
 			    "template '%s' instantiated with a type that does not satisfy its requires-clause",
 			    name);
 	}
@@ -5811,7 +5811,7 @@ cpp_tmpl_find_or_instantiate(struct scope *s, const char *name,
 			}
 		}
 		if (!decl(bs, NULL))
-			error(&tok.loc, "failed to instantiate template '%s'", name);
+			error_code(E_TEMPLATE, &tok.loc, "failed to instantiate template '%s'", name);
 		g_cpp_cexpr_tmpl_n = sv_n;
 		for (k = 0; k < sv_n; ++k) {
 			g_cpp_cexpr_tmpl_params[k] = sv_p[k];
@@ -5825,7 +5825,7 @@ cpp_tmpl_find_or_instantiate(struct scope *s, const char *name,
 
 	fd = scopegetdecl(bs, fnname, 1);
 	if (!fd || fd->kind != DECLFUNC)
-		error(&tok.loc, "template '%s' instantiation produced no function", name);
+		error_code(E_DECL, &tok.loc, "template '%s' instantiation produced no function", name);
 	/* re-register at file scope so later uses of the same instantiation
 	 * (and cross-function calls) resolve the symbol */
 	scopeputdecl(s, fd);
@@ -5966,7 +5966,7 @@ cpp_tmpl_class_do_inst(struct scope *s, struct cpp_template *tmpl,
 			}
 		}
 		if (!found)
-			error(&tok.loc, "cannot locate class name in template '%s'", tmpl->name);
+			error_code(E_TEMPLATE, &tok.loc, "cannot locate class name in template '%s'", tmpl->name);
 
 		/* replay `class Foo_i { ... }` to define the instantiated class.
 		 * rtoks stays alive (tokpush stores pointers) until cpp_class_decl
@@ -6001,7 +6001,7 @@ cpp_tmpl_class_do_inst(struct scope *s, struct cpp_template *tmpl,
 
 	t = scopegettag(&filescope, tag, 1);
 	if (!t)
-		error(&tok.loc, "class template '%s' instantiation produced no class", tmpl->name);
+		error_code(E_TEMPLATE, &tok.loc, "class template '%s' instantiation produced no class", tmpl->name);
 
 	ci = xmalloc(sizeof(*ci));
 	snprintf(ci->key, sizeof ci->key, "%s", key);
@@ -6037,14 +6037,14 @@ cpp_tmpl_class_instantiate(struct scope *s, const char *name)
 	if (!tmpl)
 		return NULL;
 	if (tmpl->nparams > 16)
-		error(&tok.loc, "template '%s' has too many parameters", name);
+		error_code(E_SYNTAX, &tok.loc, "template '%s' has too many parameters", name);
 
 	/* explicit template arguments `<T1, 42, ...>`: types for type
 	 * parameters, constant expressions for non-type parameters */
 	expect(TLESS, "after class template name");
 	do {
 		if (n >= tmpl->nparams)
-			error(&tok.loc, "too many template arguments for class template '%s'", name);
+			error_code(E_SYNTAX, &tok.loc, "too many template arguments for class template '%s'", name);
 		tq = QUALNONE;
 		toeval = NULL;
 		if (tmpl_param_is_nttp(tmpl, n)) {
@@ -6061,7 +6061,7 @@ cpp_tmpl_class_instantiate(struct scope *s, const char *name)
 	} while (tok.kind != TGREATER);
 	next(); /* consume '>' */
 	if (n < tmpl->nparams)
-		error(&tok.loc, "too few template arguments for class template '%s'", name);
+		error_code(E_TEMPLATE, &tok.loc, "too few template arguments for class template '%s'", name);
 
 	(void)p;
 	(void)key;
@@ -6092,7 +6092,7 @@ cpp_tmpl_class_ctad(struct scope *s, const char *name, struct expr *args)
 	if (!tmpl)
 		return NULL;
 	if (tmpl->nparams > 16)
-		error(&tok.loc, "template '%s' has too many parameters", name);
+		error_code(E_SYNTAX, &tok.loc, "template '%s' has too many parameters", name);
 
 	/* deduce one template argument per call argument, positionally */
 	for (p = tmpl->params, a = args; a && i < tmpl->nparams;
@@ -6114,7 +6114,7 @@ cpp_tmpl_class_ctad(struct scope *s, const char *name, struct expr *args)
 		types[i] = at;
 	}
 	if (i < tmpl->nparams)
-		error(&tok.loc,
+		error_code(E_TEMPLATE, &tok.loc,
 		    "cannot deduce template argument %d of '%s' (too few constructor arguments)",
 		    i + 1, name);
 
@@ -6184,7 +6184,7 @@ cpp_tmpl_member_pend(struct type *t, const char *name)
 		enum typequal tq = QUALNONE;
 		struct expr *toeval = NULL;
 		if (g_cpp_tmpl_member_nargs >= (int)countof(g_cpp_tmpl_member_args))
-			error(&tok.loc, "too many explicit template arguments");
+			error_code(E_SYNTAX, &tok.loc, "too many explicit template arguments");
 		g_cpp_tmpl_member_args[g_cpp_tmpl_member_nargs++] =
 		    typename(&filescope, &tq, &toeval);
 		if (tok.kind == TGREATER)
@@ -6232,17 +6232,17 @@ cpp_tmpl_member_instantiate(struct scope *s, struct expr *thisp,
 		return NULL;
 	tag = owner->u.structunion.tag;
 	if (!tag)
-		error(&tok.loc, "member template of an unnamed class is not supported");
+		error_code(E_TEMPLATE, &tok.loc, "member template of an unnamed class is not supported");
 
 	for (tmpl = g_cpp_templates; tmpl; tmpl = tmpl->next)
 		if (tmpl->is_member && tmpl->owner == owner &&
 		    strcmp(tmpl->name, name) == 0)
 			break;
 	if (!tmpl)
-		error(&tok.loc, "no template member function '%s' in class '%s'",
+		error_code(E_DECL, &tok.loc, "no template member function '%s' in class '%s'",
 		    name, tag);
 	if (tmpl->nparams > 16)
-		error(&tok.loc, "template member '%s' has too many parameters",
+		error_code(E_SYNTAX, &tok.loc, "template member '%s' has too many parameters",
 		    name);
 
 	/* explicit `<...>` args fill the leading parameters; the rest are
@@ -6256,7 +6256,7 @@ cpp_tmpl_member_instantiate(struct scope *s, struct expr *thisp,
 			types[i] = a->type;
 	}
 	if (i < tmpl->nparams)
-		error(&tok.loc,
+		error_code(E_TEMPLATE, &tok.loc,
 		    "too few template arguments for template member '%s'", name);
 
 	/* mangled member name + cache key: `get_i` / `Wrapper_get_i` (keyed
@@ -6342,7 +6342,7 @@ cpp_tmpl_member_instantiate(struct scope *s, struct expr *thisp,
 			}
 		}
 		if (!found)
-			error(&tok.loc, "cannot locate member name in template '%s'", name);
+			error_code(E_TEMPLATE, &tok.loc, "cannot locate member name in template '%s'", name);
 		cur = tok;
 		tokpush(&cur, 1);
 		tokpush(rtoks, rn);
@@ -6357,10 +6357,10 @@ cpp_tmpl_member_instantiate(struct scope *s, struct expr *thisp,
 
 		base = declspecs(bs, &sc, &fs, &align);
 		if (!base.type)
-			error(&tok.loc, "no type in template member declaration");
+			error_code(E_CTYPE, &tok.loc, "no type in template member declaration");
 		mt = declarator(bs, base, &dname, &align, NULL, false, NULL);
 		if (mt.type->kind != TYPEFUNC)
-			error(&tok.loc, "template member '%s' is not a function", name);
+			error_code(E_DECL, &tok.loc, "template member '%s' is not a function", name);
 		cpp_define_method(bs, mt.type, mname, tag, false,
 		    (sc & SCSTATIC) != 0, false);
 		/* cpp_define_method appends the encoded explicit parameter types
@@ -6382,7 +6382,7 @@ cpp_tmpl_member_instantiate(struct scope *s, struct expr *thisp,
 	 * declaration scope */
 	fd = scopegetdecl(owner->scope ? owner->scope : s, sym, 1);
 	if (!fd || fd->kind != DECLFUNC)
-		error(&tok.loc, "template member '%s' instantiation produced no function", name);
+		error_code(E_DECL, &tok.loc, "template member '%s' instantiation produced no function", name);
 
 	inst = xmalloc(sizeof(*inst));
 	snprintf(inst->key, sizeof inst->key, "%s", key);
@@ -6480,11 +6480,11 @@ cpp_lambda_expr(struct scope *s)
 	next(); /* consume '[' */
 	while (tok.kind != TRBRACK) {
 		if (tok.kind == TBAND)
-			error(&tok.loc, "reference capture '[&...]' is not supported yet (by-value capture only)");
+			error_code(E_CTYPE, &tok.loc, "reference capture '[&...]' is not supported yet (by-value capture only)");
 		if (tok.kind < TIDENT)
-			error(&tok.loc, "expected capture name in lambda capture list");
+			error_code(E_SYNTAX, &tok.loc, "expected capture name in lambda capture list");
 		if (ncap >= (int)countof(caps))
-			error(&tok.loc, "too many captures in lambda");
+			error_code(E_SYNTAX, &tok.loc, "too many captures in lambda");
 		caps[ncap].name = tokenstr(tok.kind);
 		caps[ncap].by_ref = false;
 		caps[ncap].d = scopegetdecl(s, caps[ncap].name, 1);
@@ -6511,7 +6511,7 @@ cpp_lambda_expr(struct scope *s)
 				g_cpp_member_class = NULL;
 				g_cpp_member_name = NULL;
 				g_cpp_member_const = false;
-				error(&tok.loc, "cannot capture variable '%s'",
+				error_code(E_DECL, &tok.loc, "cannot capture variable '%s'",
 				    caps[ncap].name);
 			}
 			caps[ncap].d = NULL;
@@ -6566,7 +6566,7 @@ cpp_lambda_expr(struct scope *s)
 	{
 		int bd = 0;
 		if (tok.kind != TLBRACE)
-			error(&tok.loc, "expected lambda body");
+			error_code(E_SYNTAX, &tok.loc, "expected lambda body");
 		for (;;) {
 			if (bn >= bcap) {
 				bcap = bcap ? bcap * 2 : 32;
@@ -6723,11 +6723,11 @@ cpp_lambda_expr(struct scope *s)
 
 	ct = scopegettag(&filescope, tagname, 1);
 	if (!ct)
-		error(&tok.loc, "lambda closure class '%s' was not created", tagname);
+		error_code(E_TEMPLATE, &tok.loc, "lambda closure class '%s' was not created", tagname);
 
 	/* --- construct the closure object (anonymous temporary) --- */
 	if (!curfunc)
-		error(&tok.loc, "lambda used outside of a function body is not supported");
+		error_code(E_DECL, &tok.loc, "lambda used outside of a function body is not supported");
 	tmp = mkdecl("tmp", DECLOBJECT, ct, QUALNONE, LINKNONE);
 	tmp->u.obj.storage = SDAUTO;
 	funcinit(curfunc, tmp, NULL, false); /* allocate storage */
@@ -7826,7 +7826,7 @@ cpp_constexpr_eval(struct expr *call)
 	if (nargs != fn->nparams)
 		return NULL;
 	if (g_cpp_cexpr_depth >= 64)
-		error(&tok.loc, "constexpr evaluation recursion too deep");
+		error_code(E_DECL, &tok.loc, "constexpr evaluation recursion too deep");
 
 	/* bind the parameters as integer constants and fold the body's
 	 * return expression */
@@ -7962,7 +7962,7 @@ cpp_if_constexpr(struct func *f, struct expr *cond, struct scope *s)
 		}
 	}
 	if (!have)
-		error(&tok.loc, "if constexpr condition is not a constant expression");
+		error_code(E_DECL, &tok.loc, "if constexpr condition is not a constant expression");
 	next(); /* consume ')' after the condition */
 	{
 		bool take_then = v != 0;
@@ -8006,7 +8006,7 @@ cpp_skip_branch(void)
 					break;
 				}
 			} else if (tok.kind == TEOF) {
-				error(&tok.loc, "unterminated 'if constexpr' branch");
+				error_code(E_DECL, &tok.loc, "unterminated 'if constexpr' branch");
 				break;
 			}
 			next();
@@ -8072,7 +8072,7 @@ cpp_struct_binding(struct func *f, struct scope *s, struct qualtype base)
 	next(); /* consume '[' */
 	while (tok.kind != TRBRACK) {
 		if (tok.kind < TIDENT || n >= (int)countof(names))
-			error(&tok.loc, "bad structured-binding name list");
+			error_code(E_DECL, &tok.loc, "bad structured-binding name list");
 		names[n++] = (char *)tokenstr(tok.kind);
 		next();
 		if (tok.kind == TRBRACK)
@@ -8081,22 +8081,22 @@ cpp_struct_binding(struct func *f, struct scope *s, struct qualtype base)
 	}
 	next(); /* consume ']' */
 	if (n == 0)
-		error(&tok.loc, "empty structured binding");
+		error_code(E_DECL, &tok.loc, "empty structured binding");
 	expect(TASSIGN, "after structured binding");
 	init = assignexpr(s);
 	if (!init || !init->type || init->type->kind == TYPEVOID ||
 	    init->type == &typeauto)
-		error(&tok.loc, "structured binding requires an object initializer");
+		error_code(E_DECL, &tok.loc, "structured binding requires an object initializer");
 	t = init->type;
 	if (t->kind != TYPESTRUCT && t->kind != TYPEUNION)
-		error(&tok.loc, "structured binding requires a class type");
+		error_code(E_CTYPE, &tok.loc, "structured binding requires a class type");
 	{
 		int nm = 0;
 		for (m = t->u.structunion.members; m; m = m->next)
 			if (m->name)
 				++nm;
 		if (nm != n)
-			error(&tok.loc,
+			error_code(E_DECL, &tok.loc,
 			    "structured binding names (%d) do not match member count (%d)",
 			    n, nm);
 	}

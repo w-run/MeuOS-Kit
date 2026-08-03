@@ -27,7 +27,7 @@ funclval(struct func *f, struct expr *e)
 	case EXPRIDENT:
 		d = e->u.ident.decl;
 		if (d->kind != DECLOBJECT && d->kind != DECLFUNC)
-			error(&tok.loc, "identifier '%s' is not an object or function", d->name);
+			error_code(E_DECL, &tok.loc, "identifier '%s' is not an object or function", d->name);
 		if (d == f->namedecl) {
 			fputs("data ", stdout);
 			emitname(d->value);
@@ -53,7 +53,7 @@ funclval(struct func *f, struct expr *e)
 		if (e->type->kind == TYPESTRUCT || e->type->kind == TYPEUNION)
 			lval.addr = funcexpr(f, e);
 		else
-			error(&tok.loc, "statement expression is not an lvalue");
+			error_code(E_STMT, &tok.loc, "statement expression is not an lvalue");
 		break;
 	case EXPRUNARY:
 		if (e->op == TMUL) {
@@ -64,12 +64,12 @@ funclval(struct func *f, struct expr *e)
 				lval.addr = funcinst(f, IADD, ptrclass(), lval.addr,
 				                     mkintconst(e->type->size));
 		} else {
-			error(&tok.loc, "expression is not an object");
+			error_code(E_CTYPE, &tok.loc, "expression is not an object");
 		}
 		break;
 	default:
 		if (e->type->kind != TYPESTRUCT && e->type->kind != TYPEUNION)
-			error(&tok.loc, "expression is not an object");
+			error_code(E_CTYPE, &tok.loc, "expression is not an object");
 		lval.addr = funcexpr(f, e);
 	}
 	return lval;

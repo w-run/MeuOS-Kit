@@ -67,7 +67,7 @@ label(struct func *f, struct scope *s)
 	case TCASE:
 		next();
 		if (!s->switchcases)
-			error(&tok.loc, "'case' label must be in switch");
+			error_code(E_STMT, &tok.loc, "'case' label must be in switch");
 		b = mkblock("switch_case");
 		funclabel(f, b);
 		i = intconstexpr(s, true);
@@ -77,9 +77,9 @@ label(struct func *f, struct scope *s)
 	case TDEFAULT:
 		next();
 		if (!s->switchcases)
-			error(&tok.loc, "'default' label must be in switch");
+			error_code(E_STMT, &tok.loc, "'default' label must be in switch");
 		if (s->switchcases->defaultlabel)
-			error(&tok.loc, "multiple 'default' labels");
+			error_code(E_STMT, &tok.loc, "multiple 'default' labels");
 		expect(TCOLON, "after 'default'");
 		s->switchcases->defaultlabel = mkblock("switch_default");
 		funclabel(f, s->switchcases->defaultlabel);
@@ -202,7 +202,7 @@ cpp_head_collect(struct tokbuf *h, int *colon, int *semi)
 	*semi = -1;
 	for (;;) {
 		if (tok.kind == TEOF)
-			error(&tok.loc, "unexpected end of file in 'for' header");
+			error_code(E_SYNTAX, &tok.loc, "unexpected end of file in 'for' header");
 		if (depth == 0 && tok.kind == TRPAREN) {
 			tb_push(h, tok);
 			next();
@@ -247,7 +247,7 @@ cpp_if_has_init(void)
 
 	for (;;) {
 		if (tok.kind == TEOF)
-			error(&tok.loc, "unexpected end of file in statement");
+			error_code(E_STMT, &tok.loc, "unexpected end of file in statement");
 		if (depth == 0 && tok.kind == TRPAREN)
 			break;
 		if (depth == 0 && tok.kind == TSEMICOLON)
@@ -279,7 +279,7 @@ body_buf_paren(struct tokbuf *b)
 	int depth = 0;
 	for (;;) {
 		if (tok.kind == TEOF)
-			error(&tok.loc, "unexpected end of file in statement");
+			error_code(E_STMT, &tok.loc, "unexpected end of file in statement");
 		tb_push(b, tok);
 		if (tok.kind == TLPAREN)
 			++depth;
@@ -430,7 +430,7 @@ cpp_range_for(struct scope *s, struct func *f)
 		    mname, sizeof mname) != NULL;
 	}
 	if (!is_array && !(has_begin && has_end))
-		error(&tok.loc, "range-based 'for' requires an array or a type with member 'begin()'/'end()'");
+		error_code(E_CTYPE, &tok.loc, "range-based 'for' requires an array or a type with member 'begin()'/'end()'");
 	if (is_array)
 		n = rt->size / rt->base->size;
 
@@ -649,7 +649,7 @@ stmt(struct func *f, struct scope *s)
 		}
 		t = e->type;
 		if (!(t->prop & PROPSCALAR))
-			error(&tok.loc, "controlling expression of if statement must have scalar type");
+			error_code(E_STMT, &tok.loc, "controlling expression of if statement must have scalar type");
 		if (constexpr_if) {
 			extern void cpp_if_constexpr(struct func *, struct expr *,
 			    struct scope *);
@@ -691,7 +691,7 @@ stmt(struct func *f, struct scope *s)
 		expect(TRPAREN, "after expression");
 
 		if (!(e->type->prop & PROPINT))
-			error(&tok.loc, "controlling expression of switch statement must have integer type");
+			error_code(E_STMT, &tok.loc, "controlling expression of switch statement must have integer type");
 		e = exprpromote(e);
 
 		swtch.root = NULL;
@@ -729,7 +729,7 @@ stmt(struct func *f, struct scope *s)
 		e = expr(s);
 		t = e->type;
 		if (!(t->prop & PROPSCALAR))
-			error(&tok.loc, "controlling expression of loop must have scalar type");
+			error_code(E_CTYPE, &tok.loc, "controlling expression of loop must have scalar type");
 		expect(TRPAREN, "after expression");
 
 		b[0] = mkblock("while_cond");
@@ -777,7 +777,7 @@ stmt(struct func *f, struct scope *s)
 		e = expr(s);
 		t = e->type;
 		if (!(t->prop & PROPSCALAR))
-			error(&tok.loc, "controlling expression of loop must have scalar type");
+			error_code(E_CTYPE, &tok.loc, "controlling expression of loop must have scalar type");
 		expect(TRPAREN, "after expression");
 
 		funcbranch(f, e, b[0], b[2]);
@@ -815,7 +815,7 @@ stmt(struct func *f, struct scope *s)
 			e = expr(s);
 			t = e->type;
 			if (!(t->prop & PROPSCALAR))
-				error(&tok.loc, "controlling expression of loop must have scalar type");
+				error_code(E_CTYPE, &tok.loc, "controlling expression of loop must have scalar type");
 			funcbranch(f, e, b[1], b[3]);
 			delexpr(e);
 		}
@@ -859,13 +859,13 @@ stmt(struct func *f, struct scope *s)
 			{
 				struct block *target = find_labeled_continue(name);
 				if (!target)
-					error(&tok.loc, "label '%s' for continue not found", name);
+					error_code(E_STMT, &tok.loc, "label '%s' for continue not found", name);
 				funcjmp(f, target);
 			}
 			next();
 		} else {
 			if (!s->continuelabel)
-				error(&tok.loc, "'continue' statement must be in loop");
+				error_code(E_STMT, &tok.loc, "'continue' statement must be in loop");
 			funcjmp(f, s->continuelabel);
 		}
 		expect(TSEMICOLON, "after 'continue' statement");
@@ -878,13 +878,13 @@ stmt(struct func *f, struct scope *s)
 			{
 				struct block *target = find_labeled_break(name);
 				if (!target)
-					error(&tok.loc, "label '%s' for break not found", name);
+					error_code(E_STMT, &tok.loc, "label '%s' for break not found", name);
 				funcjmp(f, target);
 			}
 			next();
 		} else {
 			if (!s->breaklabel)
-				error(&tok.loc, "'break' statement must be in loop or switch");
+				error_code(E_STMT, &tok.loc, "'break' statement must be in loop or switch");
 			funcjmp(f, s->breaklabel);
 		}
 		expect(TSEMICOLON, "after 'break' statement");
@@ -915,7 +915,7 @@ stmt(struct func *f, struct scope *s)
 					extern struct expr *mkunaryexpr(enum tokenkind,
 					    struct expr *);
 					if (!e->lvalue)
-						error(&tok.loc, "cannot return a non-lvalue as a reference");
+						error_code(E_CTYPE, &tok.loc, "cannot return a non-lvalue as a reference");
 					e = mkunaryexpr(TBAND, e);
 				}
 				e = exprassign(e, t->base);

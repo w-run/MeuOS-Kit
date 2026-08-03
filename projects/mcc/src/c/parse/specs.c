@@ -41,7 +41,7 @@ storageclass(enum storageclass *sc)
 	default: return 0;
 	}
 	if (!sc)
-		error(&tok.loc, "storage class not allowed in this declaration");
+		error_code(E_DECL, &tok.loc, "storage class not allowed in this declaration");
 	switch (*sc) {
 	case SCNONE:        allowed = ~SCNONE;           break;
 	case SCTHREADLOCAL: allowed = SCSTATIC|SCEXTERN; break;
@@ -50,7 +50,7 @@ storageclass(enum storageclass *sc)
 	default:            allowed = SCNONE;            break;
 	}
 	if (new & ~allowed)
-		error(&tok.loc, "invalid combination of storage class specifiers");
+		error_code(E_DECL, &tok.loc, "invalid combination of storage class specifiers");
 	*sc |= new;
 	next();
 
@@ -113,7 +113,7 @@ funcspec(enum funcspec *fs)
 		break;
 	}
 	if (!fs)
-		error(&tok.loc, "function specifier not allowed in this declaration");
+		error_code(E_DECL, &tok.loc, "function specifier not allowed in this declaration");
 	*fs |= new;
 	next();
 
@@ -160,13 +160,13 @@ tagspec(struct scope *s)
 	if (kind == TYPEENUM && consume(TCOLON)) {
 		et = declspecs(s, NULL, NULL, NULL).type;
 		if (!et)
-			error(&tok.loc, "no type in enum type specifier");
+			error_code(E_DECL, &tok.loc, "no type in enum type specifier");
 	}
 	if (tag)
 		t = scopegettag(s, tag, tok.kind != TLBRACE && tok.kind != TSEMICOLON);
 	if (t) {
 		if (t->kind != kind)
-			error(&tok.loc, "redeclaration of tag '%s' with different kind", tag);
+			error_code(E_REDEF, &tok.loc, "redeclaration of tag '%s' with different kind", tag);
 	} else {
 		if (kind == TYPEENUM) {
 			t = mktype(kind, PROPSCALAR|PROPARITH|PROPREAL|PROPINT);
@@ -217,7 +217,7 @@ tagspec(struct scope *s)
 			structdecl(s, &b);
 		} while (tok.kind != TRBRACE);
 		if (!t->u.structunion.members)
-			error(&tok.loc, "struct/union has no members");
+			error_code(E_CTYPE, &tok.loc, "struct/union has no members");
 		next();
 		if (!b.pack)
 			t->size = ALIGNUP(t->size, t->align);
@@ -243,19 +243,19 @@ tagspec(struct scope *s)
 			if (consume(TASSIGN)) {
 				e = eval(condexpr(s));
 				if (e->kind != EXPRCONST || !(e->type->prop & PROPINT))
-					error(&tok.loc, "expected integer constant expression");
+					error_code(E_SYNTAX, &tok.loc, "expected integer constant expression");
 				value = e->u.constant.u;
 				if (!t->base)
 					et = typehasint(&typeint, value, e->type->u.arith.issigned) ? &typeint : e->type;
 				else if (!typehasint(et, value, e->type->u.arith.issigned))
 					goto invalid;
 			} else if (value == 0 && !et->u.arith.issigned || value == 1ull << 63 && et->u.arith.issigned) {
-				error(&tok.loc, "no %ssigned integer type can represent enumerator value", et->u.arith.issigned ? "" : "un");
+				error_code(E_CTYPE, &tok.loc, "no %ssigned integer type can represent enumerator value", et->u.arith.issigned ? "" : "un");
 			} else if (!typehasint(et, value, et->u.arith.issigned)) {
 				if (t->base) {
 				invalid:
 					/* fixed underlying type */
-					error(&tok.loc, "enumerator '%s' value cannot be represented in underlying type", name);
+					error_code(E_CTYPE, &tok.loc, "enumerator '%s' value cannot be represented in underlying type", name);
 				}
 				sign = et->u.arith.issigned;
 				for (i = 0; i < countof(inttypes); ++i) {
@@ -298,7 +298,7 @@ tagspec(struct scope *s)
 						break;
 				}
 				if (i == countof(inttypes))
-					error(&tok.loc, "no integer type can represent all enumerator values");
+					error_code(E_CTYPE, &tok.loc, "no integer type can represent all enumerator values");
 				t->base = et;
 				for (d = enumconsts; d; d = d->next)
 					d->type = t;
@@ -358,11 +358,11 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 					struct type *ct2;
 					struct token ccolon, comp;
 					if (tok.kind != TCOLONCOLON)
-						error(&tok.loc, "expected '::' after namespace name");
+						error_code(E_SYNTAX, &tok.loc, "expected '::' after namespace name");
 					ccolon = tok;
 					next(); /* consume '::' */
 					if (tok.kind < TIDENT)
-						error(&tok.loc, "expected name after '::'");
+						error_code(E_SYNTAX, &tok.loc, "expected name after '::'");
 					comp = tok;
 					ct2 = scopegettag(cur, tokenstr(tok.kind), 1);
 					if (ct2 && (ct2->kind == TYPESTRUCT ||
@@ -408,7 +408,7 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 					struct type *it;
 					next();
 					if (tok.kind < TIDENT)
-						error(&tok.loc, "expected type name after '::'");
+						error_code(E_SYNTAX, &tok.loc, "expected type name after '::'");
 					it = scopegettag(s, tokenstr(tok.kind), 1);
 					if (it && (it->kind == TYPESTRUCT || it->kind == TYPEUNION)) {
 						t = it;
@@ -457,7 +457,7 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 				++ntypes;
 				expect(TRPAREN, "to close _Atomic type name");
 			} else {
-				error(&tok.loc, "expected type name in '_Atomic(...)'");
+				error_code(E_SYNTAX, &tok.loc, "expected type name in '_Atomic(...)'");
 			}
 			continue;
 		}
@@ -478,7 +478,7 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 			break;
 		case TSHORT:
 			if (ts & SPECSHORT)
-				error(&tok.loc, "duplicate 'short'");
+				error_code(E_DECL, &tok.loc, "duplicate 'short'");
 			ts |= SPECSHORT;
 			next();
 			break;
@@ -489,7 +489,7 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 			break;
 		case TLONG:
 			if (ts & SPECLONG2)
-				error(&tok.loc, "too many 'long'");
+				error_code(E_SYNTAX, &tok.loc, "too many 'long'");
 			if (ts & SPECLONG)
 				ts |= SPECLONG2;
 			ts |= SPECLONG;
@@ -507,13 +507,13 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 			break;
 		case TSIGNED:
 			if (ts & SPECSIGNED)
-				error(&tok.loc, "duplicate 'signed'");
+				error_code(E_DECL, &tok.loc, "duplicate 'signed'");
 			ts |= SPECSIGNED;
 			next();
 			break;
 		case TUNSIGNED:
 			if (ts & SPECUNSIGNED)
-				error(&tok.loc, "duplicate 'unsigned'");
+				error_code(E_DECL, &tok.loc, "duplicate 'unsigned'");
 			ts |= SPECUNSIGNED;
 			next();
 			break;
@@ -576,7 +576,7 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 		/* _Atomic as a qualifier is handled by typequal() above,
 		 * and _Atomic(type-name) is handled by the pre-check above.
 		 * This case should only be reached for invalid placements. */
-		error(&tok.loc, "'_Atomic' may not appear here; use '_Atomic(T)' or '_Atomic T'");
+		error_code(E_SYNTAX, &tok.loc, "'_Atomic' may not appear here; use '_Atomic(T)' or '_Atomic T'");
 		break;
 		case TSTRUCT:
 		case TUNION:
@@ -606,13 +606,13 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 		/* 6.7.5 Alignment specifier */
 		case TALIGNAS:
 			if (!align)
-				error(&tok.loc, "alignment specifier not allowed in this declaration");
+				error_code(E_DECL, &tok.loc, "alignment specifier not allowed in this declaration");
 			next();
 			expect(TLPAREN, "after 'alignas'");
 			other = typename(s, NULL, NULL);
 			i = other ? other->align : intconstexpr(s, false);
 			if (i & i - 1 || i > INT_MAX)
-				error(&tok.loc, "invalid alignment: %llu", i);
+				error_code(E_DECL, &tok.loc, "invalid alignment: %llu", i);
 			if (i > *align)
 				*align = i;
 			expect(TRPAREN, "to close 'alignas' specifier");
@@ -682,7 +682,7 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 			break;
 		}
 		if (ntypes > 1 || (t && ts))
-			error(&tok.loc, "multiple types in declaration specifiers");
+			error_code(E_DECL, &tok.loc, "multiple types in declaration specifiers");
 	}
 done:
 	/* Strip complex/imaginary modifier bits before the type-combination
@@ -723,7 +723,7 @@ done:
 	case SPECDOUBLE:                        t = &typedouble;  break;
 	case SPECLONG|SPECDOUBLE:               t = &typeldouble; break;
 	default:
-		error(&tok.loc, "invalid combination of type specifiers");
+		error_code(E_DECL, &tok.loc, "invalid combination of type specifiers");
 	}
 	if (tq & QUALRESTRICT) {
 		/* C23 6.7.4.1p2 */
@@ -731,24 +731,24 @@ done:
 		while (other->kind == TYPEARRAY)
 			other = other->base;
 		if (!other || other->kind != TYPEPOINTER)
-			error(&tok.loc, "'restrict' applied to non-pointer type");
+			error_code(E_CTYPE, &tok.loc, "'restrict' applied to non-pointer type");
 		if (other->base->kind == TYPEFUNC)
-			error(&tok.loc, "'restrict' applied to function pointer");
+			error_code(E_DECL, &tok.loc, "'restrict' applied to function pointer");
 	}
 	if (!t && (tq || sc && *sc || fs && *fs))
-		error(&tok.loc, "declaration has no type specifier");
+		error_code(E_DECL, &tok.loc, "declaration has no type specifier");
 	/* _Complex / _Imaginary type wrapping */
 	if (ts & SPECCOMPLEX) {
 		if (t && (t->prop & PROPFLOAT))
 			t = mkcomplextype(t);
 		else
-			error(&tok.loc, "_Complex requires a floating point type");
+			error_code(E_CTYPE, &tok.loc, "_Complex requires a floating point type");
 	}
 	if (ts & SPECIMAGINARY) {
 		if (t && (t->prop & PROPFLOAT))
 			t = mkimaginarytype(t);
 		else
-			error(&tok.loc, "_Imaginary requires a floating point type");
+			error_code(E_CTYPE, &tok.loc, "_Imaginary requires a floating point type");
 	}
 	/*
 	TODO: consider delaying attribute parsing to declarator(),

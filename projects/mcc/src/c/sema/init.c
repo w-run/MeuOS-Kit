@@ -69,7 +69,7 @@ subobj(struct initparser *p, struct type *t, unsigned long long off)
 {
 	/* the subobject could be incomplete if it's a flexible array member */
 	if (t->incomplete)
-		error(&tok.loc, "initializer specified for incomplete type");
+		error_code(E_INCOMPLETE, &tok.loc, "initializer specified for incomplete type");
 	off += p->sub->offset;
 	if (++p->sub == p->obj + countof(p->obj))
 		fatal("internal error: too many designators");
@@ -113,12 +113,12 @@ designator(struct scope *s, struct initparser *p)
 		switch (tok.kind) {
 		case TLBRACK:
 			if (t->kind != TYPEARRAY)
-				error(&tok.loc, "index designator is only valid for array types");
+				error_code(E_CTYPE, &tok.loc, "index designator is only valid for array types");
 			next();
 			p->sub->u.idx = intconstexpr(s, false) * t->base->size;
 			if (p->sub->u.idx >= t->size) {
 				if (!t->incomplete)
-					error(&tok.loc, "index designator is larger than array length");
+					error_code(E_CTYPE, &tok.loc, "index designator is larger than array length");
 				t->size = p->sub->u.idx + t->base->size;
 			}
 			expect(TRBRACK, "for index designator");
@@ -126,11 +126,11 @@ designator(struct scope *s, struct initparser *p)
 			break;
 		case TPERIOD:
 			if (t->kind != TYPESTRUCT && t->kind != TYPEUNION)
-				error(&tok.loc, "member designator only valid for struct/union types");
+				error_code(E_CTYPE, &tok.loc, "member designator only valid for struct/union types");
 			next();
 			name = expect(TIDENT, "for member designator");
 			if (!findmember(p, name))
-				error(&tok.loc, "%s has no member named '%s'", t->kind == TYPEUNION ? "union" : "struct", name);
+				error_code(E_CTYPE, &tok.loc, "%s has no member named '%s'", t->kind == TYPEUNION ? "union" : "struct", name);
 			break;
 		default:
 			expect(TASSIGN, "after designator");
@@ -189,7 +189,7 @@ advance(struct initparser *p)
 			break;
 		}
 		if (p->sub == p->cur)
-			error(&tok.loc, "too many initializers for type");
+			error_code(E_DECL, &tok.loc, "too many initializers for type");
 	}
 }
 
@@ -210,9 +210,9 @@ parseinit(struct scope *s, struct type *t)
 	p.init = NULL;
 	p.last = &p.init;
 	if (t->incomplete && t->kind != TYPEARRAY)
-		error(&tok.loc, "initializer specified for incomplete type");
+		error_code(E_INCOMPLETE, &tok.loc, "initializer specified for incomplete type");
 	if (t->kind == TYPEARRAY && t->base->size == 0)
-		error(&tok.loc, "initializer specified for variable length array type");
+		error_code(E_DECL, &tok.loc, "initializer specified for variable length array type");
 	for (;;) {
 		if (p.cur) {
 			if (tok.kind == TLBRACK || tok.kind == TPERIOD)
@@ -225,12 +225,12 @@ parseinit(struct scope *s, struct type *t)
 		if (consume(TLBRACE)) {
 			if (consume(TRBRACE)){
 				if (p.sub->type->incomplete)
-					error(&tok.loc, "array of unknown size has empty initializer");
+					error_code(E_DECL, &tok.loc, "array of unknown size has empty initializer");
 				goto next;
 			}
 			if (p.cur == p.sub) {
 				if (p.cur->type->prop & PROPSCALAR)
-					error(&tok.loc, "nested braces around scalar initializer");
+					error_code(E_DECL, &tok.loc, "nested braces around scalar initializer");
 				else
 					assert(p.cur->type->kind == TYPEARRAY);
 				focus(&p);
@@ -249,7 +249,7 @@ parseinit(struct scope *s, struct type *t)
 				base = t->base;
 				expr = expr->base;
 				if (!(base->prop & PROPCHAR && expr->type->base->prop & PROPCHAR) && !typecompatible(base, expr->type->base))
-					error(&tok.loc, "cannot initialize array with string literal of different width");
+					error_code(E_DECL, &tok.loc, "cannot initialize array with string literal of different width");
 				if (t->incomplete)
 					t->size = expr->type->size;
 				goto add;
@@ -267,7 +267,7 @@ parseinit(struct scope *s, struct type *t)
 				if (t->kind == TYPEPOINTER && t->isref) {
 					extern struct expr *mkunaryexpr(enum tokenkind, struct expr *);
 					if (!expr->lvalue && !t->isrref)
-						error(&tok.loc, "cannot bind non-lvalue to reference");
+						error_code(E_CTYPE, &tok.loc, "cannot bind non-lvalue to reference");
 					expr = mkunaryexpr(TBAND, expr);
 				}
 				expr = exprassign(expr, t);
@@ -292,7 +292,7 @@ parseinit(struct scope *s, struct type *t)
 				if (tok.kind != TRBRACE)
 					break;
 			} else if (tok.kind != TRBRACE) {
-				error(&tok.loc, "expected ',' or '}' after initializer");
+				error_code(E_DECL, &tok.loc, "expected ',' or '}' after initializer");
 			}
 			next();
 			p.sub = p.cur;

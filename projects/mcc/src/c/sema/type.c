@@ -129,7 +129,7 @@ mkbitinttype(int width, bool sign)
 	t->u.arith.issigned = sign;
 	t->u.arith.width = width;
 	if (width < 1 + sign || width > 64)
-		error(&tok.loc, "invalid %s _BitInt width %d", sign ? "signed" : "unsigned", width);
+		error_code(E_DECL, &tok.loc, "invalid %s _BitInt width %d", sign ? "signed" : "unsigned", width);
 
 	/* calculate byte size */
 	t->size = 1;

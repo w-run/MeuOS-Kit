@@ -167,7 +167,7 @@ namedval(const char *name, size_t n)
 	    && memcmp(name, "LATIN SMALL LETTER ", 19) == 0
 	    && name[19] >= 'A' && name[19] <= 'Z')
 		return name[19] - 'A' + 'a';
-	error(NULL, "unsupported named universal character '%.*s'", (int)n, name);
+	error_code(E_SYNTAX, NULL, "unsupported named universal character '%.*s'", (int)n, name);
 }
 
 static int
@@ -207,10 +207,10 @@ ident(struct scanner *s)
 						break;
 					}
 					if (nc == EOF || nc == '\n') {
-						error(&s->loc, "unterminated named universal character");
+						error_code(E_SYNTAX, &s->loc, "unterminated named universal character");
 					}
 					if (nlen == sizeof(name) - 1)
-						error(&s->loc, "named universal character is too long");
+						error_code(E_SYNTAX, &s->loc, "named universal character is too long");
 					name[nlen++] = nc;
 				}
 				ucn_val = namedval(name, nlen);
@@ -225,18 +225,18 @@ ident(struct scanner *s)
 				if (c2 == '{') {
 					/* C++23 P2290 delimited form \u{...} / \U{...}. */
 					if ((d = hexdigval(s->chr = getc(s->file))) < 0)
-						error(&s->loc, "empty delimited universal character name");
+						error_code(E_SYNTAX, &s->loc, "empty delimited universal character name");
 					while (d >= 0) {
 						if (ucn_val > 0x0fffffff)
-							error(&s->loc, "universal character name out of range");
+							error_code(E_SYNTAX, &s->loc, "universal character name out of range");
 						ucn_val = ucn_val * 16 + d;
 						d = hexdigval(s->chr = getc(s->file));
 					}
 					if (s->chr != '}')
-						error(&s->loc, "unterminated delimited universal character name");
+						error_code(E_SYNTAX, &s->loc, "unterminated delimited universal character name");
 					s->chr = getc(s->file);
 					if (ucn_val > 0x10ffff)
-						error(&s->loc, "universal character name out of range");
+						error_code(E_SYNTAX, &s->loc, "universal character name out of range");
 					bufaddutf8(&s->buf, ucn_val);
 					continue;
 				}
@@ -443,15 +443,15 @@ delimited(struct scanner *s, const char *what)
 
 	nextchar(s);
 	if (hexdigval(s->chr) < 0)
-		error(&s->loc, "empty delimited %s", what);
+		error_code(E_SYNTAX, &s->loc, "empty delimited %s", what);
 	while ((d = hexdigval(s->chr)) >= 0) {
 		if (val > 0x0fffffff)
-			error(&s->loc, "%s out of range", what);
+			error_code(E_SYNTAX, &s->loc, "%s out of range", what);
 		val = val * 16 + d;
 		nextchar(s);
 	}
 	if (s->chr != '}')
-		error(&s->loc, "unterminated delimited %s", what);
+		error_code(E_SYNTAX, &s->loc, "unterminated delimited %s", what);
 	nextchar(s);
 	return val;
 }
@@ -465,13 +465,13 @@ namedchar(struct scanner *s)
 	size_t n = 0;
 
 	if (s->chr != '{')
-		error(&s->loc, "expected '{' after \\N");
+		error_code(E_SYNTAX, &s->loc, "expected '{' after \\N");
 	nextchar(s);
 	while (s->chr != '}') {
 		if (s->chr == '\n' || s->chr == EOF)
-			error(&s->loc, "unterminated named universal character");
+			error_code(E_SYNTAX, &s->loc, "unterminated named universal character");
 		if (n == sizeof(name) - 1)
-			error(&s->loc, "named universal character is too long");
+			error_code(E_SYNTAX, &s->loc, "named universal character is too long");
 		name[n++] = s->chr;
 		nextchar(s);
 	}
@@ -499,13 +499,13 @@ escape(struct scanner *s)
 			for (val = 0, i = 0; i < n; ++i) {
 				d = hexdigval(s->chr);
 				if (d < 0)
-					error(&s->loc, "invalid universal character name");
+					error_code(E_SYNTAX, &s->loc, "invalid universal character name");
 				val = val * 16 + d;
 				nextchar(s);
 			}
 		}
 		if (val > 0x10ffff)
-			error(&s->loc, "universal character name out of range");
+			error_code(E_SYNTAX, &s->loc, "universal character name out of range");
 		rewriteescape(s, start, val, false, narrow);
 	} else if (s->chr == 'N') {
 		nextchar(s);
@@ -517,7 +517,7 @@ escape(struct scanner *s)
 			return;
 		}
 		if (!isxdigit(s->chr))
-			error(&s->loc, "invalid hexadecimal escape sequence");
+			error_code(E_SYNTAX, &s->loc, "invalid hexadecimal escape sequence");
 		do nextchar(s);
 		while (isxdigit(s->chr));
 	} else if (isodigit(s->chr)) {
@@ -530,7 +530,7 @@ escape(struct scanner *s)
 	} else if (strchr("'\"?\\abfnrtv", s->chr)) {
 		nextchar(s);
 	} else {
-		error(&s->loc, "invalid escape sequence");
+		error_code(E_SYNTAX, &s->loc, "invalid escape sequence");
 	}
 }
 
@@ -548,9 +548,9 @@ charconst(struct scanner *s)
 			nextchar(s);
 			return TCHARCONST;
 		case '\n':
-			error(&s->loc, "newline in character constant");
+			error_code(E_SYNTAX, &s->loc, "newline in character constant");
 		case EOF:
-			error(&s->loc, "EOF in character constant");
+			error_code(E_SYNTAX, &s->loc, "EOF in character constant");
 		default:
 			nextchar(s);
 			break;
@@ -572,9 +572,9 @@ stringlit(struct scanner *s)
 			nextchar(s);
 			return TSTRINGLIT;
 		case '\n':
-			error(&s->loc, "newline in string literal");
+			error_code(E_SYNTAX, &s->loc, "newline in string literal");
 		case EOF:
-			error(&s->loc, "EOF in string literal");
+			error_code(E_SYNTAX, &s->loc, "EOF in string literal");
 		default:
 			nextchar(s);
 			break;
@@ -598,7 +598,7 @@ comment(struct scanner *s)
 			last = s->chr;
 			nextchar(s);
 			if (s->chr == EOF)
-				error(&s->loc, "EOF in comment");
+				error_code(E_SYNTAX, &s->loc, "EOF in comment");
 		} while (last != '*' || s->chr != '/');
 		nextchar(s);
 		break;
