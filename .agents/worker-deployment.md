@@ -67,9 +67,11 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 |---|---|---|---|---|---|---|
 | alice | reasoning | worktree-tmp-alice (自 worktree-requires-wip) | /tmp/mxx-wt-alice | 续作 requires 表达式四类需求 | **in_progress** | c9ca880 起点 |
 | bella | lite | worktree-tmp-bella (自 worktree-mxx-work) | /tmp/mxx-wt-bella | m++ 测试矩阵扩充 + 门禁验证 | **completed**（1ed8c53 已合入主线 dd78366） | 16 个 test/cpp 文件 |
-| chloe | lite | 只读隔离副本 | /tmp/mcciso-chloe | 定位 chibicc B 类真 bug（常量折叠窄化 + va_end 类型检查） | **in_progress** | 只读不 push |
+| chloe | lite | 只读隔离副本 | /tmp/mcciso-chloe | 定位 chibicc B 类真 bug（常量折叠窄化 + va_end 类型检查） | **completed**（报告已收） | 只读不 push |
 | diana | lite | worktree-tmp-diana (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试扩充 | **in_progress** | 3020962 起点 |
 | eve | lite | worktree-tmp-eve (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵扩充 | **completed**（02d6684 已合入主线 b4cad7e） | 33 个 test/cpp 文件 |
+| grace | lite | worktree-tmp-grace (自 worktree-mxx-work) | /tmp/mxx-wt-grace | chibicc B 类两 bug 实施（**竞争**） | **in_progress** | c622f05 起点 |
+| hazel | lite | worktree-tmp-hazel (自 worktree-mxx-work) | /tmp/mxx-wt-hazel | chibicc B 类两 bug 实施（**竞争**） | **in_progress** | c622f05 起点 |
 
 ### 会话中断恢复速查（当前团队）
 1. `git fetch origin`（在 /workspace/MeuOS-Kit）
