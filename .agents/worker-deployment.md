@@ -68,7 +68,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 | alice | reasoning | worktree-tmp-alice-cpp (自 worktree-mxx-work@d0a90c9) | /tmp/mxx-wt-alice | cpp_parse 组 D1/D4/D2/E2/E3 修复（requires 续作已完成） | **completed**（已合入主线） | a3808b9 |
 | bella | lite | worktree-tmp-bella (自 worktree-mxx-work) | /tmp/mxx-wt-bella | m++ 测试矩阵扩充 + 门禁验证 | **completed**（1ed8c53 已合入主线 dd78366） | 16 个 test/cpp 文件 |
 | chloe | lite | 只读隔离副本 | /tmp/mcciso-chloe | 定位 chibicc B 类真 bug（常量折叠窄化 + va_end 类型检查） | **completed**（报告已收） | 只读不 push |
-| diana | lite | worktree-tmp-diana (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试扩充 | **completed**（db1451b 已合入主线 294e5c2） | 11 个 test/c23 文件 + 发现 F1-F3 |
+| diana | lite | worktree-tmp-diana-pic (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试扩充 + check-pic-verify 修复 | **completed**（db1451b C23 已合入 294e5c2；6db1691 PIC 已 push） | 11 个 test/c23 文件 + F1-F3 + i386/riscv64 GOT |
 | eve | lite | worktree-tmp-eve (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵扩充 | **completed**（02d6684 已合入主线 b4cad7e） | 33 个 test/cpp 文件 |
 | grace | lite | worktree-tmp-grace-sema + worktree-tmp-grace-loc (自 worktree-mxx-work@e010519) | /tmp/mxx-wt-grace | sema/decl 组 E1/E4/E5/E6 修复 + E4 行号定位到函数体 } | **completed**（已合入主线） | a8167d9 |
 | hazel | lite | worktree-tmp-hazel-c23 (自 worktree-mxx-work@d0a90c9) | /tmp/mxx-wt-hazel | C23 constexpr 组：F1/F2/F3 | **completed**（8e5aae3 已 push origin/worktree-tmp-hazel-c23，门禁全绿，已合入主线） | 8e5aae3 |
@@ -116,6 +116,15 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 
 ### 文档同步（cpp20/cpp23-gaps.md、c23-review.md）
 - 状态：**已合入主线**（edb854b + eb8372d），已闭环
+
+### check-pic-verify 修复（i386/riscv64 GOT，-fPIC）
+- 状态：**已修复**（diana 6db1691，分支 worktree-tmp-diana-pic，已 push）
+- 根因：`i386_emit.c` SExt Oaddr 恒发绝对地址 `movl $sym`（不查 T.pic）；`riscv64_emit.c` loadaddr SExt 恒发 `la`（非 GOT）
+- 修复：
+  - i386：`i386_targ.c` 无条件保留 %ebx（SysV PIC 基址寄存器）；prologue 在 T.pic 下 push %ebx + `call __x86.get_pc_thunk.bx` + `addl $_GLOBAL_OFFSET_TABLE_, %ebx`（R_386_GOTPC）；SExt 地址加载在 T.pic 下改 `sym@GOT(%ebx)`（R_386_GOT32X）
+  - riscv64：SExt 地址加载在 T.pic 下改 `auipc %got_pcrel_hi + ld %pcrel_lo(label)`（label 配对 R_RISCV_GOT_HI20 + R_RISCV_PCREL_LO12_I，gas 不接受 %got_pcrel_lo 修饰符）；extern 调用加 `@plt`
+  - 非 PIC 路径不变（i386 绝对地址 / riscv64 plain `la`）
+- 验证：check-pic-verify 全绿（x86_64/aarch64/riscv64/i386）；check-c99 / check-c-mir / check-i386 无回归；i386 非 PIC 运行时（IA32 模拟）通过
 
 ---
 
