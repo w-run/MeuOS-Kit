@@ -221,3 +221,68 @@ MeuOS 的 Linux 兼容层**不是把 Linux 内核搬进来**，而是「在 capa
 - [x] 多系统参照差异表 + 自主取舍结论。
 - [x] 待决清单含架构级裁决（D1 沙箱绕过为首要裁决项）。
 - [x] 标注「本结论非最终，doc-sync 合成 pass 回填满跨域一致性」。
+
+---
+
+## 第三轮裁决回写（已采纳，自主决策）
+
+> 本回合写：general-purpose-23（lite/hy3），指挥官模式独立修订员。依据 `14-裁决-安全与命名空间.md`（C3）、`15-裁决-兼容与启动.md`（C4/C6 + D1/D2/D6）、`17-裁决-调试与兼容.md`（C9/C10）、`18-第二轮收敛摘要.md`，及团队指挥已自主采纳 C1–C14 的指令。
+> 本节为**修订式追加**：原 §6 待决清单保留作历史记录，本节将 D1/D2/D3/D4/D5/D6/D7 的「待决」状态**升级为「已采纳」**（不删不改原文字，仅追加定论）。
+
+### R3-1 C3 回写：Linux 全局路径树 = 每进程合成投影（采纳 `14` §C3 投影规范）
+
+- 内核**不存在全局 `/`**。兼容层对外呈现的「全局路径树」是**每进程 namespace 绑定经 Linux 路径语义投影出的合成视图**：`/` = 该进程 Job 声明的 rootdir cap（多为 sysroot 子卷 cap），由 spawn 注入，非内核全局根。
+- `/proc`/`/sys`/`/dev` 为**按需生成的生成式目录 cap**：查询时由兼容层/统一命名空间按 Linux 视图生成，不落地真实文件；两进程「共享某挂载」经各自 namespace 绑定指向**同一目录 cap**（capability 级共享）实现，而非共享一张可变表。
+- 「Linux 语义 ↔ MeuOS 内部」映射规范（采纳 `14` 裁决 6 表，落本文件 §3.2/§4.1 的投影口径）：
+
+  | Linux 语义 | MeuOS 内部 | 兼容层动作 |
+  |------------|------------|-----------|
+  | `open("/abs/path")` | 当前进程 namespace 绑定表 capability 查找 | 未绑定前缀 → `ENOENT`/`EACCES` |
+  | 全局 `/` | 进程 namespace 的 `/` 绑定 = Job rootdir cap | spawn 注入，非内核全局 |
+  | `/proc`/`/sys`/`/dev` | 生成式目录 cap | 查询时按需生成 Linux 视图 |
+  | `chroot`/`pivot_root` | 重绑进程 namespace `/` 到某子目录 cap | 受 capability 约束，非全局操作 |
+  | `mount` | 注入一条 namespace 绑定（mount-capability） | 受 Service Registry + mount-cap 约束 |
+  | `getuid()==0` | 合成视图，authority = Job capability 集 | root 为视图非权限 |
+
+- 与 `14`（C3）、`06` §4.1 协同：内部模型为每进程独立 namespace，spawn 时 COW 继承父/Job 模板（非共享可变根），B 的 ergonomics 经模板继承获得。
+
+### R3-2 C4 回写：兼容层不击穿 Day1 安全边界（D1/D2/D6 升级「已采纳」）
+
+- **D1（首要裁决项）：禁止全局/运行期「关闭沙箱」开关 → 已采纳。** 默认 deny-by-default 的 pledge/unveil 是 Day1 唯一基线；放宽仅经 **per-package manifest** 的 broad-unveil / capability-grant，且受三道封顶闸约束：① 来源闸（仅包清单声明、系统侧审发，非运行期用户可切换）；② 账本闸（每次放宽记入该 Job 资源账本，可审计可撤销）；③ 类上限闸（只能扩展到该包类别被授权的能力集合，不能 mint 跨类 capability，如网络类包不可获设备 MMIO capability）。**fail-closed**：任何未声明或越类的访问照常 `EACCES`/越界终止，无「运行期授权绕过」API。
+- **D2：fork 全量 CoW 起步（VMO 子快照 + 单线程限定），多线程 fork 显式拒绝 → 已采纳。** fork = 父地址空间 VMO 建 child（CoW）+ 句柄/Job 账本投影继承；**仅限单线程进程**，多线程 fork 返回 `EINVAL`/`ENOSYS`（拒绝码待 A9 拍板，但拒绝语义已定）。`meu_spawn` 永远是原生快路径，fork 永远是慢速兼容路径；M0–M1（mkit 子集直跑）不依赖 fork，M2 起启用全量 CoW。优化后置：对「fork 即 exec」黄金路径后续上 `posix_spawn` 快路径。
+- **D6：uid/gid 纯合成视图、零权限附着；setuid = 受限 spawn + 显式 capability，永不提权 → 已采纳。** `getuid()/geteuid()/getgid()` 返回每 Job/进程的合成 uid（默认 0 作 root 视图），该视图**不解锁任何 capability**；起步单 uid 视图，扩展支持 Job manifest 声明式合成 uid/gid 集合（纯标识/视图）；跨 uid 访问（kill/ptrace/signal）映射为 capability/Job 成员判定（非 uid 相等比较）；setuid 位 = spawn 子进程（不同合成 uid 视图）+ 包 manifest 显式授予的具体 capability，无则特权操作 `EACCES`/`EPERM`。
+- §3.5 逃生通道据此收口：放宽的不是「内核权限」而是「该 Job 的 capability 投影范围」，受类上限封顶、记 Job 账本、可审计可撤销，绝无「关沙箱」语义。
+
+### R3-3 C10 回写：ptrace 支持档位 C（真原语 + capability 守护，08 边界定稿）
+
+- 兼容层**不默认授予调试权**（与 D1 同构）。`ptrace` 内部无「全局默认」对应物。
+- 选定**档位 C**：提供真 ptrace 式原语但全受 capability 守护：
+  - 单步执行 / 读寄存器 / 读内存 / 读栈 / 设观察点 = **`DBG_ATTACH`**（原生控制能力，非事件订阅）；
+  - 任意内存改写 / 写寄存器 / 写断点（patch 代码）= **`DBG_POKE`**（单列显式、绝不默认、绝不与 `DBG_ATTACH` 捆绑、授予可审计可 revoke）；
+  - `strace` = 经 `DBG_TRACE` 事件订阅等价实现（更优、更低开销）；
+  - `gdb`/`lldb` 在 `DBG_ATTACH` 下可观测/单步/回溯，仅「写断点/set 变量」需 `DBG_POKE`，缺失时具体操作 `EPERM` 但 gdb 仍可加载观测。
+- **原型期以 QEMU gdbstub 作完整调试力替代通道**：该调试权位于 VM 边界（谁控制 QEMU 谁有完整调试力），**不进入 MeuOS capability 模型**；原型/内核 bring-up 阶段开发者调试体验与 Linux gdb 等价，不污染内部模型。
+- 据此修订原 §7「不翻译」清单：`ptrace` 由「全功能 ENOSYS」改为「受 `DBG_ATTACH`/`DBG_POKE` 守护的档位 C 部分支持」（见 §7-修订注）。`/proc/<pid>/` 读映射为 inspect 子树 `DBG_INSPECT`，维持 deny 默认。
+
+### R3-4 C11–C14 回写：D3/D4/D5/D7 升级「已采纳」
+
+- **D3（C11）：32 位 Linux 二进制范围** → 已采纳：原型期**仅 64 位 + mkit 子集直跑**；i386/arm 用户态 32 位**按需求评估，不承诺全量 glibc 32 位**；先 64 位、mkit 子集优先（与 `15` C6 / `21` 自举路径协同）。
+- **D4（C12）：syscall 覆盖基线** → 已采纳：先固化 **mkit 子集 direct-mapped 全集**为基线（Phase 0 全绿），通用 glibc 程序按 Phase 1→3 按需补齐（常见 syscall 子集：IO/进程/基础信号/IPC）；**基线随 M 里程碑滚动文档化**，兼容 ABI 仅声明子集稳、子集外 `ENOSYS`（与 `23` §1 协同）。
+- **D5（C13）：`/proc`/`/sys` 生成策略** → 已采纳：生成式目录 cap、按需生成 Linux 视图、不落地真实文件；`/proc/<pid>/` 映射 inspect 子树；**默认最小暴露**，性能边界实测定（原型期最小集 pid/self/stat/maps），与 `12` inspect 子树协同基准（与 `14` §C3、`17` §C9 已覆盖一致）。
+- **D7（C14）：对外 `uname` 版本号** → 已采纳：内核**返回 MeuOS 自主版本号（非伪造 Linux）**；兼容层可经 manifest 提供「呈现为」值供老程序兼容，但**内核真相为 MeuOS**；具体对外字符串由兼容层 manifest 配置（与 `23` §7 协同：对外稳定锚点需存在且可控）。
+
+### §7-修订注（ptrace 边界，不改动原 §7 正文）
+
+> 原 §7「不翻译/显式不兼容」将 `ptrace` 全功能列入 `ENOSYS`。依 C10（档位 C）与 `17` §C10，修订口径为：**`ptrace` 受 `DBG_ATTACH`（读/单步/观测）与 `DBG_POKE`（改写）守护的部分支持**；单步/读内存/读寄存器/设观察点为 `DBG_ATTACH`，任意内存/寄存器改写须 `DBG_POKE`（永不默认）；`strace` 走事件订阅等价。原 `ENOSYS` 仅保留于「无对应 capability 且未被授予」的写实路径，以及仍不兼容的深度 `ioctl`/`perf`/`netlink` 等。
+
+> 呼应索引：`14`（C3 投影规范）、`15`（C4/D1/D2/D6）、`17`（C9/C10）、`18`（第二轮收敛）、`23`（ABI/版本）、`06`（统一命名空间）。本回写为追加定论，原 §6 待决清单保留作历史，doc-sync 合成 pass 可据本节回填一致性。
+
+---
+
+## 引用澄清（来自 24）
+
+> 来源：`24-参考系统深度专项.md` §② **失真 7**（低优先级，原指向 `06` 命名空间归属差异）。指令：若 08 涉及 Fuchsia 命名空间参照，追加澄清。本文件 §5 多系统参照表列 Fuchsia「故意不兼容 Linux，靠 POSIX 层(fdio)」，且 §3.2/§4.1 涉及命名空间投影，故据此澄清。
+
+- **失真 7 要点**：Fuchsia 的每进程命名空间由**组件框架（component framework / appmgr）**组装，而非由 FS 服务自身做根聚合。`24` 指出 `06` §3.6 对比表未显式点出该归属差异（`06` §4.1 已自陈「比 Fuchsia 多了 FS 服务做根聚合者」，但对比表未外显）。
+- **08 澄清（MeuOS 命名空间组装归属）**：MeuOS 命名空间**由 spawn / Job 组装（类组件框架），非 FS 服务单方面组装**。即每进程的 `path → 节点能力` 绑定在 spawn 时由监督者按 Job manifest 注入 + COW 继承父/Job 模板，与 Fuchsia「组件框架组装」同构；FS 服务在 MeuOS 中是**根聚合者 + mount-capability 委托子树**（与 `06` §4.1 一致），但**绑定表的组装权在 spawn/Job，不在 FS 服务单方面**。这既区别于 Fuchsia（组件框架组装）、也消除 `06` 误读风险（FS 服务单方面组装），明确「组装」与「根聚合/委托」是两层不同职责。
+- 本澄清与 C3（`14` §C3）一致：内部模型为每进程独立 namespace，spawn COW 继承模板；兼容层投影出的「全局路径树」是每进程合成视图。不影响 08 任何原有裁决结论。

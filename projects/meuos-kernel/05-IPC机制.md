@@ -275,3 +275,51 @@ MeuOS 用 spawn 模型（内建监督、资源账本 Day 1）替代传统 fork/e
 ---
 
 > 文档状态：规划 / 调研稿。待与「07-安全模型」「04-进程与调度」「09-启动与初始化」协同后定稿。
+
+---
+
+## 第三轮裁决回写（已采纳，自主决策）
+
+> 本节为第三轮规划「查缺补漏」的裁决回写。以下将属于本文（05-IPC机制）的已采纳裁决以「已采纳」定稿追加，**仅追加、不删改**既有章节。呼应文件：`14-裁决-安全与命名空间.md`（C3）、`17-裁决-调试与兼容.md`（C9-A / C9-B）、`18-第二轮收敛摘要.md`（R 系）。
+
+### 已采纳裁决 C3（Service Registry / 命名 与每进程 namespace 对齐）
+
+- **采纳结论**：统一命名空间为每进程独立模型、内核无全局 `/`（见 14 §C3）；本文 §4.4 Service Registry 是「内核级服务命名表」，其命名与 08 的 Linux 路径树投影必须对齐——Service Registry 的 `name` 是 MeuOS 内部 capability 级名字，**不是全局文件系统路径**；兼容层把 Linux 路径树投影为每进程 namespace 绑定时，Service Registry 查询属于该绑定体系之一环。
+- **对本文具体修订**：
+  - §4.4 Service Registry「与 capability 安全融合」补一句：服务名本身是可声明资源，且**不与任何全局 `/` 耦合**；多 realm / 多沙箱下服务名按 realm 隔离（待 A7 拍板），`service_connect` 只可见本 realm 注册项。
+  - §4.5 端到端融合点补：namespace 绑定可引用服务目录 cap；mount = 注入绑定，受 Service Registry + mount-capability 约束（呼应 14 §C3 连带影响）。
+- **与 14 / 18 呼应**：本文 §5 待决 4（Service Registry 与命名空间隔离）据此收敛为「每进程 / 每 realm 视图」，与 C3 同构；残余仅 realm 边界粒度（A7）。
+
+### 已采纳裁决 C9-A（调试权为 capability，守护 IPC 调试 / introspect 通道）
+
+- **采纳结论**（细节在 `17`）：调试权是一组 capability（`DBG_*` 共 6 right，含拆出的 `DBG_POKE`）；生产态默认**全 deny**（mkit 与 glibc 一致）；dev/prod 差异靠 spawn / Job manifest 的 `debug_policy` 声明属性，**非全局开关**。
+- **对本文具体修订**（仅当本文涉及调试 / introspect 通道时）：
+  - 若 Service Registry 暴露「调试 / inspect 服务」发现，或新增任何 introspect 通道，必须经 `DBG_*` capability 守护：注册 / 连接调试服务需持对应 `DBG_*` right，默认 deny。
+  - §4.5「所有四个原语的内核对象都是 capability」统一口径延伸至调试 introspect 端点：`DBG_*` 是 capability right 位图（07 §4.1）的扩展，IPC 调试接口受此守护，与本文「端点即 capability」原则一致。
+  - 与 `12-调试与可观测性` 的 inspect 通道协同：inspect 读取归类 `DBG_INSPECT`（deny 默认），经 Service Registry 暴露的 inspect 端点同样受该 right 约束。
+
+### 已采纳裁决 C9-B（异常传播与 EventPort 对齐）
+
+- **采纳结论**（细节在 `17`）：异常事件内核一次性生成、copy 语义多播给监督者 + 持权调试器；监督者决策不可抑制，调试器仅收副本、有界冻结。
+- **对本文具体修订**：
+  - §4.2 EventPort 的 `EVFILT_PROC`（pid）filter 是与异常传播对接的入口：进程崩溃 / 退出经异常 channel 多播，监督者经 `DBG_CRASHDUMP` 订阅、调试器经 `DBG_ATTACH` 收副本；EventPort 本身只承载「事件就绪」通知，不承载异常决策权。
+  - §4.1 Channel 若经 Channel 投递崩溃 dump / 异常（即 04 的 exception channel 复用 Channel 模型），其多播 + copy 语义遵循 17 C9-B，调试器持有的是副本且受 `DBG_ATTACH` 约束。
+- **与 17 呼应**：异常多播的 right 校验（监督者 `DBG_CRASHDUMP` 默认订阅、调试器 `DBG_ATTACH` 仅副本）以 17 为准；本文只承接「异常事件经 IPC 原语投递」的传输层落点。
+
+### 本文开放议题收敛提示
+
+- §5 待决 4（Service Registry 与命名空间隔离）→ C3 收敛（每进程 / 每 realm 视图）；残余 realm 边界粒度待 A7。
+- §5 待决其余（SHM 边界、cap transfer 拷贝语义、CHAN filter 细节、futex 语义、fastpath）与本轮裁决无直接冲突，维持开放待原型基准。
+
+---
+
+## 引用澄清（来自 24）
+
+> 核验 `24-参考系统深度专项.md` §② 对 `01`–`12` 的引用失真清单（失真 1–7）。
+
+- **结论**：`24` §② 的 7 条失真**全部指向 `06`（失真 1/2/3/5/7）与 `07`（失真 4/6）**，未对 `04` / `05` 提出任何失真修正。
+- **一致性确认**：`24` 对本文的正面引用与本文一致、无需修正：
+  - `24` §1.4 指明 `05` §3.1 借 seL4 rendezvous + badge + reply capability + fastpath、与 Zircon datagram 融合为 MeuOS Channel（`05` §4.1）——与本文 §3.1 / §4.1 一致。
+  - `24` §3 决策映射表「seL4 IPC fastpath + badge + reply cap → `05` §3.1/§4.1 Channel」——一致。
+  - `24` §4 自主点「Job 配额 + capability 边界 + 句柄表三者同源挂在 Job 上 Day 1……对应 `04` §4.4」——与本文 §4.4 一致。
+- **处置**：`04` / `05` 无需据 `24` §② 做失真回写；仅在本文显式澄清，避免读者误以为存在未修正的引用偏差。
