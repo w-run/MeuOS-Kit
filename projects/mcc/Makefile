@@ -226,9 +226,10 @@ check-c23-neg: $(BIN)
 check-c-mir: $(BIN)
 	@sh test/mir_matrix.sh ./$(BIN)
 
-check-driver: $(BIN)
+check-driver: $(BIN) $(MPP_BIN)
 	sh test/driver/sysroot.sh ./$(BIN)
 	sh test/driver/feature-regress.sh ./$(BIN)
+	sh test/driver/cli-args.sh ./$(MPP_BIN) ./$(BIN)
 
 # mcc-mt-integrate: verify MT_AS/MT_LD/MT_AR redirect mcc to the MeuOS toolchain
 # (mt/as, mt/ld) instead of the host cc.  SKIPs gracefully when
