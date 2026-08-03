@@ -102,6 +102,26 @@ ppinit(void)
 	 * calling it after next() would discard the first token and silently
 	 * produce empty output. */
 	ppdefine("__STDC__", "1");
+	/* -std=<standard> (semantic): define the standard version macros the
+	 * chosen mode mandates.  g_std_mode is 0 unless -std= was given, so
+	 * the historical behavior (no __STDC_VERSION__/__cplusplus) is the
+	 * default. */
+	{
+		extern int g_std_mode;
+		switch (g_std_mode) {
+		case 2:  ppdefine("__STDC_VERSION__", "199901L"); break; /* c99  */
+		case 3:  ppdefine("__STDC_VERSION__", "201112L"); break; /* c11  */
+		case 4:  ppdefine("__STDC_VERSION__", "201710L"); break; /* c17  */
+		case 5:  ppdefine("__STDC_VERSION__", "202311L"); break; /* c23  */
+		case 6:  ppdefine("__cplusplus", "199711L"); break;      /* c++98*/
+		case 7:  ppdefine("__cplusplus", "201103L"); break;      /* c++11*/
+		case 8:  ppdefine("__cplusplus", "201402L"); break;      /* c++14*/
+		case 9:  ppdefine("__cplusplus", "201703L"); break;      /* c++17*/
+		case 10: ppdefine("__cplusplus", "202002L"); break;      /* c++20*/
+		case 11: ppdefine("__cplusplus", "202302L"); break;      /* c++23*/
+		default: break;
+		}
+	}
 	next();
 }
 

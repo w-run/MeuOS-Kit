@@ -81,6 +81,11 @@ int g_cpp_func_consteval;
  * enclosing call is evaluated). */
 int g_cpp_in_consteval_body;
 
+/* -std=<standard> language mode (semantic): 0 = unspecified (default,
+ * historical behavior), then c89/c99/c11/c17/c23 then c++98..c++23.
+ * Consumed by ppinit() to define __STDC_VERSION__/__cplusplus. */
+int g_std_mode;
+
 /* Global target features bitmask (MT_FEATURE_*), set by -march=native or
  * -march=x86-64-vN. 0 = baseline only. Used by backend emit to gate ISA
  * levels (second phase); for now it records the user's intent. */
@@ -133,6 +138,7 @@ mcc_main(int argc, char *argv[])
 {
 	struct array inputs = {0}, incdirs = {0}, libdirs = {0}, libs = {0};
 	struct array defines = {0}, undefs = {0};
+	struct array wa_args = {0}, wl_args = {0};  /* -Wa,/-Wl, passthrough */
 	bool pponly = false, emit_asm_only = false, compile_only = false;
 	bool verbose = false, nostdinc = false, nostdlib = false, nodefaultlibs = false;
 	bool static_link = false, shared = false, pic = false, pie = false;
@@ -194,13 +200,91 @@ mcc_main(int argc, char *argv[])
 		/* --version / --help: true long-only options */
 		if (strcmp(a, "--version") == 0) { print_version(); exit(0); }
 		if (strcmp(a, "--help") == 0) { usage_long(); exit(0); }
+		/* --verbose: alias for -v (print each executed driver command) */
+		if (strcmp(a, "--verbose") == 0) { verbose = true; continue; }
+		/* --color[=auto|always|never]: diagnostic color control.
+		 * Default (auto) colors stderr only when it is a tty. */
+		if (strcmp(a, "--color") == 0) {
+			extern int g_diag_color;
+			g_diag_color = 1;
+			continue;
+		}
+		if (strncmp(a, "--color=", 8) == 0) {
+			extern int g_diag_color;
+			const char *v = a + 8;
+			if (strcmp(v, "auto") == 0)
+				g_diag_color = -1;
+			else if (strcmp(v, "always") == 0)
+				g_diag_color = 1;
+			else if (strcmp(v, "never") == 0)
+				g_diag_color = 0;
+			else
+				fatal("unknown --color mode '%s' (use auto/always/never)", v);
+			continue;
+		}
+		/* -x <lang>: force the input language, overriding the driver's
+		 * default (mcc=C, m++=C++). */
+		if (strcmp(a, "-x") == 0 || strncmp(a, "-x", 2) == 0 && a[2]) {
+			char *lang = ARGVAL(a + 2);
+			if (strcmp(lang, "c") == 0 || strcmp(lang, "c-header") == 0 ||
+			    strcmp(lang, "cpp-output") == 0)
+				g_lang = 0;
+			else if (strcmp(lang, "c++") == 0 ||
+			    strcmp(lang, "c++-header") == 0 ||
+			    strcmp(lang, "c++-cpp-output") == 0)
+				g_lang = 1;
+			else
+				fatal("unknown language '%s' for -x (use c or c++)", lang);
+			continue;
+		}
+		/* -Wa,<args> / -Wl,<args>: pass assembler/linker options through
+		 * to the host toolchain (accepted; forwarded verbatim). */
+		if (strncmp(a, "-Wa,", 4) == 0) {
+			arrayaddptr(&wa_args, a + 4);
+			continue;
+		}
+		if (strncmp(a, "-Wl,", 4) == 0) {
+			arrayaddptr(&wl_args, a + 4);
+			continue;
+		}
 
 		/* whole-arg multi-letter options (double-dash standard form;
 		 * single-dash gcc forms are normalized by arg_normalize()).
 		 * Category-prefixed options (-W<w>, -f<f>, -m<m>, -M<d>) stay
 		 * single-dash and are handled below. */
 	if (strncmp(a, "--std=", 6) == 0) {
-		/* recorded: mcc is C11-flavoured regardless */
+		/* -std=<standard>: select the language mode.  Maps to the
+		 * standard version macros via g_std_mode (ppinit). */
+		const char *s = a + 6;
+		if (strcmp(s, "c89") == 0 || strcmp(s, "c90") == 0 ||
+		    strcmp(s, "gnu89") == 0 || strcmp(s, "iso9899:1990") == 0)
+			g_std_mode = 1;
+		else if (strcmp(s, "c99") == 0 || strcmp(s, "c9x") == 0 ||
+		    strcmp(s, "gnu99") == 0 || strcmp(s, "iso9899:1999") == 0)
+			g_std_mode = 2;
+		else if (strcmp(s, "c11") == 0 || strcmp(s, "c1x") == 0 ||
+		    strcmp(s, "gnu11") == 0 || strcmp(s, "iso9899:2011") == 0)
+			g_std_mode = 3;
+		else if (strcmp(s, "c17") == 0 || strcmp(s, "c18") == 0 ||
+		    strcmp(s, "gnu17") == 0 || strcmp(s, "iso9899:2017") == 0)
+			g_std_mode = 4;
+		else if (strcmp(s, "c23") == 0 || strcmp(s, "c2x") == 0 ||
+		    strcmp(s, "gnu23") == 0 || strcmp(s, "iso9899:2024") == 0)
+			g_std_mode = 5;
+		else if (strcmp(s, "c++98") == 0 || strcmp(s, "c++03") == 0)
+			g_std_mode = 6;
+		else if (strcmp(s, "c++11") == 0 || strcmp(s, "c++0x") == 0)
+			g_std_mode = 7;
+		else if (strcmp(s, "c++14") == 0 || strcmp(s, "c++1y") == 0)
+			g_std_mode = 8;
+		else if (strcmp(s, "c++17") == 0 || strcmp(s, "c++1z") == 0)
+			g_std_mode = 9;
+		else if (strcmp(s, "c++20") == 0 || strcmp(s, "c++2a") == 0)
+			g_std_mode = 10;
+		else if (strcmp(s, "c++23") == 0 || strcmp(s, "c++2b") == 0)
+			g_std_mode = 11;
+		else
+			fatal("unknown -std= value '%s'", s);
 		continue;
 	}
 	if (strcmp(a, "--static") == 0) { static_link = true; continue; }
@@ -245,7 +329,17 @@ mcc_main(int argc, char *argv[])
 			fatal("unknown warning group '%s' (use all/portable/style/performance/pedantic)", grp);
 		continue;
 	}
-	if (a[1] == 'W') continue;   /* other -Wxxx warning flags */
+	if (a[1] == 'W') {
+		/* fine-grained -W control: -Wno-error / -Wno-all disable the
+		 * corresponding groups; other -Wxxx flags are accepted */
+		if (strcmp(a, "-Wno-error") == 0) {
+			warn_as_error = false;
+			warn_level &= ~WARN_ERROR;
+		} else if (strcmp(a, "-Wno-all") == 0) {
+			warn_level &= ~WARN_ALL;
+		}
+		continue;   /* other -Wxxx warning flags */
+	}
 	if (strncmp(a, "-ftls-model=", 12) == 0) {
 		const char *val = a + 12;
 		if (strcmp(val, "global-dynamic") == 0)
@@ -258,7 +352,18 @@ mcc_main(int argc, char *argv[])
 			fatal("unknown TLS model '%s'", val);
 		continue;
 	}
-	if (a[1] == 'f') continue;   /* -fxxx feature flags */
+	if (a[1] == 'f') {
+		/* -f/-fno- feature flags: the ones with a backend switch are
+		 * wired; everything else is accepted (no-op) for gcc/clang
+		 * compatibility instead of being silently dropped. */
+		if (strcmp(a, "-fomit-frame-pointer") == 0)
+			g_force_fp = 1;
+		else if (strcmp(a, "-fno-omit-frame-pointer") == 0)
+			g_force_fp = 0;
+		else if (strcmp(a, "-fno-strict-aliasing") == 0)
+			; /* accepted: no TBAA pass to disable */
+		continue;
+	}
 	if (a[1] == 'm') {           /* -march=, -mcpu=, -mfpu=, -mfloat-abi= */
 		if (strncmp(a, "-march=", 7) == 0) {
 			const char *march_val = a + 7;
@@ -397,6 +502,7 @@ mcc_main(int argc, char *argv[])
 		case 'E': pponly = true; break;
 		case 'S': emit_asm_only = true; break;
 		case 'c': compile_only = true; break;
+		case 'p': if (strcmp(a, "-pg") == 0) break; /* gprof profiling: accepted (no-op) */
 		case 'o': output = ARGVAL(a + 2); break;
 		case 't': target = ARGVAL(a + 2); break;  /* alias for -target */
 		case 'v': verbose = true; break;
@@ -533,7 +639,7 @@ mcc_main(int argc, char *argv[])
 				usage();
 			run_host_link(&inputs, output ? output : "a.out", verbose,
 				&libdirs, &libs, static_link, shared, pie, nostdlib,
-				nodefaultlibs, meuos_specs, target);
+				nodefaultlibs, meuos_specs, target, &wl_args);
 			return 0;
 		}
 	}
@@ -786,7 +892,7 @@ mcc_main(int argc, char *argv[])
 			run_host_cc(asm_tmp_path, outpath, true, verbose,
 			            &libdirs, &libs, static_link, shared, pie,
 			            nostdlib, nodefaultlibs,
-			            meuos_specs, target);
+			            meuos_specs, target, &wa_args, &wl_args);
 		} else {
 			if (!outpath)
 				outpath = "a.out";
@@ -794,7 +900,7 @@ mcc_main(int argc, char *argv[])
 			run_host_cc(asm_tmp_path, outpath, false, verbose,
 			            &libdirs, &libs, static_link, shared, pie,
 			            nostdlib, nodefaultlibs,
-			            meuos_specs, target);
+			            meuos_specs, target, &wa_args, &wl_args);
 		}
 		unlink(asm_tmp_path);
 
