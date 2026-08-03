@@ -15,6 +15,8 @@ mz_compress(const void *in, size_t il, void **r, size_t *rl, int c, int lv)
     case MZ_CODEC_LZ77:
     case MZ_CODEC_AUTO:
         return mz_compress_lz77(in, il, r, rl, lv);
+    case MZ_CODEC_DEFLATE:
+        return mz_deflate_compress(in, il, r, rl);
     default:
         return MZ_ERR_CODEC;
     }
@@ -29,6 +31,8 @@ mz_decompress(const void *in, size_t il, void **r, size_t *rl, int c)
     case MZ_CODEC_LZ77:
     case MZ_CODEC_AUTO:
         return mz_decompress_lz77(in, il, r, rl);
+    case MZ_CODEC_DEFLATE:
+        return mz_deflate_decompress(in, il, r, rl);
     default:
         return MZ_ERR_CODEC;
     }

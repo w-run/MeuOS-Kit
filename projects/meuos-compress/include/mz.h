@@ -8,6 +8,7 @@
 #define MZ_CODEC_LZ77      1
 #define MZ_CODEC_LZ77_HUFF 2
 #define MZ_CODEC_MEUOS     3   /* meuos-compress 统一算法引擎 */
+#define MZ_CODEC_DEFLATE   4   /* RFC 1951 DEFLATE */
 
 /* Compression levels */
 #define MZ_LEVEL_FASTEST   1
@@ -101,10 +102,6 @@ int mz_tans_decompress(const unsigned char *in, size_t inlen,
 int mz_compress_meuos(const void *in, size_t il, void **r, size_t *rl, int lv);
 int mz_decompress_meuos(const void *in, size_t il, void **r, size_t *rl);
 
-/* Combo pipeline: LZ77 + entropy coding */
-int mz_compress_meuos(const void *in, size_t il, void **r, size_t *rl, int lv);
-int mz_decompress_meuos(const void *in, size_t il, void **r, size_t *rl);
-
 /* Solid compression */
 struct mz_solid_ctx;
 int mz_solid_start(struct mz_solid_ctx **ctx, int level);
@@ -129,5 +126,42 @@ uint32_t mz_crc32_final(uint32_t crc);
 uint32_t mz_adler32_init(void);
 uint32_t mz_adler32_update(uint32_t adler, const void *data, size_t len);
 uint32_t mz_adler32_final(uint32_t adler);
+
+/* ===================================================================
+ * DEFLATE — RFC 1951
+ * =================================================================== */
+
+int mz_deflate_compress(const void *in, size_t inlen, void **out, size_t *outlen);
+int mz_deflate_decompress(const void *in, size_t inlen, void **out, size_t *outlen);
+
+/* ===================================================================
+ * Gzip — RFC 1952
+ * =================================================================== */
+
+int mz_gzip_compress(const void *in, size_t inlen, void **out, size_t *outlen);
+int mz_gzip_decompress(const void *in, size_t inlen, void **out, size_t *outlen);
+
+/* ===================================================================
+ * PKZIP — archive format reader
+ * =================================================================== */
+
+struct mz_zip_entry {
+    char name[512];
+    uint32_t crc32;
+    uint32_t compressed_size;
+    uint32_t uncompressed_size;
+    uint16_t method;
+    uint32_t local_header_offset;
+};
+
+struct mz_zip_reader;
+
+int  mz_zip_reader_open(struct mz_zip_reader **reader, const void *data, size_t len);
+void mz_zip_reader_close(struct mz_zip_reader *reader);
+int  mz_zip_reader_count(struct mz_zip_reader *reader);
+const struct mz_zip_entry *mz_zip_reader_entry(struct mz_zip_reader *reader, int idx);
+int  mz_zip_reader_find(struct mz_zip_reader *reader, const char *name);
+int  mz_zip_reader_extract(struct mz_zip_reader *reader, int idx,
+                           void **out_data, size_t *out_len);
 
 #endif
