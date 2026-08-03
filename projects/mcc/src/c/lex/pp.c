@@ -89,6 +89,10 @@ struct condframe {
 };
 static struct array condstack;
 
+/* Set while ppdefine() synthesizes a -D / builtin definition, so define()
+ * can skip the C 6.10.3p2 redefinition diagnostic for those. */
+static bool definefromcmdline;
+
 void
 ppinit(void)
 {
@@ -155,6 +159,8 @@ macroequal(struct macro *m1, struct macro *m2)
 		return false;
 	for (t1 = m1->token, t2 = m2->token; t1 < m1->token + m1->ntoken; ++t1, ++t2) {
 		if (t1->kind != t2->kind)
+			return false;
+		if ((t1->lit == NULL) != (t2->lit == NULL))
 			return false;
 		if (t1->lit && strcmp(t1->lit, t2->lit) != 0)
 			return false;
@@ -281,12 +287,14 @@ define(void)
 	struct macro *m, *other;
 	struct macroparam *p;
 	struct array params = {0}, repl = {0};
+	struct location nameloc;
 	size_t i;
 
 	m = xmalloc(sizeof(*m));
 	m->expanded = NULL;
 	m->nexpanded = 0;
 	ident = tok.kind;
+	nameloc = tok.loc;
 	m->name = tokencheck(&tok, TPPIDENT, "after #define");
 	m->hide = false;
 	t = arrayadd(&repl, sizeof(*t));
@@ -351,9 +359,16 @@ define(void)
 	i = ident - TPPIDENT;
 	other = arraysetptr(&macros, i, m);
 	if (other) {
-		/* C11 6.10.3p2: redefinition with different token sequences
-		 * is a constraint violation.  chibicc silently allows it;
-		 * match that behavior for compatibility. */
+		/* C11 6.10.3p2: an identifier currently defined as a macro may
+		 * be redefined only by a definition with an identical spelling
+		 * of the replacement list (and parameter names).  A benign
+		 * duplicate is accepted silently; anything else is diagnosed.
+		 *
+		 * Command-line (-D) and builtin definitions are exempt: they
+		 * are meant to seed/override what the source later defines,
+		 * which is what GCC and clang do as well. */
+		if (!definefromcmdline && !macroequal(other, m))
+			error_code(E_REDEF, &nameloc, "'%s' redefined with a different replacement list", m->name);
 		macrodel(other);
 	}
 }
@@ -970,8 +985,10 @@ ppdefine(const char *name, const char *value)
 	if (!f)
 		fatal("fmemopen failed for -D%s", name);
 	cookie = scanpushisolated("<command-line>", f);
+	definefromcmdline = true;
 	scan(&tok);   /* read macro name */
 	define();     /* reads body, leaves tok == TNEWLINE */
+	definefromcmdline = false;
 	while (tok.kind != TEOF)
 		scan(&tok);
 	scanpopisolated(cookie);
@@ -984,6 +1001,7 @@ directive(void)
 	struct location newloc;
 	enum ppflags oldflags;
 	enum tokenkind kind;
+	unsigned long long linenum;
 
 	scan(&tok);
 	if (tok.kind == TNEWLINE)
@@ -1249,7 +1267,12 @@ directive(void)
 		scan(&tok);
 		tokencheck(&tok, TNUMBER, "after #line");
 	line:
-		newloc.line = strtoull(tok.lit, NULL, 0);
+		/* C 6.10.4: the operand is the line number of the *next* source
+		 * line.  scanner->loc.line is a 0-based counter that is bumped
+		 * when the newline is consumed, and __LINE__ reports loc.line+1,
+		 * so store n-1 here to avoid an off-by-one skew. */
+		linenum = strtoull(tok.lit, NULL, 0);
+		newloc.line = linenum ? linenum - 1 : 0;
 		newloc.col = 1;
 		scan(&tok);
 		newloc.file = tok.loc.file;
