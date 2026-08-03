@@ -404,6 +404,35 @@ char *tokenstr(enum tokenkind);
 char *tokencheck(const struct token *, enum tokenkind, const char *);
 void diagloc(const struct location *);
 noreturn void error(const struct location *, const char *, ...);
+
+/* Diagnostic error codes (E####).  E_GENERIC is the fallback for
+ * diagnostics that do not yet carry an assigned code. */
+enum errcode {
+	E_GENERIC    = 0,  /* uncategorized */
+	E_SYNTAX     = 1,  /* malformed syntax: expected X, saw Y */
+	E_UNDECLARED = 2,  /* undeclared identifier */
+	E_TYPE       = 3,  /* type mismatch / invalid operands */
+	E_REDEF      = 4,  /* redefinition of a name/tag/member/enumerator */
+};
+
+/* Coded diagnostics.  error_tok_code/error_fixit render the caret across
+ * the whole token span (width derived from the token text); error() and
+ * error_code use a single caret at the location.  error_fixit appends an
+ * inline "note: <fix>" with its own caret after the primary diagnostic. */
+void error_code(enum errcode, const struct location *, const char *, ...);
+void error_tok_code(enum errcode, const struct token *, const char *, ...);
+void error_fixit(enum errcode, const struct token *, const char *,
+    const char *, ...);
+
+/* JSON multi-error collection: the top-level parse loop arms g_err_recovery
+ * (a jump buffer) and error() longjmps to it after emitting each collected
+ * error, so parsing can resume at the next top-level item. */
+void err_sync(void);
+extern int g_error_count;
+extern int g_error_limit;
+extern jmp_buf g_err_recovery;
+extern int g_err_recovery_set;
+
 void cc_warn(const struct location *, int, const char *, ...) __attribute__((format(printf, 3, 4)));
 extern int warn_level;
 extern bool warn_as_error;

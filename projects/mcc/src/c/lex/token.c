@@ -70,6 +70,7 @@ static int diag_color_on(void)
 	return cached;
 }
 #define DC_RED    "\033[31m"
+#define DC_GREEN  "\033[32m"
 #define DC_YELLOW "\033[33m"
 #define DC_CYAN   "\033[36m"
 #define DC_BOLD   "\033[1m"
@@ -213,7 +214,14 @@ tokencheck(const struct token *t, enum tokenkind kind, const char *msg)
 		tokendesc(want, sizeof(want), kind, NULL);
 	err:
 		tokendesc(got, sizeof(got), t->kind, t->lit);
-		error(&t->loc, "expected %s %s, saw %s", want, msg, got);
+		if (kind == TSEMICOLON || (msg && strstr(msg, "';'")))
+			/* the most common fix: a missing ';' at the end of a
+			 * declaration or statement */
+			error_fixit(E_SYNTAX, t, "add ';' here",
+			    "expected %s %s, saw %s", want, msg, got);
+		else
+			error_tok_code(E_SYNTAX, t,
+			    "expected %s %s, saw %s", want, msg, got);
 	}
 	return t->lit;
 }
@@ -225,46 +233,136 @@ diagloc(const struct location *loc)
 	        loc->line + 1, loc->col, dcol(DC_RESET));
 }
 
-void
-error(const struct location *loc, const char *fmt, ...)
+/* --- diagnostic error codes --------------------------------------- */
+
+static const char *const errcode_names[] = {
+	"E0000", /* E_GENERIC */
+	"E0001", /* E_SYNTAX */
+	"E0002", /* E_UNDECLARED */
+	"E0003", /* E_TYPE */
+	"E0004", /* E_REDEF */
+};
+
+static const char *
+errcode_str(enum errcode code)
 {
-	va_list ap;
+	if ((unsigned)code >= countof(errcode_names))
+		return "E0000";
+	return errcode_names[code];
+}
+
+/* JSON multi-error collection: count collected errors and stop after
+ * g_error_limit (10 by default); with a recovery point armed, longjmp
+ * there so the top-level loop can resume collecting instead of dying on
+ * the first error. */
+int g_error_count;
+int g_error_limit = 10;
+jmp_buf g_err_recovery;
+int g_err_recovery_set;
+
+/* Skip to a safe resynchronization point after a collected error: the
+ * next top-level ';' (consumed) or top-level '}' (consumed), tracking
+ * nested braces/parens/brackets so a mid-body error resumes at the end of
+ * that declaration rather than drifting to EOF. */
+void
+err_sync(void)
+{
+	int depth = 0;
+
+	while (tok.kind != TEOF) {
+		switch (tok.kind) {
+		case TLBRACE: case TLPAREN: case TLBRACK:
+			depth++;
+			break;
+		case TRBRACE: case TRPAREN: case TRBRACK:
+			if (depth > 0) {
+				depth--;
+			} else if (tok.kind == TRBRACE) {
+				next(); /* consume the closing '}' */
+				return;
+			}
+			break;
+		case TSEMICOLON:
+			if (depth == 0) {
+				next(); /* consume the ';' */
+				return;
+			}
+			break;
+		default:
+			break;
+		}
+		next();
+	}
+}
+
+/* The number of source columns the token spans, for the full-width caret. */
+static size_t
+token_width(const struct token *t)
+{
+	const char *s = t->lit ? t->lit : tokenstr(t->kind);
+	size_t n = s ? strlen(s) : 1;
+	return n > 0 ? n : 1;
+}
+
+/* Core diagnostic.  All paths are non-returning: either the trial
+ * rethrows, the JSON mode longjmps to the top-level recovery point (or
+ * exits once the error limit is hit), or the process exits. */
+static void
+error_common(enum errcode code, const struct location *loc, size_t width,
+    const char *fix, const char *fmt, va_list ap)
+{
+	char msg[1024];
+
+	vsnprintf(msg, sizeof(msg), fmt, ap);
 
 	/* Trial parse (SFINAE-style well-formedness check, e.g. C++20
 	 * requires-expressions): a parse/type error is not fatal — unwind to
 	 * the enclosing trial and report failure to the caller. */
 	if (g_cpp_trial_depth > 0) {
 		(void)loc;
-		(void)fmt;
+		(void)code;
+		(void)width;
+		(void)fix;
+		(void)msg;
 		cpp_trial_rethrow();
 	}
 
 	/* --error-json: emit one structured JSON object per diagnostic so
 	 * tooling (editors, CI) can parse diagnostics without scraping text.
-	 * Format: {"level":"error","file":...,"line":N,"col":M,"message":"..."} */
+	 * Format:
+	 * {"level":"error","code":"E0001","file":...,"line":N,"col":M,
+	 *  "end_col":P,"message":"..."}  Multiple errors are collected (up to
+	 * g_error_limit) before the process exits non-zero. */
 	if (g_error_json) {
-		char msg[1024];
-		va_start(ap, fmt);
-		vsnprintf(msg, sizeof(msg), fmt, ap);
-		va_end(ap);
-		if (loc && loc->file)
-			fprintf(stderr, "{\"level\":\"error\",\"file\":\"%s\",\"line\":%zu,"
-			        "\"col\":%zu,\"message\":\"%s\"}\n",
-			        loc->file, loc->line + 1, loc->col, msg);
-		else
-			fprintf(stderr, "{\"level\":\"error\",\"message\":\"%s\"}\n", msg);
-		exit(1);
+		fprintf(stderr, "{\"level\":\"error\",\"code\":\"%s\","
+		    "\"file\":\"%s\",\"line\":%zu,\"col\":%zu,\"end_col\":%zu,"
+		    "\"message\":\"%s\"}\n",
+		    errcode_str(code),
+		    loc && loc->file ? loc->file : "",
+		    loc ? loc->line + 1 : 0,
+		    loc ? loc->col : 0,
+		    loc ? loc->col + (width ? width - 1 : 0) : 0,
+		    msg);
+		if (++g_error_count >= g_error_limit)
+			exit(1);
+		if (g_err_recovery_set)
+			longjmp(g_err_recovery, 1);
+		exit(1); /* no recovery point: cannot safely continue */
 	}
 
-	diagloc(loc);
-	fprintf(stderr, "%serror: %s", dcol(DC_BOLD DC_RED), dcol(DC_RESET));
-	va_start(ap, fmt);
-	vfprintf(stderr, fmt, ap);
-	va_end(ap);
+	if (loc && loc->file)
+		diagloc(loc);
+	else
+		fprintf(stderr, "%s%s: %s", dcol(DC_CYAN), argv0, dcol(DC_RESET));
+	fprintf(stderr, "%serror: %s%s%s%s ",
+	    dcol(DC_BOLD DC_RED), dcol(DC_RESET),
+	    dcol(DC_BOLD), errcode_str(code), dcol(DC_RESET));
+	fputs(msg, stderr);
 	putc('\n', stderr);
 
-	/* Caret diagnostic: show the source line with ^ marker.
-	 * loc->line is 0-based — the first line is line 0. */
+	/* Caret diagnostic: show the source line with a ^ marker covering the
+	 * token span (width columns).  loc->line is 0-based — the first line
+	 * is line 0; loc->col is 1-based. */
 	if (loc && loc->file) {
 		FILE *src = fopen(loc->file, "r");
 		if (src) {
@@ -275,20 +373,76 @@ error(const struct location *loc, const char *fmt, ...)
 				l++;
 			if (l > target) {
 				size_t len = strlen(linebuf);
+				size_t n, ci;
 				while (len > 0 && (linebuf[len-1] == '\n' || linebuf[len-1] == '\r'))
 					linebuf[--len] = '\0';
 				fprintf(stderr, "    %s\n", linebuf);
 				fprintf(stderr, "    %s", dcol(DC_RED));
-				size_t ci;
 				for (ci = 1; ci < loc->col; ci++)
 					fputc(linebuf[ci-1] == '\t' ? '\t' : ' ', stderr);
-				fprintf(stderr, "^%s\n", dcol(DC_RESET));
+				/* full-span caret: width ^ (capped at the line end) */
+				n = width ? width : 1;
+				for (ci = 0; ci < n && loc->col - 1 + ci < len; ci++)
+					fputc('^', stderr);
+				fprintf(stderr, "%s\n", dcol(DC_RESET));
+				if (fix) {
+					/* inline fix-it: note + its own caret */
+					fprintf(stderr, "    %snote: %s%s\n",
+					    dcol(DC_BOLD DC_GREEN), fix,
+					    dcol(DC_RESET));
+					fprintf(stderr, "    %s", dcol(DC_GREEN));
+					for (ci = 1; ci < loc->col; ci++)
+						fputc(linebuf[ci-1] == '\t' ? '\t' : ' ', stderr);
+					fputc('^', stderr);
+					fprintf(stderr, "%s\n", dcol(DC_RESET));
+				}
 			}
 			fclose(src);
 		}
 	}
 
 	exit(1);
+}
+
+noreturn void
+error(const struct location *loc, const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	error_common(E_GENERIC, loc, 0, NULL, fmt, ap);
+	va_end(ap);
+}
+
+void
+error_code(enum errcode code, const struct location *loc, const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	error_common(code, loc, 0, NULL, fmt, ap);
+	va_end(ap);
+}
+
+void
+error_tok_code(enum errcode code, const struct token *t, const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	error_common(code, &t->loc, token_width(t), NULL, fmt, ap);
+	va_end(ap);
+}
+
+void
+error_fixit(enum errcode code, const struct token *t, const char *fix,
+    const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	error_common(code, &t->loc, token_width(t), fix, fmt, ap);
+	va_end(ap);
 }
 
 int warn_level = WARN_ALL;

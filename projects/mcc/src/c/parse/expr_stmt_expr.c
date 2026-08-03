@@ -86,7 +86,7 @@ parse_stmt_expr_body(struct scope *s)
 					if (!prior)
 						scopeputdecl(s, mkdecl(name, DECLTYPE, qt.type, qt.qual, LINKNONE));
 					else if (!typesame(prior->type, qt.type) || prior->qual != qt.qual)
-						error(&tok.loc, "typedef '%s' redefined with different type", name);
+						error_tok_code(E_REDEF, &tok, "typedef '%s' redefined with different type", name);
 				} else {
 					d = mkdecl(name, DECLOBJECT, qt.type, qt.qual,
 					           sc & SCSTATIC ? LINKINTERN : LINKNONE);

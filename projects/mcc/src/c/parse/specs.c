@@ -181,7 +181,7 @@ tagspec(struct scope *s)
 	if (tok.kind != TLBRACE)
 		return t;
 	if (!t->incomplete)
-		error(&tok.loc, "redefinition of tag '%s'", tag);
+		error_tok_code(E_REDEF, &tok, "redefinition of tag '%s'", tag);
 	next();
 	switch (t->kind) {
 	case TYPESTRUCT:
@@ -265,8 +265,8 @@ tagspec(struct scope *s)
 			 * (`enum E { a, a };`) — E3 */
 			for (struct decl *ec = enumconsts; ec; ec = ec->next)
 				if (strcmp(ec->name, name) == 0)
-					error(&tok.loc, "redefinition of enumerator '%s'",
-					    name);
+					error_tok_code(E_REDEF, &tok,
+					    "redefinition of enumerator '%s'", name);
 			d = mkdecl(name, DECLCONST, et, QUALNONE, LINKNONE);
 			d->u.enumconst = value;
 			d->value = mkintconst(value);

@@ -242,7 +242,7 @@ mkunaryexpr(enum tokenkind op, struct expr *base)
 		return expr;
 	case TMUL:
 		if (base->type->kind != TYPEPOINTER)
-			error(&tok.loc, "cannot dereference non-pointer");
+			error_tok_code(E_TYPE, &tok, "cannot dereference non-pointer");
 		if (base->kind == EXPRUNARY && base->op == TBAND && base->base->kind != EXPRSTRING) {
 			type = base->type->base;
 			expr = base->base;
@@ -293,13 +293,13 @@ exprassign(struct expr *e, struct type *t)
 	switch (t->kind) {
 	case TYPEBOOL:
 		if (!(et->prop & PROPARITH) && et->kind != TYPEPOINTER && et->kind != TYPENULLPTR)
-			error(&tok.loc, "assignment to bool must be from arithmetic, pointer, or nullptr_t type");
+			error_tok_code(E_TYPE, &tok, "assignment to bool must be from arithmetic, pointer, or nullptr_t type");
 		break;
 	case TYPEPOINTER:
 		if (nullpointer(e))
 			break;
 		if (et->kind != TYPEPOINTER)
-			error(&tok.loc, "assignment to pointer must be from pointer or null pointer constant");
+			error_tok_code(E_TYPE, &tok, "assignment to pointer must be from pointer or null pointer constant");
 		if (t->base != &typevoid && et->base != &typevoid && !typecompatible(t->base, et->base)) {
 			/* C++: a derived-class pointer converts to a base-class
 			 * pointer (upcast).  If the base subobject is not at offset
@@ -319,28 +319,28 @@ exprassign(struct expr *e, struct type *t)
 					e = adj;
 				}
 			} else {
-				error(&tok.loc, "base types of pointer assignment must be compatible or void");
+				error_tok_code(E_TYPE, &tok, "base types of pointer assignment must be compatible or void");
 			}
 		}
 		/* void* accepts any qualified pointer (C11 6.3.2.3p1). */
 		if (t->base != &typevoid && (et->qual & t->qual) != et->qual)
-			error(&tok.loc, "assignment to pointer discards qualifiers");
+			error_tok_code(E_TYPE, &tok, "assignment to pointer discards qualifiers");
 		break;
 	case TYPENULLPTR:
 		/* A null pointer constant (incl. the nullptr keyword) or any
 		 * expression already of type nullptr_t is assignable. */
 		if (!nullpointer(e) && et->kind != TYPENULLPTR)
-			error(&tok.loc, "assignment to nullptr_t must be from null pointer constant or expression with type nullptr_t");
+			error_tok_code(E_TYPE, &tok, "assignment to nullptr_t must be from null pointer constant or expression with type nullptr_t");
 		break;
 	case TYPESTRUCT:
 	case TYPEUNION:
 		if (!typecompatible(t, et))
-			error(&tok.loc, "assignment to %s type must be from compatible type", t->kind == TYPEUNION ? "union" : "struct");
+			error_tok_code(E_TYPE, &tok, "assignment to %s type must be from compatible type", t->kind == TYPEUNION ? "union" : "struct");
 		break;
 	default:
 		assert(t->prop & PROPARITH);
 		if (!(et->prop & PROPARITH))
-			error(&tok.loc, "assignment to arithmetic type must be from arithmetic type");
+			error_tok_code(E_TYPE, &tok, "assignment to arithmetic type must be from arithmetic type");
 		break;
 	}
 	return exprconvert(e, t);
