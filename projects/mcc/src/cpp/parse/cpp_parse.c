@@ -1318,6 +1318,7 @@ cpp_op_mangle(enum tokenkind op)
 	case TLNOT:    return "nt";
 	case TLPAREN:  return "cl";   /* operator() — functors / lambdas */
 	case TLBRACK:  return "ix";   /* operator[] — subscript (C++23 P2128) */
+	case TSPACESHIP: return "ss"; /* operator<=> — three-way comparison */
 	default:       return NULL;
 	}
 }
