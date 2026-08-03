@@ -13,18 +13,26 @@
 #include "irgen.h"
 
 /* The compiler-runtime ABI returns sub-word integers in a general-purpose
- * register.  Normalize them here just as ILOADSB/ILOADSH would, otherwise
- * an atomic signed char/short with its high bit set compares incorrectly. */
+ * register widened to i32, so the ICALL result's MVal type is MT_I32.
+ * Using IEXTSB/IEXTSH here would select Oextsw (movslq %eax) in the bridge
+ * — it reads the undefined high bits instead of the data bits, so a
+ * negative signed char/short comes back zero-extended.  Mask to the data
+ * width and shift/sign-extend explicitly, mirroring the narrowing
+ * conversion in convert(). */
 static struct value *
 atomicresult(struct func *f, struct type *t, struct value *v)
 {
 	if (!(t->prop & PROPINT) || t->size >= 4)
 		return v;
-	switch (t->size) {
-	case 1: return funcinst(f, t->u.arith.issigned ? IEXTSB : IEXTUB, 'w', v, NULL);
-	case 2: return funcinst(f, t->u.arith.issigned ? IEXTSH : IEXTUH, 'w', v, NULL);
-	default: return v;
+	unsigned width = t->size * 8;
+	struct value *mask = mkintconst(((uint64_t)1 << width) - 1);
+	v = funcinst(f, IAND, 'w', v, mask);
+	if (t->u.arith.issigned) {
+		unsigned shift = 32 - width;
+		v = funcinst(f, ISHL, 'w', v, mkintconst(shift));
+		v = funcinst(f, ISAR, 'w', v, mkintconst(shift));
 	}
+	return v;
 }
 
 /* The compiler ABI follows libatomic's width-specific fetch-add/sub entry
