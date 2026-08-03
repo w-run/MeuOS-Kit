@@ -507,7 +507,11 @@ postfixexpr(struct scope *s, struct expr *r)
 				m = typemember(t, tokenstr(tok.kind), &offset);
 			}
 			if (!m)
-				error(&tok.loc, "struct/union has no member named '%s'", tok.lit);
+				/* identifier text lives in the token-string table
+				 * (tokenstr), not tok.lit — tok.lit is NULL for
+				 * identifiers and would print '(null)' */
+				error(&tok.loc, "struct/union has no member named '%s'",
+				    tokenstr(tok.kind));
 			/* C++ access control: private/protected members are only
 			 * reachable from within the member's own class. */
 			{

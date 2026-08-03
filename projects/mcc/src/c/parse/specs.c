@@ -261,6 +261,12 @@ tagspec(struct scope *s)
 				}
 				assert(i < countof(inttypes));
 			}
+			/* duplicate enumerator in one enum is ill-formed
+			 * (`enum E { a, a };`) — E3 */
+			for (struct decl *ec = enumconsts; ec; ec = ec->next)
+				if (strcmp(ec->name, name) == 0)
+					error(&tok.loc, "redefinition of enumerator '%s'",
+					    name);
 			d = mkdecl(name, DECLCONST, et, QUALNONE, LINKNONE);
 			d->u.enumconst = value;
 			d->value = mkintconst(value);
