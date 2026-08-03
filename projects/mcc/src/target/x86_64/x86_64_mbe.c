@@ -130,33 +130,38 @@ mval_of_ref(MFn *mf, MRef r)
 
 /* P3b scope: scalar functions only.  Returns false (caller falls back to
  * the bridge path) when the function uses constructs the machine backend
- * does not yet lower: aggregate params/returns/args, varargs, SALLOC. */
+ * does not yet lower.  Phase 1 (2026-08-03) closed: aggregate
+ * params/returns/args, SALLOC; remaining fallbacks: TLS globals and
+ * dynamic alloca (VLA).  Set MCC_DEBUG_MBE=1 to log fallback reasons. */
 static bool
 mbe_supported(MFn *mf)
 {
-	if (mf->rettype == MT_AGG)
-		;   /* P6: aggregate-return functions run on the new backend */
-	for (uint32_t j = 0; j < mf->nparam; j++)
-		if (mf->param[j] && mf->param[j]->td)
-			;   /* P6: aggregate-param functions run on the new backend */
+	bool ok = true;
+	const char *why = 0;
 	/* TLS globals need the TLS access sequence (not yet emitted) */
-	for (uint32_t i = 0; i < mf->nval; i++)
-		if (mf->val[i] && mf->val[i]->kind == MV_GLOBAL && mf->val[i]->tls)
-			return false;
-	for (MBlk *mb = mf->link; mb; mb = mb->link) {
+	if (ok)
+		for (uint32_t i = 0; i < mf->nval; i++)
+			if (mf->val[i] && mf->val[i]->kind == MV_GLOBAL &&
+			    mf->val[i]->tls) {
+				ok = false;
+				why = "TLS global";
+				break;
+			}
+	for (MBlk *mb = mf->link; ok && mb; mb = mb->link) {
 		for (uint32_t k = 0; k < mb->nins; k++) {
 			MIns *in = &mb->ins[k];
-			if ((in->op == MOP_ARG && in->src[0].val &&
-			     in->src[0].val->kind == MV_TYPE) ||
-			    (in->op == MOP_CALL && in->src[1].val &&
-			     in->src[1].val->kind == MV_TYPE) ||
-			    in->op == MOP_SALLOC ||
-			    /* dynamic alloca (VLAs): size is a runtime value */
-			    (in->op == MOP_ALLOCA && in->src[0].val))
-				return false;
+			/* dynamic alloca (VLAs): size is a runtime value */
+			if (in->op == MOP_ALLOCA && in->src[0].val) {
+				ok = false;
+				why = "dynamic alloca";
+				break;
+			}
 		}
 	}
-	return true;
+	if (!ok && getenv("MCC_DEBUG_MBE"))
+		fprintf(stderr, "mbe: fallback %s (%s)\n",
+		        mf->name ? mf->name : "?", why ? why : "?");
+	return ok;
 }
 
 bool
