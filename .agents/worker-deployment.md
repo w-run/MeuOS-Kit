@@ -122,3 +122,4 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 - 模型：reasoning 限 2 个（贵）；lite(hy3) 免费可 10+ 并行；禁止 default
 - 夹带：遇夹带**维持现状不 force push**（已发生 3 次：647a05b/93ab4b4/6ca4ba1）
 - 门禁：每提交跑对应 `make check` / verify-all.sh，通过才 push
+- 竞争实现：双 worker 竞争同一任务（快速拿正确实现）。**竞争落败者的思路若优秀，也要参考融合进最终方案**（team-lead 审阅双方报告后合并优者），不浪费洞察。竞争派发时要求双方各自输出"实现 + 理由"，由 team-lead 统一裁决融合。
