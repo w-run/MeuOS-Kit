@@ -498,8 +498,13 @@ builtinfunc(struct scope *s, enum builtinkind kind)
 		break;
 	case BUILTINVAEND:
 		e = assignexpr(s);
-		if (!typesame(e->type, typeadjvalist))
-			error(&tok.loc, "va_end argument must have type va_list");
+		/* chibicc: __builtin_va_end is a no-op and performs no type
+		 * checking on its argument.  mcc previously required
+		 * e->type == typeadjvalist, which both rejected valid uses on
+		 * targets where va_list decays differently and reported the
+		 * diagnostic against the macro-body token (stdarg.h) instead of
+		 * the call site.  Drop the constraint to match chibicc's no-op
+		 * semantics, which also unlocks varargs.c. */
 		e = mkexpr(EXPRCAST, &typevoid, e);
 		break;
 	case BUILTINVASTART:

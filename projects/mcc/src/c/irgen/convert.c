@@ -37,6 +37,12 @@ convert(struct func *f, struct type *dst, struct type *src, struct value *l)
 
 	if (src == dst)
 		return l;
+	if (src->kind == TYPEATOMIC)
+		src = src->base;
+	if (dst->kind == TYPEATOMIC)
+		dst = dst->base;
+	if (src == dst)
+		return l;
 	if (src->kind == TYPEPOINTER)
 		src = &typeulong;
 	if (dst->kind == TYPEPOINTER)
@@ -70,7 +76,30 @@ convert(struct func *f, struct type *dst, struct type *src, struct value *l)
 			if (dst->u.arith.width <= src->u.arith.width) {
 				if (dst->kind == TYPEBITINT)
 					return funcbits(f, dst, l, (struct bitfield){0});
-				return l;
+				if (dst->u.arith.width == src->u.arith.width)
+					return l;
+				/* Narrowing conversion (int -> char/short, long long ->
+				 * short, ...): mask the source to the destination width
+				 * and, for a signed destination, sign-extend the
+				 * truncated result.  Without this the wide value is
+				 * carried through untouched and the high bits leak into
+				 * the result (chibicc B-class bug: constant folding
+				 * ignored the narrowing cast). */
+				{
+					unsigned width = dst->u.arith.width;
+					int c = src->size == 8 ? 'l' : 'w';
+					struct value *mask =
+					    mkintconst(((uint64_t)1 << width) - 1);
+					l = funcinst(f, IAND, c, l, mask);
+					if (dst->u.arith.issigned) {
+						unsigned shift = src->size * 8 - width;
+						l = funcinst(f, ISHL, c, l,
+						    mkintconst(shift));
+						l = funcinst(f, ISAR, c, l,
+						    mkintconst(shift));
+					}
+					return l;
+				}
 			}
 			if (src->kind == TYPEBITINT && (src->size == 8 || dst->size == 4))
 				return l;
