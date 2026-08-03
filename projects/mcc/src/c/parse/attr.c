@@ -108,6 +108,11 @@ parseattr(struct attr *a, enum attrkind allowed, enum attrprefix prefix)
 			kind = ATTRNOINLINE;
 		} else if (strcmp(name, "always_inline") == 0) {
 			kind = ATTRALWAYSINLINE;
+		} else if (strcmp(name, "noreturn") == 0) {
+			/* GNU `__attribute__((noreturn))` / `((__noreturn__))`
+			 * (the double-underscore form is stripped to `noreturn`
+			 * by strip() above).  Mirrors the PREFIXNONE handling. */
+			kind = ATTRNORETURN;
 		} else if (strcmp(name, "visibility") == 0) {
 			/* silently accept visibility("...") */
 			if (consume(TLPAREN)) {

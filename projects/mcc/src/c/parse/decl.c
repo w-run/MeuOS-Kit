@@ -180,6 +180,10 @@ decl(struct scope *s, struct func *f)
 	base = declspecs(s, &sc, &fs, &align);
 	if (!base.type)
 		return false;
+	/* GNU `__attribute__((...))` appearing among the decl-specifiers
+	 * (e.g. `__attribute__((noreturn)) int f(void);`) is gathered by
+	 * declspecs into base.kind; fold it into the declaration attrs. */
+	a.kind |= base.kind;
 	/* C++ non-member operator overload: `Vec operator+(Vec a, Vec b)`.
 	 * The return type is already parsed; `operator` follows. */
 	{
@@ -223,7 +227,7 @@ decl(struct scope *s, struct func *f)
 		bool ctor_call = false;
 		struct expr *ctor_args = NULL;
 
-		qt = declarator(s, base, &name, NULL, &funcscope, false);
+		qt = declarator(s, base, &name, NULL, &funcscope, false, &a);
 		t = qt.type;
 		tq = qt.qual;
 		if (qt.expr == (struct expr *)1) {

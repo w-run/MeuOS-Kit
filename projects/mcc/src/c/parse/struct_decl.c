@@ -379,7 +379,7 @@ structdecl(struct scope *s, struct structbuilder *b)
 			width = intconstexpr(s, false);
 			addmember(b, base, NULL, 0, width);
 		} else {
-			mt = declarator(s, base, &name, &align, NULL, false);
+			mt = declarator(s, base, &name, &align, NULL, false, NULL);
 			/* a C++ member function's trailing ':' is the ctor init list
 			 * (`Derived(int v) : Base(v), m(v) {}`), not a bitfield width
 			 * (functions are never bitfields); leave it for cpp side. */

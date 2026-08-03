@@ -5690,7 +5690,7 @@ cpp_tmpl_member_instantiate(struct scope *s, struct expr *thisp,
 	extern struct qualtype declspecs(struct scope *, enum storageclass *,
 	    enum funcspec *, int *);
 	extern struct qualtype declarator(struct scope *, struct qualtype,
-	    char **, int *, struct scope **, bool);
+	    char **, int *, struct scope **, bool, struct attr *);
 	extern struct scope *delscope(struct scope *);
 
 	struct cpp_template *tmpl;
@@ -5841,7 +5841,7 @@ cpp_tmpl_member_instantiate(struct scope *s, struct expr *thisp,
 		base = declspecs(bs, &sc, &fs, &align);
 		if (!base.type)
 			error(&tok.loc, "no type in template member declaration");
-		mt = declarator(bs, base, &dname, &align, NULL, false);
+		mt = declarator(bs, base, &dname, &align, NULL, false, NULL);
 		if (mt.type->kind != TYPEFUNC)
 			error(&tok.loc, "template member '%s' is not a function", name);
 		cpp_define_method(bs, mt.type, mname, tag, false,
@@ -6879,7 +6879,7 @@ cpp_cexpr_stmt(struct scope *tmp, unsigned long long *ret, int *steps)
 	extern struct qualtype declspecs(struct scope *, enum storageclass *,
 	    enum funcspec *, int *);
 	extern struct qualtype declarator(struct scope *, struct qualtype,
-	    char **, int *, struct scope **, bool);
+	    char **, int *, struct scope **, bool, struct attr *);
 	extern struct decl *mkdecl(char *, enum declkind, struct type *,
 	    enum typequal, enum linkage);
 	extern void scopeputdecl(struct scope *, struct decl *);
@@ -7020,7 +7020,7 @@ cpp_cexpr_stmt(struct scope *tmp, unsigned long long *ret, int *steps)
 		char *name;
 		struct qualtype qt;
 		for (;;) {
-			qt = declarator(tmp, base, &name, &align, NULL, false);
+			qt = declarator(tmp, base, &name, &align, NULL, false, NULL);
 			if (!name || !qt.type)
 				return CEXP_FAIL;
 			if (consume(TASSIGN)) {

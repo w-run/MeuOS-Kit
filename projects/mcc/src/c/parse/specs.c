@@ -315,6 +315,7 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 	int ntypes = 0;
 	unsigned long long i, bits;
 	struct expr *typeofexpr = NULL;
+	struct attr dsa = {0};  /* GNU `__attribute__` kinds gathered here */
 
 	t = NULL;
 	if (sc)
@@ -608,7 +609,7 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 			break;
 
 		case T__ATTRIBUTE__:
-			gnuattr(NULL, (enum attrkind)(ATTRWEAK | ATTRUSED | ATTRNOINLINE | ATTRALWAYSINLINE |
+			gnuattr(&dsa, (enum attrkind)(ATTRWEAK | ATTRUSED | ATTRNOINLINE | ATTRALWAYSINLINE |
 			    ATTRCONSTRUCTOR | ATTRDESTRUCTOR | ATTRSECTION | ATTRALIGNED | ATTRPACKED |
 			    ATTRNORETURN | ATTRDEPRECATED));
 			break;
@@ -746,7 +747,7 @@ done:
 	*/
 	attr(NULL, 0);
 
-	return (struct qualtype){t, tq, typeofexpr};
+	return (struct qualtype){t, tq, typeofexpr, dsa.kind};
 }
 bool
 istypename(struct scope *s, const char *name)
@@ -777,7 +778,7 @@ typename(struct scope *s, enum typequal *tq, struct expr **toeval)
 
 	t = declspecs(s, NULL, NULL, NULL);
 	if (t.type) {
-		t = declarator(s, t, NULL, NULL, NULL, true);
+		t = declarator(s, t, NULL, NULL, NULL, true, NULL);
 		if (tq)
 			*tq |= t.qual;
 		if (toeval)
