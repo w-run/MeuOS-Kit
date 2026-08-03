@@ -31,6 +31,8 @@ static_assert(requires(int) { typename int; });
 static_assert(requires(int a) { { a + a } -> HasPlus; });
 static_assert(requires(int a, int b) { { a + b } -> Addable; });
 static_assert(requires(int a) { { a + a }; });
+static_assert(requires(int a) { { a + a } noexcept; });
+static_assert(requires(int a) { { a + a } noexcept(true); });
 
 // 嵌套需求
 static_assert(requires(int a) { requires Addable<int>; });

@@ -511,6 +511,27 @@ cpp_tok_kind(void)
 	}
 }
 
+/* Classify an arbitrary token (not just the current `tok`) as a C++ keyword
+ * kind.  Only identifier tokens carry a name to classify; other token kinds
+ * map to CPP_TNONE (or the struct/union C++ kinds).  Unlike a bare
+ * cpp_classify_ident(tokenstr(t.kind), strlen(...)), this is safe for
+ * non-identifier tokens (literals, operators, braces) whose tokenstr() is
+ * NULL and would crash strlen().  Used by the requires-expression
+ * classifier, where the first token of a requirement span may be anything. */
+static enum cpp_tokenkind
+cpp_classify_token(struct token t)
+{
+	if (t.kind >= TIDENT) {
+		const char *name = tokenstr(t.kind);
+		return cpp_classify_ident(name, name ? strlen(name) : 0);
+	}
+	switch (t.kind) {
+	case TSTRUCT: return CPP_TSTRUCT;
+	case TUNION:  return CPP_TUNION;
+	default:      return CPP_TNONE;
+	}
+}
+
 /* Is the current token a `struct`/`union` tag declaration with a base-class
  * list (`struct D : A, B`) or a body (`struct S { ... }`)?  Consumes the tag
  * name (and an optional access specifier) to look one token ahead, then
@@ -4632,8 +4653,7 @@ cpp_req_type_ok(struct scope *s, struct token *sp, size_t n)
 	struct type *t = NULL;
 
 	/* skip the `typename` keyword (not a C type specifier) */
-	if (n > 0 && cpp_classify_ident(tokenstr(sp[0].kind),
-	    strlen(tokenstr(sp[0].kind))) == CPP_TTYPENAME) {
+	if (n > 0 && cpp_classify_token(sp[0]) == CPP_TTYPENAME) {
 		sp++;
 		n--;
 	}
@@ -4798,12 +4818,36 @@ cpp_req_compound(struct scope *rs, struct token *sp, size_t n)
 	if (!e)
 		return false;
 
-	/* optional `-> TypeConstraint` after the '}' */
-	if (close + 2 >= n || sp[close + 1].kind != TARROW)
-		return true;
+	/* optional `noexcept` specifier, then optional `-> TypeConstraint` */
 	{
-		size_t cn = n - (close + 2);
-		struct token *ct = &sp[close + 2];
+		size_t j = close + 1;
+		/* `noexcept` or `noexcept(...)` after the braced expression:
+		 * a compound requirement may require the expression be
+		 * non-throwing.  We only need to skip it syntactically here
+		 * (the well-formedness check is the expression parse above). */
+		if (j < n && sp[j].kind == CPP_TNOEXCEPT) {
+			j++;
+			if (j < n && sp[j].kind == TLPAREN) {
+				int nd = 1;
+				j++;
+				while (j < n && nd > 0) {
+					if (sp[j].kind == TLPAREN)
+						++nd;
+					else if (sp[j].kind == TRPAREN &&
+					    --nd == 0) {
+						j++;
+						break;
+					}
+					j++;
+				}
+			}
+		}
+		/* `{ e }` or `{ e } noexcept` : satisfied if the expression
+		 * parsed (already checked above); no return-type constraint. */
+		if (j >= n || sp[j].kind != TARROW)
+			return true;
+		size_t cn = n - (j + 1);
+		struct token *ct = &sp[j + 1];
 		/* a concept-id constraint: `C<T>` / `C<T1, T2>` */
 		if (cn >= 1 && ct[0].kind >= TIDENT) {
 			struct cpp_template *con;
@@ -4947,13 +4991,11 @@ cpp_requires_eval(struct scope *s, struct token *sp, size_t n)
 			bool r;
 			if (rn == 0)
 				continue;
-			if (cpp_classify_ident(tokenstr(rq[0].kind),
-			    strlen(tokenstr(rq[0].kind))) == CPP_TTYPENAME)
+			if (cpp_classify_token(rq[0]) == CPP_TTYPENAME)
 				r = cpp_req_type_ok(rs, rq, rn);
 			else if (rq[0].kind == TLBRACE)
 				r = cpp_req_compound(rs, rq, rn);
-			else if (cpp_classify_ident(tokenstr(rq[0].kind),
-			    strlen(tokenstr(rq[0].kind))) == CPP_TREQUIRES)
+			else if (cpp_classify_token(rq[0]) == CPP_TREQUIRES)
 				/* nested requirement: `requires C<T>;` */
 				r = eval_constraint(&rq[1], rn - 1, rs);
 			else
