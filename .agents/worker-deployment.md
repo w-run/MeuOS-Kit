@@ -92,17 +92,17 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 ### D1 缺陷：const T& 形参 operator==/operator< 整体失败
 - 根因：`cpp_parse.c cpp_try_operator_call`（基线 1274-1339）三处——成员路径缺 const-K/引用-R 编码回退、成员/自由函数路径实参未处理引用形参
 - 修复方案：4-way 级联查找 + 引用实参 `&` 绑定；对照 expr_postfix.c:352-354 惯例
-- 状态：def4 已定位，**待实施**（等 requires 合入主线后，同文件冲突）
+- 状态：**已修复**（alice 608f31c，测试 operator_ref_const.cc），check-cpp-func 绿
 
 ### D4 缺陷：非空类按值返回错乱（实为 ctor 初始化列表标量成员落地缺失）
 - 根因：`cpp_parse.c emit_base_ctors_for`（基线 2052-2165），行 2068-2069 只对 struct/union 成员发 ctor 调用，标量成员 init-list 项被 `continue` 丢弃
 - 修复方案：对命中初始化项的非 struct/union 成员发射 `*(this+offset)=args[0]`
-- 状态：def4 已定位，**待实施**
+- 状态：**已修复**（alice 608f31c，测试 ctor_scalar_initlist.cc），check-cpp-func 绿
 
 ### D2 缺陷：急切实例化未使用成员函数（非惰性）
 - 根因：`cpp_parse.c flush_pending_methods`（1176-1199），行 1197 无条件 `cpp_parse_method_body`
 - 修复方案：模板实例化期间延迟模式 + 保留 pending_method 进 per-class 延迟表 + 调用点按需重放（**不能简单 continue 丢弃**，probe 已证明会破坏已使用方法）
-- 状态：def4 已定位，**待实施**（工作量中偏大，专项派发）
+- 状态：**已修复**（alice d28c744，测试 tmpl_lazy_methods.cc；funcexpr EXPRCALL 按需重放 + 尾节点重锚 g_cpp_deferred_end），check-cpp-func 绿
 
 ### #elifdef/#elifndef 修复
 - 状态：**已合入主线**（pp.c→6ca4ba1，测试→e472811），已闭环
@@ -120,14 +120,14 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 
 ### 缺陷队列（待修复）
 - **E1** 命名空间作用域变量重定义 `int a; int a;` 漏检（eve 发现，pending/redef_global_var.neg.cc）
-- **E2** 类内重复成员 `int x; int x;` 漏检（pending/dup_member.neg.cc）
-- **E3** 重复枚举符 `enum E{a,a};` 漏检（pending/dup_enum.neg.cc）
+- **E2** 类内重复成员 `int x; int x;` 漏检（**已修复** alice，struct_decl.c addmember 检查；测试移至 test/cpp/dup_member.neg.cc）
+- **E3** 重复枚举符 `enum E{a,a};` 漏检（**已修复** alice，specs.c tagspec 检查；测试移至 test/cpp/dup_enum.neg.cc）
 - **E4** 非 void 函数缺 return 漏检（pending/missing_return.neg.cc）
 - **E5** 引用未初始化 `int&r;` 漏检（pending/uninit_ref.neg.cc）
 - **E6** C++ 模式禁用 VLA 未生效（pending/vla.neg.cc）
-- **D1** const T& operator 整体失败（def4 定位，cpp_try_operator_call）
-- **D4** ctor 标量成员 init-list 落地缺失（def4 定位，emit_base_ctors_for）
-- **D2** 急切实例化未使用成员（def4 定位，flush_pending_methods）
+- **D1** const T& operator 整体失败（**已修复** alice 608f31c，cpp_try_operator_call 4-way 级联）
+- **D4** ctor 标量成员 init-list 落地缺失（**已修复** alice 608f31c，emit_base_ctors_for）
+- **D2** 急切实例化未使用成员（**已修复** alice d28c744，flush_pending_methods 延迟表）
 - **F1** constexpr 函数体纯度不诊断（constexpr 函数调用 printf 不报错，diana 发现，test/c23/neg/constexpr.neg.c）
 - **F2** `nullptr_t` 变量进真值条件 ICE（内部错误 unsupported conversion，diana 发现）
 - **F3** 具名 constexpr 变量不折叠进整数常量表达式（_Static_assert(K==9) 报非常量，diana 发现）
