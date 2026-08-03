@@ -344,6 +344,15 @@ primaryexpr(struct scope *s)
 				if (g_lang == 1 && cpp_tmpl_lookup(tokenstr(tok.kind))) {
 					e = cpp_tmpl_placeholder(tokenstr(tok.kind));
 					next();
+					/* explicit template arguments: `f<int, 42>(...)` —
+					 * types and/or non-type constant expressions.  The
+					 * TLPAREN lowering later instantiates from these
+					 * plus any remaining call-site arguments. */
+					if (tok.kind == TLESS) {
+						extern void cpp_tmpl_explicit_parse(
+						    struct scope *);
+						cpp_tmpl_explicit_parse(s);
+					}
 					break;
 				}
 				error(&tok.loc, "undeclared identifier: %s", tokenstr(tok.kind));
