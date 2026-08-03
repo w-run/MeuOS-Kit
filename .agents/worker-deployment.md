@@ -71,7 +71,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 | diana | lite | worktree-tmp-diana-dwarfloc + worktree-tmp-diana-fastmath + worktree-tmp-diana-errcode2 (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试 + check-pic-verify + 错误码体系/多错收集 + DWARF 调试信息 + **DWARF 变量位置 + fast-math 折叠与 -Oz 尺寸优化 + 错误码全覆盖 E0005-E0012（~400 站点）** | **completed**（C23/PIC/errcode/dwarf/dwarfloc/fastmath/errcode2 均已合入主线） | 11 test/c23 + F1-F3 + GOT + E#### + DWARF4 + DW_AT_location + -Ofast + -Oz + 错误码全覆盖 |
 | eve | lite | worktree-tmp-eve + worktree-tmp-eve-olevel + worktree-tmp-eve-i18n + worktree-tmp-eve-p4step1 (自 worktree-mxx-work@43d1507) | /tmp/mxx-wt-eve | 负向测试矩阵 + -O 分级 + i18n 双语 + **MIR Phase 4 step1：删 emit.c 直接-LIR 构造块** | **completed**（矩阵已合 b4cad7e；olevel 已合 a1bbb85；i18n 已合 1ce1b33；p4step1 已合入主线，verify-all 19/19 + 自举通过） | worktree-tmp-eve-p4step1 |
 | grace | lite | worktree-tmp-grace-cpp23 + worktree-tmp-grace-cpprest (自 worktree-mxx-work@fc1f279) | /tmp/mxx-wt-grace | sema/decl E1/E4/E5/E6 + C++23 缺口 + **C++ 剩余缺口：依赖类型 NTTP / constexpr 返回类对象 / consteval 模板边界** | **completed**（cpp23 已合入 ba6d9f8；cpprest 本次归并合入主线：ef89d22+3ae5a04+d061167） | worktree-tmp-grace-cpprest |
-| hazel | lite | worktree-tmp-hazel-aarch64 + worktree-tmp-hazel-fpfill | /tmp/mxx-wt-hazel | MIR Phase 3b aarch64 移植 + riscv64/aarch64 浮点补齐 | **completed**（aarch64 已合入第一批；fpfill 本次归并合入主线，浮点路径上线，c99 浮点样例双 target as 通过，verify-all 19/19） | ab7e500 |
+| hazel | lite | worktree-tmp-hazel-bench (自 worktree-mxx-work@43d1507) | /tmp/mxx-wt-hazel | 性能基准对比 GCC（MIR-native 产物质量量化） | **completed**（633a949 已 push origin/worktree-tmp-hazel-bench；benchmark 集 test/bench/ + 报告 docs/mir-backend/bench-report.md，7 条优化建议清单就绪） | 633a949 |
 
 ### 会话中断恢复速查（当前团队）
 1. `git fetch origin`（在 /workspace/MeuOS-Kit）
