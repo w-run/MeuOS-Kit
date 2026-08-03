@@ -48,21 +48,31 @@ dwarf_type_of(struct type *t)
 }
 
 /* Record the function's local variables / parameters for DWARF variable
- * DIEs.  Every variable recorded by funcalloc() gets a DIE (name, type,
- * declaration line); locations are not yet emitted (the backend's final
- * frame offsets are not exposed back to the frontend), so gdb knows the
- * variables but cannot yet print their values. */
+ * DIEs.  Each variable recorded by funcalloc() gets a DIE (name, type,
+ * declaration line) plus a DW_AT_location: the x86_64 machine emitter
+ * recorded the final frame offset (static alloca) keyed by the MVal id,
+ * reached here through the func_to_mir value->MVal side table. */
 static void
 dwarf_collect_vars(struct func *f, struct MFn *mf, Fn *fn)
 {
 	int i;
 
-	(void)mf;
 	(void)fn;
 	if (!f || g_dwarf_level <= 0)
 		return;
-	for (i = 0; i < f->ndvars; i++)
-		dwarf_add_var(f->dvars[i].name, dwarf_type_of(f->dvars[i].type));
+	for (i = 0; i < f->ndvars; i++) {
+		struct dwarf_vrec *vr = &f->dvars[i];
+		int has_loc = 0, loc_off = 0, loc_reg = -1;
+		if (mf && mf->vmap && vr->value_id > 0 &&
+		    (uint32_t)vr->value_id < mf->nvmap) {
+			MVal *mv = mf->vmap[vr->value_id];
+			if (mv)
+				has_loc = dwarf_loc_get(mv->id, &loc_off,
+				    &loc_reg);
+		}
+		dwarf_add_var(vr->name, dwarf_type_of(vr->type),
+		    has_loc, loc_off, loc_reg);
+	}
 }
 
 /* MIR-only switch (Phase 2): always 1 — set in main.c (MCC_USE_MIR env
@@ -316,6 +326,7 @@ emitfunc(struct func *f, struct scope *fs, bool global)
 	if (g_dwarf_level > 0) {
 		const char *fname = f->name;
 		int fline = f->declloc.file ? f->declloc.line + 1 : 1;
+		dwarf_loc_reset();  /* fresh per-function location table */
 		dwarf_idx = dwarf_begin_func(fname, fline, 1);
 	}
 

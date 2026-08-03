@@ -63,6 +63,20 @@ enum {
 	DW_OP_reg0           = 0x50, /* rbp is reg 6 on x86_64 */
 };
 
+/* Size of the signed LEB128 encoding of v (for exprloc length bytes). */
+static int
+sleb_size(long long v)
+{
+	int n = 0;
+	for (;;) {
+		unsigned char byte = v & 0x7f;
+		v >>= 7;
+		n++;
+		if ((v == 0 && !(byte & 0x40)) || (v == -1 && (byte & 0x40)))
+			return n;
+	}
+}
+
 /* --- collector ------------------------------------------------------ */
 
 /* DWARF type kind used by variable DIEs (maps to a base-type DIE). */
@@ -77,12 +91,16 @@ enum dwarf_type_kind {
 struct dwarf_var {
 	const char *name;
 	int type;       /* enum dwarf_type_kind */
+	int has_loc;    /* nonzero: DW_AT_location present */
+	int loc_off;    /* DW_OP_fbreg operand (frame-relative offset) */
+	int loc_reg;    /* DW_OP_regN register number, -1 if stack */
 };
 
 struct dwarf_func {
 	const char *name;
 	int line;       /* 1-based declaration line */
 	int file;       /* 1-based file index */
+	int framebase;  /* 0 = rbp (DW_OP_reg6), 1 = rsp (DW_OP_reg7) */
 	struct dwarf_var *vars;
 	int nvars, cap;
 };
@@ -91,6 +109,82 @@ static struct dwarf_func *g_funcs;
 static int g_nfuncs, g_capfuncs;
 static const char *g_srcfile;
 static int g_curfunc = -1;   /* index of the open record, -1 if none */
+
+/* --- machine-layer location feedback --------------------------------
+ * The x86_64 machine emitter (memit) records each static alloca's final
+ * frame offset here, keyed by the MVal id (which the frontend reaches via
+ * the func_to_mir value->MVal side table).  dwarf_collect_vars() looks a
+ * frontend local up after the backend runs and writes the DW_AT_location. */
+
+struct dwarf_loc {
+	uint32_t mval_id;
+	int32_t off;    /* frame offset for DW_OP_fbreg */
+	int32_t reg;    /* DWARF register number, -1 = stack */
+};
+
+static struct dwarf_loc *g_locs;
+static int g_nlocs, g_caplocs;
+
+/* Per-function frame base set by the emitter: 0 = rbp, 1 = rsp. */
+static int g_framebase;
+
+void
+dwarf_loc_reset(void)
+{
+	g_nlocs = 0;
+	g_framebase = 0;
+}
+
+void
+dwarf_set_framebase(int base)
+{
+	g_framebase = base;
+}
+
+void
+dwarf_loc_set_stack(uint32_t mval_id, int32_t off)
+{
+	struct dwarf_loc *l;
+
+	if (g_nlocs >= g_caplocs) {
+		g_caplocs = g_caplocs ? g_caplocs * 2 : 32;
+		g_locs = xreallocarray(g_locs, g_caplocs, sizeof *g_locs);
+	}
+	l = &g_locs[g_nlocs++];
+	l->mval_id = mval_id;
+	l->off = off;
+	l->reg = -1;
+}
+
+void
+dwarf_loc_set_reg(uint32_t mval_id, int32_t dreg)
+{
+	struct dwarf_loc *l;
+
+	if (g_nlocs >= g_caplocs) {
+		g_caplocs = g_caplocs ? g_caplocs * 2 : 32;
+		g_locs = xreallocarray(g_locs, g_caplocs, sizeof *g_locs);
+	}
+	l = &g_locs[g_nlocs++];
+	l->mval_id = mval_id;
+	l->off = 0;
+	l->reg = dreg;
+}
+
+/* Return 1 and the location if recorded for this MVal id. */
+int
+dwarf_loc_get(uint32_t mval_id, int32_t *off, int32_t *reg)
+{
+	int i;
+
+	for (i = 0; i < g_nlocs; i++)
+		if (g_locs[i].mval_id == mval_id) {
+			*off = g_locs[i].off;
+			*reg = g_locs[i].reg;
+			return 1;
+		}
+	return 0;
+}
 
 void
 dwarf_set_file(const char *path)
@@ -119,7 +213,8 @@ dwarf_begin_func(const char *name, int line, int file)
 }
 
 void
-dwarf_add_var(const char *name, int type)
+dwarf_add_var(const char *name, int type, int has_loc, int loc_off,
+    int loc_reg)
 {
 	struct dwarf_func *fu;
 	struct dwarf_var *v;
@@ -134,11 +229,19 @@ dwarf_add_var(const char *name, int type)
 	v = &fu->vars[fu->nvars++];
 	v->name = name;
 	v->type = type;
+	v->has_loc = has_loc;
+	v->loc_off = loc_off;
+	v->loc_reg = loc_reg;
 }
 
 void
 dwarf_end_func(void)
 {
+	/* frame base is set by the emitter during codegen (memit may use rsp
+	 * for leaf functions that omit the frame pointer), so capture it when
+	 * the function record closes, after the backend has run */
+	if (g_curfunc >= 0)
+		g_funcs[g_curfunc].framebase = g_framebase;
 	g_curfunc = -1;
 }
 
@@ -240,6 +343,7 @@ dwarf_finalize(FILE *f)
 	fprintf(f, "\t.uleb128 0x49, 0x13\n");  /* type, ref4 */
 	fprintf(f, "\t.uleb128 0x3a, 0x0b\n");  /* decl_file, data1 */
 	fprintf(f, "\t.uleb128 0x3b, 0x05\n");  /* decl_line, data2 */
+	fprintf(f, "\t.uleb128 0x02, 0x18\n");  /* location, exprloc */
 	fprintf(f, "\t.byte 0,0\n");
 	/* 4: base_type, no children */
 	fprintf(f, "\t.uleb128 4\n\t.uleb128 0x24\n\t.byte 0\n");
@@ -286,16 +390,34 @@ dwarf_finalize(FILE *f)
 		fprintf(f, "\t.byte %d\n", fu->file);
 		fprintf(f, "\t.2byte %d\n", fu->line);
 		if (strcmp(T.name, "x86_64") == 0)
-			fprintf(f, "\t.byte 1, 0x%x\n", DW_OP_reg0 + 6); /* rbp */
+			/* frame base matches the variable fbreg offsets: rbp
+			 * (DW_OP_reg6) unless the function omitted the frame
+			 * pointer (rsp, DW_OP_reg7) */
+			fprintf(f, "\t.byte 1, 0x%x\n",
+			    DW_OP_reg0 + (fu->framebase ? 7 : 6));
 		else
 			fprintf(f, "\t.byte 1, 0x%x\n", DW_OP_call_frame_cfa);
 		for (j = 0; j < fu->nvars; j++) {
 			struct dwarf_var *v = &fu->vars[j];
+			int loclen = 0;
 			fprintf(f, "\t.uleb128 3\n");
 			fprintf(f, "\t.asciz \"%s\"\n", v->name);
 			fprintf(f, "\t.4byte %s - .Ldwarf_info0\n", type_label(v->type));
 			fprintf(f, "\t.byte %d\n", fu->file);
 			fprintf(f, "\t.2byte %d\n", fu->line);
+			/* DW_AT_location exprloc: DW_OP_fbreg <off> or
+			 * DW_OP_regN (a register number is a single-byte
+			 * zero-operand opcode, so its exprloc length is 1) */
+			if (v->has_loc && v->loc_reg >= 0)
+				fprintf(f, "\t.byte 1, 0x%x\n",
+				    DW_OP_reg0 + v->loc_reg);
+			else if (v->has_loc) {
+				loclen = 1 + sleb_size(v->loc_off);
+				fprintf(f, "\t.byte %d\n", loclen);
+				fprintf(f, "\t.byte 0x%x\n", DW_OP_fbreg);
+				fprintf(f, "\t.sleb128 %d\n", v->loc_off);
+			} else
+				fprintf(f, "\t.byte 0\n"); /* empty exprloc */
 		}
 		fprintf(f, "\t.byte 0\n");  /* end of subprogram children */
 	}
