@@ -231,6 +231,45 @@ cpp_head_collect(struct tokbuf *h, int *colon, int *semi)
 	return *colon >= 0;
 }
 
+/* Scan the `(...)` head of an if/while statement (starting just after
+ * the '('), returning true when a ';' appears at head depth — i.e. the
+ * head begins with an init-statement (P2360: declaration, expression,
+ * or alias) rather than being a bare condition.  Restores the token
+ * stream to just after the '(' so the caller re-parses from the start,
+ * disambiguating `if (int i = 0; i) ...` from a ctor-call condition
+ * `if (Vec(3).f() ...)` without trying decl() first. */
+static bool
+cpp_if_has_init(void)
+{
+	struct tokbuf b = {0};
+	int depth = 0;
+	bool has_semi = false;
+
+	for (;;) {
+		if (tok.kind == TEOF)
+			error(&tok.loc, "unexpected end of file in statement");
+		if (depth == 0 && tok.kind == TRPAREN)
+			break;
+		if (depth == 0 && tok.kind == TSEMICOLON)
+			has_semi = true;
+		if (tok.kind == TLPAREN || tok.kind == TLBRACK || tok.kind == TLBRACE)
+			++depth;
+		else if (tok.kind == TRPAREN || tok.kind == TRBRACK || tok.kind == TRBRACE)
+			--depth;
+		tb_push(&b, tok);
+		next();
+	}
+	tb_push(&b, tok); /* the closing ')' */
+	next();
+	/* include the token now in `tok` (the one just past ')') so the
+	 * replay restores the stream exactly — the scanner is already past
+	 * it, mirroring the range-for rewrite */
+	tb_push(&b, tok);
+	tokpush(b.toks, b.n); /* rewind: parsing resumes at the '(' */
+	next();
+	return has_semi;
+}
+
 static void body_buf_stmt(struct tokbuf *b); /* fwd */
 
 /* Buffer '(' ... matching ')' into `b`. */
@@ -572,7 +611,24 @@ stmt(struct func *f, struct scope *s)
 		}
 		s = mkscope(s);
 		expect(TLPAREN, "after 'if'");
-		e = expr(s);
+		/* P2360: the head may begin with an init-statement (a declaration
+		 * `if (int i = 0; i) ...`, an expression, or a C++ alias routed
+		 * through decl()), separated from the condition by ';'.  Scan
+		 * ahead for a depth-0 ';' to disambiguate from a ctor-call
+		 * condition like `if (Vec(3).f() ...)`, then rewind and parse. */
+		if (cpp_if_has_init()) {
+			if (!decl(s, f)) {
+				if (tok.kind != TSEMICOLON) {
+					e = expr(s);
+					funcexpr(f, e);
+					delexpr(e);
+				}
+				expect(TSEMICOLON, NULL);
+			}
+			e = expr(s); /* the condition */
+		} else {
+			e = expr(s); /* the condition */
+		}
 		t = e->type;
 		if (!(t->prop & PROPSCALAR))
 			error(&tok.loc, "controlling expression of if statement must have scalar type");
