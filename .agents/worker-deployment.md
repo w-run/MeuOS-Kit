@@ -69,7 +69,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 | bella | lite | worktree-tmp-bella (自 worktree-mxx-work) | /tmp/mxx-wt-bella | m++ 测试矩阵扩充 + 门禁验证 | **completed**（1ed8c53 已合入主线 dd78366） | 16 个 test/cpp 文件 |
 | chloe | lite | 只读隔离副本 | /tmp/mcciso-chloe | 定位 chibicc B 类真 bug（常量折叠窄化 + va_end 类型检查） | **completed**（报告已收） | 只读不 push |
 | diana | lite | worktree-tmp-diana (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试扩充 | **completed**（db1451b 已合入主线 294e5c2） | 11 个 test/c23 文件 + 发现 F1-F3 |
-| eve | lite | worktree-tmp-eve (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵扩充 | **completed**（02d6684 已合入主线 b4cad7e） | 33 个 test/cpp 文件 |
+| eve | lite | worktree-tmp-eve-olevel (自 worktree-mxx-work) | /tmp/mxx-wt-eve | -O 优化级别语义分级（O0..O3/-Os/-Oz/-Og/-Ofast + 非法级别钳制） | **completed**（check-olevel 新增；verify-all 17/17） | 4 提交待 team-lead 合入 |
 | grace | lite | worktree-tmp-grace-sema + worktree-tmp-grace-loc (自 worktree-mxx-work@e010519) | /tmp/mxx-wt-grace | sema/decl 组 E1/E4/E5/E6 修复 + E4 行号定位到函数体 } | **completed**（已合入主线） | a8167d9 |
 | hazel | lite | worktree-tmp-hazel-c23 (自 worktree-mxx-work@d0a90c9) | /tmp/mxx-wt-hazel | C23 constexpr 组：F1/F2/F3 | **completed**（8e5aae3 已 push origin/worktree-tmp-hazel-c23，门禁全绿，已合入主线） | 8e5aae3 |
 
