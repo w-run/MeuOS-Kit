@@ -630,8 +630,13 @@ emit_ins(FILE *f, MInsM *in)
 		 * -(fm->slot + 16 + csaves*8), frame reserves the alloca area
 		 * below it); adding g_slot_base (-16) here pushed the alloca
 		 * below sp (frame under-allocation; crashed float/struct-heavy
-		 * functions at runtime). */
-		fprintf(f, "\taddi\tt0, fp, %d\n", g_alloca_cur);
+		 * functions at runtime).  Offsets beyond ±2047 need t6. */
+		if (g_alloca_cur >= -2048 && g_alloca_cur <= 2047)
+			fprintf(f, "\taddi\tt0, fp, %d\n", g_alloca_cur);
+		else {
+			fprintf(f, "\tli\tt0, %d\n\tadd\tt0, fp, t0\n",
+			        g_alloca_cur);
+		}
 		scratch_to_dst(f, d, "t0");
 		return;
 	}
@@ -681,7 +686,11 @@ emit_ins(FILE *f, MInsM *in)
 			mv_to_scratch(f, s0, "t0");
 			fputs("\tjalr\tra, 0(t0)\n", f);
 		}
-		if (d) {
+		if (d && !in->td) {
+			/* scalar return: land a0/fa0 into the result value.  An
+			 * aggregate return (in->td) leaves d as the pad pointer set
+			 * up by selcall — a0 holds the first return chunk there and
+			 * must NOT clobber the pad. */
 			if (d->type == MT_F32 || d->type == MT_F64)
 				scratch_to_dst_f(f, d, "fa0");
 			else
@@ -794,10 +803,21 @@ mfnm_emit_riscv64(MFnM *fm, FILE *f)
 			fprintf(f, ".globl %s\n", fm->name);
 		fprintf(f, "%s:\n", fm->name);
 	}
-	fprintf(f, "\taddi\tsp, sp, -%d\n", framesize);
-	fprintf(f, "\tsd\tra, %d(sp)\n", framesize - 8);
-	fprintf(f, "\tsd\tfp, %d(sp)\n", framesize - 16);
-	fprintf(f, "\taddi\tfp, sp, %d\n", framesize);
+	/* frame setup: addi's 12-bit signed immediate covers ±2047; larger
+	 * frames (big arrays/VLAs) materialize the offset in t6 instead */
+	if (framesize <= 2047) {
+		fprintf(f, "\taddi\tsp, sp, -%d\n", framesize);
+		fprintf(f, "\tsd\tra, %d(sp)\n", framesize - 8);
+		fprintf(f, "\tsd\tfp, %d(sp)\n", framesize - 16);
+		fprintf(f, "\taddi\tfp, sp, %d\n", framesize);
+	} else {
+		fprintf(f, "\tli\tt6, -%d\n\tadd\tsp, sp, t6\n", framesize);
+		fprintf(f, "\tli\tt6, %d\n\tadd\tfp, sp, t6\n", framesize);
+		fprintf(f, "\tli\tt6, %d\n\tadd\tt6, sp, t6\n"
+		        "\taddi\tt6, t6, -8\n\tsd\tra, 0(t6)\n", framesize);
+		fprintf(f, "\tli\tt6, %d\n\tadd\tt6, sp, t6\n"
+		        "\taddi\tt6, t6, -16\n\tsd\tfp, 0(t6)\n", framesize);
+	}
 	for (int i = 0; fm->mt->rclob && fm->mt->rclob[i] >= 0; i++)
 		if ((fm->regsused >> fm->mt->rclob[i]) & 1) {
 			int off = -24 - 8 * csave_idx(fm->mt, fm->mt->rclob[i]);

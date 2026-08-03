@@ -99,8 +99,8 @@ mval_of_ref(MFn *mf, MRef r)
 	return 0;
 }
 
-/* Scalar integer + float functions only for this round: fall back to the
- * legacy riscv64 LIR backend for aggregates, varargs and VLA. */
+/* Scalar + float + aggregate functions for this round: fall back to the
+ * legacy riscv64 LIR backend for varargs and VLA. */
 static bool
 mbe_supported(MFn *mf)
 {
@@ -108,11 +108,6 @@ mbe_supported(MFn *mf)
 		for (uint32_t k = 0; k < mb->nins; k++) {
 			MIns *in = &mb->ins[k];
 			switch (in->op) {
-			case MOP_ARG:
-			case MOP_CALL:
-				if (in->src[0].val && in->src[0].val->kind == MV_TYPE)
-					return false;   /* aggregate args/returns */
-				break;
 			case MOP_VASTART: case MOP_VAARG:
 				return false;       /* varargs: legacy for now */
 			case MOP_ALLOCA:
@@ -158,15 +153,24 @@ mfnm_backend_riscv64(MFn *mf)
 				mi->td = dst ? dst->td : 0;
 				break;
 			}
-			case MOP_ARG:
-				maddm(fm, b, MMOP_ARG, in->dtype, 0,
-				      mval_of_ref(mf, in->src[0]), 0);
+			case MOP_ARG: {
+				MInsM *mi = maddm(fm, b, MMOP_ARG, in->dtype, 0,
+				                  mval_of_ref(mf, in->src[0]), 0);
+				if (in->src[0].val && in->src[0].val->kind == MV_TYPE) {
+					/* aggregate: src[1] is the source pointer; td is the
+					 * MV_TYPE's MTypeDesc */
+					mi->td = in->src[0].val->td;
+					mi->src[0] = mval_of_ref(mf, in->src[1]);
+				}
 				break;
+			}
 			case MOP_CALL: {
 				if (dst && dst->type == MT_NONE)
 					dst->type = in->dtype;
 				MInsM *mi = maddm(fm, b, MMOP_CALL, in->dtype, dst,
 				                  mval_of_ref(mf, in->src[0]), 0);
+				if (in->src[1].val && in->src[1].val->kind == MV_TYPE)
+					mi->td = in->src[1].val->td;
 				(void)mi;
 				break;
 			}
@@ -223,6 +227,12 @@ mfnm_backend_riscv64(MFn *mf)
 				                   mval_of_ref(mf, in->src[1]));
 				if (in->cst)
 					mi->cst = in->cst;
+				/* alloca: the size lives in src[0]; carry it as cst so the
+				 * emitter sizes the static alloca area correctly (framesize
+				 * must cover the real struct/array size, not MMOP_ALLOCA16's
+				 * default 16) */
+				if (in->op == MOP_ALLOCA && in->src[0].con)
+					mi->cst = in->src[0].con;
 				break;
 			}
 			}
