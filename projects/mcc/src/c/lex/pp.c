@@ -863,20 +863,25 @@ skipbody(void)
 		}
 		{
 			struct condframe *f = arraylast(&condstack, sizeof *f);
+			bool val = false;
 			if (f->parentactive && !f->anytaken) {
 				bool is_ndef = (tok.kind == TELIFNDEF);
-				scan(&tok);
 				bool defined = false;
+				scan(&tok);
 				if (tok.kind >= TPPIDENT)
 					defined = macroget(tok.kind) != NULL;
-				bool val = is_ndef ? !defined : defined;
+				val = is_ndef ? !defined : defined;
 				f->istaken = val;
-				if (val) {
+				if (val)
 					f->anytaken = true;
-					return;
-				}
 			}
+			/* Consume the rest of the directive line before
+			 * returning: unlike #elif (evalexpr leaves tok ==
+			 * TNEWLINE) the macro name is still current here,
+			 * and directive() requires tok == TNEWLINE. */
 			expectnewline();
+			if (val)
+				return;  /* now active */
 		}
 		break;
 		case TELSE:
