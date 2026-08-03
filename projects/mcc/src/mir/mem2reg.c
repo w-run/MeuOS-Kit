@@ -305,6 +305,15 @@ typedef struct M2RCtx {
 	uint32_t *nstack, *cstack;
 	MPhi ***phi;          /* per-slot phi inserted per block id */
 	uint32_t nblkid;
+	/* Probe mode: walk the dominator tree exactly as the real rename
+	 * does, but mutate nothing — only record, in undef[], the slots that
+	 * would need a synthesised "undefined" value because some path reads
+	 * them before any store.  Those slots are dropped before the real
+	 * run: the read is UB in C, and materialising a value for it (a float
+	 * constant in particular) can land the backend in a mem→mem move it
+	 * cannot encode.  Declining to promote is always safe. */
+	bool probe;
+	bool *undef;
 } M2RCtx;
 
 static void
@@ -324,42 +333,14 @@ m2r_top(M2RCtx *c, uint32_t s)
 	return c->nstack[s] ? c->stack[s][c->nstack[s] - 1] : 0;
 }
 
-/* An undefined read (load before any store on this path).  C makes this UB;
- * we materialise a zero constant so the value still has a definition and
- * mssa_check's single-def invariant holds. */
+/* A path reads slot `s` before any store to it.  Flag the slot so the
+ * driver excludes it from the real rename pass. */
 static MVal *
 m2r_undef(M2RCtx *c, uint32_t s, MBlk *b)
 {
-	MFn *fn = c->fn;
-	MType ty = c->slot[s].type;
-	MVal *v = mval_new(fn, MV_TEMP, ty, 0, "m2r.undef");
-	MConst *zero = (ty == MT_F32 || ty == MT_F64)
-	    ? mconst_flt(fn, ty, 0.0)
-	    : mconst_int(fn, ty, 0);
-	MBlk *e = fn->start ? fn->start : b;
-
-	/* Define it at the top of the entry block so it dominates every use. */
-	if (e->nins == e->cins) {
-		e->cins = e->cins ? e->cins * 2 : 8;
-		e->ins = realloc(e->ins, e->cins * sizeof *e->ins);
-	}
-	memmove(&e->ins[1], &e->ins[0], e->nins * sizeof *e->ins);
-	e->nins++;
-	MIns *in = &e->ins[0];
-	memset(in, 0, sizeof *in);
-	in->op = MOP_COPY;
-	in->dtype = ty;
-	in->dst = v;
-	in->src[0] = MREF_CON(zero);
-	in->blk = e;
-	v->def = in;
-	v->defblk = e;
-	/* moving the array invalidates every def back-pointer in this block */
-	for (uint32_t i = 0; i < e->nins; i++)
-		if (e->ins[i].dst && e->ins[i].dst->kind == MV_TEMP &&
-		    e->ins[i].dst->def)
-			e->ins[i].dst->def = &e->ins[i];
-	return v;
+	(void)b;
+	c->undef[s] = true;
+	return 0;
 }
 
 /* Rewrite one block's loads/stores against the current renaming stacks,
@@ -420,11 +401,12 @@ m2r_rename(M2RCtx *c, MBlk **rpo, uint32_t nrpo, const uint32_t *ridx)
 				if (s < 0)
 					continue;
 				MVal *cur = m2r_top(c, (uint32_t)s);
-				if (!cur)
-					cur = m2r_undef(c, (uint32_t)s, b);
-				/* the entry-block insert above may have moved
-				 * this block's array; re-resolve */
-				in = &b->ins[i];
+				if (!cur) {
+					m2r_undef(c, (uint32_t)s, b);
+					continue;   /* probe: slot gets dropped */
+				}
+				if (c->probe)
+					continue;
 				/* %dst = load %slot  ->  %dst = copy %cur */
 				in->op = MOP_COPY;
 				in->src[0] = MREF_VAL(cur);
@@ -442,6 +424,14 @@ m2r_rename(M2RCtx *c, MBlk **rpo, uint32_t nrpo, const uint32_t *ridx)
 					/* store of a constant: materialise it so
 					 * the slot's SSA value is always an MVal
 					 * (phi args are MVal*, not MRef) */
+					if (c->probe) {
+						/* probe only tracks liveness, and
+						 * any value would do — push the
+						 * slot address as a placeholder */
+						m2r_push(c, (uint32_t)s,
+						    c->slot[s].addr);
+						continue;
+					}
 					nv = mval_new(fn, MV_TEMP,
 					    c->slot[s].type, 0, "m2r.c");
 					in->op = MOP_COPY;
@@ -451,6 +441,10 @@ m2r_rename(M2RCtx *c, MBlk **rpo, uint32_t nrpo, const uint32_t *ridx)
 					in->cst = 0;
 					nv->def = in;
 					nv->defblk = b;
+					m2r_push(c, (uint32_t)s, nv);
+					continue;
+				}
+				if (c->probe) {
 					m2r_push(c, (uint32_t)s, nv);
 					continue;
 				}
@@ -477,8 +471,12 @@ m2r_rename(M2RCtx *c, MBlk **rpo, uint32_t nrpo, const uint32_t *ridx)
 				if (!p)
 					continue;
 				MVal *cur = m2r_top(c, s);
-				if (!cur)
-					cur = m2r_undef(c, s, b);
+				if (!cur) {
+					m2r_undef(c, s, b);
+					continue;   /* probe: slot gets dropped */
+				}
+				if (c->probe)
+					continue;
 				if (p->narg == p->carg) {
 					p->carg = p->carg ? p->carg * 2 : 4;
 					p->arg = realloc(p->arg,
@@ -566,21 +564,10 @@ mmem2reg(MFn *fn)
 			MType ty;
 			if (in->op != MOP_ALLOCA || !in->dst)
 				continue;
-			if (!m2r_promotable(in->dst, &ty)) {
-				if (getenv("M2R_DIAG"))
-					fprintf(stderr, "m2r: %s: slot v%u REJECT promotable\n",
-					    fn->name, in->dst->id);
+			if (!m2r_promotable(in->dst, &ty))
 				continue;
-			}
-			if (!m2r_size_ok(in, ty)) {
-				if (getenv("M2R_DIAG"))
-					fprintf(stderr, "m2r: %s: slot v%u REJECT size ty=%d\n",
-					    fn->name, in->dst->id, (int)ty);
+			if (!m2r_size_ok(in, ty))
 				continue;
-			}
-			if (getenv("M2R_DIAG"))
-				fprintf(stderr, "m2r: %s: slot v%u ACCEPT ty=%d\n",
-				    fn->name, in->dst->id, (int)ty);
 			slot = realloc(slot, (nslot + 1) * sizeof *slot);
 			slot[nslot].addr = in->dst;
 			slot[nslot].type = ty;
@@ -643,7 +630,7 @@ mmem2reg(MFn *fn)
 	free(queued);
 	free(wl);
 
-	/* --- rename ------------------------------------------------------- */
+	/* --- probe: find slots with an undefined read --------------------- */
 	M2RCtx ctx;
 	memset(&ctx, 0, sizeof ctx);
 	ctx.fn = fn;
@@ -655,8 +642,68 @@ mmem2reg(MFn *fn)
 	ctx.stack = calloc(nslot, sizeof *ctx.stack);
 	ctx.nstack = calloc(nslot, sizeof *ctx.nstack);
 	ctx.cstack = calloc(nslot, sizeof *ctx.cstack);
+	ctx.undef = calloc(nslot, sizeof *ctx.undef);
 
+	ctx.probe = true;
 	m2r_rename(&ctx, rpo, npost, ridx);
+	ctx.probe = false;
+
+	/* Retract the flagged slots: unhook their phis (they were prepended to
+	 * the block lists but carry no arguments yet) and stop treating their
+	 * loads/stores as promotable. */
+	uint32_t ndrop = 0;
+	for (uint32_t s = 0; s < nslot; s++)
+		if (ctx.undef[s])
+			ndrop++;
+	if (ndrop) {
+		for (uint32_t s = 0; s < nslot; s++) {
+			if (!ctx.undef[s])
+				continue;
+			slotof[slot[s].addr->id] = -1;
+			for (MBlk *b = fn->link; b; b = b->link) {
+				MPhi *dead = phi[s][b->id];
+				if (!dead)
+					continue;
+				for (MPhi **pp = &b->phi; *pp; pp = &(*pp)->link)
+					if (*pp == dead) {
+						*pp = dead->link;
+						break;
+					}
+				if (dead->dst) {
+					dead->dst->kind = MV_NONE;
+					dead->dst->defphi = 0;
+				}
+				free(dead->arg);
+				free(dead->blk);
+				free(dead);
+				phi[s][b->id] = 0;
+			}
+			promoted--;
+		}
+		/* compact the slot array so the rename stacks stay dense */
+		uint32_t w = 0;
+		for (uint32_t s = 0; s < nslot; s++) {
+			if (ctx.undef[s]) {
+				free(phi[s]);
+				free(ctx.stack[s]);
+				continue;
+			}
+			phi[w] = phi[s];
+			ctx.stack[w] = ctx.stack[s];
+			ctx.cstack[w] = ctx.cstack[s];
+			slot[w] = slot[s];
+			slot[w].idx = w;
+			slotof[slot[w].addr->id] = (int32_t)w;
+			w++;
+		}
+		nslot = w;
+		ctx.nslot = nslot;
+	}
+	memset(ctx.nstack, 0, (nslot ? nslot : 1) * sizeof *ctx.nstack);
+
+	/* --- rename ------------------------------------------------------- */
+	if (nslot)
+		m2r_rename(&ctx, rpo, npost, ridx);
 
 	/* --- drop the now-dead allocas ------------------------------------ */
 	for (MBlk *b = fn->link; b; b = b->link) {
@@ -693,6 +740,7 @@ mmem2reg(MFn *fn)
 	free(ctx.stack);
 	free(ctx.nstack);
 	free(ctx.cstack);
+	free(ctx.undef);
 	free(slot);
 	free(slotof);
 	free(ridx);
