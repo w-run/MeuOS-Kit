@@ -80,6 +80,22 @@ $BIN -Ofast --specs=host -o /tmp/olevel-fm.bin "$DIR/fastmath.c" 2>/dev/null \
 	|| fail "-Ofast fastmath.c compile failed"
 /tmp/olevel-fm.bin || fail "-Ofast fastmath.c runtime wrong"
 
+# -Oz 尺寸优先：-Oz 的 .text 必须 ≤ -Os 的 .text
+$BIN -Os --specs=host -c -o /tmp/olevel-sizez-os.o "$DIR/sizez.c" 2>/dev/null \
+	|| fail "-Os sizez.c compile failed"
+$BIN -Oz --specs=host -c -o /tmp/olevel-sizez-oz.o "$DIR/sizez.c" 2>/dev/null \
+	|| fail "-Oz sizez.c compile failed"
+szos=$(size /tmp/olevel-sizez-os.o | awk 'NR==2{print $1}')
+szoz=$(size /tmp/olevel-sizez-oz.o | awk 'NR==2{print $1}')
+[ "$szoz" -le "$szos" ] || fail "-Oz text ($szoz) should be <= -Os text ($szos)"
+# -Oz 运行时正确性（与 -Os 结果一致）
+$BIN -Os --specs=host -o /tmp/olevel-sizez-os.bin "$DIR/sizez.c" 2>/dev/null \
+	|| fail "-Os sizez.c link failed"
+$BIN -Oz --specs=host -o /tmp/olevel-sizez-oz.bin "$DIR/sizez.c" 2>/dev/null \
+	|| fail "-Oz sizez.c link failed"
+/tmp/olevel-sizez-os.bin || fail "-Os sizez.c runtime wrong"
+/tmp/olevel-sizez-oz.bin || fail "-Oz sizez.c runtime wrong"
+
 # --- 3) 非法级别 ---
 if $BIN -O9 --specs=host -c -o /tmp/olevel-o9.o "$DIR/grading.c" 2>/tmp/olevel-o9.log; then
 	grep -q "clamping to -O3" /tmp/olevel-o9.log || fail "-O9 should print clamping warning"
