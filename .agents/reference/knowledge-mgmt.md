@@ -163,7 +163,6 @@ for item in data:
 | `ima-skill` | IMA 知识库/笔记管理（§9.1-9.5） |
 | `mkit-bootstrap` | Phase 0-5 自举流程编排（调用 bootstrap.sh） |
 | `mkit-c11-check` | mcc C11 符合性检查（`_Atomic`/`_Generic`/`_Thread_local` 等） |
-| `mkit-doc-sync` | 代码变更后文档同步收尾，确保文档不落后于代码 |
 | `mkit-syscall-gen` | 生成单文件 syscall 封装（meuos-libc syscall 目录） |
 
 技能通过 `Skill` 工具或对应的 slash command 调用。

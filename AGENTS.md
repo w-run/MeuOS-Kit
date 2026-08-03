@@ -130,7 +130,7 @@ MeuOS-Kit/
 ├── .agents/                项目级 Agent 资源（统一管理）
 │   ├── knowledge/          全局记忆（经验库：纪律/缺陷闭环，进 git）
 │   ├── reference/          详细参考（组件规范/自举/构建命令/状态速查等）
-│   ├── skills/             技能（cross-test/ima-skill/mkit-*）
+│   ├── skills/             技能（cross-test/ima-skill/mkit-bootstrap/c11-check/syscall-gen）
 │   └── worktrees/          独立工作树
 ├── .todo/                  项目待办（唯一待办来源，按项目子目录）
 ├── README.md               项目说明与构建方法
