@@ -68,7 +68,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 | alice | reasoning | worktree-tmp-alice-cpp + worktree-tmp-alice-cpp20 + worktree-tmp-alice-cli + worktree-tmp-alice-mtld (自 worktree-mxx-work) | /tmp/mxx-wt-alice | cpp_parse D1/D4/D2/E2/E3 + C++20 NTTP/consteval/<=>/聚合初始化/constexpr 成员 + CLI 参数 + **mt/as imm64 截断修复（check-mt-integration 闭环）** | **completed**（D1/D4 等已合入；cpp20 68d1222；cli ac57402；mtld 本次归并合入主线 **ad52f9b**，verify-all 恢复 19/19） | push worktree-tmp-alice-cpp20 |
 | bella | lite | worktree-tmp-bella-mirp3a (自 worktree-mxx-work@5aa1154) | /tmp/mxx-wt-bella | x86_64 MIR-native（fallback/≤16B/cmov）+ Phase 3a 抽象扩展 + riscv64 MIR-native 试点（#111） | **completed**（#94 已合入；#97 cmov 已合入 49dbab6；#111 Phase 3a 本次归并合入主线 **36c20e9**，riscv64 交叉抽查通过） | 4a6d474 |
 | chloe | lite | worktree-tmp-chloe-mirp2 + worktree-tmp-chloe-memconst (自 worktree-mxx-work@9742e2f) | /tmp/mxx-wt-chloe | MIR Phase 2：强制 MIR-native + TLS PIC（g_pic 正版）+ verify-all 19 步 + **MIR-native -O1 内存常量传播（check-olevel 差距③）** | **completed**（6cafb11/0702745/318e184 已合入；memconst 本次归并合入主线 **8d0aace**，-O0/-O1 指令数断言转绿） | 81186b3 |
-| diana | lite | worktree-tmp-diana-pic + worktree-tmp-diana-errcode + worktree-tmp-diana-dwarf (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试 + check-pic-verify 修复 + 错误码体系/多错收集 + DWARF 调试信息 | **completed**（db1451b C23 已合入 294e5c2；6db1691 PIC 已合入主线 58016d2；errcode da5a646/a561b36/c204bbe 已合入；dwarf dfdb0db/381bfdd/ad4d69a 本次归并合入主线） | 11 test/c23 + F1-F3 + i386/riscv64 GOT + E#### + 最小 DWARF4 |
+| diana | lite | worktree-tmp-diana-dwarfloc (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试 + check-pic-verify + 错误码体系/多错收集 + DWARF 调试信息 + **DWARF 变量位置** | **completed**（db1451b C23、6db1691 PIC、errcode da5a646/a561b36/c204bbe、dwarf dfdb0db/381bfdd/ad4d69a 均已合入主线；dwarfloc d032082 已 push） | 11 test/c23 + F1-F3 + GOT + E#### + DWARF4 + DW_AT_location |
 | eve | lite | worktree-tmp-eve + worktree-tmp-eve-olevel + worktree-tmp-eve-i18n (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵 + -O 级别语义分级 + **i18n 消息目录与双语（--lang=en/zh、LANG 推断、--explain/usage/--error-json 双语、check-i18n 目标）** | **completed**（测试矩阵已合入 b4cad7e；eve-olevel 已合入 a1bbb85；eve-i18n 本次归并合入主线 **1ce1b33**，check-i18n 通过） | worktree-tmp-eve-i18n |
 | grace | lite | worktree-tmp-grace-cpp23 (自 worktree-mxx-work@1ef0a9a) | /tmp/mxx-wt-grace | sema/decl E1/E4/E5/E6（已合入）+ C++23 缺口：P0849/P1774/P1401/P2360/nodiscard | **completed**（sema 已合入；cpp23 f7e313a+b54c8b9+16c2ca5+2a4d655+da7a107 **已合入主线** ba6d9f8） | push worktree-tmp-grace-cpp23 |
 | hazel | lite | worktree-tmp-hazel-fp (自 worktree-mxx-work@9742e2f) | /tmp/mxx-wt-hazel | MIR-native -O2 叶函数帧指针省略（check-olevel 差距②） | **completed**（本次归并合入主线 **14b00a9**，帧指针断言转绿；附修 main.c `-f/-fno-omit-frame-pointer` 赋值反了 **47f2cc0**） | a988893 |
@@ -180,6 +180,13 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
   - 局部变量经 funcalloc 记录（func.dvars）；`readelf --debug-dump=info` 可解析 CU/function/variable
   - 已知限制：变量无 DW_AT_location（后端未回传最终栈偏移），gdb 可见变量但不可取地址
 - 验证：verify-all.sh **19 PASS / 0 FAIL / 0 SKIP**（含 check-sysroot-static 自举）
+
+### DWARF 变量位置 DW_AT_location（diana dwarfloc 分支）
+- 状态：**已修复**（d032082，分支 worktree-tmp-diana-dwarfloc，已 push）
+- 机制：memit 静态 alloca 处记录最终帧偏移（g_alloca_cur）到 dwarf_loc 表（key=MVal id，rsp/rbp 帧基按 g_omit_fp）；func_to_mir 保留 value id→MVal vmap；emit.c 收集时反查
+- 产出：栈变量 `DW_OP_fbreg(offset)`，寄存器变量 `DW_OP_regN`（预留）；帧基在 dwarf_end_func 捕获
+- 验证：readelf 显示 a=fbreg -24/b=-40/s=-56 与 asm 帧偏移一致；gdb 单步后 `print a`=42 / `print b`=8 读取正确
+- 已知限制：legacy bridge 路径（MCC_USE_MIR=0）无 memit 记录，变量保持无 location（统一处理）
 
 ---
 

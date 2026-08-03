@@ -64,6 +64,12 @@ static MFnM *g_fm;         /* current function (for the VLA/dynalloc flag) */
 static bool g_omit_fp;     /* -O2+ leaf: frame pointer elided, rsp base */
 static int g_fp_off;       /* rsp-based slot offset adjustment when omitted */
 
+/* DWARF location feedback (src/emit/dwarf.c): record each static alloca's
+ * final frame offset so variable DIEs can carry DW_AT_location. */
+extern int g_dwarf_level;
+extern void dwarf_set_framebase(int);
+extern void dwarf_loc_set_stack(uint32_t, int32_t);
+
 static int
 alloca_size(MMOP op)
 {
@@ -930,6 +936,13 @@ emit_ins(FILE *f, MInsM *in)
 		else
 			fprintf(f, "\tleaq\t%d(%%rbp), %%rax\n", g_alloca_cur);
 		rax_to_dst(f, d);
+		/* DWARF: record the variable's final location (frame-relative
+		 * offset matching the frame base emitted below). */
+		if (g_dwarf_level > 0 && d && d->kind == MV_TEMP) {
+			dwarf_set_framebase(g_omit_fp ? 1 : 0);
+			dwarf_loc_set_stack(d->id,
+			    g_alloca_cur + (g_omit_fp ? g_fp_off : 0));
+		}
 		return;
 	}
 	case MMOP_BLIT: {

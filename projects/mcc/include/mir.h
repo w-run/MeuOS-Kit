@@ -332,6 +332,13 @@ struct MFn {
 	bool export;         /* external linkage (true) or local/static (false) */
 	int optlevel;        /* 0=O0, 1=O1, 2=O2 (default), 3=O3 */
 	bool emitted;        /* codegen already run */
+	/* Frontend value-id -> MVal side table (func_to_mir).  Indexed by
+	 * frontend `struct value` ids (VALUE_TEMP; ids start at 1); NULL for
+	 * ids that do not correspond to a MIR value.  Used to map frontend
+	 * locals back to their MIR values after the machine backend assigns
+	 * final stack slots / registers (DWARF variable locations). */
+	MVal **vmap;
+	uint32_t nvmap;
 };
 
 /* ---- Construction API (src/mir/build.c) -------------------------------- */

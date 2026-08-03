@@ -385,9 +385,14 @@ func_to_mir(struct func *f, int optlevel, bool export)
 	}
 	fn->vararg = f->type->u.func.isvararg;
 
-	/* value side table: indexed by frontend value id (1..lastid) */
+	/* value side table: indexed by frontend value id (1..lastid).
+	 * Kept on the MFn so the DWARF collector can map frontend locals to
+	 * their MIR values (and final stack slots) after the machine backend
+	 * runs; mfn_free() releases it. */
 	tab = xmalloc((f->lastid + 1) * sizeof *tab);
 	memset(tab, 0, (f->lastid + 1) * sizeof *tab);
+	fn->vmap = tab;
+	fn->nvmap = f->lastid + 1;
 
 	/* count blocks */
 	for (b = f->start; b; b = b->next)
@@ -660,7 +665,6 @@ func_to_mir(struct func *f, int optlevel, bool export)
 		}
 	}
 
-	free(tab);
 	free(fbmap);
 	return fn;
 }

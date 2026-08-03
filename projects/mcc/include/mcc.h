@@ -447,10 +447,17 @@ extern int g_dwarf_level; /* -g level: 0 = no debug info, 1+ = DWARF level */
 /* DWARF debug-info collection + emission (src/emit/dwarf.c). */
 void dwarf_set_file(const char *);
 int dwarf_begin_func(const char *, int, int);
-void dwarf_add_var(const char *, int);
+void dwarf_add_var(const char *, int, int, int, int);
 void dwarf_end_func(void);
 void dwarf_emit_func_end(FILE *, int);
 void dwarf_finalize(FILE *);
+/* machine-layer location feedback (memit records final stack/register
+ * positions keyed by MVal id). */
+void dwarf_loc_reset(void);
+void dwarf_set_framebase(int);
+void dwarf_loc_set_stack(uint32_t, int32_t);
+void dwarf_loc_set_reg(uint32_t, int32_t);
+int dwarf_loc_get(uint32_t, int32_t *, int32_t *);
 
 extern int g_error_explain;
 
