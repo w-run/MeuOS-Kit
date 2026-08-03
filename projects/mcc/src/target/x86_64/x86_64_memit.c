@@ -751,6 +751,64 @@ emit_ins(FILE *f, MInsM *in)
 		fputs("\tmovzbl\t%al, %eax\n", f);
 		rax_to_dst(f, d);
 		return;
+	case MMOP_CMOV: {
+		/* dst = flags.cc ? src : dst (if-conversion).  cmov needs a
+		 * register destination (gas rejects cmov to memory) and cannot
+		 * take an immediate source.  A slot-resident destination is
+		 * routed through %r9 (a reserved emitter scratch): pre-load the
+		 * old value, conditionally overwrite, store back.  Always use
+		 * the 64-bit form with an explicit size suffix (cmov<cc>q —
+		 * a bare `cmovl` would be parsed as a 32-bit size suffix); the
+		 * low 32 bits are what a 32-bit consumer reads. */
+		const char *cc = cc_suffix(in->cc);
+		bool memdst = d && d->kind == MV_TEMP && d->reg < 0;
+		/* constants and GLOBAL symbols cannot be cmov operands directly:
+		 * constants need a register (no immediates), and a symbol is an
+		 * ADDRESS — `emit_mval` would print sym(%rip), i.e. read the
+		 * symbol's contents, not its address.  Materialize both via %rax
+		 * (mov does not touch the flags). */
+		bool mats = s0 && (s0->kind == MV_CONST || s0->kind == MV_GLOBAL);
+		if (memdst) {
+			/* gas rejects cmov to memory: dst = cc ? src : dst via %r9.
+			 * Use width-matched loads/stores — an 8-byte movq to a 4-byte
+			 * slot would clobber the neighbouring callee-saved save area
+			 * (the 32-bit slot -12(%rbp) sits right above the pushed %rbx
+			 * at -8(%rbp)).  The cmov itself stays 64-bit; only the low
+			 * 32 bits are consumed by a 32-bit consumer. */
+			bool is64 = in->dtype == MT_I64 || in->dtype == MT_PTR;
+			const char *ws = is64 ? "q" : "l";
+			const char *rn = is64 ? "%r9" : "%r9d";
+			fprintf(f, "\tmov%s\t", ws);
+			emit_mval(f, d);
+			fprintf(f, ", %s\n", rn);
+			/* the cmov always writes the full %r9; the width-matched
+			 * store below consumes only the low bits for 32-bit slots */
+			if (mats) {
+				mov_to_rax(f, s0, 0);
+				fprintf(f, "\tcmov%sq\t%%rax, %%r9\n", cc);
+			} else {
+				fprintf(f, "\tcmov%sq\t", cc);
+				emit_mval(f, s0);
+				fputs(", %r9\n", f);
+			}
+			fprintf(f, "\tmov%s\t%s, ", ws, rn);
+			emit_mval(f, d);
+			fputs("\n", f);
+			return;
+		}
+		if (mats) {
+			mov_to_rax(f, s0, 0);
+			fprintf(f, "\tcmov%sq\t%%rax, ", cc);
+			emit_mval(f, d);
+		} else {
+			fprintf(f, "\tcmov%sq\t", cc);
+			emit_mval(f, s0);
+			fputs(", ", f);
+			emit_mval(f, d);
+		}
+		fputs("\n", f);
+		return;
+	}
 	case MMOP_LOAD: {
 		/* width + zero-extension for sub-32 loads */
 		emit_addr_loads(f, in->addr);
