@@ -282,7 +282,7 @@ MIR_SRCS := $(wildcard src/mir/*.c)
 # machine.c references mtarget_x86_64.abi (mfnm_abi_x86_64) and
 # mtarget_riscv64.abi (mfnm_abi_riscv64), so every standalone link of
 # the mir/ sources also needs both machine ABIs.
-MABI_SRC := src/target/x86_64/x86_64_mabi.c src/target/riscv64/riscv64_mabi.c src/target/loongarch64/loongarch64_mabi.c src/target/aarch64/aarch64_mabi.c src/target/arm/arm_mabi.c
+MABI_SRC := src/target/x86_64/x86_64_mabi.c src/target/riscv64/riscv64_mabi.c src/target/loongarch64/loongarch64_mabi.c src/target/aarch64/aarch64_mabi.c src/target/arm/arm_mabi.c src/target/i386/i386_mabi.c
 check-mir-types: $(MIR_SRCS) $(MABI_SRC)
 	@mkdir -p build
 	$(HOST_CC) $(CFLAGS) -Iinclude -o build/mir_test $^ test/mir/mir_test.c
@@ -303,20 +303,20 @@ check-mir-regalloc: $(MIR_SRCS) $(MABI_SRC)
 # opcodes (MMOP), machine functions/blocks/instructions (MFnM/MBlkM/MInsM).
 # Independent of the LIR/QBE pipeline — links mir/ sources only (plus the
 # x86_64 machine ABI, which mtarget_x86_64.abi points at).
-check-mir-machine: $(MIR_SRCS) src/target/x86_64/x86_64_mabi.c
+check-mir-machine: $(MIR_SRCS) $(MABI_SRC)
 	@mkdir -p build
 	$(HOST_CC) $(CFLAGS) -Iinclude -o build/machine_test \
 		test/mir/machine_test.c src/mir/build.c src/mir/mir_util.c \
-		src/mir/machine.c src/mir/print.c src/target/x86_64/x86_64_mabi.c src/target/riscv64/riscv64_mabi.c src/target/loongarch64/loongarch64_mabi.c src/target/aarch64/aarch64_mabi.c src/target/arm/arm_mabi.c
+		src/mir/machine.c src/mir/print.c $(MABI_SRC)
 	./build/machine_test
 
 # P2 x86-64 SysV ABI lowering on MIR-native data: eightbyte classification
 # (mabi_typclass/mabi_argsclass) + selpar/selcall/selret lowering.
-check-mir-abi: $(MIR_SRCS) src/target/x86_64/x86_64_mabi.c
+check-mir-abi: $(MIR_SRCS) $(MABI_SRC)
 	@mkdir -p build
 	$(HOST_CC) $(CFLAGS) -Iinclude -o build/mabi_test \
 		test/mir/mabi_test.c src/mir/build.c src/mir/mir_util.c \
-		src/mir/machine.c src/mir/print.c src/target/x86_64/x86_64_mabi.c src/target/riscv64/riscv64_mabi.c src/target/loongarch64/loongarch64_mabi.c src/target/aarch64/aarch64_mabi.c src/target/arm/arm_mabi.c
+		src/mir/machine.c src/mir/print.c $(MABI_SRC)
 	./build/mabi_test
 
 # MIR → LIR bridge end-to-end: build a fib MFn, run MIR passes, bridge to

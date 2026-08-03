@@ -20,6 +20,7 @@
 #include "loongarch64_m.h"
 #include "aarch64_m.h"
 #include "arm_m.h"
+#include "i386_m.h"
 
 /* ---- loongarch64 machine target (register descriptions) ---------------- */
 /* 32 GPRs (r0-r31, ABI names) + 32 FPRs (f0-f31).  Caller-saved: t0-t8,
@@ -524,6 +525,69 @@ const MTargetM mtarget_arm = {
 	 * the allocator */
 	.scratch = (1ull << ARM_R10) | (1ull << ARM_R12) |
 	           (1ull << ARM_D8) | (1ull << ARM_D9),
+};
+
+/* ---- i386 (32-bit) machine target -------------------------------------- */
+
+static const MRegInfo i386_regs[I386MREG_NREG] = {
+	[I386MREG_EAX] = { "eax", MRC_GPR, true,  false, true  },
+	[I386MREG_ECX] = { "ecx", MRC_GPR, true,  false, false },
+	[I386MREG_EDX] = { "edx", MRC_GPR, true,  false, false },
+	[I386MREG_EBX] = { "ebx", MRC_GPR, false, true,  false },
+	[I386MREG_ESP] = { "esp", MRC_GPR, false, false, false },
+	[I386MREG_EBP] = { "ebp", MRC_GPR, false, false, false },
+	[I386MREG_ESI] = { "esi", MRC_GPR, false, true,  false },
+	[I386MREG_EDI] = { "edi", MRC_GPR, false, true,  false },
+	[I386MREG_XMM0] = { "xmm0", MRC_FPR, true,  false, false },
+	[I386MREG_XMM1] = { "xmm1", MRC_FPR, true,  false, false },
+	[I386MREG_XMM2] = { "xmm2", MRC_FPR, true,  false, false },
+	[I386MREG_XMM3] = { "xmm3", MRC_FPR, true,  false, false },
+	[I386MREG_XMM4] = { "xmm4", MRC_FPR, true,  false, false },
+	[I386MREG_XMM5] = { "xmm5", MRC_FPR, true,  false, false },
+	[I386MREG_XMM6] = { "xmm6", MRC_FPR, true,  false, false },
+	[I386MREG_XMM7] = { "xmm7", MRC_FPR, true,  false, false },
+};
+
+/* i386 cdecl: all arguments on the stack (no register arguments).
+ * Return: EAX (32-bit) or EDX:EAX (64-bit). */
+static const int i386_argreg[] = {
+	I386MREG_XMM0, I386MREG_XMM1, I386MREG_XMM2, I386MREG_XMM3,
+	I386MREG_XMM4, I386MREG_XMM5, I386MREG_XMM6, I386MREG_XMM7,
+	-1
+};
+static const int i386_rsave[] = {
+	I386MREG_EAX, I386MREG_ECX, I386MREG_EDX,
+	I386MREG_XMM0, I386MREG_XMM1, I386MREG_XMM2, I386MREG_XMM3,
+	I386MREG_XMM4, I386MREG_XMM5, I386MREG_XMM6, I386MREG_XMM7,
+	-1
+};
+static const int i386_rclob[] = {
+	I386MREG_EBX, I386MREG_ESI, I386MREG_EDI,
+	-1
+};
+
+extern void mfnm_abi_i386(MFnM *fm);
+const MTargetM mtarget_i386 = {
+	.name = "i386",
+	.nreg = I386MREG_NREG,
+	.regs = i386_regs,
+	.gpr0 = I386MREG_EAX,
+	.ngpr = 8,               /* eax, ecx, edx, ebx, esp, ebp, esi, edi */
+	.fpr0 = I386MREG_XMM0,
+	.nfpr = 8,               /* xmm0-xmm7 */
+	.rglob = (1ull << I386MREG_EBP) | (1ull << I386MREG_ESP),
+	.reserved = 0,
+	.argreg = i386_argreg,
+	.rsave = i386_rsave,
+	.rclob = i386_rclob,
+	.ptrsize = 4,
+	.stackalign = 16,
+	.kl_in_reg = false,      /* 64-bit ints not in a single register on 32-bit */
+	.feat = 0,               /* no cmov, no scale-index by default */
+	.sret_reg = I386MREG_EAX,
+	.abi = mfnm_abi_i386,
+	.scratch = (1ull << I386MREG_EAX) | (1ull << I386MREG_ECX) |
+	           (1ull << I386MREG_EDX) | (1ull << I386MREG_XMM0),
 };
 
 /* ---- x86-64 machine target (register descriptions) --------------------- */

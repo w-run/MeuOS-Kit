@@ -25,6 +25,7 @@ extern bool mfnm_backend_riscv64(struct MFn *);   /* riscv64_mbe.c (P3a machine 
 extern bool mfnm_backend_loongarch64(struct MFn *); /* loongarch64_mbe.c (P3b) */
 extern bool mfnm_backend_aarch64(struct MFn *);   /* aarch64_mbe.c (P3b machine backend) */
 extern bool mfnm_backend_arm(struct MFn *);       /* arm_mbe.c (P3c machine backend) */
+extern bool mfnm_backend_i386(struct MFn *);      /* i386_mbe.c (P3c machine backend) */
 
 /* DWARF variable-type classification for the base-type DIEs. */
 static int
@@ -76,10 +77,9 @@ dwarf_collect_vars(struct func *f, struct MFn *mf, Fn *fn)
  * removed).  The legacy direct-LIR path was removed in Phase 4 step 1. */
 int g_use_mir;
 
-/* P2+ MIR-native backend switch (Phase 2): x86_64 defaults to the machine
- * backend (convert to MFnM, ABI-lower, regalloc, emit) as its sole asm
- * producer.  MCC_MIR_BACKEND=0 may disable it for testing; non-x86_64
- * targets keep the bridge path. */
+/* MIR-native backend switch (Phase 2): always 1 — the MCC_MIR_BACKEND
+ * env var was removed in Phase 2.  Each target's machine backend is tried
+ * first; if it rejects a construct, the LIR bridge fallback takes over. */
 int g_use_mir_backend;
 
 void
@@ -121,20 +121,20 @@ emitfunc(struct func *f, struct scope *fs, bool global)
 			fprintf(stderr, "\n> MIR (post-pass) %s:\n", f->name);
 			mfn_dump(mf, stderr);
 		}
-		/* MIR-native backend (Phase 2/3a): x86_64 and riscv64 — the
-		 * machine backend dispatches per-target (mfnm_backend_<arch>);
-		 * when it reports success the MIR was emitted directly.  Other
-		 * targets keep the MIR -> bridge -> LIR path.  The per-arch
-		 * backend falls back (returns false) for constructs it does not
-		 * cover, so the bridge path stays as the safety net. */
-		if (g_use_mir_backend &&
-		    ((strcmp(T.name, "x86_64") == 0 && mfnm_backend_x86_64(mf)) ||
-		     (strcmp(T.name, "riscv64") == 0 && mfnm_backend_riscv64(mf)) ||
-		     (strcmp(T.name, "loongarch64") == 0 &&
-		      mfnm_backend_loongarch64(mf)) ||
-		     (strcmp(T.name, "aarch64") == 0 && mfnm_backend_aarch64(mf)) ||
-		     ((strcmp(T.name, "arm") == 0 || strcmp(T.name, "armv7") == 0) &&
-		      mfnm_backend_arm(mf)))) {
+		/* MIR-native backend (Phase 2/3a): the machine backend dispatches
+		 * per-target (mfnm_backend_<arch>); when it reports success the
+		 * MIR was emitted directly.  The per-arch backend falls back
+		 * (returns false) for constructs it does not cover (e.g. arm/i386
+		 * aggregates, varargs), so the bridge path stays as the safety
+		 * net.  The MCC_MIR_BACKEND env var was removed in Phase 2. */
+		if ((strcmp(T.name, "x86_64") == 0 && mfnm_backend_x86_64(mf)) ||
+		    (strcmp(T.name, "riscv64") == 0 && mfnm_backend_riscv64(mf)) ||
+		    (strcmp(T.name, "loongarch64") == 0 &&
+		     mfnm_backend_loongarch64(mf)) ||
+		    (strcmp(T.name, "aarch64") == 0 && mfnm_backend_aarch64(mf)) ||
+		    ((strcmp(T.name, "arm") == 0 || strcmp(T.name, "armv7") == 0) &&
+		     mfnm_backend_arm(mf)) ||
+		    (strcmp(T.name, "i386") == 0 && mfnm_backend_i386(mf))) {
 
 			if (g_dwarf_level > 0) {
 				dwarf_collect_vars(f, mf, NULL);

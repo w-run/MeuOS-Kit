@@ -156,13 +156,13 @@ mcc_main(int argc, char *argv[])
 	extern int g_use_mir;
 	g_use_mir = 1;
 
-	/* P2+ MIR-native backend (Phase 2): x86_64 defaults to the machine
-	 * backend (MFnM + ABI lowering + regalloc + emit) as its sole asm
-	 * producer (all fallbacks closed in Phase 1).  MCC_MIR_BACKEND=0 can
-	 * still disable it for testing.  Only the x86_64 target honors it
-	 * (gated at the call site in emit.c). */
+	/* P2+ MIR-native backend (Phase 2, Phase 4 step 2): always enabled.
+	 * Each target's machine backend runs first; if it rejects a construct
+	 * (e.g. arm/i386 aggregates), the LIR bridge fallback takes over.
+	 * The MCC_MIR_BACKEND env var was removed in Phase 2 — the MIR
+	 * backend is no longer optional. */
 	extern int g_use_mir_backend;
-	g_use_mir_backend = getenv("MCC_MIR_BACKEND") ? atoi(getenv("MCC_MIR_BACKEND")) : 1;
+	g_use_mir_backend = 1;
 
 	/* Language: 0 = C (default for mcc), 1 = C++ (default for m++).
 	 * The m++ driver sets g_lang=1 before calling mcc_main; file suffix
