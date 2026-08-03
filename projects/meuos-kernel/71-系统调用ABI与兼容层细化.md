@@ -222,10 +222,10 @@ native capability 调用（= 05/07 一等原语）
 | 编号 | 待决项 | 是否需大喵拍板 | 关联 |
 |------|--------|----------------|------|
 | **D1** | **统一 syscall 编号编码方案**：单一线性 32 位编号 vs 高位 bit 区分 native/compat 子集（本文推荐「单一线性 + 高位 NATIVE_BIT」）；编号保留位与扩展策略 | 否（设计协同，可在 doc-sync 定稿） | `08` §2.2、`21` §5.3、`23` §4 |
-| **D2** | **兼容层是否进入 TCB**：direct-mapped 整形逻辑处内核态、默认入 TCB 边界，但 emulated/synthesized 复杂语义退用户态；「兼容层整体 TCB 归属」需定调 | **已裁决·闭环（第十轮自主采纳，分层 TCB）** | `00` A3/A6、`02` §5-6 TCB 度量、`08` §5.6 |
+| **D2** | **兼容层是否进入 TCB**：direct-mapped 整形逻辑处内核态、默认入 TCB 边界，但 emulated/synthesized 复杂语义退用户态；「兼容层整体 TCB 归属」需定调 | **已裁决·reasoning 决策已出（2026-08-03，分层 TCB）** | `00` A3/A6、`02` §5-6 TCB 度量、`08` §5.6 |
 | **D3** | **errno 映射范围与存储**：内部 native 失败 → POSIX errno 精确映射表（§3.1）；每线程 TLS errno vs 全局；native 路径是否仍走 errno | 否（设计协同，协同 `07`/`21` libc 定稿） | `07` §4.1、`21` §5.3 TLS、`23` §3 |
 | **D4** | **syscall 版本化策略**：native/compat 双子集如何分别版本；`.msys` 版本号是否直接作为 native syscall revision；兼容子集弃用窗口数值 | 否（设计协同，协同 `23` §5/§6/§7 定稿） | `23` §5/§6/§7、C12、C14、`06` §4.3 |
-| **D5** | **native/compat 双路径长期维护成本**：双路径漂移风险、五架构 × 双路径测试矩阵、direct-mapped 子集变更如何同步两套语义 | **已裁决·闭环（第十轮自主采纳，direct-mapped 子集为权威 + CI 双路径门禁）** | `08` §2.2、`21` §5、`11` §5、`19` 性能/可验证性 |
+| **D5** | **native/compat 双路径长期维护成本**：双路径漂移风险、五架构 × 双路径测试矩阵、direct-mapped 子集变更如何同步两套语义 | **已裁决·reasoning 决策已出（2026-08-03，direct-mapped 子集为权威 + CI 双路径门禁）** | `08` §2.2、`21` §5、`11` §5、`19` 性能/可验证性 |
 | **D6** | **五架构入口蹦床归一约定**：per-arch 参数寄存器 → 内部 syscall frame 的整形 ABI；i386 纯 C 快通道与 Rust 接管边界（`21` §5.3 / C6） | 否（设计协同，协同 `21`/`09`/`11` 定稿） | `21` §4/§5.3、`09` §5.7、`11` §5 |
 | **D7** | **用户可见结构体冻结清单**：哪些结构体进入 `23` ① 冻结集合（`stat`/`timespec`/`utsname`/`sockaddr`…）；五架构布局一致性强制手段 | 否（协同 `23` §2 定稿，本文只声明「属冻结项」） | `23` §2/§7、`21` §5.3 |
 | **D8** | **direct-mapped 全集映射表初版**：统一编号中哪些 syscall 进 1:1 分支（mkit Phase0 子集），哪些进 emulated/synthesized | 否（实现阶段待决，协同 `08` §6.2 / C12） | `08` §2.2/§6.2、C12、`11` M0–M4 |
@@ -296,3 +296,54 @@ native capability 调用（= 05/07 一等原语）
 - 与 §1.1 / §5 同源收口一致——分发逻辑、号→原语映射、errno 合成统一实现一次，五架构仅差入口蹦床，本裁决保证双路径投影长期同源于此单源。
 
 > 待大喵复核。
+
+---
+
+## 10. reasoning 决策（2026-08-03）：D2 / D5 大喵复核细化
+
+> 本节为 reasoning 决策 agent（2026-08-03）在指挥官第十轮「分层 TCB / single source of truth」占位基础上做的细化复核——不删不改 §9 原文与 §7 待决项的占位采纳，仅追加复核结论与「被否决选项的取舍」理由。复核重点在 TCB 体量、安全模型自洽（`07` §4.1 rights 冻结纪律）、五架构同源可行性、长期可维护性、与既有地基（capability / Job 账本 / 结构化取消 / `.msys` A/B）的协同。
+
+### 10.1 D2 · 兼容层 TCB 归属 → 同意「分层 TCB」
+
+**reasoning 决策（2026-08-03）**：同意并固化「兼容层不整体入 TCB；仅 direct-mapped 整形逻辑入 TCB，emulated/synthesized 退用户态」的分工——同时将「薄整形逻辑」的 TCB 边界明确为「参数寄存器归一 + 统一分发表查表 + errno 映射表」三件机械动作，不含 security policy。
+
+**理由（含被否决选项的取舍）**：
+
+- **TCB 体量与可证明性 ROI**：direct-mapped 整形逻辑是机械映射（无 if-then-else 路径、无权限裁决、可形式化建模为有限状态机），其规模约「参数寄存器数 × syscall 数」的纯查找表，TCB 增量极小；emulated/synthesized（socketpair 模拟、signalfd、/proc 伪文件生成）涉及应用语义、状态爆炸、并发时序，证明 ROI 为负。
+- **安全模型自洽性**：直接命中 `07` §4.1 rights 冻结纪律——薄层只消费 capability 不发放（与 `08 §4.4「兼容层不是权限源」`的边界同构）；emulated/synthesized 退用户态后，权限裁决仍归下游 native capability 调用处（`07` rights 校验），不存在「兼容层绕过 capability」的逃生舱。
+- **五架构同源可行性**：薄整形逻辑 = 纯算法 + 数据结构 + 平台无关语义，与 `11` §5 五架构等价金标准、`21` §5 同源内核算式一致；退用户态的复杂语义受五架构指令集影响为零（用户态 Rust 服务）。
+- **长期可维护性**：退用户态的兼容组件可重启、可灰度、可替换（`04` §4.5 监督者框架下 supervisor 可重启崩溃的 emulated 服务）；薄层作为内核态常驻组件一旦变更需全量镜像重建（A6 重服务出核·缩 TCB 纪律）。
+
+**被否决选项**：
+
+- **「兼容层整体入 TCB」**——否决。TCB 体积爆炸（emulated 子集涵盖 fork CoW、信号投递、/proc 生成，是 fs 与 IPC 的复刻）、与 `00 A6`「重服务出核缩 TCB」背离、证明成本不可承受（`20 §7.4` 已定「拒绝 seL4 全量证明」）。
+- **「兼容层完全用户态（连 direct-mapped 都退用户态）」**——否决。每次 syscall 跨用户态/内核态边界至少 2 次上下文切换，破坏 `00 A10`「mkit 子集优先 + 内核态薄层吸收宏内核 syscall 零往返优势」；`19 §4` 已列「数据通路留核」「跨 IPC 搬运」为 lean hybrid 的两大杠杆，废薄层等于废这两条杠杆。
+
+**对本文的细化落点（不删前文）**：
+
+- §2.3「是否进入 TCB」明确：薄整形逻辑 = (a) 统一分发表 + (b) direct-mapped 1:1 整形 + (c) emulated/synthesized 的转发路由；三件均按 A3 入 TCB、入 `02 §5-6` TCB 度量；emulated/synthesized 复杂语义（fork CoW 实现、信号投递实现、/proc 伪文件生成）= 用户态兼容运行时（`08 §5.6` 边界）= 不入 TCB。
+- §7 待决项 D2 状态列同步从「第十轮自主采纳」升格为「reasoning 决策已出（2026-08-03）」。
+
+### 10.2 D5 · native/compat 双路径长期维护成本 → 同意「direct-mapped 子集为 single source of truth」
+
+**reasoning 决策（2026-08-03）**：同意并固化「direct-mapped 子集为唯一权威（single source of truth），compat 路径视为其投影并由 CI 双路径一致性门禁覆盖，五架构 × 双路径矩阵以合成测试归约；长期收敛策略为 native 优先」——同时明确「single source of truth 适用范围 = direct-mapped 子集」，emulated/synthesized 子集各有独立语义、可由两套独立维护（受各自回归门禁覆盖）。
+
+**理由（含被否决选项的取舍）**：
+
+- **漂移风险结构**：direct-mapped 子集是 native capability-call 的 1:1 投影（`08 §2.2`），等价关系由编译器/簿记自动保证；若维护两份代码，漂移是「什么时候漂」而非「会不会漂」问题。门禁只检测漂移、不阻止漂移，事后追责代价 > 事前根除。把 direct-mapped 升格为权威，compat 由权威派生，漂移结构上不存在。
+- **五架构 × 双路径测试矩阵可行性**：direct-mapped 行为一旦定义为权威，compat 路径测试可自动派生（同一 syscall 号、同样的 rights 检查、同样的 errno 映射），五架构 × 双路径矩阵退化为「五架构 direct-mapped + 自动派生 compat 一致性 = 单一矩阵」，单测套件规模可管。
+- **与既有地基协同**：与 `08 §2.2` direct-mapped = native 1:1 分支、`§5.1`「native 路径与 compat 路径终态同构」、`21 §5` meuos-libc syscall gate 五架构同源、`11 §5` M0–M4 自举验证的 syscall 子集 = 统一编号首批冻结项对齐——形成「统一编号表 = 唯一权威、统一分发表 = 唯一实现、native 与 compat = 同一张表的两个投影」三层闭环。
+- **长期收敛策略**：与 `08 §2.3` Phase 0「mkit 子集零成本直跑」同源——mkit 子集兼容 native（不用 compat 翻译）、glibc 通用程序走 compat（成本在语义仿真不在分发）；Day 1 后期 compat 翻译逐步收敛、M3 后兼容层最终消解为薄层内的 errno 合成。
+
+**被否决选项**：
+
+- **「两套独立维护 + 同步门禁」**——否决。成本高、靠纪律不靠机制；`22 §4.2` fail-closed 原则要求「默认拒绝无证据」，纪律性门禁在能力衰退期必然退化。
+- **「只维护 native、compat 自动生成」**——否决。emulated/synthesized 子集（fork CoW、信号、伪文件系统）含应用语义、无算法等价关系可生成；强自动生成只会引入隐藏缺陷。
+- **「只维护 compat、native 由 compat 翻译」**——否决。违背 `00 A10`「mkit 子集优先 + 薄层吸收宏内核 syscall 零往返优势」、违背 `08 §2.3` Phase 0「mkit 子集零成本直跑」目标、付出 zero-to-hero 性能代价换零可读性收益。
+
+**对本文的细化落点（不删前文）**：
+
+- §9.2 已写「direct-mapped 子集为权威 + CI 双路径门禁」，本节第 §10.2 进一步将「emulated/synthesized 子集独立维护」明示为该决策的边界，避免读者误以为「所有 syscall 路径」都受 single source of truth 覆盖。
+- §7 待决项 D5 状态列同步从「第十轮自主采纳」升格为「reasoning 决策已出（2026-08-03）」。
+
+---

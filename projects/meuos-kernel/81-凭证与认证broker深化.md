@@ -179,10 +179,10 @@ issuer 私钥 ──签注──▶ credential(symbolic_name, cap_anchor, validi
 | 编号 | 待决项 | 是否需大喵拍板 | 关联 |
 |------|--------|----------------|------|
 | **P1** | **认证 broker 是否单一系统服务**（类比 `63` N13 netstack 单例）？多 broker 并存是否导致 issuer 身份歧义 / 凭证溯源失真 | 否（协同 `04`/`53` 定稿，N13 已闭环单例范式可借鉴） | `53` §2.5、`63` N13、`04` 监督 |
-| **P2** | **issuer 根密钥托管**：issuer 私钥由谁持有、如何轮换、泄露如何吊销（与 `32` 度量基 / `09` Stage 4 根信任锚协同） | **是**（触及信任锚档 A/B/C 与密钥生命周期，架构级） | `32` §3.3、`61` `.mimg`、`09` Stage 4 |
+| **P2** | **issuer 根密钥托管**：issuer 私钥由谁持有、如何轮换、泄露如何吊销（与 `32` 度量基 / `09` Stage 4 根信任锚协同） | 已裁决·reasoning 决策已出（2026-08-03·待大喵复核） | `32` §3.3、`61` `.mimg`、`09` Stage 4 |
 | **P3** | **`AUTH_ISSUE` Day 1 触发条件**：何时从「预留不触发」升格为「broker 持 bit55 启用」（单用户自举 vs 多用户登录的切换点） | 否（执行层定，沿用 bit55 已冻结「Day 1 不触发」立场） | `07` §4.1 bit55、`53` §5.1 |
 | **P4** | **凭证吊销传播延迟**：revoke 经 derivation tree 全量回收的时序一致性（与 `29` T5 revoke 竞态、derivation tree 全量与否协同） | 否（归 `07`/`20`/`29` D-T3-D-T5） | `07` §4.5、`29` T5、D-T3、D-T8 |
-| **P5** | **跨 realm 认证边界**：一个 realm 的 issuer 签注符号名是否可被另一 realm 信任（federation / cross-realm trust），还是严格 default-deny（`53` C-G4 同构） | **是**（跨 realm 信任是架构级边界，关联 C-G4/A1–A12） | `53` §7.5 C-G4、`06` C3、`00` C1–C18 |
+| **P5** | **跨 realm 认证边界**：一个 realm 的 issuer 签注符号名是否可被另一 realm 信任（federation / cross-realm trust），还是严格 default-deny（`53` C-G4 同构） | 已裁决·reasoning 决策已出（2026-08-03·待大喵复核） | `53` §7.5 C-G4、`06` C3、`00` C1–C18 |
 | **P6** | **符号名 scope 与 capability 派生同步的精确规则**：派生子会话时符号名 scope 如何随 capability 收窄自动收缩（防 scope 膨胀） | 否（协同 `07` §4.5 / `53` 定稿） | `07` §4.5、`53` §2.2 |
 | **P7** | **认证事件审计的 `op` 枚举扩展**：`65` §3.1 schema 是否接纳本文 `auth_issue`/`auth_revoke` 等 op 与 `issuer`/`target` 字段 | 否（协同 `65` 修订式追加） | `65` §3.1、`12` inspect |
 | **P8** | **bearer 凭证格式选型**（SPIFFE SVID / macaroon / 自研 capability token）：仅影响用户态 broker 互操作，不进内核 | 否（设计层，多系统参照定） | 见 §8 参考文献 |
@@ -221,4 +221,32 @@ issuer 私钥 ──签注──▶ credential(symbolic_name, cap_anchor, validi
 
 ---
 
-> 本文为规划草案，不修改 `00`–`77`/README/git；结论供执行层与 `53`/`07`/`29`/`65`/`52` 引用。跨域项以 `00` 总览 `A1`–`A12` / `C1`–`C18` 为准；本文不引入新内核原语、不新增 right bit（复用 `AUTH_ISSUE`=bit55 已冻结）；五架构同源。待决项 P1–P8 中 P2（issuer 根密钥托管）、P5（跨 realm 认证边界）需大喵架构级拍板，其余为执行层/`07`/`53`/`65` 协同定稿项。
+## §8 第十轮自主采纳裁决（待大喵复核）
+
+> 本节按第十轮收口指挥官纪律——「文档内所有『需大喵拍板』项一律先自主采纳、待大喵复核」——闭环 §7 待决项表中架构级 P2 / P5 两条。立场陈述而非新设计，与既有地基（`07` §4.5、bit55 已冻结、`53` C-G4、`32`/`61`/`09` 信任链）严格同构。
+
+**P2：issuer 根密钥托管**
+
+- 采纳立场：**issuer 根密钥托管于内核 secure-key 区、经 `AUTH_ISSUE`(bit55) 受约束委托，默认 deny、Day 1 不触发**。
+- 落地要点：
+  - 根密钥生成在 `09` Stage 4 信任锚初始化阶段完成（与 `32` §3.3 度量基双锚、`61` `.mimg` 四跳信任链同源绑点），私钥不落用户态、永不导出 secure-key 区。
+  - broker 仅持 `AUTH_ISSUE`(bit55) 受约束 issuer 句柄，凭此向 secure-key 区申请「签注符号名」委托；委托动作受 `07` §4.5 受约束 mint 上限（broker 自身 rights ∩ 策略清单下限）约束。
+  - 轮换 / 泄露吊销：通过 secure-key 区原语触发 derivation tree 全断（`07` §4.5 / `29` I5），所有已签注 credential 同步失效，与凭证吊销同源（§3.2）；不新增内核原语。
+  - 与 `32`/`61`/`09` 协同点继续以 `00` 跨域项 C1–C18 登记为准，本文不重判信任锚架构。
+
+**P5：跨 realm 认证边界**
+
+- 采纳立场：**跨 realm 认证默认按 realm 边界 deny，issuer 签注跨 realm 须显式 realm 间信任约定，复用第八轮多 realm 边界同构**。
+- 落地要点：
+  - 默认 deny：一个 realm 的 issuer 私钥**不**为 realm 外签注符号名（与 `53` §7.5 C-G4 / `06` C3 default-deny reveal/grant 纪律严格同构）；broker 跨 realm 转交须由双方 realm 监督者通过 realm 间信任约定显式授权。
+  - 信任约定形式：复用既有 realm 间边界——显式跨 realm trust 表（policy list），broker 据此表 + 双方 issuer 公钥验证签注链；不引入新内核原语，跨 realm 信任表存于用户态、不进内核。
+  - 符号名 scope 严格随其绑定 capability 的 realm 作用域走：跨 realm 不因符号名而穿透（`53` §7.5「零权限附着」同构）。
+  - 与 `00` A1–A12 / C1–C18 跨域项保持登记一致；任何例外仍需 `00` 跨域冲突登记流程。
+
+**reasoning 决策（2026-08-03）—— P2**：**维持「issuer 根密钥托管于内核 secure-key 区 + 经 `AUTH_ISSUE`(bit55) 受约束委托、默认 deny、Day 1 不触发」**（同意指挥官原占位）。理由——(1) **TCB 体量**：用户态托管方案把 issuer 私钥落在 broker 进程空间，broker 自身崩溃/被攻破 = 私钥泄露，T-A 爆炸半径扩大到 broker 进程 + 私钥覆盖的所有会话（违反 §3.2「issuer 私钥泄露收敛半径」论点——收敛半径应 = broker 的 `AUTH_ISSUE` 受约束 mint 上限，而非 broker 进程 + 私钥之并集）；硬件 TPM/密钥岛内部托管方案虽然私钥永不导出硬件，但 Day 1 不一定所有架构都有硬件密钥岛（i386 软实现必须降级，与 `32` D-SB8 / `78` §6.2 同源）——内核 secure-key 区 + `AUTH_ISSUE` 受约束委托路径在五架构上完全同源（与 `78` §6.2「密钥材料永驻 secure-memory」同构）。(2) **安全模型自洽性**：issuer 根密钥是"长期密钥材料"，按 `78` §2「密钥材料永驻 secure-memory / 永不出密钥守护 pager」承载纪律——broker 类比为"密钥守护在认证维度的对偶"，仅持受约束 issuer 句柄（与 `KEY_*` 服务端句柄同构），不持私钥本身；`AUTH_ISSUE`(bit55) Day 1 不触发 = 与单用户自举期不引入 broker 一致；bit55 已冻结、复用 `07` §4.5 受约束 mint 范式，零新 right bit。(3) **信任链协同**：根密钥生成在 `09` Stage 4 信任锚初始化阶段完成（与 `32` §3.3 度量基双锚、`61` `.mimg` 四跳信任链同源绑点），私钥不落用户态、永不导出 secure-key 区；轮换/泄露吊销通过 secure-key 区原语触发 derivation tree 全断（`07` §4.5 / `29` I5），所有已签注 credential 同步失效，与凭证吊销同源（§3.2）。(4) **长期可维护性**：与 `78` 密钥后端（硬件密钥岛 / TPM / 软实现）共用 secure-key 区的五架构同源薄层（`78` §6.1），未来若需要"硬件密钥岛托管 issuer 根密钥"作为加固项，可在不破内核 API 的前提下叠加（薄层扩展、内核不感知）；用户态托管方案在加固项上反而要重写 broker。被否决选项：用户态托管（broker 崩溃即私钥泄露 / T-A 爆炸半径放大）/ 硬件密钥岛内部直接托管（Day 1 五架构不齐全 / 与文件加密 KEK 混用增加密钥岛语义负担 / broker 必须经密钥岛能力调用路径更长）。
+
+**reasoning 决策（2026-08-03）—— P5**：**维持「跨 realm 默认 deny、issuer 签注跨 realm 须显式 realm 间信任约定」**（同意指挥官原占位）。理由——(1) **TCB 体量**：跨 realm 默认允许意味着 capability 监视器需要在"认证路径"上加跨 realm 联邦策略引擎——「哪些 realm 对之间可联邦 / 哪些符号名可跨」，等价于把"联邦图"塞进内核；default-deny + 显式 realm 间信任约定（用户态 policy list）让 capability 监视器只对 realm 内 broker 做 `AUTH_ISSUE` 受约束 mint 授权，跨 realm 决策全在用户态，路径极简。(2) **安全模型自洽性**：issuer 私钥的 realm 局部性是身份层与 capability 层对齐的关键（与 §1.3「issuer 私钥托管本身落在 realm 边界内」严格同构）；跨 realm 联邦让 issuer 私钥覆盖范围突破其 realm，与 `53` §7.5 C-G4 / `06` C3 default-deny reveal/grant 纪律直接冲突；federation（OAuth / SPIFFE federation / SAML）场景应通过"双方 realm 监督者经信任约定显式授权 + broker 据策略表验签链"实现，不破 default-deny——这与 `63` netstack 单例监督服务 + `00` A1–A12 / C1–C18 跨域项保留例外通道的同源纪律一致。(3) **威胁模型**：跨 realm 联邦一旦允许，issuer 私钥泄露的 T-A 爆炸半径从"realm 内"放大到"realm 联邦图内"，与 `29` §1「攻破一个进程的爆炸半径 = 该进程持有的句柄边界」原则直接冲突；default-deny 让爆炸半径严格圈定在 realm 内。(4) **长期可维护性**：未来若需要"特定 realm 对之间联邦"——由双方 realm 监督者经 realm 间信任约定（policy list）显式授权，broker 据策略表 + 双方 issuer 公钥验证签注链（`65` 审计主键 `origin_job + subject_handle + op + rights_mask + issuer + target` 完整记录联邦事件），不动内核。被否决选项：跨 realm 默认允许（issuer 私钥覆盖范围突破 realm / 与 C-G4 / C3 default-deny 纪律冲突 / T-A 爆炸半径放大）。
+
+---
+
+> 本文为规划草案，不修改 `00`–`77`/README/git；结论供执行层与 `53`/`07`/`29`/`65`/`52` 引用。跨域项以 `00` 总览 `A1`–`A12` / `C1`–`C18` 为准；本文不引入新内核原语、不新增 right bit（复用 `AUTH_ISSUE`=bit55 已冻结）；五架构同源。待决项 P1–P8 中 P2（issuer 根密钥托管）、P5（跨 realm 认证边界）按第十轮自主采纳立场闭环（§8），待大喵复核；其余为执行层/`07`/`53`/`65` 协同定稿项。

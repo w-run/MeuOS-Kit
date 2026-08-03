@@ -237,7 +237,7 @@ Phase 3   页面迁移（ZONE_MOVABLE）+ kswapd 类异步回收（仅大机箱/
 | **P5** | **确定性预留池大小**：占总物理内存比例（如 1%–5%）、是否按 RT CPU 带宽比例动态。建议固定小比例（如 2%）起，容量挂 `04` RT 预算。 | 否（执行层参数，建议固定起步） | `28` §4.2、`04` §4.4 |
 | **P6** | **device VMO 连续页后端 = DMA32 only vs 加 CMA**：无 IOMMU + 设备需 >4GB DMA 时是否启用 CMA（压缩可用 buddy）。建议 Day 1 DMA32 起步、CMA 为演进项。 | 否（协同 `60` §2.2 退化策略） | `60` §3.2、`10` C8 |
 | **P7** | **NUMA 迁移（ZONE_MOVABLE / kswapd 异步回收）是否进 Day 1 还是 M3 后**：影响 `MmPage.node_id` 可变性与 capability 引用稳定性。建议 M3 后启用（与 `03` Phase 3 对齐）。 | 否（协同 `03` §4.6） | `03` §4.6、`04` §5-6 |
-| **P8** | **跨 node VMO 共享时物理页 node 归属与迁移是否破坏 capability 引用**（`03` §5-5 残留）：因 C1 折中已分离逻辑/物理，本文判定「不破坏」；是否需架构级确认。 | **已裁决·闭环（第十轮自主采纳，确认不破坏 capability 引用）** | `03` §5-5、`00` C1 |
+| **P8** | **跨 node VMO 共享时物理页 node 归属与迁移是否破坏 capability 引用**（`03` §5-5 残留）：因 C1 折中已分离逻辑/物理，本文判定「不破坏」；是否需架构级确认。 | **已裁决·reasoning 决策已出（2026-08-03，确认不破坏 capability 引用）** | `03` §5-5、`00` C1 |
 
 > 标注：本文为规划草案，后续以修订式追加更新，不覆盖、不删改 `00`–`70`、README、`.issues/`、git。跨域冲突以 `00` 总览 `A1`–`A12` / `C1`–`C18` 为准；本文与 `03` C1/`60` 设备内存/`28` 确定性/`04` Job 账本严格同构，未引入新内核原语或新 right bit。待决项 P1–P7 为执行层/协同定稿项，仅 P8（跨 node VMO 共享不破坏 capability 引用的架构确认）建议大喵拍板。
 
@@ -290,3 +290,34 @@ Phase 3   页面迁移（ZONE_MOVABLE）+ kswapd 类异步回收（仅大机箱/
 > **裁决**：采纳「确认本文判定：跨 node VMO 共享不破坏 capability 引用」。理由——`03` §5-5 的 C1 折中已分离逻辑对象与物理供给：VMO 是逻辑对象（capability 视图），物理页的 node 归属是供给层属性；跨 node 迁移仅改动物理供给（`MmPage.node_id`），VMO 句柄与 capability 引用（派生链、引用计数、revoke 面）均不变，因此**无需架构级额外机制**。该裁决与 `03` §5-5 C1 折中 + `07` capability 引用语义严格一致，且未引入新内核原语或新 right bit（符合 `00` A1–A12 / C1–C18 跨域地基）。P8 待决项表状态同步升级为「已裁决·闭环（第十轮自主采纳，确认不破坏 capability 引用）」。
 
 > 待大喵复核。
+
+---
+
+## 11. reasoning 决策（2026-08-03）：P8 大喵复核细化
+
+> 本节为 reasoning 决策 agent（2026-08-03）在指挥官第十轮「确认不破坏 capability 引用」占位基础上做的细化复核——不删不改 §10 原文与 §8 待决项的占位采纳，仅追加复核结论与「被否决选项的取舍」理由。复核重点在 `03 §4.1` C1 折中（buddy 独占物理页 / VMO 是逻辑视图）+ `00 A1`「句柄即 capability」+ `07 §4.1` rights 位图冻结纪律 + `07 §4.5` 受约束 mint / revoke 派生树 + `76 §1.2` 分配点 = Job 配额扣减点 + 五架构同源（buddy / zone / node_id 物理后端差异封死在 `arch/mm`）。
+
+### 11.1 P8 · 跨 node VMO 共享是否破坏 capability 引用 → 同意「确认不破坏」
+
+**reasoning 决策（2026-08-03）**：同意并固化「跨 node VMO 共享 / 跨 node 迁移（`ZONE_MOVABLE`，Phase 3）不破坏 capability 引用——VMO 句柄、capability 派生链、`revoke` 派生传播、rights 校验、`MmPage.refcount` 单一真相源均不变；唯二变化的 `MmPage.node_id`（物理供给标签）和 pte entry 项（arch/mm 内的页表项翻译）是供给层纯属性，不进 capability 语义层」——同时把「不破坏的具体边界」明示：(a) VMO handle 表 = capability 引用 (`07 §4.5` 受约束 mint)；(b) `MmPage.refcount` = 物理层引用计数，与 capability 引用分别在两个真相源，但二者由「`MmPage.refcount` 归零 → PMM 归还 buddy」单一链路衔接；(c) 跨 node 迁移触发仅改 pte 项（与跨页框替换同构），不引入新 capability 维度。
+
+**理由（含被否决选项的取舍）**：
+
+- **`03 §4.1` C1 折中是 P8 决策成立的基础**：C1 = 内核 buddy 独占物理页帧数据库（PMM = 唯一真相源）+ VMO/VMAR 作为 capability 视图（逻辑层）。该折中已经把「逻辑对象」与「物理供给」解耦到两个抽象层，因此「跨 node 迁移 = 物理层属性移动」与「capability 引用 = 逻辑层不变量」在 P8 上是天然正交，互不侵入。把该决策的成立基础显式化，避免后续被误读为「P8 假设了 C1」、并提醒任何打破 C1 折中的物理内存决策都必须重审 P8。
+- **`MmPage.refcount` 单源一致性**：与 `03 §4.3.3 vmo_create_child` 的 COW 语义一致 —— refcount 是物理层单一真相源（不与 capability 引用计数混淆），归零触发 PMM 归还 buddy。跨 node 迁移时，物理页的「旧 node 释放 + 新 node 入位」由同一 refcount 经手，与 capability 派生链上的引用解耦：C-G1 `meu_fork_light` 已在大页 / 多核场景证明该解耦正确（`47` 第七轮精细裁决）。
+- **capability 模型自洽**：与 `07 §4.5` 「revoke 派生树」+ `07 §4.6` capability Day 1 唯一裁决点 + `00 A1` 句柄即 capability + `00 A5` Job 资源账本 Day 1 同源 —— VMO 句柄是 capability 的载体、句柄与 `rights`、`revoke` 派生链耦合；物理页的 node 归属、pte entry 项、跨 node 迁移均不进入 capability 语义层，因此不破坏「句柄即 capability、权限随句柄走」的 Day 1 基线。
+- **rights 位图冻结纪律**：与 `07 §4.1` rights 位图冻结纪律（bit 0–47 已分配、bit 48+ 预留）严格一致 —— 跨 node 共享不需要新 right、不挤占 bit 48+ 预留区；NUMA 亲和 = VMO 属性（创建参数或 `madvise` 兼容层映射，§2.2 已定），不是 capability 权限。决策保持「零新增 right bit」。
+- **五架构同源可行性**：与 `00 §5-3`「统一抽象 + 每架构薄后端」+ `76 §7.1`「节点 / 大页 / NUMA 探测均在 `arch/mm` 内」同源 —— 跨 node 迁移的 pte 项翻译（x86_64 节点亲和位 vs aarch64 MPAID vs riscv64 PBM 等）属每架构薄后端，capability 语义层零差异；同一份 capability 语义在五架构上行为等价。
+- **长期可维护性**：跨 node 迁移是「`zoned page allocator` + `move_pages()`」型机制，`76 §2.3` Phase 3 已列演进路径；P8 意味着这条演进路径不需要伴随 capability 维度的扩张，演进路径与现状一致、未来扩展 NUMA 拓扑迁移机制无需额外 capability 受约束 mint 协议。
+
+**被否决选项**：
+
+- **「需新增 capability-of-node 约束（或 per-node capability 句柄）」**——否决。VMO 句柄本就不绑 node（VMO 是逻辑对象，node 是物理页属性），引入「per-node VMO capability」= 把物理属性上移到 capability 维度，破坏 capability-on-handle 纯洁性、扩张 capability 模型、违背 C1 折中。同时 `76 §2.2` 已明示「亲和是 VMO 属性而非 capability 权限」，与此决策一致。
+- **「禁止跨 node VMO 共享 / 跨 node 迁移」**——否决。过度限制 = 扼杀 NUMA 灵活性、强制虚拟地址层面对 NUMA 拓扑无感，违反 NUMA 本意（NUMA 的价值恰是「让物理层拓扑可见 + 选择亲和」）；同时 `03 §4.6` Phase 2/3 已声明 NUMA 演进路径需要跨节点可见性，禁止跨 node = 取消演进路径。
+- **「跨 node 共享需调用专门的 `cross_node_share` capability 权限」**——否决。引入新 right = 挤占 `07 §4.1` 预留区（bit 48+），与冻结纪律冲突；同时 capability 维度本不绑 node，引入「cross-node 右」= 强行把物理拓扑塞入权限语义，违反「权限随对象走、可审计粒度」的 rights 设计原则。
+- **「跨 node 时 VMO 必须 fork 一份（避免 capability 引用跨拓扑）」**——否决。性能代价大、引入 snapshot 语义（与 C-G1 `fork_light` 同构但意图不同），且无安全收益（VMO 句柄已跨 Process / Job 共享，仅多一道 NUMA 拓扑不应触发复制）。
+- **「Capability 引用次数必须等于物理页引用次数（强制 lock-step）」**——否决。两个引用计数语义不同（capability 引用 = 句柄集 + rights，与 `revoke` 派生树耦合；物理页引用 = `MmPage.refcount` 与 COW / buddy 归还耦合），强制 lock-step 等于合并两个真相源，违反 `03 §4.3` refcount 单一真相源 + 引入新的 race 窗口。
+
+**对本文的细化落点（不删前文）**：§10 已写「逻辑对象 vs 物理供给层」的根本论断，§11.1 进一步把「不破坏的具体边界」（handle 表 / refcount / 物理属性变化点 / pte 翻译）按「抽象层 × 真相源」二维列表明示；与 `03 §4.1` C1 折中 + `07 §4.5` revoke + `47` C-G1 大页/多核 COW 正确性 + `76 §1.2` 分配点 = Job 配额扣减点同源；`§8` P8 状态列同步升格。
+
+---
