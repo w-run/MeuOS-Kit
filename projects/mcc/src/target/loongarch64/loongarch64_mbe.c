@@ -1,26 +1,26 @@
-/* riscv64_mbe.c — riscv64 machine-backend entry (MIR-native).
+/* loongarch64_mbe.c — loongarch64 machine-backend entry (MIR-native).
  *
  * Translates MIR functions into the shared machine IR (MMOP) and runs the
- * riscv64 ABI lowering + register allocation + assembly emission.
+ * loongarch64 ABI lowering + register allocation + assembly emission.
  *
- * riscv64 differs from x86_64 in the comparison model: the ISA has no
+ * loongarch64 differs from x86_64 in the comparison model: the ISA has no
  * condition flags, so
  *   - MIR comparisons lower to MMOP_SETCCR (register slt/sltu-based);
  *   - `if (bool)` branches lower to MMOP_JCC whose terminator carries the
- *     boolean value in src[0] (branch on register, bnez/beqz);
+ *     boolean value in src[0] (branch on register, bne/beq vs $zero);
  *   - there is no conditional move, so if-conversion never runs.
  *
  * mbe_supported() restricts the MIR-native path to scalar integer
  * functions (no aggregates, floats, varargs, TLS, VLA) for this round;
- * everything else falls back to the legacy LIR riscv64 backend.
+ * everything else falls back to the legacy LIR loongarch64 backend.
  */
 #include <stdlib.h>
 
 #include "mir.h"
-#include "riscv64_m.h"
+#include "loongarch64_m.h"
 
-extern void mfnm_abi_riscv64(MFnM *fm);
-extern void mfnm_emit_riscv64(MFnM *fm, FILE *f);
+extern void mfnm_abi_loongarch64(MFnM *fm);
+extern void mfnm_emit_loongarch64(MFnM *fm, FILE *f);
 
 /* forward-ordered block array (mf->link is reversed) */
 static MBlk **
@@ -100,7 +100,7 @@ mval_of_ref(MFn *mf, MRef r)
 }
 
 /* Scalar integer functions only for this round: fall back to the legacy
- * riscv64 LIR backend for everything else (floats, aggregates, varargs,
+ * loongarch64 LIR backend for everything else (floats, aggregates, varargs,
  * TLS, VLA). */
 static bool
 mbe_supported(MFn *mf)
@@ -140,11 +140,11 @@ mbe_supported(MFn *mf)
 }
 
 bool
-mfnm_backend_riscv64(MFn *mf)
+mfnm_backend_loongarch64(MFn *mf)
 {
 	if (!mbe_supported(mf))
 		return false;
-	MFnM *fm = mfnm_new(mf, &mtarget_riscv64, mf->name);
+	MFnM *fm = mfnm_new(mf, &mtarget_loongarch64, mf->name);
 	fm->retty = mf->rettyd;
 
 	uint32_t nblk = 0;
@@ -196,7 +196,7 @@ mfnm_backend_riscv64(MFn *mf)
 			}
 			default: {
 				if (in->op >= MOP_CEQ && in->op <= MOP_CFGE) {
-					/* register comparison (no flags on riscv64) */
+					/* register comparison (no flags on loongarch64) */
 					MVal *a0 = mval_of_ref(mf, in->src[0]);
 					MVal *a1 = mval_of_ref(mf, in->src[1]);
 					if (a0 && a1) {
@@ -267,14 +267,14 @@ mfnm_backend_riscv64(MFn *mf)
 		}
 	}
 
-	mfnm_abi_riscv64(fm);
+	mfnm_abi_loongarch64(fm);
 	mfnm_regalloc(fm);
 	if (getenv("MCC_DEBUG_MBE")) {
-		fprintf(stderr, "\n> MIR backend (riscv64) %s:\n",
+		fprintf(stderr, "\n> MIR backend (loongarch64) %s:\n",
 		        fm->name ? fm->name : "?");
 		mfnm_dump(fm, stderr);
 	}
-	mfnm_emit_riscv64(fm, stdout);
+	mfnm_emit_loongarch64(fm, stdout);
 
 	mfnm_free(fm);
 	free(mblk);

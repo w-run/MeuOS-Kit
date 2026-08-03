@@ -17,6 +17,138 @@
 #include "mir.h"
 #include "x86_64_m.h"
 #include "riscv64_m.h"
+#include "loongarch64_m.h"
+
+/* ---- loongarch64 machine target (register descriptions) ---------------- */
+/* 32 GPRs (r0-r31, ABI names) + 32 FPRs (f0-f31).  Caller-saved: t0-t8,
+ * a0-a7, f0-f23 (ft0-15 + fa0-7); callee-saved: s0-s8, f24-f31 (fs0-7).
+ * The emitter uses t0/t1 (general scratch) and t8 (large offsets) as
+ * scratch. */
+
+static const MRegInfo la64_regs[LA64MREG_NREG] = {
+	[LA64MREG_ZERO]    = { "zero", MRC_GPR, true,  false, false },
+	[LA64MREG_RA]      = { "ra",   MRC_GPR, true,  false, false },
+	[LA64MREG_TP]      = { "tp",   MRC_GPR, true,  false, false },
+	[LA64MREG_SP]      = { "sp",   MRC_GPR, true,  false, false },
+	[LA64MREG_A0]      = { "a0",   MRC_GPR, true,  false, true  },
+	[LA64MREG_A1]      = { "a1",   MRC_GPR, true,  false, true  },
+	[LA64MREG_A2]      = { "a2",   MRC_GPR, true,  false, true  },
+	[LA64MREG_A3]      = { "a3",   MRC_GPR, true,  false, true  },
+	[LA64MREG_A4]      = { "a4",   MRC_GPR, true,  false, true  },
+	[LA64MREG_A5]      = { "a5",   MRC_GPR, true,  false, true  },
+	[LA64MREG_A6]      = { "a6",   MRC_GPR, true,  false, true  },
+	[LA64MREG_A7]      = { "a7",   MRC_GPR, true,  false, true  },
+	[LA64MREG_T0]      = { "t0",   MRC_GPR, true,  false, false },
+	[LA64MREG_T1]      = { "t1",   MRC_GPR, true,  false, false },
+	[LA64MREG_T2]      = { "t2",   MRC_GPR, true,  false, false },
+	[LA64MREG_T3]      = { "t3",   MRC_GPR, true,  false, false },
+	[LA64MREG_T4]      = { "t4",   MRC_GPR, true,  false, false },
+	[LA64MREG_T5]      = { "t5",   MRC_GPR, true,  false, false },
+	[LA64MREG_T6]      = { "t6",   MRC_GPR, true,  false, false },
+	[LA64MREG_T7]      = { "t7",   MRC_GPR, true,  false, false },
+	[LA64MREG_T8]      = { "t8",   MRC_GPR, true,  false, false },
+	[LA64MREG_RESERVED] = { "r21", MRC_GPR, true, false, false },
+	[LA64MREG_FP]      = { "fp",   MRC_GPR, true,  false, false },
+	[LA64MREG_S0]      = { "s0",   MRC_GPR, false, true,  false },
+	[LA64MREG_S1]      = { "s1",   MRC_GPR, false, true,  false },
+	[LA64MREG_S2]      = { "s2",   MRC_GPR, false, true,  false },
+	[LA64MREG_S3]      = { "s3",   MRC_GPR, false, true,  false },
+	[LA64MREG_S4]      = { "s4",   MRC_GPR, false, true,  false },
+	[LA64MREG_S5]      = { "s5",   MRC_GPR, false, true,  false },
+	[LA64MREG_S6]      = { "s6",   MRC_GPR, false, true,  false },
+	[LA64MREG_S7]      = { "s7",   MRC_GPR, false, true,  false },
+	[LA64MREG_S8]      = { "s8",   MRC_GPR, false, true,  false },
+	[LA64MREG_F0]      = { "f0",   MRC_FPR, true,  false, true  },
+	[LA64MREG_F1]      = { "f1",   MRC_FPR, true,  false, true  },
+	[LA64MREG_F2]      = { "f2",   MRC_FPR, true,  false, true  },
+	[LA64MREG_F3]      = { "f3",   MRC_FPR, true,  false, true  },
+	[LA64MREG_F4]      = { "f4",   MRC_FPR, true,  false, true  },
+	[LA64MREG_F5]      = { "f5",   MRC_FPR, true,  false, true  },
+	[LA64MREG_F6]      = { "f6",   MRC_FPR, true,  false, true  },
+	[LA64MREG_F7]      = { "f7",   MRC_FPR, true,  false, true  },
+	[LA64MREG_F8]      = { "f8",   MRC_FPR, true,  false, false },
+	[LA64MREG_F9]      = { "f9",   MRC_FPR, true,  false, false },
+	[LA64MREG_F10]     = { "f10",  MRC_FPR, true,  false, false },
+	[LA64MREG_F11]     = { "f11",  MRC_FPR, true,  false, false },
+	[LA64MREG_F12]     = { "f12",  MRC_FPR, true,  false, false },
+	[LA64MREG_F13]     = { "f13",  MRC_FPR, true,  false, false },
+	[LA64MREG_F14]     = { "f14",  MRC_FPR, true,  false, false },
+	[LA64MREG_F15]     = { "f15",  MRC_FPR, true,  false, false },
+	[LA64MREG_F16]     = { "f16",  MRC_FPR, true,  false, false },
+	[LA64MREG_F17]     = { "f17",  MRC_FPR, true,  false, false },
+	[LA64MREG_F18]     = { "f18",  MRC_FPR, true,  false, false },
+	[LA64MREG_F19]     = { "f19",  MRC_FPR, true,  false, false },
+	[LA64MREG_F20]     = { "f20",  MRC_FPR, true,  false, false },
+	[LA64MREG_F21]     = { "f21",  MRC_FPR, true,  false, false },
+	[LA64MREG_F22]     = { "f22",  MRC_FPR, true,  false, false },
+	[LA64MREG_F23]     = { "f23",  MRC_FPR, true,  false, false },
+	[LA64MREG_F24]     = { "f24",  MRC_FPR, false, true,  false },
+	[LA64MREG_F25]     = { "f25",  MRC_FPR, false, true,  false },
+	[LA64MREG_F26]     = { "f26",  MRC_FPR, false, true,  false },
+	[LA64MREG_F27]     = { "f27",  MRC_FPR, false, true,  false },
+	[LA64MREG_F28]     = { "f28",  MRC_FPR, false, true,  false },
+	[LA64MREG_F29]     = { "f29",  MRC_FPR, false, true,  false },
+	[LA64MREG_F30]     = { "f30",  MRC_FPR, false, true,  false },
+	[LA64MREG_F31]     = { "f31",  MRC_FPR, false, true,  false },
+};
+
+/* LP64D argument order: 8 integer (a0-a7), 8 FP (fa0-fa7 = f0-f7). */
+const int la64_argreg[17] = {
+	LA64MREG_A0, LA64MREG_A1, LA64MREG_A2, LA64MREG_A3,
+	LA64MREG_A4, LA64MREG_A5, LA64MREG_A6, LA64MREG_A7,
+	LA64MREG_F0, LA64MREG_F1, LA64MREG_F2, LA64MREG_F3,
+	LA64MREG_F4, LA64MREG_F5, LA64MREG_F6, LA64MREG_F7,
+	-1
+};
+static const int la64_rsave[] = {
+	LA64MREG_T0, LA64MREG_T1, LA64MREG_T2, LA64MREG_T3, LA64MREG_T4,
+	LA64MREG_T5, LA64MREG_T6, LA64MREG_T7, LA64MREG_T8,
+	LA64MREG_A0, LA64MREG_A1, LA64MREG_A2, LA64MREG_A3,
+	LA64MREG_A4, LA64MREG_A5, LA64MREG_A6, LA64MREG_A7,
+	LA64MREG_F0, LA64MREG_F1, LA64MREG_F2, LA64MREG_F3,
+	LA64MREG_F4, LA64MREG_F5, LA64MREG_F6, LA64MREG_F7,
+	LA64MREG_F8, LA64MREG_F9, LA64MREG_F10, LA64MREG_F11,
+	LA64MREG_F12, LA64MREG_F13, LA64MREG_F14, LA64MREG_F15,
+	LA64MREG_F16, LA64MREG_F17, LA64MREG_F18, LA64MREG_F19,
+	LA64MREG_F20, LA64MREG_F21, LA64MREG_F22, LA64MREG_F23,
+	-1
+};
+static const int la64_rclob[] = {
+	LA64MREG_S0, LA64MREG_S1, LA64MREG_S2, LA64MREG_S3, LA64MREG_S4,
+	LA64MREG_S5, LA64MREG_S6, LA64MREG_S7, LA64MREG_S8,
+	LA64MREG_F24, LA64MREG_F25, LA64MREG_F26, LA64MREG_F27,
+	LA64MREG_F28, LA64MREG_F29, LA64MREG_F30, LA64MREG_F31,
+	-1
+};
+
+/* P3b ABI lowering for loongarch64 LP64D (loongarch64_mabi.c). */
+extern void mfnm_abi_loongarch64(MFnM *fm);
+const MTargetM mtarget_loongarch64 = {
+	.name = "loongarch64",
+	.nreg = LA64MREG_NREG,
+	.regs = la64_regs,
+	.gpr0 = LA64MREG_ZERO,
+	.ngpr = 32,
+	.fpr0 = LA64MREG_F0,
+	.nfpr = 32,
+	/* never allocated: zero/ra/tp/sp/fp (+ reserved r21) */
+	.rglob = (1ull << LA64MREG_ZERO) | (1ull << LA64MREG_RA) |
+	         (1ull << LA64MREG_TP) | (1ull << LA64MREG_SP) |
+	         (1ull << LA64MREG_FP) | (1ull << LA64MREG_RESERVED),
+	.reserved = 0,
+	.argreg = la64_argreg,
+	.rsave = la64_rsave,
+	.rclob = la64_rclob,
+	.ptrsize = 8,
+	.stackalign = 16,
+	.kl_in_reg = true,
+	.feat = 0,               /* no cmov, no scale-index addressing */
+	.sret_reg = LA64MREG_A0,
+	.abi = mfnm_abi_loongarch64,
+	/* emitter temporaries: t0/t1 (general scratch), t8 (large offsets) */
+	.scratch = (1ull << LA64MREG_T0) | (1ull << LA64MREG_T1) |
+	           (1ull << LA64MREG_T2) | (1ull << LA64MREG_T8),
+};
 
 /* ---- riscv64 machine target (register descriptions) -------------------- */
 /* 32 GPRs (x0-x31, ABI names) + 32 FPRs (f0-f31).  Caller-saved: t0-6,

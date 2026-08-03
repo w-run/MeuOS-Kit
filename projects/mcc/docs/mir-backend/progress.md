@@ -359,3 +359,36 @@ Phase 3a 按 chloe 调研的移植顺序（riscv64→loongarch64→aarch64→arm
 - riscv64 后端补齐：聚合返回/参数（sret_reg 已就绪）、浮点（FP 寄存器
   池已建，emit 半成品）、varargs、TLS、VLA、动态 alloca。
 - 移植顺序下一目标：loongarch64（同样无 flags，复用 SETCCR 模型）。
+
+## Phase 3b：loongarch64 MIR-native 试点（2026-08-03，bella）
+
+延续 Phase 3a 的移植顺序（riscv64→loongarch64），loongarch64 与 riscv64
+同为无 flags RISC 风格，直接复用 SETCCR 抽象与 riscv64 三件套骨架。
+
+### 提交
+- `e73469b` machine.c 注册 mtarget_loongarch64（32 GPR + 32 FPR，
+  a0-a7/fa0-fa7，sret=A0）+ include/loongarch64_m.h。
+- `cca9c13` loongarch64_mabi.c/mbe.c/memit.c（LP64D 标量核心）。
+- `e888880` emit.c gate 分派 + 大帧/TLS 修复 + check-loongarch64 门禁适配。
+
+### 踩坑（两架构共用修复，随 loongarch64 一并合入）
+1. **大帧 >2KB**：addi 12 位立即数溢出。根因 alloca 大小存在 src[0] 常量
+   而非 cst 字段（alloca_size_ins 只读 cst 均 NULL）。修复：读 src[0] 常量、
+   寻址用 li+add 序列、prologue 大帧用 li.d $t8/sub.d（riscv64 li t6/sub）。
+2. **TLS 全局**：标量核不发射 TLS 重定位，mbe_supported 拒绝 tls 全局值
+   （两架构）→ 回退 legacy。
+3. **门禁断言**：check-loongarch64 的 regress.c/.large 现走 MIR-native
+   （标量），分隔符断言放宽为 [[:space:]]、fp 保存偏移按帧大小变化；
+   varargs/abi/tls/vla 仍走 legacy，原断言保留。
+
+### 验证
+- 29 个可编译 test/c99 样例经 MIR-native 交叉编译 loongarch64 汇编全部通过
+  loongarch64-linux-gnu-as（含 4096B 大帧、循环、比较分支、函数调用）。
+- check-loongarch64 门禁转绿（"LoongArch64 regression checks passed"）。
+- x86_64 无回归：check-c-mir 双模式 fail=0、check-cpp-func rc=0、
+  check-mir 全绿、自举 exit 0、verify-all 19/19（MIR-native+bridge 双路径）。
+- riscv64 同步修复大帧/TLS 后仍 29/33 汇编通过。
+
+### 剩余（后续）
+- loongarch64/riscv64 补齐：聚合返回/参数、浮点、varargs、TLS、VLA。
+- 下一目标：aarch64（有 flags，需另一套比较模型）。

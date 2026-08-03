@@ -28,6 +28,7 @@ extern int emit_debug;  /* from emit/emit.c */
 extern void emitdbgloc(uint, uint, FILE *);  /* from emit/emit.c */
 extern bool mfnm_backend_x86_64(struct MFn *);   /* x86_64_mbe.c (P3b machine backend) */
 extern bool mfnm_backend_riscv64(struct MFn *);   /* riscv64_mbe.c (P3a machine backend) */
+extern bool mfnm_backend_loongarch64(struct MFn *); /* loongarch64_mbe.c (P3b) */
 
 /* DWARF variable-type classification for the base-type DIEs. */
 static int
@@ -363,7 +364,9 @@ emitfunc(struct func *f, struct scope *fs, bool global)
 		 * cover, so the bridge path stays as the safety net. */
 		if (g_use_mir_backend &&
 		    ((strcmp(T.name, "x86_64") == 0 && mfnm_backend_x86_64(mf)) ||
-		     (strcmp(T.name, "riscv64") == 0 && mfnm_backend_riscv64(mf)))) {
+		     (strcmp(T.name, "riscv64") == 0 && mfnm_backend_riscv64(mf)) ||
+		     (strcmp(T.name, "loongarch64") == 0 &&
+		      mfnm_backend_loongarch64(mf)))) {
 			if (g_dwarf_level > 0) {
 				dwarf_collect_vars(f, mf, NULL);
 				dwarf_emit_func_end(stdout, dwarf_idx);

@@ -44,6 +44,10 @@ alloca_size_ins(const MInsM *in)
 {
 	if (in->cst && in->cst->kind == MC_INT)
 		return (int)in->cst->u.i;
+	/* the size may be a constant operand (src[0] = MV_CONST) */
+	if (in->src[0] && in->src[0]->kind == MV_CONST && in->src[0]->con &&
+	    in->src[0]->con->kind == MC_INT)
+		return (int)in->src[0]->con->u.i;
 	return alloca_size(in->op);
 }
 
@@ -172,6 +176,19 @@ scratch_to_dst(FILE *f, MVal *d, const char *rn)
 
 /* ---- load/store addressing ---------------------------------------------- */
 
+/* rn = rn + off, handling the 12-bit immediate range (addi) with a
+ * li + add pair for large displacements (big static allocas). */
+static void
+emit_offset(FILE *f, const char *rn, const char *basename, int64_t off)
+{
+	if (off >= -2048 && off <= 2047)
+		fprintf(f, "\taddi\t%s, %s, %lld\n", rn, basename, (long long)off);
+	else {
+		fprintf(f, "\tli\t%s, %lld\n", rn, (long long)off);
+		fprintf(f, "\tadd\t%s, %s, %s\n", rn, rn, basename);
+	}
+}
+
 /* Emit an address into the scratch register rn (t0/t1).  Symbolic targets
  * use the %pcrel_hi/lo pair. */
 static void
@@ -183,20 +200,16 @@ emit_addr_to_scratch(FILE *f, MAddr a, const char *rn)
 		fprintf(f, "\tlui\t%s, %%pcrel_hi(%s)\n", rn, sym);
 		fprintf(f, "\taddi\t%s, %s, %%pcrel_lo(%s)\n", rn, rn, sym);
 		if (a.off)
-			fprintf(f, "\taddi\t%s, %s, %lld\n", rn, rn, (long long)a.off);
+			emit_offset(f, rn, rn, a.off);
 		return;
 	}
 	if (base && base->kind == MV_TEMP && base->reg < 0) {
 		/* base is a spill slot: address it off(fp) */
-		fprintf(f, "\taddi\t%s, fp, %d\n", rn, base->slot + g_slot_base);
-		if (a.off)
-			fprintf(f, "\taddi\t%s, %s, %lld\n", rn, rn, (long long)a.off);
+		emit_offset(f, rn, "fp", base->slot + g_slot_base + a.off);
 		return;
 	}
 	if (base && base->kind == MV_CONST) {
-		fprintf(f, "\tli\t%s, %lld\n", rn, (long long)base->con->u.i);
-		if (a.off)
-			fprintf(f, "\taddi\t%s, %s, %lld\n", rn, rn, (long long)a.off);
+		emit_offset(f, rn, "zero", base->con->u.i + a.off);
 		return;
 	}
 	if (base && base->kind == MV_GLOBAL) {
@@ -205,19 +218,22 @@ emit_addr_to_scratch(FILE *f, MAddr a, const char *rn)
 		fprintf(f, "\tlui\t%s, %%pcrel_hi(%s)\n", rn, sym);
 		fprintf(f, "\taddi\t%s, %s, %%pcrel_lo(%s)\n", rn, rn, sym);
 		if (a.off)
-			fprintf(f, "\taddi\t%s, %s, %lld\n", rn, rn, (long long)a.off);
+			emit_offset(f, rn, rn, a.off);
 		return;
 	}
 	if (!base) {
-		fprintf(f, "\tli\t%s, %lld\n", rn, (long long)a.off);
+		emit_offset(f, rn, "zero", a.off);
 		return;
 	}
-	if (base->kind == MV_TEMP && base->reg < 0) {
-		/* unreachable (handled above), keep for safety */
+	if (base->kind == MV_REG || (base->kind == MV_TEMP && base->reg >= 0)) {
+		char rname[16];
+		snprintf(rname, sizeof rname, "%s", mreg_name(g_mt, base->reg));
+		emit_offset(f, rn, rname, a.off);
+		return;
 	}
-	fprintf(f, "\taddi\t%s, ", rn);
-	emit_mval(f, base);
-	fprintf(f, ", %lld\n", (long long)a.off);
+	mv_to_scratch(f, base, rn);
+	if (a.off)
+		emit_offset(f, rn, rn, a.off);
 }
 
 /* ---- condition suffix ---------------------------------------------------- */
@@ -425,7 +441,7 @@ emit_ins(FILE *f, MInsM *in)
 			return;
 		}
 		g_alloca_cur -= alloca_size_ins(in);
-		fprintf(f, "\taddi\tt0, fp, %d\n", g_alloca_cur + g_slot_base);
+		emit_offset(f, "t0", "fp", g_alloca_cur + g_slot_base);
 		scratch_to_dst(f, d, "t0");
 		return;
 	}
@@ -577,10 +593,23 @@ mfnm_emit_riscv64(MFnM *fm, FILE *f)
 			fprintf(f, ".globl %s\n", fm->name);
 		fprintf(f, "%s:\n", fm->name);
 	}
-	fprintf(f, "\taddi\tsp, sp, -%d\n", framesize);
-	fprintf(f, "\tsd\tra, %d(sp)\n", framesize - 8);
-	fprintf(f, "\tsd\tfp, %d(sp)\n", framesize - 16);
-	fprintf(f, "\taddi\tfp, sp, %d\n", framesize);
+	if (framesize <= 2047)
+		fprintf(f, "\taddi\tsp, sp, -%d\n", framesize);
+	else {
+		fprintf(f, "\tli\tt6, %d\n", framesize);
+		fprintf(f, "\tsub\tsp, sp, t6\n");
+	}
+	if (framesize - 16 <= 2047) {
+		fprintf(f, "\tsd\tra, %d(sp)\n", framesize - 8);
+		fprintf(f, "\tsd\tfp, %d(sp)\n", framesize - 16);
+		fprintf(f, "\taddi\tfp, sp, %d\n", framesize);
+	} else {
+		fprintf(f, "\tli\tt6, %d\n", framesize);
+		fprintf(f, "\tadd\tt0, sp, t6\n");
+		fputs("\tsd\tra, -8(t0)\n", f);
+		fputs("\tsd\tfp, -16(t0)\n", f);
+		fputs("\tmv\tfp, t0\n", f);
+	}
 	for (int i = 0; fm->mt->rclob && fm->mt->rclob[i] >= 0; i++)
 		if ((fm->regsused >> fm->mt->rclob[i]) & 1) {
 			int off = -24 - 8 * csave_idx(fm->mt, fm->mt->rclob[i]);
