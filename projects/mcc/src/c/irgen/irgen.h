@@ -65,9 +65,15 @@ struct irtype {
 	enum instkind load, store;
 };
 
+/* Per-instruction flags (frontend -> MIR): INST_VOLATILE marks a load /
+ * store of a volatile-qualified object so MIR passes (e.g. memory constant
+ * propagation) must not reorder / fold / eliminate the access. */
+#define INST_VOLATILE (1u << 0)
+
 struct inst {
 	enum instkind kind;
 	int class;
+	uint16_t flags;
 	struct value res, *arg[2];
 };
 
@@ -162,7 +168,7 @@ void calcvla(struct func *f, struct type *t);
 void funcalloc(struct func *f, struct decl *d);
 struct value *funcstore(struct func *f, struct type *t, enum typequal tq,
                        struct lvalue lval, struct value *v);
-struct value *funcload(struct func *f, struct type *t, struct lvalue lval);
+struct value *funcload(struct func *f, struct type *t, enum typequal tq, struct lvalue lval);
 
 /* branch.c */
 struct lvalue funclval(struct func *f, struct expr *e);

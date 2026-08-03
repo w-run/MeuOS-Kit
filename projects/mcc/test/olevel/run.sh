@@ -32,6 +32,18 @@ n0=$(grep -cE '^\s+[a-z]' /tmp/olevel-o0.s)
 n1=$(grep -cE '^\s+[a-z]' /tmp/olevel-o1.s)
 [ "$n0" -gt "$n1" ] || fail "-O0 ($n0) should have more asm instructions than -O1 ($n1)"
 
+# 内存局部常量传播专项：int k = 7 后读取 k 应被折叠为常量，-O1 < -O0
+$BIN -O0 --specs=host -S -o /tmp/olevel-mc0.s "$DIR/memconst.c" 2>/dev/null
+$BIN -O1 --specs=host -S -o /tmp/olevel-mc1.s "$DIR/memconst.c" 2>/dev/null
+mc0=$(grep -cE '^\s+[a-z]' /tmp/olevel-mc0.s)
+mc1=$(grep -cE '^\s+[a-z]' /tmp/olevel-mc1.s)
+[ "$mc0" -gt "$mc1" ] || fail "memconst -O0 ($mc0) should have more asm instructions than -O1 ($mc1) (k folded to constant)"
+# memconst.c 运行时正确性（-O0/-O1 结果一致）
+$BIN -O0 --specs=host -o /tmp/olevel-mc0.bin "$DIR/memconst.c" 2>/dev/null || fail "memconst -O0 compile failed"
+$BIN -O1 --specs=host -o /tmp/olevel-mc1.bin "$DIR/memconst.c" 2>/dev/null || fail "memconst -O1 compile failed"
+/tmp/olevel-mc0.bin || fail "memconst -O0 runtime wrong"
+/tmp/olevel-mc1.bin || fail "memconst -O1 runtime wrong"
+
 # -O1 分支 vs -O2 cmov（if 转换）
 $BIN -O1 --specs=host -S -o /tmp/olevel-b1.s "$DIR/branch.c" 2>/dev/null
 $BIN -O2 --specs=host -S -o /tmp/olevel-b2.s "$DIR/branch.c" 2>/dev/null

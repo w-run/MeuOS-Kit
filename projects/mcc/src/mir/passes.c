@@ -346,13 +346,79 @@ defined_outside(MFn *fn, MVal *v, MBlk *b)
 	return v->def != 0;
 }
 
+/* ---- memory constant propagation (block-local) ---------------------------
+ * Forward a constant store to a stack slot (MOP_ALLOCA result) into a later
+ * load from the same slot address within the same block — the C pattern
+ * `int k = 7; ...; use(k)` where k lives on its slot.  Conservative rules:
+ *   - only MOP_ALLOCA-derived addresses are tracked: two distinct alloca
+ *     temps can never alias, so a store to one does not affect another;
+ *     a store through any other (derived/unknown) pointer could alias a
+ *     tracked slot, so it invalidates the whole table;
+ *   - a call may write through an escaped slot pointer -> invalidate all;
+ *   - loads never invalidate (reads do not modify memory);
+ *   - volatile stores are rejected in the frontend (funcstore), so they
+ *     cannot reach here; atomic accesses use dedicated atomic ops, not
+ *     plain MOP_LOAD/MOP_STORE. */
+typedef struct MMemC {
+	MVal *addr;      /* slot address temp (MOP_ALLOCA result) */
+	MConst *val;     /* constant stored */
+	MType dtype;     /* store dtype (load must match) */
+} MMemC;
+
+static const MMemC *
+memc_find(MMemC *mc, uint32_t n, MVal *addr)
+{
+	for (uint32_t i = 0; i < n; i++)
+		if (mc[i].addr == addr)
+			return &mc[i];
+	return 0;
+}
+
+static void
+memc_set(MMemC *mc, uint32_t *n, MVal *addr, MConst *val, MType dt)
+{
+	for (uint32_t i = 0; i < *n; i++) {
+		if (mc[i].addr == addr) {
+			mc[i].val = val;
+			mc[i].dtype = dt;
+			return;
+		}
+	}
+	if (*n < 64) {
+		mc[*n].addr = addr;
+		mc[*n].val = val;
+		mc[*n].dtype = dt;
+		(*n)++;
+	}
+}
+
+/* Constant value actually held by a slot after a width-dtype store:
+ * the stored constant is masked to the store width (the slot holds the
+ * low bits; a same-width load re-reads them). */
+static MRef
+memc_const(MFn *fn, MType dt, MConst *c)
+{
+	if (c->kind == MC_INT) {
+		int w = dt == MT_I64 ? 8 : dt == MT_I32 ? 4 :
+		        dt == MT_I16 ? 2 : 1;
+		uint64_t mask = w >= 8 ? ~0ull : ((1ull << (8 * w)) - 1);
+		return MREF_CON(mconst_int(fn, dt, c->u.i & mask));
+	}
+	if (c->kind == MC_FLT)
+		return MREF_CON(c);
+	/* MC_ADDR pointer constants are not folded (relocatable semantics). */
+	return (MRef){0};
+}
+
 /* Rewrite a block: apply constant folding and algebraic simplification,
  * dropping instructions whose result is unused or simplified away.
  * Returns the number of instructions removed. */
 static uint32_t
-msimp_block(MFn *fn, MBlk *b)
+msimp_block(MFn *fn, MBlk *b, const char *is_alloca)
 {
 	MSimpMap *tab[32] = {0};
+	MMemC memc[64];
+	uint32_t nmemc = 0;
 	MIns *out = b->ins;
 	uint32_t nout = 0;
 	uint32_t removed = 0;
@@ -416,6 +482,40 @@ msimp_block(MFn *fn, MBlk *b)
 				removed++;
 				continue;
 			}
+		}
+
+		/* memory constant propagation: forward a constant store into a
+		 * same-block load of the same alloca slot.  src[0]=value and
+		 * src[1]=address for MOP_STORE (the mir.h comment is stale; see
+		 * x86_64_mbe.c funcstore convention).  Volatile accesses are
+		 * marked in MIns.extra bit 1 (MIR_VOLATILE, set by func_to_mir
+		 * from the frontend's INST_VOLATILE) and never folded. */
+		if (in->op == MOP_STORE) {
+			MRef va = map_resolve(tab, in->src[0]);
+			MRef aa = map_resolve(tab, in->src[1]);
+			MVal *addr = aa.val;
+			if (va.con && addr && addr->kind == MV_TEMP &&
+			    is_alloca[addr->id] && !(in->extra & 2))
+				memc_set(memc, &nmemc, addr, va.con, in->dtype);
+			else
+				nmemc = 0;   /* unknown/volatile writer: could alias any slot */
+		} else if (in->op == MOP_LOAD) {
+			MRef aa = map_resolve(tab, in->src[0]);
+			MVal *addr = aa.val;
+			const MMemC *mc = addr && addr->kind == MV_TEMP
+				? memc_find(memc, nmemc, addr) : 0;
+			if (mc && mc->dtype == in->dtype && !(in->extra & 2) &&
+			    !used_outside(fn, in->dst, b)) {
+				MRef fr = memc_const(fn, in->dtype, mc->val);
+				if (fr.val || fr.con) {
+					map_set(tab, in->dst, fr);
+					removed++;
+					continue;
+				}
+			}
+			/* a load never invalidates (reads do not modify memory) */
+		} else if (in->op == MOP_CALL) {
+			nmemc = 0;   /* callee may write through an escaped slot */
 		}
 
 		/* algebraic simplifications on non-constant operands.  Only when
@@ -629,8 +729,20 @@ run_mir_pass(MFn *fn, enum MIRPass pass)
 	case MIR_PASS_FOLD: {
 		uint32_t r = 0;
 		build_uses(fn); /* used_outside needs the use chains */
+		/* Collect alloca-result temps.  The MVal.def instruction pointer
+		 * is unreliable here: msimp_block compacts each block's ins array
+		 * in place, so a def recorded in an already-visited block may
+		 * point at overwritten storage.  Allocas are never removed by
+		 * FOLD, so this function-wide id set stays valid for the whole
+		 * pass. */
+		char *is_alloca = calloc(fn->nval ? fn->nval : 1, 1);
 		for (MBlk *b = fn->link; b; b = b->link)
-			r += msimp_block(fn, b);
+			for (uint32_t i = 0; i < b->nins; i++)
+				if (b->ins[i].op == MOP_ALLOCA && b->ins[i].dst)
+					is_alloca[b->ins[i].dst->id] = 1;
+		for (MBlk *b = fn->link; b; b = b->link)
+			r += msimp_block(fn, b, is_alloca);
+		free(is_alloca);
 		return r;
 	}
 	case MIR_PASS_COPY:

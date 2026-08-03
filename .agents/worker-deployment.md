@@ -198,6 +198,14 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 - verify-all.sh 改造：新增 `check-cpp-func/neg × MCC_MIR_BACKEND=1/0` 双后端显式复验步骤（补"cpp 套件只覆盖单一后端"缺口，17→19 步）。
 - 非 x86_64 target（aarch64/arm/riscv64/loongarch64/i386）仍走 MIR→bridge→LIR。
 
+### MIR-native -O1 内存常量传播（#99，chloe，worktree-tmp-chloe-memconst）
+- 目标：check-olevel 的 `-O0 (243) > -O1 (243)` 断言转绿。根因：MIR -O1 FOLD 不做内存局部常量传播（`int k=7; x+(k+1)` 的 k 走栈槽，读取 load 未被折叠为常量）。
+- 实现：`src/mir/passes.c` msimp_block 新增**块内 store→load 常量转发**（MMemC 表）——常量 store 到 MOP_ALLOCA 栈槽后，同块同址 load 折叠为常量（掩码到 load 宽度）；保守规则：未知/非 alloca 地址的 store 与 call 全失效、不同 alloca 互不别名、load 不失效。alloca 集合在 FOLD 入口预收集（避免 deref 被压实失效的 `MVal.def`）。
+- volatile 不折叠：新增 `INST_VOLATILE`（struct inst.flags）→ func_to_mir 传播到 MIR `MIns.extra` bit1 → memconst 跳过。funcload 加 `enum typequal tq` 参数（caller 传 `e->qual`），`(t->qual|tq)&QUALVOLATILE` 标记 volatile load。前端 funcstore 本就拒绝 volatile store。
+- 踩坑修复：①`memc_const` 宽度映射漏 MT_I16（513&0xFF=1，narrow_cast 回归）；②load 折叠未查 `used_outside`（switch 值跨块用被删定义，attr_basic 回归）；③`addr->def->op` 在块压实后失效导致自举崩溃（改 alloca 集合）。
+- 测试：新增 `test/olevel/memconst.c`（const_local/const_twice/overwrite）+ run.sh 专项断言（memconst -O0=194 > -O1=177，运行时 O0/O1 均过）。
+- 验证：check-c-mir fail=0、c99/c11/c23/cpp-func/cpp-neg 全绿、check-sysroot-static 自举 exit 0、**verify-all 19/19**。
+
 ## 5. 纪律速查
 
 - 提交：文件级 `git add <文件>`，**禁止 `git add -A`**；建议 `git commit --only <path>` 规避共享 index 竞态
