@@ -186,15 +186,15 @@ static MConst *con_pool_find(MFn *fn, MConst *key)
 			if (c->u.i == key->u.i)
 				return c;
 			break;
-		case MC_FLT:
-			if (c->type == MT_F32) {
-				if (c->u.s == key->u.s)
-					return c;
-			} else {
-				if (c->u.d == key->u.d)
-					return c;
-			}
+		case MC_FLT: {
+			/* Use memcmp so -0.0 and +0.0 are distinct (IEEE 754
+			 * equality says they are equal, but they differ in the
+			 * sign bit and must be preserved as separate constants). */
+			size_t sz = c->type == MT_F32 ? sizeof(float) : sizeof(double);
+			if (memcmp(&c->u, &key->u, sz) == 0)
+				return c;
 			break;
+		}
 		case MC_ADDR:
 			if (c->u.addr.sym == key->u.addr.sym &&
 			    c->u.addr.off == key->u.addr.off &&

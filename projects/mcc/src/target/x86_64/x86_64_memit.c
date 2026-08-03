@@ -553,8 +553,15 @@ emit_mov(FILE *f, MVal *dst, MVal *src, MConst *c, MType dtype)
 	if (c && c->kind == MC_INT) {
 		if (!dst)
 			return;
-		fprintf(f, "\tmovq\t$%lld, ", (long long)c->u.i);
-		emit_mval(f, dst);
+		if (dtype == MT_I32 && dst->kind == MV_REG) {
+			/* 32-bit move with zero-extend: used for setting %eax
+			 * before variadic calls (SysV ABI: %al = XMM count). */
+			fprintf(f, "\tmovl\t$%lld, ", (long long)c->u.i);
+			emit_mval32(f, dst);
+		} else {
+			fprintf(f, "\tmovq\t$%lld, ", (long long)c->u.i);
+			emit_mval(f, dst);
+		}
 		fputs("\n", f);
 		return;
 	}

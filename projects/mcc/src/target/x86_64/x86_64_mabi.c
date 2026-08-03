@@ -479,6 +479,13 @@ mabi_selcall(MFnM *fm, MOut *o, MInsM *args, int n, MInsM *call)
 		}
 	}
 
+	/* Set %al to the number of XMM registers used (x86_64 SysV ABI
+	 * for variadic calls: the callee's va_start needs this to know
+	 * how many vector registers to save to the register save area). */
+	if (ns > 0)
+		mout_cst(o, MMOP_MOV, MT_I32, reg(fm, X64MREG_RAX), 0,
+		         imm(fm, MT_I32, ns));
+
 	/* the call itself */
 	mout(o, MMOP_CALL, call->dtype, call->dst, call->src[0], 0);
 	o->ins[o->nins - 1].td = call->td;
