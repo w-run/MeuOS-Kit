@@ -5990,7 +5990,7 @@ cpp_tmpl_class_do_inst(struct scope *s, struct cpp_template *tmpl,
 		rtoks[rn].kind = TSEMICOLON;
 		rtoks[rn].space = false;
 		++rn;
-		for (i = 0; i < (int)tmpl->ntoks; ++i) {
+		for (i = 0; i < rn; ++i) {
 			const char *nm;
 			if (rtoks[i].kind < TIDENT)
 				continue;
@@ -6007,6 +6007,52 @@ cpp_tmpl_class_do_inst(struct scope *s, struct cpp_template *tmpl,
 				/* the class name itself or a constructor/destructor */
 				rtoks[i].kind = tokenget(tag, strlen(tag));
 				found = true;
+				/* Injected-class-name written as a template-id
+				 * (`Box<T>` inside `template<class T> struct Box`):
+				 * the name is now the mangled tag, so the trailing
+				 * `<...>` would be parsed as a stray less-than and
+				 * break the declarator.  Drop the argument list —
+				 * within its own definition `Box<T>` denotes exactly
+				 * this instantiation.  Only elide when every argument
+				 * token is one of the template's own parameters, so a
+				 * genuine comparison (`Box_i < x`) is left alone. */
+				if (i + 1 < rn && rtoks[i + 1].kind == TLESS) {
+					int depth2 = 0, j, k;
+					bool argsonly = true;
+					for (j = i + 1; j < rn; ++j) {
+						if (rtoks[j].kind == TLESS) {
+							++depth2;
+							continue;
+						}
+						if (rtoks[j].kind == TGREATER) {
+							if (--depth2 == 0)
+								break;
+							continue;
+						}
+						if (rtoks[j].kind == TCOMMA)
+							continue;
+						if (rtoks[j].kind >= TIDENT) {
+							const char *an = tokenstr(rtoks[j].kind);
+							bool ok = false;
+							for (p = tmpl->params; p; p = p->next)
+								if (strcmp(p->name, an) == 0) {
+									ok = true;
+									break;
+								}
+							if (ok)
+								continue;
+						}
+						argsonly = false;
+						break;
+					}
+					if (argsonly && depth2 == 0 && j < rn) {
+						/* splice out rtoks[i+1 .. j] (`<`..`>`) */
+						int ndrop = j - i;
+						for (k = i + 1; k + ndrop < rn; ++k)
+							rtoks[k] = rtoks[k + ndrop];
+						rn -= ndrop;
+					}
+				}
 			}
 		}
 		if (!found)
