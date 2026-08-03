@@ -71,7 +71,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 | diana | lite | worktree-tmp-diana-pic + worktree-tmp-diana-errcode (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试 + check-pic-verify 修复 + 错误码体系/多错收集 | **completed**（db1451b C23 已合入 294e5c2；6db1691 PIC 已合入主线 58016d2；errcode da5a646/a561b36/c204bbe 本次归并合入主线） | 11 test/c23 + F1-F3 + i386/riscv64 GOT + E####/caret 全跨/JSON 多错/fix-it |
 | eve | lite | worktree-tmp-eve + worktree-tmp-eve-olevel + worktree-tmp-eve-i18n (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵 + -O 级别语义分级 + **i18n 消息目录与双语（--lang=en/zh、LANG 推断、--explain/usage/--error-json 双语、check-i18n 目标）** | **completed**（测试矩阵已合入 b4cad7e；eve-olevel 已合入 a1bbb85；eve-i18n 本次 4 commit，verify-all 19/19） | worktree-tmp-eve-i18n |
 | grace | lite | worktree-tmp-grace-cpp23 (自 worktree-mxx-work@1ef0a9a) | /tmp/mxx-wt-grace | sema/decl E1/E4/E5/E6（已合入）+ C++23 缺口：P0849/P1774/P1401/P2360/nodiscard | **completed**（sema 已合入；cpp23 f7e313a+b54c8b9+16c2ca5+2a4d655+da7a107 **已合入主线** ba6d9f8） | push worktree-tmp-grace-cpp23 |
-| hazel | lite | worktree-tmp-hazel-conform (自 worktree-mxx-work@1ef0a9a) | /workspace/MeuOS-Kit/.agents/worktrees/mxx-work | C23 constexpr F1/F2/F3（已合入）+ chibicc conformance 缺陷组（bitfield/浮点转换/字面量/宽字符） | **completed**（F1-F3 8e5aae3 已合入；conformance 5 commit **已合入主线** 09a9263，chibicc PASS 11→16、RUNFAIL 5→0） | 24596ee |
+| hazel | lite | worktree-tmp-hazel-fp (自 worktree-mxx-work@9742e2f) | /tmp/mxx-wt-hazel | MIR-native -O2 叶函数帧指针省略（check-olevel 差距②） | **completed**（a988893 已 push origin/worktree-tmp-hazel-fp，帧指针断言转绿，verify-all 18/18） | a988893 |
 
 ### 会话中断恢复速查（当前团队）
 1. `git fetch origin`（在 /workspace/MeuOS-Kit）
@@ -80,7 +80,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 4. 半成品保护范例：`worktree-requires-wip` = requires 半成品恢复点（网络故障时保护成功）
 
 ### 门禁已知差距（2026-08-03 归并后）
-- **check-olevel：已知差距 3 项**（MIR-native 后端真实未实现，非测试 bug；按 team-lead 裁决从归并门禁排除，已排 MIR 迭代 task）：① MIR-native if-conversion（cmov，x86_64_mbe.c isel 仍为 P2 seed）；② -O2 省略叶函数帧指针（各级别都保留 rbp）；③ -O1 内存局部常量传播（`int k=7; x+(k+1)` 的 k 走栈槽，FOLD 不跨内存折叠）。已通过断言保留：O2 imul/O3 shl 强度削减、O9 钳制、Ox 拒绝、各级别运行时正确。
+- **check-olevel：已知差距 2 项**（MIR-native 后端真实未实现，非测试 bug；按 team-lead 裁决从归并门禁排除，已排 MIR 迭代 task）：① MIR-native if-conversion（cmov，x86_64_mbe.c isel 仍为 P2 seed）；③ -O1 内存局部常量传播（`int k=7; x+(k+1)` 的 k 走栈槽，FOLD 不跨内存折叠）。**② -O2 省略叶函数帧指针已修复（hazel a988893，worktree-tmp-hazel-fp）**。已通过断言保留：O2 imul/O3 shl 强度削减、O9 钳制、Ox 拒绝、各级别运行时正确；另 -O0/-O1 指令数断言当前也失败（-O0 未禁用优化，243=243，非记录项）。
 - **check-pic-verify：已修复**（97d5467，x86_64 MIR-native -fPIC GOT 回归——MIR Phase 2 强制 MIR-native 后丢失外部符号 GOT，emit_global_addr + @gotpcrel + @plt 修复，四架构全过）。
 
 ---
