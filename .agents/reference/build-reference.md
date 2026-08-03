@@ -192,7 +192,7 @@ make -C projects/meuos-sysroot clean
 - **缺少 sysroot**：确认 `MEUOS_SYSROOT` 已设置（须指向 `sysroot/<arch>`，如 `sysroot/x86_64`），`$MEUOS_SYSROOT/usr/include` 存在
 - **mcc 自身编译失败**：先用 `make -C projects/mcc && make -C projects/mcc check` 确认基础门禁通过
 - **交叉工具链缺失**：检查对应架构的 gcc 交叉编译器是否存在（`aarch64-linux-gnu-gcc --version` 等）
-- **引用未实现符号**：检查 `.issues/` 排查是否依赖了未实现的功能
+- **引用未实现符号**：检查 `.todo/` 与各组件 ARCHITECTURE.md 排查是否依赖了未实现的功能
 
 **链接错误 → 常见原因：**
 - **-l\<lib\> 顺序错误**：mcc 的链接器要求库按依赖顺序排列（引用者在被引用者之前）

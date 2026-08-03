@@ -8,7 +8,7 @@
 > **分支与提交策略**：
 > - **新任务必须创建分支**，禁止在 `main` 上直接开发（格式：`feat/<描述>`、`fix/<描述>`、`doc/<描述>`）。
 > - **worktree 分支**（`worktree-<描述>`）用于长期、跨多组件的联动开发。生命周期长，阶段性成果合并到 `main` 后再继续下一阶段；提交时仍需遵守单组件粒度（`<组件>: <描述>`）；合并到 `main` 前应做全量回归（对应组件 `make check`）。
-> - 仅在以下情况可提交到 `main`：一次性修复（typo、编译报错修正）、文档同步、`.issues/` 状态更新、纯重构不涉及功能变更。
+> - 仅在以下情况可提交到 `main`：一次性修复（typo、编译报错修正）、文档同步、`.todo/` 待办状态更新、纯重构不涉及功能变更。
 > - 每次提交前必须跑对应组件的 `make check`，确保不引入回归。
 > - 提交信息格式：`<组件>: <描述>`，例如 `mcc: fix va_list alignment on i386`。
 > - **完成即推送**：每次提交后直接 `git push`，不积压本地提交。
@@ -18,17 +18,17 @@
 > - **你不是唯一的工作者**：此项目可能处于多个 Agent 并行工作状态，你只是其中之一。操作共享资源（分支、文件、issues）时需考虑并发冲突。
 > - **拉分支 + 工作树**：执行任何任务前，先创建新分支（worktree-<描述>），再通过 git worktree add 在 .codebuddy/worktrees/ 下创建工作树。所有开发在独立工作树中进行。
 > - **复杂任务拉团队**：需要跨组件修改或涉及多个文件的任务，使用 TeamCreate 创建团队，按职责分派 Worker。禁止单 Agent 单线程处理大型任务。
-> - **拉取最新状态**：开始任务前运行 `git fetch origin && git log origin/main..main` 确认是否有他人已推送的变更。操作 .issues/ 等共享文件时注意冲突。
+> - **拉取最新状态**：开始任务前运行 `git fetch origin && git log origin/main..main` 确认是否有他人已推送的变更。操作 `.todo/` 等共享文件时注意冲突。
 >
 > **会话恢复流程**（强制要求：新 agent 启动时**必须**按顺序执行以下步骤）：
 > 1. **读取 IMA 知识库规划文档** — 查询 IMA 知识库中的 MeuOS 规划文档（`search_knowledge_base` → `get_knowledge_list`），阅读标题含"规划"/"计划"/"路线图"/"需求"/"设计"的文档。详见 `.agents/reference/knowledge-mgmt.md` §9.4。
-> 2. **子项目上下文加载** — 读目标子项目的 `ARCHITECTURE.md`（结构/模块/状态/路线图）与 `.issues/`（待实现项），了解项目当前进度。
+> 2. **子项目上下文加载** — 读目标子项目的 `ARCHITECTURE.md`（结构/模块/状态/路线图）与 `.todo/<project>/`（待办项），了解项目当前进度。
 > 3. **AGENTS.md 规约确认** — 重新确认项目规约（§4 禁止事项、§5 参考索引）和项目状态（`.agents/reference/status.md`）。
 > 4. **经验库读取** — 读 `.agents/knowledge/README.md` 索引，了解已沉淀的 git 纪律与缺陷闭环经验。
 > 5. **环境检查** — 确认 `MEUOS_SYSROOT` 已设置（须指向 `sysroot/<arch>`，如 `sysroot/x86_64`），宿主编译器和交叉工具链可用。
 >
-> 各子项目独立维护状态，无全局 STATE 文件。`.issues/` 和 ARCHITECTURE.md 是状态权威来源。
-> **待办任务约定**：所有待办任务统一存放在 `.issues/` 下，以日期编号命名（如 `0729.md`、`0730.md`）。禁止在项目目录下创建 `.todo/` 子目录或散落的待办文件。
+> 各子项目独立维护状态，无全局 STATE 文件。`ARCHITECTURE.md` 是结构/路线图权威来源。
+> **待办任务约定**：所有未完成待办统一存放在顶层 `.todo/<project>/`（见 `.todo/README.md`），禁止在 `projects/<name>/.todo/` 下新建。已闭环经验沉淀到 `.agents/knowledge/`。历史工作日志归档在各项目 docs/ 下（如 `projects/mcc/docs/issues/`）。
 
 **项目名称**：MeuOS Kit
 **项目定位**：MeuOS Next 的完整自举开发工具集。提供从零自举所需的全部工具：C/C++ 编译器、标准 C 库、构建系统、底层工具链、核心工具集、Shell、TUI 库与自研内核。
@@ -128,14 +128,13 @@ mcc
 MeuOS-Kit/
 ├── AGENTS.md               项目规约（本文件，harness 自动加载）
 ├── .agents/                项目级 Agent 资源（统一管理）
-│   ├── knowledge/          经验库（git 纪律/缺陷闭环，进 git）
+│   ├── knowledge/          全局记忆（经验库：纪律/缺陷闭环，进 git）
 │   ├── reference/          详细参考（组件规范/自举/构建命令/状态速查等）
 │   ├── skills/             技能（cross-test/ima-skill/mkit-*）
 │   └── worktrees/          独立工作树
+├── .todo/                  项目待办（唯一待办来源，按项目子目录）
 ├── README.md               项目说明与构建方法
 ├── bootstrap.sh            Phase 0–5 全流程自举脚本
-├── issue/                  全局 issue 追踪（日期命名）
-├── .issues/                当前 worktree 的任务队列
 ├── projects/<name>/        各组件（见 §2 表）
 ├── env/                    QEMU 多架构测试环境（qvm 管理器）
 ├── pkgs/                   meow 构建配方（.meow 格式）
@@ -199,21 +198,21 @@ make check                                    # 宿主全套回归
 - **架构支持矩阵**：x86_64/aarch64/riscv64/i386/loongarch64/arm 各组件支持状态。
 - **文档索引 + CI 管道**。
 
-> ⚠️ 本文件易过时，权威状态以 `.issues/` 与各组件 ARCHITECTURE.md 为准。
+> ⚠️ 本文件易过时，权威状态以 `.todo/`、`.agents/knowledge/` 与各组件 ARCHITECTURE.md 为准。
 
 ---
 
 ## 10. Issue/TODO 导航 → 详见 `.agents/reference/organization.md` §11
 
-| 层级 | 位置 | 内容 |
-|------|------|------|
-| 全局-高层 | status.md | 组件总体状态、里程碑、支持矩阵 |
-| 全局-详细 | `issue/<MMDD>.md` | 跨组件待实现清单、缺陷分析、审查报告 |
-| 子项目-结构 | `projects/<name>/ARCHITECTURE.md` | 目录结构、模块职责、路线图 |
-| 子项目-待办 | `projects/<name>/.todo/` | 主题详细设计、实现计划、验收条件 |
-| 子项目-移植 | `projects/<name>/PORTING.md` | 多架构移植说明、ABI 契约 |
-| 工作树-队列 | `.issues/INDEX.md` | worktree 任务队列 |
-| 工作树-入口 | `.issues/AGENT.md` | worktree agent 上下文与纪律 |
-| 循环任务 | `cron.md` | Cron 循环作业定义 |
+**核心系统只有两个**：项目待办（`.todo/`）+ 全局记忆（`.agents/knowledge/`）。
 
-读取优先级：IMA 知识库规划 → `.issues/` → status.md → `issue/` → 组件 ARCHITECTURE/.todo。
+| 信息类型 | 位置 | 说明 |
+|---------|------|------|
+| 项目待办（未完成） | `.todo/<project>/` | 唯一待办来源，按项目子目录 |
+| 全局记忆（已闭环经验） | `.agents/knowledge/` | 缺陷闭环、纪律、修复方案 |
+| 组件结构/路线图 | `projects/<name>/ARCHITECTURE.md` | 组件权威 |
+| 组件移植契约 | `projects/<name>/PORTING.md` | 多架构 ABI |
+| 历史工作日志 | `projects/<name>/docs/issues/` | 归档日志（非活跃系统） |
+| 全局状态速查 | `.agents/reference/status.md` | 聚合摘要 |
+
+读取优先级：`.todo/`（待办）→ `.agents/knowledge/`（经验）→ status.md → 组件 ARCHITECTURE。

@@ -12,10 +12,9 @@ MeuOS-Kit/
 ├── README.md               项目说明与构建方法
 ├── bootstrap.sh            Phase 0–5 全流程自举脚本
 ├── cron.md                 循环任务定义（session 级，随会话结束清理）
-├── issue/                  全局 issue 追踪（按日期命名的详细待实现/缺陷分析清单）
-├── .issues/                当前 worktree 的任务队列与入口文档（worktree 活跃期间有效）
+├── .todo/                  项目待办（唯一待办来源，按项目子目录）
 ├── projects/
-│   ├── mcc/                C/C++ 编译器（C99+C11+C23；m++ 待启动）
+│   ├── mcc/                C/C++ 编译器（C99+C11+C23 + C++23 主路线图）
 │   ├── meuos-libc/         标准 C 库（ISO C11 + POSIX；含 compat 兼容层）
 │   ├── meow/               构建系统（取代 make + autoconf）
 │   ├── meuos-toolchain/    底层工具链（as/ld/ar/ranlib/nm/readelf/strip/objcopy/objdump）
@@ -34,7 +33,7 @@ MeuOS-Kit/
 └── reference/              cproc/QBE/musl 只读参考源（gitignored）
 ```
 
-每个组件目录含 `ARCHITECTURE.md`（结构/模块/状态/路线图）。待办事项统一存放在 `.issues/` 下。
+每个组件目录含 `ARCHITECTURE.md`（结构/模块/状态/路线图）。待办事项统一存放在顶层 `.todo/` 下（按项目子目录）。
 
 **配方包（pkgs/）**：`pkgs/` 存放 `.meow` 格式构建配方，涵盖基础依赖库（dash/bzip2/binutils）、meow 自测试配方（`meow-smoke`、`meow-incremental` 等）和 Kit 组件配方（`mcc`、`meow`、`meuos-libc`）。通过 `meow build <pkg>` 使用，详见 `pkgs/<pkg>/project.meow`。
 
@@ -73,3 +72,29 @@ sysroot/
 ---
 
 ## 11. Issue/TODO 导航系统
+
+**核心系统只有两个**：项目待办（`.todo/`）+ 全局记忆（`.agents/knowledge/`）。
+
+| 信息类型 | 位置 | 说明 |
+|---------|------|------|
+| 项目待办（未完成） | `.todo/<project>/` | 唯一待办来源，按项目子目录 |
+| 全局记忆（已闭环经验） | `.agents/knowledge/` | 缺陷闭环、纪律、修复方案 |
+| 组件结构/路线图 | `projects/<name>/ARCHITECTURE.md` | 组件权威 |
+| 组件移植契约 | `projects/<name>/PORTING.md` | 多架构 ABI |
+| 日期工作日志（历史） | `projects/<name>/docs/issues/` | 归档日志（非活跃系统） |
+| 全局状态速查 | `.agents/reference/status.md` | 聚合摘要 |
+
+**读取优先级**：`.todo/`（待办）→ `.agents/knowledge/`（经验）→ status.md → 组件 ARCHITECTURE。
+
+### 11.3 Issue 文件命名约定
+
+`issue/` 目录下的文件按日期命名：
+- 文件名格式：`<MMDD>.md`（如 `0729.md`）
+- 内容包含：验证日期、逐项确认状态、汇总优先级
+- 过期文件：标记 `[存档]` 前缀或移入 `issue/archive/`
+
+### 11.4 .todo 文件生命周期
+
+1. **创建** — 新待办在 `.todo/<project>/<topic>.md` 创建（含任务 ID/范围/参考/验收/依赖）。
+2. **完成** — 实现并入 ARCHITECTURE.md 状态表，删除/标记 `[x]` 本文件。
+3. **沉淀** — 经验写入 `.agents/knowledge/`。

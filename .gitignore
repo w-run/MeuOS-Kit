@@ -7,9 +7,6 @@
 .agents/scheduled_tasks.lock
 .agents/worktrees/
 
-.issues/AGENT.md
-.issues/INDEX.md
-
 a.out
 # mcc chibicc community-suite run output (regenerated per run)
 **/community/chibicc/results.log

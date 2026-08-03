@@ -1,7 +1,7 @@
 # 项目状态速查（.agents/reference/status.md）
 
 > 从 AGENTS.md §10 下放（2026-08-04）。已完成里程碑、待启动工作、架构支持矩阵、文档索引、CI 管道。
-> ⚠️ 本文件易过时，权威状态以 .issues/ 与各组件 ARCHITECTURE.md 为准。
+> ⚠️ 本文件易过时，权威状态以 .todo/、.agents/knowledge/ 与各组件 ARCHITECTURE.md 为准。
 
 ## 10. 项目状态速查
 
@@ -76,18 +76,10 @@
 | `projects/meuos-utils/ARCHITECTURE.md`             | 核心工具集架构 + libutils.a + 工具路线图（Phase 7 骨架已建） |
 | `projects/meuos-shell/ARCHITECTURE.md`             | msh 架构 + 三模式 + P6-P8 路线图（Phase 7 骨架已建） |
 | `env/README.md`                                    | QEMU 测试环境使用说明                  |
-| `.issues/`                                        | 待办任务跟踪（日期编号 + 各 worktree 独立 INDEX/AGENT） |
-| `projects/mcc/.todo/cpp-shared-backend.md`         | mcc/m++ 共享后端架构计划               |
-| `projects/mcc/.todo/gd-tls.md`                     | i386 TLS 模型选择设计笔记              |
-| `projects/mcc/.todo/arm.md`                        | ARM 后端状态与待启动项                 |
-| `projects/meow/.todo/dag-dedup.md`                 | DAG 去重待实现项                       |
-| `projects/meow/.todo/native-shell.md`              | 原生 shell 替代待实现                  |
-| `projects/meuos-sysroot/.todo/msys.md`             | .msys 实现任务清单                     |
-| `projects/meuos-utils/.todo/`                      | 核心工具集子任务设计文档（按工具分文件） |
-| `projects/meuos-shell/.todo/`                      | msh 子任务设计文档（按模块分文件）     |
-| `issue/0729.md`                                   | 跨组件待实现清单 + 102 项深度代码审查结果（mcc/libc/toolchain/meow/sysroot） |
-| `.issues/INDEX.md`                                | 当前 worktree 任务队列（worktree-stable-enhance / worktree-shell-utils 等各自独立） |
-| `.issues/AGENT.md`                                | 当前 worktree agent 入口上下文与工作纪律 |
+| `.todo/README.md`                                 | 项目待办索引（唯一待办来源，按项目子目录） |
+| `.agents/knowledge/README.md`                     | 全局记忆索引（缺陷闭环/纪律/经验）     |
+| `projects/mcc/docs/ir-redesign.md`                | mcc IR 重新设计路线                    |
+| `projects/mcc/docs/issues/`                       | mcc 历史工作日志（0728-0801 归档）     |
 | IMA 知识库（通过 `ima-skill` 访问）                 | 设计笔记、移植记录、调试踩坑           |
 | `.github/workflows/ci.yml`                            | CI 管道定义                            |
 
