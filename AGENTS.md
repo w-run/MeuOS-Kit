@@ -28,7 +28,7 @@
 > 5. **环境检查** — 确认 `MEUOS_SYSROOT` 已设置（须指向 `sysroot/<arch>`，如 `sysroot/x86_64`），宿主编译器和交叉工具链可用。
 >
 > 各子项目独立维护状态，无全局 STATE 文件。`ARCHITECTURE.md` 是结构/路线图权威来源。
-> **待办任务约定**：所有未完成待办统一存放在顶层 `.todo/<project>/`（见 `.todo/README.md`），禁止在 `projects/<name>/.todo/` 下新建。已闭环经验沉淀到 `.agents/knowledge/`。历史工作日志归档在各项目 docs/ 下（如 `projects/mcc/docs/issues/`）。
+> **待办任务约定**：所有未完成待办统一存放在顶层 `.todo/<project>/`（见 `.todo/README.md`），禁止在 `projects/<name>/.todo/` 下新建。已闭环经验沉淀到 `.agents/knowledge/`。
 
 **项目名称**：MeuOS Kit
 **项目定位**：MeuOS Next 的完整自举开发工具集。提供从零自举所需的全部工具：C/C++ 编译器、标准 C 库、构建系统、底层工具链、核心工具集、Shell、TUI 库与自研内核。
@@ -212,7 +212,6 @@ make check                                    # 宿主全套回归
 | 全局记忆（已闭环经验） | `.agents/knowledge/` | 缺陷闭环、纪律、修复方案 |
 | 组件结构/路线图 | `projects/<name>/ARCHITECTURE.md` | 组件权威 |
 | 组件移植契约 | `projects/<name>/PORTING.md` | 多架构 ABI |
-| 历史工作日志 | `projects/<name>/docs/issues/` | 归档日志（非活跃系统） |
 | 全局状态速查 | `.agents/reference/status.md` | 聚合摘要 |
 
 读取优先级：`.todo/`（待办）→ `.agents/knowledge/`（经验）→ status.md → 组件 ARCHITECTURE。

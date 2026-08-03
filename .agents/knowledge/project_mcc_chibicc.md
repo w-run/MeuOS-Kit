@@ -35,4 +35,4 @@ type: project
 
 ## 5. 审计回归（已闭环）
 
-c93d5f7（m++ 成员模板）在 expr_postfix.c:288 调 `cpp_pending_record_depth()` 无前置 extern 声明，导致 check-sysroot-static 自举失败。已由 6003f47 修复（顶部 extern 区补声明）。文档：`.issues/0802.md` + `projects/mcc/docs/audit-report.md`。
+c93d5f7（m++ 成员模板）在 expr_postfix.c:288 调 `cpp_pending_record_depth()` 无前置 extern 声明，导致 check-sysroot-static 自举失败。已由 6003f47 修复（顶部 extern 区补声明）。

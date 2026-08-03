@@ -18,4 +18,4 @@
 ## 更新约定
 
 - 修改 AGENTS.md 中对应章节内容时，同步更新 reference 文件。
-- 状态类文件（status.md）易过时，权威状态以 `.issues/` 与各组件 ARCHITECTURE.md 为准。
+- 状态类文件（status.md）易过时，权威状态以 `.todo/`、`.agents/knowledge/` 与各组件 ARCHITECTURE.md 为准。

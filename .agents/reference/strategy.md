@@ -163,7 +163,7 @@ Phase A: riscv64-syscall（基础，必须串行先做）
 每个阶段完成后**必须归档**，然后才能进入下一阶段。归档是提交的前置条件：
 
 1. **运行 `make check`**（必须通过）。跨架构变更还需运行对应 `check-<arch>-bootstrap` 或 `check-<arch>-runtime`。如有回归**必须修复后才能提交**。
-2. **更新 `.issues/` 文件**，将完成项标记为 `[x]`。
+2. **更新 `.todo/` 待办状态**：完成项删除或标记 `[x]`。
 3. **更新 `ARCHITECTURE.md` / `PORTING.md`** 中的状态表和路线图。
 4. **Git 提交**，提交信息格式：`<组件>: <阶段描述>（<文件清单>）`
    - 示例：`meuos-libc: riscv64 runtime 完成 (crt1/syscall/atomic/setjmp/sigreturn/thread_clone/tls)`

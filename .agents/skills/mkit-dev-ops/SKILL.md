@@ -49,7 +49,7 @@ Worker 按**角色**命名（不是 general-purpose-N），每类 worker 专职�
 | **auditor** | 验收型 | 独立代码验证、质量检测、提交审查、门禁回归 |
 | **worker-<域>** | 执行型 | 按领域划分（如 worker-cpp/worker-toolchain/worker-libc），写代码 |
 | **worker-test** | 执行型 | 测试矩阵扩充、缺陷发现、边界用例 |
-| **doc-sync** | 支持型 | docs/.issues/ARCHITECTURE 文档同步，零滞后 |
+| **doc-sync** | 支持型 | .todo/、.agents/knowledge/、ARCHITECTURE 文档同步，零滞后 |
 
 **分工铁律**：
 - **文件区域隔离**：每个 worker 只动自己的文件区域（src/opt/ vs src/cpp/ vs test/ vs .md），避免冲突
@@ -61,7 +61,7 @@ Worker 按**角色**命名（不是 general-purpose-N），每类 worker 专职�
 - **细颗粒度拆分**：大任务拆成独立小任务，每任务可独立提交+验证+回退
 - **优先级排序**：按严重度/收益/依赖排序（如 缺陷 C→D→B→E，每项单独提交）
 - **归属明确**：每任务指定 owner，并发时防止重复实现（可声明"缺陷 X 归属给 worker-Y"）
-- **任务池**：维护 .issues/ 下的任务队列文档，worker 完成一个领下一个
+- **任务池**：维护 .todo/<project>/ 下的待办队列文档，worker 完成一个领下一个
 
 ### 4. 快速迭代机制
 
@@ -75,8 +75,8 @@ Worker 按**角色**命名（不是 general-purpose-N），每类 worker 专职�
 
 - **验收门禁**：建立 `verify-all.sh`（聚合 check/单测/回归/自举），每提交必跑，任一失败即非零退出
 - **auditor 独立审查**：定期派 auditor 审查最近提交（格式/调试残留/未实现声明/回归），输出 audit-report.md
-- **文档同步**：doc-sync 专职同步 docs/.issues/ARCHITECTURE，每技术提交后更新，标注对应 commit 哈希
-- **缺陷登记**：测试/审计发现的问题统一登记到 .issues/<date>.md 缺陷队列，修复后标记哈希闭环
+- **文档同步**：doc-sync 专职同步 .todo/、.agents/knowledge/、ARCHITECTURE，每技术提交后更新，标注对应 commit 哈希
+- **缺陷登记**：测试/审计发现的问题统一登记到 .todo/<project>/ 待办，修复后标记哈希闭环
 
 ## 会话恢复流程
 
@@ -84,13 +84,13 @@ Worker 按**角色**命名（不是 general-purpose-N），每类 worker 专职�
 2. 用 EnterWorktree 进入目标工作树（若用户要求）
 3. 确认 branch 状态（git status/pull/push 同步）
 4. 重新声明 goal（/loop 或直接）
-5. 检查任务队列（.issues/）续接未完成任务
+5. 检查任务队列（.todo/）续接未完成任务
 
 ## 6. 进度记录更新机制
 
 **每个任务节点后必须更新进度记录**（不是完成时，是每节点），文档是"状态权威来源"：
 
-- **.issues/<日期>.md**：当天所有技术提交、缺陷、决策的时间线记录。每节标注 commit 哈希。
+- **.todo/<project>/**：未完成待办（含范围/参考/验收/依赖）。经验沉淀到 .agents/knowledge/。
 - **docs/ 组件文档**：ARCHITECTURE.md（目录/模块/Phase Status）、各专项报告（roadmap/audit/acceptance）。
 - **worker-deployment.md**：worker 角色/状态/在途/stash 记录，会话中断后恢复上下文用。
 - **更新时机**：每提交、每缺陷闭环、每 worker 状态变化，doc-sync worker 专职同步，避免文档滞后于代码。
@@ -142,7 +142,7 @@ planner 可行性调研（参考源+社区+路线）→ 拆细颗粒度任务 �
 - 禁止在 main 直接开发（必须工作分支）
 - 禁止遗留半成品不处理（stash 或回退，不留垃圾）
 - 禁止跳过验收门禁提交
-- 禁止文档滞后（每节点更新 .issues/docs/ARCHITECTURE，不攒到结束）
+- 禁止文档滞后（每节点更新 .todo/ 与 ARCHITECTURE，不攒到结束）
 - 禁止并发 worker 同文件区冲突（文件区域隔离或独立 worktree）
 
 ## 参考实践（MeuOS-Kit mcc/m++，2026-08-02）

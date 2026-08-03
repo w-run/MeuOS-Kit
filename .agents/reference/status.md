@@ -78,8 +78,6 @@
 | `env/README.md`                                    | QEMU 测试环境使用说明                  |
 | `.todo/README.md`                                 | 项目待办索引（唯一待办来源，按项目子目录） |
 | `.agents/knowledge/README.md`                     | 全局记忆索引（缺陷闭环/纪律/经验）     |
-| `projects/mcc/docs/ir-redesign.md`                | mcc IR 重新设计路线                    |
-| `projects/mcc/docs/issues/`                       | mcc 历史工作日志（0728-0801 归档）     |
 | IMA 知识库（通过 `ima-skill` 访问）                 | 设计笔记、移植记录、调试踩坑           |
 | `.github/workflows/ci.yml`                            | CI 管道定义                            |
 

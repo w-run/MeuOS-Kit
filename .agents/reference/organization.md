@@ -81,19 +81,11 @@ sysroot/
 | 全局记忆（已闭环经验） | `.agents/knowledge/` | 缺陷闭环、纪律、修复方案 |
 | 组件结构/路线图 | `projects/<name>/ARCHITECTURE.md` | 组件权威 |
 | 组件移植契约 | `projects/<name>/PORTING.md` | 多架构 ABI |
-| 日期工作日志（历史） | `projects/<name>/docs/issues/` | 归档日志（非活跃系统） |
 | 全局状态速查 | `.agents/reference/status.md` | 聚合摘要 |
 
 **读取优先级**：`.todo/`（待办）→ `.agents/knowledge/`（经验）→ status.md → 组件 ARCHITECTURE。
 
-### 11.3 Issue 文件命名约定
-
-`issue/` 目录下的文件按日期命名：
-- 文件名格式：`<MMDD>.md`（如 `0729.md`）
-- 内容包含：验证日期、逐项确认状态、汇总优先级
-- 过期文件：标记 `[存档]` 前缀或移入 `issue/archive/`
-
-### 11.4 .todo 文件生命周期
+### 11.3 .todo 文件生命周期
 
 1. **创建** — 新待办在 `.todo/<project>/<topic>.md` 创建（含任务 ID/范围/参考/验收/依赖）。
 2. **完成** — 实现并入 ARCHITECTURE.md 状态表，删除/标记 `[x]` 本文件。
