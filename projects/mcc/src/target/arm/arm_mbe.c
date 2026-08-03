@@ -104,30 +104,18 @@ mval_of_ref(MFn *mf, MRef r)
 	return 0;
 }
 
-/* Scalar + aggregate + varargs functions for the MIR-native ARM backend.
- * 64-bit integer values (long long) need register pairs on this 32-bit
- * target — they are handled via register pairs (r0:r1 etc.) at the ABI
- * level and via two 32-bit loads/stores + adc/sbc at the emitter level.
- * VLA (dynamic alloca) is still rejected and falls back to the legacy
- * LIR ARM backend.  MT_PTR is allowed: on this 32-bit target it only
- * carries function references (the callee of MOP_CALL), which the
- * emitter turns into a direct `bl`. */
+/* All functions: scalar, i64, aggregate, varargs, VLA — all lowered to
+ * the MIR-native ARM backend.  64-bit integer values (long long) need
+ * register pairs on this 32-bit target — they are handled via register
+ * pairs (r0:r1 etc.) at the ABI level and via two 32-bit loads/stores +
+ * adc/sbc at the emitter level.  Dynamic VLA (non-constant alloca) is
+ * handled by the emitter (MMOP_ALLOCA* with runtime size).  MT_PTR is
+ * allowed: on this 32-bit target it only carries function references
+ * (the callee of MOP_CALL), which the emitter turns into a direct `bl`. */
 static bool
 mbe_supported(MFn *mf)
 {
-	for (MBlk *mb = mf->link; mb; mb = mb->link) {
-		for (uint32_t k = 0; k < mb->nins; k++) {
-			MIns *in = &mb->ins[k];
-			switch (in->op) {
-			case MOP_ALLOCA:
-				if (in->src[0].val && in->src[0].val->kind != MV_CONST)
-					return false;   /* VLA: legacy for now */
-				break;
-			default:
-				break;
-			}
-		}
-	}
+	(void)mf;
 	return true;
 }
 

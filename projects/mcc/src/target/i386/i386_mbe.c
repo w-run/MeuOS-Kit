@@ -99,31 +99,16 @@ mval_of_ref(MFn *mf, MRef r)
 	return 0;
 }
 
-/* Scalar + aggregate + varargs functions: reject only VLA — fall back to
- * the legacy LIR i386 backend.  MT_PTR is allowed (on 32-bit i386 it
+/* All functions: scalar, i64, aggregate, varargs, VLA — all lowered to
+ * the MIR-native i386 backend.  MT_PTR is allowed (on 32-bit i386 it
  * carries function refs).  i64 values are supported via register pairs
- * (EDX:EAX) and spill slots.  Aggregates and varargs are now handled by
- * the ABI-lowering layer (i386_mabi.c). */
+ * (EDX:EAX) and spill slots.  Aggregates and varargs are handled by the
+ * ABI-lowering layer (i386_mabi.c).  Dynamic VLA (non-constant alloca)
+ * is handled by the emitter (MMOP_ALLOCA* with runtime size). */
 static bool
 mbe_supported(MFn *mf)
 {
-	for (MBlk *mb = mf->link; mb; mb = mb->link) {
-		for (uint32_t k = 0; k < mb->nins; k++) {
-			MIns *in = &mb->ins[k];
-			switch (in->op) {
-			case MOP_ALLOCA:
-				if (in->src[0].val && in->src[0].val->kind != MV_CONST) {
-					if (getenv("MCC_DEBUG_I386REJ"))
-						fprintf(stderr, "i386 rej %s: VLA\n",
-						        mf->name);
-					return false;   /* VLA: legacy for now */
-				}
-				break;
-			default:
-				break;
-			}
-		}
-	}
+	(void)mf;
 	return true;
 }
 

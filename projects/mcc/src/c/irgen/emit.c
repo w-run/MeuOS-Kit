@@ -85,7 +85,6 @@ int g_use_mir_backend;
 void
 emitfunc(struct func *f, struct scope *fs, bool global)
 {
-	Fn *fn;
 	int dwarf_idx = -1;
 
 	/* DWARF debug info: record the function (name, declaration line). */
@@ -121,41 +120,29 @@ emitfunc(struct func *f, struct scope *fs, bool global)
 			fprintf(stderr, "\n> MIR (post-pass) %s:\n", f->name);
 			mfn_dump(mf, stderr);
 		}
-		/* MIR-native backend (Phase 2/3a): the machine backend dispatches
-		 * per-target (mfnm_backend_<arch>); when it reports success the
-		 * MIR was emitted directly.  The per-arch backend falls back
-		 * (returns false) for constructs it does not cover (e.g. arm/i386
-		 * aggregates, varargs), so the bridge path stays as the safety
-		 * net.  The MCC_MIR_BACKEND env var was removed in Phase 2. */
-		if ((strcmp(T.name, "x86_64") == 0 && mfnm_backend_x86_64(mf)) ||
-		    (strcmp(T.name, "riscv64") == 0 && mfnm_backend_riscv64(mf)) ||
-		    (strcmp(T.name, "loongarch64") == 0 &&
-		     mfnm_backend_loongarch64(mf)) ||
-		    (strcmp(T.name, "aarch64") == 0 && mfnm_backend_aarch64(mf)) ||
-		    ((strcmp(T.name, "arm") == 0 || strcmp(T.name, "armv7") == 0) &&
-		     mfnm_backend_arm(mf)) ||
-		    (strcmp(T.name, "i386") == 0 && mfnm_backend_i386(mf))) {
+		/* MIR-native backend (Phase 3e): the machine backend dispatches
+		 * per-target (mfnm_backend_<arch>).  All 6 architectures (x86_64,
+		 * riscv64, loongarch64, aarch64, arm, i386) now support the full
+		 * set of constructs (scalar, i64, aggregate, varargs, VLA) so the
+		 * MIR backend always succeeds.  The LIR bridge (lir_bridge) has
+		 * been removed — the MIR layer is now the sole asm producer. */
+		if (strcmp(T.name, "x86_64") == 0)
+			mfnm_backend_x86_64(mf);
+		else if (strcmp(T.name, "riscv64") == 0)
+			mfnm_backend_riscv64(mf);
+		else if (strcmp(T.name, "loongarch64") == 0)
+			mfnm_backend_loongarch64(mf);
+		else if (strcmp(T.name, "aarch64") == 0)
+			mfnm_backend_aarch64(mf);
+		else if (strcmp(T.name, "arm") == 0 || strcmp(T.name, "armv7") == 0)
+			mfnm_backend_arm(mf);
+		else if (strcmp(T.name, "i386") == 0)
+			mfnm_backend_i386(mf);
+		else
+			die("mcc: no MIR backend for target '%s'", T.name);
 
-			if (g_dwarf_level > 0) {
-				dwarf_collect_vars(f, mf, NULL);
-				dwarf_emit_func_end(stdout, dwarf_idx);
-				dwarf_end_func();
-			}
-			freeall();
-			mfn_free(mf);
-			return;
-		}
-		fn = lir_bridge(mf);
-		if (debug['X']) {
-			fprintf(stderr, "\n> LIR (bridged) %s:\n", f->name);
-			printfn(fn, stderr);
-		}
-		run_passes(fn);
-		if (emit_debug)
-			emitdbgloc(1, 0, stdout);
-		T.emitfn(fn, stdout);
 		if (g_dwarf_level > 0) {
-			dwarf_collect_vars(f, mf, fn);
+			dwarf_collect_vars(f, mf, NULL);
 			dwarf_emit_func_end(stdout, dwarf_idx);
 			dwarf_end_func();
 		}
