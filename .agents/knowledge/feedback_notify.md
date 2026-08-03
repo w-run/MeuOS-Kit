@@ -1,18 +1,26 @@
 ---
-name: 阶段进展用notify通知
-description: MeuOS内核规划等长期多轮任务，阶段性进展里程碑用notify推送到手机，图标meuos_icon、分组meuos-kernel
+name: notify 推送经验
+description: 里程碑推送、icon 必须 https PNG、push.py 对 icon 不编码致 404、正文禁裸斜杠且宜精简
 type: feedback
 ---
 
-每当内核规划（kernel-plan）等多轮长任务的**阶段性进展**达成时，使用 notify skill 向用户手机推送通知。
+notify skill（`/root/.codebuddy/skills/notify/push.py`，Bark 协议 `https://msg.w-run.net/...`）推送经验汇总：
 
-**Why:** 大喵明确要求"当阶段性任务有进展时，使用 /notify 通知用户"，并补充"图标使用 meuos_icon""通知分组使用 meuos-kernel"，以便无需盯终端也能获知长任务里程碑。
+**1. 阶段进展用 notify（长期任务里程碑）**
+- kernel-plan 等多轮长任务的**阶段性进展**（某轮子 agent 回收完成 / doc-sync 收口 / commit+push 完成）用 notify 推送，勿对每个小 agent 逐条通知刷屏。
+- 图标固定 `https://box.w-run.net/assets/meuos_icon.png`（PNG；Bark 不支持 SVG），分组 `meuos-kernel`。
 
-**How to apply:**
-- 调用：`python3 ${CODEBUDDY_SKILL_DIR}/push.py "标题" "内容" icon=https://box.w-run.net/assets/meuos_icon.png group=meuos-kernel`（Bark/iOS 不支持 SVG，图标必须用 PNG 格式；http 致 Bark 404，见 feedback_notify_https.md）
-- 图标固定 `meuos_icon.png`（PNG 格式；Bark/iOS 不支持 SVG，必须用 PNG；位于 `/workspace/static/assets/`，公网 URL 如上）；分组固定 `meuos-kernel`。
-- 触发节点（按轮次里程碑，不要对每个小 agent 逐条通知以免刷屏）：
-  1. 某轮全部子 agent 回收；
-  2. 该轮 doc-sync 收口完成（写 `XX-收敛摘要.md` + 更新 `00`/`README`）；
-  3. 该轮 `git commit` + `push origin worktree-kernel-plan` 完成。
-- 推送内容不含敏感信息；标题清晰点明轮次与里程碑（如"第四轮完成并已推送"）。
+**2. icon/url 必须 https 绝对路径 + PNG**
+- 必须用 `https://box.w-run.net/<path>`（webroot 映射 `/workspace/static`），http 致 Bark 404。
+- icon 一律 PNG（`meuos_icon.png`/`meuos_logo.png` 可用），不用 SVG（部分客户端拒绝）。
+
+**3. push.py icon/url 编码 bug**
+- push.py 对 `icon=`/`url=` 故意不编码，含 `://` 完整 URL 原样进 query 会致 Bark `Error: 404`。
+- **规避**：带 icon/url 时不用 push.py 裸传，改用内联 python `urllib.parse.quote(url, safe="")` 完整编码后拼 URL，或 curl `--get --data-urlencode "icon=..."`。仅标题+内容（无 icon/url）时 push.py 正常。
+
+**4. 正文禁裸斜杠且宜精简**
+- `urllib.parse.quote(body)` 默认 `safe='/'` 不编码斜杠，body 里 `C15/C16` 等 `/` 被 Bark 当 URL path 分隔符 → 404。
+- 文案层级用 `、`/空格代替 `/`（写 `C15、C16、V1`，不写 `C15/C16`）。
+- 大段详情生成 HTML 报告到 `/workspace/static/<group>/<file>.html`，notify 只发短摘要 + `url=https://box.w-run.net/<group>/<file>.html` 跳转。
+
+**已验证可用组合**：`icon=https://box.w-run.net/assets/meuos_icon.png` + `group=meuos-kernel`，正文无裸 `/` 返回 `code:200`。标题/内容 UTF-8 中文正常。
