@@ -271,20 +271,27 @@ fe_val(MFn *fn, struct value *v, MVal **tab)
 		 * local `.L<name>.<id>` symbols; reference them with that
 		 * local name so the LIR bridge produces a correct relocation.
 		 * Other globals use the bare name (extern) or `.L<name>.<id>`
-		 * (internal, id > 0).  Thread-local globals keep their symbol
-		 * and the TLS flag.  VALUE_QUOTE is also used for asm-named
-		 * symbols (`__asm__` or C++ namespace mangling); those carry
-		 * id == 0 and an external linkage, and keep the bare name. */
+		 * (internal, id > 0).  Function-local statics — TLS or not —
+		 * share emitdata's `globalname()` which mangles them to
+		 * `.L<name>.<id>` (id > 0); the reference must use the same
+		 * mangled name or the linker sees an undefined reference
+		 * (e.g. `static _Thread_local` inside a function).  The TLS
+		 * flag is still forwarded so the backend emits the correct
+		 * `@tpoff`/`@gottpoff` relocation on that local symbol.
+		 * File-scope static TLS (id == 0) and extern TLS keep the
+		 * bare name.  VALUE_QUOTE is also used for asm-named symbols
+		 * (`__asm__` or C++ namespace mangling); those carry id == 0
+		 * and an external linkage, and keep the bare name. */
 		bool tls = (v->kind & VALUE_THREAD) != 0;
 		const char *nm = v->u.name ? v->u.name : "compound";
 		if ((v->kind & VALUE_QUOTE) && v->id) {
 			char buf[256];
 			snprintf(buf, sizeof buf, ".L%s.%u", nm, v->id);
 			m = mval_global(fn, buf, false, false);
-		} else if (v->id && !(v->kind & VALUE_EXTERN) && !tls) {
+		} else if (v->id && !(v->kind & VALUE_EXTERN)) {
 			char buf[256];
 			snprintf(buf, sizeof buf, ".L%s.%u", nm, v->id);
-			m = mval_global(fn, buf, false, false);
+			m = mval_global(fn, buf, false, tls);
 		} else {
 			m = mval_global(fn, v->u.name,
 			                (v->kind & VALUE_EXTERN) != 0, tls);
