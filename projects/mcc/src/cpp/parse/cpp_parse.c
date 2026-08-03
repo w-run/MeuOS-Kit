@@ -7381,7 +7381,10 @@ cpp_if_constexpr(struct func *f, struct expr *cond, struct scope *s)
 	if (cond) {
 		struct expr *r = eval(cond);
 		/* eval() folds in place and returns the same node */
-		if (r->kind == EXPRCONST && (r->type->prop & PROPINT)) {
+		if (r->kind == EXPRCONST && (r->type->prop & PROPSCALAR)) {
+			/* P1401: the condition is contextually converted to bool,
+			 * so any scalar constant works — including pointer/nullptr
+			 * constants (`if constexpr (p)` for a pointer constant p). */
 			v = r->u.constant.u;
 			have = true;
 		}
