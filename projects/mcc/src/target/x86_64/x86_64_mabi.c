@@ -294,7 +294,7 @@ mabi_selpar(MFnM *fm, MOut *o, MInsM *parms, int n, uint32_t *vafa)
 			 * body clobbers it, so stash it in an alloca slot (regalloc
 			 * manages the slot across calls) and reload it in selret. */
 			MVal *rdi = rarg(fm, &ni, &ns, false);
-			fm->sret_rdi = true;   /* RDI is the sret buffer; pin it for regalloc */
+			fm->has_sret = true;   /* sret buffer in mt->sret_reg (RDI); pin it for regalloc */
 			MVal *pad = tmp(fm, MT_PTR, "sret");
 			mout(o, MMOP_ALLOCA16, MT_PTR, pad, 0, 0);
 			mout_addr(o, MMOP_STORE, MT_PTR, 0, maddr(pad, 0, 1, 0), rdi);

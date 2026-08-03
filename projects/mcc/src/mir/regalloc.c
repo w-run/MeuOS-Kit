@@ -21,7 +21,6 @@
 #include <string.h>
 
 #include "mir.h"
-#include "x86_64_m.h"
 
 /* ---- interval bookkeeping ------------------------------------------------- */
 
@@ -294,10 +293,11 @@ mreg_scan(MFnM *fm, MRegCtx *ctx)
 	/* fixed occupations (MV_REG operands) */
 	MFixed fixed[64];
 	memset(fixed, 0, sizeof fixed);
-	if (fm->sret_rdi) {
-		/* the hidden sret buffer lives in RDI for the whole function */
+	if (fm->has_sret && mt->sret_reg >= 0) {
+		/* the hidden sret buffer lives in the target's sret register
+		 * (x86_64: RDI; riscv64/arm64: A0) for the whole function */
 		for (uint32_t p = 0; p < ctx->npos; p++)
-			fixed_add(&fixed[X64MREG_RDI], p);
+			fixed_add(&fixed[mt->sret_reg], p);
 	}
 	{
 		uint32_t *calls = NULL;

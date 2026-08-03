@@ -16,6 +16,140 @@
 
 #include "mir.h"
 #include "x86_64_m.h"
+#include "riscv64_m.h"
+
+/* ---- riscv64 machine target (register descriptions) -------------------- */
+/* 32 GPRs (x0-x31, ABI names) + 32 FPRs (f0-f31).  Caller-saved: t0-6,
+ * a0-7, f0-7, fa0-7, f28-31; callee-saved: s1-s11, f8-9, f18-27.  The
+ * emitter uses t0-t2 (5-7) and t3-t6 (28-31) as scratch. */
+
+static const MRegInfo rv64_regs[RV64MREG_NREG] = {
+	[RV64MREG_ZERO] = { "zero", MRC_GPR, true,  false, false },
+	[RV64MREG_RA]   = { "ra",   MRC_GPR, true,  false, false },
+	[RV64MREG_SP]   = { "sp",   MRC_GPR, true,  false, false },
+	[RV64MREG_GP]   = { "gp",   MRC_GPR, true,  false, false },
+	[RV64MREG_TP]   = { "tp",   MRC_GPR, true,  false, false },
+	[RV64MREG_T0]   = { "t0",   MRC_GPR, true,  false, false },
+	[RV64MREG_T1]   = { "t1",   MRC_GPR, true,  false, false },
+	[RV64MREG_T2]   = { "t2",   MRC_GPR, true,  false, false },
+	[RV64MREG_FP]   = { "fp",   MRC_GPR, true,  false, false },
+	[RV64MREG_S1]   = { "s1",   MRC_GPR, false, true,  false },
+	[RV64MREG_A0]   = { "a0",   MRC_GPR, true,  false, true  },
+	[RV64MREG_A1]   = { "a1",   MRC_GPR, true,  false, true  },
+	[RV64MREG_A2]   = { "a2",   MRC_GPR, true,  false, true  },
+	[RV64MREG_A3]   = { "a3",   MRC_GPR, true,  false, true  },
+	[RV64MREG_A4]   = { "a4",   MRC_GPR, true,  false, true  },
+	[RV64MREG_A5]   = { "a5",   MRC_GPR, true,  false, true  },
+	[RV64MREG_A6]   = { "a6",   MRC_GPR, true,  false, true  },
+	[RV64MREG_A7]   = { "a7",   MRC_GPR, true,  false, true  },
+	[RV64MREG_S2]   = { "s2",   MRC_GPR, false, true,  false },
+	[RV64MREG_S3]   = { "s3",   MRC_GPR, false, true,  false },
+	[RV64MREG_S4]   = { "s4",   MRC_GPR, false, true,  false },
+	[RV64MREG_S5]   = { "s5",   MRC_GPR, false, true,  false },
+	[RV64MREG_S6]   = { "s6",   MRC_GPR, false, true,  false },
+	[RV64MREG_S7]   = { "s7",   MRC_GPR, false, true,  false },
+	[RV64MREG_S8]   = { "s8",   MRC_GPR, false, true,  false },
+	[RV64MREG_S9]   = { "s9",   MRC_GPR, false, true,  false },
+	[RV64MREG_S10]  = { "s10",  MRC_GPR, false, true,  false },
+	[RV64MREG_S11]  = { "s11",  MRC_GPR, false, true,  false },
+	[RV64MREG_T3]   = { "t3",   MRC_GPR, true,  false, false },
+	[RV64MREG_T4]   = { "t4",   MRC_GPR, true,  false, false },
+	[RV64MREG_T5]   = { "t5",   MRC_GPR, true,  false, false },
+	[RV64MREG_T6]   = { "t6",   MRC_GPR, true,  false, false },
+	[RV64MREG_F0]   = { "f0",   MRC_FPR, true,  false, false },
+	[RV64MREG_F1]   = { "f1",   MRC_FPR, true,  false, false },
+	[RV64MREG_F2]   = { "f2",   MRC_FPR, true,  false, false },
+	[RV64MREG_F3]   = { "f3",   MRC_FPR, true,  false, false },
+	[RV64MREG_F4]   = { "f4",   MRC_FPR, true,  false, false },
+	[RV64MREG_F5]   = { "f5",   MRC_FPR, true,  false, false },
+	[RV64MREG_F6]   = { "f6",   MRC_FPR, true,  false, false },
+	[RV64MREG_F7]   = { "f7",   MRC_FPR, true,  false, false },
+	[RV64MREG_F8]   = { "f8",   MRC_FPR, false, true,  false },
+	[RV64MREG_F9]   = { "f9",   MRC_FPR, false, true,  false },
+	[RV64MREG_FA0]  = { "fa0",  MRC_FPR, true,  false, true  },
+	[RV64MREG_FA1]  = { "fa1",  MRC_FPR, true,  false, true  },
+	[RV64MREG_FA2]  = { "fa2",  MRC_FPR, true,  false, true  },
+	[RV64MREG_FA3]  = { "fa3",  MRC_FPR, true,  false, true  },
+	[RV64MREG_FA4]  = { "fa4",  MRC_FPR, true,  false, true  },
+	[RV64MREG_FA5]  = { "fa5",  MRC_FPR, true,  false, true  },
+	[RV64MREG_FA6]  = { "fa6",  MRC_FPR, true,  false, true  },
+	[RV64MREG_FA7]  = { "fa7",  MRC_FPR, true,  false, true  },
+	[RV64MREG_F18]  = { "f18",  MRC_FPR, false, true,  false },
+	[RV64MREG_F19]  = { "f19",  MRC_FPR, false, true,  false },
+	[RV64MREG_F20]  = { "f20",  MRC_FPR, false, true,  false },
+	[RV64MREG_F21]  = { "f21",  MRC_FPR, false, true,  false },
+	[RV64MREG_F22]  = { "f22",  MRC_FPR, false, true,  false },
+	[RV64MREG_F23]  = { "f23",  MRC_FPR, false, true,  false },
+	[RV64MREG_F24]  = { "f24",  MRC_FPR, false, true,  false },
+	[RV64MREG_F25]  = { "f25",  MRC_FPR, false, true,  false },
+	[RV64MREG_F26]  = { "f26",  MRC_FPR, false, true,  false },
+	[RV64MREG_F27]  = { "f27",  MRC_FPR, false, true,  false },
+	[RV64MREG_F28]  = { "f28",  MRC_FPR, true,  false, false },
+	[RV64MREG_F29]  = { "f29",  MRC_FPR, true,  false, false },
+	[RV64MREG_F30]  = { "f30",  MRC_FPR, true,  false, false },
+	[RV64MREG_F31]  = { "f31",  MRC_FPR, true,  false, false },
+};
+
+/* RISC-V LP64D argument order: 8 integer (a0-a7), 8 FP (fa0-fa7). */
+const int rv64_argreg[17] = {
+	RV64MREG_A0, RV64MREG_A1, RV64MREG_A2, RV64MREG_A3,
+	RV64MREG_A4, RV64MREG_A5, RV64MREG_A6, RV64MREG_A7,
+	RV64MREG_FA0, RV64MREG_FA1, RV64MREG_FA2, RV64MREG_FA3,
+	RV64MREG_FA4, RV64MREG_FA5, RV64MREG_FA6, RV64MREG_FA7,
+	-1
+};
+static const int rv64_rsave[] = {
+	RV64MREG_T0, RV64MREG_T1, RV64MREG_T2,
+	RV64MREG_A0, RV64MREG_A1, RV64MREG_A2, RV64MREG_A3,
+	RV64MREG_A4, RV64MREG_A5, RV64MREG_A6, RV64MREG_A7,
+	RV64MREG_T3, RV64MREG_T4, RV64MREG_T5, RV64MREG_T6,
+	RV64MREG_F0, RV64MREG_F1, RV64MREG_F2, RV64MREG_F3,
+	RV64MREG_F4, RV64MREG_F5, RV64MREG_F6, RV64MREG_F7,
+	RV64MREG_FA0, RV64MREG_FA1, RV64MREG_FA2, RV64MREG_FA3,
+	RV64MREG_FA4, RV64MREG_FA5, RV64MREG_FA6, RV64MREG_FA7,
+	RV64MREG_F28, RV64MREG_F29, RV64MREG_F30, RV64MREG_F31,
+	-1
+};
+static const int rv64_rclob[] = {
+	RV64MREG_S1, RV64MREG_S2, RV64MREG_S3, RV64MREG_S4, RV64MREG_S5,
+	RV64MREG_S6, RV64MREG_S7, RV64MREG_S8, RV64MREG_S9, RV64MREG_S10,
+	RV64MREG_S11,
+	RV64MREG_F8, RV64MREG_F9,
+	RV64MREG_F18, RV64MREG_F19, RV64MREG_F20, RV64MREG_F21,
+	RV64MREG_F22, RV64MREG_F23, RV64MREG_F24, RV64MREG_F25,
+	RV64MREG_F26, RV64MREG_F27,
+	-1
+};
+
+/* P3a ABI lowering for riscv64 LP64D (riscv64_mabi.c). */
+extern void mfnm_abi_riscv64(MFnM *fm);
+const MTargetM mtarget_riscv64 = {
+	.name = "riscv64",
+	.nreg = RV64MREG_NREG,
+	.regs = rv64_regs,
+	.gpr0 = RV64MREG_ZERO,
+	.ngpr = 32,
+	.fpr0 = RV64MREG_F0,
+	.nfpr = 32,
+	/* never allocated: zero/ra/sp/gp/tp/fp (frame) */
+	.rglob = (1ull << RV64MREG_ZERO) | (1ull << RV64MREG_RA) |
+	         (1ull << RV64MREG_SP) | (1ull << RV64MREG_GP) |
+	         (1ull << RV64MREG_TP) | (1ull << RV64MREG_FP),
+	.reserved = 0,
+	.argreg = rv64_argreg,
+	.rsave = rv64_rsave,
+	.rclob = rv64_rclob,
+	.ptrsize = 8,
+	.stackalign = 16,
+	.kl_in_reg = true,
+	.feat = 0,               /* no cmov, no scale-index addressing */
+	.sret_reg = RV64MREG_A0,
+	.abi = mfnm_abi_riscv64,
+	/* emitter temporaries: t0/t1 (addressing scratch) + t6 (large
+	 * offsets / dynamic alloca) — never handed to the allocator. */
+	.scratch = (1ull << RV64MREG_T0) | (1ull << RV64MREG_T1) |
+	           (1ull << RV64MREG_T2) | (1ull << RV64MREG_T6),
+};
 
 /* ---- x86-64 machine target (register descriptions) --------------------- */
 
@@ -98,7 +232,8 @@ const MTargetM mtarget_x86_64 = {
 	.ptrsize = 8,
 	.stackalign = 16,
 	.kl_in_reg = true,
-	.feat = MTF_SCALE_INDEX,
+	.feat = MTF_SCALE_INDEX | MTF_CMOV,
+	.sret_reg = X64MREG_RDI,
 	.abi = mfnm_abi_x86_64,
 	/* emitter temporaries: rax (accumulator), rcx (divisor/shift), rdx
 	 * (division remainder), r9 (large immediates), r10/r11 (addressing),
@@ -243,6 +378,7 @@ mmop_name(MMOP op)
 		[MMOP_TEST]     = "test",
 		[MMOP_SETCC]    = "setcc",
 		[MMOP_CMOV]     = "cmov",
+		[MMOP_SETCCR]   = "setccr",
 		[MMOP_PARM]     = "parm",
 		[MMOP_ARG]      = "arg",
 		[MMOP_JMP]      = "jmp",
