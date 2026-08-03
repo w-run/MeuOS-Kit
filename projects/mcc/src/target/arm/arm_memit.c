@@ -260,11 +260,12 @@ emit_addr_to_scratch(FILE *f, MAddr a, const char *rn)
 static const char *arm_cc_suffix(MCC cc);   /* defined below */
 
 /* Load a floating value into a FP scratch register.  is32 selects the
- * s-view (s16/s17) for MT_F32 operands. */
+ * s-view (s16/s17) for MT_F32 operands; `dst` is the destination scratch
+ * name ("d8"/"d9" or "s16"/"s17") so both operands of a binary op land in
+ * distinct registers. */
 static void
-fload_scratch(FILE *f, MVal *v, bool is32)
+fload_scratch(FILE *f, MVal *v, bool is32, const char *dst)
 {
-	const char *dn = is32 ? FS_A : FR_A;
 	if (!v) {
 		fprintf(f, "\tfmov\t%s, #0.0\n", is32 ? "s" : "d");
 		return;
@@ -274,14 +275,16 @@ fload_scratch(FILE *f, MVal *v, bool is32)
 		MConst *c = v->con;
 		if (c && c->kind == MC_FLT) {
 			if (c->type == MT_F32) {
-				load_imm(f, "r10", (int64_t)(uint32_t)c->u.s);
-				fprintf(f, "\tvmov\t%s, r10\n", FS_A);
+				uint32_t bits;
+				memcpy(&bits, &c->u.s, 4);
+				load_imm(f, "r10", (int64_t)bits);
+				fprintf(f, "\tvmov\t%s, r10\n", dst);
 			} else {
 				uint64_t bits;
 				memcpy(&bits, &c->u.d, 8);
 				load_imm(f, "r10", (int64_t)(uint32_t)bits);
 				load_imm(f, "r12", (int64_t)(bits >> 32));
-				fprintf(f, "\tvmov\t%s, r10, r12\n", FR_A);
+				fprintf(f, "\tvmov\t%s, r10, r12\n", dst);
 			}
 			return;
 		}
@@ -293,35 +296,32 @@ fload_scratch(FILE *f, MVal *v, bool is32)
 			bool isd = v->reg >= ARM_D0;
 			if (isd) {
 				int dn = v->reg - ARM_D0;
-				if (v->type == MT_F32)
-					fprintf(f, "\tvmov\t%s, s%d\n", FS_A, 2 * dn);
+				if (is32)
+					fprintf(f, "\tvmov\t%s, s%d\n", dst, 2 * dn);
 				else
-					fprintf(f, "\tvmov\t%s, d%d\n", FR_A, dn);
+					fprintf(f, "\tvmov\t%s, d%d\n", dst, dn);
 			} else {
 				fprintf(f, "\tmov\t%s, %s\n", "r10",
 				        mreg_name(g_mt, v->reg));
 			}
 		} else {
 			int off = v->slot + g_slot_base;
-			const char *rw = v->type == MT_F32 ? "s" : "d";
-			const char *rd = v->type == MT_F32 ? FS_A : FR_A;
 			if (off >= -1020 && off <= 1020)
-				fprintf(f, "\tvldr\t%s, [fp, #%d]\n", rd, off);
+				fprintf(f, "\tvldr\t%s, [fp, #%d]\n", dst, off);
 			else {
 				load_imm(f, "r12", off);
-				fprintf(f, "\tvldr\t%s, [fp, r12]\n", rd);
+				fprintf(f, "\tvldr\t%s, [fp, r12]\n", dst);
 			}
-			(void)rw;
 		}
 		return;
 	case MV_REG: {
 		bool isd = v->reg >= ARM_D0;
 		if (isd) {
 			int dn = v->reg - ARM_D0;
-			if (v->type == MT_F32)
-				fprintf(f, "\tvmov\t%s, s%d\n", FS_A, 2 * dn);
+			if (is32)
+				fprintf(f, "\tvmov\t%s, s%d\n", dst, 2 * dn);
 			else
-				fprintf(f, "\tvmov\t%s, d%d\n", FR_A, dn);
+				fprintf(f, "\tvmov\t%s, d%d\n", dst, dn);
 		} else {
 			fprintf(f, "\tmov\t%s, %s\n", "r10",
 			        mreg_name(g_mt, v->reg));
@@ -347,7 +347,7 @@ fstore_scratch(FILE *f, MVal *d, bool is32)
 			bool isd = d->reg >= ARM_D0;
 			if (isd) {
 				int dn = d->reg - ARM_D0;
-				if (d->type == MT_F32)
+				if (is32)
 					fprintf(f, "\tvmov\ts%d, %s\n", 2 * dn, FS_A);
 				else
 					fprintf(f, "\tvmov\td%d, %s\n", dn, FR_A);
@@ -357,7 +357,7 @@ fstore_scratch(FILE *f, MVal *d, bool is32)
 			}
 		} else {
 			int off = d->slot + g_slot_base;
-			const char *rd = d->type == MT_F32 ? FS_A : FR_A;
+			const char *rd = is32 ? FS_A : FR_A;
 			if (off >= -1020 && off <= 1020)
 				fprintf(f, "\tvstr\t%s, [fp, #%d]\n", rd, off);
 			else {
@@ -370,7 +370,7 @@ fstore_scratch(FILE *f, MVal *d, bool is32)
 		bool isd = d->reg >= ARM_D0;
 		if (isd) {
 			int dn = d->reg - ARM_D0;
-			if (d->type == MT_F32)
+			if (is32)
 				fprintf(f, "\tvmov\ts%d, %s\n", 2 * dn, FS_A);
 			else
 				fprintf(f, "\tvmov\td%d, %s\n", dn, FR_A);
@@ -395,8 +395,8 @@ emit_setccr_fp(FILE *f, MInsM *in)
 	bool is32 = (a && a->type == MT_F32);
 	const char *dn = is32 ? FS_A : FR_A;
 	const char *dm = is32 ? FS_B : FR_B;
-	fload_scratch(f, a, is32);
-	fload_scratch(f, b, is32);
+	fload_scratch(f, a, is32, is32 ? FS_A : FR_A);
+	fload_scratch(f, b, is32, is32 ? FS_B : FR_B);
 	fprintf(f, "\tvcmp.%s\t%s, %s\n", is32 ? "f32" : "f64", dn, dm);
 	fputs("\tvmrs\tAPSR_nzcv, fpscr\n", f);
 	fprintf(f, "\tmov\tr10, #0\n");
@@ -513,8 +513,11 @@ emit_store(FILE *f, MType dt, MAddr a, MVal *s0)
 {
 	if (dt == MT_F32 || dt == MT_F64) {
 		bool is32 = dt == MT_F32;
+		/* load the value first: fload_scratch clobbers r10/r12 when the
+		 * value is a float constant (movw/movt bit patterns), so the
+		 * store address must be computed afterwards */
+		fload_scratch(f, s0, is32, is32 ? FS_A : FR_A);
 		emit_addr_to_scratch(f, a, "r12");
-		fload_scratch(f, s0, is32);
 		if (is32)
 			fprintf(f, "\tvstr\t%s, [r12]\n", FS_A);
 		else
@@ -541,8 +544,8 @@ emit_ins(FILE *f, MInsM *in)
 	switch (op) {
 	case MMOP_MOV:
 		if (s0 && (s0->type == MT_F32 || s0->type == MT_F64)) {
-			bool is32 = s0->type == MT_F32;
-			fload_scratch(f, s0, is32);
+			bool is32 = in->dtype == MT_F32;
+			fload_scratch(f, s0, is32, is32 ? FS_A : FR_A);
 			fstore_scratch(f, d, is32);
 			return;
 		}
@@ -624,30 +627,30 @@ emit_ins(FILE *f, MInsM *in)
 		default:         opn = "vsqrt"; break;
 		}
 		if (op == MMOP_FNEG || op == MMOP_FSQRT) {
-			fload_scratch(f, s0, is32);
+			fload_scratch(f, s0, is32, is32 ? FS_A : FR_A);
 			fprintf(f, "\t%s.%s\t%s, %s\n", opn, w, dn, dn);
 		} else {
-			fload_scratch(f, s0, is32);
-			fload_scratch(f, s1, is32);
+			fload_scratch(f, s0, is32, is32 ? FS_A : FR_A);
+			fload_scratch(f, s1, is32, is32 ? FS_B : FR_B);
 			fprintf(f, "\t%s.%s\t%s, %s, %s\n", opn, w, dn, dn, dm);
 		}
 		fstore_scratch(f, d, is32);
 		return;
 	}
 	case MMOP_CVTSS2SD:   /* f32 -> f64 */
-		fload_scratch(f, s0, true);
+		fload_scratch(f, s0, true, FS_A);
 		fputs("\tvcvt.f64.f32\td8, s16\n", f);
 		fstore_scratch(f, d, false);
 		return;
 	case MMOP_CVTSD2SS:   /* f64 -> f32 */
-		fload_scratch(f, s0, false);
+		fload_scratch(f, s0, false, FR_A);
 		fputs("\tvcvt.f32.f64\ts16, d8\n", f);
 		fstore_scratch(f, d, true);
 		return;
 	case MMOP_CVTTSS2SI:  /* f32 -> i32 (trunc) */
 	case MMOP_CVTTSD2SI: {
 		bool is32 = (op == MMOP_CVTTSS2SI);
-		fload_scratch(f, s0, is32);
+		fload_scratch(f, s0, is32, is32 ? FS_A : FR_A);
 		if (is32)
 			fputs("\tvcvt.s32.f32\ts16, s16\n", f);
 		else
@@ -701,7 +704,12 @@ emit_ins(FILE *f, MInsM *in)
 			return;
 		}
 		g_alloca_cur -= alloca_size_ins(in);
-		load_imm(f, "r10", g_alloca_cur + g_slot_base);
+		/* g_alloca_cur is already a frame-relative fp offset (it starts
+		 * at -(fm->slot + pushbytes + vpushbytes) and the frame reserves
+		 * the alloca area below it); adding g_slot_base here pushed the
+		 * allocas below sp (frame under-allocation, segfault in
+		 * float/loop-heavy functions) */
+		load_imm(f, "r10", g_alloca_cur);
 		fputs("\tadd\tr10, fp, r10\n", f);
 		scratch_to_dst(f, d, "r10");
 		return;
@@ -758,8 +766,14 @@ emit_ins(FILE *f, MInsM *in)
 		}
 		if (d && !in->td) {
 			if (d->type == MT_F32 || d->type == MT_F64) {
-				/* float return in d0 (s0/d0) */
-				fstore_scratch(f, d, d->type == MT_F32);
+				/* float return arrives in d0 (s0 for float): move it
+				 * into the FP scratch, then into the result value */
+				bool is32 = d->type == MT_F32;
+				if (is32)
+					fputs("\tvmov\ts16, s0\n", f);
+				else
+					fputs("\tvmov\td8, d0\n", f);
+				fstore_scratch(f, d, is32);
 			} else {
 				scratch_to_dst(f, d, "r0");
 			}
@@ -814,7 +828,8 @@ emit_block(FILE *f, MBlkM *b)
 					        mreg_name(g_mt, v->reg));
 				}
 			} else {
-				fload_scratch(f, v, v->type == MT_F32);
+				fload_scratch(f, v, v->type == MT_F32,
+			       v->type == MT_F32 ? FS_A : FR_A);
 				if (v->type == MT_F32)
 					fputs("\tvmov\ts0, s16\n", f);
 				else

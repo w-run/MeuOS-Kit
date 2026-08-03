@@ -102,27 +102,41 @@ mval_of_ref(MFn *mf, MRef r)
 }
 
 /* Scalar 32-bit integer + floating-point functions only for this round:
- * reject 64-bit integers (register pairs on this 32-bit target),
- * aggregates, varargs, TLS and VLA — fall back to the legacy LIR ARM
- * backend. */
+ * reject 64-bit integer values (long long needs register pairs on this
+ * 32-bit target), aggregates, varargs, TLS and VLA — fall back to the
+ * legacy LIR ARM backend.  MT_PTR is allowed: on this 32-bit target it
+ * only carries function references (the callee of MOP_CALL), which the
+ * emitter turns into a direct `bl`. */
 static bool
 mbe_supported(MFn *mf)
 {
-	if (mf->rettype == MT_I64 || mf->rettype == MT_PTR)
+	if (mf->rettype == MT_I64) {
+		if (getenv("MCC_DEBUG_ARMREJ"))
+			fprintf(stderr, "arm rej %s: rettype i64\n", mf->name);
 		return false;   /* 64-bit return: legacy */
+	}
 	for (MBlk *mb = mf->link; mb; mb = mb->link) {
 		for (uint32_t k = 0; k < mb->nins; k++) {
 			MIns *in = &mb->ins[k];
-			if (in->dtype == MT_I64 || in->dtype == MT_PTR)
-				return false;   /* 64-bit value: legacy */
-			for (int s = 0; s < 2; s++)
-				if (in->src[s].val &&
-				    (in->src[s].val->type == MT_I64 ||
-				     in->src[s].val->type == MT_PTR))
-					return false;
-			if (in->dst && (in->dst->type == MT_I64 ||
-			                in->dst->type == MT_PTR))
+			if (in->dtype == MT_I64) {
+				if (getenv("MCC_DEBUG_ARMREJ"))
+					fprintf(stderr, "arm rej %s: ins %d dtype i64\n",
+					        mf->name, (int)in->op);
 				return false;
+			}
+			for (int s = 0; s < 2; s++) {
+				if (in->src[s].val && in->src[s].val->type == MT_I64) {
+					if (getenv("MCC_DEBUG_ARMREJ"))
+						fprintf(stderr, "arm rej %s: src%d i64\n",
+						        mf->name, s);
+					return false;
+				}
+			}
+			if (in->dst && in->dst->type == MT_I64) {
+				if (getenv("MCC_DEBUG_ARMREJ"))
+					fprintf(stderr, "arm rej %s: dst i64\n", mf->name);
+				return false;
+			}
 			switch (in->op) {
 			case MOP_ARG:
 			case MOP_CALL:
