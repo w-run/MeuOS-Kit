@@ -781,6 +781,116 @@ msimp_block(MFn *fn, MBlk *b, const char *is_alloca)
 	return removed;
 }
 
+/* ---- signed div/rem by power-of-two strength reduction (msdiv_pow2) ----- */
+/* -O3/-Os/-Oz: x / 2^n rounds toward zero while SAR rounds toward -inf, so
+ * the unsigned shift/and fold does not apply.  Emit the classic
+ * correction sequence:
+ *   q = (x + ((x >> (bits-1)) & (2^n - 1))) >> n      (arithmetic)
+ *   r = x - (q << n)
+ * only when the divisor is a positive power of two. */
+
+static MIns *
+msdiv_emit(MIns *out, uint32_t n, MBlk *b, MOP op, MType dt, MVal *dst,
+           MRef a0, MRef a1)
+{
+	MIns *in = &out[n];
+	memset(in, 0, sizeof *in);
+	in->op = op;
+	in->dtype = dt;
+	in->dst = dst;
+	in->src[0] = a0;
+	in->src[1] = a1;
+	in->blk = b;
+	in->id = n;   /* debug only */
+	if (dst && dst->kind == MV_TEMP) {
+		dst->def = in;
+		dst->defblk = b;
+	}
+	return in;
+}
+
+static bool
+msdiv_pow2_block(MFn *fn, MBlk *b)
+{
+	bool changed = false;
+	MIns *old = b->ins;
+	uint32_t nold = b->nins;
+	MIns *out = malloc((nold + 16) * sizeof *out);
+	uint32_t nout = 0;
+
+	for (uint32_t i = 0; i < nold; i++) {
+		MIns *in = &old[i];
+		MVal *d = in->dst;
+		MRef a0 = in->src[0], a1 = in->src[1];
+		bool isdiv = in->op == MOP_DIV || in->op == MOP_UDIV;
+		bool isrem = in->op == MOP_REM || in->op == MOP_UREM;
+		if (d && (isdiv || isrem) && a1.con &&
+		    a1.con->kind == MC_INT && a1.con->u.i > 0 &&
+		    (in->op == MOP_DIV || in->op == MOP_REM)) {
+			uint64_t v = (uint64_t)a1.con->u.i;
+			if ((v & (v - 1)) == 0 && v > 1) {
+				int n = 0;
+				uint64_t t = v;
+				while (!(t & 1)) {
+					t >>= 1;
+					n++;
+				}
+				int bits = (in->dtype == MT_I64) ? 63 : 31;
+				MType dt = in->dtype;
+				MVal *t1 = mval_new(fn, MV_TEMP, dt, 0, "sdiv");
+				MVal *t2 = mval_new(fn, MV_TEMP, dt, 0, "sdiv");
+				MVal *t3 = mval_new(fn, MV_TEMP, dt, 0, "sdiv");
+				msdiv_emit(out, nout++, b, MOP_SAR, dt, t1, a0,
+				    MREF_CON(mconst_int(fn, MT_I32, bits)));
+				msdiv_emit(out, nout++, b, MOP_AND, dt, t2, MREF_VAL(t1),
+				    MREF_CON(mconst_int(fn, dt, (int64_t)(v - 1))));
+				msdiv_emit(out, nout++, b, MOP_ADD, dt, t3, a0,
+				    MREF_VAL(t2));
+				if (isrem) {
+					/* q = (x + corr) >> n; r = x - (q << n) */
+					MVal *t4 = mval_new(fn, MV_TEMP, dt, 0, "sdiv");
+					msdiv_emit(out, nout, b, MOP_SAR, dt, t4,
+					    MREF_VAL(t3),
+					    MREF_CON(mconst_int(fn, MT_I32, n)));
+					nout++;
+					msdiv_emit(out, nout, b, MOP_SHL, dt, t4,
+					    MREF_VAL(t4),
+					    MREF_CON(mconst_int(fn, MT_I32, n)));
+					nout++;
+					msdiv_emit(out, nout, b, MOP_SUB, dt, d, a0,
+					    MREF_VAL(t4));
+				} else {
+					msdiv_emit(out, nout, b, MOP_SAR, dt, d,
+					    MREF_VAL(t3),
+					    MREF_CON(mconst_int(fn, MT_I32, n)));
+				}
+				nout++;
+				changed = true;
+				continue;
+			}
+		}
+		out[nout++] = *in;
+	}
+	if (changed) {
+		b->ins = out;
+		b->nins = nout;
+		b->cins = nout;
+	} else {
+		free(out);
+	}
+	return changed;
+}
+
+static uint32_t
+msdiv_pow2(MFn *fn)
+{
+	uint32_t r = 0;
+	for (MBlk *b = fn->link; b; b = b->link)
+		if (msdiv_pow2_block(fn, b))
+			r++;
+	return r;
+}
+
 /* ---- load forwarding + dead-store elimination (mloadfwd) ---------------- */
 /* The frontend lowers every scalar into its variable slot (store) and
  * reloads it (load); store→load pairs for non-escaping local slots are
@@ -1029,8 +1139,13 @@ run_mir_passes(MFn *fn, int optlevel)
 		run_mir_pass(fn, MIR_PASS_LOADFWD);
 		run_mir_pass(fn, MIR_PASS_GVN);
 		run_mir_pass(fn, MIR_PASS_COPY);   /* propagate load-forwarded copies */
-		if (optlevel >= 3)
+		if (optlevel >= 3) {
+			/* -O3/-Os/-Oz 增量：有符号 div/rem 按 2 的幂强度削减
+			 * （含向零舍入修正序列），再做一轮 FOLD 清扫 */
+			msdiv_pow2(fn);
 			run_mir_pass(fn, MIR_PASS_FOLD);
+			run_mir_pass(fn, MIR_PASS_COPY);
+		}
 		run_mir_pass(fn, MIR_PASS_DCE);
 	}
 	/* B.6 验收项 2: explicit-SSA consistency gate after the pipeline. */
