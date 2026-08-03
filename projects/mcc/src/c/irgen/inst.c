@@ -25,6 +25,7 @@ mkinst(struct func *f, int op, int class, struct value *arg0, struct value *arg1
 	inst = xmalloc(sizeof(*inst));
 	inst->kind = op;
 	inst->class = class;
+	inst->flags = 0;
 	inst->arg[0] = arg0;
 	inst->arg[1] = arg1;
 	if (class && op != IARG)

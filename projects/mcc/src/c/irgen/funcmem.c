@@ -172,7 +172,7 @@ funcstore(struct func *f, struct type *t, enum typequal tq, struct lvalue lval,
 }
 
 struct value *
-funcload(struct func *f, struct type *t, struct lvalue lval)
+funcload(struct func *f, struct type *t, enum typequal tq, struct lvalue lval)
 {
 	struct value *v;
 	struct irtype qt;
@@ -185,5 +185,15 @@ funcload(struct func *f, struct type *t, struct lvalue lval)
 	}
 	qt = irtype(t);
 	v = funcinst(f, qt.load, qt.base, lval.addr, NULL);
+	if ((t->qual | tq) & QUALVOLATILE) {
+		/* mark the just-emitted load volatile so MIR passes do not fold
+		 * or eliminate the access (memory constant propagation etc.) */
+		struct array *a = &f->end->insts;
+		size_t n = a->len / sizeof(void *);
+		if (n) {
+			struct inst *in = ((struct inst **)a->val)[n - 1];
+			in->flags |= INST_VOLATILE;
+		}
+	}
 	return funcbits(f, t, v, lval.bits);
 }

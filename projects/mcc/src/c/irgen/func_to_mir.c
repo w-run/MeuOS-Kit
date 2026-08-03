@@ -23,6 +23,11 @@
 #include "irgen.h"
 #include "mir.h"
 
+/* MIR MIns.extra bit marking a volatile load/store (frontend INST_VOLATILE
+ * propagated through).  Bit 1 deliberately avoids the machine layer's
+ * extra==1 phi-spill marker; MIR-level extra is otherwise unused. */
+#define MIR_VOLATILE (2u)
+
 /* Translate a frontend class char ('w','l','s','d', 0) to a MIR scalar
  * type.  Returns MT_NONE for 0/unknown. */
 static MType
@@ -592,7 +597,9 @@ func_to_mir(struct func *f, int optlevel, bool export)
 				res->type = dt;
 
 			if (op == MOP_STORE) {
-				madd(fn, mb, op, dt, 0, a0, a1);
+				MIns *mi = madd(fn, mb, op, dt, 0, a0, a1);
+				if (in->flags & INST_VOLATILE)
+					mi->extra |= MIR_VOLATILE;
 			} else if (in->kind == ILOADSB || in->kind == ILOADSH) {
 				/* MIR loads are width-only (the bridge emits the
 				 * zero-extending opcode); the frontend's signed load
@@ -601,13 +608,19 @@ func_to_mir(struct func *f, int optlevel, bool export)
 				 * the byte/halfword load into a temp and append an
 				 * explicit SEXT to the result width. */
 				MVal *tmp = mval_new(fn, MV_TEMP, dt, 0, 0);
-				madd1(fn, mb, MOP_LOAD, dt, tmp, a0);
+				MIns *mi = madd1(fn, mb, MOP_LOAD, dt, tmp, a0);
+				if (in->flags & INST_VOLATILE)
+					mi->extra |= MIR_VOLATILE;
 				MType rty = fe_cls_to_mtype(in->class);
 				madd1(fn, mb, MOP_SEXT, rty, res, MREF_VAL(tmp));
 			} else if (a1.val || a1.con) {
-				madd(fn, mb, op, dt, res, a0, a1);
+				MIns *mi = madd(fn, mb, op, dt, res, a0, a1);
+				if (in->flags & INST_VOLATILE)
+					mi->extra |= MIR_VOLATILE;
 			} else {
-				madd1(fn, mb, op, dt, res, a0);
+				MIns *mi = madd1(fn, mb, op, dt, res, a0);
+				if (in->flags & INST_VOLATILE)
+					mi->extra |= MIR_VOLATILE;
 			}
 		}
 

@@ -156,7 +156,7 @@ funcexpr(struct func *f, struct expr *e)
 		case DECLOBJECT:
 			if (e->qual & QUALATOMIC)
 				return atomicload(f, e->type, d->value);
-			return funcload(f, e->type, (struct lvalue){d->value});
+			return funcload(f, e->type, e->qual, (struct lvalue){d->value});
 		case DECLCONST:  return d->value;
 		default:
 			fatal("unimplemented declaration kind %d", d->kind);
@@ -171,7 +171,7 @@ funcexpr(struct func *f, struct expr *e)
 	case EXPRBITFIELD:
 	case EXPRCOMPOUND:
 		lval = funclval(f, e);
-		return funcload(f, e->type, lval);
+		return funcload(f, e->type, e->qual, lval);
 	case EXPRINCDEC:
 		lval = funclval(f, e->base);
 		/* C11 requires ++/-- applied to an atomic object to be a single
@@ -187,7 +187,7 @@ funcexpr(struct func *f, struct expr *e)
 				return l;
 			return funcinst(f, e->op == TINC ? IADD : ISUB, irtype(t).base, l, r);
 		}
-		l = funcload(f, e->base->type, lval);
+		l = funcload(f, e->base->type, e->qual, lval);
 		t = e->type;
 		if (t->kind == TYPEPOINTER) {
 			if (t->base->kind == TYPEARRAY && t->base->size == 0) {
@@ -254,21 +254,21 @@ funcexpr(struct func *f, struct expr *e)
 			r = funcexpr(f, e->base);
 			if (e->qual & QUALATOMIC)
 				return atomicload(f, e->type, r);
-			return funcload(f, e->type, (struct lvalue){r});
+			return funcload(f, e->type, e->qual, (struct lvalue){r});
 		case TSUB:
 			r = funcexpr(f, e->base);
 			return funcinst(f, INEG, irtype(e->type).base, r, NULL);
 		case T__REAL__:
 			/* __real__ complex_value — load first sizeof(base) bytes */
 			lval = funclval(f, e->base);
-			return funcload(f, e->type, lval);
+			return funcload(f, e->type, e->qual, lval);
 		case T__IMAG__:
 			/* __imag__ complex_value — load second sizeof(base) bytes */
 			lval = funclval(f, e->base);
 			{
 				struct value *addr = lval.addr;
 				addr = funcinst(f, IADD, ptrclass(), addr, mkintconst(e->type->size));
-				return funcload(f, e->type, (struct lvalue){addr});
+				return funcload(f, e->type, e->qual, (struct lvalue){addr});
 			}
 		}
 		fatal("internal error; unknown unary expression");
