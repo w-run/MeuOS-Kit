@@ -488,6 +488,10 @@ mcc_main(int argc, char *argv[])
 	/* ----- IR backend + frontend init ----- */
 	T = *pick_target(target);
 	T.pic = pic;
+	/* PIC/shared mirror for the MIR machine layer (x86_64_memit.c),
+	 * which does not read the QBE `Target T` global (purity rule). */
+	extern int g_pic;
+	g_pic = pic;
 
 	/* Triple → ABI auto-mapping (triple-abi-map). If the target triple
 	 * contains an ABI suffix (e.g. riscv64-meuos-linux-lp64d), extract

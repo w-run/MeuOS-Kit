@@ -17,6 +17,12 @@
 #include "mir.h"
 #include "x86_64_m.h"
 
+/* PIC/shared-code flag, set by the driver alongside the QBE target's
+ * g_pic (main.c).  The MIR machine layer deliberately does not read the
+ * QBE `Target T` global (purity rule), so TLS emission and any other
+ * PIC-sensitive codegen consult this flag instead. */
+int g_pic;
+
 /* ---- width suffixes ----------------------------------------------------- */
 
 static char
@@ -190,10 +196,16 @@ emit_const(FILE *f, MConst *c)
 		        fp_label(c));
 		break;
 	case MC_ADDR:
-		if (c->u.addr.tls)
-			fprintf(f, "%s@tpoff(%%rip)", c->u.addr.sym ? c->u.addr.sym : "0");
-		else
+		if (c->u.addr.tls) {
+			/* TLS symbol reference: @tpoff for local-exec (non-PIC),
+			 * @gottpoff for the initial-exec GOT form under PIC/shared
+			 * (TPOFF64 — local-exec relocations are rejected in a DSO). */
+			fprintf(f, "%s@%s(%%rip)",
+			        c->u.addr.sym ? c->u.addr.sym : "0",
+			        g_pic ? "gottpoff" : "tpoff");
+		} else {
 			fprintf(f, "%s(%%rip)", c->u.addr.sym ? c->u.addr.sym : "0");
+		}
 		break;
 	default:
 		fputs("$0", f);
@@ -258,11 +270,21 @@ emit_mval(FILE *f, MVal *v)
 }
 
 /* Emit the address of a TLS global into a scratch register: the thread
- * pointer (%fs:0) plus the link-time-resolved @tpoff offset (local-exec /
- * initial-exec TLS model, matching the legacy x86_64_emit.c path). */
+ * pointer (%fs:0) plus the link-time-resolved TLS offset.
+ *   - non-PIC: local-exec @tpoff (TPOFF32), fast for executables;
+ *   - PIC/shared (g_pic): initial-exec GOT form @gottpoff + %fs:0 (TPOFF64)
+ *     — local-exec relocations are rejected in a DSO (mirrors the legacy
+ *     x86_64_emit.c SThr path). */
 static void
 emit_tls_addr(FILE *f, const char *sym, int64_t off, const char *reg)
 {
+	if (g_pic) {
+		fprintf(f, "\tmovq\t%s@gottpoff(%%rip), %%%s\n", sym ? sym : "0", reg);
+		fprintf(f, "\taddq\t%%fs:0, %%%s\n", reg);
+		if (off)
+			fprintf(f, "\taddq\t$%lld, %%%s\n", (long long)off, reg);
+		return;
+	}
 	fprintf(f, "\tmovq\t%%fs:0, %%%s\n", reg);
 	fprintf(f, "\tleaq\t%s@tpoff", sym ? sym : "0");
 	if (off)
@@ -346,11 +368,20 @@ mov_to_rax(FILE *f, MVal *v, MConst *c)
 	if (c) {
 		if (c->kind == MC_ADDR) {
 			if (c->u.addr.tls) {
-				fprintf(f, "\tleaq\t%s@tpoff", c->u.addr.sym ? c->u.addr.sym : "0");
-				if (c->u.addr.off)
-					fprintf(f, "%+lld", (long long)c->u.addr.off);
-				fprintf(f, "(%%rip), %%rax\n");
-				fputs("\taddq\t%fs:0, %rax\n", f);
+				if (g_pic) {
+					fprintf(f, "\tmovq\t%s@gottpoff(%%rip), %%rax\n",
+					        c->u.addr.sym ? c->u.addr.sym : "0");
+					fputs("\taddq\t%fs:0, %rax\n", f);
+					if (c->u.addr.off)
+						fprintf(f, "\taddq\t$%lld, %%rax\n",
+						        (long long)c->u.addr.off);
+				} else {
+					fprintf(f, "\tleaq\t%s@tpoff", c->u.addr.sym ? c->u.addr.sym : "0");
+					if (c->u.addr.off)
+						fprintf(f, "%+lld", (long long)c->u.addr.off);
+					fprintf(f, "(%%rip), %%rax\n");
+					fputs("\taddq\t%fs:0, %rax\n", f);
+				}
 			} else {
 				fprintf(f, "\tleaq\t%s%+lld(%%rip), %%rax\n",
 				        c->u.addr.sym ? c->u.addr.sym : "0",
