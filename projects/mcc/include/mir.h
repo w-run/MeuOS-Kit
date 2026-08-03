@@ -379,6 +379,7 @@ enum MIRPass {
 	MIR_PASS_USES,   /* build use chains */
 	MIR_PASS_FOLD,   /* constant folding + algebraic simplification */
 	MIR_PASS_COPY,   /* copy propagation + phi copy propagation */
+	MIR_PASS_LOADFWD,/* store→load forwarding + dead-store elimination */
 	MIR_PASS_GVN,    /* global value numbering */
 	MIR_PASS_DCE,    /* dead code elimination */
 	MIR_PASS_SSA,    /* SSA consistency check (mssa_check) */
@@ -391,6 +392,7 @@ int mssa_check(MFn *fn);
 void build_uses(MFn *fn);
 uint32_t mcopy(MFn *fn);
 uint32_t mgvn(MFn *fn);
+uint32_t mloadfwd(MFn *fn);
 void mref_replace(MFn *fn, MVal *old, MRef nr);
 
 /* ---- MIR → LIR bridge (src/lir/bridge.c) ------------------------------ */
