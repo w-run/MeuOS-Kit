@@ -1172,8 +1172,12 @@ x86_64_encode_insn(const struct mt_target *target,
 				emit_rex(out->bytes, &out->size, width == 8, 0, op[1].reg, -1);
 				emit_u8(out->bytes, &out->size, width == 1 ? 0xb0 : 0xb8 +
 				        (op[1].reg & 7));
+				/* 0xb8..0xbf is the movabs (imm64) form: when REX.W widens
+				 * to 64 bits the immediate MUST be 8 bytes, otherwise the
+				 * following instruction's bytes are swallowed into the
+				 * immediate and the decoded instruction stream is garbage. */
 				emit_le(out->bytes, &out->size, (uint64_t)op[0].displacement,
-				        width == 1 ? 1 : width == 2 ? 2 : 4);
+				        width == 1 ? 1 : width == 2 ? 2 : width == 8 ? 8 : 4);
 			}
 			goto done;
 		}
