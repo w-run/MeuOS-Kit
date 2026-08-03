@@ -534,7 +534,7 @@
 **轮次 3（性能 + 体验优化，P2）**：
 - T20（pending 批量）+ T21/T22/T23（性能 OPT）+ T24（UX）+ T25（PIC 门禁解锁）
 
-> **每轮建议模型分布**：reasoning（贵）限 2 个 / 5h 计费（参考 `feedback_model_resources.md`）；lite(hy3) 免费可 10+ 并行。本计划 25 个任务中 P0 选 1 个 reasoning（T03 ABI 需要深度推理），其余全 lite。
+> **每轮建议模型分布（已过时）**：本文档规划于 2026-08-03，当时 lite 映射 hy3（免费可 10+ 并行）。hy3 免费额度已于 2026-08-04 后不可用，后续派发按当前可用模型显式指定。
 
 ---
 
@@ -543,7 +543,7 @@
 ### 5.1 假设
 
 1. **环境稳定**：meuos-sysroot 已构建（`projects/sysroot` 存在），可支持 `MEUOS_SYSROOT=$(pwd)/../sysroot` 模式（参考 verify-all.sh 默认探测）
-2. **hy3 额度**：lite(hy3) 至少有 2 天可用（用户称"hy3 只剩 2 天"——本计划要求快速迭代 + 充分并行）
+2. **模型额度（已过时）**：规划时 hy3 免费额度"只剩 2 天"要求快速并行；该额度 2026-08-04 后已不可用，派发时按当前可用模型执行
 3. **可并行性**：6 分支归并先例（worker-deployment.md §3）已证明同 worktree 8+ worker 并行可行
 4. **worktree-mxx-work 干净**：HEAD=3446850 工作树无未提交改动
 5. **任务粒度**：每个任务可由 1 个 worker 在 4 小时内完成（cpp_parse.c 8146 行的区域定位可保证；性能 OPT 类可能需要更长时间，但有 bench-report.md 已有明确方向）

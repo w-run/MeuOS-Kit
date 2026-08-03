@@ -2,13 +2,15 @@
 
 > 本文件是 `worker-deployment.md` 的精简快照，供下一会话 5 分钟接手。
 > 权威细节见 `.agents/worker-deployment.md`（§3 及其子节）。
+> ⚠️ 本文档是 r6→r7 过渡期的历史快照。r7 团队已完成（T01-T19 全合入），
+> 其中 lite/hy3 模型纪律在当时有效，hy3 免费额度已于 2026-08-04 后不可用。
 
 ---
 
 ## 0. 本次会话为何终结
 
-- 用户发现 r5 团队有 worker 实际运行模型非 lite(hy3)（疑似 deepseek-v4-flash，违反模型纪律）。
-- 用户将当前顶层模型切到 **hy3**，要求"彻底重建团队"。
+- 用户发现 r5 团队有 worker 实际运行模型非 lite（当时 lite 映射 hy3；疑似 deepseek-v4-flash，违反模型纪律）。
+- 用户将当前顶层模型切到 **hy3（lite）**，要求"彻底重建团队"。
 - 但随后决定**本次会话直接终结**，重建动作交给下一会话。
 - 已要求 r6 在途 3 个 worker 全部保护在途进度；现已全部保护完毕（见下）。
 
@@ -17,7 +19,7 @@ mcc/m++ 重构，最终 C++ 覆盖 98~23、C 覆盖 90~23，完全自举、端�
 
 ## 1. 团队现状（mcc-team-r6）
 - r6 仅 3 个 worker 在途：**grace / bella / chloe**，全部已保护进度，无在途丢失风险。
-- 重建计划：下一会话 `TeamDelete(mcc-team-r6)` → 建 `mcc-team-r7`，凡 spawn 均 `model=lite`（=hy3），**严禁复用 r6 worker、严禁 default 变体**。
+- 重建计划：下一会话 `TeamDelete(mcc-team-r6)` → 建 `mcc-team-r7`，凡 spawn 显式指定 model（当时为 lite/hy3），**严禁复用 r6 worker、严禁 default 变体**。
 
 ## 2. 待归并分支（基线 worktree-mxx-work = 43d1507）
 r5 关闭遗留 7 分支，全部在 origin：
