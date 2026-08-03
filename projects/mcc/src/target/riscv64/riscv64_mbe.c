@@ -75,6 +75,12 @@ mir_cmp_cc(MOP op)
 	case MOP_CULE: return MCC_LS;
 	case MOP_CUGT: return MCC_HI;
 	case MOP_CUGE: return MCC_CS;
+	case MOP_CFEQ: return MCC_EQ;
+	case MOP_CFNE: return MCC_NE;
+	case MOP_CFLT: return MCC_LT;   /* FP compare: signed-style names */
+	case MOP_CFLE: return MCC_LE;
+	case MOP_CFGT: return MCC_GT;
+	case MOP_CFGE: return MCC_GE;
 	default:       return MCC_EQ;
 	}
 }

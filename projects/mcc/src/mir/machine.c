@@ -412,10 +412,12 @@ const MTargetM mtarget_aarch64 = {
 	.feat = 0,               /* no cmov, no scale-index addressing */
 	.sret_reg = A64MREG_X8,
 	.abi = mfnm_abi_aarch64,
-	/* emitter temporaries: x9/x10/x11 (scratch) + ip0/ip1 (x16/x17) */
+	/* emitter temporaries: x9/x10/x11 (scratch) + ip0/ip1 (x16/x17) +
+	 * v16/v17 (FP scratch) */
 	.scratch = (1ull << A64MREG_X9) | (1ull << A64MREG_X10) |
 	           (1ull << A64MREG_X11) | (1ull << A64MREG_IP0) |
-	           (1ull << A64MREG_IP1),
+	           (1ull << A64MREG_IP1) | (1ull << A64MREG_V16) |
+	           (1ull << A64MREG_V17),
 };
 
 /* ---- x86-64 machine target (register descriptions) --------------------- */

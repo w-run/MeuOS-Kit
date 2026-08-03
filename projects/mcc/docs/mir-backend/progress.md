@@ -455,3 +455,42 @@ Phase 3a 按 chloe 调研的移植顺序（riscv64→loongarch64→aarch64→arm
 - 验证：qemu-riscv64-static 运行时（浮点/聚合/varargs/VLA/整数）全过；
   test/riscv64/{abi,tls,varargs,vla} 全走 MIR-native 且汇编通过；
   c99+c11 54 样例交叉汇编全过；x86_64 verify-all 19/19 + 自举 exit 0。
+
+## Phase 3b：riscv64/aarch64 浮点补齐（2026-08-03，hazel）
+
+riscv64（Phase 3a）与 aarch64（Phase 3b 移植）的 MIR-native 后端此前
+仅支持标量整数。本批补齐浮点路径（FPR 传参/返回、浮点运算、转换、
+常量、比较），仅聚合/varargs/TLS/VLA 仍回退 legacy。FPR 池（riscv64
+f0-f31 / aarch64 v0-v31）与 mabi 的 isf 槽此前已建。
+
+### 提交（branch worktree-tmp-hazel-fpfill，先 merge aarch64 三件套）
+- **242ed8b** machine.c FPR scratch（riscv64 f0/f1、aarch64 v16/v17）
+  入池，regalloc 不再分配 emitter 浮点临时。
+- **754569d** riscv64/aarch64 isel：mir_cmp_cc 补 MOP_CF*（浮点比较 →
+  EQ/NE/LT/LE/GT/GE）；F2I/I2F/UI2F 按宽度选 MMOP_CVT*，FEXT/FTRUNC →
+  CVTSS2SD/CVTSD2SS；mbe_supported 收窄（允许浮点）。
+- **9f2f176** riscv64 发射：F* 指令（fadd.s/d 等）、FCVT、fcvt.w/l rtz
+  （F2I）、fcvt.s/d.w/l(u)（I2F/UI2F）、浮点 SETCCR（feq/flt/fle，结果
+  整数寄存器）、MOV/LOAD/STORE 浮点（flw/fld/fsw/fsd）、CALL/RET 用
+  fa0；callee-saved FPR 用 fsd/fld。
+- **bbf7561** aarch64 发射：F* 指令（fadd s/d 等）、fcvt/fcvtzs/scvtf/
+  ucvtf、浮点 SETCCR（fcmp+cset）、MOV/LOAD/STORE 浮点（ldr/str s16/d16）、
+  CALL/RET 用 v0；freg_name（V→sN/dN 视图）、csave_reg_name（V8-V15 用
+  d64 视图，AAPCS64 只保低 64 位）。
+- **ab7e500** 回归测试：test/targets/fp.c + fpfill.sh（双 target 浮点
+  汇编 + as + 关键指令断言）。
+
+### 验证
+- 双 target：test/c99 全量 28 样例（含 float/float_expr/hex_float/
+  complex/narrow_cast 等浮点样例）MCC_MIR_BACKEND=1 汇编全部通过
+  riscv64-linux-gnu-as / aarch64-linux-gnu-as；fpfill.sh 通过。
+- 浮点逻辑覆盖：fadd/fsub/fmul/fdiv/fneg、SETCCR 比较、int↔fp 转换
+  （含 unsigned）、FEXT/FTRUNC、常量位模式（li+fmv.d.x / movz+fmov）、
+  多浮点参数（v0-v7/fa0-fa7）、跨调用浮点传参返回、callee-saved FPR。
+- x86_64 无回归：verify-all 全 PASS（check-c-mir 双模式、自举、自举
+  exit 0）、check-mir 全绿。
+
+### 剩余工作（后续）
+- riscv64/aarch64 聚合（sret）与 varargs/TLS/VLA；移植顺序下一目标
+  loongarch64。
+
