@@ -65,11 +65,11 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 
 | Worker | 模型 | 分支 | Worktree | 任务 | 状态 | 上次 push |
 |---|---|---|---|---|---|---|
-| alice | reasoning | worktree-tmp-alice-cpp (自 worktree-mxx-work@d0a90c9) | /tmp/mxx-wt-alice | cpp_parse 组 D1/D4/D2/E2/E3 修复（requires 续作已完成） | **completed**（已合入主线） | a3808b9 |
-| bella | lite | worktree-tmp-bella-mirp1 (自 worktree-mxx-work) | /tmp/mxx-wt-bella | x86_64 MIR-native fallback 闭环 + ≤16B 聚合返回修复（#94） | **completed**（fallback 4c908df/1a1d599/7e78598；#94：chloe 4aaa11f + fafa676 + bella 72a04bd/16273af，MIR_BACKEND=1 verify-all 17/17） | 16273af |
-| chloe | lite | 只读隔离副本 | /tmp/mcciso-chloe | 定位 chibicc B 类真 bug（常量折叠窄化 + va_end 类型检查） | **completed**（报告已收） | 只读不 push |
+| alice | reasoning | worktree-tmp-alice-cpp + worktree-tmp-alice-cpp20 (自 worktree-mxx-work) | /tmp/mxx-wt-alice | cpp_parse D1/D4/D2/E2/E3 + C++20 NTTP/consteval/<=>/聚合初始化/constexpr 成员 | **completed**（D1/D4 等已合入；cpp20 本次归并合入主线 **68d1222**） | push worktree-tmp-alice-cpp20 |
+| bella | lite | worktree-tmp-bella-mirp1 (自 worktree-mxx-work) | /tmp/mxx-wt-bella | x86_64 MIR-native fallback 闭环 + ≤16B 聚合返回修复（#94） | **completed**（#94 已随 chloe-mirp2 **0702745** 合入主线；memit.c TLS 按 g_pic 正版裁决） | 16273af |
+| chloe | lite | worktree-tmp-chloe-mirp2 (自 worktree-mxx-work) | /tmp/mxx-wt-chloe | MIR Phase 2：强制 MIR-native + TLS PIC（g_pic 正版）+ verify-all 19 步 | **completed**（6cafb11 v1 + 0702745/318e184 更新已合入主线；TLS 采用 g_pic 版，无 T.pic/ir.h） | 318e184 |
 | diana | lite | worktree-tmp-diana-pic + worktree-tmp-diana-errcode (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试 + check-pic-verify 修复 + 错误码体系/多错收集 | **completed**（db1451b C23 已合入 294e5c2；6db1691 PIC 已合入主线 58016d2；errcode da5a646/a561b36/c204bbe 本次归并合入主线） | 11 test/c23 + F1-F3 + i386/riscv64 GOT + E####/caret 全跨/JSON 多错/fix-it |
-| eve | lite | worktree-tmp-eve + worktree-tmp-eve-olevel (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵扩充 + -O 优化级别语义分级（O0..O3/-Os/-Oz/-Og/-Ofast + 非法级别钳制）+ check-olevel 目标 | **completed**（02d6684 测试矩阵已合入 b4cad7e；eve-olevel 本次归并合入主线） | 33 test/cpp + check-olevel |
+| eve | lite | worktree-tmp-eve + worktree-tmp-eve-olevel (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵扩充 + -O 优化级别语义分级（O0..O3/-Os/-Oz/-Og/-Ofast + 非法级别钳制）+ check-olevel 目标 | **completed**（02d6684 测试矩阵已合入 b4cad7e；eve-olevel 本次归并合入主线 **a1bbb85**） | 33 test/cpp + check-olevel |
 | grace | lite | worktree-tmp-grace-cpp23 (自 worktree-mxx-work@1ef0a9a) | /tmp/mxx-wt-grace | sema/decl E1/E4/E5/E6（已合入）+ C++23 缺口：P0849/P1774/P1401/P2360/nodiscard | **completed**（sema 已合入；cpp23 f7e313a+b54c8b9+16c2ca5+2a4d655+da7a107 **已合入主线** ba6d9f8） | push worktree-tmp-grace-cpp23 |
 | hazel | lite | worktree-tmp-hazel-conform (自 worktree-mxx-work@1ef0a9a) | /workspace/MeuOS-Kit/.agents/worktrees/mxx-work | C23 constexpr F1/F2/F3（已合入）+ chibicc conformance 缺陷组（bitfield/浮点转换/字面量/宽字符） | **completed**（F1-F3 8e5aae3 已合入；conformance 5 commit **已合入主线** 09a9263，chibicc PASS 11→16、RUNFAIL 5→0） | 24596ee |
 
@@ -78,6 +78,10 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 2. alice 的分支：`worktree-tmp-alice`（含 requires 半成品 c9ca880 续作）；bella：`worktree-tmp-bella`
 3. 需要续接时 spawn 同名 worker，prompt 指向对应 worktree 路径即可
 4. 半成品保护范例：`worktree-requires-wip` = requires 半成品恢复点（网络故障时保护成功）
+
+### 门禁已知差距（2026-08-03 归并后）
+- **check-olevel：已知差距 3 项**（MIR-native 后端真实未实现，非测试 bug；按 team-lead 裁决从归并门禁排除，已排 MIR 迭代 task）：① MIR-native if-conversion（cmov，x86_64_mbe.c isel 仍为 P2 seed）；② -O2 省略叶函数帧指针（各级别都保留 rbp）；③ -O1 内存局部常量传播（`int k=7; x+(k+1)` 的 k 走栈槽，FOLD 不跨内存折叠）。已通过断言保留：O2 imul/O3 shl 强度削减、O9 钳制、Ox 拒绝、各级别运行时正确。
+- **check-pic-verify：已修复**（97d5467，x86_64 MIR-native -fPIC GOT 回归——MIR Phase 2 强制 MIR-native 后丢失外部符号 GOT，emit_global_addr + @gotpcrel + @plt 修复，四架构全过）。
 
 ---
 
