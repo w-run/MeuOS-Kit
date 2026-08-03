@@ -494,3 +494,33 @@ f0-f31 / aarch64 v0-v31）与 mabi 的 isf 槽此前已建。
 - riscv64/aarch64 聚合（sret）与 varargs/TLS/VLA；移植顺序下一目标
   loongarch64。
 
+
+## MIR 机器层性能优化（2026-08-03，bella，#156）
+
+三个独立优化（commit a7dc321 / 628f17b / 3ebd775）。
+
+### 1. regalloc spill-either 启发式（a7dc321）
+- 线性扫描无空闲寄存器时不再总是 spill 新区间；改优先 spill 活跃区间中
+  结束最晚的 victim（同类、无固定冲突、跨调用时取 callee-saved），把
+  寄存器留给短命值。中途 spill 正确性：发射端对槽位值每 def 存/每 use
+  载，但需同步清 cand[].reg 防 write-back 覆盖。
+- **基准 perf_bench：3.43s → 0.52s（≈6.6×）**，输出一致。
+
+### 2. load 转发/死存储消除 + DCE 不动点（628f17b）
+- 前端把每个标量经槽位 store/load 往返。新增 MIR_PASS_LOADFWD：直接
+  alloca 结果的块内 store→load 转发（COPY 再传播）+ 只写槽死 store 删。
+  仅限直接 alloca（base+off 计算地址可能别名）。正确性关键：① 移除指令
+  使 MVal.def 失效 → 用前向 is_alloca 位图；② 删除前统一决策。
+- DCE 迭代到不动点。
+- **基准 perf_dead：218→146 asm（-33%）**。
+
+### 3. -O3 有符号 div/rem 按 2 的幂强度削减（3ebd775）
+- 有符号除因 C 向零舍入 vs SAR 向 -inf 未削减。msdiv_pow2 生成修正序列
+  （q=(x+((x>>31)&(2^n-1)))>>n；r=x-(q<<n)），逐块重建指令数组 +
+  msdiv_emit 维护显式 SSA。
+- **基准 perf_div：O3 idiv 4→0**；±7/2、INT_MIN/8 等边界全过。
+
+### 综合验证
+- check-c-mir 双模式 fail=0、check-cpp-func/neg rc=0、check-mir 全绿、
+  check-olevel rc=0、verify-all 19/19（MIR-native + bridge 双路径）、
+  自举 exit 0。
