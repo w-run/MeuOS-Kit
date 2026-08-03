@@ -827,8 +827,11 @@ cpp_lookup_visible(struct scope *s, const char *name)
 	return NULL;
 }
 
-/* `using namespace NAME;` or `using NAME::member;`. */
-static void
+/* `using namespace NAME;`, `using NAME::member;`, or a C++11 alias
+ * declaration `using Name = Type;`.  Non-static so the shared C
+ * declaration parser can dispatch block-scope `using` (and thus for/if
+ * init-statement alias declarations, P2360) to the C++ frontend. */
+void
 cpp_using_decl(struct scope *s)
 {
 	next(); /* consume 'using' */
@@ -845,13 +848,26 @@ cpp_using_decl(struct scope *s)
 		expect(TSEMICOLON, "after using directive");
 		return;
 	}
-	/* using NAME::member; */
+	/* using NAME::member; or using Name = Type; */
 	{
 		struct decl *nsd;
+		const char *nm;
 		if (tok.kind < TIDENT)
 			error(&tok.loc, "expected namespace name in using declaration");
-		nsd = scopegetdecl(s, tokenstr(tok.kind), 1);
+		nm = tokenstr(tok.kind);
+		nsd = scopegetdecl(s, nm, 1);
 		next();
+		if (tok.kind == TASSIGN) {
+			/* C++11 alias declaration: `using Name = Type;` */
+			struct type *at;
+			next(); /* consume '=' */
+			at = typename(s, NULL, NULL);
+			if (!at)
+				error(&tok.loc, "expected type name in alias declaration");
+			expect(TSEMICOLON, "after alias declaration");
+			scopeputdecl(s, mkdecl((char *)nm, DECLTYPE, at, QUALNONE, LINKNONE));
+			return;
+		}
 		expect(TCOLONCOLON, "after namespace name in using declaration");
 		if (tok.kind < TIDENT)
 			error(&tok.loc, "expected member name after '::'");
@@ -7381,7 +7397,10 @@ cpp_if_constexpr(struct func *f, struct expr *cond, struct scope *s)
 	if (cond) {
 		struct expr *r = eval(cond);
 		/* eval() folds in place and returns the same node */
-		if (r->kind == EXPRCONST && (r->type->prop & PROPINT)) {
+		if (r->kind == EXPRCONST && (r->type->prop & PROPSCALAR)) {
+			/* P1401: the condition is contextually converted to bool,
+			 * so any scalar constant works — including pointer/nullptr
+			 * constants (`if constexpr (p)` for a pointer constant p). */
 			v = r->u.constant.u;
 			have = true;
 		}

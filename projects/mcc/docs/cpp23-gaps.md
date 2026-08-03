@@ -19,7 +19,7 @@
 - **e06a2b0 复核后新增支持 5 项**：`if consteval`（P1938，55499d6，含 `if !consteval`/嵌套/模板）、多维 `operator[]`（P2128，cfeadf9 + const 决议 da9e2bf）、deducing this（P0847，bea068d，引用形式 X&/const X&/X&&）、constexpr 多语句体（dca1620，局部变量/循环/分支/static constexpr 局部，P2242/P2647 地基）、range-for（71fbb35，含 C++20 init-statement 与 begin/end 成员）。
 - **HEAD 2c474d4 新增支持 3 项（P2290/P2361/P1467，0025f1b + 99d4a54 + af905db）**：分隔/命名转义、`\u{...}`/`\U{...}`/`\x{...}`/`\N{NAME}`（字符串与标识符路径）、扩展浮点后缀 f16/f32/f64/f128/bf16（映射现有 float/double，`_FloatN` 真类型未引入）。
 - **部分支持 2 项**：P1102（`[x] -> int {...}` 无括号 OK，`[x] noexcept`/`[x]() mutable` 因 noexcept/mutable 基线缺失失败）、P1169 static `operator()`（static 限定被忽略，按非静态成员处理）。
-- **C++23 纯缺口约 4 项**（P2290/P2361/P1467 已闭环）：`auto(x)`（P0849）、`[[assume]]`（P1774，属性一律被静默忽略）、`if constexpr` 窄化转 bool（P1401）、init 语句 alias（P2360）。
+- **C++23 纯缺口 4 项已全部闭环（worker-cpp23-grace，2026-08-03）**：`auto(x)`（P0849，**f7e313a**）、`[[assume]]`（P1774，**b54c8b9**）、`if constexpr` 窄化转 bool（P1401，**16c2ca5**）、init 语句 alias（P2360，**2a4d655**，含 C++11 `using Name = Type;` 别名声明）。属性语义评估：alignas 本已生效、`[[nodiscard]]` 丢弃返回值警告已实现（**da7a107**）；deprecated/fallthrough/maybe_unused 保持解析接受、使用点警告留待后续。
 - **被基线阻塞无法独立评估**：P2266（**非空类**按值返回/RVO 基线缺陷，见 §1.4 D4）、P2242/P2280/P2448 的**引用/数组/类对象成员**部分（多语句/局部变量已通）、P2582（继承构造缺失）、P2468（重写相等候选缺失；且 `operator==` 带 `const T&` 形参时整体失败，见 §2 D1）、P2513（char8_t 关键字缺失，C++20 项）、急切实例化（D2，模板健壮性）。
 - **最高杠杆的阻塞缺口**（非 C++23 本身，但卡住一批 C++23 特性）：`operator==`/`operator<=>` 类类型重载中的 **const 引用形参** 解析失败（D1，比 P2468 更宽）；类按值返回缺陷（非空类结果错乱，D4）。
 
@@ -54,10 +54,10 @@
 
 | C++23 特性 | 现象 | 证据（错误信息） | 阻塞项 | 难度 | 优先级 |
 |:-----------|:-----|:----------------|:-------|:----:|:-----:|
-| `auto(x)` 退化拷贝（P0849） | `auto b = auto(r);` 编译失败 | 「expected primary expression」 | 复用 auto 推导 + 退化规则 | 低-中 | 中 |
-| `[[assume(expr)]]`（P1774） | 编译通过但**属性一律被静默忽略** | `[[assume(x>0 && undefined)]]`、`[[totally_bogus_attr(1,2,3)]]` 均通过且无诊断；e06a2b0 复验 | 属性语义（含 C 模式）整体未实现 | 中 | 低 |
-| `if constexpr` 窄化转 bool（P1401） | `if constexpr (p)`（p 为指针常量）编译失败 | 「if constexpr condition is not a constant expression」 | 指针常量表达式支持有限 | 中 | 低 |
-| init 语句中 alias（P2360） | `if (using T=int; …)` 编译失败 | 「undeclared identifier: using」 | — | 中 | 低 |
+| `auto(x)` 退化拷贝（P0849） | ✅ **f7e313a 已实现**（expr_primary TAUTO 识别 + decay/剥顶层 cv；test/cpp/auto_paren.cc） | 原「expected primary expression」 | — | 低-中 | 中 |
+| `[[assume(expr)]]`（P1774） | ✅ **b54c8b9 已实现**（attr.c PREFIXNONE 识别 assume，要求括号参数形式、表达式未求值 no-op；test/cpp/assume_attr.cc + assume_no_arg.neg.cc） | `[[assume]]` 无参数报「requires a parenthesized expression」 | — | 中 | 低 |
+| `if constexpr` 窄化转 bool（P1401） | ✅ **16c2ca5 已实现**（cpp_if_constexpr 条件检查 PROPINT→PROPSCALAR，指针/nullptr 常量按上下文转 bool；test/cpp/if_constexpr_bool.cc + if_constexpr_runtime_ptr.neg.cc） | 非 constexpr 运行时指针仍报「not a constant expression」 | — | 中 | 低 |
+| init 语句中 alias（P2360） | ✅ **2a4d655 已实现**（if/for 支持 alias/声明/表达式 init-statement；`using Name = Type;` 别名声明落地；test/cpp/init_alias.cc + using_alias.cc） | 原「undeclared identifier: using」 | — | 中 | 低 |
 
 ### 1.4 被基线阻塞（无法独立评估的 C++23 项）
 
@@ -94,12 +94,12 @@
 
 1. **`operator==`/`<` 类类型重载的 `const T&` 形参（D1，高优先，中难度）**：e06a2b0 新发现，HEAD 2c474d4 仍待修。`int operator==(const Vec& a, const Vec& b)` 报「assignment to pointer…」，值形参可跑——定位运算符重载注册/调用点的引用形参处理。解锁常见比较运算符 + P2468 前驱。
 2. **非空类按值返回缺陷（D4，高优先，中高难度）**：非空类 `V make(){V v(7); return v;}` 结果错乱（exit≠0）；空类已修（2be27a7），需推广到一般聚合返回路径。阻塞 P2266。
-3. **`auto(x)` 退化拷贝（中优先，低-中难度）**：表达式层 `auto(` 识别 → 复用 auto 推导 + 退化（去引用/顶层 cv）→ 构造。参考 aburiscript helpers/auto_type_utils.cpp。
+3. **`auto(x)` 退化拷贝（中优先，低-中难度）**：✅ **f7e313a 已实现**。表达式层 `auto(` 识别 → decay + 剥顶层 cv → prvalue。参考 aburiscript helpers/auto_type_utils.cpp。
 4. **constexpr 体引用/数组/类对象（中优先，中高难度）**：dca1620 已覆盖多语句/局部/循环；补引用绑定与类对象 mini 内存模型后，P2242/P2280/P2448 可收官。
 5. **急切实例化（D2，中优先，中难度）**：类模板成员函数改为仅 ODR-used 才实例化（惰性），避免未使用成员函数体内错误误报。
 6. **`#elifdef` 求值缺口（D3，低优先，低难度）**：共享 pp 在跳过组内求值 `#elifdef` 时误报；修复后 P2334 才算完整。**worker-pp4 正在修**。
 7. **char8_t（中优先，中难度）**：加 `char8_t` 关键字/类型，u8 字面量类型化为 `const char8_t[]`（当前已是 char 数组，比文档初版记录更进一步）。
-8. **`[[assume]]`（低优先，中难度）**：属性语义整体落地（至少解析已知属性名并校验表达式），或仅记录为「已解析忽略」。
+8. **`[[assume]]`（低优先，中难度）**：✅ **b54c8b9 已实现**（接受语法 + 要求括号参数形式，no-op）。属性语义部分实现：alignas 本已生效；`[[nodiscard]]` 丢弃返回值警告 **da7a107**；deprecated/fallthrough/maybe_unused 使用点警告留待后续。
 
 > 已关闭项（不再排期）：if consteval（55499d6）、多维 operator[]（cfeadf9/da9e2bf）、deducing this（bea068d）、constexpr 多语句体（dca1620）、range-for（71fbb35）、分隔/命名转义 + 扩展浮点后缀（P2290/P2361/P1467，0025f1b + 99d4a54 + af905db）。
 

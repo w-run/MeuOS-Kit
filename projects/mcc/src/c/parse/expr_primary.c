@@ -116,6 +116,23 @@ primaryexpr(struct scope *s)
 		e->u.constant.u = 0;
 		next();
 		break;
+	case TAUTO: {
+		/* C++23 P0849: `auto(expr)` is a decay-copy functional cast — a
+		 * prvalue of the decayed type of expr (arrays/functions decay to
+		 * pointers, top-level cv-qualifiers are dropped), exactly what
+		 * `auto v = expr;` would deduce.  Note peek() consumes the '('
+		 * when it matches, so the expression is parsed directly. */
+		extern int g_lang;
+		if (g_lang == 1 && peek(TLPAREN)) {
+			e = assignexpr(s);
+			expect(TRPAREN, "after 'auto('");
+			e = decay(e);
+			e->qual &= ~(QUALCONST | QUALVOLATILE);
+			break;
+		}
+		error(&tok.loc, "expected primary expression");
+		break;
+	}
 	case TLPAREN:
 		next();
 		if (tok.kind == TLBRACE) {

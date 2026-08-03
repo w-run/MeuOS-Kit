@@ -21,6 +21,7 @@ int cpp_nkeywords(void);
 
 /* parse (src/cpp/parse/cpp_parse.c) */
 void cpp_parse_translation_unit(void);
+void cpp_using_decl(struct scope *s);
 enum cpp_tokenkind cpp_tok_kind(void);
 
 /* C++ member-function lowering helpers (src/cpp/parse/cpp_parse.c).

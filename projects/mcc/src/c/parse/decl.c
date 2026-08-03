@@ -174,6 +174,18 @@ decl(struct scope *s, struct func *f)
 
 	if (staticassert(s))
 		return true;
+	/* C++ `using` declaration: `using namespace N;`, `using N::m;`, or a
+	 * C++11 alias `using Name = Type;`.  Routing it here (rather than the
+	 * statement path) makes block-scope and for/if init-statement forms
+	 * (P2360) work uniformly. */
+	{
+		extern int g_lang;
+		extern enum cpp_tokenkind cpp_tok_kind(void);
+		if (g_lang == 1 && cpp_tok_kind() == CPP_TUSING) {
+			cpp_using_decl(s);
+			return true;
+		}
+	}
 	a.kind = 0;
 	if (attr(&a, ATTRNORETURN | ATTRFALLTHROUGH | ATTRNODISCARD | ATTRMAYBEUNUSED | ATTRDEPRECATED) && consume(TSEMICOLON))
 		return true;
@@ -549,6 +561,7 @@ decl(struct scope *s, struct func *f)
 				d->value = mkglobal(d);
 				d->u.func.inlinedefn = d->linkage == LINKEXTERN && fs & FUNCINLINE && !(sc & SCEXTERN) && (!prior || prior->u.func.inlinedefn);
 				d->u.func.isnoreturn = fs & FUNCNORETURN || a.kind & ATTRNORETURN;
+				d->u.func.isnodiscard = (a.kind & ATTRNODISCARD) != 0;
 				/* C99 6.7.4p6: an `extern` (or plain, non-inline) declaration
 				 * of a function that was previously defined `inline` promotes
 				 * that inline definition to an external definition — emit the

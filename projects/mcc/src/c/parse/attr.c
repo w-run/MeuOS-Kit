@@ -59,7 +59,15 @@ parseattr(struct attr *a, enum attrkind allowed, enum attrprefix prefix)
 				expect(TRPAREN, "after nodiscard");
 		} else if (strcmp(name, "maybe_unused") == 0)
 			kind = ATTRMAYBEUNUSED;
-		else if (strcmp(name, "deprecated") == 0) {
+		else if (strcmp(name, "assume") == 0) {
+			/* P1774: `[[assume(expr)]]` — the expression is unevaluated
+			 * and the attribute is a no-op here, but the parenthesized
+			 * argument form is required (and its balanced token list is
+			 * consumed by the generic skip below). */
+			if (tok.kind != TLPAREN)
+				error(&tok.loc,
+				    "'assume' attribute requires a parenthesized expression");
+		} else if (strcmp(name, "deprecated") == 0) {
 			kind = ATTRDEPRECATED;
 			if (consume(TLPAREN)) {
 				if (tok.kind == TSTRINGLIT)
