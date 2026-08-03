@@ -37,7 +37,6 @@
  * enforces: every value created here gets exactly one definition — either an
  * MIns (a load rewritten in place into a MOP_COPY) or an MPhi — never both.
  */
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -567,10 +566,21 @@ mmem2reg(MFn *fn)
 			MType ty;
 			if (in->op != MOP_ALLOCA || !in->dst)
 				continue;
-			if (!m2r_promotable(in->dst, &ty))
+			if (!m2r_promotable(in->dst, &ty)) {
+				if (getenv("M2R_DIAG"))
+					fprintf(stderr, "m2r: %s: slot v%u REJECT promotable\n",
+					    fn->name, in->dst->id);
 				continue;
-			if (!m2r_size_ok(in, ty))
+			}
+			if (!m2r_size_ok(in, ty)) {
+				if (getenv("M2R_DIAG"))
+					fprintf(stderr, "m2r: %s: slot v%u REJECT size ty=%d\n",
+					    fn->name, in->dst->id, (int)ty);
 				continue;
+			}
+			if (getenv("M2R_DIAG"))
+				fprintf(stderr, "m2r: %s: slot v%u ACCEPT ty=%d\n",
+				    fn->name, in->dst->id, (int)ty);
 			slot = realloc(slot, (nslot + 1) * sizeof *slot);
 			slot[nslot].addr = in->dst;
 			slot[nslot].type = ty;
@@ -647,16 +657,6 @@ mmem2reg(MFn *fn)
 	ctx.cstack = calloc(nslot, sizeof *ctx.cstack);
 
 	m2r_rename(&ctx, rpo, npost, ridx);
-
-	if (getenv("M2R_DEBUG")) {
-		for (uint32_t s = 0; s < nslot; s++)
-			for (MBlk *b = fn->link; b; b = b->link)
-				if (phi[s][b->id])
-					fprintf(stderr,
-					    "m2r: %s blk %s npred=%u phi narg=%u\n",
-					    fn->name, b->name ? b->name : "?",
-					    b->npred, phi[s][b->id]->narg);
-	}
 
 	/* --- drop the now-dead allocas ------------------------------------ */
 	for (MBlk *b = fn->link; b; b = b->link) {
