@@ -62,9 +62,13 @@ cpp_trial_rethrow(void)
 }
 
 /* Min-color support for diagnostics (p9-ui: colored error/warn like clang).
- * No external dependency — gated on isatty(stderr). */
+ * No external dependency — gated on isatty(stderr) unless the driver's
+ * --color=always/never overrides it (-1 = auto, 0 = never, 1 = always). */
+int g_diag_color = -1;
 static int diag_color_on(void)
 {
+	if (g_diag_color >= 0)
+		return g_diag_color;
 	static int cached = -1;
 	if (cached < 0)
 		cached = isatty(fileno(stderr)) ? 1 : 0;

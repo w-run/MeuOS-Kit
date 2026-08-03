@@ -33,7 +33,10 @@ parseattr(struct attr *a, enum attrkind allowed, enum attrprefix prefix)
 	enum attrkind kind;
 	int paren;
 
-	if (tok.kind < TIDENT)
+	/* `_Noreturn` lexes as the reserved T_NORETURN token, not TIDENT;
+	 * accept it as an attribute name (C23 makes `_Noreturn` equivalent
+	 * to `[[noreturn]]`). */
+	if (tok.kind < TIDENT && tok.kind != T_NORETURN)
 		return false;
 	name = strip(tokenstr(tok.kind), namebuf, sizeof namebuf);
 	next();

@@ -307,7 +307,8 @@ void
 run_host_cc(const char *asm_path, const char *output, bool compile_only,
             bool verbose, struct array *libdirs, struct array *libs,
             bool static_link, bool shared, bool pie, bool nostdlib, bool nodefaultlibs,
-            bool meuos_specs, const char *target_triple)
+            bool meuos_specs, const char *target_triple,
+            struct array *wa_args, struct array *wl_args)
 {
 	struct array cmd = {0};
 	const char *cc = pick_host_cc(target_triple);
@@ -398,6 +399,16 @@ run_host_cc(const char *asm_path, const char *output, bool compile_only,
 	    asm_requires_atomic(asm_path))
 		arrayaddbuf(&cmd, meuos_specs ? " -latomic-meuos" : " -latomic",
 		            meuos_specs ? 15 : 9);
+	/* -Wa,<args> / -Wl,<args> passthrough: forwarded verbatim to the
+	 * host assembler/linker driver. */
+	for (i = 0, p = wa_args->val; i < wa_args->len / sizeof(char *); ++i) {
+		arrayaddbuf(&cmd, " -Wa,", 5);
+		cmdadd(&cmd, p[i]);
+	}
+	for (i = 0, p = wl_args->val; i < wl_args->len / sizeof(char *); ++i) {
+		arrayaddbuf(&cmd, " -Wl,", 5);
+		cmdadd(&cmd, p[i]);
+	}
 	arrayaddbuf(&cmd, " -o ", 4);
 	cmdadd(&cmd, output);
 	arrayaddbuf(&cmd, "", 1);  /* NUL terminator */
@@ -414,7 +425,7 @@ void
 run_host_link(struct array *objects, const char *output, bool verbose,
 	struct array *libdirs, struct array *libs, bool static_link, bool shared,
 	bool pie, bool nostdlib, bool nodefaultlibs, bool meuos_specs,
-	const char *target_triple)
+	const char *target_triple, struct array *wl_args)
 {
 	struct array cmd = {0};
 	const char *cc = pick_host_cc(target_triple);
@@ -462,6 +473,11 @@ run_host_link(struct array *objects, const char *output, bool verbose,
 	}
 	if (meuos_specs && !nodefaultlibs)
 		arrayaddbuf(&cmd, " -lc-meuos", 10);
+	/* -Wl,<args> passthrough: forwarded verbatim to the host linker. */
+	for (i = 0, p = wl_args->val; i < wl_args->len / sizeof(char *); ++i) {
+		arrayaddbuf(&cmd, " -Wl,", 5);
+		cmdadd(&cmd, p[i]);
+	}
 	arrayaddbuf(&cmd, " -o ", 4);
 	cmdadd(&cmd, output);
 	arrayaddbuf(&cmd, "", 1);

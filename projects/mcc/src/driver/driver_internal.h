@@ -43,11 +43,13 @@ char *sysrootpath(const char *root, const char *suffix);
 void run_host_cc(const char *asm_path, const char *output, bool compile_only,
                  bool verbose, struct array *libdirs, struct array *libs,
                  bool static_link, bool shared, bool pie, bool nostdlib,
-                 bool nodefaultlibs, bool meuos_specs, const char *target_triple);
+                 bool nodefaultlibs, bool meuos_specs, const char *target_triple,
+                 struct array *wa_args, struct array *wl_args);
 void run_host_link(struct array *objects, const char *output, bool verbose,
                    struct array *libdirs, struct array *libs, bool static_link,
                    bool shared, bool pie, bool nostdlib, bool nodefaultlibs,
-                   bool meuos_specs, const char *target_triple);
+                   bool meuos_specs, const char *target_triple,
+                   struct array *wl_args);
 bool is_link_input(const char *path);
 char *default_out_name(const char *input, const char *desc);
 
