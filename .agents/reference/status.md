@@ -49,6 +49,9 @@
 | meow 原生 shell 替代                   | 🔄 进行中 | 用 msh 替代 /bin/sh（阻塞于 msh 可用性）                          |
 | mt DWARF 调试信息（P8）                 | ⏳ 待启动 | 调试信息生成                                                       |
 | arm-multiver emit 多版本分支            | 🟡 待补 | ARM emit 层 `g_arm_arch_ver` 已就绪，v6/v7+/v8 指令分支待落地        |
+| mcc atomic 窄类型符号扩展缺陷           | 🔴 回归 | 2026-08-04 审计：`atomic_fetch_add` 对 `atomic_short` 返回值零扩展(65534)而非符号扩展(-2)，致 libc `test/atomic.c` FAIL。verify-all 19/19 未覆盖。详见 `.todo/mcc/defect-atomic-narrow-signext.md` |
+| mcc TLS 局部静态符号不一致缺陷          | 🔴 回归 | 2026-08-04 审计：`static _Thread_local` 变量 `.tbss` 段定义为 `.L<name>.N`，函数体引用 `<name>`，符号不一致致链接 `undefined reference`。meow `make check` 失败。详见 `.todo/mcc/defect-tls-static-local-symbol.md` |
+| check-pic-verify aarch64/riscv64 GOT    | 🔴 缺口 | 2026-08-04 审计：x86_64/i386 PIC GOT ✅，aarch64/riscv64 仍失败。diana 6db1691 仅修 i386+riscv64（riscv64 实测仍失败），aarch64 从未覆盖。`worker-deployment.md` §3/§4 "四架构全过"为错误声明 |
 
 ### 10.3 各架构支持矩阵
 

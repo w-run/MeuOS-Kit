@@ -31,3 +31,10 @@
 | [utils-gzip-lz77](meuos-utils/utils-gzip-lz77.md) | ⏳ | gzip LZ77 压缩 |
 | [utils-patch-context](meuos-utils/utils-patch-context.md) | ⏳ | patch context 格式 |
 | [utils-unzip-create](meuos-utils/utils-unzip-create.md) | ⏳ | zip 创建能力 |
+
+### mcc
+
+| 任务 | 状态 | 说明 |
+|------|------|------|
+| [defect-atomic-narrow-signext](mcc/defect-atomic-narrow-signext.md) | 🔴 回归 | 2026-08-04 审计：`atomic_fetch_add` 对 `atomic_short` 返回值零扩展(65534)而非符号扩展(-2)，致 libc `test/atomic.c` FAIL |
+| [defect-tls-static-local-symbol](mcc/defect-tls-static-local-symbol.md) | 🔴 回归 | 2026-08-04 审计：`static _Thread_local` 局部静态变量 `.tbss` 定义 `.L<name>.N` vs 函数体引用 `<name>`，符号不一致致 meow 链接失败 |

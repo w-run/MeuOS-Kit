@@ -100,6 +100,31 @@ r5 会话遗留的 7 个 `worktree-tmp-*` 分支已**全部合入主线 worktree
 ### 门禁状态（2026-08-03 alice mt/ld 修复归并后）
 - **check-mt-integration：已闭环**（alice 3d3f91f，归并 ad52f9b）：根因是 mt/as x86_64 `movq $imm, %r64` 的 imm64 截断编码（encode.c 对 width==8 用 0xb8 movabs 形式但 imm 只写 4 字节，后续指令被吞进立即数 → 解码垃圾 → crt1 入口段错误 0x40101c）。**门禁已知失败清零：verify-all 恢复 19/19 全绿**。
 
+### 门禁实测（2026-08-04 接手审计 — 大喵指示验证实际进度）
+
+> 本节为新会话接手后对历史声明的实测复核，修正文档与实际的偏差。实测在当前 `mcc-toolchain` worktree HEAD `4fb549f` 下进行。
+
+- **verify-all.sh**：实测 **19/19 全绿**（`bash test/verify-all.sh` rc=0，约 1 分钟）——历史声称准确。
+  - ⚠️ 注意：`sh test/verify-all.sh` 会因 bash 特性（`BASH_SOURCE`）静默秒退，必须用 `bash` 执行。
+- **check-pic-verify**：实测 **仍失败**（`make check-pic-verify` rc=2）：
+  - x86_64 PIC GOT ✅、i386 PIC GOT ✅
+  - **aarch64 PIC ❌**（`GOT global_var NOT FOUND`，pattern `:got:global_var`）
+  - **riscv64 PIC ❌**（`GOT sequences not found (known gap)`）
+  - diana `6db1691`（已在 HEAD）仅修 i386+riscv64，commit message 声称 riscv64 green，实测仍失败；aarch64 从未覆盖。
+  - **修正上文 §3 与 §4 "check-pic-verify 四架构全过已修复"为错误声明**。`verify-all.sh` 注释"riscv64/i386 GOT 已知缺口"才准确（aarch64 缺口注释漏提）。
+- **alice requires 表达式**：实测 **早已合入当前 mcc-toolchain HEAD**（`git merge-base HEAD worktree-tmp-alice` = `43ab6c8` = alice 顶端；HEAD 领先 alice 20 commit）。
+  - **修正下文 §4 "requires 表达式（C++20）— 半成品未稳定"为滞后描述**，实际已闭环。
+- **libc `make check`**：实测 **失败**（rc=2）——`test/atomic.c` 输出 `FAIL` exit=1。
+  - 根因：mcc `atomic_fetch_add` 对 `atomic_short` 返回值**零扩展**（65534）而非**符号扩展**（-2），导致 `atomic_fetch_add(&small,3) != -2` 断言失败（line 46-50）。
+  - 对照 gcc 同文件 PASS；mcc 分段测 store/load/fetch_or/exchange/CAS/flag/fetch_sub/thrd_create/counter 均正确，唯窄类型 fetch_add 符号扩展错。
+  - `status.md` "meuos-libc x86_64 完整运行验证 ✅"与此矛盾。
+- **meow `make check`**：实测 **失败**（rc=2）——链接 `undefined reference to 'buffer'`（`build/engine/graph.o` 的 `expand_path`）。
+  - 根因：mcc 对 `static _Thread_local char buffer[RECIPE_MAX];`（graph.c:31）代码生成缺陷——`.tbss` 段定义为 `.Lbuffer.2`，函数体引用 `buffer`，符号名不一致 → 链接器找不到 `buffer`。
+  - `status.md` "meow 构建系统 ✅"与此矛盾。
+- **meuos-toolchain `make check`**：实测 **PASS**（rc=0，mt check/readelf/strip/objcopy/objdump 全绿）——历史声称准确。
+
+**审计结论**：mcc 存在 2 个真实代码生成缺陷（atomic 窄类型符号扩展 + TLS 局部静态符号不一致），被 verify-all 19/19 掩盖（verify-all 不含 libc atomic 全流程与 meow 链接）。已建 `.todo/mcc/` 待办。check-pic-verify aarch64/riscv64 GOT 缺口未修。
+
 ---
 
 ## 4. 任务队列（当前在途）
