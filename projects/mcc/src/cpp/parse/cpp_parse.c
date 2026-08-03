@@ -167,7 +167,7 @@ static void cpp_emit_base_ctor(struct func *f);
 static void cpp_emit_base_dtor(struct func *f);
 static void cpp_parse_init_list(struct func *f, struct scope *fs);
 static void cpp_mangle_type(struct type *t, char *buf, size_t bufsz);
-static size_t cpp_requires_span_len(void);
+static size_t cpp_requires_span_len(struct token **out);
 static void flush_pending_methods(void);
 static void cpp_emit_global_ctors(void);
 static void cpp_emit_global_dtor(struct func *f, struct decl *d);
@@ -4048,16 +4048,17 @@ cpp_template_decl(struct scope *s, struct type *owner)
 				    cpp_tok_kind() == CPP_TREQUIRES) {
 					/* a whole requires-expression: consume it
 					 * (including its body braces) as one unit */
-					size_t rn = cpp_requires_span_len();
-					while (rn-- > 0) {
+					struct token *rtoks = NULL;
+					size_t rn = cpp_requires_span_len(&rtoks);
+					for (size_t k = 0; k < rn; k++) {
 						if (cn >= ccap) {
 							ccap = ccap ? ccap * 2 : 64;
 							ctoks = xreallocarray(ctoks,
 							    ccap, sizeof *ctoks);
 						}
-						ctoks[cn++] = tok;
-						next();
+						ctoks[cn++] = rtoks[k];
 					}
+					free(rtoks);
 					continue;
 				}
 				if (tok.kind == TLBRACE)
@@ -4472,13 +4473,20 @@ eval_concept_use(struct token *c, size_t n, struct scope *bs)
 		extern struct expr *expr(struct scope *);
 		extern struct expr *eval(struct expr *);
 		extern void tokpush(struct token *, size_t);
+		size_t d = tokctx_depth();
+		struct token guard = {0};
 		cur = tok;
-		tokpush(&cur, 1);
+		/* a guard after the expanded expression so expr() stops at the
+		 * end of it instead of falling through to the buffered token
+		 * below (cur / the caller's context) */
+		guard.kind = TSEMICOLON;
+		tokpush(&guard, 1);
 		tokpush(exp, en);
 		next();
 		e = expr(bs);
-		/* the expanded constraint may have consumed the saved token;
-		 * put it back so decl() resumes at the right position */
+		/* discard any unconsumed expansion tokens, then resume at the
+		 * token that was current before the evaluation */
+		tokctx_rewind(d);
 		tokpush(&cur, 1);
 		next();
 		e = eval(e);
@@ -4546,18 +4554,24 @@ cpp_check_constraint(struct cpp_template *tmpl, struct scope *bs)
 /* Copy the requires-expression token span starting at the current token
  * (`requires` keyword) through its closing '}'.  Nested braces / parens
  * (compound-requirement bodies, nested requires, lambda bodies in
- * requirements) are tracked so the outer '}' is found correctly.  Returns
- * the number of tokens; the caller must copy the tokens (the stream
- * advances past them). */
+ * requirements) are tracked so the outer '}' is found correctly.  Fills
+ * *out with the tokens (the caller owns the allocation) and advances the
+ * stream past the closing '}'; returns the number of tokens. */
 static size_t
-cpp_requires_span_len(void)
+cpp_requires_span_len(struct token **out)
 {
-	int depth = 0, count = 0, req_brace = 0;
+	int depth = 0, req_brace = 0;
+	size_t n = 0, cap = 16;
+	struct token *sp = xmalloc(cap * sizeof *sp);
 
 	for (;;) {
 		if (tok.kind == TEOF)
-			return count;
-		++count;
+			break;
+		if (n >= cap) {
+			cap *= 2;
+			sp = xreallocarray(sp, cap, sizeof *sp);
+		}
+		sp[n++] = tok;
 		if (depth == 0 && tok.kind == TLBRACE) {
 			if (req_brace) {
 				++depth;
@@ -4570,10 +4584,12 @@ cpp_requires_span_len(void)
 			if (tok.kind == TLBRACE)
 				++depth;
 			else if (tok.kind == TRBRACE && --depth == 0)
-				return count;
+				break;
 		}
 		next();
 	}
+	*out = sp;
+	return n;
 }
 
 /* The token `t` is a `typename`/`class` (C++ tag) keyword? */
@@ -4611,7 +4627,6 @@ cpp_ident_is_type(struct scope *s, const char *name)
 static bool
 cpp_req_type_ok(struct scope *s, struct token *sp, size_t n)
 {
-	struct token cur;
 	struct expr *toeval = NULL;
 	enum typequal tq = QUALNONE;
 	struct type *t = NULL;
@@ -4625,9 +4640,11 @@ cpp_req_type_ok(struct scope *s, struct token *sp, size_t n)
 	if (n == 0)
 		return false;
 
-	/* `T :: member` with T a template parameter: the member is a nested
+	/* `T :: member` with T a known class: the member is a nested
 	 * typedef of the bound class.  (Higher levels — `A::B::member` or
-	 * `T::U::member` — are not handled yet.) */
+	 * `T::U::member` — are not handled yet.)  m++ stores struct members
+	 * (including in-class typedefs) in the aggregate member list, so look
+	 * the name up there rather than in the class scope. */
 	if (n >= 3 && sp[1].kind == TCOLONCOLON &&
 	    cpp_ident_is_type(s, tokenstr(sp[0].kind))) {
 		struct decl *td = scopegetdecl(s, tokenstr(sp[0].kind), 1);
@@ -4636,25 +4653,32 @@ cpp_req_type_ok(struct scope *s, struct token *sp, size_t n)
 			ct = td->type;
 		else
 			ct = scopegettag(s, tokenstr(sp[0].kind), 1);
-		if (ct && (ct->kind == TYPESTRUCT || ct->kind == TYPEUNION) &&
-		    ct->scope) {
-			struct decl *md = scopegetdecl(ct->scope,
-			    tokenstr(sp[2].kind), 1);
-			return md && md->kind == DECLTYPE;
+		if (ct && (ct->kind == TYPESTRUCT || ct->kind == TYPEUNION)) {
+			unsigned long long off = 0;
+			return typemember(ct, tokenstr(sp[2].kind), &off) != NULL;
 		}
 		return false;
 	}
 
 	/* replay the span and parse it as a type-name; errors longjmp to the
-	 * enclosing trial and report failure */
-	cur = tok;
-	tokpush(&cur, 1);
-	tokpush(sp, n);
-	next();
-	t = typename(s, &tq, &toeval);
-	(void)t; (void)tq; (void)toeval;
-	tokpush(&cur, 1);
-	next();
+	 * enclosing trial and report failure.  The parse must consume the
+	 * whole span: `typename void::value_type` parses `void` and leaves
+	 * `::value_type`, which must not count as naming a type. */
+	{
+		size_t d = tokctx_depth();
+		struct token guard = {0};
+		bool complete;
+		guard.kind = TSEMICOLON;
+		tokpush(&guard, 1);
+		tokpush(sp, n);
+		next();
+		t = typename(s, &tq, &toeval);
+		complete = tok.kind == TSEMICOLON;
+		(void)tq; (void)toeval;
+		tokctx_rewind(d);
+		if (!complete)
+			return false;
+	}
 	return t != NULL;
 }
 
@@ -4666,26 +4690,32 @@ cpp_req_type_ok(struct scope *s, struct token *sp, size_t n)
 static size_t
 cpp_req_params(struct scope *rs, struct token *sp, size_t n)
 {
-	struct token cur;
 	size_t i = 1;
 
 	if (n == 0 || sp[0].kind != TLPAREN)
 		return 0; /* no parameter clause */
-	cur = tok;
-	tokpush(&cur, 1);
-	tokpush(sp, n);
-	next(); /* consume '('; parameter() parses each parameter */
-	while (tok.kind != TRPAREN) {
-		struct decl *pd;
-		pd = parameter(rs);
-		(void)pd;
-		if (tok.kind == TRPAREN)
-			break;
-		expect(TCOMMA, "or ')' in requires parameter list");
+	{
+		size_t d = tokctx_depth();
+		struct token guard = {0};
+		guard.kind = TSEMICOLON;
+		tokpush(&guard, 1);
+		tokpush(sp, n);
+		next(); /* tok = '(' */
+		next(); /* skip '('; parameter() parses each parameter */
+		while (tok.kind != TRPAREN) {
+			struct decl *pd;
+			pd = parameter(rs);
+			/* parameter() returns the decl; register it in the requires
+			 * scope so the requirement body can reference it */
+			if (pd && pd->name)
+				scopeputdecl(rs, pd);
+			if (tok.kind == TRPAREN)
+				break;
+			expect(TCOMMA, "or ')' in requires parameter list");
+		}
+		next(); /* consume ')' */
+		tokctx_rewind(d);
 	}
-	next(); /* consume ')' */
-	tokpush(&cur, 1);
-	next();
 	/* number of span tokens consumed: everything through the matching ')' */
 	{
 		int d = 0;
@@ -4710,18 +4740,20 @@ cpp_req_params(struct scope *rs, struct token *sp, size_t n)
 static bool
 cpp_req_simple(struct scope *rs, struct token *sp, size_t n)
 {
-	struct token cur;
 	struct expr *e;
+	size_t d = tokctx_depth();
+	struct token guard = {0};
 
-	cur = tok;
-	tokpush(&cur, 1);
+	/* a guard after the requirement span: the outer requires-expression
+	 * span is still buffered below in the token context, and an
+	 * expression parser must not fall through to its leftover tokens */
+	guard.kind = TSEMICOLON;
+	tokpush(&guard, 1);
 	tokpush(sp, n);
 	next();
 	e = expr(rs);
-	(void)e;
-	tokpush(&cur, 1);
-	next();
-	return true;
+	tokctx_rewind(d);
+	return e != NULL;
 }
 
 /* Compound requirement `{ e } -> Constraint` / `{ e }`: validate e and an
@@ -4729,7 +4761,6 @@ cpp_req_simple(struct scope *rs, struct token *sp, size_t n)
 static bool
 cpp_req_compound(struct scope *rs, struct token *sp, size_t n)
 {
-	struct token cur;
 	struct expr *e;
 	size_t close = 0;
 	int d = 0;
@@ -4752,14 +4783,18 @@ cpp_req_compound(struct scope *rs, struct token *sp, size_t n)
 	if (close == 0)
 		return false;
 
-	/* the braced expression must parse */
-	cur = tok;
-	tokpush(&cur, 1);
-	tokpush(sp, close + 1);
-	next();
-	e = expr(rs);
-	tokpush(&cur, 1);
-	next();
+	/* the braced expression must parse (inner expression, excluding the
+	 * enclosing braces) */
+	{
+		size_t d2 = tokctx_depth();
+		struct token guard = {0};
+		guard.kind = TSEMICOLON;
+		tokpush(&guard, 1);
+		tokpush(sp + 1, close - 1 > 0 ? close - 1 : 0);
+		next();
+		e = expr(rs);
+		tokctx_rewind(d2);
+	}
 	if (!e)
 		return false;
 
@@ -4812,9 +4847,28 @@ cpp_req_compound(struct scope *rs, struct token *sp, size_t n)
 					bool r = eval_concept_use(ntok, cn, rs);
 					free(ntok);
 					return r;
-				}
-				free(ntok);
+				}				free(ntok);
 				return false;
+			} else if (con) {
+				/* `-> Concept` shorthand: a one-place concept
+				 * constrained by the expression type:
+				 * `Concept<decltype(e)>`. */
+				struct token ntok[4] = {0};
+				char iname[64];
+				struct decl *td;
+				snprintf(iname, sizeof iname, "__req%d",
+				    ++g_cpp_lambda_count);
+				td = mkdecl(iname, DECLTYPE, e->type,
+				    QUALNONE, LINKNONE);
+				scopeputdecl(rs, td);
+				ntok[0] = ct[0];
+				ntok[1].kind = TLESS;
+				ntok[1].loc = ct[0].loc;
+				ntok[2].kind = tokenget(iname, strlen(iname));
+				ntok[2].loc = ct[0].loc;
+				ntok[3].kind = TGREATER;
+				ntok[3].loc = ct[0].loc;
+				return eval_concept_use(ntok, 4, rs);
 			}
 		}
 		/* otherwise a type constraint: the type must be valid */
@@ -4872,7 +4926,9 @@ cpp_requires_eval(struct scope *s, struct token *sp, size_t n)
 	/* `requires` keyword */
 	i = 1;
 	if (i < n && sp[i].kind == TLPAREN)
-		i = cpp_req_params(s, &sp[i], n - i);
+		/* cpp_req_params returns the sub-span offset just past the ')';
+		 * the whole-span index is 1 (for the `requires` keyword) plus it */
+		i = 1 + cpp_req_params(s, &sp[i], n - i);
 	if (i >= n || sp[i].kind != TLBRACE)
 		return false; /* malformed: no requirement body */
 	++i; /* skip '{' */
@@ -4926,53 +4982,47 @@ struct expr *
 cpp_requires_expr(struct scope *s)
 {
 	struct token *sp;
-	struct token saved;
-	size_t n, i, depth;
+	struct token after;
+	size_t n, depth;
 	bool result;
 	struct expr *e;
 	jmp_buf env;
 
 	/* buffer the whole expression first so a failed check still leaves
 	 * the stream positioned after it */
-	n = cpp_requires_span_len();
+	n = cpp_requires_span_len(&sp);
 	if (n == 0)
 		error(&tok.loc, "malformed requires-expression");
-	sp = xmalloc(n * sizeof *sp);
-	saved = tok;
+	/* `after` is the first token past the requires-expression; the caller
+	 * resumes here.  Captured before the trial, because a failed trial
+	 * may leave the global token anywhere. */
+	next(); /* advance past the closing '}' to the token after it */
+	after = tok;
 	depth = tokctx_depth();
-	for (i = 0; i < n; i++) {
-		sp[i] = tok;
-		next();
-	}
-	/* consume the expression: the caller continues at the current token */
-	{
-		struct token nxt = tok;
-		tokctx_rewind(depth);
-		tokpush(&nxt, 1);
-	}
 
 	/* evaluate the buffered expression under a trial: replay the span,
-	 * then restore the context; any parse/type error makes it false */
+	 * then restore the context; any parse/type error makes it false.
+	 * cpp_trial_begin/end save and restore the enclosing trial's jump
+	 * buffer (and depth) so a failed trial unwinds here with result false
+	 * rather than rethrowing into the caller. */
 	if (setjmp(env) == 0) {
 		cpp_trial_begin(env);
 		tokpush(sp, n);
 		next();
 		result = cpp_requires_eval(s, sp, n);
-		tokctx_rewind(depth);
 		cpp_trial_end(env);
 	} else {
-		cpp_trial_rethrow();
-		tokctx_rewind(depth);
+		/* an error was raised inside the trial; restore the trial
+		 * bookkeeping and report the expression as false. */
+		cpp_trial_end(env);
 		result = false;
 	}
-	/* restore the stream to just past the requires-expression (the token
-	 * pushed above); a failed trial is left with the guard, not the span */
-	{
-		struct token nxt = tok;
-		tokctx_rewind(depth);
-		tokpush(&nxt, 1);
-	}
-	(void)saved;
+	/* restore the stream to just past the requires-expression: discard
+	 * the trial's replayed tokens and set the global token to the one
+	 * after the expression (the trial never advanced the source stream,
+	 * so `after` is still the next source token). */
+	tokctx_rewind(depth);
+	tok = after;
 	free(sp);
 
 	e = mkexpr(EXPRCONST, &typebool, NULL);
