@@ -8,7 +8,7 @@ LIB := $(BUILD)/libtui.a
 TEST := $(BUILD)/test_tui
 RENDER_TEST := $(BUILD)/test_render_dump
 
-EXAMPLES := demo demo_dialog demo_list demo_shell demo_json
+EXAMPLES := demo demo_dialog demo_list demo_shell demo_json demo_fm demo_top
 EXE := $(addprefix $(BUILD)/,$(EXAMPLES))
 
 .PHONY: all check clean examples $(EXAMPLES)
@@ -58,12 +58,20 @@ $(BUILD)/demo_shell: examples/demo_shell.c $(LIB) | $(BUILD)
 $(BUILD)/demo_json: examples/demo_json.c $(LIB) | $(BUILD)
 	$(CC) $(CFLAGS) -Iinclude -o $@ examples/demo_json.c $(LIB)
 
+$(BUILD)/demo_fm: examples/demo_fm.c $(LIB) | $(BUILD)
+	$(CC) $(CFLAGS) -Iinclude -o $@ examples/demo_fm.c $(LIB)
+
+$(BUILD)/demo_top: examples/demo_top.c $(LIB) | $(BUILD)
+	$(CC) $(CFLAGS) -Iinclude -o $@ examples/demo_top.c $(LIB)
+
 # 单个示例快捷构建
 demo: $(BUILD)/demo
 demo_dialog: $(BUILD)/demo_dialog
 demo_list: $(BUILD)/demo_list
 demo_shell: $(BUILD)/demo_shell
 demo_json: $(BUILD)/demo_json
+demo_fm: $(BUILD)/demo_fm
+demo_top: $(BUILD)/demo_top
 
 clean:
 	rm -rf $(BUILD)
