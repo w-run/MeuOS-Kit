@@ -464,6 +464,7 @@ typedef struct MTargetM {
 extern const MTargetM mtarget_x86_64;   /* x86_64 first; others follow per-arch */
 extern const MTargetM mtarget_riscv64;  /* P3a: riscv64 MIR-native (LP64D) */
 extern const MTargetM mtarget_loongarch64; /* P3b: loongarch64 MIR-native (LP64D) */
+extern const MTargetM mtarget_aarch64;  /* P3b: aarch64 MIR-native (AAPCS64) */
 
 const char *mreg_name(const MTargetM *mt, MReg r);
 /* Look up a register by assembler name; returns -1 if not found. */
