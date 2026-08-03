@@ -147,9 +147,11 @@ const MTargetM mtarget_riscv64 = {
 	.sret_reg = RV64MREG_A0,
 	.abi = mfnm_abi_riscv64,
 	/* emitter temporaries: t0/t1 (addressing scratch) + t6 (large
-	 * offsets / dynamic alloca) — never handed to the allocator. */
+	 * offsets / dynamic alloca) + f0/f1 (FP scratch) — never handed to
+	 * the allocator. */
 	.scratch = (1ull << RV64MREG_T0) | (1ull << RV64MREG_T1) |
-	           (1ull << RV64MREG_T2) | (1ull << RV64MREG_T6),
+	           (1ull << RV64MREG_T2) | (1ull << RV64MREG_T6) |
+	           (1ull << RV64MREG_F0) | (1ull << RV64MREG_F1),
 };
 
 /* ---- aarch64 machine target (register descriptions) --------------------- */
@@ -278,10 +280,12 @@ const MTargetM mtarget_aarch64 = {
 	.feat = 0,               /* no cmov, no scale-index addressing */
 	.sret_reg = A64MREG_X8,
 	.abi = mfnm_abi_aarch64,
-	/* emitter temporaries: x9/x10/x11 (scratch) + ip0/ip1 (x16/x17) */
+	/* emitter temporaries: x9/x10/x11 (scratch) + ip0/ip1 (x16/x17) +
+	 * v16/v17 (FP scratch) */
 	.scratch = (1ull << A64MREG_X9) | (1ull << A64MREG_X10) |
 	           (1ull << A64MREG_X11) | (1ull << A64MREG_IP0) |
-	           (1ull << A64MREG_IP1),
+	           (1ull << A64MREG_IP1) | (1ull << A64MREG_V16) |
+	           (1ull << A64MREG_V17),
 };
 
 /* ---- x86-64 machine target (register descriptions) --------------------- */
