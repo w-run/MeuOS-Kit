@@ -385,7 +385,13 @@ check-cpp: check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg
 check-olevel: $(BIN)
 	@sh test/olevel/run.sh ./$(BIN)
 
-.PHONY: all clean check check-all check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-c23-neg check-c-mir check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir-bridge check-mir check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg check-cpp check-olevel
+# mcc/m++ i18n 双语消息目录回归（test/i18n/run.sh）：
+# --lang=en/zh 错误文本、--error-json message、--explain 修复建议、
+# --help 双语、LANG 环境推断、未收录消息降级。
+check-i18n: $(BIN) $(MPP_BIN)
+	@sh test/i18n/run.sh ./$(BIN) ./$(MPP_BIN)
+
+.PHONY: all clean check check-all check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-c23-neg check-c-mir check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir-bridge check-mir check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg check-cpp check-olevel check-i18n
 
 # chibicc community functional test suite (C11/C23 conformance).
 # Runs test/community/chibicc/run.sh against the MeuOS sysroot.
