@@ -322,3 +322,40 @@ P5/P6 已彻底修复；regalloc（线性扫描，依据 regalloc-design.md）�
   **19/19**（MIR-native + bridge 双路径）。commit bcd61f5 + 9f7682d。
 - 剩余 check-olevel 差距：② -O2 叶函数帧指针省略、③ -O1 内存局部常量
   传播（均 MIR-native 后端，另有 task）。
+
+## Phase 3a：抽象扩展 + riscv64 MIR-native 试点（2026-08-03，bella）
+
+长期目标"完全抛弃 QBE LIR 仅用 MIR"（x86_64 已强制 MIR-native，5aa1154）。
+Phase 3a 按 chloe 调研的移植顺序（riscv64→loongarch64→aarch64→arm→i386）
+交付 riscv64 试点。
+
+### 抽象扩展（commit 258f303）
+- **MTargetM.sret_reg**：隐藏返回缓冲寄存器从硬编码 X64MREG_RDI/
+  MFnM.sret_rdi 泛化为目标参数（x86_64=RDI、riscv64=A0）；regalloc.c
+  去掉 x86_64_m.h 依赖。
+- **MMOP_SETCCR**（寄存器比较）：无 flags ISA 替代 CMP+SETCC 的 flags
+  模型；riscv64 isel 用 slt/sltu 派生全条件。
+- **MTF_CMOV** 特性位；machine.c 注册 mtarget_riscv64（32 GPR+32 FPR、
+  a0-a7/fa0-fa7、无 cmov/无 scale-index）。
+
+### riscv64 MIR-native 标量后端（commit af0d958）
+- riscv64_mabi.c（LP64D 标量 ABI）+ riscv64_mbe.c（isel，比较→SETCCR、
+  分支→JCC 带布尔值）+ riscv64_memit.c（无 flags 发射，fp 固定帧）。
+- mbe_supported 限定标量整数函数；聚合/浮点/varargs/TLS/VLA 回退 legacy
+  riscv64 LIR 后端（正确性兜底）。
+
+### gate 泛化（commit 6c2a068）
+- emit.c 按 target 分派 mfnm_backend_x86_64/riscv64，未覆盖构造回退
+  bridge。
+
+### 验证
+- 24 个可编译 test/c99 样例经 MIR-native 交叉编译 riscv64 汇编全部通过
+  riscv64-linux-gnu-as（含 8 参数/循环/比较分支）。
+- test/riscv64/{regress,abi,tls,varargs,vla} 经 legacy 回退同样汇编通过。
+- x86_64 无回归：check-c-mir 双模式 fail=0、check-cpp-func rc=0、
+  check-mir 全绿、自举 exit 0、verify-all 19/19（MIR-native+bridge 双路径）。
+
+### 剩余工作（后续 Phase 3a/3b）
+- riscv64 后端补齐：聚合返回/参数（sret_reg 已就绪）、浮点（FP 寄存器
+  池已建，emit 半成品）、varargs、TLS、VLA、动态 alloca。
+- 移植顺序下一目标：loongarch64（同样无 flags，复用 SETCCR 模型）。
