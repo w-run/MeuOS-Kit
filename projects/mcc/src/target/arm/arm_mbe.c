@@ -59,6 +59,9 @@ map_op(MOP op, bool isf)
 	case MOP_SEXT: return MMOP_MOVSX;
 	case MOP_ZEXT: return MMOP_MOVZX;
 	case MOP_ALLOCA: return MMOP_ALLOCA16;
+	case MOP_VASTART: return MMOP_VASTART;
+	case MOP_VAARG:   return MMOP_VAARG;
+	case MOP_SALLOC:  return MMOP_SALLOC;
 	default:       return MMOP_NONE;
 	}
 }
@@ -101,14 +104,14 @@ mval_of_ref(MFn *mf, MRef r)
 	return 0;
 }
 
-/* Scalar 32/64-bit integer + floating-point functions for the MIR-native
- * ARM backend.  64-bit integer values (long long) need register pairs on
- * this 32-bit target — they are handled via register pairs (r0:r1 etc.)
- * at the ABI level and via two 32-bit loads/stores + adc/sbc at the
- * emitter level.  Aggregates, varargs, TLS and VLA are still rejected
- * and fall back to the legacy LIR ARM backend.  MT_PTR is allowed: on
- * this 32-bit target it only carries function references (the callee of
- * MOP_CALL), which the emitter turns into a direct `bl`. */
+/* Scalar + aggregate + varargs functions for the MIR-native ARM backend.
+ * 64-bit integer values (long long) need register pairs on this 32-bit
+ * target — they are handled via register pairs (r0:r1 etc.) at the ABI
+ * level and via two 32-bit loads/stores + adc/sbc at the emitter level.
+ * VLA (dynamic alloca) is still rejected and falls back to the legacy
+ * LIR ARM backend.  MT_PTR is allowed: on this 32-bit target it only
+ * carries function references (the callee of MOP_CALL), which the
+ * emitter turns into a direct `bl`. */
 static bool
 mbe_supported(MFn *mf)
 {
@@ -116,13 +119,6 @@ mbe_supported(MFn *mf)
 		for (uint32_t k = 0; k < mb->nins; k++) {
 			MIns *in = &mb->ins[k];
 			switch (in->op) {
-			case MOP_ARG:
-			case MOP_CALL:
-				if (in->src[0].val && in->src[0].val->kind == MV_TYPE)
-					return false;   /* aggregate args/returns */
-				break;
-			case MOP_VASTART: case MOP_VAARG:
-				return false;       /* varargs: legacy for now */
 			case MOP_ALLOCA:
 				if (in->src[0].val && in->src[0].val->kind != MV_CONST)
 					return false;   /* VLA: legacy for now */
@@ -166,16 +162,24 @@ mfnm_backend_arm(MFn *mf)
 				mi->td = dst ? dst->td : 0;
 				break;
 			}
-			case MOP_ARG:
-				maddm(fm, b, MMOP_ARG, in->dtype, 0,
-				      mval_of_ref(mf, in->src[0]), 0);
+			case MOP_ARG: {
+				MInsM *mi = maddm(fm, b, MMOP_ARG, in->dtype, 0,
+				                  mval_of_ref(mf, in->src[0]), 0);
+				if (in->src[0].val && in->src[0].val->kind == MV_TYPE) {
+					/* aggregate: src[1] is the source pointer;
+					 * td is the MV_TYPE's MTypeDesc */
+					mi->td = in->src[0].val->td;
+					mi->src[0] = mval_of_ref(mf, in->src[1]);
+				}
 				break;
+			}
 			case MOP_CALL: {
 				if (dst && dst->type == MT_NONE)
 					dst->type = in->dtype;
 				MInsM *mi = maddm(fm, b, MMOP_CALL, in->dtype, dst,
 				                  mval_of_ref(mf, in->src[0]), 0);
-				(void)mi;
+				if (in->src[1].val && in->src[1].val->kind == MV_TYPE)
+					mi->td = in->src[1].val->td;
 				break;
 			}
 			case MOP_LOAD: {

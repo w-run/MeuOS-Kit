@@ -995,6 +995,76 @@ emit_ins(FILE *f, MInsM *in)
 		return;   /* handled by the block loop */
 	case MMOP_NOP:
 		return;
+	case MMOP_BLIT: {
+		/* aggregate copy: src[1] -> src[0], cst bytes.
+		 * Use EAX as the data register, ECX/EDX for addresses.
+		 * Copy in 4/2/1 byte chunks. */
+		MConst *bc = in->cst;
+		int64_t sz = bc ? bc->u.i : 0;
+		MVal *dp = s0, *sp = s1;
+		/* Load destination address into ECX */
+		if (dp && dp->kind == MV_REG)
+			fprintf(f, "\tmovl\t%%%s, %%ecx\n", mreg_name(g_mt, dp->reg));
+		else {
+			mv_to_scratch(f, dp, "ecx");
+		}
+		/* Load source address into EDX */
+		if (sp && sp->kind == MV_REG)
+			fprintf(f, "\tmovl\t%%%s, %%edx\n", mreg_name(g_mt, sp->reg));
+		else {
+			mv_to_scratch(f, sp, "edx");
+		}
+		int64_t off = 0;
+		while (sz >= 4) {
+			fprintf(f, "\tmovl\t%lld(%%edx), %%eax\n", (long long)off);
+			fprintf(f, "\tmovl\t%%eax, %lld(%%ecx)\n", (long long)off);
+			off += 4;
+			sz -= 4;
+		}
+		if (sz >= 2) {
+			fprintf(f, "\tmovw\t%lld(%%edx), %%ax\n", (long long)off);
+			fprintf(f, "\tmovw\t%%ax, %lld(%%ecx)\n", (long long)off);
+			off += 2;
+			sz -= 2;
+		}
+		if (sz >= 1) {
+			fprintf(f, "\tmovb\t%lld(%%edx), %%al\n", (long long)off);
+			fprintf(f, "\tmovb\t%%al, %lld(%%ecx)\n", (long long)off);
+		}
+		return;
+	}
+	case MMOP_CMP: {
+		/* compare src[0] vs src[1], set flags */
+		mv_to_scratch(f, s0, "eax");
+		mv_to_scratch(f, s1, "ecx");
+		fputs("\tcmpl\t%ecx, %eax\n", f);
+		return;
+	}
+	case MMOP_SETCC: {
+		/* dst = flags.cc ? 1 : 0 */
+		fprintf(f, "\tset%s\t%%al\n", i386_cc_suffix(in->cc));
+		fputs("\tmovzbl\t%al, %eax\n", f);
+		scratch_to_dst(f, d, "eax");
+		return;
+	}
+	case MMOP_VASTART: {
+		/* va_start(ap): store the address of the first vararg into ap.
+		 * The address is computed from vafa (stored in the MIR function's
+		 * vafa field by the ABI lowering).  The terminator's vafa is
+		 * stored in term.td or in the function's vafa — but we need a
+		 * way to get it here.  The ABI lowering replaces MMOP_VASTART
+		 * with concrete instructions, so this should never be reached
+		 * in the emitter.  For safety, emit a no-op. */
+		fprintf(f, "\t# vastart\n");
+		return;
+	}
+	case MMOP_VAARG: {
+		/* va_arg(ap, type): load the next argument.  The ABI lowering
+		 * replaces MMOP_VAARG with concrete instructions, so this
+		 * should never be reached. */
+		fprintf(f, "\t# vaarg\n");
+		return;
+	}
 	case MMOP_PUSH: {
 		if (s0)
 			mv_to_scratch(f, s0, "eax");

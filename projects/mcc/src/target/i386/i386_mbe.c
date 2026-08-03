@@ -54,6 +54,9 @@ map_op(MOP op, bool isf)
 	case MOP_SEXT: return MMOP_MOVSX;
 	case MOP_ZEXT: return MMOP_MOVZX;
 	case MOP_ALLOCA: return MMOP_ALLOCA16;
+	case MOP_SALLOC: return MMOP_SALLOC;
+	case MOP_VASTART: return MMOP_VASTART;
+	case MOP_VAARG:   return MMOP_VAARG;
 	default:       return MMOP_NONE;
 	}
 }
@@ -96,10 +99,11 @@ mval_of_ref(MFn *mf, MRef r)
 	return 0;
 }
 
-/* Scalar integer + floating-point functions: reject aggregates, varargs,
- * TLS and VLA — fall back to the legacy LIR i386 backend.  MT_PTR is
- * allowed (on 32-bit i386 it carries function refs).  i64 values are
- * supported via register pairs (EDX:EAX) and spill slots. */
+/* Scalar + aggregate + varargs functions: reject only VLA — fall back to
+ * the legacy LIR i386 backend.  MT_PTR is allowed (on 32-bit i386 it
+ * carries function refs).  i64 values are supported via register pairs
+ * (EDX:EAX) and spill slots.  Aggregates and varargs are now handled by
+ * the ABI-lowering layer (i386_mabi.c). */
 static bool
 mbe_supported(MFn *mf)
 {
@@ -107,20 +111,6 @@ mbe_supported(MFn *mf)
 		for (uint32_t k = 0; k < mb->nins; k++) {
 			MIns *in = &mb->ins[k];
 			switch (in->op) {
-			case MOP_ARG:
-			case MOP_CALL:
-				if (in->src[0].val && in->src[0].val->kind == MV_TYPE) {
-					if (getenv("MCC_DEBUG_I386REJ"))
-						fprintf(stderr, "i386 rej %s: aggregate\n",
-						        mf->name);
-					return false;   /* aggregate args/returns */
-				}
-				break;
-			case MOP_VASTART: case MOP_VAARG:
-				if (getenv("MCC_DEBUG_I386REJ"))
-					fprintf(stderr, "i386 rej %s: varargs\n",
-					        mf->name);
-				return false;       /* varargs: legacy for now */
 			case MOP_ALLOCA:
 				if (in->src[0].val && in->src[0].val->kind != MV_CONST) {
 					if (getenv("MCC_DEBUG_I386REJ"))
@@ -168,16 +158,24 @@ mfnm_backend_i386(MFn *mf)
 				mi->td = dst ? dst->td : 0;
 				break;
 			}
-			case MOP_ARG:
-				maddm(fm, b, MMOP_ARG, in->dtype, 0,
-				      mval_of_ref(mf, in->src[0]), 0);
+			case MOP_ARG: {
+				MInsM *mi = maddm(fm, b, MMOP_ARG, in->dtype, 0,
+				                  mval_of_ref(mf, in->src[0]), 0);
+				if (in->src[0].val && in->src[0].val->kind == MV_TYPE) {
+					/* aggregate argument: src[1] is the source
+					 * pointer; td is the MV_TYPE's MTypeDesc */
+					mi->td = in->src[0].val->td;
+					mi->src[0] = mval_of_ref(mf, in->src[1]);
+				}
 				break;
+			}
 			case MOP_CALL: {
 				if (dst && dst->type == MT_NONE)
 					dst->type = in->dtype;
 				MInsM *mi = maddm(fm, b, MMOP_CALL, in->dtype, dst,
 				                  mval_of_ref(mf, in->src[0]), 0);
-				(void)mi;
+				if (in->src[1].val && in->src[1].val->kind == MV_TYPE)
+					mi->td = in->src[1].val->td;
 				break;
 			}
 			case MOP_LOAD: {

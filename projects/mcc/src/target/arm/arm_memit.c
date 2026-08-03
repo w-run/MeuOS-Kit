@@ -1085,9 +1085,63 @@ emit_ins(FILE *f, MInsM *in)
 		}
 		return;
 	}
+	case MMOP_BLIT: {
+		/* aggregate copy: src[1] -> src[0], cst = size.
+		 * Use r10 (dest) and r12 (src) as pointers, r4 as data temp.
+		 * r4 is callee-saved, so push/pop around the copy. */
+		int64_t sz = in->cst ? in->cst->u.i : 0;
+		MVal *dp = s0, *sp = s1;
+		/* load dest pointer into r10 */
+		if (dp && dp->kind == MV_REG)
+			fprintf(f, "\tmov\tr10, %s\n", mreg_name(g_mt, dp->reg));
+		else
+			mv_to_scratch(f, dp, "r10");
+		/* load src pointer into r12 */
+		if (sp && sp->kind == MV_REG)
+			fprintf(f, "\tmov\tr12, %s\n", mreg_name(g_mt, sp->reg));
+		else
+			mv_to_scratch(f, sp, "r12");
+		/* save r4, do the copy, restore r4 */
+		fputs("\tpush\t{r4}\n", f);
+		int64_t off = 0;
+		while (sz >= 4) {
+			fprintf(f, "\tldr\tr4, [r12, #%lld]\n", (long long)off);
+			fprintf(f, "\tstr\tr4, [r10, #%lld]\n", (long long)off);
+			off += 4;
+			sz -= 4;
+		}
+		if (sz >= 2) {
+			fprintf(f, "\tldrh\tr4, [r12, #%lld]\n", (long long)off);
+			fprintf(f, "\tstrh\tr4, [r10, #%lld]\n", (long long)off);
+			off += 2;
+			sz -= 2;
+		}
+		if (sz >= 1) {
+			fprintf(f, "\tldrb\tr4, [r12, #%lld]\n", (long long)off);
+			fprintf(f, "\tstrb\tr4, [r10, #%lld]\n", (long long)off);
+		}
+		fputs("\tpop\t{r4}\n", f);
+		return;
+	}
+	case MMOP_CMP: {
+		/* compare two values and set CPSR flags: cmp src[0], src[1] */
+		mv_to_scratch(f, s0, "r10");
+		mv_to_scratch(f, s1, "r12");
+		fputs("\tcmp\tr10, r12\n", f);
+		return;
+	}
+	case MMOP_SETCC: {
+		/* dst = flags.cc ? 1 : 0 — conditional set from CPSR flags */
+		fputs("\tmov\tr10, #0\n", f);
+		fprintf(f, "\tmov%s\tr10, #1\n", arm_cc_suffix(in->cc));
+		scratch_to_dst(f, d, "r10");
+		return;
+	}
 	case MMOP_RET:
 		return;   /* handled by the block loop */
 	case MMOP_NOP:
+	case MMOP_VASTART:
+	case MMOP_VAARG:
 		return;
 	default:
 		fprintf(f, "\t# unsupported MMOP %d\n", (int)op);
