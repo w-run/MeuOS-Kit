@@ -4729,8 +4729,12 @@ cpp_tmpl_deduce(struct cpp_template *tmpl, struct expr *arglist,
 static bool eval_constraint(struct token *c, size_t n, struct scope *bs);
 
 /* Maximum constraint expansion depth (guards against recursive
- * concept definitions referencing each other). */
-#define MAX_CONSTRAINT_DEPTH 16
+ * concept definitions referencing each other).  This is a runaway guard,
+ * not a conformance limit: legitimate deep template code (long concept
+ * reference chains, `Concept<Concept<...>>` nesting) routinely exceeds a
+ * couple of dozen levels, so the bound is set well above the constant
+ * expression recursion limit (64) rather than at it. */
+#define MAX_CONSTRAINT_DEPTH 256
 
 /* Split the argument token span `args[0..nargs)` of a concept use
  * `Name < args... >` on top-level commas.  Returns a heap array of
