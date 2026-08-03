@@ -583,7 +583,7 @@ decl(struct scope *s, struct func *f)
 				 * that inline definition to an external definition — emit the
 				 * deferred body now (defect c-01). */
 				if (!d->u.func.inlinedefn && d->u.func.deferfn) {
-					emitfunc(d->u.func.deferfn, d->linkage == LINKEXTERN);
+					emitfunc(d->u.func.deferfn, d->u.func.deferscope, d->linkage == LINKEXTERN);
 					delscope(d->u.func.deferscope);
 					delfunc(d->u.func.deferfn);
 					d->u.func.deferfn = NULL;
@@ -699,7 +699,7 @@ decl(struct scope *s, struct func *f)
 					 * emission decision and keep the body (and its function
 					 * scope) alive until then. */
 					if (!d->u.func.inlinedefn) {
-						emitfunc(f, d->linkage == LINKEXTERN);
+						emitfunc(f, s, d->linkage == LINKEXTERN);
 						s = delscope(s);
 						delfunc(f);
 					} else {

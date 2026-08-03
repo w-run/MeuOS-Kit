@@ -442,6 +442,16 @@ extern bool warn_as_error;
 /* Diagnostic output mode (p9-ui): --error-json emits diagnostics as
  * structured JSON lines for tooling; --explain adds a fix-hint suffix. */
 extern int g_error_json;
+extern int g_dwarf_level; /* -g level: 0 = no debug info, 1+ = DWARF level */
+
+/* DWARF debug-info collection + emission (src/emit/dwarf.c). */
+void dwarf_set_file(const char *);
+int dwarf_begin_func(const char *, int, int);
+void dwarf_add_var(const char *, int);
+void dwarf_end_func(void);
+void dwarf_emit_func_end(FILE *, int);
+void dwarf_finalize(FILE *);
+
 extern int g_error_explain;
 
 /* Target features bitmask (MT_FEATURE_*), set by -march=native or
@@ -702,5 +712,5 @@ struct location funcget_bodyend(struct func *);
 void funcswitch(struct func *, struct value *, struct switchcases *, struct block *);
 void funcinit(struct func *, struct decl *, struct init *, bool);
 
-void emitfunc(struct func *, bool);
+void emitfunc(struct func *, struct scope *, bool);
 void emitdata(struct decl *, struct init *);

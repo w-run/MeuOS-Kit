@@ -75,6 +75,21 @@ funcalloc(struct func *f, struct decl *d)
 		v = funcinst(f, IAND, ptrclass(), v, mkintconst(-align));
 	}
 	d->value = v;
+	/* DWARF: record the local (name, type, frontend value id) so the
+	 * collector can map it to its final stack location via the MIR
+	 * value table after register allocation. */
+	if (d->name && v->kind == VALUE_TEMP) {
+		struct dwarf_vrec *vr;
+		if (f->ndvars >= f->capdvars) {
+			f->capdvars = f->capdvars ? f->capdvars * 2 : 8;
+			f->dvars = xreallocarray(f->dvars, f->capdvars,
+			    sizeof *f->dvars);
+		}
+		vr = &f->dvars[f->ndvars++];
+		vr->name = d->name;
+		vr->type = d->type;
+		vr->value_id = v->id;
+	}
 	f->end = end;
 }
 

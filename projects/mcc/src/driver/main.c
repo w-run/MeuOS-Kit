@@ -529,7 +529,26 @@ mcc_main(int argc, char *argv[])
 		case 't': target = ARGVAL(a + 2); break;  /* alias for -target */
 		case 'v': verbose = true; break;
 		case 'w': warn_level = 0; break;
-		case 'g': emit_debug = 1; break;   /* debug info */
+		case 'g': {
+			/* -g (default level 1) / -g0 (no debug info at all) /
+			 * -gN (N = 1,2,4,5) / -gdwarf[-N]: record the DWARF level.
+			 * -g0 turns off emit_debug so no .file/.loc/.debug_* output
+			 * is produced; higher levels are accepted and recorded but
+			 * currently share the same minimal DWARF emission. */
+			const char *lv = a[2] ? a + 2 : "";
+			int lvl = 1;
+			if (lv[0] == '0' && lv[1] == '\0')
+				lvl = 0;
+			else if (strncmp(lv, "dwarf", 5) == 0)
+				lvl = lv[5] ? atoi(lv + 5) : 2;
+			else if (lv[0] >= '1' && lv[0] <= '9')
+				lvl = atoi(lv);
+			if (lvl < 0) lvl = 0;
+			if (lvl > 5) lvl = 5;
+			g_dwarf_level = lvl;
+			emit_debug = lvl > 0;
+			break;
+		}
 		case 'd': { for (char *p = a + 2; *p; ++p) if (*p <= 'Z') debug[(unsigned char)*p] = 1; break; }
 		case 'P': break;   /* suppress line markers in -E */
 		case 'H': break;   /* print includes */
@@ -859,8 +878,10 @@ mcc_main(int argc, char *argv[])
 		}
 	} else {
 		scopeinit();
-		if (emit_debug && first_input)
+		if (emit_debug && first_input) {
 			emitdbgfile(first_input, stdout);
+			dwarf_set_file(first_input);
+		}
 		if (g_lang == 1) {
 			/* C++ translation unit: the C++ frontend parser drives the
 			 * declaration loop (C++ grammar layered over the C parser). */
@@ -898,6 +919,9 @@ mcc_main(int argc, char *argv[])
 		/* Emit ELF footer (sections, etc.). */
 		if (T.emitfin)
 			T.emitfin(stdout);
+		/* DWARF debug info (when -g with a level). */
+		if (g_dwarf_level > 0)
+			dwarf_finalize(stdout);
 	}
 
 	fflush(stdout);
