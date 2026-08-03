@@ -290,12 +290,12 @@ emitfunc(struct func *f, bool global)
 	 * below is unreachable (scheduled for removal in Phase 3). */
 	if (g_use_mir) {
 		MFn *mf = func_to_mir(f, opt_level, global);
-		if (emit_debug) {
+		if (debug['X']) {
 			fprintf(stderr, "\n> MIR (pre-pass) %s:\n", f->name);
 			mfn_dump(mf, stderr);
 		}
 		run_mir_passes(mf, opt_level);
-		if (emit_debug) {
+		if (debug['X']) {
 			fprintf(stderr, "\n> MIR (post-pass) %s:\n", f->name);
 			mfn_dump(mf, stderr);
 		}
@@ -310,7 +310,7 @@ emitfunc(struct func *f, bool global)
 			return;
 		}
 		fn = lir_bridge(mf);
-		if (emit_debug) {
+		if (debug['X']) {
 			fprintf(stderr, "\n> LIR (bridged) %s:\n", f->name);
 			printfn(fn, stderr);
 		}

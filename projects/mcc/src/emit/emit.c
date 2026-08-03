@@ -1,6 +1,7 @@
 #include "ir.h"
 
 int emit_debug;  /* set by -g flag in main.c */
+int g_dwarf_level;  /* -g level: 0 = no debug info, 1+ = DWARF level */
 
 enum {
 	SecText,
