@@ -6,6 +6,7 @@
 .agents/settings.json
 .agents/scheduled_tasks.lock
 .agents/worktrees/
+
 a.out
 # mcc chibicc community-suite run output (regenerated per run)
 **/community/chibicc/results.log
@@ -50,12 +51,11 @@ projects/mcc/mcc
 # QEMU test environment (env/) - large binaries, not tracked
 reference/
 # Reference source trees (cproc + QBE), pulled read-only for design reference.
+# But .agents/reference/ IS tracked (project-level agent reference docs).
+!.agents/reference/
 *.s
 *.so
 *.so.*
-# Exception: P0 MIR-backend oracle baselines (compiled assembly outputs) are
-# tracked so the bridge path can be asm-diffed against the MIR backend.
-!projects/mcc/docs/mir-backend/asm/*.s
 sources/
 *.ssa
 stage/
@@ -63,9 +63,3 @@ stage/
 sysroot/
 .vscode/
 *.msys
-
-# Reference projects (cloned for study, not part of the build)
-reference/
-
-# Reference source-tree symlink (points to the main checkout)
-reference
