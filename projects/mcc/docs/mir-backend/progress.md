@@ -100,6 +100,20 @@ check-mir 全绿；bridge 路径 0 回归。
   check-cpp-func/neg rc=0；cpp 套件在 MCC_MIR_BACKEND=1 下全绿。
 - 覆盖门禁建议：check-cpp 增加 MCC_MIR_BACKEND=1 变体。
 
+### 后续收口（MCC_MIR_BACKEND=1 全量 verify-all 17/17 所需的两个配套修复）
+1. **MCC_MIR_BACKEND 目标门控**（emit.c，72a04bd）：MIR-native 后端仅
+   x86_64 实现，但调用 mfnm_backend_x86_64 不检查目标，MCC_MIR_BACKEND=1
+   会劫持 i386/loongarch64/riscv64/aarch64 编译并输出 x86-64 指令
+   （pushq/%rsp）→ 汇编失败。按 `T.name=="x86_64"` 门控，非 x86_64 忽略
+   该 env 走 legacy LIR。
+2. **MIR-native TLS 适配 PIC**（x86_64_memit.c，16273af）：emit_tls_addr
+   一律 local-exec（%fs:0+@tpoff），--shared 下 R_X86_64_TPOFF32 被链接器
+   拒绝。T.pic 时改用 initial-exec GOT 形式
+   （`movq sym@gottpoff(%rip); addq %fs:0`），对照 legacy Oaddr。
+- 最终验证：`MCC_MIR_BACKEND=1 sh test/verify-all.sh` **17/17**（含
+  check-driver 的 shared/TLS 回归、check-i386/loongarch64/targets 交叉
+  目标）；默认模式 verify-all 亦 17/17，无回归。
+
 ## 当前工作点
 
 - **P4 regalloc 全部完成（A-E）**；isel-debug 验证发现的 P3b 遗留 2 个边界
