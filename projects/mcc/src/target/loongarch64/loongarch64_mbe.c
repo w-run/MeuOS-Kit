@@ -7,7 +7,7 @@
  * condition flags, so
  *   - MIR comparisons lower to MMOP_SETCCR (register slt/sltu-based);
  *   - `if (bool)` branches lower to MMOP_JCC whose terminator carries the
- *     boolean value in src[0] (branch on register, bne/beq vs $zero);
+ *     boolean value in src[0] (branch on register, bnez/beqz);
  *   - there is no conditional move, so if-conversion never runs.
  *
  * mbe_supported() restricts the MIR-native path to scalar integer
@@ -65,12 +65,12 @@ static MCC
 mir_cmp_cc(MOP op)
 {
 	switch (op) {
-	case MOP_CEQ:  return MCC_EQ;
-	case MOP_CNE:  return MCC_NE;
-	case MOP_CSLT: return MCC_LT;
-	case MOP_CSLE: return MCC_LE;
-	case MOP_CSGT: return MCC_GT;
-	case MOP_CSGE: return MCC_GE;
+	case MOP_CEQ:  case MOP_CFEQ: return MCC_EQ;
+	case MOP_CNE:  case MOP_CFNE: return MCC_NE;
+	case MOP_CSLT: case MOP_CFLT: return MCC_LT;
+	case MOP_CSLE: case MOP_CFLE: return MCC_LE;
+	case MOP_CSGT: case MOP_CFGT: return MCC_GT;
+	case MOP_CSGE: case MOP_CFGE: return MCC_GE;
 	case MOP_CULT: return MCC_CC;
 	case MOP_CULE: return MCC_LS;
 	case MOP_CUGT: return MCC_HI;
@@ -99,43 +99,14 @@ mval_of_ref(MFn *mf, MRef r)
 	return 0;
 }
 
-/* Scalar integer functions only for this round: fall back to the legacy
- * loongarch64 LIR backend for everything else (floats, aggregates, varargs,
- * TLS, VLA). */
+/* Full coverage: scalar, float, aggregates, VLA and varargs all run
+ * MIR-native on loongarch64. */
 static bool
 mbe_supported(MFn *mf)
 {
-	/* thread-local globals need TLS address relocations the scalar core
-	 * does not emit; let the legacy backend handle them */
-	for (uint32_t i = 0; i < mf->nval; i++)
-		if (mf->val[i] && mf->val[i]->kind == MV_GLOBAL &&
-		    mf->val[i]->tls)
-			return false;
-	for (MBlk *mb = mf->link; mb; mb = mb->link) {
-		for (uint32_t k = 0; k < mb->nins; k++) {
-			MIns *in = &mb->ins[k];
-			if (in->dtype == MT_F32 || in->dtype == MT_F64)
-				return false;   /* float codegen: legacy for now */
-			switch (in->op) {
-			case MOP_ARG:
-			case MOP_CALL:
-				if (in->src[0].val && in->src[0].val->kind == MV_TYPE)
-					return false;   /* aggregate args/returns */
-				break;
-			case MOP_F2I: case MOP_I2F: case MOP_UI2F:
-			case MOP_FEXT: case MOP_FTRUNC:
-				return false;
-			case MOP_VASTART: case MOP_VAARG:
-				return false;       /* varargs: legacy for now */
-			case MOP_ALLOCA:
-				if (in->src[0].val && in->src[0].val->kind != MV_CONST)
-					return false;   /* VLA: legacy for now */
-				break;
-			default:
-				break;
-			}
-		}
-	}
+	/* loongarch64 MIR-native full coverage since #119: scalar, float,
+	 * aggregates, VLA and varargs all run MIR-native. */
+	(void)mf;
 	return true;
 }
 
@@ -170,15 +141,24 @@ mfnm_backend_loongarch64(MFn *mf)
 				mi->td = dst ? dst->td : 0;
 				break;
 			}
-			case MOP_ARG:
-				maddm(fm, b, MMOP_ARG, in->dtype, 0,
-				      mval_of_ref(mf, in->src[0]), 0);
+			case MOP_ARG: {
+				MInsM *mi = maddm(fm, b, MMOP_ARG, in->dtype, 0,
+				                  mval_of_ref(mf, in->src[0]), 0);
+				if (in->src[0].val && in->src[0].val->kind == MV_TYPE) {
+					/* aggregate: src[1] is the source pointer; td is the
+					 * MV_TYPE's MTypeDesc */
+					mi->td = in->src[0].val->td;
+					mi->src[0] = mval_of_ref(mf, in->src[1]);
+				}
 				break;
+			}
 			case MOP_CALL: {
 				if (dst && dst->type == MT_NONE)
 					dst->type = in->dtype;
 				MInsM *mi = maddm(fm, b, MMOP_CALL, in->dtype, dst,
 				                  mval_of_ref(mf, in->src[0]), 0);
+				if (in->src[1].val && in->src[1].val->kind == MV_TYPE)
+					mi->td = in->src[1].val->td;
 				(void)mi;
 				break;
 			}
@@ -194,6 +174,14 @@ mfnm_backend_loongarch64(MFn *mf)
 				           mval_of_ref(mf, in->src[0]));
 				break;
 			}
+			case MOP_VASTART:
+				maddm(fm, b, MMOP_VASTART, MT_NONE, 0,
+				      mval_of_ref(mf, in->src[0]), 0);
+				break;
+			case MOP_VAARG:
+				maddm(fm, b, MMOP_VAARG, in->dtype, dst,
+				      mval_of_ref(mf, in->src[0]), 0);
+				break;
 			default: {
 				if (in->op >= MOP_CEQ && in->op <= MOP_CFGE) {
 					/* register comparison (no flags on loongarch64) */
@@ -206,8 +194,28 @@ mfnm_backend_loongarch64(MFn *mf)
 					}
 					break;
 				}
-				MMOP mo = map_op(in->op,
-				                in->dtype == MT_F32 || in->dtype == MT_F64);
+				MMOP mo;
+				if (in->op == MOP_I2F || in->op == MOP_UI2F) {
+					/* int -> fp: destination type picks the opcode */
+					mo = in->dtype == MT_F32
+					     ? (in->op == MOP_UI2F ? MMOP_CVTSI2SS_U
+					                           : MMOP_CVTSI2SS)
+					     : (in->op == MOP_UI2F ? MMOP_CVTSI2SD_U
+					                           : MMOP_CVTSI2SD);
+				} else if (in->op == MOP_F2I) {
+					/* fp -> int: source type picks the opcode */
+					MVal *s = mval_of_ref(mf, in->src[0]);
+					mo = (s && s->type == MT_F32) ? MMOP_CVTTSS2SI
+					                              : MMOP_CVTTSD2SI;
+				} else if (in->op == MOP_FEXT) {
+					mo = MMOP_CVTSS2SD;
+				} else if (in->op == MOP_FTRUNC) {
+					mo = MMOP_CVTSD2SS;
+				} else {
+					mo = map_op(in->op,
+					            in->dtype == MT_F32 ||
+					            in->dtype == MT_F64);
+				}
 				if (mo == MMOP_NONE)
 					break;
 				MInsM *mi = maddm(fm, b, mo, in->dtype, dst,
@@ -215,6 +223,12 @@ mfnm_backend_loongarch64(MFn *mf)
 				                   mval_of_ref(mf, in->src[1]));
 				if (in->cst)
 					mi->cst = in->cst;
+				/* alloca: the size lives in src[0]; carry it as cst so the
+				 * emitter sizes the static alloca area correctly (framesize
+				 * must cover the real struct/array size, not MMOP_ALLOCA16's
+				 * default 16) */
+				if (in->op == MOP_ALLOCA && in->src[0].con)
+					mi->cst = in->src[0].con;
 				break;
 			}
 			}

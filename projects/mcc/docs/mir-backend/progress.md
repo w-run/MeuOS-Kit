@@ -525,6 +525,42 @@ __gr_offs/__vr_offs）。
 
 ### 剩余工作（后续）
 - aarch64 浮点 va_arg 的 FP 块宽度（16B 槽 vs 实际 8B）边界、聚合块
-  分类的混合块（int+float 同一 8B 块）细化；移植顺序下一目标
-  loongarch64（bella 在途）。
+  分类的混合块（int+float 同一 8B 块）细化；loongarch64 已由 bella
+  补齐（见下）。
 
+## Phase 3b（续）：loongarch64 MIR-native 全功能补齐（2026-08-03，bella，#141）
+
+loongarch64 从标量整数扩展到全功能（参照 chloe 的 riscv64 补齐 49c2ac1）。
+commit：a4b28cd（聚合+varargs ABI）、2045931（浮点/TLS/BLIT 发射）、
+052fcb2（门禁适配）。
+
+### 聚合
+- LvClass 分类器：≤16B 拆 8B 块——全 FP 结构用 fa0/fa1，否则 a0/a1；
+  >16B/不完整走 sret（a0 隐藏缓冲，selpar 存槽、selret 重载 + BLIT）。
+- selpar/selcall/selret 聚合参数/返回 + 寄存器回填 pad。
+
+### varargs
+- 单指针 va_list：selpar 建 64B va_save 区存 a0-a7；vastart 指向首个
+  未消费 GP 寄存器或栈参数；vaarg 读 *ap 并步进 8。
+
+### 浮点
+- fadd/fsub/fmul/fdiv/fneg/fsqrt.s/d；movgr2fr+ffint（int→fp）、
+  ftintrz+movfr2gr（fp→int 截断 = C cast）；fcvt.s/d 互转。
+- 浮点比较：fcmp.clt/cle/ceq.s/d $fcc0 + movcf2gr（结果落 GPR）。
+- 踩坑：工具链 as（2.41）缺无符号 ffint.*.u——32 位无符号源已零扩展，
+  用有符号转换精确。
+
+### TLS
+- local-exec（lu12i.w %le_hi20/ori %le_lo12/lu32i.d %le64_lo20/
+  lu52i.d %le64_hi12/add.d $tp）与 initial-exec。
+
+### 验证
+- 29 个可编译 test/c99 样例（含 float/float_expr/hex_float/complex）
+  全部经 loongarch64-linux-gnu-as 汇编通过。
+- 综合样例（聚合 float 返回 fa0/fa1、>16B sret、varargs 含 double、
+  VLA、TLS）汇编通过。
+- check-loongarch64 门禁双后端（MIR-native 默认 + bridge）均转绿。
+- x86_64 无回归：verify-all 19/19（双路径）、自举 exit 0。
+
+### 下一目标
+- aarch64 已由 hazel 补齐（见上）；arm 移植由 chloe 在途。
