@@ -99,8 +99,8 @@ mval_of_ref(MFn *mf, MRef r)
 	return 0;
 }
 
-/* Scalar + float + aggregate functions for this round: fall back to the
- * legacy riscv64 LIR backend for varargs and VLA. */
+/* Scalar + float + aggregate + VLA functions for this round: fall back to
+ * the legacy riscv64 LIR backend for varargs only. */
 static bool
 mbe_supported(MFn *mf)
 {
@@ -110,10 +110,6 @@ mbe_supported(MFn *mf)
 			switch (in->op) {
 			case MOP_VASTART: case MOP_VAARG:
 				return false;       /* varargs: legacy for now */
-			case MOP_ALLOCA:
-				if (in->src[0].val && in->src[0].val->kind != MV_CONST)
-					return false;   /* VLA: legacy for now */
-				break;
 			default:
 				break;
 			}
