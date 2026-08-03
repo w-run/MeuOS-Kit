@@ -979,16 +979,25 @@ cpp_parse_translation_unit(void)
 
 	/* C++ `extern "C"` linkage specification: `extern "C" { ... }` block
 	 * form or `extern "C" int f();` single-declaration form.  Intercept
-	 * before the C parser's decl() sees `extern` as a storage class. */
+	 * before the C parser's decl() sees `extern` as a storage class.
+	 *
+	 * Peek-ahead: save the extern token, consume the next token, check
+	 * for "C".  If it IS extern "C" handle it; if not, use the same
+	 * pushback pattern as `consume()` in pp.c (copy the peeked token
+	 * to a local, restore the original, then ctxpush the copy). */
 	if (tok.kind == TEXTERN && g_lang == 1) {
 		struct token save = tok;
+		struct token peek;
 		next();
+		peek = tok;
 		/* The C lexer stores string literal content INCLUDING the
 		 * surrounding quotes in tok.lit, so we compare against "\"C\""
 		 * (the literal text `"C"` with quote characters). */
-		if (tok.kind == TSTRINGLIT && tok.lit &&
-		    tok.lit[0] == '"' && tok.lit[1] == 'C' && tok.lit[2] == '"' && tok.lit[3] == '\0') {
-			next(); /* consume the string literal */
+		if (peek.kind == TSTRINGLIT && peek.lit &&
+		    peek.lit[0] == '"' && peek.lit[1] == 'C' && peek.lit[2] == '"' && peek.lit[3] == '\0') {
+			/* extern "C": consume the "C" token (tok currently points to
+			 * it because next() advanced past extern). */
+			next(); /* consume "C" string literal */
 			char *saved = g_cpp_extern_c ? strdup("nested") : NULL;
 			if (tok.kind == TLBRACE) {
 				/* `extern "C" { ... }` — parse all declarations inside
@@ -1030,9 +1039,10 @@ cpp_parse_translation_unit(void)
 			g_err_recovery_set = 0;
 			continue;
 		}
-		/* not `extern "C"` — push back and fall through to normal decl() */
-		tokpush(&tok, 1);
+		/* not `extern "C"` — restore the extern token and push the
+		 * peeked token back so the normal C parser sees `extern int ...`. */
 		tok = save;
+		tokpush(&peek, 1);
 	}
 
 	c_decl:
