@@ -123,7 +123,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 - **E1** 命名空间作用域变量重定义 `int a; int a;` 漏检（eve 发现，pending/redef_global_var.neg.cc）→ **done**（grace，decl.c 重定义诊断 + 测试转正 test/cpp/redef_global_var.neg.cc）
 - **E2** 类内重复成员 `int x; int x;` 漏检（**已修复** alice，struct_decl.c addmember 检查；测试移至 test/cpp/dup_member.neg.cc）
 - **E3** 重复枚举符 `enum E{a,a};` 漏检（**已修复** alice，specs.c tagspec 检查；测试移至 test/cpp/dup_enum.neg.cc）
-- **E4** 非 void 函数缺 return 漏检（pending/missing_return.neg.cc）→ **done**（grace，func_falls_off_end CFG 可达性 + decl.c 检查 + 测试转正 test/cpp/missing_return.neg.cc；**GNU noreturn 误报已修复**——attr.c PREFIXGNU 补 noreturn + qualtype.kind 传播 GNU `__attribute__` 到 decl，test/cpp/noreturn_attr.cc 覆盖四风格）
+- **E4** 非 void 函数缺 return 漏检（pending/missing_return.neg.cc）→ **done**（grace，func_falls_off_end CFG 可达性 + decl.c 检查 + 测试转正 test/cpp/missing_return.neg.cc；**GNU noreturn 误报已修复**——attr.c PREFIXGNU 补 noreturn + qualtype.kind 传播 GNU `__attribute__` 到 decl，test/cpp/noreturn_attr.cc 覆盖四风格；**行号定位已修复**——struct func.bodyend 记录函数体 } 位置，报错不再落到下一 token）
 - **E5** 引用未初始化 `int&r;` 漏检（pending/uninit_ref.neg.cc）→ **done**（grace，decl.c 声明处检查 + 测试转正 test/cpp/uninit_ref.neg.cc）
 - **E6** C++ 模式禁用 VLA 未生效（pending/vla.neg.cc）→ **done**（grace，decl.c PROPVM 检查 + 测试转正 test/cpp/vla.neg.cc）
 - **D1** const T& operator 整体失败（**已修复** alice 608f31c，cpp_try_operator_call 4-way 级联）

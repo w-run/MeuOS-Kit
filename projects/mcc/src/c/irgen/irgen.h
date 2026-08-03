@@ -111,6 +111,10 @@ struct func {
 	struct block *start, *end;
 	struct map gotos;
 	unsigned lastid;
+	/* source location of the closing brace of the (outermost) compound
+	 * statement, recorded by stmt() so diagnostics can point at the
+	 * function body's end rather than the following token */
+	struct location bodyend;
 };
 
 /* Pointer width follows the selected ABI: i386 is ILP32, the remaining
