@@ -103,6 +103,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 - 根因：`cpp_parse.c flush_pending_methods`（1176-1199），行 1197 无条件 `cpp_parse_method_body`
 - 修复方案：模板实例化期间延迟模式 + 保留 pending_method 进 per-class 延迟表 + 调用点按需重放（**不能简单 continue 丢弃**，probe 已证明会破坏已使用方法）
 - 状态：**已修复**（alice d28c744，测试 tmpl_lazy_methods.cc；funcexpr EXPRCALL 按需重放 + 尾节点重锚 g_cpp_deferred_end），check-cpp-func 绿
+- 消息瑕疵已修复：按需解析报错成员名曾显示 `(null)`（expr_postfix.c 错误消息误用 tok.lit，标识符文本在 tokenstr 表）。修复改用 tokenstr(tok.kind)，测试 tmpl_member_undefined.neg.cc
 
 ### #elifdef/#elifndef 修复
 - 状态：**已合入主线**（pp.c→6ca4ba1，测试→e472811），已闭环
