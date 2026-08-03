@@ -248,6 +248,7 @@ struct decl {
 			/* the function might have an "inline definition" (C11 6.7.4p7) */
 			bool inlinedefn;
 			bool isnoreturn;
+			bool isnodiscard;   /* [[nodiscard]] function */
 			bool isconstexpr;   /* C++ constexpr function */
 			/* C99 6.7.4p6: an inline definition is not itself an external
 			 * definition.  The body is deferred here (with its function

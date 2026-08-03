@@ -561,6 +561,7 @@ decl(struct scope *s, struct func *f)
 				d->value = mkglobal(d);
 				d->u.func.inlinedefn = d->linkage == LINKEXTERN && fs & FUNCINLINE && !(sc & SCEXTERN) && (!prior || prior->u.func.inlinedefn);
 				d->u.func.isnoreturn = fs & FUNCNORETURN || a.kind & ATTRNORETURN;
+				d->u.func.isnodiscard = (a.kind & ATTRNODISCARD) != 0;
 				/* C99 6.7.4p6: an `extern` (or plain, non-inline) declaration
 				 * of a function that was previously defined `inline` promotes
 				 * that inline definition to an external definition — emit the

@@ -559,6 +559,24 @@ stmt(struct func *f, struct scope *s)
 		break;
 	default:
 		e = expr(s);
+		/* [[nodiscard]]: warn when the return of a nodiscard function
+		 * is discarded as a statement expression.  The callee of a
+		 * direct call is an EXPRIDENT, possibly wrapped in the unary
+		 * `&` used to decay the function to a pointer. */
+		{
+			extern int g_lang;
+			struct decl *cd = NULL;
+			struct expr *cb = e && e->kind == EXPRCALL ? e->base : NULL;
+			if (cb && cb->kind == EXPRUNARY && cb->op == TBAND && cb->base)
+				cb = cb->base;
+			if (cb && cb->kind == EXPRIDENT && cb->u.ident.decl)
+				cd = cb->u.ident.decl;
+			if (g_lang == 1 && cd && cd->u.func.isnodiscard)
+				/* WARN_RETURN (1<<3) — the return-value warning bucket */
+				cc_warn(&tok.loc, 1 << 3,
+				    "ignoring return value of nodiscard function '%s'",
+				    cd->name);
+		}
 		v = funcexpr(f, e);
 		delexpr(e);
 		expect(TSEMICOLON, "after expression statement");
