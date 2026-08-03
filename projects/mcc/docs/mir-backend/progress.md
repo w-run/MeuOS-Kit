@@ -356,8 +356,7 @@ Phase 3a 按 chloe 调研的移植顺序（riscv64→loongarch64→aarch64→arm
   check-mir 全绿、自举 exit 0、verify-all 19/19（MIR-native+bridge 双路径）。
 
 ### 剩余工作（后续 Phase 3a/3b）
-- riscv64 后端补齐：聚合返回/参数（sret_reg 已就绪）、浮点（FP 寄存器
-  池已建，emit 半成品）、varargs、TLS、VLA、动态 alloca。
+- ~~riscv64 后端补齐~~（2026-08-03 chloe 完成，见下）
 - 移植顺序下一目标：loongarch64（同样无 flags，复用 SETCCR 模型）。
 
 ## Phase 3b：loongarch64 MIR-native 试点（2026-08-03，bella）
@@ -434,3 +433,25 @@ Phase 3a 按 chloe 调研的移植顺序（riscv64→loongarch64→aarch64→arm
   varargs、TLS、VLA、动态 alloca。
 
 
+
+### riscv64 全功能补齐（#119，chloe，worktree-tmp-chloe-rv64fill）
+5 项独立提交，riscv64 MIR-native 覆盖标量+浮点+聚合+varargs+TLS+VLA：
+- **浮点**（5e8594a）：FPR 临时寄存器 f28/f29；fadd/sub/mul/div/neg/
+  sqrt、flw/fld/fsw/fsd、fcvt.*（F2I 带 rtz 保证 C 截断）；浮点比较
+  flt/fle/feq（目标整数寄存器）；mir_cmp_cc 补 CF*；mbe 转换 op 映射。
+  附带后端基础修复：入口块跳转（多块函数）、JCC 显式 fall-through
+  （块反转发射）、静态 alloca 越界、callee-saved FPR 用 fsd/fld。
+- **聚合**（b286463）：LP64D ≤16B 拆 8B 块回寄存器（非 FP 结构
+  a0/a1、全浮点结构 fa0/fa1）、>16B sret；RvClass 分类器 + mout_blit；
+  selpar/selcall/selret 全链路；MMOP_CALL 聚合返回不搬 a0 到 pad 指针；
+  大帧（>2047）li t6 前记；alloca 尺寸 cst 传递（修大结构溢出）。
+- **TLS**（9430114）：内部 tprel（lui %tprel_hi + add tp + addi
+  %tprel_lo）、外部 la.tls.ie（initial-exec）。
+- **VLA**（5fc57dd）：放开动态 alloca（memit 已有 sub sp + dynalloc）。
+- **varargs**（18f7348）：指针型 va_list（targ.c typevalist）；a0-a7
+  存 64B 保存区，*ap 指向首未消耗 GP 或栈区，va_arg 每次 +8；MFnM 加
+  va_save；mbe 补 VASTART/VAARG 映射。限制（与 legacy 一致）：double
+  varargs 与 >8 GP varargs 不支持。
+- 验证：qemu-riscv64-static 运行时（浮点/聚合/varargs/VLA/整数）全过；
+  test/riscv64/{abi,tls,varargs,vla} 全走 MIR-native 且汇编通过；
+  c99+c11 54 样例交叉汇编全过；x86_64 verify-all 19/19 + 自举 exit 0。
