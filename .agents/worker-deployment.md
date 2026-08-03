@@ -66,7 +66,7 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 | Worker | 模型 | 分支 | Worktree | 任务 | 状态 | 上次 push |
 |---|---|---|---|---|---|---|
 | alice | reasoning | worktree-tmp-alice-cpp (自 worktree-mxx-work@d0a90c9) | /tmp/mxx-wt-alice | cpp_parse 组 D1/D4/D2/E2/E3 修复（requires 续作已完成） | **completed**（已合入主线） | a3808b9 |
-| bella | lite | worktree-tmp-bella-mirp1 (自 worktree-mxx-work) | /tmp/mxx-wt-bella | x86_64 MIR-native fallback 闭环（聚合实参/SALLOC、TLS、动态 alloca/VLA） | **completed**（4c908df/1a1d599/7e78598/c5235b1 已 push origin/worktree-tmp-bella-mirp1，verify-all 17/17 全绿，双路径自举通过） | c5235b1 |
+| bella | lite | worktree-tmp-bella-mirp1 (自 worktree-mxx-work) | /tmp/mxx-wt-bella | x86_64 MIR-native fallback 闭环 + ≤16B 聚合返回修复（#94） | **completed**（fallback 4c908df/1a1d599/7e78598；#94：chloe 4aaa11f + fafa676 + bella 72a04bd/16273af，MIR_BACKEND=1 verify-all 17/17） | 16273af |
 | chloe | lite | 只读隔离副本 | /tmp/mcciso-chloe | 定位 chibicc B 类真 bug（常量折叠窄化 + va_end 类型检查） | **completed**（报告已收） | 只读不 push |
 | diana | lite | worktree-tmp-diana-pic + worktree-tmp-diana-errcode (自 worktree-mxx-work) | /tmp/mxx-wt-diana | C23/C11 边界测试 + check-pic-verify 修复 + 错误码体系/多错收集 | **completed**（db1451b C23 已合入 294e5c2；6db1691 PIC 已合入主线 58016d2；errcode da5a646/a561b36/c204bbe 本次归并合入主线） | 11 test/c23 + F1-F3 + i386/riscv64 GOT + E####/caret 全跨/JSON 多错/fix-it |
 | eve | lite | worktree-tmp-eve + worktree-tmp-eve-olevel (自 worktree-mxx-work) | /tmp/mxx-wt-eve | m++ 负向测试矩阵扩充 + -O 优化级别语义分级（O0..O3/-Os/-Oz/-Og/-Ofast + 非法级别钳制）+ check-olevel 目标 | **completed**（02d6684 测试矩阵已合入 b4cad7e；eve-olevel 本次归并合入主线） | 33 test/cpp + check-olevel |
@@ -179,6 +179,20 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
   - `7e78598` 动态 alloca/VLA：MFnM.dynalloc 标志 + emit 动态序列（subq rsp/16 对齐/leaq 0(rsp)）+ 前置扫描（块逆序输出问题）+ epilogue 从 rbp 恢复 rsp；新增 test/c11/vla_boundary.c
 - 验证：check-c-mir 默认与 MCC_MIR_BACKEND=1 双路径 fail=0；check-mir 全绿（mabi 45/regalloc 45）；check-sysroot-static 自举默认路径 exit 0（MIR_BACKEND=1 自举另验）
 - 说明：check-c99/c11/c23 默认 specs 需要 meuos-sysroot libc（-lc-meuos），本 worktree 未装 sysroot 属环境问题，与 MIR 改动无关（mir_matrix 显式 --specs=host 全绿）
+
+### ≤16B 聚合按值返回修复（#94，bella+chloe 竞争融合，worktree-tmp-bella-mirp1）
+- 现象：MCC_MIR_BACKEND=1 下 8/12/16B struct 按值返回 SIGSEGV（24B+ sret 正常）；cpp 侧 ref_ctor/ctor_scalar_initlist/structured_binding 崩
+- 根因（互补三处）：① mabi_selcall ≤16B else 分支为空（call->dst 未指向真实 pad，RAX 数据当地址解引用）；② 混合类返回寄存器映射位置式错误（SysV 按类计数 INTEGER:rax,rdx / SSE:xmm0,xmm1）；③ regalloc 区间 start 被多 def 覆盖（call dst 先赋 pad 地址、call 再 re-def → [mov,call) 区间失去保护 → 线性扫描复用寄存器，链式 `a+b+c` 的 this 被覆盖）
+- 提交：chloe `4aaa11f`（mabi pad+per-class retreg+aggregate_ret_small 测试）、`fafa676`（memit 直接 movsd + regalloc 多 def 区间 + aggregate_return 测试）；bella `72a04bd`（MCC_MIR_BACKEND 目标门控限 x86_64）、`16273af`（MIR-native TLS 适配 PIC @gottpoff）
+- 验证：`MCC_MIR_BACKEND=1 sh test/verify-all.sh` **17/17**（含 check-driver shared/TLS、check-i386/loongarch64/targets 交叉目标）；默认模式亦 17/17
+- 备注：与 chloe 撞车为竞争融合正面案例，chloe 4aaa11f/fafa676 与其 Phase 2 分支（worktree-tmp-chloe-mirp2）无文件重叠
+
+### Phase 2：x86_64 默认强制 MIR-native（#80，chloe，worktree-tmp-chloe-mirp2）
+- 目标：MCC_USE_MIR=0 不再生效（g_use_mir 恒 1）；x86_64 默认走 MIR-native（g_use_mir_backend 默认 1）；删 emit.c 死 fallback 路径。
+- 提交：`e6f8c56`（main.c g_use_mir 恒 1 + g_use_mir_backend 默认 1；emit.c 删 NULL fall-through + `strcmp(T.name,"x86_64")` 目标门控）→ merge bella #94 收口 → `20e6988`（memit TLS PIC：新增 g_pic 全局镜像 T.pic，emit_tls_addr/mov_to_rax/emit_const 三处 @gottpoff 分叉，守 MIR 纯纪律优于 bella 16273af 的 T.pic 方案，已获 bella review 采纳）→ `0702745`（merge bella 72a04bd/16273af/e4b420b，memit 冲突以 g_pic 版为准）。
+- 验证：MCC_MIR_BACKEND=1 与默认模式双路径 verify-all 均 **19/19**（含 check-cpp-func/neg × MIR-native/bridge 双后端变体、check-driver TLS、自举）；此前 3 例 cpp 聚合返回段错误全修复。
+- verify-all.sh 改造：新增 `check-cpp-func/neg × MCC_MIR_BACKEND=1/0` 双后端显式复验步骤（补"cpp 套件只覆盖单一后端"缺口，17→19 步）。
+- 非 x86_64 target（aarch64/arm/riscv64/loongarch64/i386）仍走 MIR→bridge→LIR。
 
 ## 5. 纪律速查
 
