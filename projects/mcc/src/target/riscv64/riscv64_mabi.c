@@ -270,6 +270,21 @@ mabi_selpar(MFnM *fm, MOut *o, MInsM *parms, int n, uint32_t *vafa)
 	/* record the first-unused GPR/FPR counts and the caller-pushed stack
 	 * offset for va_start (offset relative to fp) */
 	*vafa = (uint32_t)((ni << 8) | (ns << 16) | (off << 24));
+
+	/* varargs: spill every possible GP argument register into a 64-byte
+	 * save area so va_start can point the va_list (a single pointer on
+	 * riscv64) at the first unconsumed register argument.  Matches the
+	 * legacy pointer-based va_list: va_arg reads *ap and advances by 8. */
+	if (fm->host && fm->host->vararg) {
+		MVal *save = tmp(fm, MT_PTR, "va_save");
+		mout_cst(o, MMOP_ALLOCA16, MT_PTR, save, 0,
+		         imm(fm, MT_I32, 64));
+		fm->va_save = save;
+		for (int i = 0; i < 8; i++)
+			mout_addr(o, MMOP_STORE, MT_I64, 0,
+			          maddr(save, 0, 1, i * 8),
+			          reg(fm, RV64MREG_A0 + i));
+	}
 }
 
 /* ---- selcall: call lowering -------------------------------------------- */
@@ -428,6 +443,51 @@ mabi_selret(MFnM *fm, MOut *o, MInsM *term)
 	term->td = 0;
 }
 
+/* ---- va_start / va_arg --------------------------------------------------
+ * riscv64 va_list is a single pointer (targ.c typevalist): *ap points at
+ * the next vararg.  va_start points it at the first unconsumed GP
+ * register (saved in the 64-byte va_save area) or, when all GP registers
+ * were consumed by named parameters, at the caller-pushed stack args.
+ * va_arg reads *(type*)*ap and advances *ap by 8 — mirrors the legacy
+ * rv64_abi.c selvastart/selvaarg. */
+
+static void
+mabi_vastart(MFnM *fm, MOut *o, MVal *ap, uint32_t vafa)
+{
+	int gp = (vafa >> 8) & 15;    /* consumed GP registers */
+	int soff = vafa >> 24;        /* first stack arg offset from fp */
+	MVal *first;
+
+	if (gp < 8 && fm->va_save) {
+		/* first unconsumed GP arg lives at va_save + gp*8 */
+		first = tmp(fm, MT_PTR, "abi");
+		mout_addr(o, MMOP_LEA, MT_PTR, first,
+		          maddr(fm->va_save, 0, 1, gp * 8), 0);
+	} else {
+		/* all GP regs consumed: the varargs continue on the stack */
+		first = tmp(fm, MT_PTR, "abi");
+		mout_addr(o, MMOP_LEA, MT_PTR, first,
+		          maddr(reg(fm, RV64MREG_FP), 0, 1, soff), 0);
+	}
+	mout_addr(o, MMOP_STORE, MT_PTR, 0, maddr(ap, 0, 1, 0), first);
+}
+
+static void
+mabi_vaarg(MFnM *fm, MOut *o, MInsM *in)
+{
+	MVal *ap = in->src[0];
+	MVal *dst = in->dst;
+
+	/* loc = *ap; *ap = loc + 8; dst = *(type*)loc */
+	MVal *loc = tmp(fm, MT_PTR, "va");
+	mout_addr(o, MMOP_LOAD, MT_PTR, loc, maddr(ap, 0, 1, 0), 0);
+	MVal *nl = tmp(fm, MT_PTR, "va");
+	mout(o, MMOP_ADD, MT_PTR, nl, loc,
+	     mval_const(fm->host, MT_I64, imm(fm, MT_I64, 8)));
+	mout_addr(o, MMOP_STORE, MT_PTR, 0, maddr(ap, 0, 1, 0), nl);
+	mout_addr(o, MMOP_LOAD, in->dtype, dst, maddr(loc, 0, 1, 0), 0);
+}
+
 /* ---- block rewrite ------------------------------------------------------ */
 
 static void
@@ -449,6 +509,14 @@ mabi_block(MFnM *fm, MBlkM *b, uint32_t start, MOut *o)
 		if (in->op == MMOP_CALL) {
 			mabi_selcall(fm, o, args, nargs, in);
 			nargs = 0;
+			continue;
+		}
+		if (in->op == MMOP_VASTART) {
+			mabi_vastart(fm, o, in->src[0], fm->vafa);
+			continue;
+		}
+		if (in->op == MMOP_VAARG) {
+			mabi_vaarg(fm, o, in);
 			continue;
 		}
 		mout(o, in->op, in->dtype, in->dst, in->src[0], in->src[1]);

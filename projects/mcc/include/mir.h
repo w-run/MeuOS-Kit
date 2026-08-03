@@ -617,6 +617,7 @@ struct MFnM {
 	bool has_sret;           /* sret: the hidden buffer register (mt->sret_reg)
 	                          * is pinned for the whole function */
 	MVal *sret_pad;          /* sret: alloca holding the buffer ptr across calls */
+	MVal *va_save;           /* varargs: pointer to the 128B reg_save_area */
 	uint32_t vafa;           /* varargs: packed arg-register usage (selpar) */
 	int32_t slot;            /* stack frame size (bytes); filled by regalloc/spill */
 	int32_t salign;          /* frame alignment */

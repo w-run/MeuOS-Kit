@@ -294,8 +294,11 @@ emit_addr_to_scratch(FILE *f, MAddr a, const char *rn)
 		return;
 	}
 	if (base && base->kind == MV_TEMP && base->reg < 0) {
-		/* base is a spill slot: address it off(fp) */
-		fprintf(f, "\taddi\t%s, fp, %d\n", rn, base->slot + g_slot_base);
+		/* base is a spilled temp whose stack slot holds a POINTER VALUE
+		 * (alloca result / computed address) — load it, then add the
+		 * displacement.  Treating the slot as a frame address here made
+		 * va_arg's register/stack select read the wrong memory. */
+		fprintf(f, "\tld\t%s, %d(fp)\n", rn, base->slot + g_slot_base);
 		if (a.off)
 			fprintf(f, "\taddi\t%s, %s, %lld\n", rn, rn, (long long)a.off);
 		return;

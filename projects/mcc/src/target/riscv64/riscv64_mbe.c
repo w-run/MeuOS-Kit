@@ -99,22 +99,12 @@ mval_of_ref(MFn *mf, MRef r)
 	return 0;
 }
 
-/* Scalar + float + aggregate + VLA functions for this round: fall back to
- * the legacy riscv64 LIR backend for varargs only. */
+/* Full coverage: scalar, float, aggregates, VLA and varargs all run
+ * MIR-native on riscv64. */
 static bool
 mbe_supported(MFn *mf)
 {
-	for (MBlk *mb = mf->link; mb; mb = mb->link) {
-		for (uint32_t k = 0; k < mb->nins; k++) {
-			MIns *in = &mb->ins[k];
-			switch (in->op) {
-			case MOP_VASTART: case MOP_VAARG:
-				return false;       /* varargs: legacy for now */
-			default:
-				break;
-			}
-		}
-	}
+	(void)mf;
 	return true;
 }
 
@@ -182,6 +172,14 @@ mfnm_backend_riscv64(MFn *mf)
 				           mval_of_ref(mf, in->src[0]));
 				break;
 			}
+			case MOP_VASTART:
+				maddm(fm, b, MMOP_VASTART, MT_NONE, 0,
+				      mval_of_ref(mf, in->src[0]), 0);
+				break;
+			case MOP_VAARG:
+				maddm(fm, b, MMOP_VAARG, in->dtype, dst,
+				      mval_of_ref(mf, in->src[0]), 0);
+				break;
 			default: {
 				if (in->op >= MOP_CEQ && in->op <= MOP_CFGE) {
 					/* register comparison (no flags on riscv64) */
