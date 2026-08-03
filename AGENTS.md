@@ -313,13 +313,8 @@ const char *mz_strerror(int e);
 
 **构建**：
 ```sh
-<<<<<<< Updated upstream
 make -C projects/meuos-compress              # 构建 libmz.a
 make -C projects/meuos-compress check        # 压缩/解压缩轮转测试
-=======
-make -C projects/mz              # 构建 libmz.a
-make -C projects/mz check        # 压缩/解压缩轮转测试
->>>>>>> Stashed changes
 ```
 
 **实现原则**：纯 C11 实现，零外部依赖。当前仅实现 LZ77 编码器（`MZ_CODEC_LZ77`），后续可扩展其他编解码器。
@@ -428,11 +423,7 @@ MeuOS-Kit/
 │   ├── meuos-utils/        核心工具集（骨架：libutils.a + 5 烟雾工具）
 │   ├── meuos-shell/        Shell 终端（骨架：-c/script/REPL 三模式）
 │   ├── meuos-buildtools/   构建工具（m4/gperf/flex/bison）
-<<<<<<< Updated upstream
 │   └── meuos-compress/       压缩库（libmz.a，LZ77）
-=======
-│   └── mz/                 压缩库（libmz.a，LZ77）
->>>>>>> Stashed changes
 ├── env/                    QEMU 多架构测试环境（6.6.142 内核 + 9p 共享）
 │   ├── bin/qvm             VM 管理器
 │   ├── qemu/               静态 qemu-user 二进制（aarch64/riscv64/loongarch64）
@@ -749,13 +740,8 @@ make -C projects/meuos-sysroot                # 构建 libmsys.a + mkmsys + msys
 make -C projects/meuos-sysroot so             # 构建 libmsys.so（Python 绑定用）
 
 # mz - 压缩库
-<<<<<<< Updated upstream
 make -C projects/meuos-compress                           # 构建 libmz.a
 make -C projects/meuos-compress check                     # 压缩/解压缩轮转测试
-=======
-make -C projects/mz                           # 构建 libmz.a
-make -C projects/mz check                     # 压缩/解压缩轮转测试
->>>>>>> Stashed changes
 
 # meuos-buildtools（Phase 6）
 make -C projects/meuos-buildtools             # 构建 m4/gperf/flex
@@ -919,6 +905,20 @@ make -C projects/meuos-sysroot clean
 > 本项目集成了 IMA OpenAPI 技能（`ima-skill`），作为 MeuOS Kit 文档的统一外部知识库。
 > 知识库中存储设计文档、会议记录、架构决策、移植笔记等不适合纳入代码仓库的内容。
 
+### 9.0 本地知识沉淀（`.agents/knowledge/`）
+
+> **项目经验库**：`.agents/knowledge/` 随 git 版本管理，沉淀自 AI 会话的工作纪律与项目技术经验
+> （git 并发纪律、缺陷闭环、修复方案、架构决策）。新 agent 启动时**应读取**该目录了解既有经验，避免重复踩坑。
+
+- **feedback_\*.md** — 工作纪律与操作教训（git 安全、并发、构建、通知）
+- **project_\*.md** — 项目技术经验（缺陷闭环、修复方案）
+- **README.md** — 分类索引（按主题列出全部文件与要点）
+
+**使用约定**：
+1. 新 agent 启动读 `README.md` 索引，按需打开对应文件。
+2. 会话中产生新的可复用经验（踩坑教训、缺陷根因、修复方案），完成后沉淀为 `.agents/knowledge/` 下 markdown 并更新 README 索引。
+3. 本地 AI 记忆（`~/.codebuddy/projects/*/memory/`）与 `.agents/knowledge/` 分工：前者是会话级自动记忆，后者是项目级持久知识（进 git）。
+
 ### 9.1 分工边界
 
 | 内容类型                              | 存放位置                 | 说明                                                                 |
@@ -1053,11 +1053,7 @@ for item in data:
 
 ### 9.6 Codebuddy 技能清单
 
-<<<<<<< Updated upstream
 本项目配置了以下 Codebuddy 技能（统一存放于 `.agents/skills/`，`.codebuddy` 与 `.trae` 均为指向 `.agents` 的软链接别名）：
-=======
-本项目配置了以下 Codebuddy 技能（位于 `.codebuddy/skills/`，软链接到 `.agents/skills/`）：
->>>>>>> Stashed changes
 
 | 技能 | 用途 |
 |------|------|
@@ -1238,8 +1234,3 @@ AGENTS.md §10 (全局完成状态速查)
 1. **创建** — 当某个主题（新架构移植、新功能、重构）需要详细计划时，在对应组件下创建 `.todo/<topic>.md`
 2. **内容** — 任务范围、参考来源、验收标准、依赖关系（参考 §7.2 任务卡片五要素）
 3. **归档** — 实现完成后，`.todo` 文件内容合并到 `ARCHITECTURE.md` 或 `PORTING.md`，`.todo` 文件标记 `[x]` 或删除
-
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
