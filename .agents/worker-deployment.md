@@ -231,6 +231,15 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 - 测试：新增 `test/olevel/memconst.c`（const_local/const_twice/overwrite）+ run.sh 专项断言（memconst -O0=194 > -O1=177，运行时 O0/O1 均过）。
 - 验证：check-c-mir fail=0、c99/c11/c23/cpp-func/cpp-neg 全绿、check-sysroot-static 自举 exit 0、**verify-all 19/19**。
 
+### riscv64 MIR-native 全功能补齐（#119，chloe，worktree-tmp-chloe-rv64fill）
+- 基线：bella Phase 3a 标量整数后端（fc1f279 归并主线）。本轮 5 项独立提交补齐其余功能：
+  - **浮点**（`5e8594a`）：FPR 临时寄存器 f28/f29；浮点运算/load/store/转换（F2I 带 rtz 截断）、浮点比较 flt/fle/feq；mir_cmp_cc 补 CF*；mbe 转换映射。附带后端基础修复：入口块跳转、JCC 显式 fall-through、静态 alloca 越界、callee-saved FPR fsd/fld。
+  - **聚合**（`b286463`）：LP64D ≤16B 拆块回寄存器（a0/a1 或 fa0/fa1）、>16B sret；RvClass + mout_blit；selpar/selcall/selret 全链路；大帧 li t6。
+  - **TLS**（`9430114`）：内部 %tprel（local-exec）、外部 la.tls.ie（initial-exec）。
+  - **VLA**（`5fc57dd`）：放开动态 alloca。
+  - **varargs**（`18f7348`）：指针型 va_list（对照 legacy rv64_abi）；a0-a7 存 64B 保存区，*ap 指向首未消耗 GP 或栈区；MFnM.va_save。限制与 legacy 一致（double varargs / >8 GP varargs 不支持）。
+- 验证：qemu-riscv64-static 运行时（浮点/聚合/varargs/VLA/整数）全过；test/riscv64/{abi,tls,varargs,vla} 全走 MIR-native 且汇编通过；c99+c11 54 样例交叉汇编全过；x86_64 verify-all 19/19 + 自举 exit 0。
+
 ## 5. 纪律速查
 
 - 提交：文件级 `git add <文件>`，**禁止 `git add -A`**；建议 `git commit --only <path>` 规避共享 index 竞态
