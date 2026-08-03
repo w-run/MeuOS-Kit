@@ -26,7 +26,7 @@ m++ 已实现 C++20 基础（consteval 折叠、三向比较标量降级、conce
 | # | 缺口 | 证据 | 难度 | 优先级 |
 |---|---|---|---|---|
 | 1 | **requires 表达式（`requires { ... }`）** | 概念体/requires-clause 内 `requires(T a) { a+a; }` 已由 worker-req4 实现（在途未提交：cpp_parse.c + test/cpp/requires_min.cc），待合入闭环；四类表达式（简单/类型/复合/嵌套）基本就绪 | 高 | P0（在途） |
-| 2 | **非类型模板参数（NTTP）** | `template<int N>` / `template<auto N>` 已支持（alice 6fc4d57）；`template<T, T N>` 依赖类型 NTTP 仍缺 | 中高 | P0 ✅ |
+| 2 | **非类型模板参数（NTTP）** | `template<int N>` / `template<auto N>` 已支持（alice 6fc4d57）；`template<T, T N>` 依赖类型 NTTP **已实现**（grace ef89d22：参数表作用域 + 依赖 NTTP 标记 + 显式实参按参数类型直接解析） | 中高 | P0 ✅ |
 | 3 | **consteval 只做折叠、无即时调用强制** | 非常量实参 `sq(v)` 静默降级为运行时调用（标准要求编译错误） | 中 | P1 |
 | 4 | **类类型三向比较（defaulted/成员 `operator<=>`/重写）** | `auto operator<=>(...) const = default` / 成员 `int operator<=>(...)` 均报 `unsupported operator for overloading` | 中高 | P1 |
 | 5 | **括号/直接列表初始化（C++11 连带）** | `P p(1,2)` / `P p{1,2}` 均失败（聚合无 ctor 时不走直接构造 / 声明符后 `{` 未识别） | 中 | P1 |
@@ -44,7 +44,7 @@ m++ 已实现 C++20 基础（consteval 折叠、三向比较标量降级、conce
 | C++20 特性 | 状态 | 证据（实测命令/文件） | 说明 |
 |---|---|---|---|
 | consteval（常量折叠） | ✅ | t15_consteval_ok / t34_consteval_member / t60_consteval_sa RUN=0 | 折叠、成员、递归、嵌套、static_assert 全过（e698f37） |
-| consteval（即时调用强制） | ✅ | alice 实现 | 非常量实参 `sq(v)` 报 "call to consteval function is not a constant expression"（test/cpp/consteval_immediate.cc + consteval_nonconst.neg.cc） |
+| consteval（即时调用强制） | ✅ | alice 实现 + grace d061167 模板边界验证 | 非常量实参 `sq(v)` 报 "call to consteval function is not a constant expression"（test/cpp/consteval_immediate.cc + consteval_nonconst.neg.cc）；模板边界（consteval 函数模板、constexpr 内常量实参、template<int N>、依赖 NTTP 交叉）由 test/cpp/consteval_tmpl_boundary.cc 闭环 |
 | 三向比较 `<=>`（内置标量） | ✅ | t16_spaceship_ok RUN=0 | TSPACESHIP token + 降级 `(a>b)?1:((a<b)?-1:0)`（34d0566；test/cpp/spaceship*.cc） |
 | 三向比较（类类型 operator<=>） | ✅ | alice 实现 | cpp_op_mangle 补 TSPACESHIP→'ss'，成员 operator<=> 重载与 a<=>b 调用（test/cpp/spaceship_member.cc） |
 | 三向比较（defaulted `= default`） | ⛔ | t09_default_spaceship：`unsupported operator for overloading` | 无 defaulted 成员函数机制 |
@@ -58,7 +58,7 @@ m++ 已实现 C++20 基础（consteval 折叠、三向比较标量降级、conce
 | 范围 for（含 C++20 初始化语句） | ✅ | e06a2b0 复核：`for (int x : arr)` / `for(auto x : arr)` / `for (int i=0; auto x : arr)` / begin/end 成员全部编译+运行通过 | **71fbb35 已实现**（src/c/parse/stmt.c TFOR +367 行；test/cpp/range_for.cc）；§2.1 由缺口转关闭 |
 | constinit | ⛔ | t06_constinit：`expected declaration or function definition` | 关键字未 lex/未识别（cpp_tokens.h 无 CPP_TCONSTINIT） |
 | 显式(bool) 条件 explicit | ⛔ | t07_explicit_bool：`no type in struct member declaration` | `explicit(expr)` 形式未处理 |
-| 非类型模板参数 NTTP | ✅ | alice 6fc4d57 | `template<int N>`/`template<auto N>` 支持（函数/类模板、显式实参、constexpr 折叠）；`template<T, T N>` 依赖类型 NTTP 仍缺 |
+| 非类型模板参数 NTTP | ✅ | alice 6fc4d57 + grace ef89d22 | `template<int N>`/`template<auto N>` 支持（函数/类模板、显式实参、constexpr 折叠）；`template<T, T N>` 依赖类型 NTTP 已实现（test/cpp/nttp_dep_type.cc），混合显式实参 `f<int,5>` 与多值类模板 `D<2,4>` 已修复 |
 | char8_t | ⛔ | t10_char8：`declaration has no type specifier`；复核 `const char* s = u8"abc"` 已可（c-00/e9fae35 后 u8 字面量元素为 `char`，非 `unsigned char`） | 类型系统无 `char8_t` 关键字/类型；u8 字面量现为普通 char 数组 |
 | using enum | ⛔ | t11_using_enum：`undeclared identifier: using` | `using enum E;` 未识别 |
 | lambda 模板参数 `[]<typename T>` | ⛔ | t12_lambda_tmpl：`expected lambda body` | lambda 头只解析 `[cap](params)` |
@@ -137,7 +137,7 @@ m++ 已实现 C++20 基础（consteval 折叠、三向比较标量降级、conce
 |---|---|---|
 | ~~range-for 全部缺失~~（C++11） | ~~t30/t42 编译失败~~ → ✅ 已实现（71fbb35） | 已解除；C++20 初始化语句随基础实现一并落地 |
 | **直接列表初始化 `T x{...}`**（C++11） | t40 失败，仅 `T x = {...}` 可用；e06a2b0 复核仍失败 | 阻塞 C++20 括号聚合（t14）与 constexpr 对象（t25） |
-| **constexpr 对象/成员访问**（C++11 阶段 3） | alice 已实现 | constexpr 聚合对象成员访问折叠（mini 内存模型：成员值表 obj+offset->value），`constexpr P p{1,2}` 的 p.a/p.b 可在 static_assert 求值（test/cpp/constexpr_obj_member.cc）；constexpr 函数返回类对象仍缺 |
+| **constexpr 对象/成员访问**（C++11 阶段 3） | alice 已实现 + grace 3ae5a04 | constexpr 聚合对象成员访问折叠（mini 内存模型：成员值表 obj+offset->value），`constexpr P p{1,2}` 的 p.a/p.b 可在 static_assert 求值（test/cpp/constexpr_obj_member.cc）；**constexpr 函数返回类对象已实现**（解释器聚合初始化 + 类返回 + 调用结果成员表，test/cpp/constexpr_return_obj.cc；局部 constexpr 类变量从调用初始化亦支持） |
 
 ---
 
