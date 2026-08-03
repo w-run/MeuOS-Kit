@@ -42,6 +42,7 @@
 | P6g | Bug B 修复：selcall sret 分配 pad（qualtype 24B） | ✅ | 已提交 eccf7ae |
 | P6h | Bug C 修复：meuos-libc strtod 不支持 hex float（0x1p63）→ self-mcc 编译 eval.c 崩溃。已修复并全量自举 105/105 | ✅ | 已提交 f412f75 |
 | P7 | x86_64 fallback 全部闭环（聚合实参/SALLOC、TLS、动态 alloca/VLA）：MCC_MIR_BACKEND=1 为完整路径，无 bridge fallback，自举通过 | ✅ | 4c908df, 1a1d599, 7e78598 |
+| Phase4-1 | **legacy 直接-LIR 构造块删除**：src/c/irgen/emit.c 的不可达直接-LIR Fn 构造（原 emitfunc 尾部）+ 仅服务该路径的 char_to_cls/fe_to_ir_op/valref/expand_gd_tls 静态函数删除；MIR 路径（func_to_mir → run_mir_passes → MIR-native/bridge → T.emitfn）完整保留。verify-all 19/19 + 自举通过 | ✅ | 见 worktree-tmp-eve-p4step1 |
 
 ## 验证结果（截至 P3b）
 
