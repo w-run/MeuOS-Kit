@@ -12,8 +12,8 @@
 mcc 的 C23 覆盖**高度完整**：`make check-c23` 21 个测试全 PASS，绝大多数 C23
 语言特性已实现并有测试。原确认的 **3 个差距**（constexpr 函数编译期求值、
 `__VA_OPT__`、`__has_c_attribute`）已由 **226d31e 全部闭环**（2026-08-03，HEAD 2c474d4），
-新增 4 个差距测试全过；当前 **C23 无已知差距**。⚠️ 门禁提示：check-chibicc 当前
-PASS=0/COMPILEFAIL=41（chibicc 兼容性全灭，worker-chi4 调查），见文末「门禁状态」。
+新增 4 个差距测试全过；当前 **C23 无已知差距**。⚠️ 门禁提示：check-chibicc 仍为失败门禁
+（早期 41 COMPILEFAIL 的 sysroot 链接根因已由 6ca4ba1 修复，现不再是 0 通过；worker-chi4 调查，排除出 verify-all.sh），见文末「门禁状态」。
 
 ## 已支持特性（含证据）
 
@@ -63,6 +63,6 @@ MEUOS_SYSROOT=$(pwd)/../sysroot make check-c23   # 21 个测试全 PASS
 | 门禁 | 状态 | 说明 |
 |:-----|:-----|:-----|
 | check-c23 | ✅ 全 PASS | 28 个测试（含 226d31e 新增 va_opt/va_opt_boundary/has_c_attribute/constexpr_func 4 个差距测试） |
-| check-chibicc | **PASS=0 / RUNFAIL=0 / COMPILEFAIL=41（共 41）** | chibicc 社区套件兼容性全灭（test/community/chibicc/results.log 现状）。失败形态含「cannot find -lc-meuos」（sysroot 未安装导致链接失败）与标准/C conformance 缺陷（如 100f 后缀、UINT64_MAX 字面量类型、宏重定义、_Atomic→void* 转换、__LINE__ 偏差等，见 test/community/chibicc/REPORT.md §5 分类）。**worker-chi4 调查中**，未纳入 verify-all.sh。 |
+| check-chibicc | **RED 门禁（未通过，排除出 verify-all.sh）** | chibicc 社区套件兼容性仍为失败门禁。早期 41 项 COMPILEFAIL 的根因是 sysroot 路径推导错误（`6ca4ba1` 已修复「cannot find -lc-meuos」链接失败），修复后套件已不再是 0 通过，但仍有大量标准/C conformance 缺陷（如 100f 后缀、UINT64_MAX 字面量类型、宏重定义、_Atomic→void* 转换、__LINE__ 偏差等，见 test/community/chibicc/REPORT.md §5 分类）未闭环。**worker-chi4 调查中**；`test/community/chibicc/results.log` 为 gitignore 易变产物（取决于构建状态，含在途未提交改动时数字会漂移），最新一次运行约 `PASS=9 / RUNFAIL=6 / COMPILEFAIL=26`，门禁整体仍判定失败并排除出 verify-all.sh。 |
 | check-pic-verify | FAIL（已知缺口） | riscv64 不发射 GOT 序列（`%got_pcrel_hi` 缺失）、i386 缺 `@GOT(` 序列；x86_64/aarch64 OK。未纳入 verify-all.sh（脚本内标注 known gap）。 |
 | verify-all.sh | 17/17 PASS | HEAD 2c474d4 全量门禁通过；上述两门禁因已知缺口被显式排除。 |
