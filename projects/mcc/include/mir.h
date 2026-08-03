@@ -443,6 +443,8 @@ typedef struct MTargetM {
 	int stackalign;            /* stack alignment in bytes */
 	bool kl_in_reg;            /* 64-bit ints may live in GPRs (0 for i386/arm) */
 	uint32_t feat;             /* MTF_* feature bits */
+	int sret_reg;              /* register holding the hidden sret buffer
+	                            * (x86_64: RDI, riscv64/arm64: A0), or -1 */
 	/* machine backend entry points (per-arch, filled progressively) */
 	void (*abi)(MFnM *);       /* ABI lowering: selpar/selcall/selret (P2) */
 } MTargetM;
@@ -450,8 +452,10 @@ typedef struct MTargetM {
 /* machine target feature bits (isel/emit guidance) */
 #define MTF_SCALE_INDEX (1u<<0)  /* base+index*scale addressing (x86/i386) */
 #define MTF_COND_EXEC   (1u<<1)  /* every instruction predicated (arm) */
+#define MTF_CMOV        (1u<<2)  /* conditional-move if-conversion (x86_64) */
 
 extern const MTargetM mtarget_x86_64;   /* x86_64 first; others follow per-arch */
+extern const MTargetM mtarget_riscv64;  /* P3a: riscv64 MIR-native (LP64D) */
 
 const char *mreg_name(const MTargetM *mt, MReg r);
 /* Look up a register by assembler name; returns -1 if not found. */
@@ -512,6 +516,9 @@ typedef enum MMOP {
 	MMOP_TEST,             /* and src[0], src[1], set flags */
 	MMOP_SETCC,            /* dst = flags.cc ? 1 : 0 */
 	MMOP_CMOV,             /* dst = flags.cc ? src[0] : dst (if-conversion) */
+	MMOP_SETCCR,           /* dst = (src[0] cc src[1]) ? 1 : 0 — register
+	                        * comparison for flag-less ISAs (riscv64 slt/...).
+	                        * cc carries the condition, operands src[0]/src[1]. */
 	/* parameter passing (pre-ABI markers consumed by the ABI lowering) */
 	MMOP_PARM,             /* function parameter (entry block); td = agg type */
 	MMOP_ARG,              /* call argument; td = agg type for aggregates */
@@ -607,8 +614,9 @@ struct MFnM {
 	MBlkM *link;             /* block list head */
 	uint32_t nblk;
 	MTypeDesc *retty;        /* aggregate return type, NULL for scalar/void */
-	bool sret_rdi;           /* sret: RDI holds the return buffer (pin it) */
-	MVal *sret_pad;          /* sret: alloca holding the RDI pad across calls */
+	bool has_sret;           /* sret: the hidden buffer register (mt->sret_reg)
+	                          * is pinned for the whole function */
+	MVal *sret_pad;          /* sret: alloca holding the buffer ptr across calls */
 	uint32_t vafa;           /* varargs: packed arg-register usage (selpar) */
 	int32_t slot;            /* stack frame size (bytes); filled by regalloc/spill */
 	int32_t salign;          /* frame alignment */

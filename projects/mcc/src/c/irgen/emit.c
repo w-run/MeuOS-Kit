@@ -26,7 +26,8 @@
 
 extern int emit_debug;  /* from emit/emit.c */
 extern void emitdbgloc(uint, uint, FILE *);  /* from emit/emit.c */
-extern bool mfnm_backend_x86_64(struct MFn *);  /* x86_64_mbe.c (P3b machine backend) */
+extern bool mfnm_backend_x86_64(struct MFn *);   /* x86_64_mbe.c (P3b machine backend) */
+extern bool mfnm_backend_riscv64(struct MFn *);   /* riscv64_mbe.c (P3a machine backend) */
 
 /* DWARF variable-type classification for the base-type DIEs. */
 static int
@@ -343,12 +344,15 @@ emitfunc(struct func *f, struct scope *fs, bool global)
 			fprintf(stderr, "\n> MIR (post-pass) %s:\n", f->name);
 			mfn_dump(mf, stderr);
 		}
-		/* MIR-native backend (Phase 2): x86_64 only — g_use_mir_backend
-		 * defaults to 1 for the host target, and mfnm_backend_x86_64
-		 * covers the complete x86_64 codegen scope.  Other targets keep
-		 * the MIR -> bridge -> LIR path. */
-		if (g_use_mir_backend && strcmp(T.name, "x86_64") == 0 &&
-		    mfnm_backend_x86_64(mf)) {
+		/* MIR-native backend (Phase 2/3a): x86_64 and riscv64 — the
+		 * machine backend dispatches per-target (mfnm_backend_<arch>);
+		 * when it reports success the MIR was emitted directly.  Other
+		 * targets keep the MIR -> bridge -> LIR path.  The per-arch
+		 * backend falls back (returns false) for constructs it does not
+		 * cover, so the bridge path stays as the safety net. */
+		if (g_use_mir_backend &&
+		    ((strcmp(T.name, "x86_64") == 0 && mfnm_backend_x86_64(mf)) ||
+		     (strcmp(T.name, "riscv64") == 0 && mfnm_backend_riscv64(mf)))) {
 			if (g_dwarf_level > 0) {
 				dwarf_collect_vars(f, mf, NULL);
 				dwarf_emit_func_end(stdout, dwarf_idx);
