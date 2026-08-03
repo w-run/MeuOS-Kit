@@ -31,4 +31,14 @@ for tgt in riscv64 aarch64; do
 	printf '%s\n' "fpfill: $tgt MIR-native FP assembly OK"
 done
 
+# aarch64 full coverage (aggregates/varargs/TLS/VLA) — riscv64 not yet
+# required here (chloe's coverage lives in the riscv64 regress suite).
+if command -v aarch64-linux-gnu-as >/dev/null 2>&1; then
+	"$mcc" --target=aarch64-linux -S -o "$asm" "$root/test/targets/aggva.c"
+	grep -Eq 'tpidr_el0' "$asm" \
+		|| { printf '%s\n' "fpfill: aarch64 no TLS access emitted"; exit 1; }
+	"$as" -o "$asm.o" "$asm"
+	printf '%s\n' "fpfill: aarch64 MIR-native aggregate/varargs/TLS/VLA assembly OK"
+fi
+
 printf '%s\n' 'riscv64/aarch64 MIR-native FP regression checks passed'
