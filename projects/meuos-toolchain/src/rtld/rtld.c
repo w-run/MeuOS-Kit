@@ -757,6 +757,9 @@ rtld_main(size_t *sp)
 	parse_phdr((const unsigned char *)at_phdr, 0, &ph0);
 	uintptr_t phdr_vaddr = ph0.vaddr;
 	uintptr_t main_base = at_phdr - phdr_vaddr;
+	/* Remember the main executable's load base so RELATIVE relocations
+	 * resolve as `main_base + addend` instead of `0 + addend`. */
+	main_lib->base = main_base;
 	/* Walk the phdrs to find PT_DYNAMIC */
 	for (unsigned i = 0; i < at_phnum; i++) {
 		Phdr64 ph;
@@ -802,6 +805,9 @@ rtld_main(size_t *sp)
 		case DT_JMPREL:
 			main_lib->jmprel = (Rela64 *)(main_base + d->d_val);
 			break;
+		case DT_PLTRELSZ:
+			main_lib->jmprelsz = (size_t)d->d_val;
+			break;
 		case DT_INIT:
 			main_lib->init = (void (*)(void))(main_base + d->d_val);
 			break;
@@ -811,10 +817,11 @@ rtld_main(size_t *sp)
 		case DT_INIT_ARRAYSZ:
 			main_lib->init_arraysz = (size_t)d->d_val;
 			break;
-	/* Load shared libraries via DT_NEEDED (transitive) */
-	rtld_load_needed(&st, main_lib);
 		}
 	}
+
+	/* Load shared libraries via DT_NEEDED (transitive) */
+	rtld_load_needed(&st, main_lib);
 
 	/* Register TLS modules, assign module IDs, lay out the contiguous
 	 * TLS area, and set %fs before resolving DTPMOD64/DTPOFF64
