@@ -850,7 +850,10 @@ x86_64_encode_insn(const struct mt_target *target,
 			goto fail;
 	if (strncmp(base, "call", 4) == 0 && n == 1) {
 		if (op[0].kind == OP_SYMBOL) {
-			code = strcmp(op[0].modifier, "plt") == 0 ?
+			/* mcc emits both `foo@plt` and (for TLS GD)
+			 * `__tls_get_addr@PLT`; accept either case as PLT32. */
+			code = (strcmp(op[0].modifier, "plt") == 0 ||
+			        strcmp(op[0].modifier, "PLT") == 0) ?
 			       R_X86_64_PLT32 : R_X86_64_PC32;
 			emit_symbol_branch(out->bytes, &out->size, out, 0xe8, &op[0], code);
 			goto done;

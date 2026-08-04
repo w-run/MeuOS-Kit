@@ -48,6 +48,26 @@ ASM
     echo "FAIL: @gottpoff did not produce R_X86_64_GOTTPOFF"; fail=1
 }
 
+# mcc GD emits call __tls_get_addr@PLT (uppercase @PLT); mt/as must treat
+# it as PLT32 (not PC32) like the lowercase @plt form.
+cat >"$work/pltcase.s" <<'ASM'
+.text
+.globl _start
+_start:
+    call __tls_get_addr@PLT
+    call foo@plt
+    ret
+ASM
+"$as" -o "$work/pltcase.o" "$work/pltcase.s" 2>/dev/null || {
+    echo "FAIL: mt/as could not assemble @PLT calls"; fail=1
+}
+"$readelf" -r "$work/pltcase.o" 2>/dev/null | grep "__tls_get_addr" | grep -q "R_X86_64_PLT32" || {
+    echo "FAIL: @PLT (uppercase) did not produce R_X86_64_PLT32"; fail=1
+}
+"$readelf" -r "$work/pltcase.o" 2>/dev/null | grep "foo" | grep -q "R_X86_64_PLT32" || {
+    echo "FAIL: @plt (lowercase) did not produce R_X86_64_PLT32"; fail=1
+}
+
 # --- mt/ld shared-library TLS GD: DTPMOD|DTPOFF GOT pair in .rela.dyn ---
 cat >"$work/tlslib.s" <<'ASM'
 .text
