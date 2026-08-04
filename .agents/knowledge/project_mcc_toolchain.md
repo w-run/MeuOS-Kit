@@ -90,4 +90,14 @@ PIC EBX 零临时分配 → 仍作 GOT base。mt 侧 i386 GOT 重定位留待 P1
 
 - 新待办：`.todo/meuos-toolchain/mt-ld-dynamic-section.md`
 - 目标：mt/ld 生成的 `.dynamic` 节区符合 ELF 规范——`sh_type=SHT_DYNAMIC`、`sh_link`→`.dynstr`，从根源消除 readelf/外部工具对 PROGBITS+sh_link=0 的兼容负担。
+- **已闭环**（commit `0015271e`，`src/ld/link.c` L3830/L2839 两处 diff）；待办已关闭。
+
+## P2 后续任务（2026-08-04）
+
+### rtld e2e 端到端实跑验证（需合并 rtld-p0）
+
+- 新待办：`.todo/meuos-toolchain/rtld-e2e-pie-verify.md`
+- mt/ld `.dynamic` 节区规范化（`0015271e`）已闭环，但仅限于"链接产物静态校验"层面；
+- rtld e2e **实跑验证**（PIE + 真实 ld.so：`mt/ld -pie -dynamic-linker` → 加载 → exit 42）需合并 `tmp/rtld-p0`（含 `-dynamic-linker`，commit `f88ae83` 的 check-rtld 端到端门禁）后由 exec-integration 跨域门禁覆盖；
+- 关联 commit：`0015271e`（.dynamic 节区）、`f88ae83`（check-rtld 端到端）、`tmp/rtld-p0` 4 提交（153be27/3f2c354/82a4b40/f88ae83）。
 
