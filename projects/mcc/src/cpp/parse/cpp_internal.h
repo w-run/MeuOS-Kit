@@ -82,6 +82,10 @@ struct expr *cpp_tmpl_const_arg(struct scope *s);
  * cpp_parse.c); used by the class-template instantiation. */
 bool tmpl_param_is_nttp(struct cpp_template *tmpl, int i);
 
+/* Emit __mxx_global_var_init (defined in cpp_gcctor.c); called at the
+ * end of the translation unit. */
+void cpp_emit_global_ctors(void);
+
 /* Template data structures shared by the template-instantiation code
  * (cpp_parse.c) and the member-template lowering (cpp_tmpl_member.c).
  * Pure data: the registry/instantiation state (g_cpp_tmpl_stack, packs,
