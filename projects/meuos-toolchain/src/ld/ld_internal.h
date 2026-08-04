@@ -283,5 +283,8 @@ int build_dynamic_tables(struct ld_context *ctx);
 int fill_dynamic_addresses(struct ld_context *ctx);
 int ensure_dynamic_section(struct ld_context *ctx);
 int ensure_pie_section(struct ld_context *ctx);
+int build_rela_dyn(struct ld_context *ctx);
+int rela_dyn_add(struct ld_context *ctx, uint64_t offset, uint64_t info,
+                 int64_t addend);
 
 #endif /* MEUOS_TOOLCHAIN_LD_INTERNAL_H */
