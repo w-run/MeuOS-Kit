@@ -455,9 +455,24 @@ rtld_find_sym(struct rtld_state *st, const char *name, int *out_lib)
 /* ---- relocation application ---- */
 
 static uint64_t
-resolve_sym_value(struct rtld_lib *lib, Sym64 *sym, uintptr_t lib_base)
+resolve_sym_value(struct rtld_state *st, struct rtld_lib *lib,
+                  Sym64 *sym, uintptr_t lib_base)
 {
-	(void)lib;
+	/* SHN_UNDEF (shndx == 0): the symbol is not defined in this
+	 * library.  Resolve it globally across all loaded libraries so a
+	 * PIE / shared library can import a symbol defined in another
+	 * library (e.g. the main executable or a dependency). */
+	if (sym->shndx == 0) {
+		const char *sym_name = "";
+		if (lib->strtab && lib->strsz && sym->name > 0 &&
+		    sym->name < lib->strsz)
+			sym_name = lib->strtab + sym->name;
+		int def_lib = -1;
+		Sym64 *def_sym = rtld_find_sym(st, sym_name, &def_lib);
+		if (def_sym && def_lib >= 0)
+			return st->libs[def_lib].base + def_sym->value;
+		return 0;
+	}
 	return lib_base + sym->value;
 }
 
@@ -481,12 +496,12 @@ rtld_apply_rela(struct rtld_lib *lib, struct rtld_state *st)
 		case R_X86_64_GLOB_DAT:
 		case R_X86_64_64: {
 			Sym64 *sym = &lib->symtab[rsym];
-			*loc = resolve_sym_value(lib, sym, base) + (uintptr_t)r->r_addend;
+			*loc = resolve_sym_value(st, lib, sym, base) + (uintptr_t)r->r_addend;
 			break;
 		}
 		case R_X86_64_JUMP_SLOT: {
 			Sym64 *sym = &lib->symtab[rsym];
-			*loc = resolve_sym_value(lib, sym, base);
+			*loc = resolve_sym_value(st, lib, sym, base);
 			break;
 		}
 		case R_X86_64_DTPMOD64: {
@@ -559,7 +574,7 @@ rtld_apply_rela(struct rtld_lib *lib, struct rtld_state *st)
 				switch (rtype) {
 				case R_X86_64_JUMP_SLOT: {
 					Sym64 *sym = &lib->symtab[rsym];
-					*loc = resolve_sym_value(lib, sym, base);
+					*loc = resolve_sym_value(st, lib, sym, base);
 					break;
 				}
 				case R_X86_64_RELATIVE:
@@ -567,7 +582,7 @@ rtld_apply_rela(struct rtld_lib *lib, struct rtld_state *st)
 					break;
 				case R_X86_64_GLOB_DAT: {
 					Sym64 *sym = &lib->symtab[rsym];
-					*loc = resolve_sym_value(lib, sym, base);
+					*loc = resolve_sym_value(st, lib, sym, base);
 					break;
 				}
 				default:
@@ -757,6 +772,9 @@ rtld_main(size_t *sp)
 	parse_phdr((const unsigned char *)at_phdr, 0, &ph0);
 	uintptr_t phdr_vaddr = ph0.vaddr;
 	uintptr_t main_base = at_phdr - phdr_vaddr;
+	/* Remember the main executable's load base so RELATIVE relocations
+	 * resolve as `main_base + addend` instead of `0 + addend`. */
+	main_lib->base = main_base;
 	/* Walk the phdrs to find PT_DYNAMIC */
 	for (unsigned i = 0; i < at_phnum; i++) {
 		Phdr64 ph;
@@ -802,6 +820,9 @@ rtld_main(size_t *sp)
 		case DT_JMPREL:
 			main_lib->jmprel = (Rela64 *)(main_base + d->d_val);
 			break;
+		case DT_PLTRELSZ:
+			main_lib->jmprelsz = (size_t)d->d_val;
+			break;
 		case DT_INIT:
 			main_lib->init = (void (*)(void))(main_base + d->d_val);
 			break;
@@ -811,10 +832,11 @@ rtld_main(size_t *sp)
 		case DT_INIT_ARRAYSZ:
 			main_lib->init_arraysz = (size_t)d->d_val;
 			break;
-	/* Load shared libraries via DT_NEEDED (transitive) */
-	rtld_load_needed(&st, main_lib);
 		}
 	}
+
+	/* Load shared libraries via DT_NEEDED (transitive) */
+	rtld_load_needed(&st, main_lib);
 
 	/* Register TLS modules, assign module IDs, lay out the contiguous
 	 * TLS area, and set %fs before resolving DTPMOD64/DTPOFF64

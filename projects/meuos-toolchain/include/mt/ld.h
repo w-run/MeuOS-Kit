@@ -9,6 +9,7 @@ struct mt_ld_options {
 	const char *output;    /* output file path */
 	const char *entry;     /* entry symbol (default "_start") */
 	const char *soname;    /* DT_SONAME for shared libraries (may be NULL) */
+	const char *dynamic_linker; /* PT_INTERP path for PIE executables (may be NULL) */
 	int         shared;    /* 1 = ET_DYN (shared library), 0 = ET_EXEC */
 	int         pie;       /* 1 = PIE (ET_DYN + PT_INTERP), 0 = 普通 */
 	int         build_id;   /* 1 = generate .note.gnu.build-id (FNV-1a hash) */

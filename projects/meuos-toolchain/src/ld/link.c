@@ -194,6 +194,7 @@ struct ld_context {
 	int cref;            /* 1 = output cross-reference table */
 	const char *link_script; /* path to section layout script */
 	const char *soname;  /* DT_SONAME for shared lib (may be NULL) */
+	const char *dynamic_linker; /* PT_INTERP path (may be NULL) */
 	/* Dynamic symbol table bookkeeping (shared libs only) */
 	struct ld_dynsym_entry *dynsym_entries;
 	size_t dynsym_count;
@@ -2321,7 +2322,7 @@ static int
 build_rela_dyn(struct ld_context *ctx)
 {
 	size_t i;
-	if (!ctx->shared || ctx->got.count == 0)
+	if ((!ctx->shared && !ctx->pie) || ctx->got.count == 0)
 		return 0;
 	/* .rela.dyn was pre-created in build_dynamic_tables */
 	int rg = find_group(ctx, ".rela.dyn");
@@ -3534,7 +3535,7 @@ build_dynamic_tables(struct ld_context *ctx)
 	/* Pre-create .rela.dyn group for dynamic relocations (must exist before
 	 * layout_output assigns addresses).  Content is filled by build_rela_dyn()
 	 * after layout. */
-	int have_rela = (ctx->shared && ctx->got.count > 0);
+	int have_rela = ((ctx->shared || ctx->pie) && ctx->got.count > 0);
 	if (have_rela) {
 		ntags += 3; /* DT_RELA, DT_RELASZ, DT_RELAENT */
 		int rg = get_group(ctx, ".rela.dyn", MT_SHT_RELA,
@@ -3848,7 +3849,8 @@ ensure_pie_section(struct ld_context *ctx)
 	if (g < 0)
 		return ld_error(ctx, "out of memory");
 	ctx->groups[g].rank = 1; /* read-only region */
-	const char *interp = "/lib/ld-meuos.so.1";
+	const char *interp = ctx->dynamic_linker
+	                     ? ctx->dynamic_linker : "/lib/ld-meuos.so.1";
 	uint64_t off;
 	if (append_group_data(ctx, &ctx->groups[g],
 	                       (const unsigned char *)interp,
@@ -3976,6 +3978,7 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 		ctx.print_map = opts->print_map;
 		ctx.cref = opts->cref;
 		ctx.link_script = opts->link_script;
+		ctx.dynamic_linker = opts->dynamic_linker;
 		ctx.add_needed = opts->add_needed;
 		ctx.add_needed_count = opts->add_needed_count;
 		/* Parse --version-script file into symbol list */
