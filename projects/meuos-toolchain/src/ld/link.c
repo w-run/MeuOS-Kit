@@ -163,6 +163,22 @@ struct ld_got {
 	int group;
 };
 
+/* Static General-Dynamic TLS descriptor (tls_index): one 16-byte entry in
+ * .data per GD symbol.  For a static executable the GD sequence
+ * `leaq sym@tlsgd(%rip), %rdi; call __tls_get_addr` reads this descriptor
+ * ({ti_module=1, ti_offset=tpoff}) and resolves tp+ti_offset. */
+struct ld_tls_desc_entry {
+	char *name;
+	uint64_t data_offset;   /* byte offset within the .data group */
+};
+
+struct ld_tls_desc {
+	struct ld_tls_desc_entry *items;
+	size_t count;
+	size_t capacity;
+	int data_group;          /* .data group index (created on demand) */
+};
+
 /* One exported symbol recorded for the dynamic symbol table (.dynsym).
  * The actual .dynsym entry bytes are filled in after layout (when the final
  * virtual addresses are known), so we keep the metadata here. */
@@ -181,6 +197,7 @@ struct ld_context {
 	size_t group_capacity;
 	struct ld_globals globals;
 	struct ld_got got;
+	struct ld_tls_desc tls_desc;
 	int tls_tdata_group;
 	int tls_tbss_group;
 	uint64_t tls_tdata_size;
@@ -574,6 +591,8 @@ free_context(struct ld_context *ctx)
 		free(ctx->globals.items[i].name);
 	for (i = 0; i < ctx->got.count; ++i)
 		free(ctx->got.items[i].name);
+	for (i = 0; i < ctx->tls_desc.count; ++i)
+		free(ctx->tls_desc.items[i].name);
 	for (i = 0; i < ctx->archives.count; ++i)
 		free(ctx->archives.paths[i]);
 	free(ctx->archives.paths);
@@ -581,6 +600,7 @@ free_context(struct ld_context *ctx)
 	free(ctx->groups);
 	free(ctx->globals.items);
 	free(ctx->got.items);
+	free(ctx->tls_desc.items);
 	free(ctx->dynsym_entries);
 	/* Free in-memory archive data (from .msys VFS) */
 	for (i = 0; i < ctx->archive_mem_count; ++i)
@@ -1775,6 +1795,105 @@ collect_got_relocations(struct ld_context *ctx)
 	return 0;
 }
 
+/* ---- Static GD tls_index descriptors (scheme B) ---- */
+
+/* Look up the .data offset of a static GD tls_index descriptor for `name`.
+ * Returns 0 with *offset set, or 1 if the symbol has no descriptor yet. */
+static int
+tls_desc_lookup(struct ld_context *ctx, const char *name, uint64_t *offset)
+{
+	size_t i;
+	for (i = 0; i < ctx->tls_desc.count; ++i)
+		if (strcmp(ctx->tls_desc.items[i].name, name) == 0) {
+			*offset = ctx->tls_desc.items[i].data_offset;
+			return 0;
+		}
+	return 1;
+}
+
+/* Allocate a 16-byte tls_index descriptor in .data for a GD symbol.
+ * Returns the .data offset via *offset on success. */
+static int
+tls_desc_add(struct ld_context *ctx, const char *name, uint64_t *offset)
+{
+	struct ld_group *data;
+	uint64_t off;
+	if (ctx->tls_desc.data_group < 0)
+		ctx->tls_desc.data_group = get_group(ctx, ".data", MT_SHT_PROGBITS,
+		                                     LD_SHF_ALLOC | LD_SHF_WRITE, 8);
+	if (ctx->tls_desc.data_group < 0)
+		return -1;
+	data = &ctx->groups[ctx->tls_desc.data_group];
+	/* Reserve the 16-byte slot; layout fills {1, tpoff} and patches the
+	 * lea's rip-relative field once addresses are known (in apply_relocations). */
+	if (append_group_data(ctx, data, NULL, 16, 8, &off) != 0)
+		return -1;
+	if (ctx->tls_desc.count == ctx->tls_desc.capacity) {
+		size_t capacity = ctx->tls_desc.capacity ? ctx->tls_desc.capacity * 2 : 8;
+		struct ld_tls_desc_entry *items =
+			(struct ld_tls_desc_entry *)ld_realloc(ctx->tls_desc.items,
+			                                     capacity * sizeof(*items));
+		if (!items)
+			return ld_error(ctx, "out of memory");
+		ctx->tls_desc.items = items;
+		ctx->tls_desc.capacity = capacity;
+	}
+	ctx->tls_desc.items[ctx->tls_desc.count].name = ld_strdup(name);
+	if (!ctx->tls_desc.items[ctx->tls_desc.count].name)
+		return -1;
+	ctx->tls_desc.items[ctx->tls_desc.count].data_offset = off;
+	++ctx->tls_desc.count;
+	*offset = off;
+	return 0;
+}
+
+/* For a static executable, scan every TLSGD relocation and allocate a
+ * .data tls_index descriptor per distinct symbol.  Called before layout so
+ * the descriptor bytes occupy address space within .data. */
+static int
+collect_static_tls_descs(struct ld_context *ctx)
+{
+	uint16_t i;
+	size_t j;
+	struct mt_elf64_section section;
+	uint64_t n;
+	if (ctx->shared || ctx->pie)
+		return 0;
+	if (strcmp(ctx->target->name, "x86_64") != 0)
+		return 0;   /* scheme B covers the x86_64 GD sequence only */
+	for (i = 0; i < ctx->objects.count; ++i) {
+		struct ld_object *object = &ctx->objects.items[i];
+		for (j = 0; j < object_section_count(object); ++j) {
+			if (object_get_section(object, j, &section) != 0)
+				return -1;
+			if (section.type != MT_SHT_RELA && section.type != MT_SHT_REL)
+				continue;
+			if (section.entry_size < 24 ||
+			    section.size % section.entry_size != 0)
+				continue;
+			for (n = 0; n < section.size / section.entry_size; ++n) {
+				const unsigned char *p = object->data + section.offset +
+				                          n * section.entry_size;
+				uint64_t info64 = read64(p + 8);
+				unsigned rel_type = (unsigned)(info64 & 0xffffffff);
+				if (rel_type != LD_R_X86_64_TLSGD)
+					continue;
+				const char *name;
+				struct mt_elf64_symbol symbol;
+				uint64_t dummy;
+				if (get_symbol_by_index(ctx, object, info64 >> 32,
+				                        &symbol, &name) != 0)
+					return -1;
+				if (tls_desc_lookup(ctx, name, &dummy) != 0) {
+					if (tls_desc_add(ctx, name, &dummy) != 0)
+						return -1;
+				}
+			}
+		}
+	}
+	return 0;
+}
+
 /* Apply linker script: override section ranks for placement order.
  * Script format: one "section_name = rank" per line.
  * Lower rank = earlier placement (rank 0 = first).
@@ -2320,9 +2439,37 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 		 * field is patched to point at the symbol's GOT slot, which
 		 * ld.so fills at load time. */
 		if (!ctx->shared && !ctx->pie) {
-			/* Static executable: relax GD/LD/IE to Local-Exec.  The
-			 * absolute DTPOFF reloc resolves to the raw TLS offset. */
-			if (type == LD_R_X86_64_DTPOFF) {
+			/* Static executable.  General-Dynamic accesses are routed
+			 * through a tls_index descriptor: mcc emits
+			 *   leaq sym@tlsgd(%rip), %rdi
+			 *   call __tls_get_addr
+			 * which the linker cannot rewrite in place (the LE sequence is
+			 * longer than the 12B slot).  Instead .data holds a 16-byte
+			 * tls_index{ti_module=1, ti_offset=tpoff}; the lea's
+			 * rip-relative field is patched to point at it, and the
+			 * unchanged __tls_get_addr (tp + ti->ti_offset) completes the
+			 * access.  This avoids emitting any dynamic relocation.
+			 * Non-GD dynamic models (LD/IE/absolute DTPOFF) are relaxed to
+			 * Local-Exec TPOFF32 as before. */
+			if (type == LD_R_X86_64_TLSGD) {
+				uint64_t tls_off, desc_off;
+				uint64_t desc_addr;
+				struct ld_group *data;
+				if (symbol_tls_offset(ctx, object, symbol_index, &tls_off) != 0)
+					return -1;
+				if (tls_desc_lookup(ctx, name, &desc_off) != 0)
+					return ld_errorf(ctx,
+					        "static GD TLS descriptor missing for %s", name);
+				/* Fill tls_index: module stays 1 (static), offset is the
+				 * sign-extended TP offset used by __tls_get_addr. */
+				data = &ctx->groups[ctx->tls_desc.data_group];
+				write64(data->data + desc_off, 1);              /* ti_module */
+				write64(data->data + desc_off + 8,
+				        (uint64_t)((int64_t)tls_off - (int64_t)ctx->tls_size));
+				desc_addr = data->address + desc_off;
+				value = desc_addr + addend - place;       /* rip-relative */
+				width = 4;
+			} else if (type == LD_R_X86_64_DTPOFF) {
 				value = resolved_value + addend;
 				width = 4;
 			} else {
@@ -4227,6 +4374,7 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 			ctx.as_needed = 0;
 	}
 	ctx.got.group = -1;
+	ctx.tls_desc.data_group = -1;
 	for (i = 0; i < input_count; ++i)
 		if (load_input(&ctx, inputs[i]) != 0)
 			goto out;
@@ -4238,7 +4386,8 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 	    ensure_pie_section(&ctx) != 0 ||
 	    collect_symbols(&ctx) != 0 ||
 	    extract_archives(&ctx) != 0 || allocate_common(&ctx) != 0 ||
-	    collect_got_relocations(&ctx) != 0)
+	    collect_got_relocations(&ctx) != 0 ||
+	    collect_static_tls_descs(&ctx) != 0)
 		goto out;
 	/* --defsym: define absolute symbols (must run before --no-undefined
 	 * so the new symbols are treated as satisfied references). */
