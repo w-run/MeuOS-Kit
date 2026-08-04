@@ -42,6 +42,33 @@ page_align(size_t addr, size_t page_size)
 static uintptr_t heap_start;
 static uintptr_t heap_cur;
 
+/* P0.3: pointer to the active linker state, set by rtld_main and used by
+ * the run-time entry points (rtld_dlopen / rtld_dlsym / rtld_tls_get_addr)
+ * which, unlike the startup-time helpers, do not receive `st` as a
+ * parameter. */
+static struct rtld_state *g_st;
+
+/* Host test hook: let a standalone harness drive dlopen / DTV without
+ * going through the full rtld_main startup path. */
+void
+rtld_set_state(struct rtld_state *st)
+{
+	g_st = st;
+}
+
+/* x86_64 TLS GD descriptor (matches libc's tls_index): the compiler
+ * emits `leaq sym@tlsgd(%rip), %rdi; call __tls_get_addr`, where the
+ * @tlsgd relocation points at a 16-byte {ti_module, ti_offset}.  In the
+ * dynamic (DTV) scheme, ti_offset is the offset within the module's TLS
+ * block, and the DTV slot for the module is lazily allocated on first
+ * touch. */
+typedef struct {
+	unsigned long ti_module;
+	unsigned long ti_offset;
+} tls_index;
+
+void *__tls_get_addr(tls_index *ti);
+
 static void
 rtld_heap_init(void)
 {
@@ -87,6 +114,16 @@ rtld_strcmp(const char *a, const char *b)
 {
 	while (*a && *a == *b) { a++; b++; }
 	return (unsigned char)*a - (unsigned char)*b;
+}
+
+/* Byte-wise copy helper (rtld is freestanding; no memcpy). */
+static void
+rtld_memcpy(void *dst, const void *src, size_t n)
+{
+	unsigned char *d = (unsigned char *)dst;
+	const unsigned char *s = (const unsigned char *)src;
+	for (size_t i = 0; i < n; i++)
+		d[i] = s[i];
 }
 
 /* ---- auxv parsing ---- */
@@ -463,6 +500,40 @@ rtld_find_sym(struct rtld_state *st, const char *name, int *out_lib)
 
 /* ---- relocation application ---- */
 
+/* Address of an ld.so-exported run-time symbol, if `name` matches one of
+ * the dynamic-linker's own functions that a PIE imports (e.g. it calls
+ * rtld_dlopen / rtld_dlsym / rtld_tls_get_addr).  These live in ld.so
+ * itself, which is not part of st->libs, so normal library-wide lookup
+ * would miss them.  Returns 0 if `name` is not an ld.so export. */
+static uintptr_t
+rtld_fptr_addr(void (*fn)(void))
+{
+	/* Copy a function pointer's bits into an integer without tripping
+	 * -Wpedantic's function-pointer-to-object-pointer rule. */
+	uintptr_t v = 0;
+	const unsigned char *s = (const unsigned char *)(const void *)&fn;
+	unsigned char *d = (unsigned char *)(void *)&v;
+	for (size_t i = 0; i < sizeof(v); i++)
+		d[i] = s[i];
+	return v;
+}
+
+static uintptr_t
+rtld_self_sym(const char *name)
+{
+	if (!name || !name[0])
+		return 0;
+	if (rtld_strcmp(name, "rtld_dlopen") == 0)
+		return rtld_fptr_addr((void (*)(void))rtld_dlopen);
+	if (rtld_strcmp(name, "rtld_dlsym") == 0)
+		return rtld_fptr_addr((void (*)(void))rtld_dlsym);
+	if (rtld_strcmp(name, "rtld_tls_get_addr") == 0)
+		return rtld_fptr_addr((void (*)(void))rtld_tls_get_addr);
+	if (rtld_strcmp(name, "__tls_get_addr") == 0)
+		return rtld_fptr_addr((void (*)(void))__tls_get_addr);
+	return 0;
+}
+
 static uint64_t
 resolve_sym_value(struct rtld_state *st, struct rtld_lib *lib,
                   Sym64 *sym, uintptr_t lib_base)
@@ -476,6 +547,11 @@ resolve_sym_value(struct rtld_state *st, struct rtld_lib *lib,
 		if (lib->strtab && lib->strsz && sym->name > 0 &&
 		    sym->name < lib->strsz)
 			sym_name = lib->strtab + sym->name;
+		/* ld.so's own exported run-time API (dlopen/dlsym/tls_get_addr)
+		 * takes priority: the main program links against them directly. */
+		uintptr_t self = rtld_self_sym(sym_name);
+		if (self)
+			return self;
 		int def_lib = -1;
 		Sym64 *def_sym = rtld_find_sym(st, sym_name, &def_lib);
 		if (def_sym && def_lib >= 0)
@@ -533,9 +609,13 @@ rtld_apply_rela(struct rtld_lib *lib, struct rtld_state *st)
 			break;
 		}
 		case R_X86_64_DTPOFF64: {
-			/* TP-relative offset of the symbol.  The compiler's
-			 * __tls_get_addr resolves `tp + ti_offset`, so we store
-			 *   (module_block_base + sym_offset) - tp. */
+			/* Block-relative offset of the symbol within its module's
+			 * TLS block.  With the DTV scheme, __tls_get_addr resolves
+			 * `DTV[ti_module] + ti_offset`, where ti_offset is this
+			 * offset (NOT a TP-relative delta).  The DTV slot for the
+			 * module points at the block base (static-allocated for
+			 * startup modules, lazily allocated for dlopen'd ones), so
+			 * the returned address is correct. */
 			const char *sym_name = 0;
 			if (lib->symtab && lib->strtab && lib->strsz) {
 				Sym64 *s = &lib->symtab[rsym];
@@ -546,16 +626,10 @@ rtld_apply_rela(struct rtld_lib *lib, struct rtld_state *st)
 			Sym64 *def_sym = 0;
 			if (sym_name)
 				def_sym = rtld_find_sym(st, sym_name, &def_lib);
-			uintptr_t block_base = lib->tls_image;
 			uint64_t sym_off = (uint64_t)r->r_addend;
-			if (def_sym) {
+			if (def_sym)
 				sym_off = def_sym->value + (uint64_t)r->r_addend;
-				if (def_lib >= 0)
-					block_base = st->libs[def_lib].tls_image;
-			}
-			*(uint64_t *)loc =
-				(uint64_t)((int64_t)(block_base + sym_off)
-				           - (int64_t)st->tls_tp);
+			*(uint64_t *)loc = sym_off;
 			break;
 		}
 		case R_X86_64_NONE:
@@ -663,7 +737,18 @@ rtld_load_needed(struct rtld_state *st, struct rtld_lib *lib)
  * which the compiler's __tls_get_addr resolves as `tp + ti_offset`.
  *
  * Called once after every library is loaded and before relocations, so
- * that R_X86_64_DTPMOD64/DTPOFF64 can be filled in. */
+ * that R_X86_64_DTPMOD64/DTPOFF64 can be filled in.
+ *
+ * P0.3: also builds the per-module TLS registration table and the primary
+ * thread's Dynamic Thread Vector (DTV).  The DTV lets __tls_get_addr
+ * resolve modules > 1 (notably modules dlopen'd later) by lazily
+ * allocating their TLS block on first touch.  The static layout below is
+ * retained so the existing static-GD path (libc __tls_get_addr) keeps
+ * working; modules registered here that were static-allocated already
+ * point their DTV slot at the pre-allocated block. */
+static void
+rtld_tls_build_dtv(struct rtld_state *st);
+
 static void
 rtld_tls_setup(struct rtld_state *st)
 {
@@ -688,9 +773,7 @@ rtld_tls_setup(struct rtld_state *st)
 		return;
 	/* The thread pointer is the END of the area. */
 	uintptr_t tp = area + total;
-	st->tls_tp = tp;
-
-	/* Lay out modules from the top down (module with the highest
+	st->tls_tp = tp;	/* Lay out modules from the top down (module with the highest
 	 * modid sits just below the TCB).  Assign modids 1..N. */
 	uintptr_t cursor = tp;
 	/* Main executable first (modid 1). */
@@ -723,11 +806,256 @@ rtld_tls_setup(struct rtld_state *st)
 				((unsigned char *)lib->tls_vaddr)[i];
 	}
 
+	/* P0.3: build the registration table + DTV now that tls_modid /
+	 * tls_image are known. */
+	rtld_tls_build_dtv(st);
+
 	/* Point %fs at the thread pointer. */
 	rtld_arch_prctl(0x1002 /* ARCH_SET_FS */, (unsigned long)tp);
 }
 
-/* ---- main entry (called from dlstart.S) ---- */
+/* ---- P0.3 dynamic TLS: DTV + module registry + dlopen ---- */
+
+/* Build the per-module TLS registration table and the primary thread's
+ * DTV.  Each DSO with a PT_TLS contributes one entry (template / sizes /
+ * align); the primary thread's DTV array gets one slot per module holding
+ * the module's TLS block address.  Blocks that were static-allocated
+ * above (all startup modules) already have an address, so their DTV slot
+ * points there; later dlopen'd modules start NULL and are lazily
+ * allocated by rtld_tls_get_addr.  The DTV pointer is stored in the TCB
+ * at %fs-8 so a DTV-based __tls_get_addr can find it via %fs. */
+static void
+rtld_tls_build_dtv(struct rtld_state *st)
+{
+	st->tls_mod_count = 0;
+	st->dtv = 0;
+	st->dtv_len = 0;
+	st->dtv_store = 0;
+
+	/* Count TLS modules and build the registry. */
+	for (int l = 0; l < st->lib_count; l++) {
+		struct rtld_lib *lib = &st->libs[l];
+		if (lib->tls_memsz == 0)
+			continue;
+		if (st->tls_mod_count >= RTLD_MAX_LIBS)
+			break;
+		struct rtld_tls_mod *m = &st->tls_mods[st->tls_mod_count];
+		m->modid = st->tls_mod_count + 1;
+		m->lib_idx = l;
+		m->template = (const unsigned char *)lib->tls_vaddr;
+		m->tls_filesz = lib->tls_filesz;
+		m->tls_memsz = lib->tls_memsz;
+		m->tls_align = lib->tls_align ? lib->tls_align : 1;
+		lib->tls_modid = m->modid;
+		st->tls_mod_count++;
+	}
+
+	if (st->tls_mod_count == 0)
+		return;
+
+	/* Allocate the DTV array: slot 0 = generation, slots 1..mods. */
+	int dtv_len = st->tls_mod_count + 1;
+	uintptr_t *dtv = (uintptr_t *)rtld_alloc((size_t)dtv_len * sizeof(*dtv));
+	if (!dtv)
+		return;
+	dtv[0] = 1; /* generation */
+	for (int i = 1; i < dtv_len; i++)
+		dtv[i] = 0;
+	st->dtv = dtv;
+	st->dtv_len = dtv_len;
+	st->dtv_store = dtv;
+
+	/* Point each module's slot at its static-allocated block (startup
+	 * modules are pre-laid-out); dlopen'd modules get NULL (lazy). */
+	for (int i = 0; i < st->tls_mod_count; i++) {
+		struct rtld_tls_mod *m = &st->tls_mods[i];
+		struct rtld_lib *lib = &st->libs[m->lib_idx];
+		dtv[m->modid] = lib->tls_image;
+	}
+
+	/* Store the DTV pointer in the TCB at %fs-8.  %fs was already set
+	 * to the thread pointer by the caller; the 16-byte TCB just below it
+	 * holds the DTV pointer at tp-8. */
+	uintptr_t tp = st->tls_tp;
+	if (tp)
+		*(uintptr_t *)(tp - 8) = (uintptr_t)dtv;
+}
+
+/* Lazily allocate module `mod`'s TLS block for the current (primary)
+ * thread and return its base address.  Uses the module's registration
+ * template to copy .tdata and zero .tbss.  Returns 0 on failure. */
+static uintptr_t
+rtld_tls_lazy_alloc(struct rtld_state *st, int mod)
+{
+	if (mod <= 0 || mod > st->tls_mod_count)
+		return 0;
+	struct rtld_tls_mod *m = &st->tls_mods[mod - 1];
+	size_t align = m->tls_align > 16 ? m->tls_align : 16;
+	size_t sz = (m->tls_memsz + align - 1) & ~(align - 1);
+	uintptr_t blk = (uintptr_t)rtld_alloc(sz + align - 1);
+	if (!blk)
+		return 0;
+	/* Align the block to the module's TLS alignment. */
+	uintptr_t base = (blk + (m->tls_align - 1)) & ~(uintptr_t)(m->tls_align - 1);
+	for (size_t i = 0; i < m->tls_memsz; i++)
+		((unsigned char *)base)[i] = 0;
+	if (m->template && m->tls_filesz > 0)
+		for (size_t i = 0; i < m->tls_filesz; i++)
+			((unsigned char *)base)[i] = m->template[i];
+	/* Grow the DTV if a dlopen'd module has a higher modid. */
+	if (mod >= st->dtv_len) {
+		int nlen = mod + 2;
+		uintptr_t *ndtv = (uintptr_t *)rtld_alloc((size_t)nlen * sizeof(*ndtv));
+		if (!ndtv)
+			return 0;
+		for (int i = 0; i < st->dtv_len; i++)
+			ndtv[i] = st->dtv[i];
+		for (int i = st->dtv_len; i < nlen; i++)
+			ndtv[i] = 0;
+		st->dtv = ndtv;
+		st->dtv_len = nlen;
+		st->dtv_store = ndtv;
+		uintptr_t tp = st->tls_tp;
+		if (tp)
+			*(uintptr_t *)(tp - 8) = (uintptr_t)ndtv;
+	}
+	st->dtv[mod] = base;
+	return base;
+}
+
+/* DTV-backed __tls_get_addr core: current thread's address of the TLS
+ * variable in module `mod` at block-relative offset `off`. */
+void *
+rtld_tls_get_addr(unsigned long mod, unsigned long off)
+{
+	struct rtld_state *st = g_st;
+	if (!st)
+		return 0;
+	if (mod == 0)
+		return 0;
+	if (!st->dtv || mod >= (unsigned long)st->dtv_len)
+		if (rtld_tls_lazy_alloc(st, (int)mod) == 0 && !st->dtv)
+			return 0;
+	uintptr_t blk = st->dtv[mod];
+	if (blk == 0) {
+		if (rtld_tls_lazy_alloc(st, (int)mod) == 0)
+			return 0;
+		blk = st->dtv[mod];
+	}
+	return (void *)(blk + off);
+}
+
+/* DTV-backed __tls_get_addr symbol (ABI: takes tls_index*).  In the
+ * dynamic (DTV) scheme, ti_offset is the offset within the module's TLS
+ * block, and the DTV slot for the module is lazily allocated on first
+ * touch. */
+void *
+__tls_get_addr(tls_index *ti)
+{
+	if (!ti)
+		return 0;
+	return rtld_tls_get_addr(ti->ti_module, ti->ti_offset);
+}
+
+/* Runtime handle to a dlopen'd library.  We return the rtld_lib pointer
+ * cast to void* (module 0..N).  For the main executable, handle = libs[0].
+ * The caller (a dlfcn shim) can pass this back to rtld_dlsym. */
+void *
+rtld_dlopen(const char *name)
+{
+	struct rtld_state *st = g_st;
+	if (!st || !name || !*name)
+		return 0;
+	if (st->lib_count >= RTLD_MAX_LIBS)
+		return 0;
+
+	/* Deduplicate: if already loaded, return the existing handle. */
+	for (int l = 0; l < st->lib_count; l++) {
+		if (st->libs[l].name &&
+		    rtld_strcmp(st->libs[l].name, name) == 0)
+			return &st->libs[l];
+	}
+
+	struct rtld_lib *lib = rtld_load_lib(name, st);
+	if (!lib)
+		return 0;
+	int first_new = (int)(lib - st->libs);
+	/* Load the library's own DT_NEEDED deps (transitive). */
+	rtld_load_needed(st, lib);
+	/* If it (or a new dep) brought a PT_TLS module not yet registered,
+	 * register it and extend the DTV. */
+	if (lib->tls_memsz > 0 && lib->tls_modid == 0) {
+		if (st->tls_mod_count >= RTLD_MAX_LIBS) {
+			rtld_die("rtld_dlopen: too many TLS modules");
+			return 0;
+		}
+		struct rtld_tls_mod *m = &st->tls_mods[st->tls_mod_count];
+		m->modid = st->tls_mod_count + 1;
+		m->lib_idx = (int)(lib - st->libs);
+		m->template = (const unsigned char *)lib->tls_vaddr;
+		m->tls_filesz = lib->tls_filesz;
+		m->tls_memsz = lib->tls_memsz;
+		m->tls_align = lib->tls_align ? lib->tls_align : 1;
+		lib->tls_modid = m->modid;
+		st->tls_mod_count++;
+		/* DTV slot starts NULL: lazily allocated on first touch. */
+		if (m->modid >= st->dtv_len) {
+			int nlen = m->modid + 2;
+			uintptr_t *ndtv = (uintptr_t *)rtld_alloc(
+				(size_t)nlen * sizeof(*ndtv));
+			if (!ndtv)
+				return 0;
+			for (int i = 0; i < st->dtv_len; i++)
+				ndtv[i] = st->dtv ? st->dtv[i] : 0;
+			for (int i = st->dtv_len; i < nlen; i++)
+				ndtv[i] = 0;
+			if (st->dtv == 0)
+				ndtv[0] = 1;
+			st->dtv = ndtv;
+			st->dtv_len = nlen;
+			st->dtv_store = ndtv;
+			uintptr_t tp = st->tls_tp;
+			if (tp)
+				*(uintptr_t *)(tp - 8) = (uintptr_t)ndtv;
+		}
+	}
+
+	/* Apply relocations for the newly-loaded library and any of its
+	 * dependencies that were pulled in just now (they were not applied
+	 * at startup). */
+	for (int l = first_new; l < st->lib_count; l++)
+		rtld_apply_rela(&st->libs[l], st);
+
+	rtld_init_lib(lib);
+	return (void *)lib;
+}
+
+/* Resolve a symbol in a previously dlopen'd handle (or, if handle is 0,
+ * search all loaded libraries in load order). */
+void *
+rtld_dlsym(void *handle, const char *name)
+{
+	struct rtld_state *st = g_st;
+	if (!st || !name || !*name)
+		return 0;
+	if (handle) {
+		struct rtld_lib *lib = (struct rtld_lib *)handle;
+		int l = (int)(lib - st->libs);
+		if (l < 0 || l >= st->lib_count)
+			return 0;
+		Sym64 *sym = rtld_find_sym(st, name, &l);
+		if (!sym)
+			return 0;
+		if (l != (int)(lib - st->libs))
+			return 0; /* not defined in this handle */
+		return (void *)(lib->base + sym->value);
+	}
+	int l = -1;
+	Sym64 *sym = rtld_find_sym(st, name, &l);
+	if (!sym || l < 0)
+		return 0;
+	return (void *)(st->libs[l].base + sym->value);
+}
 
 uintptr_t
 rtld_main(size_t *sp)
@@ -930,6 +1258,22 @@ rtld_main(size_t *sp)
 		/* For PIE, the entry is relative to the base, so
 		 * we compute it from the binary's phdrs layout.
 		 * The entry from auxv is already absolute. */
+	}
+
+	/* P0.3: persist the linker state on the heap before handing control
+	 * to the program, so rtld_dlopen / rtld_dlsym / rtld_tls_get_addr
+	 * (called later, after rtld_main returns and its stack frame is
+	 * gone) can still reach the loaded libraries, the module TLS registry
+	 * and the DTV. */
+	{
+		struct rtld_state *persist =
+			(struct rtld_state *)rtld_alloc(sizeof(struct rtld_state));
+		if (persist) {
+			rtld_memcpy(persist, &st, sizeof(struct rtld_state));
+			g_st = persist;
+		} else {
+			g_st = &st; /* best-effort; stack lifetime only */
+		}
 	}
 	return entry;
 }
