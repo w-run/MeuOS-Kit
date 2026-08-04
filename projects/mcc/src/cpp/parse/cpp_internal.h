@@ -32,6 +32,26 @@ struct cpp_method_ctx {
 };
 extern struct cpp_method_ctx g_cpp_method;
 
+/* Constructor init-list item: `m(args)` or `Base(args)` in
+ * `Derived(int v) : Base(v), m(v * 2) {}`.  Populated by
+ * cpp_parse_init_list (called at the start of a ctor body) and consumed
+ * by emit_base_ctors_for so an explicit initializer supersedes the
+ * implicit default-construction call. */
+struct cpp_init_item {
+	const char *name;
+	struct expr *args; /* linked list of argument expressions */
+	struct cpp_init_item *next;
+};
+extern struct cpp_init_item *g_cpp_init_items;
+extern struct cpp_init_item **g_cpp_init_end;
+
+/* Constructor/destructor emission (defined in cpp_ctor.c); the members
+ * below are called from the method-body replay in cpp_parse.c. */
+void cpp_emit_base_ctor(struct func *f);
+void cpp_emit_base_dtor(struct func *f);
+void cpp_parse_init_list(struct func *f, struct scope *fs);
+void cpp_emit_global_dtor(struct func *f, struct decl *d);
+
 /* Template data structures shared by the template-instantiation code
  * (cpp_parse.c) and the member-template lowering (cpp_tmpl_member.c).
  * Pure data: the registry/instantiation state (g_cpp_tmpl_stack, packs,
