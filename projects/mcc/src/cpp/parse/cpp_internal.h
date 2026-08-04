@@ -67,6 +67,21 @@ enum cpp_tokenkind cpp_classify_token(struct token t);
 bool cpp_check_constraint(struct cpp_template *tmpl, struct scope *bs);
 size_t cpp_requires_span_len(struct token **out);
 
+/* Template-instantiation state shared between the member-buffer replay
+ * and the class-template instantiation (both in cpp_parse.c / moved
+ * modules).  Defined in cpp_parse.c. */
+extern bool g_cpp_tmpl_instantiating;
+extern struct decl *g_cpp_tmpl_binds[16];
+extern int g_cpp_tmpl_nbinds;
+
+/* Parse a non-type template argument (defined in cpp_parse.c,
+ * function-template section); used by the class-template instantiation. */
+struct expr *cpp_tmpl_const_arg(struct scope *s);
+
+/* Is template parameter `i` a non-type parameter? (defined in
+ * cpp_parse.c); used by the class-template instantiation. */
+bool tmpl_param_is_nttp(struct cpp_template *tmpl, int i);
+
 /* Template data structures shared by the template-instantiation code
  * (cpp_parse.c) and the member-template lowering (cpp_tmpl_member.c).
  * Pure data: the registry/instantiation state (g_cpp_tmpl_stack, packs,
