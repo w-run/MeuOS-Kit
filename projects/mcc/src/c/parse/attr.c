@@ -77,6 +77,8 @@ parseattr(struct attr *a, enum attrkind allowed, enum attrprefix prefix)
 					next();
 				expect(TRPAREN, "after deprecated message");
 			}
+		} else if (strcmp(name, "no_unique_address") == 0) {
+			kind = ATTRNOUNIQUEADDRESS;
 		}
 		break;
 	case PREFIXGNU:

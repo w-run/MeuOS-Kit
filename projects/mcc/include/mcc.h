@@ -116,6 +116,9 @@ struct member {
 	bool is_explicit;
 	/* C++ vtable slot index (valid once the class layout is finalized). */
 	int vslot;
+	/* C++20 [[no_unique_address]]: this member may share its address
+	 * with another member (layout optimization). */
+	bool is_no_unique_address;
 	struct member *next;
 };
 
@@ -620,6 +623,7 @@ enum attrkind {
 	ATTRUSED        = 1<<11,
 	ATTRNOINLINE    = 1<<12,
 	ATTRALWAYSINLINE = 1<<13,
+	ATTRNOUNIQUEADDRESS = 1<<14, /* C++20 [[no_unique_address]] */
 };
 
 struct attr {
