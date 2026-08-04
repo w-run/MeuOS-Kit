@@ -1,5 +1,9 @@
 # libc vfprintf 浮点格式化缺陷（负数+精度）
 
+> ✅ **已闭环（2026-08-05 验证）**：由 `0fc6ff5`（sign_bit 死循环）、`da205fa`（%f/%e 舍入点）、`c004de8`（mcc x86_64 负零池区分 +0.0/-0.0）等收敛修复。
+> 验证：`projects/mcc/mcc --specs=meuos` 编译运行 `test/fp_fmt.c` → **PASS fp_fmt，0 FAIL**；最小复现 `printf("%.2f", -3.14)` 正确输出 `-3.14`。
+> 保留本文件作为回归记录；如需从待办清出可删除。
+
 > 来源：2026-08-04 接手审计修复 atomic 缺陷后暴露（mcc-toolchain HEAD `7ff1fc5`）
 > 严重度：🟡 中（浮点 printf 受影响，但正数 %f/%e 正常）
 > 组件：meuos-libc（`vfprintf` / `__float_to_str`）
