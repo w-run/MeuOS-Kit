@@ -1,7 +1,7 @@
 # mt/readelf -d 对 PIE 文件误报 "no dynamic section"
 
-> 状态：🔄 开放（pre-existing，2026-08-04 由 reviewer-auditor 在 rtld P0 验收中发现）
-> 分支参考：tmp/rtld-p0（HEAD=f88ae83）
+> 状态：✅ 完成（2026-08-04 exec-toolchain-lite）
+> 分支参考：tmp/exec-toolchain/mt-readelf-pie（HEAD=49349b2）
 > 关联 commit：153be27 / 3f2c354 / 82a4b40 / f88ae83（与本任务无关，仅是 P0 闭环期间复现）
 
 ## 现象
@@ -40,3 +40,16 @@ There is no dynamic section in this file.
 - 不动 src/ld/* / src/rtld/* / src/as/* / src/libelf/*；
 - 不引入新 warning（-Werror）；
 - 文件级 git commit `mt: readelf: fix -d parsing for PIE files`。
+
+## 修复记录（2026-08-04 exec-toolchain-lite）
+
+- **commit**：`49349b2`（分支 `tmp/exec-toolchain/mt-readelf-pie`）
+- **关键 diff**：
+  - `dump_dynamic` 改为**优先读取 `PT_DYNAMIC` program header**（而非只查 .dynamic section 段头表），适配 ET_DYN / PIE；
+  - 对 `.dynamic` 节区 `sh_type=PROGBITS`（mt/ld 端生成）**回退兼容**：不因 sh_type≠SHT_DYNAMIC 而拒绝解析；
+  - strtab **按名查 `.dynstr`**，而非依赖 `sh_link` 到 `.dynstr` 的索引（mt/ld 端 sh_link=0）。
+- **3 类样本验证矩阵**：
+  - 静态（ET_EXEC 静态）：`-d` 正常输出 / 无动态段继续提示；
+  - 传统动态 ET_EXEC：9 条 DT 条目正确；
+  - PIE（ET_DYN）：GNU readelf 对齐，9 条 DT 条目完整不再误报。
+- **commit message**：`mt: readelf: fix -d parsing for PIE files`
