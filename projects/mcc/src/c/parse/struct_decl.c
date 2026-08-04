@@ -413,8 +413,9 @@ structdecl(struct scope *s, struct structbuilder *b)
 		/* C++20 `= default` / `= delete` on operators: consume the
 		 * trailing specifier (if present) so the declaration is accepted
 		 * without a body.  `= delete` marks the function as not callable;
-		 * `= default` on <=> is accepted syntactically (the defaulted
-		 * body generation is a future enhancement). */
+		 * `= default` on `<=>` synthesizes the member-wise comparison
+		 * body (the operator must be 'ss' for a synthesized body — other
+		 * operators are still accepted syntactically). */
 		if (tok.kind == TASSIGN) {
 			next();
 			/* `default` is a C keyword (TDEFAULT), so cpp_tok_kind()
@@ -426,9 +427,18 @@ structdecl(struct scope *s, struct structbuilder *b)
 				expect(TSEMICOLON, "after '= default'");
 				mname = xmalloc(strlen(opcode) + 10);
 				sprintf(mname, "operator_%s", opcode);
-				cpp_define_method(s, ft, mname,
-			    b->type->u.structunion.tag,
-			    is_const, is_static, false);
+				if (strcmp(opcode, "ss") == 0) {
+					/* defaulted `<=>`: generate the body comparing
+					 * every non-static data member in order */
+					extern void cpp_synth_default_spaceship(struct scope *,
+					    struct type *, const char *, const char *, bool);
+					cpp_synth_default_spaceship(s, ft, mname,
+					    b->type->u.structunion.tag, is_const);
+				} else {
+					cpp_define_method(s, ft, mname,
+					    b->type->u.structunion.tag,
+					    is_const, is_static, false);
+				}
 				addmember(b, (struct qualtype){ft, QUALNONE, NULL},
 				    mname, 0, -1);
 				return;
