@@ -1302,6 +1302,23 @@ x86_64_encode_insn(const struct mt_target *target,
 			emit_le(out->bytes, &out->size, (uint32_t)op[0].displacement, 4);
 			goto done;
 		}
+		if (n == 2 && op[0].kind == OP_IMM && op[1].kind == OP_REG) {
+			/* Two-operand `imul $imm, %reg` (mcc emits
+			 * `imulq $4,%rax` for arr[i] index scaling).  Encode as
+			 * `imul %reg, %reg, $imm32` (Op 69, REX.W + 69 +
+			 * modrm(reg=op[1], rm=op[1]) + imm32).  Previous code fell
+			 * through to the 0x0f/0xaf `imul r64,r/m64` branch which
+			 * used OpImm as r/m, mis-encoding the whole region and
+			 * shifting every following instruction by a few bytes
+			 * (D3: static exe global-array store segfault). */
+			width = op[1].width;
+			emit_rex_rm(out->bytes, &out->size, width == 8, op[1].reg, &op[1]);
+			emit_u8(out->bytes, &out->size, 0x69);
+			emit_modrm(out->bytes, &out->size, out, op[1].reg, &op[1],
+			           R_X86_64_PC32, -4);
+			emit_le(out->bytes, &out->size, (uint32_t)op[0].displacement, 4);
+			goto done;
+		}
 		if (n == 2 && op[1].kind == OP_REG) {
 			width = op[1].width;
 			emit_rex_rm(out->bytes, &out->size, width == 8, op[1].reg, &op[0]);
