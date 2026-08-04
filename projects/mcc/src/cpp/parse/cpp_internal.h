@@ -25,4 +25,24 @@ extern int g_cpp_cexpr_tmpl_n;
 void cpp_expand_folds(struct token *toks, size_t n, const char *pack_var,
                       int npack, struct token **out, size_t *outn);
 
+/* Pending `this` object of the next member-function call, set by the
+ * postfix `.`/`->` lowering; the lambda lowering nulls it out. */
+extern struct expr *g_cpp_member_this;
+
+/* Running counter for synthesized closure classes ``__lambdaN``; shared
+ * between the template-instantiation code (cpp_parse.c) and the lambda
+ * lowering (cpp_lambda.c). */
+extern int g_cpp_lambda_count;
+
+/* Parse a C++ ``class``/``struct`` body (access-control sections,
+ * members, base lists).  Defined in cpp_parse.c; the lambda lowering
+ * replays a synthesized closure-class definition through it. */
+bool cpp_class_decl(struct scope *s);
+
+/* Token-stream builder for the synthesized closure-class definition.
+ * Defined in cpp_lambda.c; used by the template-declaration code in
+ * cpp_parse.c. */
+void cpp_tb(struct token *buf, size_t *n, struct token tmpl,
+            enum tokenkind k, const char *name);
+
 #endif /* MCC_CPP_PARSE_INTERNAL_H */
