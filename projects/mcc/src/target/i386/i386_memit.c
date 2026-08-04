@@ -1115,6 +1115,8 @@ emit_block(FILE *f, MBlkM *b)
 		}
 		/* epilogue: restore frame and pop */
 		fputs("\tmovl\t%ebp, %esp\n", f);
+		if (g_pic)
+			fputs("\tpopl\t%ebx\n", f);
 		fputs("\tpopl\t%ebp\n", f);
 		fputs("\tret\n", f);
 		break;
@@ -1131,8 +1133,11 @@ mfnm_emit_i386(MFnM *fm, FILE *f)
 	g_fm = fm;
 	g_fname = fm->name ? fm->name : "?";
 
-	/* frame: push ebp (4 bytes) above the slot area */
+	/* frame: push ebp (4 bytes) above the slot area; PIC additionally
+	 * pushes the callee-saved EBX (GOT base) before setting ebp. */
 	int pushbytes = 4;
+	if (g_pic)
+		pushbytes += 4;
 	g_slot_base = -pushbytes;
 
 	fm->dynalloc = false;
@@ -1158,9 +1163,17 @@ mfnm_emit_i386(MFnM *fm, FILE *f)
 		fprintf(f, "%s:\n", fm->name);
 	}
 	fprintf(f, "\tpushl\t%%ebp\n");
+	if (g_pic)
+		fprintf(f, "\tpushl\t%%ebx\n");
 	fprintf(f, "\tmovl\t%%esp, %%ebp\n");
 	if (framesize > pushbytes)
 		fprintf(f, "\tsubl\t$%d, %%esp\n", framesize - pushbytes);
+
+	if (g_pic) {
+		/* Load the GOT base into EBX for PIC direct-global addressing. */
+		fprintf(f, "\tcall\t__x86.get_pc_thunk.bx\n");
+		fprintf(f, "\taddl\t$_GLOBAL_OFFSET_TABLE_, %%ebx\n");
+	}
 
 	/* Branch to the real entry block after the prologue */
 	if (fm->start)
