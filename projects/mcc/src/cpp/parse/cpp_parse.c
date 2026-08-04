@@ -721,6 +721,13 @@ cpp_class_decl(struct scope *s)
 			}
 			if (tok.kind == TRBRACE)
 				break;
+			/* C++20 [[no_unique_address]]: capture the attribute before
+			 * structdecl so it can be propagated to the member layout. */
+			{
+				struct attr _ma = {0};
+				attr(&_ma, ATTRNOUNIQUEADDRESS);
+				b.member_no_unique_address = (_ma.kind & ATTRNOUNIQUEADDRESS) != 0;
+			}
 			structdecl(s, &b);
 		}
 		next(); /* consume '}' */
@@ -924,6 +931,117 @@ cpp_using_decl(struct scope *s)
 	}
 }
 
+/* C++20 module declaration: `module ModuleName;` or `module :private;`.
+ * Only syntax parsing — no semantic module loading. */
+void
+cpp_module_decl(struct scope *s)
+{
+	next(); /* consume 'module' */
+
+	if (tok.kind == TCOLON) {
+		/* `module :private;` — private module fragment */
+		next(); /* consume ':' */
+		if (cpp_tok_kind() != CPP_TPRIVATE)
+			error_code(E_SYNTAX, &tok.loc, "expected 'private' after 'module :'");
+		next(); /* consume 'private' */
+		expect(TSEMICOLON, "after module :private");
+		return;
+	}
+
+	/* Parse module name: identifier (. identifier)* */
+	if (tok.kind >= TIDENT) {
+		for (;;) {
+			next(); /* consume identifier */
+			if (tok.kind == TPERIOD) {
+				next(); /* consume '.' */
+				if (tok.kind < TIDENT)
+					error_code(E_SYNTAX, &tok.loc, "expected identifier after '.' in module name");
+			} else {
+				break;
+			}
+		}
+	}
+	expect(TSEMICOLON, "after module declaration");
+}
+
+/* C++20 import declaration: `import ModuleName;` or `import "header";`.
+ * Only syntax parsing — no semantic module loading. */
+void
+cpp_import_decl(struct scope *s)
+{
+	next(); /* consume 'import' */
+
+	/* C++23 header import: `import "header";` */
+	if (tok.kind == TSTRINGLIT) {
+		next(); /* consume string literal */
+		expect(TSEMICOLON, "after header import");
+		return;
+	}
+
+	/* Parse module name: identifier (. identifier)* */
+	if (tok.kind >= TIDENT) {
+		for (;;) {
+			next(); /* consume identifier */
+			if (tok.kind == TPERIOD) {
+				next(); /* consume '.' */
+				if (tok.kind < TIDENT)
+					error_code(E_SYNTAX, &tok.loc, "expected identifier after '.' in module name");
+			} else {
+				break;
+			}
+		}
+	}
+	expect(TSEMICOLON, "after import declaration");
+}
+
+/* C++20 export declaration: `export module ...`, `export import ...`,
+ * `export { ... }`, `export declaration`, or `export template ...`.
+ * Only syntax parsing — no semantic export tracking. */
+void
+cpp_export_decl(struct scope *s)
+{
+	next(); /* consume 'export' */
+
+	enum cpp_tokenkind k = cpp_tok_kind();
+	if (k == CPP_TMODULE) {
+		/* `export module ModuleName;` — module interface declaration */
+		cpp_module_decl(s);
+	} else if (k == CPP_TIMPORT) {
+		/* `export import ModuleName;` — re-export an imported module */
+		cpp_import_decl(s);
+	} else if (tok.kind == TLBRACE) {
+		/* `export { ... }` — export block */
+		next(); /* consume '{' */
+		while (tok.kind != TRBRACE && tok.kind != TEOF) {
+			enum cpp_tokenkind k2 = cpp_tok_kind();
+			if (k2 == CPP_TEXPORT)
+				cpp_export_decl(s);
+			else if (k2 == CPP_TIMPORT)
+				cpp_import_decl(s);
+			else if (k2 == CPP_TMODULE)
+				cpp_module_decl(s);
+			else if (k2 == CPP_TUSING)
+				cpp_using_decl(s);
+			else if (k2 == CPP_TTEMPLATE)
+				cpp_template_decl(s, NULL);
+			else if (k2 == CPP_TCLASS || k2 == CPP_TSTRUCT || k2 == CPP_TUNION)
+				cpp_class_decl(s);
+			else if (k2 == CPP_TNAMESPACE)
+				cpp_namespace_decl(s);
+			else
+				decl(s, NULL);
+		}
+		if (tok.kind == TRBRACE)
+			next(); /* consume '}' */
+	} else if (k == CPP_TTEMPLATE) {
+		/* `export template <...> ...` */
+		cpp_template_decl(s, NULL);
+	} else {
+		/* `export declaration` — parse the declaration normally */
+		decl(s, NULL);
+	}
+}
+
 /* Parse a C++ translation unit: top-level declaration loop.
  * C++ grammar is layered over the C parser; `class` declarations with
  * access control are handled here (cpp_class_decl), and C-compatible
@@ -973,6 +1091,21 @@ cpp_parse_translation_unit(void)
 		}
 		if (k == CPP_TTEMPLATE) {
 			cpp_template_decl(&filescope, NULL);
+			g_err_recovery_set = 0;
+			continue;
+		}
+		if (k == CPP_TEXPORT) {
+			cpp_export_decl(&filescope);
+			g_err_recovery_set = 0;
+			continue;
+		}
+		if (k == CPP_TIMPORT) {
+			cpp_import_decl(&filescope);
+			g_err_recovery_set = 0;
+			continue;
+		}
+		if (k == CPP_TMODULE) {
+			cpp_module_decl(&filescope);
 			g_err_recovery_set = 0;
 			continue;
 		}
