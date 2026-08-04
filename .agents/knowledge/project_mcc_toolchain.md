@@ -130,3 +130,5 @@ PIC EBX 零临时分配 → 仍作 GOT base。mt 侧 i386 GOT 重定位留待 P1
   - `D3`：exec-mcc **GD store clobber**（修复中）。
 - **集成复测**：由 exec-integration-lite 负责（GD 运行期跨 mcc + mt/ld 端到端门禁）。
 
+> **本轮并行进展延伸**（TLS 静态 GD 运行期闭环、m++ C++ P1 5 项、P0.1 动态 libc、mt/ld .dynamic 新阻塞、静态数组 segfault、关键教训）见 [project_mcc_toolchain_roundup.md](project_mcc_toolchain_roundup.md)。
+
