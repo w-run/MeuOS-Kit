@@ -220,9 +220,13 @@ rarg(MFnM *fm, int *ni, int *ns, bool isf)
 static void
 mabi_selpar(MFnM *fm, MOut *o, MInsM *parms, int n, uint32_t *vafa)
 {
-	int ni = 0, ns = 0;
-	int off = 16;   /* caller-pushed stack args sit at fp+16 (the prologue
-	                 * pushed fp+lr, so fp = old_sp - 16) */
+int ni = 0, ns = 0;
+	int off = 0;    /* AAPCS64: caller writes stack-passed args to
+	                * [sp_at_call + 0, +8, ...].  Per AAPCS64 §Frame
+	                * Pointer, x29 = sp at function entry = sp_at_call, so
+	                * the args land at [x29 + 0].  The save area for fp/lr
+	                * is below the args at [x29, -16] (saved x29) and
+	                * [x29, -8] (saved x30), not above them. */
 
 	/* aggregate return (sret): x8 holds the hidden buffer; stash it so
 	 * selret can reload it after body calls clobber x8 */

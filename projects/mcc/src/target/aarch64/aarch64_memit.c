@@ -235,8 +235,16 @@ emit_addr_to_scratch(FILE *f, MAddr a, const char *rn)
 	MVal *base = a.base;
 	int64_t off = a.off;
 	if (base && base->kind == MV_TEMP && base->reg < 0) {
-		/* base is a spill slot: address it off(x29) */
-		load_imm(f, rn, base->slot + g_slot_base);
+		/* base is a spilled temp whose stack slot holds a POINTER VALUE
+		 * (alloca result / computed address) - load it off x29, then add
+		 * the displacement (mirrors loongarch64 emit_addr_to_scratch). */
+		int boff = base->slot + g_slot_base;
+		if (boff >= -256 && boff <= 255)
+			fprintf(f, "\tldr\t%s, [x29, #%d]\n", rn, boff);
+		else {
+			load_imm(f, "x16", boff);
+			fprintf(f, "\tldr\t%s, [x29, x16]\n", rn);
+		}
 		if (off)
 			fprintf(f, "\tadd\t%s, %s, #%lld\n", rn, rn, (long long)off);
 		return;
@@ -906,8 +914,19 @@ mfnm_emit_aarch64(MFnM *fm, FILE *f)
 		fprintf(f, "%s:\n", fm->name);
 	}
 	fprintf(f, "\tsub\tsp, sp, #%d\n", framesize);
-	fprintf(f, "\tstp\tx29, x30, [sp, #%d]\n", framesize - 16);
-	fprintf(f, "\tadd\tx29, sp, #%d\n", framesize);
+	/* stp's signed imm7 is scaled by 8: offset must fit [-512, 504].
+	 * A frame whose save offset (framesize - 16) exceeds that can only be
+	 * saved relative to the frame pointer with a tiny fixed offset, so we
+	 * must stow the old fp in a scratch reg before x29 is repointed (the
+	 * tail sequence restores lr from [x29,-8] and fp from [x29,-16]). */
+	if (framesize - 16 > 504) {
+		fprintf(f, "\tmov\tx16, x29\n");
+		fprintf(f, "\tadd\tx29, sp, #%d\n", framesize);
+		fprintf(f, "\tstp\tx16, x30, [x29, #-16]\n");
+	} else {
+		fprintf(f, "\tstp\tx29, x30, [sp, #%d]\n", framesize - 16);
+		fprintf(f, "\tadd\tx29, sp, #%d\n", framesize);
+	}
 	for (int i = 0; fm->mt->rclob && fm->mt->rclob[i] >= 0; i++)
 		if ((fm->regsused >> fm->mt->rclob[i]) & 1) {
 			int off = -24 - 8 * csave_idx(fm->mt, fm->mt->rclob[i]);
