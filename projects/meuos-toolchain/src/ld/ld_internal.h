@@ -312,6 +312,11 @@ int fill_got(struct ld_context *ctx);
 int write_executable(struct ld_context *ctx, const char *path,
                      const char *entry, const struct mt_target *target);
 
+/* Section address layout (defined in layout.c). */
+int apply_link_script(struct ld_context *ctx, const char *path);
+int layout_output(struct ld_context *ctx);
+int is_tls_group(struct ld_context *ctx, int group);
+
 /* ELF output structures (layout/elfout domains). */
 struct ld_output_section {
 	const char *name;
