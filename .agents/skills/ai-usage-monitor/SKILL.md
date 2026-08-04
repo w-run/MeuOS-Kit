@@ -44,27 +44,29 @@ bash /workspace/MeuOS-Kit/.codebuddy/skills/ai-usage-monitor/query.sh   # JSON �
 /root/ai.sh                                                             # 交互式 TUI（每 10s）
 ```
 
-## 决策逻辑（query.sh v3 内置，渠道策略 2026-08-04）
+## 决策逻辑（query.sh v4 内置，渠道策略 2026-08-04）
 
 按**渠道策略优先级**决策（大喵 2026-08-04 定位）：
 
 | 渠道 | 定位 | 使用策略 |
 |------|------|---------|
-| **MiniMax M3** | 只有周/5h 限制，间隔重置快 | **周配额充足即可猛用**（建议 default=M3），间隔% 只影响短期（重置快不阻塞） |
-| **lite (DS flash)** | 经济实惠好吃不贵 | **性价比首选**，常规任务主力 |
+| **MiniMax M3** | 只有周/5h 限制，间隔重置快 | 周配额充足时**可手动把某 variant(lite/reasoning) 临时改 variantModels 指向 custom-local:MiniMax-M3 猛用**；不自动走 default |
+| **lite (DS flash)** | 经济实惠好吃不贵 | **性价比首选，常规任务主力** |
 | **reasoning (GLM-5.2/Ark)** | **月总量告急**（monthly 15%） | **必须省着用**，仅必要复杂分析；monthly<20% 时禁用 |
 | **codebuddy 自带** | 查不到积分余额 | **只能应急** |
 
+**⚠️ 铁律：创建 subagent 时禁用 default**。settings.json 中 `default` 是随便配置的（设置时只有 lite/reasoning 有区分意义），不可靠。子任务只允许 `lite` 或 `reasoning`。
+
 判定：
-- MiniMax：**按周配额**（<20% 才 low；间隔仅作短期提示，重置快）
+- MiniMax：按**周配额**（<20% 才 low；间隔仅短期提示，重置快）——周配额充足时在 `minimax_note` 提示可手动切 M3
 - DeepSeek：余额 <¥10 → low
 - Ark：**按月总量**（monthly<20% → reasoning 禁用）
 
 决策顺序：
-1. MiniMax 周配额 ok → 建议 `default`（M3，猛用）
-2. 否则 lite（DS flash 性价比）
-3. DeepSeek 余额 low → 转 `hy3` 免费
-4. `reasoning_available`：Ark monthly≥20%（或走 local-free）→ yes，由指挥官按需启用
+1. **lite**（DS flash 性价比）为常规主力（default 禁用）
+2. DeepSeek 余额 low → 转 `hy3` 免费
+3. `reasoning_available`：Ark monthly≥20%（或走 local-free）→ yes，由指挥官按需启用
+4. MiniMax 周配额充足 → `minimax_note` 提示可手动切 M3（需改 variantModels），非默认决策
 
 ## 指挥官使用规范
 

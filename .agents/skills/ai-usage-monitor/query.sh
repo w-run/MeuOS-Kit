@@ -108,15 +108,14 @@ ds_ok="ok"; [ "$ds" != "N/A" ] && awk "BEGIN{exit !($ds < 10)}" 2>/dev/null && d
 ark_ok="ok"; [ "$m_rem" != "N/A" ] && awk "BEGIN{exit !($m_rem < 20)}" 2>/dev/null && ark_ok="low"
 
 # 推荐 variant：
-#   - MiniMax 周配额充足 → 建议 default=M3（可猛用）
-#   - 否则 DS flash(lite) 性价比首选
+#   **禁用 default**（settings.json 中 default 为随便配置，不可靠）。
+#   只用 lite / reasoning / hy3。
+#   - MiniMax 周配额充足 → 提示可把某 variant 临时切到 M3 猛用（需改 variantModels），
+#     但不建议 default；常规仍走 lite（DS flash 性价比）
+#   - lite（DS flash）常规主力
 #   - DeepSeek 余额低 → 转 hy3 免费
 sugg="lite"
-sugg_reason="lite($lite_m, ${LITE_CH}) 常规主力（DS flash 性价比）"
-if [ "$mm_ok" = "ok" ]; then
-    sugg="default"
-    sugg_reason="MiniMax 周配额 ${mm_w}%（可猛用，间隔 ${mm_i}% 约 ${mm_i_cnt} 后重置）→ 用 default=M3"
-fi
+sugg_reason="lite($lite_m, ${LITE_CH}) 常规主力（DS flash 性价比；default 禁用）"
 if [ "$ds_ok" = "low" ]; then
     sugg="hy3"
     sugg_reason="DeepSeek 按量余额低(¥${ds})，转 hy3 免费"
@@ -128,6 +127,12 @@ if [ "$RSN_CH" = "ark" ] && [ "$ark_ok" = "ok" ]; then
     reasoning_ok="yes"
 elif [ "$RSN_CH" = "local-free" ]; then
     reasoning_ok="yes"
+fi
+
+# MiniMax 备注：周配额充足时可用于临时切某 variant 到 M3 猛用（需改 variantModels），但不禁用 lite
+mm_note="MiniMax 周配额 ${mm_w}% (${mm_ok})，间隔 ${mm_i}% 约 ${mm_i_cnt} 后重置"
+if [ "$mm_ok" = "ok" ]; then
+    mm_note="MiniMax 周配额 ${mm_w}% 充足 — 如需猛用 M3，可将某 variant(lite/reasoning) 临时改 variantModels 指向 custom-local:MiniMax-M3；决策仍禁用 default"
 fi
 
 cat <<EOF
@@ -143,6 +148,6 @@ cat <<EOF
     "deepseek":      { "balance_yuan": "$ds", "safe_pct": "$ds_pct", "ok": "$ds_ok" },
     "ark_plan":      { "session_pct_rem": "$s_rem", "weekly_pct_rem": "$w_rem", "monthly_pct_rem": "$m_rem", "session_reset": "$s_cnt", "ok": "$ark_ok" }
   },
-  "decision": { "suggested": "$sugg", "reasoning_available": "$reasoning_ok", "reason": "$sugg_reason" }
+  "decision": { "suggested": "$sugg", "reasoning_available": "$reasoning_ok", "minimax_note": "$mm_note", "reason": "$sugg_reason" }
 }
 EOF
