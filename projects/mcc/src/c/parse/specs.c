@@ -651,6 +651,52 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 		default:
 			if (op < TIDENT || t || ts)
 				goto done;
+			/* C++20 `typename` in (dependent) type contexts:
+			 * `typename T::value_type x;` — the member names a nested
+			 * typedef of the class T is bound to.  Template bodies are
+			 * parsed at instantiation with T bound to a concrete type,
+			 * so resolve the qualified name through the member list. */
+			{
+				extern int g_lang;
+				extern enum cpp_tokenkind cpp_tok_kind(void);
+				if (g_lang == 1 && cpp_tok_kind() == CPP_TTYPENAME) {
+					next(); /* consume 'typename' */
+					if (tok.kind >= TIDENT) {
+						struct decl *td =
+						    scopegetdecl(s, tokenstr(tok.kind), 1);
+						struct type *ct = NULL;
+						if (td && td->kind == DECLTYPE)
+							ct = td->type;
+						else
+							ct = scopegettag(s, tokenstr(tok.kind), 1);
+						if (ct && (ct->kind == TYPESTRUCT ||
+						    ct->kind == TYPEUNION)) {
+							next(); /* consume the class/param name */
+							if (tok.kind == TCOLONCOLON) {
+								next(); /* consume '::' */
+								if (tok.kind >= TIDENT) {
+									unsigned long long off = 0;
+									struct member *m = typemember(ct,
+									    tokenstr(tok.kind), &off);
+									if (m && m->type) {
+										t = m->type;
+										tq = m->qual;
+										++ntypes;
+										next(); /* consume the member name */
+										break;
+									}
+								}
+								error_code(E_CTYPE, &tok.loc,
+								    "typename requires a nested typedef of a class");
+							}
+						}
+						error_code(E_CTYPE, &tok.loc,
+						    "typename requires a qualified class member name");
+					}
+					error_code(E_CTYPE, &tok.loc,
+					    "expected a type name after 'typename'");
+				}
+			}
 			/* C++20 char8_t: a keyword, not a typedef.  Handle it
 			 * before the scope-lookup path. */
 			{
