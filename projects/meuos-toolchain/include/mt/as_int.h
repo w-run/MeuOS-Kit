@@ -138,4 +138,54 @@ int get_section(struct as_file *as, const char *name);
 /* DWARF debug-information emission (defined in as_dwarf.c). */
 int emit_dwarf(struct as_file *as);
 
+/* ELF ET_REL output writing (defined in as_elfout.c). */
+int write_object(struct as_file *as, const struct mt_target *target,
+                 const char *output_path);
+
+/* Symbol lookup (defined in assemble.c, shared with elfout.c). */
+struct as_symbol *find_symbol(struct as_file *as, const char *name);
+
+/* ELF symbol-table output record (used by as_elfout.c's build_symbols). */
+struct elf_sym_out {
+	uint32_t name;
+	uint8_t info;
+	uint8_t other;
+	uint16_t section;
+	uint64_t value;
+	uint64_t size;
+};
+
+#define MT_ST_INFO(bind, type) MT_ELF64_ST_INFO(bind, type)
+
+/* ELF ET_REL output structures (defined here, used by as_elfout.c). */
+struct out_section {
+	const char *name;
+	uint32_t type;
+	uint64_t flags;
+	uint64_t align;
+	unsigned char *data;
+	size_t size;
+	uint64_t file_offset;
+	uint32_t link;
+	uint32_t info;
+	uint64_t entry_size;
+	int nobits;
+};
+struct out_reloc {
+	uint64_t offset;
+	uint32_t type;
+	uint32_t symbol;
+	int64_t addend;
+};
+struct reloc_group {
+	struct out_reloc *items;
+	size_t count;
+	size_t capacity;
+};
+struct string_table {
+	unsigned char *data;
+	size_t size;
+	size_t capacity;
+};
+
 #endif /* MT_AS_INT_H */
