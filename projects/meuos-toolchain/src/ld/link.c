@@ -1888,24 +1888,6 @@ layout_output(struct ld_context *ctx)
 		}
 	}
 
-	/* Pass 3: non-allocatable sections (.debug*, .comment, .note, ...).
-	 * These carry no loadable content, so place them after every loaded
-	 * section (PROGBITS and NOBITS alike). */
-	for (rank = 5; rank <= 6; ++rank) {
-		for (i = 0; i < ctx->group_count; ++i) {
-			struct ld_group *group = &ctx->groups[i];
-			if (group->rank != rank)
-				continue;
-			if (is_tls_group(ctx, (int)i))
-				continue;
-			offset = align_up(offset, group->align ? group->align : 1);
-			group->file_offset = offset;
-			group->address = base + offset;
-			if (group->type != MT_SHT_NOBITS)
-				offset += group->size;
-		}
-	}
-
 	/* Advance offset past non-TLS sections so TLS does not overlap .bss */
 	for (i = 0; i < ctx->group_count; ++i) {
 		struct ld_group *g = &ctx->groups[i];
@@ -1914,7 +1896,13 @@ layout_output(struct ld_context *ctx)
 		if (e > offset) offset = e;
 	}
 
-	/* TLS sections: lay out .tdata (needs file space) then .tbss (NOBITS). */
+	/* TLS sections: lay out .tdata (needs file space) then .tbss (NOBITS).
+	 * TLS must be laid out BEFORE the non-allocatable Pass 3 below, so that
+	 * .comment/.debug/.note land at higher file offsets than the allocatable
+	 * (.tdata) file region.  Otherwise a non-alloc section sharing the LOAD
+	 * file span (e.g. .comment at the same offset as .bss) gets its file
+	 * bytes loaded over .bss, zeroing/clobbering runtime state (ctor arrays,
+	 * counters) → static TLS programs segfault. */
 	if (ctx->tls_tdata_group >= 0) {
 		struct ld_group *g = &ctx->groups[ctx->tls_tdata_group];
 		offset = align_up(offset, g->align ? g->align : 1);
@@ -1941,8 +1929,27 @@ layout_output(struct ld_context *ctx)
 				offset += g->size;
 			}
 		}
-		return 0;
+
+	/* Pass 3: non-allocatable sections (.debug*, .comment, .note, ...).
+	 * These carry no loadable content, so place them after every loaded
+	 * section (PROGBITS, NOBITS and TLS alike) — beyond any PT_LOAD file
+	 * span, so their bytes are never mapped into an allocatable segment. */
+	for (rank = 5; rank <= 6; ++rank) {
+		for (i = 0; i < ctx->group_count; ++i) {
+			struct ld_group *group = &ctx->groups[i];
+			if (group->rank != rank)
+				continue;
+			if (is_tls_group(ctx, (int)i))
+				continue;
+			offset = align_up(offset, group->align ? group->align : 1);
+			group->file_offset = offset;
+			group->address = base + offset;
+			if (group->type != MT_SHT_NOBITS)
+				offset += group->size;
+		}
 	}
+	return 0;
+}
 
 
 static int
