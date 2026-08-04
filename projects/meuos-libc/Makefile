@@ -79,9 +79,12 @@ INCLUDE := -Iinclude -Isrc
 # libc-meuos.so is built from a separate -fPIC object set under $(PIC_BUILD),
 # leaving the static libc-meuos.a objects untouched so the two artifacts
 # coexist with no build-time interference.  mt/ld provides -shared (ET_DYN)
-# with .dynsym/.dynstr/.hash + DT_SONAME (P1b validated); LD_OVERRIDE below
-# defaults to the meuos-toolchain mt/ld and can be set via MT_LD.
-LD ?= ../meuos-toolchain/build/bin/ld
+# with .dynsym/.dynstr/.hash + DT_SONAME (P1b validated).  Defaults to the
+# meuos-toolchain mt/ld.  `LD` is a make built-in variable (LD = ld), so a
+# plain `?=` would never apply and `make` would silently skip libc-meuos.so;
+# use $(origin) so the default is used unless LD is set on the command line
+# or the environment (origin command/environment/override).
+LD := $(if $(filter default,$(origin LD)),../meuos-toolchain/build/bin/ld,$(LD))
 LIB_SONAME := libc-meuos.so.1
 PIC_BUILD := $(BUILD)/pic
 LIB_SO := $(BUILD)/libc-meuos.so
