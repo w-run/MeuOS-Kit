@@ -6,15 +6,10 @@ type: project
 
 # cpp_parse.c 大文件拆分方法论（2026-08-05）
 
-## 现状
-把 `projects/mcc/src/cpp/parse/cpp_parse.c`（9088 行）拆成 ~600-800 行小文件。已拆出 6 个（均为纯重构、`make check` + verify-all 全 PASS）：
-- `cpp_newdel.c`（new/delete/throw）
-- `cpp_fold.c`（fold 表达式）
-- `cpp_lambda.c`（lambda 表达式）
-- `cpp_mangle.c`（名称 mangling）
-- `cpp_vtable.c`（虚函数/vtable）
-- `cpp_tmpl_member.c`（成员模板）
-cpp_parse.c 当前 6489 行。共享符号统一放 `cpp_internal.h`。
+## 现状（最终）
+`cpp_parse.c`（9088 行）已拆到 **3131 行（-66%）**，拆出 **15 个模块**：
+cpp_requires(871)/cpp_newdel(690)/cpp_lambda(656)/cpp_ctor(648)/cpp_method(613)/cpp_vtable(605)/cpp_expr_op(487)/cpp_classtmpl(394)/cpp_tmpl_member(310)/cpp_fold(211)/cpp_freeop(210)/cpp_mangle(185)/cpp_gcctor(132)/cpp_memberlook(105)/cpp_constexpr(1507 先前)
+共享符号统一放 `cpp_internal.h`（~240 行）。剩余函数模板核心(~1570行)与 mcc 其它合法文件(cpp_constexpr 1507)量级相当，保持单文件合理。
 
 ## 可复用方法（每刀）
 1. 选**文件尾部或完全自包含**的段（行号断裂最小、static 依赖最少）。
@@ -34,8 +29,16 @@ cpp_parse.c 当前 6489 行。共享符号统一放 `cpp_internal.h`。
 后续续接拆分时：每拆一刀立即 verify-all（尤其 check-sysroot-static），确保自举一致性；跨文件函数声明务必补进 cpp_internal.h。
 
 ## 补充教训（2026-08-05 续，requires/class 簇）
-- cpp_parse.c 已从 9088 → 3962 行（-56%），拆出 12 模块（newdel/fold/lambda/mangle/vtable/tmpl_member/ctor/expr_op/freeop/requires/classtmpl/constexpr）。
+- cpp_parse.c 已从 9088 → 3131 行（-66%），拆出 15 模块。
 - **header 原型引用后定义的 struct 必须先加前向声明**：cpp_internal.h 里 `cpp_check_constraint(struct cpp_template *...)` 若写在 `struct cpp_template {}` 定义前，cpp_parse.c 调用点报 `incompatible pointer type`。修：在 header 顶部 forward-declare `struct cpp_template;`。
 - **漏 promote 一个 static 会 link 报 undefined reference**：如 `tmpl_param_is_nttp` 被 class 模板簇调用但仍在 cpp_parse.c 是 static。拆簇前先用 grep -oE 列全依赖，逐个核对是 extern 还是 static。
-- 拆类的簇内部自足函数要给 static 前向声明，否则"static follows non-static"（隐式声明冲突）。
+- 拆的簇内部自足函数要给 static 前向声明，否则"static follows non-static"（隐式声明冲突）。
+- **提取 .c 时函数返回类型(如 `void`)易丢**：`cpp_record_global_ctor`/`cpp_parse_free_operator` 提取后缺 `void`，宿主 gcc 过但自举 `E0001 期望声明`。提取后务必核对每个函数的返回类型行。
+
+## 使能步骤模式（重要）
+拆大量 static 状态的簇前，**先单独做"promote 共享状态到 cpp_internal.h"的独立提交**（不改语义，零行为改变，verify-all 验证通过）：
+- g_cpp_method/struct cpp_method_ctx → 解锁 ctor/method 簇
+- g_cpp_tmpl_instantiating/binds/nbinds → 解锁 member 缓冲簇
+- g_cpp_tmpl_stack/depth/expl_*/pack_* → 解锁函数模板子簇
+这类"先开小路再拆"使能提交风险低、可独立验证，是拆深耦合状态机的标准手法。
 
