@@ -2836,13 +2836,18 @@ write_executable(struct ld_context *ctx, const char *path,
 		if (gn && strings_add(&shstr, sections[i + 1].name, &name_offsets[i + 1]) != 0)
 			goto out_strings;
 	}
-	/* Set sh_link / sh_info for the dynamic symbol table and .dynamic.
-	 * Valid for -shared and -pie (both emit .dynstr / .dynsym / .dynamic). */
+	/* Set sh_link / sh_info for the dynamic symbol table and the .dynamic,
+	 * .hash and .rela.dyn sections.  Valid for -shared and -pie (both emit
+	 * .dynstr / .dynsym / .dynamic / .hash, and .rela.dyn when relocations
+	 * exist).  Per ELF spec, .hash and .rela.dyn's sh_link points to the
+	 * dynamic symbol table (.dynsym). */
 	if (ctx->shared || ctx->pie) {
 		/* Find .dynstr section index */
 		uint32_t dynstr_sec = 0;
 		uint32_t dynsym_sec = 0;
 		uint32_t dynamic_sec = 0;
+		uint32_t hash_sec = 0;
+		uint32_t reladyn_sec = 0;
 		for (i = 0; i < ctx->group_count; ++i) {
 			const char *gn = ctx->groups[i].name;
 			if (strcmp(gn, ".dynstr") == 0)
@@ -2851,6 +2856,10 @@ write_executable(struct ld_context *ctx, const char *path,
 				dynsym_sec = (uint32_t)(i + 1);
 			if (strcmp(gn, ".dynamic") == 0)
 				dynamic_sec = (uint32_t)(i + 1);
+			if (strcmp(gn, ".hash") == 0)
+				hash_sec = (uint32_t)(i + 1);
+			if (strcmp(gn, ".rela.dyn") == 0)
+				reladyn_sec = (uint32_t)(i + 1);
 		}
 		if (dynsym_sec && dynstr_sec) {
 			sections[dynsym_sec].link = dynstr_sec;
@@ -2858,6 +2867,11 @@ write_executable(struct ld_context *ctx, const char *path,
 		}
 		if (dynamic_sec && dynstr_sec)
 			sections[dynamic_sec].link = dynstr_sec;
+		/* sh_link of .hash / .rela.dyn -> .dynsym (only if dynsym present) */
+		if (hash_sec && dynsym_sec)
+			sections[hash_sec].link = dynsym_sec;
+		if (reladyn_sec && dynsym_sec)
+			sections[reladyn_sec].link = dynsym_sec;
 	}
 	/* ---- .note.gnu.build-id section (if --build-id) ---- */
 	if (ctx->build_id) {
