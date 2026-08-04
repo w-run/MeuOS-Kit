@@ -30,9 +30,16 @@ struct meuos_phdr {
 
 extern long __meuos_arch_prctl(long, unsigned long);
 
-/* --- module TLS registry (storage) --- */
-struct tls_module __meuos_tls_modules[MEUOS_MAX_TLS_MODULES];
-int __meuos_tls_module_count;
+/* --- module TLS registry (storage) ---
+ * Kept static (library-private): these are internal bookkeeping accessed
+ * only from this file (allocating a thread's TLS area / DTV).  As non-static
+ * exported globals the -fPIC code would reference them via the GOT as
+ * GLOB_DAT, and rtld resolves a symbol defined in the same DSO to its raw
+ * value without the load base — so make them private so internal access
+ * stays PC-relative / RELATIVE (base-correct), which rtld applies with
+ * base+addend.  Only __meuos_tls_add_module (the rtld entry) is exported. */
+static struct tls_module __meuos_tls_modules[MEUOS_MAX_TLS_MODULES];
+static int __meuos_tls_module_count;
 
 static const void *tls_image;
 static size_t tls_file_size, tls_memory_size, tls_alignment, tls_allocation_size;

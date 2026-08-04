@@ -47,13 +47,14 @@ struct tls_module {
 	size_t align;         /* TLS alignment */
 };
 
-/* Module TLS registry (libc storage).  rtld fills it via
- * __meuos_tls_add_module when loading a DSO with a PT_TLS; allocate_tls /
- * __meuos_tls_alloc read it to size a new thread's TLS area + DTV.  In a
- * plain static process the registry stays empty (module 1 is implicit). */
 #define MEUOS_MAX_TLS_MODULES 64
-extern struct tls_module __meuos_tls_modules[MEUOS_MAX_TLS_MODULES];
-extern int __meuos_tls_module_count;
+
+/* The registry storage itself (__meuos_tls_modules[] and
+ * __meuos_tls_module_count) is private to arch/<arch>/tls.c (static) so
+ * internal -fPIC access stays PC-relative and needs no GOT GLOB_DAT
+ * reloc (which rtld would resolve without the DSO load base).  Only these
+ * two functions are exported: __meuos_tls_add_module is the rtld entry
+ * point (called by rtld when loading a DSO with a PT_TLS). */
 
 /* Registry interface, declared here for rtld (via its own extern) and used
  * internally by allocate_tls. */
