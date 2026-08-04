@@ -455,9 +455,24 @@ rtld_find_sym(struct rtld_state *st, const char *name, int *out_lib)
 /* ---- relocation application ---- */
 
 static uint64_t
-resolve_sym_value(struct rtld_lib *lib, Sym64 *sym, uintptr_t lib_base)
+resolve_sym_value(struct rtld_state *st, struct rtld_lib *lib,
+                  Sym64 *sym, uintptr_t lib_base)
 {
-	(void)lib;
+	/* SHN_UNDEF (shndx == 0): the symbol is not defined in this
+	 * library.  Resolve it globally across all loaded libraries so a
+	 * PIE / shared library can import a symbol defined in another
+	 * library (e.g. the main executable or a dependency). */
+	if (sym->shndx == 0) {
+		const char *sym_name = "";
+		if (lib->strtab && lib->strsz && sym->name > 0 &&
+		    sym->name < lib->strsz)
+			sym_name = lib->strtab + sym->name;
+		int def_lib = -1;
+		Sym64 *def_sym = rtld_find_sym(st, sym_name, &def_lib);
+		if (def_sym && def_lib >= 0)
+			return st->libs[def_lib].base + def_sym->value;
+		return 0;
+	}
 	return lib_base + sym->value;
 }
 
@@ -481,12 +496,12 @@ rtld_apply_rela(struct rtld_lib *lib, struct rtld_state *st)
 		case R_X86_64_GLOB_DAT:
 		case R_X86_64_64: {
 			Sym64 *sym = &lib->symtab[rsym];
-			*loc = resolve_sym_value(lib, sym, base) + (uintptr_t)r->r_addend;
+			*loc = resolve_sym_value(st, lib, sym, base) + (uintptr_t)r->r_addend;
 			break;
 		}
 		case R_X86_64_JUMP_SLOT: {
 			Sym64 *sym = &lib->symtab[rsym];
-			*loc = resolve_sym_value(lib, sym, base);
+			*loc = resolve_sym_value(st, lib, sym, base);
 			break;
 		}
 		case R_X86_64_DTPMOD64: {
@@ -559,7 +574,7 @@ rtld_apply_rela(struct rtld_lib *lib, struct rtld_state *st)
 				switch (rtype) {
 				case R_X86_64_JUMP_SLOT: {
 					Sym64 *sym = &lib->symtab[rsym];
-					*loc = resolve_sym_value(lib, sym, base);
+					*loc = resolve_sym_value(st, lib, sym, base);
 					break;
 				}
 				case R_X86_64_RELATIVE:
@@ -567,7 +582,7 @@ rtld_apply_rela(struct rtld_lib *lib, struct rtld_state *st)
 					break;
 				case R_X86_64_GLOB_DAT: {
 					Sym64 *sym = &lib->symtab[rsym];
-					*loc = resolve_sym_value(lib, sym, base);
+					*loc = resolve_sym_value(st, lib, sym, base);
 					break;
 				}
 				default:
