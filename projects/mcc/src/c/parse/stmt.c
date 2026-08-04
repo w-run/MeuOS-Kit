@@ -601,6 +601,15 @@ stmt(struct func *f, struct scope *s)
 				cpp_coroutine_stmt(f, s, ck);
 				return; /* unreachable: error_code is noreturn */
 			}
+			/* `try { ... } catch (T e) { ... }` — recognised keyword.
+			 * The landingpad/unwind backend that routes a thrown
+			 * exception to a catch block is not yet implemented, so the
+			 * statement is lowered to a clear diagnostic. */
+			if (ck == CPP_TTRY) {
+				extern void cpp_exc_stmt(struct func *, struct scope *);
+				cpp_exc_stmt(f, s);
+				return;
+			}
 		}
 	}
 	switch (tok.kind) {
