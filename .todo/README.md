@@ -40,6 +40,7 @@
 | [rtld-e2e-pie-verify](meuos-toolchain/rtld-e2e-pie-verify.md) | ✅ | rtld e2e 实跑需合并 rtld-p0 后由 exec-integration 门禁覆盖（完成，聚合分支 2d4b65a 验证） |
 | [mt-eoverflow-build](meuos-toolchain/mt-eoverflow-build.md) | 🔄 | mt 全量 make 在宿主 glibc 严格模式 `_POSIX_C_SOURCE=200809L` 下 EOVERFLOW 未声明（src/ar/archive.c:59，独立构建缺陷非 TLS P1 引入） |
 | [mt-as-local-label](meuos-toolchain/mt-as-local-label.md) | 🔄 | mt/as 局部数字标签 `1f/2b` forward/backward 跳转目标解析错（`jne 1f` 跳错位置；手写 asm 受影响，mcc 产物用命名标签不受影响） |
+| [pie-bss-relative](meuos-toolchain/pie-bss-relative.md) | 🔄 | PIE 动态链接里 libc 静态 .bss 全局（thread_controls/guard）缺 R_X86_64_RELATIVE → 线程控制崩(SIGSEGV)；非 DTV/TLS，独立缺陷，静态 exe 正常 |
 
 ### meuos-utils
 
