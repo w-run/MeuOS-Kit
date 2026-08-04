@@ -466,6 +466,23 @@ struct Fn {
 #define WARN_ALL         (WARN_UNUSED|WARN_TYPE|WARN_IMPLICIT|WARN_RETURN|WARN_PERFORMANCE)
 #define WARN_ERROR       (1<<7)  /* -Werror flag (or'd into warnlevel) */
 
+/* 细粒度警告（p9-ui 扩展，默认关闭——与 gcc/clang 一致，显式
+ * -Wxxx / -Wall / -Wextra 开启）：
+ *   -Wunused-variable  未使用的局部变量
+ *   -Wunused-parameter 未使用的函数参数
+ *   -Wconversion       隐式整数转换截断（宽 -> 窄）
+ *   -Wsign-compare     有符号/无符号整数比较
+ *   -Wuninitialized    使用可能未初始化的自动变量
+ * -Wall  = WARN_WALL（gcc 语义：常用组，含 unused-variable/uninitialized）
+ * -Wextra = WARN_WEXTRA（gcc 语义：-Wall + unused-parameter/sign-compare） */
+#define WARN_UNUSED_VAR   (1<<8)   /* -Wunused-variable */
+#define WARN_UNUSED_PARAM (1<<9)   /* -Wunused-parameter */
+#define WARN_CONVERSION   (1<<10)  /* -Wconversion */
+#define WARN_SIGN_COMPARE (1<<11)  /* -Wsign-compare */
+#define WARN_UNINIT       (1<<12)  /* -Wuninitialized */
+#define WARN_WALL         (WARN_ALL|WARN_UNUSED_VAR|WARN_UNINIT)
+#define WARN_WEXTRA       (WARN_WALL|WARN_UNUSED_PARAM|WARN_SIGN_COMPARE)
+
 struct Typ {
 	char *name;
 	char isdark;

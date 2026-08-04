@@ -311,9 +311,15 @@ mcc_main(int argc, char *argv[])
 	if (strcmp(a, "-fPIE") == 0 || strcmp(a, "-fpie") == 0 ||
 	    strcmp(a, "-fPIC") == 0 || strcmp(a, "-fpic") == 0)
 		{ pic = true; continue; }
-	/* -Wall/-Wextra/-Werror: -W is a category prefix, stays single-dash */
-	if (strcmp(a, "-Wall") == 0 || strcmp(a, "-Wextra") == 0) {
-		warn_level = WARN_ALL;
+	/* -Wall/-Wextra/-Werror: -W is a category prefix, stays single-dash.
+	 * -Wall: gcc 语义常用组（含 -Wunused-variable/-Wuninitialized）；
+	 * -Wextra: -Wall + 额外（含 -Wunused-parameter/-Wsign-compare）。 */
+	if (strcmp(a, "-Wall") == 0) {
+		warn_level = WARN_WALL;
+		continue;
+	}
+	if (strcmp(a, "-Wextra") == 0) {
+		warn_level = WARN_WEXTRA;
 		continue;
 	}
 	if (strcmp(a, "-Werror") == 0) {
@@ -342,12 +348,34 @@ mcc_main(int argc, char *argv[])
 	}
 	if (a[1] == 'W') {
 		/* fine-grained -W control: -Wno-error / -Wno-all disable the
-		 * corresponding groups; other -Wxxx flags are accepted */
+		 * corresponding groups; -Wunused-variable/-Wunused-parameter/
+		 * -Wconversion/-Wsign-compare/-Wuninitialized (及 -Wno- 反形式)
+		 * 独立开关细粒度警告；其他 -Wxxx 标志按 gcc 兼容性接受。 */
 		if (strcmp(a, "-Wno-error") == 0) {
 			warn_as_error = false;
 			warn_level &= ~WARN_ERROR;
 		} else if (strcmp(a, "-Wno-all") == 0) {
-			warn_level &= ~WARN_ALL;
+			warn_level &= ~WARN_WALL;
+		} else if (strcmp(a, "-Wunused-variable") == 0) {
+			warn_level |= WARN_UNUSED_VAR;
+		} else if (strcmp(a, "-Wno-unused-variable") == 0) {
+			warn_level &= ~WARN_UNUSED_VAR;
+		} else if (strcmp(a, "-Wunused-parameter") == 0) {
+			warn_level |= WARN_UNUSED_PARAM;
+		} else if (strcmp(a, "-Wno-unused-parameter") == 0) {
+			warn_level &= ~WARN_UNUSED_PARAM;
+		} else if (strcmp(a, "-Wconversion") == 0) {
+			warn_level |= WARN_CONVERSION;
+		} else if (strcmp(a, "-Wno-conversion") == 0) {
+			warn_level &= ~WARN_CONVERSION;
+		} else if (strcmp(a, "-Wsign-compare") == 0) {
+			warn_level |= WARN_SIGN_COMPARE;
+		} else if (strcmp(a, "-Wno-sign-compare") == 0) {
+			warn_level &= ~WARN_SIGN_COMPARE;
+		} else if (strcmp(a, "-Wuninitialized") == 0) {
+			warn_level |= WARN_UNINIT;
+		} else if (strcmp(a, "-Wno-uninitialized") == 0) {
+			warn_level &= ~WARN_UNINIT;
 		}
 		continue;   /* other -Wxxx warning flags */
 	}
