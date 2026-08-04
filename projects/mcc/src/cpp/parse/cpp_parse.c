@@ -1476,21 +1476,21 @@ static struct cpp_template **g_cpp_templates_end = &g_cpp_templates;
  * and consumed by the TLPAREN lowering after the arguments are known.  A
  * stack so nested template calls in arguments (e.g. f(g(...))) each keep
  * their own pending name. */
-static const char *g_cpp_tmpl_stack[64];
-static int g_cpp_tmpl_depth;
+const char *g_cpp_tmpl_stack[64];
+int g_cpp_tmpl_depth;
 /* Explicit template arguments parsed after a template name (`f<int, 42>`):
  * a leading type argument list that fills the template parameters before
  * any call-site deduction.  Each slot records whether it is a value (NTTP)
  * or a type.  Cleared after each instantiation. */
-static struct type *g_cpp_tmpl_expl_types[16];
-static unsigned long long g_cpp_tmpl_expl_vals[16];
-static bool g_cpp_tmpl_expl_isval[16];
-static int g_cpp_tmpl_expl_n;
+struct type *g_cpp_tmpl_expl_types[16];
+unsigned long long g_cpp_tmpl_expl_vals[16];
+bool g_cpp_tmpl_expl_isval[16];
+int g_cpp_tmpl_expl_n;
 /* Parameter-pack element counts of templates being replayed (pushed by the
  * variadic instantiation, popped when the replay completes).  `sizeof...`
  * consults the innermost count. */
-static int g_cpp_pack_stack[64];
-static int g_cpp_pack_depth;
+int g_cpp_pack_stack[64];
+int g_cpp_pack_depth;
 
 /* Template parameter type bindings for the instantiation currently being
  * parsed into a constexpr body (set by cpp_tmpl_find_or_instantiate just

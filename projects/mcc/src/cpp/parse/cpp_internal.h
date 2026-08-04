@@ -124,6 +124,17 @@ bool tmpl_param_is_nttp(struct cpp_template *tmpl, int i);
  * end of the translation unit. */
 void cpp_emit_global_ctors(void);
 
+/* Template-instantiation state (defined in cpp_parse.c, function-template
+ * section), shared with the future function-template submodules. */
+extern const char *g_cpp_tmpl_stack[64];
+extern int g_cpp_tmpl_depth;
+extern struct type *g_cpp_tmpl_expl_types[16];
+extern unsigned long long g_cpp_tmpl_expl_vals[16];
+extern bool g_cpp_tmpl_expl_isval[16];
+extern int g_cpp_tmpl_expl_n;
+extern int g_cpp_pack_stack[64];
+extern int g_cpp_pack_depth;
+
 /* Member-method body buffering / replay (defined in cpp_method.c):
  * flush_pending_methods is called after a class body is laid out,
  * cpp_ss_addtok builds a synthesized token stream for inherited ctors. */
