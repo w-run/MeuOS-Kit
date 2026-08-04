@@ -297,9 +297,21 @@ int get_symbol_by_index(struct ld_context *ctx, struct ld_object *object,
 uint16_t object_section_count(const struct ld_object *object);
 int object_get_section(struct ld_object *object, uint16_t index,
                        struct mt_elf64_section *out);
+const char *object_section_name(struct ld_object *object, uint16_t index);
+int object_get_symbol(struct ld_object *object, uint64_t index,
+                      struct mt_elf64_symbol *out);
+int append_object(struct ld_context *ctx, const char *name,
+                  const unsigned char *data, size_t size);
 int tls_desc_index(struct ld_context *ctx, const char *name);
 int collect_got_relocations(struct ld_context *ctx);
 int collect_tls_descriptors(struct ld_context *ctx);
+
+/* Symbol collection / resolution (defined in symbol.c). */
+int collect_symbols(struct ld_context *ctx);
+int extract_archives(struct ld_context *ctx);
+int allocate_common(struct ld_context *ctx);
+int apply_defsym(struct ld_context *ctx, const char *defsym);
+int apply_wrap(struct ld_context *ctx, const char *sym);
 int add_got_entry(struct ld_context *ctx, const char *name);
 int got_index(struct ld_context *ctx, const char *name, size_t *index);
 
