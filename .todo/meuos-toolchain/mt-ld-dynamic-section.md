@@ -1,6 +1,6 @@
 # mt/ld 生成的 .dynamic 节区不符合 ELF 规范（sh_type=PROGBITS / sh_link=0）
 
-> 状态：🔄 开放（2026-08-04 由 exec-toolchain-lite 在 mt/readelf PIE 修复中定位根因）
+> 状态：✅ 完成（2026-08-04 exec-toolchain-lite-2，commit 0015271e）
 > 关联 commit：49349b2（readelf 端已做兼容回退，本任务从根因修正）
 
 ## 现象
@@ -34,3 +34,16 @@
 - 不动 `src/rtld/*` / `src/readelf/*` / `src/as/*` / `src/libelf/*`；
 - 不引入新 warning（-Werror）；
 - 文件级 git commit，格式 `mt: ld: ...`。
+
+## 修复记录（2026-08-04 exec-toolchain-lite-2）
+
+- **commit**：`0015271e`（分支 `tmp/exec-toolchain/ld-dynamic-section`），msg：`mt: ld: set SHT_DYNAMIC and sh_link for .dynamic section`
+- **文件**：`src/ld/link.c`（**根因更正**：`src/ld/` 下无 `elfwriter.c`，仅 `link.c`；`.dynamic` 生成在 `ensure_dynamic_section`（L3830）与 section-header 写循环（L2839））。
+- **关键 diff（3 段）**：
+  - **L3830**：`MT_SHT_PROGBITS` → `MT_SHT_DYNAMIC`（修复 sh_type）；
+  - **L2839**：条件 `if (ctx->shared)` → `if (ctx->shared || ctx->pie)`，并加 `.dynamic` 段号收集 + `sections[dynamic_sec].link = dynstr_sec`（修复 sh_link；顺带补 PIE 下 `.dynsym` 的 sh_link→`.dynstr`）。
+- **验证矩阵（PIE 与 shared 两种 ET_DYN）**：
+  - `.dynamic` 段均 `sh_type=DYNAMIC`；
+  - `sh_link` → `.dynstr`（readelf -S Link 列正确）；
+  - `make -C projects/meuos-toolchain check` 全 PASS，warning=0。
+- **rtld e2e 限制**：当前基线 df962a0 不含 rtld-p0 的 `-dynamic-linker` 选项，故 rtld e2e 运行验证需合并 rtld-p0 后由 exec-integration 端到端门禁覆盖（建议登记为后续任务）。
