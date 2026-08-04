@@ -271,12 +271,42 @@ decl(struct scope *s, struct func *f)
 	 * declspecs into base.kind; fold it into the declaration attrs. */
 	a.kind |= base.kind;
 	/* C++ non-member operator overload: `Vec operator+(Vec a, Vec b)`.
-	 * The return type is already parsed; `operator` follows. */
+	 * The return type is already parsed; `operator` follows.  A leading
+	 * pointer/reference declarator (`const char *operator""_s`,
+	 * `Vec &operator+`) is folded into the return type here — mirroring
+	 * the in-class member-operator path (struct_decl.c) — because
+	 * declarator() would otherwise treat `operator` as a plain name. */
 	{
 		extern int g_lang;
 		extern enum cpp_tokenkind cpp_tok_kind(void);
 		extern void cpp_parse_free_operator(struct scope *,
 		    struct qualtype);
+		if (g_lang == 1 &&
+		    (tok.kind == TMUL || tok.kind == TBAND ||
+		     tok.kind == TLAND)) {
+			struct token save = tok;
+			struct type *rt;
+			next();
+			if (cpp_tok_kind() == CPP_TOPERATOR) {
+				/* the return type's qualifiers (e.g. `const` in
+				 * `const char *`) move onto the pointer, matching
+				 * declarator()'s t->qual = base.qual */
+				rt = mkpointertype(base.type, base.qual);
+				if (save.kind != TMUL) {
+					rt->isref = true;
+					rt->isrref = save.kind == TLAND;
+				}
+				base.type = rt;
+			} else {
+				/* not an operator: restore the stream exactly */
+				struct token *t = xmalloc(sizeof *t);
+				*t = tok;
+				if (t->lit)
+					t->lit = strdup(t->lit);
+				tokpush(t, 1);
+				tok = save;
+			}
+		}
 		if (g_lang == 1 && cpp_tok_kind() == CPP_TOPERATOR) {
 			cpp_parse_free_operator(s, base);
 			return true;

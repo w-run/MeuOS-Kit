@@ -55,7 +55,11 @@ err_spelling_suggest(struct scope *s, const char *name)
 	for (; s; s = s->parent) {
 		struct map *m = &s->decls;
 		size_t i;
-		/* entries are scattered across the hash table: walk all slots */
+		/* entries are scattered across the hash table: walk all slots.
+		 * A never-populated map has no cap/keys yet (mkscope leaves
+		 * them as uninitialized xmalloc garbage), so skip it. */
+		if (!m->len)
+			continue;
 		for (i = 0; i < m->cap; i++) {
 			const char *cand = m->keys[i].str;
 			size_t clen;
@@ -79,7 +83,8 @@ primaryexpr(struct scope *s)
 	struct expr *e;
 	struct decl *d;
 	struct type *t;
-	char *src, *end;
+	const char *src;
+	char *end;
 	uint_least32_t chr;
 	unsigned long long val;
 	bool hexoct, ordinary;
@@ -92,6 +97,30 @@ primaryexpr(struct scope *s)
 		e->type = mkarraytype(t, QUALNONE, e->u.string.size);
 		e->lvalue = true;
 		e = decay(e);
+		/* C++11 user-defined string literal: `"hi"_s` — the suffix is a
+		 * `_`-prefixed identifier directly after the literal.  Plain
+		 * adjacent `"a" "b"` concatenation was already consumed by
+		 * stringconcat; a keyword or non-`_` name is not a UDL suffix. */
+		{
+			extern int g_lang;
+			if (g_lang == 1 && tok.kind >= TIDENT) {
+				const char *suffix = tokenstr(tok.kind);
+				extern enum cpp_tokenkind cpp_tok_kind(void);
+				if (suffix && suffix[0] == '_' &&
+				    cpp_tok_kind() == CPP_TNONE) {
+					extern struct expr *cpp_udl_literal_call(
+					    struct scope *, const char *,
+					    struct expr *);
+					struct expr *call = cpp_udl_literal_call(s, suffix, e);
+					if (call) {
+						next(); /* consume the suffix */
+						e = call;
+						if (e->type->isref)
+							e = mkunaryexpr(TMUL, e);
+					}
+				}
+			}
+		}
 		break;
 	case TCHARCONST:
 		src = tok.lit;
@@ -130,10 +159,26 @@ primaryexpr(struct scope *s)
 			error_code(E_SYNTAX, &tok.loc, "character constant contains more than one character: %c", *src);
 		next();
 		break;
-	case TNUMBER:
+	case TNUMBER: {
+		const char *lit = tok.lit;
+		const char *uds = NULL;
+		char *nl = NULL;
 		e = mkexpr(EXPRCONST, NULL, NULL);
-		if (tok.lit[0] == '0') {
-			switch (tok.lit[1]) {
+		/* C++11 user-defined literal: `1.5_km` / `123_km` — the lexer
+		 * scans the suffix into the number token; parse only the value
+		 * part and lower the whole thing to operator_udl_<sfx>(value). */
+		{
+			extern int g_lang;
+			extern const char *cpp_udl_suffix_of(const char *);
+			if (g_lang == 1 && (uds = cpp_udl_suffix_of(lit))) {
+				nl = xmalloc(uds - lit + 1);
+				memcpy(nl, lit, uds - lit);
+				nl[uds - lit] = '\0';
+				lit = nl;
+			}
+		}
+		if (lit[0] == '0') {
+			switch (lit[1]) {
 			case 'x': case 'X': base = 16; break;
 			case 'b': case 'B': base = 2; break;
 			default: base = 8; break;
@@ -143,11 +188,11 @@ primaryexpr(struct scope *s)
 		}
 		/* C23: 100f / 42F float suffix without '.' or exponent (6.4.4.2).
 		 * Only add fF for decimal; hex with .pP already works. */
-		if (strpbrk(tok.lit, base == 16 ? ".pP" : ".eEfF")) {
+		if (strpbrk(lit, base == 16 ? ".pP" : ".eEfF")) {
 			/* floating constant */
-			e->u.constant.f = strtod(tok.lit, &end);
-			if (end == tok.lit)
-				error_code(E_SYNTAX, &tok.loc, "invalid floating constant '%s'", tok.lit);
+			e->u.constant.f = strtod(lit, &end);
+			if (end == lit)
+				error_code(E_SYNTAX, &tok.loc, "invalid floating constant '%s'", lit);
 			if (!end[0])
 				e->type = &typedouble;
 			else if ((end[0] == 'f' || end[0] == 'F') && !end[1])
@@ -157,17 +202,32 @@ primaryexpr(struct scope *s)
 			else
 				error_code(E_SYNTAX, &tok.loc, "invalid floating constant suffix '%s'", end);
 		} else {
-			src = tok.lit;
+			src = lit;
 			if (base == 2)
 				src += 2;
 			/* integer constant */
 			e->u.constant.u = strtoull(src, &end, base);
 			if (end == src)
-				error_code(E_SYNTAX, &tok.loc, "invalid integer constant '%s'", tok.lit);
+				error_code(E_SYNTAX, &tok.loc, "invalid integer constant '%s'", lit);
 			e->type = inttype(e->u.constant.u, base == 10, end);
+		}
+		if (uds) {
+			extern struct expr *cpp_udl_literal_call(struct scope *,
+			    const char *, struct expr *);
+			struct expr *call;
+			free(nl);
+			call = cpp_udl_literal_call(s, uds, e);
+			if (!call)
+				error_code(E_UNDECLARED, &tok.loc,
+				    "no user-defined literal operator with suffix '%s' is in scope",
+				    uds);
+			e = call;
+			if (e->type->isref)
+				e = mkunaryexpr(TMUL, e);
 		}
 		next();
 		break;
+	}
 	case TTRUE:
 	case TFALSE:
 		e = mkexpr(EXPRCONST, &typebool, NULL);

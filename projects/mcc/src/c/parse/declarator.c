@@ -149,6 +149,9 @@ declaratortypes(struct scope *s, struct list *result, char **name, int *align, s
 			switch (tok.kind) {
 			case TMUL:
 			case TLPAREN:
+			case TBAND:   /* C++ reference: `int(&a)[3]` - a parenthesized
+				       * reference declarator, not a function */
+			case TLAND:
 				break;
 			default:
 				if (tok.kind >= TIDENT && !istypename(s, tokenstr(tok.kind)))
