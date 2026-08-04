@@ -74,6 +74,28 @@ endif
 BUILD := build/$(ARCH)
 INCLUDE := -Iinclude -Isrc
 
+# Dynamic (shared) library support.
+#
+# libc-meuos.so is built from a separate -fPIC object set under $(PIC_BUILD),
+# leaving the static libc-meuos.a objects untouched so the two artifacts
+# coexist with no build-time interference.  mt/ld provides -shared (ET_DYN)
+# with .dynsym/.dynstr/.hash + DT_SONAME (P1b validated); LD_OVERRIDE below
+# defaults to the meuos-toolchain mt/ld and can be set via MT_LD.
+LD ?= ../meuos-toolchain/build/bin/ld
+LIB_SONAME := libc-meuos.so.1
+PIC_BUILD := $(BUILD)/pic
+LIB_SO := $(BUILD)/libc-meuos.so
+# Wire libc-meuos.so into `all`/`install` only when a mt/ld is present.
+# This keeps `make` and `make check` building the static archives exactly as
+# before on toolchains that do not yet have meuos-toolchain built, so the
+# shared-lib addition never regresses the existing static path.  The explicit
+# libc-meuos.so target below still works whenever $(LD) is supplied.
+ifneq ($(wildcard $(LD)),)
+BUILD_SO := $(LIB_SO)
+else
+BUILD_SO :=
+endif
+
 # ============================================================
 # libc-meuos.a objects
 # ============================================================
@@ -209,11 +231,28 @@ ALL_OBJS := $(STRING_OBJS) $(STDLIB_OBJS) $(STDIO_OBJS) $(SYSCALL_OBJS) \
             $(ARCH_PRCTL_OBJ) $(THREAD_OBJS) $(SUPPORT_OBJS) $(SYSCALL_GATE_OBJ) \
             $(ARCH_RT_OBJS) $(ATOMIC_OBJ) $(DL_OBJS) $(TERMIOS_OBJS) $(TIME_OBJS)
 
+# -fPIC object set used exclusively to build libc-meuos.so.  Each static
+# object path build/<arch>/X.o maps to build/<arch>/pic/X.o.
+PIC_OBJ = $(patsubst $(BUILD)/%,$(PIC_BUILD)/%,$1)
+PIC_OBJS := $(foreach o,$(ALL_OBJS),$(call PIC_OBJ,$o))
+# On x86_64, src/syscall/socketcall.c and src/socket/socket.c both define
+# the same network wrapper symbols (socket/bind/connect/...).  A static
+# archive tolerates this (demand pulling), but a fully-merged shared object
+# cannot.  x86_64 uses the dedicated per-syscall wrappers in socket.o, so
+# drop the legacy socketcall(2) clone from the dynamic object set.  (This
+# baseline targets x86_64; a 32-bit common-syscall port that needs
+# socketcall would select the other object instead.)
+PIC_OBJS := $(filter-out $(PIC_BUILD)/syscall/socketcall.o,$(PIC_OBJS))
+# Share the environ slot definition in libc-meuos.so itself (crt1.o is not
+# part of the shared lib; see src/internal/environ.c).  Static .a keeps the
+# crt1.o-provided definition, so this object is dynamic-only.
+PIC_OBJS += $(PIC_BUILD)/internal/environ.o
+
 # ============================================================
 # Build rules
 # ============================================================
 
-all: $(ATOMIC_LIB) $(LIBC_LIB) $(CRT1_OBJ) compat
+all: $(ATOMIC_LIB) $(LIBC_LIB) $(CRT1_OBJ) $(BUILD_SO) compat
 
 # Atomic shim: assembly only.
 $(ATOMIC_OBJ): src/arch/$(ARCH)/atomic.S
@@ -257,6 +296,40 @@ $(LIBC_LIB): $(ALL_OBJS)
 	$(AR) rcs $@ $(ALL_OBJS)
 
 # ============================================================
+# libc-meuos.so (dynamic library, -fPIC object set)
+# ============================================================
+
+# Per-feature C sources, compiled with -fPIC into $(PIC_BUILD).
+$(PIC_BUILD)/%.o: src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) -fPIC $(INCLUDE) -c -o $@ $<
+
+# Per-arch runtime C, -fPIC (so a shared lib can be loaded at any base).
+$(PIC_BUILD)/arch/$(ARCH)/%.o: src/arch/$(ARCH)/%.c
+	@mkdir -p $(dir $@)
+	$(CC) -fPIC $(INCLUDE) -c -o $@ $<
+
+# Per-arch runtime and syscall-gate assembly (assembled as-is; mt/ld records
+# the appropriate relocations for the derived ET_DYN).
+$(PIC_BUILD)/arch/$(ARCH)/%.o: src/arch/$(ARCH)/%.S
+	@mkdir -p $(dir $@)
+	$(AS) -c -o $@ $<
+
+$(PIC_BUILD)/internal/arch/$(ARCH)/%.o: src/internal/arch/$(ARCH)/%.S
+	@mkdir -p $(dir $@)
+	$(AS) -c -o $@ $<
+
+# The x86_64 __tls_get_addr.c special rule only named $(BUILD)/thread;
+# the generic $(PIC_BUILD)/%.o: src/%.c rule above covers its -fPIC twin.
+
+# libc-meuos.so: link all -fPIC objects into a shared library (ET_DYN)
+# with a stable DT_SONAME.  This is a pure linker artifact (P0.1); dynamic
+# loading / DTV runtime handoff to rtld lands in a later phase.
+$(LIB_SO): $(PIC_OBJS)
+	@mkdir -p $(dir $@)
+	$(LD) -shared -soname $(LIB_SONAME) -o $@ $(PIC_OBJS)
+
+# ============================================================
 # Compat layer (separate archive, recursive make)
 # ============================================================
 
@@ -274,10 +347,13 @@ compat:
 # Install
 # ============================================================
 
-install: $(ATOMIC_LIB) $(LIBC_LIB) $(CRT1_OBJ)
+install: $(ATOMIC_LIB) $(LIBC_LIB) $(CRT1_OBJ) $(BUILD_SO)
 	@mkdir -p $(DESTDIR)$(PREFIX)/lib $(DESTDIR)$(PREFIX)/include/sys
 	cp -r include/. $(DESTDIR)$(PREFIX)/include/
 	cp $(LIBC_LIB)    $(DESTDIR)$(PREFIX)/lib/libc-meuos.a
+	@if [ -n "$(BUILD_SO)" ]; then \
+		cp $(LIB_SO) $(DESTDIR)$(PREFIX)/lib/$(LIB_SONAME); \
+	fi
 	cp $(ATOMIC_LIB)  $(DESTDIR)$(PREFIX)/lib/libatomic-meuos.a
 	cp $(CRT1_OBJ)    $(DESTDIR)$(PREFIX)/lib/crt1.o
 	@$(MAKE) -C src/compat install DESTDIR=$(DESTDIR) PREFIX=$(PREFIX) ARCH=$(ARCH)
