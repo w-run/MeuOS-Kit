@@ -4929,6 +4929,11 @@ struct cpp_tmpl_param {
 	bool is_nttp;            /* non-type template parameter (`int N` / `auto N`) */
 	bool is_dep_nttp;        /* NTTP whose type names an earlier type parameter (`T N`) */
 	struct type *nttp_type;  /* fixed NTTP type (NULL for `auto N` / dependent `T N`) */
+	/* C++11 default template argument (`template<typename T = int>`): the
+	 * buffered tokens after `=`, applied when the parameter is omitted.
+	 * NULL when the parameter has no default. */
+	struct token *deftoks;
+	size_t ndeftoks;
 	struct cpp_tmpl_param *next;
 };
 
@@ -5354,7 +5359,7 @@ cpp_tmpl_explicit_parse(struct scope *s)
 		tmpl = NULL;
 	if (tmpl)
 		p = tmpl->params;
-	for (;;) {
+	while (tok.kind != TGREATER) {
 		if (g_cpp_tmpl_expl_n >= 16)
 			error_code(E_SYNTAX, &tok.loc, "too many template arguments");
 		if (p && p->is_nttp) {
@@ -5684,6 +5689,41 @@ nttp_common:
 			++tmpl->nparams;
 		}
 param_done:
+		/* C++11 default template argument: `template<typename T = int>` /
+		 * `template<int N = 5>`.  Buffer the tokens after `=` up to the
+		 * next top-level ',' or '>' into the parameter's default span.
+		 * Applying the default (for an omitted argument) happens at
+		 * instantiation in cpp_tmpl_deduce. */
+		p->deftoks = NULL;
+		p->ndeftoks = 0;
+		if (tok.kind == TASSIGN) {
+			struct token *dtoks = NULL;
+			size_t dn = 0, dcap = 0, ddep = 0;
+			next(); /* consume '=' */
+			for (;;) {
+				if (tok.kind == TEOF)
+					error_code(E_TEMPLATE, &tok.loc,
+					    "unterminated default template argument");
+				if (ddep == 0 && (tok.kind == TCOMMA || tok.kind == TGREATER))
+					break;
+				if (tok.kind == TLESS || tok.kind == TLPAREN ||
+				    tok.kind == TLBRACK)
+					++ddep;
+				else if (tok.kind == TGREATER || tok.kind == TRPAREN ||
+				    tok.kind == TRBRACK) {
+					if (ddep > 0)
+						--ddep;
+				}
+				if (dn >= dcap) {
+					dcap = dcap ? dcap * 2 : 16;
+					dtoks = xreallocarray(dtoks, dcap, sizeof *dtoks);
+				}
+				dtoks[dn++] = tok;
+				next();
+			}
+			p->deftoks = dtoks;
+			p->ndeftoks = dn;
+		}
 		if (tok.kind == TGREATER)
 			break;
 		if (p->is_pack)
@@ -5948,7 +5988,8 @@ tmpl_param_is_nttp(struct cpp_template *tmpl, int i)
  * `T f(T a, T b)` / `T f(T a, U b)` forms).  A trailing parameter pack
  * collects every remaining argument type. */
 static bool
-cpp_tmpl_deduce(struct cpp_template *tmpl, struct expr *arglist,
+cpp_tmpl_deduce(struct cpp_template *tmpl, struct scope *s,
+                struct expr *arglist,
                 struct type **out, int *nout, unsigned long long *nttp_vals)
 {
 	struct cpp_tmpl_param *p;
@@ -5990,6 +6031,74 @@ cpp_tmpl_deduce(struct cpp_template *tmpl, struct expr *arglist,
 		}
 		if (p)
 			p = p->next;
+	}
+	/* C++11 default template arguments: for remaining fixed parameters
+	 * that carry a default (`template<typename T = int>`), evaluate the
+	 * buffered default tokens to fill the missing argument. */
+	if (i < nfix) {
+		extern struct scope *mkscope(struct scope *);
+		extern void scopeputdecl(struct scope *, struct decl *);
+		extern struct decl *mkdecl(char *, enum declkind,
+		    struct type *, enum typequal, enum linkage);
+		extern struct type *typename(struct scope *, enum typequal *,
+		    struct expr **);
+		extern struct expr *condexpr(struct scope *);
+		extern struct expr *eval(struct expr *);
+		extern void tokpush(struct token *, size_t);
+		struct scope *ds = mkscope(s);
+		/* bind the already-resolved type parameters so a default may
+		 * reference an earlier parameter (`template<typename T,
+		 * typename U = T>`) */
+		struct token deduce_tok = tok;
+		int k;
+		for (k = 0; k < i && k < nfix; k++) {
+			struct cpp_tmpl_param *pp = tmpl->params;
+			int j;
+			for (j = 0; j < k && pp; j++, pp = pp->next)
+				;
+			if (!pp)
+				break;
+			if (pp->is_nttp)
+				scopeputdecl(ds, mkdecl((char *)pp->name,
+				    DECLCONST, out[k], QUALNONE, LINKNONE));
+			else
+				scopeputdecl(ds, mkdecl((char *)pp->name,
+				    DECLTYPE, out[k], QUALNONE, LINKNONE));
+		}
+		for (; i < nfix && p; p = p->next, ++i) {
+			if (!p->deftoks || p->ndeftoks == 0)
+				return false; /* too few arguments, no default */
+			size_t d = tokctx_depth();
+			struct token guard = {0};
+			guard.kind = TSEMICOLON;
+			tokpush(&guard, 1);
+			tokpush(p->deftoks, p->ndeftoks);
+			next(); /* position tok at the first default token */
+			if (p->is_nttp) {
+				/* value default: `template<int N = 5>` */
+				struct expr *ev = eval(condexpr(ds));
+				tokctx_rewind(d);
+				tok = deduce_tok;
+				if (!ev || ev->kind != EXPRCONST ||
+				    !(ev->type->prop & PROPINT))
+					error_code(E_TEMPLATE, &p->deftoks[0].loc,
+					    "default template argument is not a constant integer expression");
+				out[i] = ev->type;
+				if (nttp_vals)
+					nttp_vals[i] = ev->u.constant.u;
+			} else {
+				/* type default: `template<typename T = int>` */
+				enum typequal tq = QUALNONE;
+				struct expr *toeval = NULL;
+				struct type *tt = typename(ds, &tq, &toeval);
+				tokctx_rewind(d);
+				tok = deduce_tok;
+				if (!tt || toeval)
+					error_code(E_TEMPLATE, &p->deftoks[0].loc,
+					    "default template argument is not a type");
+				out[i] = tt;
+			}
+		}
 	}
 	if (i < nfix)
 		return false; /* too few arguments for the fixed parameters */
@@ -6885,7 +6994,7 @@ cpp_tmpl_find_or_instantiate(struct scope *s, const char *name,
 		return NULL;
 	if (tmpl->nparams > 16)
 		error_code(E_SYNTAX, &tok.loc, "template '%s' has too many parameters", name);
-	if (!cpp_tmpl_deduce(tmpl, arglist, types, &nt, nttp_vals))
+	if (!cpp_tmpl_deduce(tmpl, s, arglist, types, &nt, nttp_vals))
 		error_code(E_TEMPLATE, &tok.loc, "too few arguments for template '%s'", name);
 
 	/* mangled name: name + "_" + type codes / NTTP values (e.g. max_i,
@@ -7399,9 +7508,12 @@ cpp_tmpl_class_instantiate(struct scope *s, const char *name)
 		error_code(E_SYNTAX, &tok.loc, "template '%s' has too many parameters", name);
 
 	/* explicit template arguments `<T1, 42, ...>`: types for type
-	 * parameters, constant expressions for non-type parameters */
+	 * parameters, constant expressions for non-type parameters.  An
+	 * empty `<>` (C++11 `Box<>` with a defaulted first parameter) and
+	 * omitted trailing arguments fall back to the defaults recorded in
+	 * each parameter's deftoks. */
 	expect(TLESS, "after class template name");
-	do {
+	while (tok.kind != TGREATER) {
 		if (n >= tmpl->nparams)
 			error_code(E_SYNTAX, &tok.loc, "too many template arguments for class template '%s'", name);
 		tq = QUALNONE;
@@ -7417,10 +7529,64 @@ cpp_tmpl_class_instantiate(struct scope *s, const char *name)
 		if (tok.kind == TGREATER)
 			break;
 		expect(TCOMMA, "',' or '>' in class template argument list");
-	} while (tok.kind != TGREATER);
+	}
 	next(); /* consume '>' */
-	if (n < tmpl->nparams)
-		error_code(E_TEMPLATE, &tok.loc, "too few template arguments for class template '%s'", name);
+	/* apply default template arguments for the remaining parameters */
+	if (n < tmpl->nparams) {
+		extern struct scope *mkscope(struct scope *);
+		extern void scopeputdecl(struct scope *, struct decl *);
+		extern struct decl *mkdecl(char *, enum declkind,
+		    struct type *, enum typequal, enum linkage);
+		extern struct expr *condexpr(struct scope *);
+		extern struct expr *eval(struct expr *);
+		extern void tokpush(struct token *, size_t);
+		struct scope *ds = mkscope(s);
+		struct cpp_tmpl_param *pp;
+		struct token post_args = tok; /* restore the stream after '>' */
+		int j;
+		/* bind the already-resolved params (defaults may reference an
+		 * earlier type parameter) */
+		for (pp = tmpl->params, j = 0; pp && j < n; pp = pp->next, ++j) {
+			if (pp->is_nttp)
+				scopeputdecl(ds, mkdecl((char *)pp->name,
+				    DECLCONST, args[j], QUALNONE, LINKNONE));
+			else
+				scopeputdecl(ds, mkdecl((char *)pp->name,
+				    DECLTYPE, args[j], QUALNONE, LINKNONE));
+		}
+		for (; n < tmpl->nparams; ++n, pp = pp ? pp->next : NULL) {
+			if (!pp || !pp->deftoks || pp->ndeftoks == 0)
+				error_code(E_TEMPLATE, &tok.loc,
+				    "too few template arguments for class template '%s'", name);
+			size_t d = tokctx_depth();
+			struct token guard2 = {0};
+			guard2.kind = TSEMICOLON;
+			tokpush(&guard2, 1);
+			tokpush(pp->deftoks, pp->ndeftoks);
+			next();
+			if (pp->is_nttp) {
+				struct expr *ev = eval(condexpr(ds));
+				tokctx_rewind(d);
+				tok = post_args;
+				if (!ev || ev->kind != EXPRCONST ||
+				    !(ev->type->prop & PROPINT))
+					error_code(E_TEMPLATE, &pp->deftoks[0].loc,
+					    "default template argument is not a constant integer expression");
+				args[n] = ev->type;
+				nttp_vals[n] = ev->u.constant.u;
+			} else {
+				enum typequal dq = QUALNONE;
+				struct expr *dtoe = NULL;
+				struct type *dt = typename(ds, &dq, &dtoe);
+				tokctx_rewind(d);
+				tok = post_args;
+				if (!dt || dtoe)
+					error_code(E_TEMPLATE, &pp->deftoks[0].loc,
+					    "default template argument is not a type");
+				args[n] = dt;
+			}
+		}
+	}
 
 	(void)p;
 	(void)key;
