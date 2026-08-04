@@ -18,7 +18,7 @@
 | 任务 | 状态 | 说明 |
 |------|------|------|
 | [aarch64-qemu-segfault](mcc/aarch64-qemu-segfault.md) | 🔄 | mcc 编译 aarch64 hello qemu 运行 segfault(139)，疑栈帧序列/crt1-AAPCS |
-| [const-fold-negzero](mcc/const-fold-negzero.md) | 🔄 | mcc 常量折叠丢失负零符号（-0.0 折成正零，疑 const-fold 归并 0.0==-0.0） |
+| [const-fold-negzero](mcc/const-fold-negzero.md) | ✅ | mcc 常量折叠丢失负零符号（-0.0 折成正零）——根因为 x86_64 后端 fp_label 数值相等去重，已修 c004de8 |
 
 ### meuos-shell（msh）
 
