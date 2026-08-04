@@ -801,6 +801,36 @@ aarch64_encode_insn(const struct mt_target *target,
 			set_fixup(out, 0, 4, reloc, ops[1].sym_start, ops[1].imm);
 			return 0;
 		}
+		if (ops[1].imm < 0 && ops[1].imm != -1) {
+			/* Negative immediate offset → LDUR (unscaled, imm9).  A real
+			 * negative entry like [x29, #-8] must not fall through to the
+			 * register-offset path below (imm==-1 marks a register offset,
+			 * whose offset register is otherwise lost by the shared parsing).
+			 * imm==-1 alone (register offset marker) is kept as-is below. */
+			if (ops[1].imm < -256 || ops[1].imm > 255) return -1;
+			uint32_t base_op;
+			if (strcmp(mnemonic, "ldr") == 0) {
+				if (wreg == QREG)            base_op = 0x3CC00000;
+				else if (wreg == DREG)       base_op = 0xFC400000;
+				else if (wreg == SREG)       base_op = 0xBC400000;
+				else if (wreg == XREG)       base_op = 0xF8400000;
+				else                         base_op = 0xB8400000; /* w */
+			} else if (strcmp(mnemonic, "ldrb") == 0)
+				base_op = 0x38400000;
+			else if (strcmp(mnemonic, "ldrh") == 0)
+				base_op = 0x78400000;
+			else if (strcmp(mnemonic, "ldrsw") == 0)
+				base_op = 0xB8800000;
+			else if (strcmp(mnemonic, "ldrsb") == 0)
+				base_op = is64 ? 0x39800000 : 0x38800000;
+			else if (strcmp(mnemonic, "ldrsh") == 0)
+				base_op = is64 ? 0x79800000 : 0x78800000;
+			else return -1;
+			uint64_t uimm = (uint64_t)(ops[1].imm & 0x1FF);
+			emit32(out, &off, base_op | ((unsigned)uimm << 12) |
+			       (rn << 5) | rt);
+			return 0;
+		}
 		if (ops[1].imm >= 0) {
 			/* Scalar immediate offset */
 			unsigned size = 0;
@@ -944,7 +974,28 @@ aarch64_encode_insn(const struct mt_target *target,
 		} else return -1;
 
 		int64_t imm = ops[1].imm;
-		if (imm < 0) return -1; /* negative offset needs pre-indexed or STUR */
+		if (imm < 0) {
+			/* Negative immediate offset → STUR (unscaled, imm9).
+			 * Previously this returned -1, so mcc's valid [x29,#-N]
+			 * callee-save/frame save/restore could not be assembled. */
+			if (imm < -256 || imm > 255) return -1;
+			uint32_t base_op;
+			if (strcmp(mnemonic, "str") == 0) {
+				if (wreg == QREG)            base_op = 0x3C800000;
+				else if (wreg == DREG)       base_op = 0xFC000000;
+				else if (wreg == SREG)       base_op = 0xBC000000;
+				else if (wreg == XREG)       base_op = 0xF8000000;
+				else                         base_op = 0xB8000000; /* w */
+			} else if (strcmp(mnemonic, "strb") == 0)
+				base_op = 0x38000000;
+			else if (strcmp(mnemonic, "strh") == 0)
+				base_op = 0x78000000;
+			else return -1;
+			uint64_t uimm = (uint64_t)(imm & 0x1FF);
+			emit32(out, &off, base_op | ((unsigned)uimm << 12) |
+			       (rn << 5) | rt);
+			return 0;
+		}
 		uint64_t scaled = (uint64_t)imm >> size;
 		if (scaled > 0xFFF || (imm & ((1ULL << size) - 1)) != 0) return -1;
 		emit32(out, &off, base_op | ((unsigned)scaled << 10) |
