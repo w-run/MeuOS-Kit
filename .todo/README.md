@@ -24,8 +24,9 @@
 
 | 任务 | 状态 | 说明 |
 |------|------|------|
-| [mt-readelf-pie-dynamic](meuos-toolchain/mt-readelf-pie-dynamic.md) | 🔄 | `mt/readelf -d` 对 PIE 误报 no dynamic section（pre-existing） |
+| [mt-readelf-pie-dynamic](meuos-toolchain/mt-readelf-pie-dynamic.md) | ✅ | `mt/readelf -d` 对 PIE 误报 no dynamic section（已完成 commit 49349b2） |
 | [check-qemu-skip-wrapper](meuos-toolchain/check-qemu-skip-wrapper.md) | 🔄 | check-qemu-x86_64/i386 缺 SKIP 包装（pre-existing） |
+| [mt-ld-dynamic-section](meuos-toolchain/mt-ld-dynamic-section.md) | 🔄 | mt/ld 生成的 .dynamic 节区 sh_type 应为 SHT_DYNAMIC、sh_link→.dynstr |
 
 ### meuos-utils
 
