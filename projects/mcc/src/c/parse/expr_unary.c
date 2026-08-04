@@ -43,11 +43,14 @@ unaryexpr(struct scope *s)
 			extern enum cpp_tokenkind cpp_tok_kind(void);
 			extern struct expr *cpp_parse_new_expr(struct scope *);
 			extern struct expr *cpp_parse_delete_expr(struct scope *);
+			extern struct expr *cpp_parse_throw_expr(struct scope *);
 			enum cpp_tokenkind ck = cpp_tok_kind();
 			if (ck == CPP_TNEW)
 				return cpp_parse_new_expr(s);
 			if (ck == CPP_TDELETE)
 				return cpp_parse_delete_expr(s);
+			if (ck == CPP_TTHROW)
+				return cpp_parse_throw_expr(s);
 		}
 	}
 	op = tok.kind;

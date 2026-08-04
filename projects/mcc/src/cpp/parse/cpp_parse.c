@@ -4169,6 +4169,111 @@ cpp_parse_delete_expr(struct scope *s)
 	return cpp_free_expr(e);
 }
 
+/* --- C++ exceptions (basic frontend support) ---------------------------- */
+
+/* C++ exception runtime helpers (minimal, non-ABI self-owned interface).
+ * The landingpad/unwind backend that would route a thrown exception to a
+ * catch block is not yet implemented; `_meuos_exc_throw` arms the
+ * exception slot and aborts for now (forward-compatible with a future
+ * unwinder).  `_meuos_exc_typecode` maps a C++ type to an integer
+ * discriminant used for catch-type matching. */
+struct decl *
+cpp_ensure_exc_fn(const char *name)
+{
+	extern struct scope filescope;
+	struct decl *fd = scopegetdecl(&filescope, name, 1);
+	if (fd && fd->kind == DECLFUNC)
+		return fd;
+	if (strcmp(name, "_meuos_exc_throw") == 0) {
+		/* void _meuos_exc_throw(int typecode, unsigned long long value) */
+		struct type *ft = mktype(TYPEFUNC, 0);
+		struct decl *p2;
+		ft->base = &typevoid;
+		ft->u.func.isvararg = false;
+		ft->u.func.nparam = 2;
+		p2 = mkdecl("typecode", DECLOBJECT, &typeint, QUALNONE, LINKNONE);
+		p2->u.obj.storage = SDAUTO;
+		p2->next = mkdecl("value", DECLOBJECT, &typeullong, QUALNONE,
+		    LINKNONE);
+		p2->next->u.obj.storage = SDAUTO;
+		ft->u.func.params = p2;
+		fd = mkdecl("_meuos_exc_throw", DECLFUNC, ft, QUALNONE, LINKEXTERN);
+	} else {
+		return NULL;
+	}
+	fd->value = mkglobal(fd);
+	fd->u.func.isnoreturn = true; /* throwing never returns normally */
+	scopeputdecl(&filescope, fd);
+	return fd;
+}
+
+/* Integer type discriminant for catch-type matching.  By default every
+ * integer family maps to 0 (int); a future multi-type ABI would assign
+ * distinct codes per type. */
+static int
+cpp_exc_typecode(struct type *t)
+{
+	(void)t;
+	return 0;
+}
+
+/* Build a call `_meuos_exc_throw(typecode, value)`. */
+static struct expr *
+cpp_exc_throw_call(struct type *t, struct expr *value)
+{
+	struct decl *fd = cpp_ensure_exc_fn("_meuos_exc_throw");
+	struct expr *fn, *call, *a1, *a2;
+
+	if (!fd)
+		return mkexpr(EXPRCONST, &typevoid, NULL);
+	fn = mkexpr(EXPRIDENT, fd->type, NULL);
+	fn->u.ident.decl = fd;
+	fn = decay(fn);
+	call = mkexpr(EXPRCALL, &typevoid, fn);
+	a1 = mkconstexpr(&typeint, cpp_exc_typecode(t));
+	a2 = value ? mkexpr(EXPRCAST, &typeullong, value)
+	           : mkconstexpr(&typeullong, 0);
+	a2->next = NULL;
+	a1->next = a2;
+	call->u.call.args = a1;
+	call->u.call.nargs = 2;
+	return call;
+}
+
+/* C++ `try`/`catch` statement.  Parsed and recognised (so it is no longer
+ * reported as an undeclared identifier), but the landingpad / .eh_frame
+ * unwinder backend that routes a thrown exception to a catch block is not
+ * yet implemented — so we emit a clear diagnostic rather than silent
+ * miscompilation. */
+void
+cpp_exc_stmt(struct func *f, struct scope *s)
+{
+	extern void stmt(struct func *, struct scope *);
+	extern void next(void);
+
+	if (cpp_tok_kind() != CPP_TTRY)
+		return;
+	next(); /* consume 'try' */
+	error_tok_code(E_TEMPLATE, &tok,
+	    "'try'/'catch' exception handling requires the landingpad unwinder backend (not yet implemented in mcc)");
+	/* never reached */
+	stmt(f, s);
+}
+
+/* C++ `throw` expression (`throw expr;` or bare `throw;` rethrow).
+ * Lowered to a call to the exception runtime. */
+struct expr *
+cpp_parse_throw_expr(struct scope *s)
+{
+	extern struct expr *assignexpr(struct scope *);
+	struct expr *e = NULL;
+
+	next(); /* consume 'throw' */
+	if (tok.kind != TSEMICOLON && tok.kind != TEOF)
+		e = assignexpr(s);
+	return cpp_exc_throw_call(e ? e->type : &typeint, e);
+}
+
 /* Append the mangling code for one type into buf (NUL-terminated). */
 static void
 cpp_mangle_type(struct type *t, char *buf, size_t bufsz)
