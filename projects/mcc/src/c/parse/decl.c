@@ -147,6 +147,7 @@ defineobj(struct decl *d, struct init *init, bool hasinit, struct func *f)
 	 * integer constant (`constexpr int x = 1.5;` is rejected). */
 	if ((d->qual & QUALCONSTEXPR) && hasinit && init->expr) {
 		extern int g_lang;
+		extern bool cpp_is_lambda_closure(const struct type *);
 		struct expr *e = eval(init->expr);
 		if (e->kind != EXPRCONST) {
 			/* C++ constexpr variable of class type initialized by a
@@ -167,7 +168,12 @@ defineobj(struct decl *d, struct init *init, bool hasinit, struct func *f)
 				error_code(E_QUAL, &tok.loc,
 				    "constexpr variable '%s' requires a constant expression initializer",
 				    d->name);
-		} else if (g_lang == 1 && !(e->type->prop & PROPINT))
+		} else if (g_lang == 1 && !(e->type->prop & PROPINT) &&
+		    /* a no-capture lambda's closure object is an empty,
+		     * constant-constructible object, so
+		     * `constexpr auto f = [](int){...};` is a valid constant
+		     * initializer (the closure folds to zero below) */
+		    !cpp_is_lambda_closure(e->type))
 			error_code(E_DECL, &tok.loc, "constexpr variable '%s' requires a constant integer expression initializer", d->name);
 		else {
 			/* remember the value so a later constant expression can reuse it */
