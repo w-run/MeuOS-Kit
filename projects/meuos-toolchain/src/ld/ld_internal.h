@@ -298,6 +298,8 @@ uint16_t object_section_count(const struct ld_object *object);
 int object_get_section(struct ld_object *object, uint16_t index,
                        struct mt_elf64_section *out);
 int tls_desc_index(struct ld_context *ctx, const char *name);
+int collect_got_relocations(struct ld_context *ctx);
+int collect_tls_descriptors(struct ld_context *ctx);
 int add_got_entry(struct ld_context *ctx, const char *name);
 int got_index(struct ld_context *ctx, const char *name, size_t *index);
 
