@@ -287,4 +287,25 @@ int build_rela_dyn(struct ld_context *ctx);
 int rela_dyn_add(struct ld_context *ctx, uint64_t offset, uint64_t info,
                  int64_t addend);
 
+/* GOT / symbol-value helpers defined in link.c (symbol/got domain). */
+int symbol_value(struct ld_context *ctx, struct ld_object *object,
+                 uint64_t symbol_index, uint64_t *value,
+                 const char **name_out);
+int get_symbol_by_index(struct ld_context *ctx, struct ld_object *object,
+                        uint64_t index, struct mt_elf64_symbol *symbol,
+                        const char **name);
+uint16_t object_section_count(const struct ld_object *object);
+int object_get_section(struct ld_object *object, uint16_t index,
+                       struct mt_elf64_section *out);
+int tls_desc_index(struct ld_context *ctx, const char *name);
+int add_got_entry(struct ld_context *ctx, const char *name);
+int got_index(struct ld_context *ctx, const char *name, size_t *index);
+
+/* Relocation application (defined in reloc.c). */
+int write_relocation(struct ld_context *ctx, struct ld_object *object,
+                     const struct mt_elf64_section *reloc_section,
+                     struct ld_group *target, uint64_t reloc_index);
+int apply_relocations(struct ld_context *ctx);
+int fill_got(struct ld_context *ctx);
+
 #endif /* MEUOS_TOOLCHAIN_LD_INTERNAL_H */
