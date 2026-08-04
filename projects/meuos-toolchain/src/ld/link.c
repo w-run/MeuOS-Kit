@@ -3,20 +3,20 @@
 
 
 
-static void *
+void *
 ld_malloc(size_t size)
 {
 	void *p = malloc(size == 0 ? 1 : size);
 	return p;
 }
 
-static void *
+void *
 ld_realloc(void *old, size_t size)
 {
 	return realloc(old, size == 0 ? 1 : size);
 }
 
-static char *
+char *
 ld_strdup(const char *text)
 {
 	size_t n = strlen(text);
@@ -26,7 +26,7 @@ ld_strdup(const char *text)
 	return copy;
 }
 
-static int
+int
 ld_error(struct ld_context *ctx, const char *message)
 {
 	strncpy(ctx->error, message, sizeof(ctx->error) - 1);
@@ -34,7 +34,7 @@ ld_error(struct ld_context *ctx, const char *message)
 	return -1;
 }
 
-static int
+int
 ld_errorf(struct ld_context *ctx, const char *prefix, const char *name)
 {
 	if (name)
@@ -44,33 +44,33 @@ ld_errorf(struct ld_context *ctx, const char *prefix, const char *name)
 	return -1;
 }
 
-static uint32_t
+uint32_t
 read32(const unsigned char *p)
 {
 	return (uint32_t)p[0] | (uint32_t)p[1] << 8 |
 	       (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
 }
 
-static uint16_t
+uint16_t
 read16(const unsigned char *p)
 {
 	return (uint16_t)p[0] | (uint16_t)p[1] << 8;
 }
 
-static uint64_t
+uint64_t
 read64(const unsigned char *p)
 {
 	return (uint64_t)read32(p) | (uint64_t)read32(p + 4) << 32;
 }
 
-static void
+void
 write16(unsigned char *p, uint16_t value)
 {
 	p[0] = (unsigned char)value;
 	p[1] = (unsigned char)(value >> 8);
 }
 
-static void
+void
 write32(unsigned char *p, uint32_t value)
 {
 	p[0] = (unsigned char)value;
@@ -79,7 +79,7 @@ write32(unsigned char *p, uint32_t value)
 	p[3] = (unsigned char)(value >> 24);
 }
 
-static void
+void
 write64(unsigned char *p, uint64_t value)
 {
 	unsigned i;
@@ -87,7 +87,7 @@ write64(unsigned char *p, uint64_t value)
 		p[i] = (unsigned char)(value >> (i * 8));
 }
 
-static uint64_t
+uint64_t
 align_up(uint64_t value, uint64_t align)
 {
 	uint64_t mask = align - 1;
@@ -95,11 +95,6 @@ align_up(uint64_t value, uint64_t align)
 }
 
 /* ---- ELF32/64 dispatch helpers ---- */
-
-/* Forward declarations for functions used by helpers below. */
-static struct ld_global *find_global(struct ld_context *ctx, const char *name);
-static int ld_errorf(struct ld_context *ctx, const char *prefix, const char *name);
-static int ld_error(struct ld_context *ctx, const char *message);
 
 /* Parse an object file's ELF header.  Returns 0 on success, -1 on failure. */
 static int
@@ -610,7 +605,7 @@ is_tls_group(struct ld_context *ctx, int group)
 	return group == ctx->tls_tdata_group || group == ctx->tls_tbss_group;
 }
 
-static int
+int
 find_group(struct ld_context *ctx, const char *name)
 {
 	size_t i;
@@ -620,7 +615,7 @@ find_group(struct ld_context *ctx, const char *name)
 	return -1;
 }
 
-static int
+int
 get_group(struct ld_context *ctx, const char *name, uint32_t type,
           uint64_t flags, uint64_t align)
 {
@@ -652,7 +647,7 @@ get_group(struct ld_context *ctx, const char *name, uint32_t type,
 	return index;
 }
 
-static int
+int
 append_group_data(struct ld_context *ctx, struct ld_group *group,
                   const unsigned char *data, size_t size, uint64_t align,
                   uint64_t *section_offset)
@@ -804,7 +799,7 @@ collect_one_object_sections(struct ld_context *ctx, size_t object_index)
 	return 0;
 }
 
-static struct ld_global *
+struct ld_global *
 find_global(struct ld_context *ctx, const char *name)
 {
 	size_t i;
@@ -814,7 +809,7 @@ find_global(struct ld_context *ctx, const char *name)
 	return NULL;
 }
 
-static struct ld_global *
+struct ld_global *
 get_global(struct ld_context *ctx, const char *name)
 {
 	struct ld_global *globals;
@@ -3514,7 +3509,7 @@ write_dynsym_entry(unsigned char *p, int elf64,
 
 /* Pass 1: collect exported globals, create .dynsym / .dynstr / .hash groups
  * and fill their content (except symbol values which need layout addresses). */
-static int
+int
 build_dynamic_tables(struct ld_context *ctx)
 {
 	size_t i;
@@ -3886,7 +3881,7 @@ write_dt_addr(unsigned char *dp, int elf64, size_t *k,
 
 /* Pass 2: after layout, fill .dynsym entry values and .dynamic DT entries.
  * Called after layout_output and before write_executable. */
-static int
+int
 fill_dynamic_addresses(struct ld_context *ctx)
 {
 	size_t i;
@@ -4118,7 +4113,7 @@ fill_dynamic_addresses(struct ld_context *ctx)
 /* Ensure the .dynamic output section group exists for -shared.
  * Actual content (DT entries) is built later by build_dynamic_tables /
  * fill_dynamic_addresses. */
-static int
+int
 ensure_dynamic_section(struct ld_context *ctx)
 {
 	if (!ctx->shared && !ctx->pie)
@@ -4134,7 +4129,7 @@ ensure_dynamic_section(struct ld_context *ctx)
 /* For PIE executables, create the .interp section that holds the path to
  * the dynamic linker.  The content is fixed (/lib/ld-meuos.so.1) so we
  * fill it immediately; the section just needs to exist before layout(). */
-static int
+int
 ensure_pie_section(struct ld_context *ctx)
 {
 	if (!ctx->pie)

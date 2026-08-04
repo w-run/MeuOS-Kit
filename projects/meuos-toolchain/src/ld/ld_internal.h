@@ -256,4 +256,32 @@ struct ld_context {
 	const char *entry;      /* entry symbol (default "_start") */
 	char error[512];
 };
+/* Low-level helpers defined in link.c, shared across the ld submodules. */
+void *ld_malloc(size_t size);
+void *ld_realloc(void *old, size_t size);
+char *ld_strdup(const char *text);
+int ld_error(struct ld_context *ctx, const char *message);
+int ld_errorf(struct ld_context *ctx, const char *prefix, const char *name);
+uint16_t read16(const unsigned char *p);
+uint32_t read32(const unsigned char *p);
+uint64_t read64(const unsigned char *p);
+void write16(unsigned char *p, uint16_t value);
+void write32(unsigned char *p, uint32_t value);
+void write64(unsigned char *p, uint64_t value);
+uint64_t align_up(uint64_t v, uint64_t a);
+int find_group(struct ld_context *ctx, const char *name);
+int get_group(struct ld_context *ctx, const char *name, uint32_t type,
+              uint64_t flags, uint64_t align);
+int append_group_data(struct ld_context *ctx, struct ld_group *group,
+                      const unsigned char *data, size_t size, uint64_t align,
+                      uint64_t *section_offset);
+struct ld_global *find_global(struct ld_context *ctx, const char *name);
+struct ld_global *get_global(struct ld_context *ctx, const char *name);
+
+/* Dynamic-symbol/.dynamic construction (defined in dynamic.c). */
+int build_dynamic_tables(struct ld_context *ctx);
+int fill_dynamic_addresses(struct ld_context *ctx);
+int ensure_dynamic_section(struct ld_context *ctx);
+int ensure_pie_section(struct ld_context *ctx);
+
 #endif /* MEUOS_TOOLCHAIN_LD_INTERNAL_H */
