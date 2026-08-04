@@ -21,6 +21,7 @@ struct func;
 struct scope;
 struct expr;
 struct decl;
+struct cpp_template;
 
 /* Member-method parsing context: the enclosing class and implicit
  * `this` parameter while a method body is being parsed.  Shared by the
@@ -55,6 +56,16 @@ void cpp_emit_global_dtor(struct func *f, struct decl *d);
 /* Parse a `friend` declaration (defined in cpp_parse.c, class section);
  * used by the access-control check in the operator lowering. */
 void cpp_friend_decl(struct scope *s, struct type *classt);
+
+/* Classify a token into the C++ keyword kind (defined in cpp_parse.c,
+ * class section); used by the requires-expression splitting (cpp_requires.c). */
+enum cpp_tokenkind cpp_classify_token(struct token t);
+
+/* requires-expression / constraint machinery (defined in cpp_requires.c):
+ * cpp_check_constraint and cpp_requires_span_len are called from the
+ * template-instantiation paths in cpp_parse.c. */
+bool cpp_check_constraint(struct cpp_template *tmpl, struct scope *bs);
+size_t cpp_requires_span_len(struct token **out);
 
 /* Template data structures shared by the template-instantiation code
  * (cpp_parse.c) and the member-template lowering (cpp_tmpl_member.c).
