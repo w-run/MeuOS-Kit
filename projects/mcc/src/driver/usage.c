@@ -162,6 +162,7 @@ usage_long_zh(void)
 "  -d<标志>           后端调试转储（A/I/R/S）\n"
 "  -w                 抑制警告\n"
 "  -W<警告>           警告控制（-Wall, -Werror, ...）\n"
+"  --color[=auto|always|never]   彩色诊断（默认: auto = 终端自动）\n"
 "  --error-json       结构化 JSON 诊断\n"
 "  --explain          附加修复建议\n"
 "\n"
