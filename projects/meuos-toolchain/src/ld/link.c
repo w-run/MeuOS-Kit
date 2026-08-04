@@ -154,6 +154,7 @@ struct ld_got_entry {
 	int reloc_type;  /* 0=RELATIVE(default), MT_R_X86_64_JUMP_SLOT for PLT imports */
 	int tls;         /* 1=TLS GOT entry (GD/LD DTPMOD/DTPOFF pair, or IE TPOFF) */
 	int slots;       /* number of 8-byte slots this entry occupies (TLS GD/LD=2) */
+	uint64_t plt_offset; /* byte offset of this entry's PLT stub within .plt (JUMP_SLOT only) */
 };
 
 struct ld_got {
@@ -823,6 +824,7 @@ section_rank(const char *name)
 {
 	if (strcmp(name, ".text") == 0) return 0;
 	if (strncmp(name, ".text.", 6) == 0) return 0;
+	if (strcmp(name, ".plt") == 0) return 0;  /* executable, like .text */
 	if (strcmp(name, ".rodata") == 0) return 1;
 	if (strcmp(name, ".interp") == 0) return 1;
 	if (strcmp(name, ".eh_frame") == 0) return 1;
@@ -1558,12 +1560,13 @@ symbol_value(struct ld_context *ctx, struct ld_object *object,
 		while (global->alias)
 			global = global->alias;
 		if (!global->defined) {
-			/* For shared library output (ET_DYN), undefined external
+			/* For shared/PIE output (ET_DYN), undefined external
 			 * symbols are resolved at load time by ld.so.  Return 0
 			 * as the placeholder value; the PLT32/GOTPCREL relocation
-			 * handler will allocate a GOT entry and emit a JUMP_SLOT
-			 * dynamic relocation so ld.so fills the correct address. */
-			if (ctx->shared) {
+			 * handler will allocate a GOT entry and emit a JUMP_SLOT /
+			 * GLOB_DAT dynamic relocation so ld.so fills the correct
+			 * address. */
+			if (ctx->shared || ctx->pie) {
 				*value = 0;
 				return 0;
 			}
@@ -1571,7 +1574,20 @@ symbol_value(struct ld_context *ctx, struct ld_object *object,
 		}
 		if (global->absolute)
 			*value = global->offset + symbol.value;
-		else
+		else if (global->group < 0) {
+			/* Symbol defined only in an input shared library (its
+			 * global has no output-section group).  It is external to
+			 * this ET_DYN and must be resolved by ld.so at load time,
+			 * so return 0 and let the PLT32/GOTPCREL dynamic-relocation
+			 * path emit the GLOB_DAT/JUMP_SLOT entry.  Returning a
+			 * baked-in vaddr from the .so (groups[-1] junk) would leave
+			 * a static self-reference that crashes at runtime. */
+			if (ctx->shared || ctx->pie) {
+				*value = 0;
+				return 0;
+			}
+			*value = 0;
+		} else
 			*value = ctx->groups[global->group].address +
 			         global->offset + symbol.value;
 		return 0;
@@ -2414,18 +2430,32 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 		value = got_group->address + ctx->got.items[got].offset + addend - place;
 		width = 4;
 	} else if (type == LD_R_X86_64_PLT32) {
-		/* PLT32: call/jmp to a function.  In shared library mode,
-		 * undefined external symbols must go through the PLT/GOT
-		 * so ld.so can resolve them at load time. */
-		if (ctx->shared && resolved_value == 0) {
+		/* PLT32: call/jmp to a function.  In shared-library OR PIE
+		 * mode, undefined external symbols must go through the GOT so
+		 * ld.so can resolve them at load time via a JUMP_SLOT dynamic
+		 * relocation.  (A PIE's `call foo@PLT` otherwise gets a static
+		 * self-relative call to address 0 and crashes.) */
+		if ((ctx->shared || ctx->pie) && resolved_value == 0) {
 			size_t got_idx = 0;
 			if (add_got_entry(ctx, name) != 0)
 				return ld_errorf(ctx, "cannot create GOT entry for %s", name);
 			got_index(ctx, name, &got_idx); /* succeeds after add */
 			got = got_idx;
 			ctx->got.items[got].reloc_type = MT_R_X86_64_JUMP_SLOT;
-			got_group = &ctx->groups[ctx->got.group];
-			value = got_group->address + ctx->got.items[got].offset + addend - place;
+			/* The call targets this symbol's PLT stub (`jmp *GOT(%rip)`),
+			 * whose address is known after layout.  The stub then jumps
+			 * through the GOT slot that ld.so fills with the resolved
+			 * function address. */
+			int pgl = find_group(ctx, ".plt");
+			if (pgl >= 0) {
+				value = ctx->groups[pgl].address +
+				        ctx->got.items[got].plt_offset +
+				        addend - place;
+			} else {
+				got_group = &ctx->groups[ctx->got.group];
+				value = got_group->address + ctx->got.items[got].offset +
+				        addend - place;
+			}
 		} else {
 			value = resolved_value + addend - place;
 		}
@@ -2538,6 +2568,14 @@ apply_relocations(struct ld_context *ctx)
 	int group;
 	for (i = 0; i < ctx->objects.count; ++i) {
 		struct ld_object *object = &ctx->objects.items[i];
+		/* A shared-library (.so) input carries its own dynamic
+		 * relocations (DT_RELA etc.) that ld.so applies at load time;
+		 * the static linker must not process them.  Skipping avoids the
+		 * bogus "relocation target was discarded" on the .so's
+		 * .rela.dyn (whose sh_info points at section 0, which has no
+		 * output-section group). */
+		if (object->is_shared)
+			continue;
 		for (j = 0; j < object_section_count(object); ++j) {
 			if (object_get_section(object, j, &section) != 0)
 				return ld_errorf(ctx, "invalid relocation section", object->name);
@@ -2585,6 +2623,30 @@ fill_got(struct ld_context *ctx)
 			return ld_errorf(ctx, "undefined GOT symbol", ctx->got.items[i].name);
 		value = ctx->groups[global->group].address + global->offset;
 		write64(got->data + ctx->got.items[i].offset, value);
+	}
+	/* Fill the .plt stub disp32 fields: each `jmp *GOT_slot(%rip)` stub
+	 * needs `disp32 = GOT_slot_addr - stub_addr - 4`.  Both addresses are
+	 * known only after layout, which has now run. */
+	if (ctx->shared || ctx->pie) {
+		int pg = find_group(ctx, ".plt");
+		if (pg >= 0) {
+			uint64_t plt_addr = ctx->groups[pg].address;
+			for (i = 0; i < ctx->got.count; ++i) {
+				if (ctx->got.items[i].reloc_type != MT_R_X86_64_JUMP_SLOT)
+					continue;
+				uint64_t got_slot = ctx->groups[ctx->got.group].address +
+				                    ctx->got.items[i].offset;
+				uint64_t stub_addr = plt_addr + ctx->got.items[i].plt_offset;
+				/* The jmp is 6 bytes (ff 25 disp32); the effective
+				 * address is (stub_addr + 6) + disp, so disp = target
+				 * - (stub_addr + 6). */
+				int64_t disp = (int64_t)got_slot - (int64_t)stub_addr - 6;
+				unsigned char *stub = ctx->groups[pg].data +
+				                      ctx->got.items[i].plt_offset;
+				/* disp32 lives at stub+2 (after `ff 25`). */
+				write32(stub + 2, (uint32_t)(uint64_t)disp);
+			}
+		}
 	}
 	return 0;
 }
@@ -2685,19 +2747,42 @@ build_rela_dyn(struct ld_context *ctx)
 			if (rela_dyn_add(ctx, got_entry, info, 0) != 0)
 				return -1;
 		} else {
-			/* Defined symbol: RELATIVE relocation. */
+			/* The GOT entry references a symbol.  If it is defined in
+			 * THIS link, emit a RELATIVE (load-base + addend) so the
+			 * slot points at the symbol directly.  If it is an external
+			 * (undefined) symbol — e.g. a PIE importing data from a
+			 * shared library — emit GLOB_DAT so ld.so resolves it by
+			 * name across DSOs at load time; emitting RELATIVE would
+			 * bake in a bogus addend and leave the slot garbage. */
 			struct ld_global *g = find_global(ctx, ctx->got.items[i].name);
-			if (!g) continue;
-			uint64_t sym_value = ctx->groups[g->group].address + g->offset;
-			uint64_t info;
-			if (strcmp(ctx->target->name, "arm") == 0)
-				info = (uint64_t)MT_R_ARM_RELATIVE;
-			else if (ctx->target->elf_class == MT_ELFCLASS32)
-				info = (uint64_t)MT_R_X86_64_RELATIVE;
-			else
-				info = (0ULL << 32) | MT_R_X86_64_RELATIVE;
-			if (rela_dyn_add(ctx, got_entry, info, (int64_t)sym_value) != 0)
-				return -1;
+			if (g && g->defined && g->group >= 0) {
+				uint64_t sym_value = ctx->groups[g->group].address + g->offset;
+				uint64_t info;
+				if (strcmp(ctx->target->name, "arm") == 0)
+					info = (uint64_t)MT_R_ARM_RELATIVE;
+				else if (ctx->target->elf_class == MT_ELFCLASS32)
+					info = (uint64_t)MT_R_X86_64_RELATIVE;
+				else
+					info = (0ULL << 32) | MT_R_X86_64_RELATIVE;
+				if (rela_dyn_add(ctx, got_entry, info, (int64_t)sym_value) != 0)
+					return -1;
+			} else if ((ctx->shared || ctx->pie) &&
+			           strcmp(ctx->target->name, "x86_64") == 0) {
+				/* External/undefined symbol: GLOB_DAT so ld.so fills
+				 * the GOT slot with the defining DSO's symbol address. */
+				uint32_t sym_idx = 0;
+				for (size_t j = 0; j < ctx->dynsym_count; ++j) {
+					if (ctx->dynsym_entries[j].global->name &&
+					    strcmp(ctx->dynsym_entries[j].global->name,
+					           ctx->got.items[i].name) == 0) {
+						sym_idx = (uint32_t)(j + 1); /* +1 for STN_UNDEF */
+						break;
+					}
+				}
+				uint64_t info = ((uint64_t)sym_idx << 32) | MT_R_X86_64_GLOB_DAT;
+				if (rela_dyn_add(ctx, got_entry, info, 0) != 0)
+					return -1;
+			}
 		}
 	}
 	/* Shrink .rela.dyn to the actual number of entries written (a skipped
@@ -3942,6 +4027,41 @@ build_dynamic_tables(struct ld_context *ctx)
 		                      relaslots * rela_es, 8, &rdyn_off) != 0)
 			return -1;
 		ctx->rela_count = 0;
+	}
+
+	/* ---- .plt stubs (one per JUMP_SLOT GOT entry) ----
+	 * mt/ld has no lazy-binding PLT machinery, so each PLT32 function
+	 * import gets a tiny 6-byte stub `jmp *GOT_slot(%rip)` in an RX .plt
+	 * section.  The caller's `call foo@PLT` (a direct rel32 call) targets
+	 * the stub, which then jumps through the GOT slot that ld.so fills
+	 * with the resolved function address.  Without the stub, the call
+	 * would target the GOT slot's own address and execute the 8-byte
+	 * pointer as code (SIGSEGV).  The disp32 is filled in after layout,
+	 * once both the stub and the GOT slot addresses are known. */
+	{
+		size_t njumps = 0;
+		for (i = 0; i < ctx->got.count; ++i)
+			if (ctx->got.items[i].reloc_type == MT_R_X86_64_JUMP_SLOT)
+				njumps++;
+		if (njumps > 0) {
+			int pg = get_group(ctx, ".plt", MT_SHT_PROGBITS,
+			                   LD_SHF_ALLOC | LD_SHF_EXECINSTR, 16);
+			if (pg < 0)
+				return ld_error(ctx, "out of memory");
+			ctx->groups[pg].rank = 0; /* RX, like .text */
+			static const unsigned char stub[6] = {
+				0xff, 0x25, 0x00, 0x00, 0x00, 0x00
+			};
+			uint64_t stub_off = 0;
+			for (i = 0; i < ctx->got.count; ++i) {
+				if (ctx->got.items[i].reloc_type != MT_R_X86_64_JUMP_SLOT)
+					continue;
+				if (append_group_data(ctx, &ctx->groups[pg], stub,
+				                      sizeof(stub), 16, &stub_off) != 0)
+					return -1;
+				ctx->got.items[i].plt_offset = stub_off;
+			}
+		}
 	}
 	/* .init / .fini / .init_array / .fini_array / .preinit_array */
 	int have_init = (find_group(ctx, ".init") >= 0);
