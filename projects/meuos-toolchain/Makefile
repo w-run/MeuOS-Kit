@@ -352,6 +352,9 @@ check-ld-libpath: $(AS_BIN) $(LD_BIN) $(MCC)
 check-rtld: $(AS_BIN) $(LD_BIN) $(RTLD_BIN)
 	sh test/rtld_e2e.sh "$(abspath $(AS_BIN))" "$(abspath $(LD_BIN))" "$(abspath $(RTLD_BIN))"
 
+check-rtld-dtv: $(RTLD_BIN)
+	sh test/rtld_dtv.sh "$(abspath ../..)"
+
 check-ranlib: $(AR_BIN) $(RANLIB_BIN)
 	sh test/ranlib_basic.sh "$(abspath $(AR_BIN))" "$(abspath $(RANLIB_BIN))"
 
@@ -396,4 +399,4 @@ install: $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all check check-elf check-ar check-as-x86_64 check-as-tls-x86_64 check-target-dispatch check-as-sse-x86_64 check-as-libc-x86_64 check-ld-x86_64 check-ar-bsd check-ld-libpath check-rtld check-ranlib check-libelf check-nm check-readelf check-strip check-objcopy check-objdump check-qemu-x86_64 check-qemu-i386 check-qemu-aarch64 check-qemu-riscv64 check-qemu-loongarch64 check-qemu-arm check-qemu-all install clean
+.PHONY: all check check-elf check-ar check-as-x86_64 check-as-tls-x86_64 check-target-dispatch check-as-sse-x86_64 check-as-libc-x86_64 check-ld-x86_64 check-ar-bsd check-ld-libpath check-rtld check-rtld-dtv check-ranlib check-libelf check-nm check-readelf check-strip check-objcopy check-objdump check-qemu-x86_64 check-qemu-i386 check-qemu-aarch64 check-qemu-riscv64 check-qemu-loongarch64 check-qemu-arm check-qemu-all install clean

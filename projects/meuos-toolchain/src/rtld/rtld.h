@@ -221,6 +221,19 @@ struct rtld_lib {
 	uintptr_t tls_image;  /* runtime base of this module's TLS block */
 };
 
+/* Dynamic Thread Vector (DTV) slot for a TLS module: records the template
+ * (initialized .tdata bytes inside the library image) and the block size /
+ * alignment needed to lazily allocate a per-thread copy.  Registered for
+ * every DSO that has a PT_TLS, including ones loaded later via dlopen. */
+struct rtld_tls_mod {
+	int modid;                    /* module id (1..N) */
+	int lib_idx;                  /* index into st->libs */
+	const unsigned char *template;/* -> .tdata image bytes (in the DSO) */
+	size_t tls_filesz;            /* initialized size */
+	size_t tls_memsz;             /* total block size (.tdata + .tbss) */
+	size_t tls_align;             /* alignment */
+};
+
 /* Global state */
 struct rtld_state {
 	struct rtld_lib libs[RTLD_MAX_LIBS];
@@ -234,6 +247,17 @@ struct rtld_state {
 	 * + O.  tls_mod_count is the number of TLS modules registered. */
 	uintptr_t tls_tp;     /* thread pointer value (%fs base) */
 	int tls_mod_count;
+
+	/* P0.3 dynamic TLS: per-module registration table + the primary
+	 * thread's DTV.  dtv[0] is the generation counter; dtv[mod] holds
+	 * that module's TLS block address for the current thread (0 => not
+	 * yet allocated; __tls_get_addr lazily allocates from the template).
+	 * dtv points into the primary thread's TCB (just below %fs), so the
+	 * DTV-using __tls_get_addr can find it via %fs. */
+	struct rtld_tls_mod tls_mods[RTLD_MAX_LIBS];
+	uintptr_t *dtv;       /* primary thread's DTV array */
+	int dtv_len;          /* allocated length of dtv[] */
+	uintptr_t *dtv_store; /* backing store (grown on demand) */
 };
 
 /* syscall.c */
@@ -259,5 +283,19 @@ void rtld_apply_rela(struct rtld_lib *lib, struct rtld_state *st);
 void rtld_init_lib(struct rtld_lib *lib);
 Sym64 *rtld_find_sym(struct rtld_state *st, const char *name, int *out_lib);
 int rtld_elf_hash(const char *name);
+
+/* P0.3 dlopen + dynamic TLS.  Loads a DSO at run time (registering any
+ * PT_TLS module, applying relocations, calling its init), returns an
+ * opaque handle (the rtld_lib*).  Returns 0 on failure. */
+void *rtld_dlopen(const char *name);
+/* Resolve a symbol in a previously dlopen'd handle (or all libs if
+ * handle is 0), returning its runtime address. */
+void *rtld_dlsym(void *handle, const char *name);
+/* DTV-backed __tls_get_addr core: returns the current thread's address
+ * of the TLS variable in module `mod` at block-relative offset `off`,
+ * lazily allocating the module's TLS block on first touch. */
+void *rtld_tls_get_addr(unsigned long mod, unsigned long off);
+/* Host test hook: set the global linker state for dlopen/DTV harness. */
+void rtld_set_state(struct rtld_state *st);
 
 #endif /* RTLD_H */

@@ -1763,14 +1763,19 @@ collect_got_relocations(struct ld_context *ctx)
 						unsigned rel_type = (unsigned)(info64 & 0xffffffff);
 						if (rel_type == 75 || rel_type == 76)
 							goto collect_got64;
-						/* x86_64 PLT32 undefined function imports need a
-						 * JUMP_SLOT GOT entry so that in a shared lib /
-						 * PIE `call foo@plt` resolves via ld.so (the
-						 * write_relocation PLT32 branch is otherwise dead
-						 * code, since the GOT entry was never collected). */
+						/* x86_64 PLT32 or PC32 undefined function imports
+						 * need a JUMP_SLOT GOT entry so that in a shared
+						 * lib / PIE `call foo` / `call foo@plt` resolves
+						 * via ld.so.  mcc emits a plain R_X86_64_PC32 for
+						 * `call foo` (no @PLT suffix); treating a PC32
+						 * reloc on an UNDEF symbol as a function import
+						 * mirrors gas/gcc's behaviour (PC32 to an external
+						 * is normally a call).  Local/data PC32 (SHN_UNDEF
+						 * != symbol) is left untouched. */
 						if (strcmp(ctx->target->name, "x86_64") == 0 &&
 						    (ctx->shared || ctx->pie) &&
-						    rel_type == LD_R_X86_64_PLT32) {
+						    (rel_type == LD_R_X86_64_PLT32 ||
+						     rel_type == LD_R_X86_64_PC32)) {
 							if (get_symbol_by_index(ctx, object,
 							                        info64 >> 32, &symbol,
 							                        &name) != 0 ||
@@ -2045,7 +2050,14 @@ layout_output(struct ld_context *ctx)
 		struct ld_group *g = &ctx->groups[ctx->tls_tdata_group];
 		offset = align_up(offset, g->align ? g->align : 1);
 		g->file_offset = offset;
-		g->address = ctx->shared ? 0 : LD_BASE + offset;
+		/* .tdata gets its real vaddr (base + offset) for BOTH shared and
+		 * PIE.  Previously a shared library forced .tdata vaddr = 0,
+		 * which made PT_TLS p_vaddr = 0 while the .tdata bytes actually
+		 * lived at file offset p_offset (> 0).  The dynamic loader copies
+		 * the TLS template from load_base + p_vaddr, so a 0 vaddr pointed
+		 * it at the ELF header instead of the .tdata data, corrupting
+		 * every lazy-allocated TLS block. */
+		g->address = base + offset;
 		offset += g->size;
 	}
 	if (ctx->tls_tbss_group >= 0) {
@@ -2057,7 +2069,7 @@ layout_output(struct ld_context *ctx)
 			uint64_t tdata_end = td->file_offset + td->size;
 			uint64_t tbss_off = align_up(tdata_end, g->align ? g->align : 1);
 			g->file_offset = tbss_off;
-			g->address = ctx->shared ? 0 : LD_BASE + tbss_off;
+			g->address = base + tbss_off;
 		} else {
 			/* No .tdata: allocate beyond non-TLS sections */
 			offset = align_up(offset, g->align ? g->align : 1);
@@ -3807,17 +3819,16 @@ build_dynamic_tables(struct ld_context *ctx)
 	int dg_str = get_group(ctx, ".dynstr", MT_SHT_STRTAB,
 	                       LD_SHF_ALLOC, 1);
 	if (dg_str < 0) return ld_error(ctx, "out of memory");
-	struct ld_group *gstr = &ctx->groups[dg_str];
 	/* Leading NUL byte (string table index 0 = empty string) */
 	uint64_t stroff;
-	if (append_group_data(ctx, gstr, (const unsigned char *)"", 1, 1, &stroff) != 0)
+	if (append_group_data(ctx, &ctx->groups[dg_str], (const unsigned char *)"", 1, 1, &stroff) != 0)
 		return -1;
 
 	/* Store soname string (if any) and append its name to .dynstr */
 	ctx->soname_dynstr_offset = 0;
 	if (ctx->soname) {
 		uint64_t so_off;
-		if (append_group_data(ctx, gstr,
+		if (append_group_data(ctx, &ctx->groups[dg_str],
 		                      (const unsigned char *)ctx->soname,
 		                      strlen(ctx->soname) + 1, 1, &so_off) != 0)
 			return -1;
@@ -3846,7 +3857,7 @@ build_dynamic_tables(struct ld_context *ctx)
 		/* --add-needed entries */
 		for (i = 0; i < ctx->add_needed_count; ++i) {
 			uint64_t no_off;
-			if (append_group_data(ctx, gstr,
+			if (append_group_data(ctx, &ctx->groups[dg_str],
 			                      (const unsigned char *)ctx->add_needed[i],
 			                      strlen(ctx->add_needed[i]) + 1, 1, &no_off) != 0)
 				return -1;
@@ -3858,7 +3869,7 @@ build_dynamic_tables(struct ld_context *ctx)
 			if (!obj->is_shared) continue;
 			/* Use SONAME from .so's dynamic section if available */
 			uint64_t no_off;
-			if (append_group_data(ctx, gstr,
+			if (append_group_data(ctx, &ctx->groups[dg_str],
 			                      (const unsigned char *)obj->name,
 			                      strlen(obj->name) + 1, 1, &no_off) != 0)
 				return -1;
@@ -3870,7 +3881,6 @@ build_dynamic_tables(struct ld_context *ctx)
 	int dg_sym = get_group(ctx, ".dynsym", MT_SHT_DYNSYM,
 	                       LD_SHF_ALLOC, 8);
 	if (dg_sym < 0) return ld_error(ctx, "out of memory");
-	struct ld_group *gsym = &ctx->groups[dg_sym];
 	size_t nsym_total = nsym + 1; /* index 0 = null symbol */
 	size_t dysize = nsym_total * symsize;
 	/* Zero-fill the entire .dynsym (null symbol at 0 stays zero) */
@@ -3878,7 +3888,7 @@ build_dynamic_tables(struct ld_context *ctx)
 	if (!dz) return ld_error(ctx, "out of memory");
 	memset(dz, 0, dysize);
 	uint64_t sym_data_off;
-	if (append_group_data(ctx, gsym, dz, dysize, 8, &sym_data_off) != 0) {
+	if (append_group_data(ctx, &ctx->groups[dg_sym], dz, dysize, 8, &sym_data_off) != 0) {
 		free(dz);
 		return -1;
 	}
@@ -3910,13 +3920,13 @@ build_dynamic_tables(struct ld_context *ctx)
 			const char *gname = ctx->groups[g->group].name;
 			if (gname && strcmp(gname, ".text") == 0)
 				stt = MT_STT_FUNC;
-			else if (g->group >= 0 &&
-			         (g->group == ctx->tls_tdata_group ||
-			          g->group == ctx->tls_tbss_group))
+			else if (gname &&
+			         (strcmp(gname, ".tdata") == 0 ||
+			          strcmp(gname, ".tbss") == 0))
 				stt = MT_STT_TLS;
 		}
 		uint32_t dynstr_off;
-		if (append_group_data(ctx, gstr,
+		if (append_group_data(ctx, &ctx->groups[dg_str],
 		                      (const unsigned char *)g->name,
 		                      strlen(g->name) + 1, 1, &stroff) != 0)
 			return -1;
@@ -3948,7 +3958,7 @@ build_dynamic_tables(struct ld_context *ctx)
 		struct ld_global *g = find_global(ctx, ctx->got.items[i].name);
 		if (!g) continue;
 		uint32_t dynstr_off;
-		if (append_group_data(ctx, gstr,
+		if (append_group_data(ctx, &ctx->groups[dg_str],
 		                      (const unsigned char *)g->name,
 		                      strlen(g->name) + 1, 1, &stroff) != 0)
 			return -1;
@@ -3963,7 +3973,6 @@ build_dynamic_tables(struct ld_context *ctx)
 	int dg_hash = get_group(ctx, ".hash", MT_SHT_HASH,
 	                        LD_SHF_ALLOC, 4);
 	if (dg_hash < 0) return ld_error(ctx, "out of memory");
-	struct ld_group *ghash = &ctx->groups[dg_hash];
 	uint32_t nbucket = next_prime32((uint32_t)(nsym_total > 1 ? nsym_total : 3));
 	uint32_t nchain = (uint32_t)nsym_total;
 	size_t hash_size = (size_t)(2 + nbucket + nchain) * 4;
@@ -3984,7 +3993,7 @@ build_dynamic_tables(struct ld_context *ctx)
 		bucket[bi] = sym_ndx;
 	}
 	uint64_t hash_off;
-	if (append_group_data(ctx, ghash, hb, hash_size, 4, &hash_off) != 0) {
+	if (append_group_data(ctx, &ctx->groups[dg_hash], hb, hash_size, 4, &hash_off) != 0) {
 		free(hb);
 		return -1;
 	}
@@ -4088,12 +4097,11 @@ build_dynamic_tables(struct ld_context *ctx)
 	size_t dyn_total = ntags * dynent;
 	int dg_dyn = find_group(ctx, ".dynamic"); /* created by ensure_dynamic_section */
 	if (dg_dyn < 0) return ld_error(ctx, "out of memory");
-	struct ld_group *gdyn = &ctx->groups[dg_dyn];
 	unsigned char *dd = (unsigned char *)ld_malloc(dyn_total ? dyn_total : 1);
 	if (!dd) return ld_error(ctx, "out of memory");
 	memset(dd, 0, dyn_total);
 	uint64_t dyn_off;
-	if (append_group_data(ctx, gdyn, dd, dyn_total, 8, &dyn_off) != 0) {
+	if (append_group_data(ctx, &ctx->groups[dg_dyn], dd, dyn_total, 8, &dyn_off) != 0) {
 		free(dd);
 		return -1;
 	}
@@ -4158,8 +4166,19 @@ fill_dynamic_addresses(struct ld_context *ctx)
 		uint16_t st_shndx;
 		uint8_t st_bind = LD_STB_GLOBAL;
 		if (g->defined && g->group >= 0) {
-			st_value = ctx->groups[g->group].address + g->offset;
-			st_shndx = (uint16_t)(g->group + 1);
+			if (e->stt == MT_STT_TLS) {
+				/* TLS symbols carry a block-relative st_value: the offset
+				 * of the variable within the module's TLS block (.tdata
+				 * base).  Using the .tdata runtime address here would make
+				 * rtld's DTPOFF resolution bake in the vaddr and break
+				 * __tls_get_addr (the dynamic loader does block-relative
+				 * offset arithmetic). */
+				st_value = g->offset;
+				st_shndx = (uint16_t)(g->group + 1);
+			} else {
+				st_value = ctx->groups[g->group].address + g->offset;
+				st_shndx = (uint16_t)(g->group + 1);
+			}
 		} else {
 			st_value = 0;
 			st_shndx = 0;
