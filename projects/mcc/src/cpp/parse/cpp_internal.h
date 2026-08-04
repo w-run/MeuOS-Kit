@@ -19,6 +19,18 @@ struct token;
 struct member;
 struct func;
 struct scope;
+struct expr;
+struct decl;
+
+/* Member-method parsing context: the enclosing class and implicit
+ * `this` parameter while a method body is being parsed.  Shared by the
+ * member / ctor / operator lowering across the split modules. */
+struct cpp_method_ctx {
+	struct type *class_type; /* enclosing class of the method being parsed */
+	struct decl *this_decl;  /* the implicit `this` parameter decl */
+	bool active;
+};
+extern struct cpp_method_ctx g_cpp_method;
 
 /* Template data structures shared by the template-instantiation code
  * (cpp_parse.c) and the member-template lowering (cpp_tmpl_member.c).

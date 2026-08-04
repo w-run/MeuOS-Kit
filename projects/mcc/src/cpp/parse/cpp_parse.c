@@ -155,11 +155,7 @@ void cpp_define_method(struct scope *s, struct type *funct,
 /* Method-body context: while parsing a member-function body, bare member
  * identifiers (`count`) lower to `(*this).count` via cpp_member_ident,
  * and the implicit `this` parameter is available in scope. */
-static struct cpp_method_ctx {
-	struct type *class_type; /* enclosing class of the method being parsed */
-	struct decl *this_decl;  /* the implicit `this` parameter decl */
-	bool active;
-} g_cpp_method;
+struct cpp_method_ctx g_cpp_method;
 
 /* Pending qualified-class name from a `Class::method` declarator; consumed
  * by decl()'s DECLFUNC path to route out-of-line method definitions. */
