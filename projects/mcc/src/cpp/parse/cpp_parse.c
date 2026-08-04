@@ -1678,9 +1678,75 @@ cpp_define_static_data(struct scope *s, const char *qclass, const char *name)
 	}
 }
 
+/* Build a member operator call `l.operator_<mname>(r)` when the class
+ * `t` has that operator.  const-K × reference-R 级联查找：声明侧形如
+ * `Vec_operator_eqKRoVec`（const 成员函数追加 K，引用形参前缀 R）。调用
+ * 侧按实参编码，缺 K/R 会查不到。依次尝试 4 种变体：对象 const 匹配的 K
+ * 态优先，引用编码（prefer_ref 给 lvalue 加 'R'、rvalue 加 'V'）与裸编码
+ * 各试一轮，命中即用。  Returns true and sets *out on success. */
+static bool
+cpp_member_op_call(struct type *t, const char *mname, struct expr *l,
+                   struct expr *r, struct expr **out)
+{
+	extern struct scope filescope;
+
+	char mangled[256];
+	struct decl *fd;
+	struct expr *fn, *obj, *call, **end;
+	bool obj_const = (l->qual & QUALCONST) != 0;
+	bool found = false;
+	int kk;
+
+	for (kk = 0; kk < 2 && !found; kk++) {
+		/* kk=0 先试与对象 const 性匹配的 K 态，kk=1 回退另一态 */
+		const char *ks = (kk == 0) == obj_const ? "K" : "";
+		char mnameQ[64];
+		int rref;
+		snprintf(mnameQ, sizeof mnameQ, "%s%s", mname, ks);
+		for (rref = 0; rref < 2 && !found; rref++) {
+			cpp_mangled_name_args(t, mnameQ, r, mangled,
+			    sizeof mangled, rref != 0);
+			fd = scopegetdecl(t->scope ? t->scope : &filescope,
+			    mangled, 1);
+			found = fd && fd->kind == DECLFUNC;
+		}
+	}
+	if (!found)
+		return false;
+
+	fn = mkexpr(EXPRIDENT, fd->type, NULL);
+	fn->u.ident.decl = fd;
+	fn = decay(fn); /* &Class_operator_pl */
+
+	obj = mkunaryexpr(TBAND, l); /* &l */
+	obj->type = mkpointertype(t, l->qual);
+
+	call = mkexpr(EXPRCALL, fd->type->base, fn);
+	call->u.call.args = obj;
+	call->u.call.nargs = 1;
+	end = &obj->next;
+	if (r) {
+		struct decl *pp = fd->type->u.func.params ?
+		    fd->type->u.func.params->next : NULL;
+		struct expr *arg = r;
+		/* C++ reference parameter: bind the address
+		 * (expr_postfix.c:352-354 惯例) */
+		if (pp && pp->type && pp->type->isref)
+			arg = mkunaryexpr(TBAND, r);
+		*end = exprassign(arg, pp ? pp->type : NULL);
+		end = &(*end)->next;
+		++call->u.call.nargs;
+	}
+	*out = call;
+	return true;
+}
+
 /* Lower `l op r` to a member operator call `l.operator_pl(r)` when the
- * left operand is a class type with that operator overloaded.  Returns
- * true and sets *out on success (caller keeps normal arithmetic). */
+ * left operand is a class type with that operator overloaded.  Falls
+ * back to the C++20 rewritten candidates ([over.match.oper]/3.4): with
+ * no direct `operator<`/`==`/..., `a op b` rewrites to `(a <=> b) op 0`
+ * using the class's `operator<=>`.  Returns true and sets *out on
+ * success (caller keeps normal arithmetic). */
 bool
 cpp_try_operator_call(struct scope *s, struct expr *l, enum tokenkind op,
                       struct expr *r, struct expr **out)
@@ -1689,69 +1755,32 @@ cpp_try_operator_call(struct scope *s, struct expr *l, enum tokenkind op,
 
 	struct type *t = l ? l->type : NULL;
 	const char *opcode;
-	char mname[64], mangled[256];
+	char mname[64];
 	struct decl *fd;
-	struct expr *fn, *obj, *call, **end;
+	struct expr *fn, *call, **end;
 
 	opcode = cpp_op_mangle(op);
 	if (!opcode || !t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
 		return false;
 	snprintf(mname, sizeof mname, "operator_%s", opcode);
-	if (cpp_is_member_function(t, mname)) {
-		/* const-K × reference-R 级联查找：声明侧形如 `Vec_operator_eqKRoVec`
-		 *（const 成员函数追加 K，引用形参前缀 R）。调用侧按实参编码，缺
-		 * K/R 会查不到（D1）。依次尝试 4 种变体：对象 const 匹配的 K 态优
-		 * 先，引用编码（prefer_ref 给 lvalue 加 'R'、rvalue 加 'V'）与裸
-		 * 编码各试一轮，命中即用。 */
-		bool obj_const = (l->qual & QUALCONST) != 0;
-		bool found = false;
-		int kk;
-		for (kk = 0; kk < 2 && !found; kk++) {
-			/* kk=0 先试与对象 const 性匹配的 K 态，kk=1 回退另一态 */
-			const char *ks = (kk == 0) == obj_const ? "K" : "";
-			char mnameQ[64];
-			int rref;
-			snprintf(mnameQ, sizeof mnameQ, "%s%s", mname, ks);
-			for (rref = 0; rref < 2 && !found; rref++) {
-				cpp_mangled_name_args(t, mnameQ, r, mangled,
-				    sizeof mangled, rref != 0);
-				fd = scopegetdecl(t->scope ? t->scope : &filescope,
-				    mangled, 1);
-				found = fd && fd->kind == DECLFUNC;
-			}
+	if (cpp_is_member_function(t, mname))
+		return cpp_member_op_call(t, mname, l, r, out);
+	/* C++20 rewritten candidates: with no direct member operator,
+	 * `a < b` / `a == b` / ... rewrite to `(a <=> b) < 0` / `(a <=> b)
+	 * == 0` / ... via the class's `operator<=>`. */
+	if ((op == TLESS || op == TLEQ || op == TGREATER || op == TGEQ ||
+	    op == TEQL || op == TNEQ) &&
+	    cpp_is_member_function(t, "operator_ss")) {
+		struct expr *ss;
+		if (cpp_member_op_call(t, "operator_ss", l, r, &ss) &&
+		    ss->type && (ss->type->prop & PROPREAL)) {
+			*out = mkbinaryexpr(&tok.loc, op, ss,
+			    mkconstexpr(&typeint, 0));
+			return true;
 		}
-		if (!found)
-			return false;
-
-		fn = mkexpr(EXPRIDENT, fd->type, NULL);
-		fn->u.ident.decl = fd;
-		fn = decay(fn); /* &Class_operator_pl */
-
-		obj = mkunaryexpr(TBAND, l); /* &l */
-		obj->type = mkpointertype(t, l->qual);
-
-		call = mkexpr(EXPRCALL, fd->type->base, fn);
-		call->u.call.args = obj;
-		call->u.call.nargs = 1;
-		end = &obj->next;
-		if (r) {
-			struct decl *pp = fd->type->u.func.params ?
-			    fd->type->u.func.params->next : NULL;
-			struct expr *arg = r;
-			/* C++ reference parameter: bind the address
-			 * (expr_postfix.c:352-354 惯例) */
-			if (pp && pp->type && pp->type->isref)
-				arg = mkunaryexpr(TBAND, r);
-			*end = exprassign(arg, pp ? pp->type : NULL);
-			end = &(*end)->next;
-			++call->u.call.nargs;
-		}
-		*out = call;
-		return true;
 	}
 	/* non-member operator overload: `operator_pl(a, b)` registered as a
 	 * free function in the current scope */
-	extern struct scope filescope;
 	fd = scopegetdecl(s, mname, 1);
 	if (!fd || fd->kind != DECLFUNC)
 		return false;
@@ -2259,6 +2288,118 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname,
 		pm.is_static = is_static;
 		cpp_parse_method_body(&pm);
 	}
+}
+
+/* Append one token to a synthesized token stream (cpp_synth_default_spaceship). */
+static void
+cpp_ss_addtok(struct token **toks, size_t *n, enum tokenkind k,
+    const char *lit, struct location loc)
+{
+	extern int tokenget(const void *, size_t);
+
+	*toks = xreallocarray(*toks, *n + 1, sizeof **toks);
+	/* identifiers get their per-name kind via tokenget (the same path
+	 * the scanner uses): all identifiers share the TIDENT enum value,
+	 * but the macro table and name lookups key on the per-name kind */
+	if (k == TIDENT && lit)
+		k = tokenget(lit, strlen(lit));
+	(*toks)[*n].kind = k;
+	(*toks)[*n].lit = (char *)lit;
+	(*toks)[*n].loc = loc;
+	(*toks)[*n].hide = false;
+	(*toks)[*n].space = false;
+	++*n;
+}
+
+/* Synthesize the body of a C++20 defaulted `<=>` (P0515):
+ * `auto operator<=>(const T&) const = default;` compares every
+ * non-static data member in declaration order and returns the first
+ * non-zero result, else 0:
+ *
+ *     { if (x <=> rhs.x != 0) return x <=> rhs.x; ... return 0; }
+ *
+ * The synthesized body is tokenized and replayed through the normal
+ * method-body path (cpp_define_method buffers it while the class body is
+ * still being parsed and flushes it after layout), so the implicit `this`
+ * and bare-member lowering (cpp_member_ident) apply as usual.  An unnamed
+ * parameter (`const T&`) is given an internal name so the body can
+ * reference the right-hand operand.  Base-class subobjects (anonymous
+ * members) and static data members (not in the member list) are skipped. */
+void
+cpp_synth_default_spaceship(struct scope *s, struct type *funct,
+    const char *mname, const char *class_tag, bool is_const)
+{
+	extern void tokpush(struct token *, size_t);
+	extern void next(void);
+
+	struct type *ct;
+	struct member *m;
+	struct decl *pd = funct->u.func.params;
+	const char *rhs = "__mcc_ss_rhs";
+	struct token *toks = NULL;
+	size_t n = 0;
+	struct location loc = tok.loc;
+
+	/* the synthesized body refers to the RHS operand by parameter name;
+	 * an unnamed parameter gets an internal name so the comparison can
+	 * reference it */
+	if (pd && !pd->name) {
+		pd->name = xmalloc(strlen(rhs) + 1);
+		strcpy((char *)pd->name, rhs);
+	} else if (pd && pd->name) {
+		rhs = pd->name;
+	}
+	if (!pd)
+		error_code(E_DECL, &tok.loc,
+		    "defaulted 'operator<=>' must take a parameter");
+
+	ct = scopegettag(s, class_tag, true);
+	cpp_ss_addtok(&toks, &n, TLBRACE, NULL, loc);
+	if (ct) {
+		for (m = ct->u.structunion.members; m; m = m->next) {
+			/* skip member functions; base-class subobjects are
+			 * anonymous members (no name to compare by) */
+			if (!m->name || m->type->kind == TYPEFUNC)
+				continue;
+			/* if (m <=> rhs.m != 0) return m <=> rhs.m; */
+			cpp_ss_addtok(&toks, &n, TIF, NULL, loc);
+			cpp_ss_addtok(&toks, &n, TLPAREN, NULL, loc);
+			cpp_ss_addtok(&toks, &n, TIDENT, m->name, loc);
+			cpp_ss_addtok(&toks, &n, TSPACESHIP, NULL, loc);
+			cpp_ss_addtok(&toks, &n, TIDENT, rhs, loc);
+			cpp_ss_addtok(&toks, &n, TPERIOD, NULL, loc);
+			cpp_ss_addtok(&toks, &n, TIDENT, m->name, loc);
+			cpp_ss_addtok(&toks, &n, TNEQ, NULL, loc);
+			cpp_ss_addtok(&toks, &n, TNUMBER, "0", loc);
+			cpp_ss_addtok(&toks, &n, TRPAREN, NULL, loc);
+			cpp_ss_addtok(&toks, &n, TRETURN, NULL, loc);
+			cpp_ss_addtok(&toks, &n, TIDENT, m->name, loc);
+			cpp_ss_addtok(&toks, &n, TSPACESHIP, NULL, loc);
+			cpp_ss_addtok(&toks, &n, TIDENT, rhs, loc);
+			cpp_ss_addtok(&toks, &n, TPERIOD, NULL, loc);
+			cpp_ss_addtok(&toks, &n, TIDENT, m->name, loc);
+			cpp_ss_addtok(&toks, &n, TSEMICOLON, NULL, loc);
+		}
+	}
+	cpp_ss_addtok(&toks, &n, TRETURN, NULL, loc);
+	cpp_ss_addtok(&toks, &n, TNUMBER, "0", loc);
+	cpp_ss_addtok(&toks, &n, TSEMICOLON, NULL, loc);
+	cpp_ss_addtok(&toks, &n, TRBRACE, NULL, loc);
+
+	/* replay through the normal method-definition path: keep the token
+	 * after the consumed ';' (the next class member or '}') on the
+	 * stream, push the synthesized body in front, and let
+	 * cpp_define_method buffer it (in-class, g_cpp_class_parsing) or
+	 * parse it directly */
+	{
+		struct token cur = tok;
+		tokpush(&cur, 1);
+		tokpush(toks, n);
+		next(); /* position at the body's '{' */
+		cpp_define_method(s, funct, mname, class_tag, is_const, false,
+		    false);
+	}
+	free(toks);
 }
 
 /* Non-member operator overload: `Vec operator+(Vec a, Vec b) {...}`
@@ -7171,7 +7312,17 @@ cpp_tmpl_member_instantiate(struct scope *s, struct expr *thisp,
 		mt = declarator(bs, base, &dname, &align, NULL, false, NULL);
 		if (mt.type->kind != TYPEFUNC)
 			error_code(E_DECL, &tok.loc, "template member '%s' is not a function", name);
-		cpp_define_method(bs, mt.type, mname, tag, false,
+		/* a trailing `const` (e.g. a lambda's const operator()) is a
+		 * member cv-qualifier, not part of the C declarator grammar:
+		 * consume it here and pass it through so the const overload
+		 * (`Class_methodK<args>`) is instantiated, matching the
+		 * non-template member path (struct_decl.c). */
+		bool mconst = false;
+		if (tok.kind == TCONST) {
+			mconst = true;
+			next();
+		}
+		cpp_define_method(bs, mt.type, mname, tag, mconst,
 		    (sc & SCSTATIC) != 0, false);
 		/* cpp_define_method appends the encoded explicit parameter types
 		 * to the mangled symbol (`Wrapper_add_i` + `i` -> `Wrapper_add_ii`),
@@ -7179,6 +7330,8 @@ cpp_tmpl_member_instantiate(struct scope *s, struct expr *thisp,
 		{
 			struct decl *cur;
 			snprintf(sym, sizeof sym, "%s_%s", tag, mname);
+			if (mconst)
+				strncat(sym, "K", sizeof sym - strlen(sym) - 1);
 			for (cur = mt.type->u.func.params; cur; cur = cur->next) {
 				char code[64];
 				cpp_mangle_type(cur->type, code, sizeof code);
@@ -7249,6 +7402,21 @@ cpp_lambda_cap_needs_ctor_init(const struct cpp_lambda_cap *cap)
 	if (!t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
 		return false;
 	return cpp_has_ctor(t, t->u.structunion.tag);
+}
+
+/* Is `t` the closure class of a lambda (`__lambdaN`)?  A no-capture
+ * closure is an empty, constant-constructible object, so its closure
+ * object may serve as a static/constant initializer — file-scope
+ * `auto f = [](...){...};` and `constexpr auto f = [](...){...};`. */
+bool
+cpp_is_lambda_closure(const struct type *t)
+{
+	const char *tag;
+
+	if (!t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
+		return false;
+	tag = t->u.structunion.tag;
+	return tag && strncmp(tag, "__lambda", 8) == 0;
 }
 
 /* Parse a C++11 lambda expression `[captures](params) -> ret { body }` and
@@ -7547,6 +7715,12 @@ cpp_lambda_expr(struct scope *s)
 				wtoks[wn++] = ptoks[i];
 		}
 	}
+	/* the lambda's operator() is const by default (C++11 [expr.prim.lambda]p5,
+	 * unless `mutable`): a const closure object — e.g. a `constexpr` or
+	 * `const` lambda variable — must be callable through the const
+	 * overload (`operator_clK...`), and by-value captures remain readable
+	 * through a const `this`. */
+	cpp_tb(wtoks, &wn, tmpl, 0, "const");
 	if (bn) {
 		memcpy(wtoks + wn, btoks, bn * sizeof *btoks);
 		wn += bn;
@@ -7574,11 +7748,7 @@ cpp_lambda_expr(struct scope *s)
 		error_code(E_TEMPLATE, &tok.loc, "lambda closure class '%s' was not created", tagname);
 
 	/* --- construct the closure object (anonymous temporary) --- */
-	if (!curfunc)
-		error_code(E_DECL, &tok.loc, "lambda used outside of a function body is not supported");
 	tmp = mkdecl("tmp", DECLOBJECT, ct, QUALNONE, LINKNONE);
-	tmp->u.obj.storage = SDAUTO;
-	funcinit(curfunc, tmp, NULL, false); /* allocate storage */
 	args = NULL;
 	ae = &args;
 	for (i = 0; i < ncap; ++i) {
@@ -7588,7 +7758,30 @@ cpp_lambda_expr(struct scope *s)
 		*ae = cap;
 		ae = &cap->next;
 	}
-	cpp_emit_ctor_call(curfunc, tmp, args);
+	if (!curfunc) {
+		/* file-scope lambda: the closure object has static storage.
+		 * A no-capture closure is an empty object — constant-
+		 * constructible — so it needs no runtime construction; the
+		 * closure object folds to a constant, which makes file-scope
+		 * `auto f = [](...){...};` a valid static initializer and
+		 * `constexpr auto f = [](...){...};` satisfy the constant-
+		 * initializer requirement.  Capturing lambdas at file scope
+		 * would require dynamic initialization (deferred to
+		 * __mxx_global_var_init) and are not supported yet. */
+		tmp->u.obj.storage = SDSTATIC;
+		tmp->value = mkglobal(tmp);
+		if (ncap == 0) {
+			tmp->u.obj.constval = 0;
+			tmp->u.obj.has_constval = true;
+		} else {
+			error_code(E_DECL, &tok.loc,
+			    "file-scope lambda with captures is not supported yet");
+		}
+	} else {
+		tmp->u.obj.storage = SDAUTO;
+		funcinit(curfunc, tmp, NULL, false); /* allocate storage */
+		cpp_emit_ctor_call(curfunc, tmp, args);
+	}
 
 	e = mkexpr(EXPRIDENT, ct, NULL);
 	e->lvalue = true;

@@ -116,9 +116,20 @@ eval(struct expr *expr)
 			 * (integer) value is usable in later constant expressions
 			 * (e.g. _Static_assert, array dimensions). */
 			extern int g_lang;
+			/* A no-capture lambda's closure object is an empty,
+			 * constant-constructible object: fold it (to its stored
+			 * zero value) so a file-scope `auto f = [](...){...};`
+			 * is a valid static initializer and `constexpr auto f =
+			 * [](...){...};` satisfies the constant-initializer
+			 * requirement. */
+			extern bool cpp_is_lambda_closure(const struct type *);
 			if (d->kind == DECLOBJECT && d->u.obj.has_constval &&
-			    (d->type->prop & PROPINT) &&
-			    (g_lang == 1 || (d->qual & QUALCONSTEXPR))) {
+			    (g_lang == 1 || (d->qual & QUALCONSTEXPR)) &&
+			    ((d->type->prop & PROPINT) ||
+			     (g_lang == 1 && d->type &&
+			      (d->type->kind == TYPESTRUCT ||
+			       d->type->kind == TYPEUNION) &&
+			      cpp_is_lambda_closure(d->type)))) {
 				expr->kind = EXPRCONST;
 				expr->u.constant.u = d->u.obj.constval;
 			}

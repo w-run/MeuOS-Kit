@@ -376,6 +376,14 @@ emitdata(struct decl *d, struct init *init)
 					dat.type = DL;
 					dat.u.fltd = cur->expr->u.constant.f;
 				}
+			} else if (!(t->prop & PROPSCALAR)) {
+				/* A constant-folded non-scalar object (a no-capture
+				 * lambda's empty closure): zero-initialize its slot. */
+				dat.type = DZ;
+				dat.isstr = 0;
+				dat.isref = 0;
+				dat.u.num = end - start;
+				emitdat(&dat, stdout);
 			} else {
 				switch (irtype(t).data) {
 				case 'b': dat.type = DB; break;
