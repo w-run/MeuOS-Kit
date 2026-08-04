@@ -14,6 +14,16 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+/* ---- Optional rtld dlopen/dlsym ABI (P0.3 stage B) ----
+ *
+ * In a dynamically-linked process ld.so (rtld) exports DTV-aware
+ * dlopen/dlsym and resolves them via rtld_self_sym, so the dl* wrappers
+ * prefer them for correct run-time loading + TLS.  These are weak so a
+ * plain static link (no ld.so) resolves them to NULL and falls back to the
+ * in-libc ELF loader below. */
+__attribute__((weak)) void *rtld_dlopen(const char *name);
+__attribute__((weak)) void *rtld_dlsym(void *handle, const char *name);
+
 /* ---- Error state (static buffer, non-thread-safe) ---- */
 #define ERR_BUF_SIZE 256
 static char dl_err[ERR_BUF_SIZE];
@@ -380,6 +390,17 @@ dlopen(const char *file, int mode)
 		set_error("filename is NULL");
 		return NULL;
 	}
+	/* Prefer the dynamic linker's DTV-aware loader when linked against
+	 * ld.so; fall back to the in-libc loader for static-only builds. */
+	if (rtld_dlopen) {
+		void *h = rtld_dlopen(file);
+		if (!h) {
+			char buf[ERR_BUF_SIZE];
+			snprintf(buf, sizeof(buf), "dlopen: cannot load '%s'", file);
+			set_error(buf);
+		}
+		return h;
+	}
 	struct loaded_lib *lib = load_lib(file);
 	if (!lib) {
 		char buf[ERR_BUF_SIZE];
@@ -396,6 +417,14 @@ dlsym(void *handle, const char *name)
 	if (!name || !*name) {
 		set_error("dlsym: symbol name is NULL");
 		return NULL;
+	}
+	/* Dynamic scenario: let ld.so resolve (it owns the loaded-lib list
+	 * and DTV).  Falls back to the in-libc table for static builds. */
+	if (rtld_dlsym) {
+		void *sym = rtld_dlsym(handle, name);
+		if (!sym)
+			set_error("dlsym: symbol not found");
+		return sym;
 	}
 	uint32_t h = elf_hash(name);
 
