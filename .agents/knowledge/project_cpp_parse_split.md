@@ -32,3 +32,10 @@ cpp_parse.c 当前 6489 行。共享符号统一放 `cpp_internal.h`。
 
 ## How to apply
 后续续接拆分时：每拆一刀立即 verify-all（尤其 check-sysroot-static），确保自举一致性；跨文件函数声明务必补进 cpp_internal.h。
+
+## 补充教训（2026-08-05 续，requires/class 簇）
+- cpp_parse.c 已从 9088 → 3962 行（-56%），拆出 12 模块（newdel/fold/lambda/mangle/vtable/tmpl_member/ctor/expr_op/freeop/requires/classtmpl/constexpr）。
+- **header 原型引用后定义的 struct 必须先加前向声明**：cpp_internal.h 里 `cpp_check_constraint(struct cpp_template *...)` 若写在 `struct cpp_template {}` 定义前，cpp_parse.c 调用点报 `incompatible pointer type`。修：在 header 顶部 forward-declare `struct cpp_template;`。
+- **漏 promote 一个 static 会 link 报 undefined reference**：如 `tmpl_param_is_nttp` 被 class 模板簇调用但仍在 cpp_parse.c 是 static。拆簇前先用 grep -oE 列全依赖，逐个核对是 extern 还是 static。
+- 拆类的簇内部自足函数要给 static 前向声明，否则"static follows non-static"（隐式声明冲突）。
+
