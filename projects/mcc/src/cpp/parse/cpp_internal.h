@@ -8,7 +8,91 @@
 #ifndef MCC_CPP_PARSE_INTERNAL_H
 #define MCC_CPP_PARSE_INTERNAL_H
 
+#include <stdbool.h>
 #include "cpp.h"
+
+/* Forward declarations for pointer fields in the template data
+ * structures below.  Full definitions live in mcc.h, included by the
+ * translation units (not here, to avoid redefining enum tokenkind). */
+struct type;
+struct token;
+struct member;
+struct func;
+struct scope;
+
+/* Template data structures shared by the template-instantiation code
+ * (cpp_parse.c) and the member-template lowering (cpp_tmpl_member.c).
+ * Pure data: the registry/instantiation state (g_cpp_tmpl_stack, packs,
+ * etc.) stays in cpp_parse.c. */
+
+/* One template parameter (`T` in `template <typename T> ...`).  The
+ * concrete type binding is filled in during instantiation.  A parameter
+ * pack (`typename... Args`) collects the remaining instantiation types. */
+struct cpp_tmpl_param {
+	const char *name;
+	bool is_pack;            /* `typename... Args` */
+	bool is_nttp;            /* non-type template parameter (`int N` / `auto N`) */
+	bool is_dep_nttp;        /* NTTP whose type names an earlier type parameter (`T N`) */
+	struct type *nttp_type;  /* fixed NTTP type (NULL for `auto N` / dependent `T N`) */
+	/* C++11 default template argument (`template<typename T = int>`): the
+	 * buffered tokens after `=`, applied when the parameter is omitted.
+	 * NULL when the parameter has no default. */
+	struct token *deftoks;
+	size_t ndeftoks;
+	struct cpp_tmpl_param *next;
+};
+
+/* A concrete instantiation of a function template (`max<int>`). */
+struct cpp_tmpl_inst {
+	char key[128];       /* mangled function name, e.g. "max_i" */
+	struct decl *fn;
+	struct cpp_tmpl_inst *next;
+};
+
+/* A concrete instantiation of a class template (`Foo<int>`): the
+ * instantiated class type, under its mangled tag name. */
+struct cpp_tmpl_cls_inst {
+	char key[128];       /* mangled tag name, e.g. "Foo_i" */
+	struct type *t;
+	struct cpp_tmpl_cls_inst *next;
+};
+
+/* A function or class template declaration.  `toks` holds the declaration
+ * tokens after the `template <...>` header (function declaration + body,
+ * or `class Foo { ... }`); it is replayed with each concrete parameter
+ * binding to define the instantiation. */
+struct cpp_template {
+	const char *name;
+	int nparams;
+	struct cpp_tmpl_param *params;
+	struct token *toks;
+	size_t ntoks;
+	bool is_class;               /* `template<...> class Foo { ... }` */
+	bool is_member;              /* template member function of a class */
+	bool is_concept;             /* `template<...> concept Name = expr;` */
+	struct type *owner;          /* enclosing class (member templates) */
+	struct token *constraint;    /* requires-clause tokens (`requires Expr<T>`) */
+	size_t nconstraint;
+	struct cpp_tmpl_inst *insts;
+	struct cpp_tmpl_inst **insts_end;
+	struct cpp_tmpl_cls_inst *cls_insts;
+	struct cpp_tmpl_cls_inst **cls_insts_end;
+	struct cpp_template *next;
+};
+
+/* Template registry (defined in cpp_parse.c); traversed by the
+ * member-template lowering. */
+extern struct cpp_template *g_cpp_templates;
+
+/* Dummy callee expression for a pending template call (defined in
+ * cpp_parse.c); used by the member-template lowering. */
+struct decl *cpp_tmpl_dummy_callee(void);
+
+/* Define a (possibly templated) method of class `class_tag` (defined in
+ * cpp_parse.c); used by the member-template lowering. */
+void cpp_define_method(struct scope *s, struct type *funct,
+                       const char *mname, const char *class_tag,
+                       bool is_const, bool is_static, bool is_virtual);
 
 /* Non-type template parameter values captured for constexpr evaluation.
  * Shared between the template-instantiation code (cpp_parse.c) and the
@@ -28,6 +112,10 @@ void cpp_expand_folds(struct token *toks, size_t n, const char *pack_var,
 /* Pending `this` object of the next member-function call, set by the
  * postfix `.`/`->` lowering; the lambda lowering nulls it out. */
 extern struct expr *g_cpp_member_this;
+
+/* The pending member call is a template-member call (`obj.get<int>(...)`).
+ * Set by cpp_tmpl_member_pend, cleared with the rest of the pending state. */
+extern bool g_cpp_member_tmpl;
 
 /* Running counter for synthesized closure classes ``__lambdaN``; shared
  * between the template-instantiation code (cpp_parse.c) and the lambda
