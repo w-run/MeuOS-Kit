@@ -19,6 +19,10 @@
 #include "mir.h"
 #include "i386_m.h"
 
+/* PIC/shared-code flag, set by the driver (main.c).  Consulted for GOT/PLT
+ * and initial-exec TLS emission under -fPIC. */
+extern int g_pic;
+
 static const MTargetM *g_mt;
 static MFnM *g_fm;
 static int g_alloca_cur;
@@ -76,36 +80,6 @@ emit_const(FILE *f, MConst *c)
 	}
 }
 
-/* Print a register, or a slot as ebp-relative memory. */
-static void
-emit_mval(FILE *f, MVal *v)
-{
-	if (!v) {
-		fputs("%eax", f);
-		return;
-	}
-	switch (v->kind) {
-	case MV_REG:
-		fprintf(f, "%%%s", mreg_name(g_mt, v->reg));
-		break;
-	case MV_TEMP:
-		if (v->reg >= 0)
-			fprintf(f, "%%%s", mreg_name(g_mt, v->reg));
-		else
-			fprintf(f, "%d(%%ebp)", v->slot + g_slot_base);
-		break;
-	case MV_CONST:
-		emit_const(f, v->con);
-		break;
-	case MV_GLOBAL:
-		fprintf(f, "%s", v->sym ? v->sym : "0");
-		break;
-	default:
-		fputs("%eax", f);
-		break;
-	}
-}
-
 /* Load a value into a scratch register. */
 static void
 mv_to_scratch(FILE *f, MVal *v, const char *rn)
@@ -138,7 +112,22 @@ mv_to_scratch(FILE *f, MVal *v, const char *rn)
 		break;
 	case MV_GLOBAL: {
 		const char *sym = v->sym ? v->sym : "0";
-		fprintf(f, "\tmovl\t$%s, %%%s\n", sym, rn);
+		if (v->tls) {
+			/* TLS: thread pointer (TP, %gs:0) plus the TLS offset.
+			 * PIC uses the initial-exec GOT form (R_386_TLS_GOTIE);
+			 * non-PIC uses local-exec (R_386_TLS_LE). */
+			fprintf(f, "\tmovl\t%%gs:0, %%%s\n", rn);
+			if (g_pic)
+				fprintf(f, "\taddl\t%s@gotntpoff, %%%s\n", sym, rn);
+			else
+				fprintf(f, "\taddl\t$%s@ntpoff, %%%s\n", sym, rn);
+		} else if (g_pic && v->isext) {
+			/* external global: load its address via the GOT (EBX is the
+			 * GOT base in PIC prologues) */
+			fprintf(f, "\tmovl\t%s@GOT(%%ebx), %%%s\n", sym, rn);
+		} else {
+			fprintf(f, "\tmovl\t$%s, %%%s\n", sym, rn);
+		}
 		break;
 	}
 	default:
@@ -192,7 +181,21 @@ emit_addr_str(FILE *f, MAddr a, char *buf, size_t bufsz)
 		fprintf(f, ", %%ecx\n");
 		base_s = "%ecx";
 	} else if (base && base->kind == MV_GLOBAL) {
-		fprintf(f, "\tmovl\t$%s, %%ecx\n", base->sym ? base->sym : "0");
+		if (base->tls) {
+			/* TLS base: TP + TLS offset (see mv_to_scratch). */
+			fprintf(f, "\tmovl\t%%gs:0, %%ecx\n");
+			if (g_pic)
+				fprintf(f, "\taddl\t%s@gotntpoff, %%ecx\n",
+				        base->sym ? base->sym : "0");
+			else
+				fprintf(f, "\taddl\t$%s@ntpoff, %%ecx\n",
+				        base->sym ? base->sym : "0");
+		} else if (g_pic && base->isext) {
+			fprintf(f, "\tmovl\t%s@GOT(%%ebx), %%ecx\n",
+			        base->sym ? base->sym : "0");
+		} else {
+			fprintf(f, "\tmovl\t$%s, %%ecx\n", base->sym ? base->sym : "0");
+		}
 		base_s = "%ecx";
 	} else if (base) {
 		/* mreg_name returns bare name ("ebp"); AT&T syntax needs %ebp */
@@ -290,7 +293,13 @@ fload_scratch(FILE *f, MVal *v)
 			        mreg_name(g_mt, v->reg));
 		return;
 	case MV_GLOBAL:
-		fprintf(f, "\tmovsd\t%s, %%xmm0\n", v->sym ? v->sym : "0");
+		if (g_pic && v->isext && !v->tls) {
+			fprintf(f, "\tmovl\t%s@GOT(%%ebx), %%eax\n",
+			        v->sym ? v->sym : "0");
+			fprintf(f, "\tmovsd\t(%%eax), %%xmm0\n");
+		} else {
+			fprintf(f, "\tmovsd\t%s, %%xmm0\n", v->sym ? v->sym : "0");
+		}
 		return;
 	default:
 		fputs("\txorpd\t%xmm0, %xmm0\n", f);
@@ -972,7 +981,8 @@ emit_ins(FILE *f, MInsM *in)
 	}
 	case MMOP_CALL: {
 		if (s0 && s0->kind == MV_GLOBAL) {
-			fprintf(f, "\tcall\t%s\n", s0->sym ? s0->sym : "?");
+			fprintf(f, "\tcall\t%s%s\n", s0->sym ? s0->sym : "?",
+			        g_pic && s0->isext ? "@plt" : "");
 		} else if (s0) {
 			mv_to_scratch(f, s0, "eax");
 			fprintf(f, "\tcall\t*%%eax\n");
@@ -1111,6 +1121,8 @@ emit_block(FILE *f, MBlkM *b)
 		}
 		/* epilogue: restore frame and pop */
 		fputs("\tmovl\t%ebp, %esp\n", f);
+		if (g_pic)
+			fputs("\tpopl\t%ebx\n", f);
 		fputs("\tpopl\t%ebp\n", f);
 		fputs("\tret\n", f);
 		break;
@@ -1127,8 +1139,11 @@ mfnm_emit_i386(MFnM *fm, FILE *f)
 	g_fm = fm;
 	g_fname = fm->name ? fm->name : "?";
 
-	/* frame: push ebp (4 bytes) above the slot area */
+	/* frame: push ebp (4 bytes) above the slot area; PIC additionally
+	 * pushes the callee-saved EBX (GOT base) before setting ebp. */
 	int pushbytes = 4;
+	if (g_pic)
+		pushbytes += 4;
 	g_slot_base = -pushbytes;
 
 	fm->dynalloc = false;
@@ -1154,9 +1169,17 @@ mfnm_emit_i386(MFnM *fm, FILE *f)
 		fprintf(f, "%s:\n", fm->name);
 	}
 	fprintf(f, "\tpushl\t%%ebp\n");
+	if (g_pic)
+		fprintf(f, "\tpushl\t%%ebx\n");
 	fprintf(f, "\tmovl\t%%esp, %%ebp\n");
 	if (framesize > pushbytes)
 		fprintf(f, "\tsubl\t$%d, %%esp\n", framesize - pushbytes);
+
+	if (g_pic) {
+		/* Load the GOT base into EBX for PIC direct-global addressing. */
+		fprintf(f, "\tcall\t__x86.get_pc_thunk.bx\n");
+		fprintf(f, "\taddl\t$_GLOBAL_OFFSET_TABLE_, %%ebx\n");
+	}
 
 	/* Branch to the real entry block after the prologue */
 	if (fm->start)

@@ -21,6 +21,9 @@
 #include <string.h>
 
 #include "mir.h"
+#include "i386_m.h"     /* I386MREG_EBX (PIC GOT base, reserved under -fPIC) */
+
+extern int g_pic;       /* PIC/shared flag from the driver (main.c) */
 
 /* ---- interval bookkeeping ------------------------------------------------- */
 
@@ -256,11 +259,15 @@ intv_cmp_start(const void *a, const void *b)
 }
 
 /* Build the caller-saved (px) and callee-saved (pc) pools per class.
- * Excludes rglob (frame regs), reserved and scratch (emitter temps). */
+ * Excludes rglob (frame regs), reserved and scratch (emitter temps).
+ * Under -fPIC the i386 EBX is additionally removed to serve as the GOT
+ * base pointer; non-PIC keeps EBX in the allocator pool (W1 fix). */
 static void
-mreg_pool_build(const MTargetM *mt, MRegPool *pc, MRegPool *px)
+mreg_pool_build(const MTargetM *mt, int pic, MRegPool *pc, MRegPool *px)
 {
 	uint64_t no = mt->rglob | mt->reserved | mt->scratch;
+	if (pic && strcmp(mt->name, "i386") == 0)
+		no |= (1ull << I386MREG_EBX);
 	for (int r = mt->gpr0; r < mt->gpr0 + mt->ngpr; r++) {
 		if ((no >> r) & 1)
 			continue;
@@ -311,7 +318,7 @@ mreg_scan(MFnM *fm, MRegCtx *ctx)
 	MRegSlots slots = { 0 };
 	bool vararg = fm->host && fm->host->vararg;
 	MRegPool pc[2] = { 0 }, px[2] = { 0 };
-	mreg_pool_build(mt, pc, px);
+	mreg_pool_build(mt, g_pic, pc, px);
 
 	/* fixed occupations (MV_REG operands) */
 	MFixed fixed[64];
