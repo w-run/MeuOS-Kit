@@ -231,6 +231,14 @@ struct ld_context {
 	size_t *archive_mem_size;
 	size_t archive_mem_count;
 	size_t archive_mem_capacity;
+	/* .rela.dyn in-place fill: rela_count is the next slot index; the
+	 * section buffer is pre-reserved in build_dynamic_tables (so layout
+	 * assigns the correct file offset / size) and filled incrementally by
+	 * build_rela_dyn().  Indexing by slot is required so that growing the
+	 * dynamic relocation list can never overflow the section and clobber
+	 * the adjacent .dynamic section in the output file. */
+	size_t rela_count;         /* number of RELA entries written so far */
+	size_t rela_capacity_entries; /* reserved slot count in .rela.dyn */
 	/* Linker options (copied from struct mt_ld_options) */
 	const char *output;     /* output file path */
 	const char *entry;      /* entry symbol (default "_start") */
@@ -2591,19 +2599,24 @@ rela_dyn_add(struct ld_context *ctx, uint64_t offset, uint64_t info, int64_t add
 	int rg = find_group(ctx, ".rela.dyn");
 	int elf64 = (ctx->target->elf_class == MT_ELFCLASS64);
 	size_t entry_size = elf64 ? 24 : 12;
-	unsigned char entry[24];
 	if (rg < 0) return -1;
+	/* Reject overflow: the section buffer was pre-reserved in
+	 * build_dynamic_tables to hold rela_capacity_entries entries. */
+	if (ctx->rela_count >= ctx->rela_capacity_entries)
+		return ld_error(ctx, "internal: .rela.dyn overflow");
+	unsigned char *dst = ctx->groups[rg].data +
+	                     ctx->rela_count * entry_size;
 	if (elf64) {
-		write64(entry, offset);
-		write64(entry + 8, info);
-		write64(entry + 16, (uint64_t)addend);
+		write64(dst, offset);
+		write64(dst + 8, info);
+		write64(dst + 16, (uint64_t)addend);
 	} else {
-		write32(entry, (uint32_t)offset);
-		write32(entry + 4, (uint32_t)info);
-		write32(entry + 8, (uint32_t)addend);
+		write32(dst, (uint32_t)offset);
+		write32(dst + 4, (uint32_t)info);
+		write32(dst + 8, (uint32_t)addend);
 	}
-	uint64_t n;
-	return append_group_data(ctx, &ctx->groups[rg], entry, entry_size, 8, &n);
+	ctx->rela_count++;
+	return 0;
 }
 
 /* Build the .rela.dyn section from GOT entries for shared library output.
@@ -2616,9 +2629,11 @@ build_rela_dyn(struct ld_context *ctx)
 	size_t i;
 	if ((!ctx->shared && !ctx->pie) || ctx->got.count == 0)
 		return 0;
-	/* .rela.dyn was pre-created in build_dynamic_tables */
+	/* .rela.dyn was pre-created and its buffer pre-reserved in
+	 * build_dynamic_tables; we fill it in place here. */
 	int rg = find_group(ctx, ".rela.dyn");
 	if (rg < 0) return 0; /* no GOT entries, nothing to relocate */
+	ctx->rela_count = 0;
 	uint64_t got_addr = ctx->groups[ctx->got.group].address;
 	for (i = 0; i < ctx->got.count; ++i) {
 		uint64_t got_entry = got_addr + ctx->got.items[i].offset;
@@ -2683,6 +2698,29 @@ build_rela_dyn(struct ld_context *ctx)
 				info = (0ULL << 32) | MT_R_X86_64_RELATIVE;
 			if (rela_dyn_add(ctx, got_entry, info, (int64_t)sym_value) != 0)
 				return -1;
+		}
+	}
+	/* Shrink .rela.dyn to the actual number of entries written (a skipped
+	 * undefined-symbol RELATIVE may leave the reserved buffer under-filled),
+	 * then fix up DT_RELASZ, which fill_dynamic_addresses could only
+	 * approximate before the entry list was finalised. */
+	int rela64 = (ctx->target->elf_class == MT_ELFCLASS64);
+	size_t rsz = ctx->rela_count * (rela64 ? 24 : 12);
+	ctx->groups[rg].size = rsz;
+	int dgn = find_group(ctx, ".dynamic");
+	if (dgn >= 0) {
+		struct ld_group *dyn = &ctx->groups[dgn];
+		size_t ndyn = dyn->size / (rela64 ? 16 : 8);
+		for (size_t di = 0; di < ndyn; ++di) {
+			uint64_t tag = rela64 ? read64(dyn->data + di * 16)
+			                   : read32(dyn->data + di * 8);
+			if (tag == MT_DT_RELASZ) {
+				if (rela64)
+					write64(dyn->data + di * 16 + 8, rsz);
+				else
+					write32(dyn->data + di * 8 + 4, (uint32_t)rsz);
+				break;
+			}
 		}
 	}
 	return 0;
@@ -3881,6 +3919,29 @@ build_dynamic_tables(struct ld_context *ctx)
 		if (rg < 0)
 			return ld_error(ctx, "out of memory");
 		ctx->groups[rg].rank = 1; /* same rank as .rodata/dynstr/dynsym */
+		/* Pre-reserve the exact .rela.dyn byte size (layout assigns the
+		 * section's file offset from this size).  Failing to reserve it
+		 * leaves the section size 0 at layout time, so build_rela_dyn's
+		 * later growth would overflow the section and clobber the
+		 * adjacent .dynamic section in the written file.  Count one slot
+		 * per produced RELA, mirroring build_rela_dyn() exactly. */
+		size_t relaslots = 0;
+		for (i = 0; i < ctx->got.count; ++i) {
+			if (ctx->got.items[i].tls) {
+				/* GD/LD: DTPMOD + DTPOFF pair; IE: single TPOFF */
+				relaslots += (ctx->got.items[i].slots >= 2) ? 2 : 1;
+			} else {
+				/* JUMP_SLOT import or RELATIVE defined symbol: 1 each */
+				relaslots += 1;
+			}
+		}
+		ctx->rela_capacity_entries = relaslots;
+		size_t rela_es = elf64 ? 24 : 12;
+		uint64_t rdyn_off;
+		if (append_group_data(ctx, &ctx->groups[rg], NULL,
+		                      relaslots * rela_es, 8, &rdyn_off) != 0)
+			return -1;
+		ctx->rela_count = 0;
 	}
 	/* .init / .fini / .init_array / .fini_array / .preinit_array */
 	int have_init = (find_group(ctx, ".init") >= 0);
