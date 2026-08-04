@@ -121,13 +121,16 @@ if [ "$ds_ok" = "low" ]; then
     sugg_reason="DeepSeek 按量余额低(¥${ds})，转 hy3 免费"
 fi
 
-# reasoning 可用性：Ark 月总量充足（且非 local-free 则走 Ark）
+# reasoning 可用性：按 reasoning variant 实际 channel 判断
+#   - ark (glm-5.2)     → Ark monthly≥20% 才可用（月总量告急）
+#   - minimax (M3)      → MiniMax 周配额 ok 即可（可猛用）
+#   - local-free        → 恒可用
 reasoning_ok="no"
-if [ "$RSN_CH" = "ark" ] && [ "$ark_ok" = "ok" ]; then
-    reasoning_ok="yes"
-elif [ "$RSN_CH" = "local-free" ]; then
-    reasoning_ok="yes"
-fi
+case "$RSN_CH" in
+    ark)     [ "$ark_ok" = "ok" ] && reasoning_ok="yes";;
+    minimax) [ "$mm_ok" = "ok" ] && reasoning_ok="yes";;
+    local-free) reasoning_ok="yes";;
+esac
 
 # MiniMax 备注：周配额充足时可用于临时切某 variant 到 M3 猛用（需改 variantModels），但不禁用 lite
 mm_note="MiniMax 周配额 ${mm_w}% (${mm_ok})，间隔 ${mm_i}% 约 ${mm_i_cnt} 后重置"
