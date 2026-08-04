@@ -82,6 +82,8 @@ struct structbuilder {
 	bool member_const;
 	/* current member is a C++ explicit constructor/conversion */
 	bool member_explicit;
+	/* current member has C++20 [[no_unique_address]] attribute */
+	bool member_no_unique_address;
 };
 
 /* Tentative-definition list: tracked in decl.c but drained by

@@ -232,6 +232,22 @@ decl(struct scope *s, struct func *f)
 			cpp_using_decl(s);
 			return true;
 		}
+		/* C++20 module/import/export declarations. */
+		if (g_lang == 1 && cpp_tok_kind() == CPP_TMODULE) {
+			extern void cpp_module_decl(struct scope *);
+			cpp_module_decl(s);
+			return true;
+		}
+		if (g_lang == 1 && cpp_tok_kind() == CPP_TIMPORT) {
+			extern void cpp_import_decl(struct scope *);
+			cpp_import_decl(s);
+			return true;
+		}
+		if (g_lang == 1 && cpp_tok_kind() == CPP_TEXPORT) {
+			extern void cpp_export_decl(struct scope *);
+			cpp_export_decl(s);
+			return true;
+		}
 	}
 	a.kind = 0;
 	if (attr(&a, ATTRNORETURN | ATTRFALLTHROUGH | ATTRNODISCARD | ATTRMAYBEUNUSED | ATTRDEPRECATED) && consume(TSEMICOLON))

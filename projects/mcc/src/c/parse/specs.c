@@ -38,7 +38,18 @@ storageclass(enum storageclass *sc)
 	case TREGISTER:      new = SCREGISTER;    break;
 	/* C23: TAUTO is handled in declspecs() as a type deduction indicator */
 	// case TAUTO:      new = SCAUTO;        break;
-	default: return 0;
+	default:
+		/* C++11 `thread_local`: the C lexer classifies it as an
+		 * identifier; check the C++ keyword classification. */
+		if (tok.kind >= TIDENT) {
+			extern int g_lang;
+			extern enum cpp_tokenkind cpp_tok_kind(void);
+			if (g_lang == 1 && cpp_tok_kind() == CPP_TTHREAD_LOCAL) {
+				new = SCTHREADLOCAL;
+				break;
+			}
+		}
+		return 0;
 	}
 	if (!sc)
 		error_code(E_DECL, &tok.loc, "storage class not allowed in this declaration");
