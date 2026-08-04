@@ -77,3 +77,17 @@ PIC EBX 零临时分配 → 仍作 GOT base。mt 侧 i386 GOT 重定位留待 P1
 - 续接 m++ 或动态链接 P1 时，从 tmp/lead-doc-mir-baseline + tmp/i386-pic-got + tmp/rtld-p0 三分支并行推进；
 - 跨域修改需新建 worktree（`worktree-<name>` 或 `tmp/<agent>/<feature>`）；
 - 任何 mcc 端 PIC 改动先 GNU as 验证，再评估是否需要 mt 侧 GOT 重定位。
+
+## P2 修复记录（2026-08-04）
+
+### mt/readelf PIE `.dynamic` 解析修复
+
+- **commit**：`49349b2`（分支 `tmp/exec-toolchain/mt-readelf-pie`）
+- 根因**不在 readelf 端**，而在 **mt/ld 端**：`src/ld/elfwriter.c` 生成的 `.dynamic` 节区为 `sh_type=PROGBITS` 且 `sh_link=0`，不符合 ELF 规范（规范应为 `SHT_DYNAMIC`、`sh_link`→`.dynstr`）。
+- readelf 端修复：`dump_dynamic` 优先 `PT_DYNAMIC` phdr、对 `sh_type=PROGBITS` 回退兼容、strtab 按名查 `.dynstr`（不依赖 sh_link）。已关闭待办 `.todo/meuos-toolchain/mt-readelf-pie-dynamic.md`。
+
+### 新增 P2 待办：mt/ld `.dynamic` 节区规范化
+
+- 新待办：`.todo/meuos-toolchain/mt-ld-dynamic-section.md`
+- 目标：mt/ld 生成的 `.dynamic` 节区符合 ELF 规范——`sh_type=SHT_DYNAMIC`、`sh_link`→`.dynstr`，从根源消除 readelf/外部工具对 PROGBITS+sh_link=0 的兼容负担。
+
