@@ -13,7 +13,17 @@
 /* Current function context for statement-expression ({}) parsing.
  * Set by stmt() before entering expression parsing; used by
  * parse_stmt_expr_body() to pass stmt() control-flow constructs. */
-struct func *curfunc;struct func *
+struct func *curfunc;
+
+/* C++20 coroutine: mark the function as containing co_await / co_yield /
+ * co_return (see stmt.c cpp_coroutine_stmt). */
+void
+funcset_iscoroutine(struct func *f)
+{
+	f->iscoroutine = true;
+}
+
+struct func *
 mkfunc(struct decl *decl, char *name, struct type *t, struct scope *s)
 {
 	struct func *f;
@@ -28,6 +38,7 @@ mkfunc(struct decl *decl, char *name, struct type *t, struct scope *s)
 	/* function-name source location (DWARF subprogram decl_line/file);
 	 * `tok` is positioned at the function name's declarator here */
 	f->declloc = tok.loc;
+	f->iscoroutine = false;
 	f->dvars = NULL;
 	f->ndvars = 0;
 	f->capdvars = 0;

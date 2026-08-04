@@ -87,7 +87,7 @@
 | init-capture / 引用捕获 | `[n=42]` → 「cannot capture variable 'n'」；`[&x]` → 「not supported yet」（e06a2b0 复验） | C++14/C++11 基线（引用捕获 roadmap 已注明） |
 | ~~constexpr 函数体单 return~~ | ~~局部变量/多语句/数组均失败~~ | ✅ **dca1620 已实现**多语句/局部变量/循环；剩余引用/数组/类对象（见 1.4） |
 | 属性语义全忽略 | `[[deprecated]]`/`[[nodiscard]]`/任意名属性均无诊断（e06a2b0 复验） | C++11 基线，阻塞 P1774 |
-| 其他 | `char8_t`、UDL `operator""`（→「unsupported operator for overloading」）、协程（co_return 等）、`inline namespace`（→「declaration has no type specifier」）、用户自定义 `operator<=>`（内置 `<=>` 已有）均缺 | C++20 基线 |
+| 其他 | `char8_t`、UDL `operator""`（→「unsupported operator for overloading」）、协程 lowering（`co_return`/`co_yield`/`co_await` 语法已识别，2026-08-04 起报明确 "C++20 coroutines are not yet supported by m++"）、`inline namespace`（→「declaration has no type specifier」）、用户自定义 `operator<=>`（内置 `<=>` 已有）均缺 | C++20 基线 |
 | `#elifdef`/`#elifndef` 求值边界（**D3**） | 前组未取（`#if 0 … #elifdef FOO`）时「expected newline after preprocessing directive, saw identifier 'FOO'」；前组已取（`#if 1 … #elifdef FOO`）正常 | 共享 pp（C/C++ 均复现）；P2334 已支持但求值路径有缺口。**worker-pp4 正在修**（src/c/lex/pp.c 跳过组内求值分支） |
 
 ## 3. 实施建议（按价值/难度）

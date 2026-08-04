@@ -730,6 +730,9 @@ struct value *mkintconst(unsigned long long);
 
 struct func *mkfunc(struct decl *, char *, struct type *, struct scope *);
 void delfunc(struct func *);
+/* C++20 coroutine: mark the function as containing co_await / co_yield /
+ * co_return (the body was parsed but lowering is not implemented). */
+void funcset_iscoroutine(struct func *);
 struct type *functype(struct func *);
 void funclabel(struct func *, struct block *);
 struct value *funcbranch(struct func *, struct expr *, struct block *, struct block *);

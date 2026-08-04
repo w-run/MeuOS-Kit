@@ -132,6 +132,11 @@ struct func {
 	/* source location of the function name (declaration), recorded by
 	 * mkfunc() for DWARF subprogram DIEs */
 	struct location declloc;
+	/* C++20 coroutine: set when the body contains co_await / co_yield /
+	 * co_return.  m++ parses the coroutine statements but does not yet
+	 * lower them (no promise protocol / state machine), so a coroutine
+	 * function is diagnosed at the first coroutine keyword. */
+	bool iscoroutine;
 	/* local variables / parameters recorded by funcalloc() for DWARF
 	 * variable DIEs (name, type, frontend value id -> MIR slot) */
 	struct dwarf_vrec *dvars;

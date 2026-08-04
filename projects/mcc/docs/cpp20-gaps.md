@@ -166,7 +166,7 @@ P2（按需）
  15. [[no_unique_address]] 等属性语义
 
 明确不支持（标记，不排期）
-  - coroutines：需协程状态机变换 + 承诺协议，后端大改造
+  - coroutines：语句语法已解析（co_return/co_yield/co_await → 明确 not-yet-supported 错误，2026-08-04）；lowering 需协程状态机变换 + 承诺协议，后端大改造
   - modules：需分离编译、声明可达性、import 解析，前端架构大改
 ```
 
