@@ -920,6 +920,13 @@ mfnm_emit_aarch64(MFnM *fm, FILE *f)
 				        csave_reg_name(fm->mt, fm->mt->rclob[i]));
 			}
 		}
+	/* The parameter/entry block (bb0) may not be first in fm->link, so
+	 * jump to fm->start after the prologue (x86_64/riscv64 do the same).
+	 * Without this, framed functions with register parameters read the
+	 * uninitialized incoming argument registers (the aarch64 segfault
+	 * follow-on bug: selpar's bb0 never executed). */
+	if (fm->start)
+		fprintf(f, "\tb\t.L%s.bb%u\n", g_fname, fm->start->id);
 
 	for (MBlkM *b = fm->link; b; b = b->link)
 		emit_block(f, b);
