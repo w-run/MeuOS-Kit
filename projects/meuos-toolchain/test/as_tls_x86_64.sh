@@ -126,6 +126,28 @@ ASM
     echo "FAIL: static TLS GD should have no .got section"; fail=1
 }
 
+# --- static TLS smoke: .tdata+.tbss static program links and emits a PT_TLS
+# (regression for the static TLS block layout path) ---
+cat >"$work/layout.s" <<'ASM'
+.text
+.globl _start
+_start:
+    ret
+.section .tdata,"awT"
+.globl td_var
+td_var: .byte 42
+.section .tbss,"awT"
+.globl tb_var
+tb_var: .zero 4
+ASM
+"$as" -o "$work/layout.o" "$work/layout.s" 2>/dev/null
+"$ld" -o "$work/layout" "$work/layout.o" 2>/dev/null || {
+    echo "FAIL: mt/ld static TLS layout link failed"; fail=1
+}
+"$readelf" -l "$work/layout" 2>/dev/null | grep -q "TLS" || {
+    echo "FAIL: static TLS program missing PT_TLS"; fail=1
+}
+
 if [ "$fail" -ne 0 ]; then
     echo "mt/as x86_64 TLS relocation: FAILED"
     exit 1
