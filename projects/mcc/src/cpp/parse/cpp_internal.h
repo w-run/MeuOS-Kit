@@ -45,4 +45,12 @@ bool cpp_class_decl(struct scope *s);
 void cpp_tb(struct token *buf, size_t *n, struct token tmpl,
             enum tokenkind k, const char *name);
 
+/* C++ name mangling (defined in cpp_mangle.c). */
+void cpp_mangle_type(struct type *t, char *buf, size_t bufsz);
+
+/* Resolve the class that owns method `name` of type `t` (following
+ * inheritance); defined in cpp_parse.c, used by the mangle module. */
+struct member *cpp_method_member(struct type *t, const char *name,
+                                 struct type **owner);
+
 #endif /* MCC_CPP_PARSE_INTERNAL_H */
