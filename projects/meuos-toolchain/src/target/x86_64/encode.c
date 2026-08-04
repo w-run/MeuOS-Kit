@@ -558,17 +558,21 @@ emit_rm_reg(unsigned char *buf, size_t *size, struct mt_insn *out,
 		return;
 	}
 	if (rm->kind == OP_MEM && rm->symbol) {
-		if (strcmp(rm->modifier, "gotpcrel") == 0)
+		/* mt/as preserves the assembler's casing for `sym@MOD` suffixes
+		 * (e.g. `@GOTPCREL`), so match them case-insensitively; a bare
+		 * uppercase `@GOTPCREL` used to silently degrade to a plain
+		 * PC32, leaving the data reference unrelocated across DSOs. */
+		if (strcasecmp(rm->modifier, "gotpcrel") == 0)
 			fix_type = R_X86_64_GOTPCREL;
-		else if (strcmp(rm->modifier, "tpoff") == 0)
+		else if (strcasecmp(rm->modifier, "tpoff") == 0)
 			fix_type = R_X86_64_TPOFF32;
-		else if (strcmp(rm->modifier, "gottpoff") == 0)
+		else if (strcasecmp(rm->modifier, "gottpoff") == 0)
 			fix_type = R_X86_64_GOTTPOFF;
-		else if (strcmp(rm->modifier, "tlsgd") == 0)
+		else if (strcasecmp(rm->modifier, "tlsgd") == 0)
 			fix_type = R_X86_64_TLSGD;
-		else if (strcmp(rm->modifier, "tlsld") == 0)
+		else if (strcasecmp(rm->modifier, "tlsld") == 0)
 			fix_type = R_X86_64_TLSLD;
-		else if (strcmp(rm->modifier, "dtpoff") == 0)
+		else if (strcasecmp(rm->modifier, "dtpoff") == 0)
 			fix_type = R_X86_64_DTPOFF32;
 		else if (rm->base != -2 && rm->base != -1)
 			return;
