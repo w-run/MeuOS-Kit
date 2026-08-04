@@ -60,7 +60,7 @@ CFLAGS += -DMCC_DEFAULT_TARGET=\"$(DEFAULT_TARGET)\"
 # archived into libmcc.a so a future m++ binary can link the same archive.
 # util/ is shared (utf/warn/xmalloc are used by both FE and BE).
 FE_DIRS := src/driver src/cpp src/c
-BE_DIRS := src/mir src/lir src/ir src/opt src/abi src/emit src/target src/util
+BE_DIRS := src/mir src/ir src/opt src/abi src/emit src/target src/util
 
 # mpp_main.c provides the C++-mode main() (g_lang=1) and is linked only
 # into m++; mcc links c_main.c (C mode, g_lang=0).
