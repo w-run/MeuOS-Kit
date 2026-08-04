@@ -8810,6 +8810,60 @@ cpp_cexpr_lval(struct expr *l, struct decl *temp)
 	return NULL;
 }
 
+/* Recognize a scalar member access lvalue `*( (unsigned long)&obj + off )`
+ * inside the constant-expression interpreter.  On success returns the
+ * base struct/union object decl and its member's byte offset:
+ *   lhs  = EXPRUNARY TMUL                            (* ...)
+ *          base = EXPRBINARY TADD                    (addr + off)
+ *                   l = EXPRCAST(to unsigned long)   (unsigned long)(...)
+ *                       base = EXPRUNARY TBAND       (&obj)
+ *                                base = EXPRIDENT    (obj)
+ *                   r = EXPRCONST(off)
+ * Returns NULL when `l` is not such a member access. */
+static struct decl *
+cpp_cexpr_member_lval(struct expr *l, unsigned long long *offset_out)
+{
+	struct expr *addr, *off;
+	if (!l || l->kind != EXPRUNARY || l->op != TMUL || !l->base)
+		return NULL;
+	if (l->base->kind != EXPRBINARY || l->base->op != TADD)
+		return NULL;
+	addr = l->base->u.binary.l;
+	off = l->base->u.binary.r;
+	if (!off || off->kind != EXPRCONST || !(off->type->prop & PROPINT))
+		return NULL;
+	/* `(unsigned long)&obj` — the cast wraps a `&obj` unary */
+	if (addr->kind != EXPRCAST || !addr->base)
+		return NULL;
+	if (addr->base->kind != EXPRUNARY || addr->base->op != TBAND ||
+	    !addr->base->base)
+		return NULL;
+	if (addr->base->base->kind != EXPRIDENT || !addr->base->base->u.ident.decl)
+		return NULL;
+	{
+		struct decl *d = addr->base->base->u.ident.decl;
+		if (d->kind != DECLOBJECT)
+			return NULL;
+		*offset_out = off->u.constant.u;
+		return d;
+	}
+}
+
+/* Record a constant member value into a constexpr aggregate object's mini
+ * memory model (so a later member access / return of the object folds it).
+ * `obj`/`offset` identify the member; `val` is its constant value. */
+void
+cpp_record_cexpr_member(struct decl *obj, unsigned long long offset,
+                        unsigned long long val)
+{
+	struct cexp_obj_member *m = xmalloc(sizeof *m);
+	m->obj = obj;
+	m->offset = offset;
+	m->val = val;
+	m->next = g_cexp_obj_members;
+	g_cexp_obj_members = m;
+}
+
 /* Read/write the interpreter's integer value slot of a bound variable
  * (DECLOBJECT constval for locals/params, DECLCONST enumconst for
  * constants). */
@@ -8969,6 +9023,24 @@ cpp_cexpr_value(struct expr *e, struct decl **temp, unsigned long long *ret)
 				return false;
 			cexp_var_set(cd, *ret);
 			return true;
+		}
+		/* member-by-member assignment of a constexpr aggregate object
+		 * (`p.x = 10;` in a constexpr function body): fold the RHS and
+		 * record the member into the object's mini-memory so a later
+		 * member access / return of `p` folds it. */
+		{
+			unsigned long long moff = 0;
+			struct decl *obj = cpp_cexpr_member_lval(e->u.assign.l,
+			    &moff);
+			if (obj) {
+				struct decl *mtemp = NULL;
+				unsigned long long mval;
+				if (cpp_cexpr_value(e->u.assign.r, &mtemp, &mval)) {
+					cpp_record_cexpr_member(obj, moff, mval);
+					return true;
+				}
+				return false;
+			}
 		}
 		/* compound-assignment lowering: `tmp = &local` */
 		if (e->u.assign.l->kind == EXPRTEMP &&
@@ -9387,8 +9459,21 @@ cpp_cexpr_stmt(struct scope *tmp, unsigned long long *ret, int *steps)
 					scopeputdecl(tmp, cd);
 				}
 			} else {
-				/* uninitialized local: no constant value to bind */
-				return CEXP_FAIL;
+				/* uninitialized local.  A struct/union local may be
+				 * assigned member-by-member (`P p; p.x = 10;`) and
+				 * then returned; bind it as a mutable object so the
+				 * member assignments below can be folded.  Scalars
+				 * and other types have no constant value yet, so
+				 * they degrade to a runtime call. */
+				if (qt.type && (qt.type->kind == TYPESTRUCT ||
+				    qt.type->kind == TYPEUNION)) {
+					struct decl *cd = mkdecl(name, DECLOBJECT,
+					    qt.type, qt.qual, LINKNONE);
+					cd->u.obj.storage = SDAUTO;
+					scopeputdecl(tmp, cd);
+				} else {
+					return CEXP_FAIL;
+				}
 			}
 			if (consume(TSEMICOLON))
 				break;
