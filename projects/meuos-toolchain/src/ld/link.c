@@ -172,6 +172,14 @@ struct ld_dynsym_entry {
 	int stt;                   /* STT_FUNC / STT_OBJECT / STT_TLS */
 };
 
+/* A static-executable TLS GD/LD descriptor: points into .data where a
+ * 16-byte `tls_index{ti_module=1, ti_offset}` lives for one TLS symbol. */
+struct ld_tls_desc {
+	char *name;
+	int group;        /* .data group index */
+	uint64_t offset;  /* offset of the descriptor within the group */
+};
+
 struct ld_context {
 	const struct mt_target *target;
 	struct ld_objects objects;
@@ -186,6 +194,12 @@ struct ld_context {
 	uint64_t tls_tdata_size;
 	uint64_t tls_size;
 	uint64_t tls_align;
+	/* Static-executable GD/LD TLS descriptor table (方案B): one 16-byte
+	 * `tls_index{ti_module=1, ti_offset}` per GD/LD symbol in .data, letting
+	 * the retained `call __tls_get_addr` resolve tp + ti->ti_offset. */
+	struct ld_tls_desc *tls_descs;
+	size_t tls_desc_count;
+	size_t tls_desc_capacity;
 	int shared;          /* 1 = ET_DYN (shared library), 0 = ET_EXEC */
 	int pie;             /* 1 = PIE (ET_DYN + PT_INTERP) */
 	int build_id;        /* 1 = generate .note.gnu.build-id */
@@ -581,6 +595,12 @@ free_context(struct ld_context *ctx)
 	free(ctx->groups);
 	free(ctx->globals.items);
 	free(ctx->got.items);
+	if (ctx->tls_descs) {
+		size_t di;
+		for (di = 0; di < ctx->tls_desc_count; ++di)
+			free(ctx->tls_descs[di].name);
+		free(ctx->tls_descs);
+	}
 	free(ctx->dynsym_entries);
 	/* Free in-memory archive data (from .msys VFS) */
 	for (i = 0; i < ctx->archive_mem_count; ++i)
@@ -1775,6 +1795,100 @@ collect_got_relocations(struct ld_context *ctx)
 	return 0;
 }
 
+/* Find an existing static GD/LD TLS descriptor by symbol name. */
+static int
+tls_desc_index(struct ld_context *ctx, const char *name)
+{
+	size_t i;
+	for (i = 0; i < ctx->tls_desc_count; ++i)
+		if (strcmp(ctx->tls_descs[i].name, name) == 0)
+			return (int)i;
+	return -1;
+}
+
+/* Allocate a 16-byte `tls_index{ti_module=1,ti_offset}` descriptor for a
+ * GD/LD TLS symbol in .data, and record `{name → group,offset}`.  Called
+ * during the pre-layout collect phase so .data size/address is final. */
+static int
+add_tls_desc(struct ld_context *ctx, const char *name)
+{
+	struct ld_tls_desc *desc;
+	int g;
+	uint64_t off;
+	if (tls_desc_index(ctx, name) >= 0)
+		return 0;  /* already one */
+	if (ctx->tls_desc_count == ctx->tls_desc_capacity) {
+		size_t cap = ctx->tls_desc_capacity ? ctx->tls_desc_capacity * 2 : 8;
+		desc = (struct ld_tls_desc *)ld_realloc(
+		    ctx->tls_descs, cap * sizeof(*desc));
+		if (!desc)
+			return ld_error(ctx, "out of memory");
+		ctx->tls_descs = desc;
+		ctx->tls_desc_capacity = cap;
+	}
+	g = get_group(ctx, ".data", MT_SHT_PROGBITS,
+	              LD_SHF_ALLOC | LD_SHF_WRITE, 8);
+	if (g < 0)
+		return ld_error(ctx, "out of memory");
+	ctx->groups[g].rank = 3;  /* allocated .data region */
+	if (append_group_data(ctx, &ctx->groups[g], NULL, 16, 8, &off) != 0)
+		return -1;
+	desc = &ctx->tls_descs[ctx->tls_desc_count];
+	desc->name = ld_strdup(name);
+	if (!desc->name)
+		return ld_error(ctx, "out of memory");
+	desc->group = g;
+	desc->offset = off;
+	++ctx->tls_desc_count;
+	return 0;
+}
+
+/* Pre-layout collect of static-executable GD/LD TLS descriptors.  Only
+ * runs for ET_EXEC (static), matching the write_relocation path that
+ * relaxes GD/LD via a static tls_index descriptor. */
+static int
+collect_tls_descriptors(struct ld_context *ctx)
+{
+	uint16_t i;
+	size_t j;
+	uint64_t n;
+	struct mt_elf64_section section;
+	struct mt_elf64_symbol symbol;
+	const char *name;
+	if (ctx->shared || ctx->pie)
+		return 0;  /* GD handled dynamically via GOT for shared/PIE */
+	if (strcmp(ctx->target->name, "x86_64") != 0)
+		return 0;
+	for (i = 0; i < ctx->objects.count; ++i) {
+		struct ld_object *object = &ctx->objects.items[i];
+		for (j = 0; j < object_section_count(object); ++j) {
+			if (object_get_section(object, (uint16_t)j, &section) != 0)
+				return -1;
+			if (section.type != MT_SHT_RELA && section.type != MT_SHT_REL)
+				continue;
+			if (object->elf_class == 1)
+				continue;  /* 32-bit not handled here */
+			if (section.entry_size < 24 ||
+			    section.size % section.entry_size != 0)
+				continue;
+			for (n = 0; n < section.size / section.entry_size; ++n) {
+				const unsigned char *p = object->data + section.offset +
+				                          n * section.entry_size;
+				uint64_t info64 = read64(p + 8);
+				unsigned rel_type = (unsigned)(info64 & 0xffffffff);
+				if (rel_type != LD_R_X86_64_TLSGD &&
+				    rel_type != LD_R_X86_64_TLSLD)
+					continue;
+				if (get_symbol_by_index(ctx, object, info64 >> 32,
+				                        &symbol, &name) != 0 ||
+				    add_tls_desc(ctx, name) != 0)
+					return -1;
+			}
+		}
+	}
+	return 0;
+}
+
 /* Apply linker script: override section ranks for placement order.
  * Script format: one "section_name = rank" per line.
  * Lower rank = earlier placement (rank 0 = first).
@@ -2320,10 +2434,40 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 		 * field is patched to point at the symbol's GOT slot, which
 		 * ld.so fills at load time. */
 		if (!ctx->shared && !ctx->pie) {
-			/* Static executable: relax GD/LD/IE to Local-Exec.  The
-			 * absolute DTPOFF reloc resolves to the raw TLS offset. */
+			/* Static executable: GD/LD relaxes via a static tls_index
+			 * descriptor (方案B).  The compiler emitted
+			 *   lea sym@tlsgd(%rip),%rdi; call __tls_get_addr
+			 * which __tls_get_addr resolves to tp + ti->ti_offset.  We
+			 * allocate a `{ti_module=1, ti_offset}` descriptor in .data
+			 * (collect_tls_descriptors) and point the lea at it, keeping
+			 * the call.  This needs no instruction rewrite / no size
+			 * growth; DTPOFF (absolute) resolves to the raw offset. */
 			if (type == LD_R_X86_64_DTPOFF) {
 				value = resolved_value + addend;
+				width = 4;
+			} else if (type == LD_R_X86_64_TLSGD ||
+			           type == LD_R_X86_64_TLSLD) {
+				int d = tls_desc_index(ctx, name);
+				struct ld_group *dg;
+				uint64_t tls_off, ti_offset;
+				uint64_t desc_addr;
+				if (d < 0)
+					return ld_errorf(ctx, "missing static TLS descriptor",
+					                 name);
+				dg = &ctx->groups[ctx->tls_descs[d].group];
+				if (symbol_tls_offset(ctx, object, symbol_index, &tls_off) != 0)
+					return -1;
+				ti_offset = (uint64_t)((int64_t)tls_off -
+				                       (int64_t)ctx->tls_size);
+				desc_addr = dg->address + ctx->tls_descs[d].offset;
+				/* Write {ti_module=1, ti_offset} into the descriptor. */
+				if (dg->type != MT_SHT_NOBITS &&
+				    ctx->tls_descs[d].offset + 16 <= dg->size) {
+					write64(dg->data + ctx->tls_descs[d].offset, 1);
+					write64(dg->data + ctx->tls_descs[d].offset + 8, ti_offset);
+				}
+				/* Point the lea @tlsgd(%rip) reloc field at the desc. */
+				value = desc_addr + addend - place;
 				width = 4;
 			} else {
 				uint64_t tls_off;
@@ -4238,7 +4382,8 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 	    ensure_pie_section(&ctx) != 0 ||
 	    collect_symbols(&ctx) != 0 ||
 	    extract_archives(&ctx) != 0 || allocate_common(&ctx) != 0 ||
-	    collect_got_relocations(&ctx) != 0)
+	    collect_got_relocations(&ctx) != 0 ||
+	    collect_tls_descriptors(&ctx) != 0)
 		goto out;
 	/* --defsym: define absolute symbols (must run before --no-undefined
 	 * so the new symbols are treated as satisfied references). */
