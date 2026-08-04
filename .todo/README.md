@@ -38,6 +38,7 @@
 | [mt-ld-dynamic-section](meuos-toolchain/mt-ld-dynamic-section.md) | ✅ | mt/ld 生成的 .dynamic 节区 sh_type 应为 SHT_DYNAMIC、sh_link→.dynstr（完成 commit 0015271e） |
 | [rtld-e2e-pie-verify](meuos-toolchain/rtld-e2e-pie-verify.md) | ✅ | rtld e2e 实跑需合并 rtld-p0 后由 exec-integration 门禁覆盖（完成，聚合分支 2d4b65a 验证） |
 | [mt-eoverflow-build](meuos-toolchain/mt-eoverflow-build.md) | 🔄 | mt 全量 make 在宿主 glibc 严格模式 `_POSIX_C_SOURCE=200809L` 下 EOVERFLOW 未声明（src/ar/archive.c:59，独立构建缺陷非 TLS P1 引入） |
+| [mt-as-local-label](meuos-toolchain/mt-as-local-label.md) | 🔄 | mt/as 局部数字标签 `1f/2b` forward/backward 跳转目标解析错（`jne 1f` 跳错位置；手写 asm 受影响，mcc 产物用命名标签不受影响） |
 
 ### meuos-utils
 
