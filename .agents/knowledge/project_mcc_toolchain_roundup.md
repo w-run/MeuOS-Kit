@@ -1,6 +1,6 @@
 ---
-name: mcc-toolchain 本轮进展汇总（TLS 闭环 / m++ P1 / libc P0.1 / P0.2 动态链接 / 新阻塞 / 教训）
-description: 动态链接 TLS 静态 GD 闭环、m++ C++ P1 5 项、P0.1 动态 libc、P0.2 完整动态链接链路、mt/ld .dynamic 新阻塞、静态数组 segfault、关键教训
+name: mcc-toolchain 本轮进展汇总（TLS 闭环 / m++ P1 / libc P0.1 / P0.2 动态链接 / P0.3 dlopen+DTV / 新阻塞 / 教训）
+description: 动态链接 TLS 静态 GD 闭环、m++ C++ P1 5 项、P0.1 动态 libc、P0.2 完整动态链接链路、P0.3 dlopen+DTV+共享库 GD 动态 TLS、mt/ld .dynamic 新阻塞、静态数组 segfault、关键教训
 type: project
 ---
 
@@ -59,7 +59,26 @@ type: project
 - **端到端验证**：PIE 主程序 `DT_NEEDED=libc-meuos.so` → rtld 加载 → 跨库符号解析（GLOB_DAT/JUMP_SLOT）→ **exit 0**。
 - **P0.3 可立项**：dlopen + DTV + 共享库 GD 动态 TLS 可进入 P0.3 排期。
 
-## 7. 重要教训
+## 7. P0.3 dlopen + DTV + 共享库 GD 动态 TLS 核心闭环（2026-08-04/05）
+
+- **关键前置**：rtld（ld.so）现导出 **`__tls_get_addr`**（解决此前 P1c 的阻塞B——无共享 libc 提供 `__tls_get_addr`）；`libc-meuos.so` 导出 dlopen / dlsym / `__meuos_tls_*`（DTV）。
+- **阶段/组件 commit（均已核实）**：
+  - 阶段 A `23a7904`：rtld **dlopen + DTV** 动态 TLS（module>1 懒分配）；
+  - 阶段 B `9d0b16e`：libc **DTV** upgrade（`__tls_get_addr`/`allocate_tls`）+ dlfcn；
+  - 前置 `313a8dd`：mt/ld 修复 `.dynstr` UND imports + TLS st_value/vaddr（dlopen 前置）；
+  - `d3fff40`：rtld DTV 指针对齐 **TCB tp+8**（MEUOS_TCB_DTV_OFF=8，match libc 阶段 B）；
+  - `f372f6b`：rtld_dtv host harness 同步到 tp+8 布局。
+- **验证（exec-integration-lite，fresh 全链）**：
+  - 静态 GD→DTV 主程序（module 1）`gdmain2` exit 0；
+  - dlopen 跨模块 GD TLS（module>1）`dlm3`（读 42）/ `dlwrite`（写读一致）exit 0；
+  - per-thread DTV 独立 `thrtls` exit 0；libc `bare-tls tls main=5 child=9 errno=31/47` PASS、C11 threads PASS；
+  - P0.2 回归 `fullmain` exit 0；
+  - 门禁 `check-rtld-dtv` `rtld dlopen+DTV lazy alloc+__tls_get_addr module>1 OK`、mt make check 全 PASS、libc make check exit 0。
+- **遗留**：
+  - **PIE .bss RELATIVE**（独立缺陷，见待办 `pie-bss-relative`）：PIE 里 libc 静态 `.bss` 全局缺 `R_X86_64_RELATIVE` → 线程控制崩；阻塞"新线程访问 dlopen 模块 TLS"组合；
+  - mcc `verify-all` 的 `check-sysroot-static` **FAIL 为既有** `src/msysctl/main.c:342 execlp` 宿主 glibc `_GNU_SOURCE` 隐藏 + `-Werror`（P0.3 未改 sysroot，非引入）。
+
+## 8. 重要教训
 
 - **测 GD TLS 必须用 P1a 分支 mcc**（含 D3 `4e54505`）：主线 mcc 无 GD 生成，`-ftls-model=global-dynamic` 静默退化成 LE 假阳性，会误判 GD 已闭环。
 - **exec-toolchain-lite 状态被污染**：已 terminate，由其导致的中间产物/旧 hash（如 memory 里 `fc8aee8`）作废，以实际 commit（`ae88aa1`）为准，新 worker 重做。
@@ -67,6 +86,8 @@ type: project
 - **429 时 dsv4flash fallback 已实测有效**：限流时回退到 DeepSeek-V4-Flash 保持并行不中断。
 - **GCC14 宿主兼容** `47f5f70`（mt）：修复 gcc14 `-Werror=format/implicit-declaration`（PRIx64 / rename 等）基线编译错误，保证宿主 GCC14 下 mt 全量可编译。
 - **⚠️ 指挥官叙述可能错**：`47f5f70` 并非 TLS 合入 hash（实为 gcc14 兼容）；沉淀事实一律以 `git log` 实测为准，不盲从叙述。
+- **测 P0.3 用 fresh mt 全链**：从 mcc → mt/as → mt/ld → rtld 全量新构建验证，避免 build 陈旧误判。
+- **rtld DTV 指针位于 tcb tp+8（`MEUOS_TCB_DTV_OFF=8`）统一**：rtld 与 libc 的 DTV 布局必须一致（d3fff40/f372f6b），改动任一侧需同步另一侧。
 
 ## Why / How to apply
 
