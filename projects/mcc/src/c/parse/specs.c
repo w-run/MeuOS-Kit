@@ -709,6 +709,51 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 					break;
 				}
 			}
+			/* C++11 decltype: `decltype(expr)` names the type of an
+			 * expression without evaluating it.  The C lexer sees
+			 * `decltype` as an identifier.  Semantics (simplified for
+			 * non-dependent arguments, matching the C++ standard):
+			 *   - `decltype(a)`  (unparenthesized name): the declared
+			 *     type of the entity `a` — no extra cv/ref from the
+			 *     expression; an `int` variable gives `int`.
+			 *   - `decltype((a))` (parenthesized expression): the type
+			 *     of the expression — a modifiable lvalue gives `T&`,
+			 *     an rvalue gives `T`.
+			 * This mirrors the TTYPEOF machinery but always through an
+			 * expression (decltype takes no type-name form). */
+			{
+				extern int g_lang;
+				extern enum cpp_tokenkind cpp_tok_kind(void);
+				if (g_lang == 1 && cpp_tok_kind() == CPP_TDECLTYPE) {
+					struct expr *de;
+					bool paren;
+					next(); /* consume 'decltype' */
+					expect(TLPAREN, "after 'decltype'");
+					paren = tok.kind == TLPAREN;
+					de = expr(s);
+					if (paren) {
+						/* `decltype((expr))`: lvalue -> T&, rvalue -> T */
+						if (de->lvalue) {
+							struct type *ref = mkpointertype(NULL, 0);
+							ref->isref = true;
+							ref->base = de->type;
+							t = ref;
+							tq = QUALNONE;
+						} else {
+							t = de->type;
+							tq = de->qual;
+						}
+					} else {
+						/* `decltype(name)`: use the entity's declared
+						 * type (no parenthesized-expression ref). */
+						t = de->type;
+						tq = de->qual;
+					}
+					++ntypes;
+					expect(TRPAREN, "to close 'decltype'");
+					break;
+				}
+			}
 			d = scopegetdecl(s, tokenstr(tok.kind), 1);
 			if (!d || d->kind != DECLTYPE) {
 				/* C++: a class/struct/union tag is usable as a bare
