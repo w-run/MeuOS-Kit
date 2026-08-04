@@ -16,6 +16,7 @@
  * (8 GP x0-x7 + 8 V v0-v7, 16-byte V slots).
  */
 #include <stdlib.h>
+#include <string.h>
 
 #include "mir.h"
 #include "aarch64_m.h"
