@@ -17,11 +17,11 @@
 #include "mir.h"
 #include "x86_64_m.h"
 
-/* PIC/shared-code flag, set by the driver alongside the QBE target's
- * g_pic (main.c).  The MIR machine layer deliberately does not read the
- * QBE `Target T` global (purity rule), so TLS emission and any other
+/* PIC/shared-code flag, defined and owned by the MIR machine layer
+ * (src/mir/machine.c).  The MIR machine layer deliberately does not read
+ * the QBE `Target T` global (purity rule), so TLS emission and any other
  * PIC-sensitive codegen consult this flag instead. */
-int g_pic;
+extern int g_pic;
 
 /* ---- width suffixes ----------------------------------------------------- */
 

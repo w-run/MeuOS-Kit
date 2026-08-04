@@ -643,6 +643,13 @@ static const int x64_argreg[] = {
 	-1
 };
 
+/* PIC/shared-code flag, set by the driver (main.c).  The MIR machine
+ * layer owns its definition here so that standalone mir/ unit-test links
+ * (check-mir-*, which omit the emitter/driver sources) resolve it; the
+ * emitters that read it declare it extern.  Purity rule: MIR never reads
+ * the legacy QBE `Target T` PIC global -- this flag is the MIR-native one. */
+int g_pic;
+
 /* P2 ABI lowering for x86_64 SysV (src/target/x86_64/x86_64_mabi.c). */
 extern void mfnm_abi_x86_64(MFnM *fm);
 static const int x64_rsave[] = {
