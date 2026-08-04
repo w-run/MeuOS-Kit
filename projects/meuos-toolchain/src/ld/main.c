@@ -180,6 +180,7 @@ main(int argc, char **argv)
 	const char *entry = "_start";
 	const char *target_name = NULL;
 	const char *soname = NULL;
+	const char *dynamic_linker = NULL;
 	int shared = 0;
 	int pie = 0;
 	int build_id = 0;
@@ -335,6 +336,12 @@ main(int argc, char **argv)
 		if (strcmp(argv[i], "-soname") == 0) {
 			if (++i >= argc) { usage(stderr); return 2; }
 			soname = argv[i];
+			continue;
+		}
+		if (strcmp(argv[i], "-dynamic-linker") == 0 ||
+		    strcmp(argv[i], "-I") == 0) {
+			if (++i >= argc) { usage(stderr); return 2; }
+			dynamic_linker = argv[i];
 			continue;
 		}
 		if (strcmp(argv[i], "-o") == 0) {
@@ -498,6 +505,7 @@ main(int argc, char **argv)
 	opts.output  = output;
 	opts.entry   = shared ? NULL : entry;
 	opts.soname  = soname;
+	opts.dynamic_linker = dynamic_linker;
 	opts.shared  = shared;
 	opts.pie     = pie;
 	opts.build_id    = build_id;
