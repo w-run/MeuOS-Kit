@@ -1828,20 +1828,25 @@ layout_output(struct ld_context *ctx)
 
 	/* Calculate TLS block size (variant II: tdata then tbss). */
 	if (ctx->tls_tdata_group >= 0 || ctx->tls_tbss_group >= 0) {
-		uint64_t tdata = 0, tbss = 0, talign = 1;
+		uint64_t tdata = 0, tbss = 0, talign = 1, tbss_align = 1;
 		if (ctx->tls_tdata_group >= 0) {
 			tdata = ctx->groups[ctx->tls_tdata_group].size;
 			talign = ctx->groups[ctx->tls_tdata_group].align;
 		}
 		if (ctx->tls_tbss_group >= 0) {
 			tbss = ctx->groups[ctx->tls_tbss_group].size;
-			if (ctx->groups[ctx->tls_tbss_group].align > talign)
-				talign = ctx->groups[ctx->tls_tbss_group].align;
+			tbss_align = ctx->groups[ctx->tls_tbss_group].align;
+			if (tbss_align > talign)
+				talign = tbss_align;
 		}
 		ctx->tls_tdata_size = tdata;
 		ctx->tls_align = talign;
-		/* variant II: tbss starts after aligned tdata */
-		ctx->tls_size = align_up(align_up(tdata, talign) + tbss, talign);
+		/* variant II: .tbss starts at the .tbss-aligned boundary right
+		 * after .tdata (NOT rounded up to talign — that would over-round
+		 * a small .tdata and inflate memsz, e.g. 4-byte .tdata align 8 +
+		 * 4-byte .tbss would yield 16 instead of 8).  Only the final
+		 * memsz is rounded up to the max TLS alignment. */
+		ctx->tls_size = align_up(align_up(tdata, tbss_align) + tbss, talign);
 	}
 
 	/* Pass 1: PROGBITS sections (skip TLS .tdata).
@@ -1921,8 +1926,12 @@ layout_output(struct ld_context *ctx)
 		struct ld_group *g = &ctx->groups[ctx->tls_tbss_group];
 		if (ctx->tls_tdata_group >= 0) {
 			struct ld_group *td = &ctx->groups[ctx->tls_tdata_group];
-			g->file_offset = td->file_offset + td->size;
-			g->address = td->address + td->size;
+			/* .tbss starts at the .tbss-aligned boundary after .tdata.
+			 * (.tbss is NOBITS, so file space isn't needed here.) */
+			uint64_t tdata_end = td->file_offset + td->size;
+			uint64_t tbss_off = align_up(tdata_end, g->align ? g->align : 1);
+			g->file_offset = tbss_off;
+			g->address = ctx->shared ? 0 : LD_BASE + tbss_off;
 		} else {
 			/* No .tdata: allocate beyond non-TLS sections */
 			offset = align_up(offset, g->align ? g->align : 1);
@@ -1944,6 +1953,13 @@ symbol_tls_offset(struct ld_context *ctx, struct ld_object *object,
 	const char *name;
 	struct ld_global *global;
 	struct ld_section_map *map;
+	/* Base offset of .tbss within the TLS block: the .tbss-aligned
+	 * boundary right after .tdata (matches tls_size / PT_TLS memsz). */
+	uint64_t tbss_base = ctx->tls_tdata_size;
+	if (ctx->tls_tbss_group >= 0) {
+		uint64_t a = ctx->groups[ctx->tls_tbss_group].align;
+		tbss_base = align_up(tbss_base, a ? a : 1);
+	}
 	if (get_symbol_by_index(ctx, object, symbol_index, &symbol, &name) != 0)
 		return -1;
 	if (symbol.section == MT_SHN_UNDEF) {
@@ -1958,7 +1974,7 @@ symbol_tls_offset(struct ld_context *ctx, struct ld_object *object,
 		if (global->group == ctx->tls_tdata_group)
 			*tls_offset = global->offset + symbol.value;
 		else if (global->group == ctx->tls_tbss_group)
-			*tls_offset = ctx->tls_tdata_size + global->offset + symbol.value;
+			*tls_offset = tbss_base + global->offset + symbol.value;
 		else
 			return ld_errorf(ctx, "TPOFF32 relocation against non-TLS symbol", name);
 		return 0;
@@ -1970,7 +1986,7 @@ symbol_tls_offset(struct ld_context *ctx, struct ld_object *object,
 	if (map->group == ctx->tls_tdata_group)
 		*tls_offset = map->offset + symbol.value;
 	else if (map->group == ctx->tls_tbss_group)
-		*tls_offset = ctx->tls_tdata_size + map->offset + symbol.value;
+		*tls_offset = tbss_base + map->offset + symbol.value;
 	else
 		return ld_errorf(ctx, "TPOFF32 relocation against non-TLS symbol", name);
 	return 0;
