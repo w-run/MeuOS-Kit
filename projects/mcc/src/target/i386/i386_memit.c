@@ -19,6 +19,10 @@
 #include "mir.h"
 #include "i386_m.h"
 
+/* PIC/shared-code flag, set by the driver (main.c).  Consulted for GOT/PLT
+ * and initial-exec TLS emission under -fPIC. */
+extern int g_pic;
+
 static const MTargetM *g_mt;
 static MFnM *g_fm;
 static int g_alloca_cur;
