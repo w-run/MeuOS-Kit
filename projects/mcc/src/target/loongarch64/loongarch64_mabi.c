@@ -8,6 +8,7 @@
  *     caller-pushed stack args.
  */
 #include <stdlib.h>
+#include <string.h>
 
 #include "mir.h"
 #include "loongarch64_m.h"

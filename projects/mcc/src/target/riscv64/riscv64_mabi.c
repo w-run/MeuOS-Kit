@@ -11,6 +11,7 @@
  * the riscv64 isel (mbe_supported), so this scalar core never sees them.
  */
 #include <stdlib.h>
+#include <string.h>
 
 #include "mir.h"
 #include "riscv64_m.h"
