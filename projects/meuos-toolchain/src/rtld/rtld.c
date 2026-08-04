@@ -755,8 +755,12 @@ rtld_tls_setup(struct rtld_state *st)
 	st->tls_mod_count = 0;
 	st->tls_tp = 0;
 
-	/* Count total TLS bytes and reserve a 16-byte TCB at the top. */
-	size_t total = 16; /* TCB (holds DTV slot / pthread at tp-8) */
+	/* Count total TLS bytes (without the TCB: x86_64 Variant II places
+	 * the TCB just ABOVE the thread pointer — TP+0 = self anchor,
+	 * TP+8 = DTV pointer (MEUOS_TCB_DTV_OFF), matching libc stage B.
+	 * The 16-byte TCB is carved out of the allocation after the TLS
+	 * data, below. */
+	size_t total = 0;
 	for (int l = 0; l < st->lib_count; l++) {
 		struct rtld_lib *lib = &st->libs[l];
 		if (lib->tls_memsz == 0)
@@ -764,16 +768,20 @@ rtld_tls_setup(struct rtld_state *st)
 		size_t align = lib->tls_align > 16 ? lib->tls_align : 16;
 		total += (lib->tls_memsz + align - 1) & ~(align - 1);
 	}
-	if (total == 16)
+	if (total == 0)
 		return; /* no TLS at all */
 
-	/* Allocate the contiguous TLS area. */
-	uintptr_t area = (uintptr_t)rtld_alloc(total);
+	/* Allocate the TLS data area plus a 16-byte TCB above the thread
+	 * pointer. */
+	uintptr_t area = (uintptr_t)rtld_alloc(total + 16);
 	if (!area)
 		return;
-	/* The thread pointer is the END of the area. */
+	/* The thread pointer is the END of the TLS data area; the TCB
+	 * occupies [tp, tp+16). */
 	uintptr_t tp = area + total;
-	st->tls_tp = tp;	/* Lay out modules from the top down (module with the highest
+	st->tls_tp = tp;
+	/* TCB self anchor: TP+0 == TP (matches libc's *(void**)TP==TP). */
+	*(uintptr_t *)tp = tp;	/* Lay out modules from the top down (module with the highest
 	 * modid sits just below the TCB).  Assign modids 1..N. */
 	uintptr_t cursor = tp;
 	/* Main executable first (modid 1). */
@@ -873,12 +881,13 @@ rtld_tls_build_dtv(struct rtld_state *st)
 		dtv[m->modid] = lib->tls_image;
 	}
 
-	/* Store the DTV pointer in the TCB at %fs-8.  %fs was already set
-	 * to the thread pointer by the caller; the 16-byte TCB just below it
-	 * holds the DTV pointer at tp-8. */
+	/* Store the DTV pointer in the TCB at %fs+8 (MEUOS_TCB_DTV_OFF),
+	 * matching libc stage B so the main thread (set up by rtld) and any
+	 * new thread (set up by libc allocate_tls) read the DTV from the
+	 * same offset. */
 	uintptr_t tp = st->tls_tp;
 	if (tp)
-		*(uintptr_t *)(tp - 8) = (uintptr_t)dtv;
+		*(uintptr_t *)(tp + 8) = (uintptr_t)dtv;
 }
 
 /* Lazily allocate module `mod`'s TLS block for the current (primary)
@@ -917,7 +926,7 @@ rtld_tls_lazy_alloc(struct rtld_state *st, int mod)
 		st->dtv_store = ndtv;
 		uintptr_t tp = st->tls_tp;
 		if (tp)
-			*(uintptr_t *)(tp - 8) = (uintptr_t)ndtv;
+			*(uintptr_t *)(tp + 8) = (uintptr_t)ndtv;
 	}
 	st->dtv[mod] = base;
 	return base;
@@ -1016,7 +1025,7 @@ rtld_dlopen(const char *name)
 			st->dtv_store = ndtv;
 			uintptr_t tp = st->tls_tp;
 			if (tp)
-				*(uintptr_t *)(tp - 8) = (uintptr_t)ndtv;
+				*(uintptr_t *)(tp + 8) = (uintptr_t)ndtv;
 		}
 	}
 
