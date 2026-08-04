@@ -42,7 +42,6 @@ reasoning = custom-local:glm-5.2             → Ark Coding Plan
 ```bash
 bash /workspace/MeuOS-Kit/.codebuddy/skills/ai-usage-monitor/query.sh        # 用量 JSON + variant 决策
 bash /workspace/MeuOS-Kit/.codebuddy/skills/ai-usage-monitor/probe-main.sh   # 主模型选择 + fallback 链
-bash /workspace/MeuOS-Kit/.codebuddy/skills/ai-usage-monitor/switch-main.sh [tmux_session]  # 自动切主模型（默认 meuos-kit）
 /root/ai.sh                                                                  # 交互式 TUI（每 10s）
 ```
 
@@ -57,9 +56,21 @@ bash /workspace/MeuOS-Kit/.codebuddy/skills/ai-usage-monitor/switch-main.sh [tmu
 | 3 | DeepSeek 按量余额 ≥¥10 | `custom-local:deepseek-v4-flash`（DeepSeek platform） |
 | 4 | 全不足 | `hy3` |
 
-`probe-main.sh` 输出 `decided_main` / `needs_switch` / `availability`。若 `needs_switch=yes`，**两种方式切换**：
-1. 改 `/root/.codebuddy/settings.json` 的 `model` 字段（改前 `cp` 备份 `settings.json.bak.main.<HHMMSS>`）——仅影响新会话。
-2. 跑 `switch-main.sh [tmux_session]`（默认 `meuos-kit`）——通过 `tmux send-keys "/model <id>" Enter` 向指定 tmux session 发送交互式 `/model` 命令，**让当前已运行的交互会话立即切换**。这是热生效的关键（仅改 settings 不热生效）。
+`probe-main.sh` 输出 `decided_main` / `needs_switch` / `availability`。
+
+### ⚠️ 不要自动切主模型
+
+之前尝试通过 `tmux send-keys "/model <id>"` 自动切主模型——**会导致 tmux session 死**。改为：
+
+1. 跑 `probe-main.sh` 看 `needs_switch` / `decided_main` / `reason`。
+2. 若 `needs_switch=yes`，**手动在交互式会话内**输入 `/model <id>`（如 `/model custom-local:MiniMax-M3`）—— `/model` 命令必须由用户在交互会话中发出。
+3. 让 5m 用量监控 cron 在 `needs_switch=yes` 时**用 notify 发紧急通知给大喵**（`level=critical group=告警`），由大喵手动 `/model`。
+
+### 紧急通知指令（需要切换时）
+
+```bash
+python3 /root/.codebuddy/skills/notify/push.py "模型切换提醒" "主模型需切换：当前=<cur> → 目标=<decided>；原因=<reason>。手动 /model <decided> 即生效。" icon=https://box.w-run.net/assets/meuos_icon.png level=critical group=告警
+```
 
 探测命令（有副作用，按需/定时调用，非每次 query.sh）：
 ```bash
