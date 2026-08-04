@@ -40,9 +40,10 @@ reasoning = custom-local:glm-5.2             → Ark Coding Plan
 ## 运行
 
 ```bash
-bash /workspace/MeuOS-Kit/.codebuddy/skills/ai-usage-monitor/query.sh   # 用量 JSON + variant 决策
-bash /workspace/MeuOS-Kit/.codebuddy/skills/ai-usage-monitor/probe-main.sh  # 主模型选择 + fallback 链
-/root/ai.sh                                                             # 交互式 TUI（每 10s）
+bash /workspace/MeuOS-Kit/.codebuddy/skills/ai-usage-monitor/query.sh        # 用量 JSON + variant 决策
+bash /workspace/MeuOS-Kit/.codebuddy/skills/ai-usage-monitor/probe-main.sh   # 主模型选择 + fallback 链
+bash /workspace/MeuOS-Kit/.codebuddy/skills/ai-usage-monitor/switch-main.sh [tmux_session]  # 自动切主模型（默认 meuos-kit）
+/root/ai.sh                                                                  # 交互式 TUI（每 10s）
 ```
 
 ## 主模型选择 + fallback 链（probe-main.sh）
@@ -56,7 +57,9 @@ bash /workspace/MeuOS-Kit/.codebuddy/skills/ai-usage-monitor/probe-main.sh  # �
 | 3 | DeepSeek 按量余额 ≥¥10 | `custom-local:deepseek-v4-flash`（DeepSeek platform） |
 | 4 | 全不足 | `hy3` |
 
-`probe-main.sh` 输出 `decided_main` / `needs_switch` / `availability`。若 `needs_switch=yes`，改 `/root/.codebuddy/settings.json` 的 `model` 字段（改前 `cp` 备份 `settings.json.bak.main.<HHMMSS>`）。
+`probe-main.sh` 输出 `decided_main` / `needs_switch` / `availability`。若 `needs_switch=yes`，**两种方式切换**：
+1. 改 `/root/.codebuddy/settings.json` 的 `model` 字段（改前 `cp` 备份 `settings.json.bak.main.<HHMMSS>`）——仅影响新会话。
+2. 跑 `switch-main.sh [tmux_session]`（默认 `meuos-kit`）——通过 `tmux send-keys "/model <id>" Enter` 向指定 tmux session 发送交互式 `/model` 命令，**让当前已运行的交互会话立即切换**。这是热生效的关键（仅改 settings 不热生效）。
 
 探测命令（有副作用，按需/定时调用，非每次 query.sh）：
 ```bash
