@@ -44,20 +44,27 @@ bash /workspace/MeuOS-Kit/.codebuddy/skills/ai-usage-monitor/query.sh   # JSON �
 /root/ai.sh                                                             # 交互式 TUI（每 10s）
 ```
 
-## 决策逻辑（query.sh v2 内置）
+## 决策逻辑（query.sh v3 内置，渠道策略 2026-08-04）
 
-按**各 variant 的实际计费渠道余量**评估可用性，再决策：
+按**渠道策略优先级**决策（大喵 2026-08-04 定位）：
 
-1. 解析 `settings.json` → 每个 variant（lite/default/reasoning）映射到真实 channel（deepseek/ark/minimax/local-free）。
-2. 采集三渠道用量：MiniMax 间隔%、DeepSeek 余额、Ark session/weekly%。
-3. 可用性判定（<20% 视为 low）：
-   - DeepSeek 余额 <¥10 → low
-   - Ark session 剩余 <20% → low
-   - MiniMax 间隔 <20% → low
-4. 决策：
-   - 默认 **lite**（DeepSeek 按量）。
-   - DeepSeek 余额 low → 建议 **hy3**（免费）。
-   - `reasoning_available`：仅当 reasoning 走 Ark 且 session ≥20%（或走 local-free）时为 yes；由指挥官按需启用（同时 ≤2）。
+| 渠道 | 定位 | 使用策略 |
+|------|------|---------|
+| **MiniMax M3** | 只有周/5h 限制，间隔重置快 | **周配额充足即可猛用**（建议 default=M3），间隔% 只影响短期（重置快不阻塞） |
+| **lite (DS flash)** | 经济实惠好吃不贵 | **性价比首选**，常规任务主力 |
+| **reasoning (GLM-5.2/Ark)** | **月总量告急**（monthly 15%） | **必须省着用**，仅必要复杂分析；monthly<20% 时禁用 |
+| **codebuddy 自带** | 查不到积分余额 | **只能应急** |
+
+判定：
+- MiniMax：**按周配额**（<20% 才 low；间隔仅作短期提示，重置快）
+- DeepSeek：余额 <¥10 → low
+- Ark：**按月总量**（monthly<20% → reasoning 禁用）
+
+决策顺序：
+1. MiniMax 周配额 ok → 建议 `default`（M3，猛用）
+2. 否则 lite（DS flash 性价比）
+3. DeepSeek 余额 low → 转 `hy3` 免费
+4. `reasoning_available`：Ark monthly≥20%（或走 local-free）→ yes，由指挥官按需启用
 
 ## 指挥官使用规范
 

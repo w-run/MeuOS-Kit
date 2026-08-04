@@ -93,24 +93,36 @@ if [ "$ds" != "N/A" ] && awk "BEGIN{exit !($ds+0 >= 0)}" 2>/dev/null; then
     ds_pct=$(awk "BEGIN{p=($ds/50)*100; if(p>100)p=100; printf \"%.0f\", p}" 2>/dev/null)
 fi
 
-# --- 3. 决策：按 variant 各自渠道余量评估可用性 ---
-# 各 variant 状态：ok / low / no
-mm_ok="ok"; [ "$mm_i" != "N/A" ] && awk "BEGIN{exit !($mm_i < 20)}" 2>/dev/null && mm_ok="low"
+# --- 3. 决策：按渠道策略（大喵 2026-08-04 定位）---
+# 渠道优先级：
+#   MiniMax M3  —— 只有周/5h 限制，间隔重置快，周配额充足可"猛用"（default=M3）
+#   lite(DS flash) —— 经济实惠好吃不贵，性价比首选（常规任务主力）
+#   reasoning(GLM-5.2/Ark) —— 月总量告急(monthly 15%)，必须省着用，仅必要复杂分析
+#   codebuddy 自带 —— 查不到积分余额，只能应急
+# 各渠道 ok/low 判定：
+#   minimax: 用"周"配额判断（猛用依据），间隔只影响短期（重置快）；周<20% 才 low
+#   deepseek: 余额 <¥10 low
+#   ark: 用"月"总量判断（告急依据），monthly<20% 则 reasoning 禁用
+mm_ok="ok"; [ "$mm_w" != "N/A" ] && awk "BEGIN{exit !($mm_w < 20)}" 2>/dev/null && mm_ok="low"
 ds_ok="ok"; [ "$ds" != "N/A" ] && awk "BEGIN{exit !($ds < 10)}" 2>/dev/null && ds_ok="low"
-ark_ok="ok"; [ "$s_rem" != "N/A" ] && awk "BEGIN{exit !($s_rem < 20)}" 2>/dev/null && ark_ok="low"
+ark_ok="ok"; [ "$m_rem" != "N/A" ] && awk "BEGIN{exit !($m_rem < 20)}" 2>/dev/null && ark_ok="low"
 
-# 推荐 variant：按渠道余量 + 免费优先
-# 规则：优先 lite（DeepSeek 按量），reasoning 仅 Ark 充足且需要复杂分析，M3 仅在 MiniMax 充足
+# 推荐 variant：
+#   - MiniMax 周配额充足 → 建议 default=M3（可猛用）
+#   - 否则 DS flash(lite) 性价比首选
+#   - DeepSeek 余额低 → 转 hy3 免费
 sugg="lite"
-sugg_reason="lite($lite_m, ${LITE_CH}) 默认（DeepSeek 按量 ¥${ds}）"
-if [ "$LITE_CH" = "deepseek" ] && [ "$ds_ok" = "low" ]; then
+sugg_reason="lite($lite_m, ${LITE_CH}) 常规主力（DS flash 性价比）"
+if [ "$mm_ok" = "ok" ]; then
+    sugg="default"
+    sugg_reason="MiniMax 周配额 ${mm_w}%（可猛用，间隔 ${mm_i}% 约 ${mm_i_cnt} 后重置）→ 用 default=M3"
+fi
+if [ "$ds_ok" = "low" ]; then
     sugg="hy3"
     sugg_reason="DeepSeek 按量余额低(¥${ds})，转 hy3 免费"
 fi
-if [ "$RSN_CH" = "ark" ] && [ "$ark_ok" = "no" ]; then
-    sugg="$sugg"
-fi
 
+# reasoning 可用性：Ark 月总量充足（且非 local-free 则走 Ark）
 reasoning_ok="no"
 if [ "$RSN_CH" = "ark" ] && [ "$ark_ok" = "ok" ]; then
     reasoning_ok="yes"
