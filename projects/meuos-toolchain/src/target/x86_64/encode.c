@@ -17,6 +17,10 @@
 #define R_X86_64_PC32     2
 #define R_X86_64_PLT32    4
 #define R_X86_64_GOTPCREL 9
+#define R_X86_64_TLSGD    19  /* General Dynamic:  lea sym@tlsgd(%rip), %rdi */
+#define R_X86_64_TLSLD    20  /* Local Dynamic:    lea sym@tlsld(%rip), %rdi */
+#define R_X86_64_DTPOFF32 21  /* DTP-relative offset: sym@dtpoff */
+#define R_X86_64_GOTTPOFF 22  /* Initial Exec:     movq sym@gottpoff(%rip), %r */
 #define R_X86_64_TPOFF32  23
 
 /* ---- Operand model ---- */
@@ -558,6 +562,14 @@ emit_rm_reg(unsigned char *buf, size_t *size, struct mt_insn *out,
 			fix_type = R_X86_64_GOTPCREL;
 		else if (strcmp(rm->modifier, "tpoff") == 0)
 			fix_type = R_X86_64_TPOFF32;
+		else if (strcmp(rm->modifier, "gottpoff") == 0)
+			fix_type = R_X86_64_GOTTPOFF;
+		else if (strcmp(rm->modifier, "tlsgd") == 0)
+			fix_type = R_X86_64_TLSGD;
+		else if (strcmp(rm->modifier, "tlsld") == 0)
+			fix_type = R_X86_64_TLSLD;
+		else if (strcmp(rm->modifier, "dtpoff") == 0)
+			fix_type = R_X86_64_DTPOFF32;
 		else if (rm->base != -2 && rm->base != -1)
 			return;
 	}
@@ -569,12 +581,14 @@ emit_rm_reg(unsigned char *buf, size_t *size, struct mt_insn *out,
 		              rm->kind == OP_REG ? rm->reg : -1);
 	emit_rex_rm(buf, size, width == 8, reg, rm);
 	emit_u8(buf, size, opcode);
-	/* PC-relative relocs (PC32, PLT32, GOTPCREL) subtract the 4-byte
-	 * field from the addend; absolute and TLS relocs carry the raw
-	 * symbol addend. */
+	/* PC-relative relocs (PC32, PLT32, GOTPCREL, and the %rip-based
+	 * TLS forms GOTTPOFF/TLSGD/TLSLD) subtract the 4-byte field from
+	 * the addend; absolute TLS relocs (TPOFF32/DTPOFF32) carry the
+	 * raw symbol addend. */
 	emit_modrm(buf, size, out, reg, rm, fix_type,
 	           fix_type == R_X86_64_PC32 || fix_type == R_X86_64_PLT32 ||
-	           fix_type == R_X86_64_GOTPCREL
+	           fix_type == R_X86_64_GOTPCREL || fix_type == R_X86_64_GOTTPOFF ||
+	           fix_type == R_X86_64_TLSGD || fix_type == R_X86_64_TLSLD
 	               ? rm->addend - 4 : rm->addend);
 }
 
@@ -836,7 +850,10 @@ x86_64_encode_insn(const struct mt_target *target,
 			goto fail;
 	if (strncmp(base, "call", 4) == 0 && n == 1) {
 		if (op[0].kind == OP_SYMBOL) {
-			code = strcmp(op[0].modifier, "plt") == 0 ?
+			/* mcc emits both `foo@plt` and (for TLS GD)
+			 * `__tls_get_addr@PLT`; accept either case as PLT32. */
+			code = (strcmp(op[0].modifier, "plt") == 0 ||
+			        strcmp(op[0].modifier, "PLT") == 0) ?
 			       R_X86_64_PLT32 : R_X86_64_PC32;
 			emit_symbol_branch(out->bytes, &out->size, out, 0xe8, &op[0], code);
 			goto done;
@@ -1184,9 +1201,12 @@ x86_64_encode_insn(const struct mt_target *target,
 		if (op[0].kind == OP_IMM && (op[1].kind == OP_MEM ||
 		                              op[1].kind == OP_REG)) {
 			unsigned fix_type = R_X86_64_PC32;
-			if (op[1].kind == OP_MEM && op[1].symbol &&
-			    strcmp(op[1].modifier, "tpoff") == 0)
-				fix_type = R_X86_64_TPOFF32;
+			if (op[1].kind == OP_MEM && op[1].symbol) {
+				if (strcmp(op[1].modifier, "tpoff") == 0)
+					fix_type = R_X86_64_TPOFF32;
+				else if (strcmp(op[1].modifier, "dtpoff") == 0)
+					fix_type = R_X86_64_DTPOFF32;
+			}
 			if (op[1].kind == OP_MEM && op[1].seg)
 				emit_u8(out->bytes, &out->size, op[1].seg);
 			emit_rex_rm(out->bytes, &out->size, width == 8, 0, &op[1]);
@@ -1210,16 +1230,24 @@ x86_64_encode_insn(const struct mt_target *target,
 	if (strncmp(base, "lea", 3) == 0 && n == 2 && op[1].kind == OP_REG) {
 		width = op[1].width;
 		unsigned fix_type = R_X86_64_PC32;
-		if (op[0].kind == OP_MEM && op[0].symbol &&
-		    strcmp(op[0].modifier, "tpoff") == 0)
-			fix_type = R_X86_64_TPOFF32;
+		if (op[0].kind == OP_MEM && op[0].symbol) {
+			if (strcmp(op[0].modifier, "tpoff") == 0)
+				fix_type = R_X86_64_TPOFF32;
+			else if (strcmp(op[0].modifier, "tlsgd") == 0)
+				fix_type = R_X86_64_TLSGD;
+			else if (strcmp(op[0].modifier, "tlsld") == 0)
+				fix_type = R_X86_64_TLSLD;
+			else if (strcmp(op[0].modifier, "dtpoff") == 0)
+				fix_type = R_X86_64_DTPOFF32;
+		}
 		emit_rex_rm(out->bytes, &out->size, width == 8, op[1].reg, &op[0]);
 		emit_u8(out->bytes, &out->size, 0x8d);
-		/* Only the %rip-relative PC32 form subtracts the 4-byte field;
-		 * TPOFF32 carries the raw symbol addend. */
+		/* Only the %rip-relative PC32 / TLSGD / TLSLD forms subtract
+		 * the 4-byte field; TPOFF32/DTPOFF32 carry the raw addend. */
 		emit_modrm(out->bytes, &out->size, out, op[1].reg, &op[0],
 		           fix_type,
-		           fix_type == R_X86_64_PC32 ? -4 : 0);
+		           fix_type == R_X86_64_PC32 || fix_type == R_X86_64_TLSGD ||
+		           fix_type == R_X86_64_TLSLD ? -4 : 0);
 		goto done;
 	}
 	if ((strncmp(base, "xchg", 4) == 0 || strncmp(base, "xadd", 4) == 0 ||

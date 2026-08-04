@@ -59,7 +59,9 @@ extern int msys_vfs_load(const char *path, void **buf, size_t *size);
 #define LD_R_X86_64_TLSGD   19  /* General Dynamic: lea sym@tlsgd(%rip), %rdi */
 #define LD_R_X86_64_TLSLD   20  /* Local Dynamic:  lea sym@tlsld(%rip), %rdi */
 #define LD_R_X86_64_DTPOFF  21  /* DTP-relative offset: sym@dtpoff */
-#define LD_R_X86_64_DTPMOD  22  /* Module id: sym@dtpmod */
+#define LD_R_X86_64_DTPMOD  16  /* Module id: R_X86_64_DTPMOD64 (GOT pair DTPMOD slot) */
+#define LD_R_X86_64_TPOFF64 18  /* TP-relative 64-bit (IE GOT slot content) */
+#define LD_R_X86_64_GOTTPOFF 22 /* Initial Exec: movq sym@gottpoff(%rip), %r */
 
 /* i386 TLS relocation types (used by the i386 dispatch) */
 #define LD_R_386_TLS_GD   18  /* General Dynamic */
@@ -150,6 +152,8 @@ struct ld_got_entry {
 	char *name;
 	uint64_t offset;
 	int reloc_type;  /* 0=RELATIVE(default), MT_R_X86_64_JUMP_SLOT for PLT imports */
+	int tls;         /* 1=TLS GOT entry (GD/LD DTPMOD/DTPOFF pair, or IE TPOFF) */
+	int slots;       /* number of 8-byte slots this entry occupies (TLS GD/LD=2) */
 };
 
 struct ld_got {
@@ -168,6 +172,14 @@ struct ld_dynsym_entry {
 	int stt;                   /* STT_FUNC / STT_OBJECT / STT_TLS */
 };
 
+/* A static-executable TLS GD/LD descriptor: points into .data where a
+ * 16-byte `tls_index{ti_module=1, ti_offset}` lives for one TLS symbol. */
+struct ld_tls_desc {
+	char *name;
+	int group;        /* .data group index */
+	uint64_t offset;  /* offset of the descriptor within the group */
+};
+
 struct ld_context {
 	const struct mt_target *target;
 	struct ld_objects objects;
@@ -182,6 +194,12 @@ struct ld_context {
 	uint64_t tls_tdata_size;
 	uint64_t tls_size;
 	uint64_t tls_align;
+	/* Static-executable GD/LD TLS descriptor table (方案B): one 16-byte
+	 * `tls_index{ti_module=1, ti_offset}` per GD/LD symbol in .data, letting
+	 * the retained `call __tls_get_addr` resolve tp + ti->ti_offset. */
+	struct ld_tls_desc *tls_descs;
+	size_t tls_desc_count;
+	size_t tls_desc_capacity;
 	int shared;          /* 1 = ET_DYN (shared library), 0 = ET_EXEC */
 	int pie;             /* 1 = PIE (ET_DYN + PT_INTERP) */
 	int build_id;        /* 1 = generate .note.gnu.build-id */
@@ -577,6 +595,12 @@ free_context(struct ld_context *ctx)
 	free(ctx->groups);
 	free(ctx->globals.items);
 	free(ctx->got.items);
+	if (ctx->tls_descs) {
+		size_t di;
+		for (di = 0; di < ctx->tls_desc_count; ++di)
+			free(ctx->tls_descs[di].name);
+		free(ctx->tls_descs);
+	}
 	free(ctx->dynsym_entries);
 	/* Free in-memory archive data (from .msys VFS) */
 	for (i = 0; i < ctx->archive_mem_count; ++i)
@@ -1572,6 +1596,24 @@ got_index(struct ld_context *ctx, const char *name, size_t *index)
 	return -1;
 }
 
+static size_t
+total_got_slots(struct ld_context *ctx)
+{
+	size_t sum = 0, i;
+	for (i = 0; i < ctx->got.count; ++i)
+		sum += ctx->got.items[i].slots;
+	return sum;
+}
+
+static size_t
+total_got_slots_before(struct ld_context *ctx, size_t idx)
+{
+	size_t sum = 0, i;
+	for (i = 0; i < idx; ++i)
+		sum += ctx->got.items[i].slots;
+	return sum;
+}
+
 static int
 add_got_entry(struct ld_context *ctx, const char *name)
 {
@@ -1596,9 +1638,55 @@ add_got_entry(struct ld_context *ctx, const char *name)
 	ctx->got.items[ctx->got.count].name = ld_strdup(name);
 	if (!ctx->got.items[ctx->got.count].name)
 		return ld_error(ctx, "out of memory");
-	ctx->got.items[ctx->got.count].offset = ctx->got.count * 8;
+	ctx->got.items[ctx->got.count].offset = total_got_slots(ctx) * 8;
 	ctx->got.items[ctx->got.count].reloc_type = 0; /* default RELATIVE */
+	ctx->got.items[ctx->got.count].tls = 0;
+	ctx->got.items[ctx->got.count].slots = 1;
 	++ctx->got.count;
+	return 0;
+}
+
+/* Add a TLS GOT entry.  GD/LD allocate a two-slot (DTPMOD | DTPOFF) pair;
+ * IE (GOTTPOFF) allocates a single slot holding the TP offset. */
+static int
+add_got_entry_tls(struct ld_context *ctx, const char *name, unsigned rel_type)
+{
+	int slots = (rel_type == LD_R_X86_64_TLSGD ||
+	             rel_type == LD_R_X86_64_TLSLD) ? 2 : 1;
+	size_t idx = 0;
+	if (got_index(ctx, name, &idx) == 0) {
+		if (slots > ctx->got.items[idx].slots)
+			ctx->got.items[idx].slots = slots;
+		return 0;
+	}
+	if (add_got_entry(ctx, name) != 0)
+		return -1;
+	idx = ctx->got.count - 1;
+	ctx->got.items[idx].tls = 1;
+	ctx->got.items[idx].slots = slots;
+	/* TLS GD/LD entries that appear after a single-slot entry must be
+	 * moved to a 2-slot boundary so the DTPMOD|DTPOFF pair stays aligned.
+	 * Re-apply the slot offset accounting for the promoted size. */
+	ctx->got.items[idx].offset = total_got_slots_before(ctx, idx) * 8;
+	return 0;
+}
+
+/* Add a GOT entry for an undefined function import (PLT32).  The slot is
+ * resolved by ld.so via a JUMP_SLOT dynamic relocation so `call foo@plt`
+ * in a shared library reaches the correct address at load time. */
+static int
+add_got_jumpslot(struct ld_context *ctx, const char *name)
+{
+	size_t idx = 0;
+	if (got_index(ctx, name, &idx) == 0) {
+		/* Existing entry (e.g. from a GOTPCREL) — promote to JUMP_SLOT. */
+		ctx->got.items[idx].reloc_type = MT_R_X86_64_JUMP_SLOT;
+		return 0;
+	}
+	if (add_got_entry(ctx, name) != 0)
+		return -1;
+	idx = ctx->got.count - 1;
+	ctx->got.items[idx].reloc_type = MT_R_X86_64_JUMP_SLOT;
 	return 0;
 }
 
@@ -1611,6 +1699,7 @@ collect_got_relocations(struct ld_context *ctx)
 	struct mt_elf64_symbol symbol;
 	const char *name;
 	uint64_t n;
+	unsigned tls_got = 0;   /* set when collecting an x86_64 TLS GOT reloc */
 	for (i = 0; i < ctx->objects.count; ++i) {
 		struct ld_object *object = &ctx->objects.items[i];
 		for (j = 0; j < object_section_count(object); ++j) {
@@ -1650,6 +1739,35 @@ collect_got_relocations(struct ld_context *ctx)
 						unsigned rel_type = (unsigned)(info64 & 0xffffffff);
 						if (rel_type == 75 || rel_type == 76)
 							goto collect_got64;
+						/* x86_64 PLT32 undefined function imports need a
+						 * JUMP_SLOT GOT entry so that in a shared lib /
+						 * PIE `call foo@plt` resolves via ld.so (the
+						 * write_relocation PLT32 branch is otherwise dead
+						 * code, since the GOT entry was never collected). */
+						if (strcmp(ctx->target->name, "x86_64") == 0 &&
+						    (ctx->shared || ctx->pie) &&
+						    rel_type == LD_R_X86_64_PLT32) {
+							if (get_symbol_by_index(ctx, object,
+							                        info64 >> 32, &symbol,
+							                        &name) != 0 ||
+							    symbol.section != MT_SHN_UNDEF)
+								goto collect_got64_skip;
+							if (add_got_jumpslot(ctx, name) != 0)
+								return -1;
+							continue;
+						}
+						/* x86_64 TLS GD/LD/IE relocations need GOT slots
+						 * only when the output is a shared lib or PIE
+						 * (static executables relax them to Local-Exec,
+						 * which needs no GOT entry). */
+						if (strcmp(ctx->target->name, "x86_64") == 0 &&
+						    (ctx->shared || ctx->pie) &&
+						    (rel_type == LD_R_X86_64_TLSGD ||
+						     rel_type == LD_R_X86_64_TLSLD ||
+						     rel_type == LD_R_X86_64_GOTTPOFF)) {
+							tls_got = rel_type;
+							goto collect_tls_got64;
+						}
 						continue;
 					}
 					collect_got64:;
@@ -1657,15 +1775,116 @@ collect_got_relocations(struct ld_context *ctx)
 					                        &name) != 0 ||
 					    add_got_entry(ctx, name) != 0)
 						return -1;
+					collect_got64_skip:;
+					continue;
+					collect_tls_got64:;
+					if (get_symbol_by_index(ctx, object, info64 >> 32, &symbol,
+					                        &name) != 0 ||
+					    add_got_entry_tls(ctx, name, tls_got) != 0)
+						return -1;
 				}
 			}
 		}
 	}
 	if (ctx->got.count != 0) {
 		struct ld_group *got = &ctx->groups[find_group(ctx, ".got")];
-		if (append_group_data(ctx, got, NULL, ctx->got.count * 8, 8,
+		if (append_group_data(ctx, got, NULL, total_got_slots(ctx) * 8, 8,
 		                      &n) != 0)
 			return -1;
+	}
+	return 0;
+}
+
+/* Find an existing static GD/LD TLS descriptor by symbol name. */
+static int
+tls_desc_index(struct ld_context *ctx, const char *name)
+{
+	size_t i;
+	for (i = 0; i < ctx->tls_desc_count; ++i)
+		if (strcmp(ctx->tls_descs[i].name, name) == 0)
+			return (int)i;
+	return -1;
+}
+
+/* Allocate a 16-byte `tls_index{ti_module=1,ti_offset}` descriptor for a
+ * GD/LD TLS symbol in .data, and record `{name → group,offset}`.  Called
+ * during the pre-layout collect phase so .data size/address is final. */
+static int
+add_tls_desc(struct ld_context *ctx, const char *name)
+{
+	struct ld_tls_desc *desc;
+	int g;
+	uint64_t off;
+	if (tls_desc_index(ctx, name) >= 0)
+		return 0;  /* already one */
+	if (ctx->tls_desc_count == ctx->tls_desc_capacity) {
+		size_t cap = ctx->tls_desc_capacity ? ctx->tls_desc_capacity * 2 : 8;
+		desc = (struct ld_tls_desc *)ld_realloc(
+		    ctx->tls_descs, cap * sizeof(*desc));
+		if (!desc)
+			return ld_error(ctx, "out of memory");
+		ctx->tls_descs = desc;
+		ctx->tls_desc_capacity = cap;
+	}
+	g = get_group(ctx, ".data", MT_SHT_PROGBITS,
+	              LD_SHF_ALLOC | LD_SHF_WRITE, 8);
+	if (g < 0)
+		return ld_error(ctx, "out of memory");
+	ctx->groups[g].rank = 3;  /* allocated .data region */
+	if (append_group_data(ctx, &ctx->groups[g], NULL, 16, 8, &off) != 0)
+		return -1;
+	desc = &ctx->tls_descs[ctx->tls_desc_count];
+	desc->name = ld_strdup(name);
+	if (!desc->name)
+		return ld_error(ctx, "out of memory");
+	desc->group = g;
+	desc->offset = off;
+	++ctx->tls_desc_count;
+	return 0;
+}
+
+/* Pre-layout collect of static-executable GD/LD TLS descriptors.  Only
+ * runs for ET_EXEC (static), matching the write_relocation path that
+ * relaxes GD/LD via a static tls_index descriptor. */
+static int
+collect_tls_descriptors(struct ld_context *ctx)
+{
+	uint16_t i;
+	size_t j;
+	uint64_t n;
+	struct mt_elf64_section section;
+	struct mt_elf64_symbol symbol;
+	const char *name;
+	if (ctx->shared || ctx->pie)
+		return 0;  /* GD handled dynamically via GOT for shared/PIE */
+	if (strcmp(ctx->target->name, "x86_64") != 0)
+		return 0;
+	for (i = 0; i < ctx->objects.count; ++i) {
+		struct ld_object *object = &ctx->objects.items[i];
+		for (j = 0; j < object_section_count(object); ++j) {
+			if (object_get_section(object, (uint16_t)j, &section) != 0)
+				return -1;
+			if (section.type != MT_SHT_RELA && section.type != MT_SHT_REL)
+				continue;
+			if (object->elf_class == 1)
+				continue;  /* 32-bit not handled here */
+			if (section.entry_size < 24 ||
+			    section.size % section.entry_size != 0)
+				continue;
+			for (n = 0; n < section.size / section.entry_size; ++n) {
+				const unsigned char *p = object->data + section.offset +
+				                          n * section.entry_size;
+				uint64_t info64 = read64(p + 8);
+				unsigned rel_type = (unsigned)(info64 & 0xffffffff);
+				if (rel_type != LD_R_X86_64_TLSGD &&
+				    rel_type != LD_R_X86_64_TLSLD)
+					continue;
+				if (get_symbol_by_index(ctx, object, info64 >> 32,
+				                        &symbol, &name) != 0 ||
+				    add_tls_desc(ctx, name) != 0)
+					return -1;
+			}
+		}
 	}
 	return 0;
 }
@@ -1723,20 +1942,25 @@ layout_output(struct ld_context *ctx)
 
 	/* Calculate TLS block size (variant II: tdata then tbss). */
 	if (ctx->tls_tdata_group >= 0 || ctx->tls_tbss_group >= 0) {
-		uint64_t tdata = 0, tbss = 0, talign = 1;
+		uint64_t tdata = 0, tbss = 0, talign = 1, tbss_align = 1;
 		if (ctx->tls_tdata_group >= 0) {
 			tdata = ctx->groups[ctx->tls_tdata_group].size;
 			talign = ctx->groups[ctx->tls_tdata_group].align;
 		}
 		if (ctx->tls_tbss_group >= 0) {
 			tbss = ctx->groups[ctx->tls_tbss_group].size;
-			if (ctx->groups[ctx->tls_tbss_group].align > talign)
-				talign = ctx->groups[ctx->tls_tbss_group].align;
+			tbss_align = ctx->groups[ctx->tls_tbss_group].align;
+			if (tbss_align > talign)
+				talign = tbss_align;
 		}
 		ctx->tls_tdata_size = tdata;
 		ctx->tls_align = talign;
-		/* variant II: tbss starts after aligned tdata */
-		ctx->tls_size = align_up(align_up(tdata, talign) + tbss, talign);
+		/* variant II: .tbss starts at the .tbss-aligned boundary right
+		 * after .tdata (NOT rounded up to talign — that would over-round
+		 * a small .tdata and inflate memsz, e.g. 4-byte .tdata align 8 +
+		 * 4-byte .tbss would yield 16 instead of 8).  Only the final
+		 * memsz is rounded up to the max TLS alignment. */
+		ctx->tls_size = align_up(align_up(tdata, tbss_align) + tbss, talign);
 	}
 
 	/* Pass 1: PROGBITS sections (skip TLS .tdata).
@@ -1778,9 +2002,52 @@ layout_output(struct ld_context *ctx)
 		}
 	}
 
+	/* Advance offset past non-TLS sections so TLS does not overlap .bss */
+	for (i = 0; i < ctx->group_count; ++i) {
+		struct ld_group *g = &ctx->groups[i];
+		if (is_tls_group(ctx, (int)i)) continue;
+		uint64_t e = g->file_offset + g->size;
+		if (e > offset) offset = e;
+	}
+
+	/* TLS sections: lay out .tdata (needs file space) then .tbss (NOBITS).
+	 * TLS must be laid out BEFORE the non-allocatable Pass 3 below, so that
+	 * .comment/.debug/.note land at higher file offsets than the allocatable
+	 * (.tdata) file region.  Otherwise a non-alloc section sharing the LOAD
+	 * file span (e.g. .comment at the same offset as .bss) gets its file
+	 * bytes loaded over .bss, zeroing/clobbering runtime state (ctor arrays,
+	 * counters) → static TLS programs segfault. */
+	if (ctx->tls_tdata_group >= 0) {
+		struct ld_group *g = &ctx->groups[ctx->tls_tdata_group];
+		offset = align_up(offset, g->align ? g->align : 1);
+		g->file_offset = offset;
+		g->address = ctx->shared ? 0 : LD_BASE + offset;
+		offset += g->size;
+	}
+	if (ctx->tls_tbss_group >= 0) {
+		struct ld_group *g = &ctx->groups[ctx->tls_tbss_group];
+		if (ctx->tls_tdata_group >= 0) {
+			struct ld_group *td = &ctx->groups[ctx->tls_tdata_group];
+			/* .tbss starts at the .tbss-aligned boundary after .tdata.
+			 * (.tbss is NOBITS, so file space isn't needed here.) */
+			uint64_t tdata_end = td->file_offset + td->size;
+			uint64_t tbss_off = align_up(tdata_end, g->align ? g->align : 1);
+			g->file_offset = tbss_off;
+			g->address = ctx->shared ? 0 : LD_BASE + tbss_off;
+		} else {
+			/* No .tdata: allocate beyond non-TLS sections */
+			offset = align_up(offset, g->align ? g->align : 1);
+			g->file_offset = offset;
+			g->address = base + offset;
+			if (g->type != MT_SHT_NOBITS)
+				offset += g->size;
+			}
+		}
+
 	/* Pass 3: non-allocatable sections (.debug*, .comment, .note, ...).
 	 * These carry no loadable content, so place them after every loaded
-	 * section (PROGBITS and NOBITS alike). */
+	 * section (PROGBITS, NOBITS and TLS alike) — beyond any PT_LOAD file
+	 * span, so their bytes are never mapped into an allocatable segment. */
 	for (rank = 5; rank <= 6; ++rank) {
 		for (i = 0; i < ctx->group_count; ++i) {
 			struct ld_group *group = &ctx->groups[i];
@@ -1795,40 +2062,8 @@ layout_output(struct ld_context *ctx)
 				offset += group->size;
 		}
 	}
-
-	/* Advance offset past non-TLS sections so TLS does not overlap .bss */
-	for (i = 0; i < ctx->group_count; ++i) {
-		struct ld_group *g = &ctx->groups[i];
-		if (is_tls_group(ctx, (int)i)) continue;
-		uint64_t e = g->file_offset + g->size;
-		if (e > offset) offset = e;
-	}
-
-	/* TLS sections: lay out .tdata (needs file space) then .tbss (NOBITS). */
-	if (ctx->tls_tdata_group >= 0) {
-		struct ld_group *g = &ctx->groups[ctx->tls_tdata_group];
-		offset = align_up(offset, g->align ? g->align : 1);
-		g->file_offset = offset;
-		g->address = ctx->shared ? 0 : LD_BASE + offset;
-		offset += g->size;
-	}
-	if (ctx->tls_tbss_group >= 0) {
-		struct ld_group *g = &ctx->groups[ctx->tls_tbss_group];
-		if (ctx->tls_tdata_group >= 0) {
-			struct ld_group *td = &ctx->groups[ctx->tls_tdata_group];
-			g->file_offset = td->file_offset + td->size;
-			g->address = td->address + td->size;
-		} else {
-			/* No .tdata: allocate beyond non-TLS sections */
-			offset = align_up(offset, g->align ? g->align : 1);
-			g->file_offset = offset;
-			g->address = base + offset;
-			if (g->type != MT_SHT_NOBITS)
-				offset += g->size;
-			}
-		}
-		return 0;
-	}
+	return 0;
+}
 
 
 static int
@@ -1839,6 +2074,13 @@ symbol_tls_offset(struct ld_context *ctx, struct ld_object *object,
 	const char *name;
 	struct ld_global *global;
 	struct ld_section_map *map;
+	/* Base offset of .tbss within the TLS block: the .tbss-aligned
+	 * boundary right after .tdata (matches tls_size / PT_TLS memsz). */
+	uint64_t tbss_base = ctx->tls_tdata_size;
+	if (ctx->tls_tbss_group >= 0) {
+		uint64_t a = ctx->groups[ctx->tls_tbss_group].align;
+		tbss_base = align_up(tbss_base, a ? a : 1);
+	}
 	if (get_symbol_by_index(ctx, object, symbol_index, &symbol, &name) != 0)
 		return -1;
 	if (symbol.section == MT_SHN_UNDEF) {
@@ -1853,7 +2095,7 @@ symbol_tls_offset(struct ld_context *ctx, struct ld_object *object,
 		if (global->group == ctx->tls_tdata_group)
 			*tls_offset = global->offset + symbol.value;
 		else if (global->group == ctx->tls_tbss_group)
-			*tls_offset = ctx->tls_tdata_size + global->offset + symbol.value;
+			*tls_offset = tbss_base + global->offset + symbol.value;
 		else
 			return ld_errorf(ctx, "TPOFF32 relocation against non-TLS symbol", name);
 		return 0;
@@ -1865,7 +2107,7 @@ symbol_tls_offset(struct ld_context *ctx, struct ld_object *object,
 	if (map->group == ctx->tls_tdata_group)
 		*tls_offset = map->offset + symbol.value;
 	else if (map->group == ctx->tls_tbss_group)
-		*tls_offset = ctx->tls_tdata_size + map->offset + symbol.value;
+		*tls_offset = tbss_base + map->offset + symbol.value;
 	else
 		return ld_errorf(ctx, "TPOFF32 relocation against non-TLS symbol", name);
 	return 0;
@@ -2184,25 +2426,72 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 		value = resolved_value + addend - place;
 		width = 4;
 	} else if (type == LD_R_X86_64_TLSGD || type == LD_R_X86_64_TLSLD ||
-	           type == LD_R_X86_64_DTPOFF || type == LD_R_X86_64_DTPMOD) {
-		/* Dynamic TLS model (GD/LD).  For a static executable the
+	           type == LD_R_X86_64_DTPOFF || type == LD_R_X86_64_DTPMOD ||
+	           type == LD_R_X86_64_GOTTPOFF) {
+		/* Dynamic TLS model (GD/LD/IE).  For a static executable the
 		 * linker knows the final TP-relative offset, so we relax to
-		 * Local-Exec (TPOFF32).  For a shared library the relocation
-		 * is preserved in .rela.dyn and resolved by ld.so. */
+		 * Local-Exec (TPOFF32).  For a shared library the %rip-relative
+		 * field is patched to point at the symbol's GOT slot, which
+		 * ld.so fills at load time. */
 		if (!ctx->shared && !ctx->pie) {
-			uint64_t tls_off;
-			if (symbol_tls_offset(ctx, object, symbol_index, &tls_off) != 0)
-				return -1;
-			value = (uint64_t)((int64_t)tls_off - (int64_t)ctx->tls_size) + addend;
-			width = 4;
+			/* Static executable: GD/LD relaxes via a static tls_index
+			 * descriptor (方案B).  The compiler emitted
+			 *   lea sym@tlsgd(%rip),%rdi; call __tls_get_addr
+			 * which __tls_get_addr resolves to tp + ti->ti_offset.  We
+			 * allocate a `{ti_module=1, ti_offset}` descriptor in .data
+			 * (collect_tls_descriptors) and point the lea at it, keeping
+			 * the call.  This needs no instruction rewrite / no size
+			 * growth; DTPOFF (absolute) resolves to the raw offset. */
+			if (type == LD_R_X86_64_DTPOFF) {
+				value = resolved_value + addend;
+				width = 4;
+			} else if (type == LD_R_X86_64_TLSGD ||
+			           type == LD_R_X86_64_TLSLD) {
+				int d = tls_desc_index(ctx, name);
+				struct ld_group *dg;
+				uint64_t tls_off, ti_offset;
+				uint64_t desc_addr;
+				if (d < 0)
+					return ld_errorf(ctx, "missing static TLS descriptor",
+					                 name);
+				dg = &ctx->groups[ctx->tls_descs[d].group];
+				if (symbol_tls_offset(ctx, object, symbol_index, &tls_off) != 0)
+					return -1;
+				ti_offset = (uint64_t)((int64_t)tls_off -
+				                       (int64_t)ctx->tls_size);
+				desc_addr = dg->address + ctx->tls_descs[d].offset;
+				/* Write {ti_module=1, ti_offset} into the descriptor. */
+				if (dg->type != MT_SHT_NOBITS &&
+				    ctx->tls_descs[d].offset + 16 <= dg->size) {
+					write64(dg->data + ctx->tls_descs[d].offset, 1);
+					write64(dg->data + ctx->tls_descs[d].offset + 8, ti_offset);
+				}
+				/* Point the lea @tlsgd(%rip) reloc field at the desc. */
+				value = desc_addr + addend - place;
+				width = 4;
+			} else {
+				uint64_t tls_off;
+				if (symbol_tls_offset(ctx, object, symbol_index, &tls_off) != 0)
+					return -1;
+				value = (uint64_t)((int64_t)tls_off - (int64_t)ctx->tls_size) + addend;
+				width = 4;
+			}
 		} else {
-			/* Shared library or PIE: leave the GOT slot for ld.so.
-			 * The instruction sequence is:
-			 *   lea sym@tlsgd(%rip), %rdi; call __tls_get_addr
-			 * The two GOT slots are filled at load time.  We do not
-			 * write anything into the instruction stream here; the
-			 * GOT entries are created during GOT allocation. */
-			return 0;
+			/* Shared library or PIE: patch the %rip-relative field
+			 * (GLD/LD `lea ...(%rip)` and IE `movq ...(%rip)`) to the
+			 * symbol's GOT slot; ld.so resolves the DTPMOD|DTPOFF /
+			 * TPOFF contents via .rela.dyn. */
+			if (type == LD_R_X86_64_DTPOFF || type == LD_R_X86_64_DTPMOD) {
+				/* DTPOFF/DTPMOD alone are not %rip-relative; they are
+				 * consumed as GOT-pair contents, left for ld.so. */
+				return 0;
+			}
+			size_t got;
+			if (got_index(ctx, name, &got) != 0)
+				return ld_errorf(ctx, "missing TLS GOT entry", name);
+			got_group = &ctx->groups[ctx->got.group];
+			value = got_group->address + ctx->got.items[got].offset + addend - place;
+			width = 4;
 		}
 	} else if (type == LD_R_X86_64_64) {
 		value = resolved_value + addend;
@@ -2278,6 +2567,9 @@ fill_got(struct ld_context *ctx)
 		return 0;
 	got = &ctx->groups[ctx->got.group];
 	for (i = 0; i < ctx->got.count; ++i) {
+		if (ctx->got.items[i].tls ||
+		    ctx->got.items[i].reloc_type == MT_R_X86_64_JUMP_SLOT)
+			continue;  /* TLS slots + PLT imports filled by ld.so */
 		global = find_global(ctx, ctx->got.items[i].name);
 		if (global && global->alias)
 			global = global->alias;
@@ -2330,6 +2622,32 @@ build_rela_dyn(struct ld_context *ctx)
 	uint64_t got_addr = ctx->groups[ctx->got.group].address;
 	for (i = 0; i < ctx->got.count; ++i) {
 		uint64_t got_entry = got_addr + ctx->got.items[i].offset;
+		if (ctx->got.items[i].tls) {
+			/* TLS GOT slots are filled at load time by ld.so.
+			 * GD/LD pairs get a DTPMOD64 + DTPOFF64 reloc pair; IE
+			 * gets a single DTPOFF64 (TP-relative offset). */
+			uint32_t sym_idx = 0;
+			for (size_t j = 0; j < ctx->dynsym_count; ++j) {
+				if (strcmp(ctx->dynsym_entries[j].global->name,
+				           ctx->got.items[i].name) == 0) {
+					sym_idx = (uint32_t)(j + 1); /* +1 for STN_UNDEF */
+					break;
+				}
+			}
+			if (ctx->got.items[i].slots >= 2) {
+				uint64_t dtpmod = ((uint64_t)sym_idx << 32) | MT_R_X86_64_DTPMOD64;
+				uint64_t dtpoff = ((uint64_t)sym_idx << 32) | MT_R_X86_64_DTPOFF64;
+				if (rela_dyn_add(ctx, got_entry, dtpmod, 0) != 0 ||
+				    rela_dyn_add(ctx, got_entry + 8, dtpoff, 0) != 0)
+					return -1;
+			} else {
+				/* IE: GOT slot holds the symbol's TP-relative offset. */
+				uint64_t tpoff = ((uint64_t)sym_idx << 32) | MT_R_X86_64_TPOFF64;
+				if (rela_dyn_add(ctx, got_entry, tpoff, 0) != 0)
+					return -1;
+			}
+			continue;
+		}
 		if (ctx->got.items[i].reloc_type == MT_R_X86_64_JUMP_SLOT) {
 			/* Undefined symbol import: emit JUMP_SLOT dynamic
 			 * relocation so ld.so looks up the symbol by name
@@ -4064,7 +4382,8 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 	    ensure_pie_section(&ctx) != 0 ||
 	    collect_symbols(&ctx) != 0 ||
 	    extract_archives(&ctx) != 0 || allocate_common(&ctx) != 0 ||
-	    collect_got_relocations(&ctx) != 0)
+	    collect_got_relocations(&ctx) != 0 ||
+	    collect_tls_descriptors(&ctx) != 0)
 		goto out;
 	/* --defsym: define absolute symbols (must run before --no-undefined
 	 * so the new symbols are treated as satisfied references). */
