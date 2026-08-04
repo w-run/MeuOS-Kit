@@ -19,6 +19,7 @@
 |------|------|------|
 | [aarch64-qemu-segfault](mcc/aarch64-qemu-segfault.md) | 🔄 | mcc 编译 aarch64 hello qemu 运行 segfault(139)，疑栈帧序列/crt1-AAPCS |
 | [const-fold-negzero](mcc/const-fold-negzero.md) | ✅ | mcc 常量折叠丢失负零符号（-0.0 折成正零）——根因为 x86_64 后端 fp_label 数值相等去重，已修 c004de8 |
+| [static-global-array-segfault](mcc/static-global-array-segfault.md) | 🔄 | 静态 exe + 全局数组运行 segfault(139)——mcc/mt 的 R_X86_64_PC32/绝对数组寻址既有 bug（基线 07303b2 复现，非 TLS 引入） |
 
 ### meuos-shell（msh）
 
