@@ -53,4 +53,13 @@ void cpp_mangle_type(struct type *t, char *buf, size_t bufsz);
 struct member *cpp_method_member(struct type *t, const char *name,
                                  struct type **owner);
 
+/* Virtual-function / vtable construction (defined in cpp_vtable.c);
+ * called from the class-decl, member, and ctor paths in cpp_parse.c. */
+void cpp_vkey(const char *mname, struct type *funct, bool is_const,
+              char *buf, size_t bufsz);
+void cpp_compute_vtable(struct type *t);
+bool cpp_find_final(struct type *d, const char *key, struct type **owner,
+                    struct member **outm);
+void cpp_init_vptrs(struct func *f, struct type *t, struct expr *thisp);
+
 #endif /* MCC_CPP_PARSE_INTERNAL_H */
