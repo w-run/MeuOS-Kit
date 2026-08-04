@@ -250,18 +250,19 @@ print_entry_bsd(const struct nm_entry *e, const struct nm_opts *opts)
 {
 	if (e->defined) {
 		if (opts->print_size && e->size != 0)
-			printf("%016" PRIx64 " %016" PRIx64 " %c %s\n",
-			       e->value, e->size, e->type_char,
-			       e->name ? e->name : "");
+			printf("%016llx %016llx %c %s\n",
+			       (unsigned long long)e->value,
+			       (unsigned long long)e->size,
+			       e->type_char, e->name ? e->name : "");
 		else
-			printf("%016" PRIx64 " %c %s\n",
-			       e->value, e->type_char,
-			       e->name ? e->name : "");
+			printf("%016llx %c %s\n",
+			       (unsigned long long)e->value,
+			       e->type_char, e->name ? e->name : "");
 	} else {
 		if (opts->print_size && e->size != 0)
-			printf("                %016" PRIx64 " %c %s\n",
-			       e->size, e->type_char,
-			       e->name ? e->name : "");
+			printf("                %016llx %c %s\n",
+			       (unsigned long long)e->size,
+			       e->type_char, e->name ? e->name : "");
 		else
 			printf("                %c %s\n",
 			       e->type_char, e->name ? e->name : "");
@@ -273,8 +274,9 @@ print_entry_posix(const struct nm_entry *e, const struct nm_opts *opts)
 {
 	(void)opts;
 	if (e->defined)
-		printf("%s %c %016" PRIx64 " %s\n",
-		       e->name ? e->name : "", e->type_char, e->value,
+		printf("%s %c %016llx %s\n",
+		       e->name ? e->name : "", e->type_char,
+		       (unsigned long long)e->value,
 		       e->secname ? e->secname : "");
 	else
 		printf("%s %c\n", e->name ? e->name : "", e->type_char);
