@@ -40,8 +40,9 @@ int main(int argc, char **argv) {
     struct rtld_state st; memset(&st,0,sizeof(st));
     st.page_size=4096;
     st.lib_count=1; st.libs[0].name="(main)"; st.libs[0].is_main=1;
-    static unsigned char tlsarea[4096] __attribute__((aligned(64)));
-    st.tls_tp=(uintptr_t)tlsarea+sizeof(tlsarea);
+    /* Leave room above TP for the 16-byte TCB (self @+0, DTV @+8). */
+    static unsigned char tlsarea[4128] __attribute__((aligned(64)));
+    st.tls_tp=(uintptr_t)tlsarea+4096;
     st.dtv=0;
     rtld_heap_init();
     /* main executable has a static TLS block = module 1 */
@@ -59,7 +60,8 @@ int main(int argc, char **argv) {
         st.dtv=(uintptr_t*)rtld_alloc((size_t)n0*sizeof(*st.dtv));
         for(int i=0;i<n0;i++) st.dtv[i]=0;
         st.dtv[0]=1; st.dtv[1]=mb; st.dtv_len=n0; st.dtv_store=st.dtv;
-        if(st.tls_tp) *(uintptr_t*)(st.tls_tp-8)=(uintptr_t)st.dtv;
+        if(st.tls_tp) { *(uintptr_t*)st.tls_tp=(uintptr_t)st.tls_tp; /* self */
+                        *(uintptr_t*)(st.tls_tp+8)=(uintptr_t)st.dtv; }
     }
     rtld_set_state(&st);
     const char *path = argc>1 ? argv[1] : "hosttlslib.so";
