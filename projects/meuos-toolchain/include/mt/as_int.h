@@ -138,6 +138,21 @@ int get_section(struct as_file *as, const char *name);
 /* DWARF debug-information emission (defined in as_dwarf.c). */
 int emit_dwarf(struct as_file *as);
 
+/* Operand / directive parsing helpers shared between assemble.c and
+ * the extracted as_parse.c. */
+char *trim(char *text);
+int align_section(struct as_file *as, struct as_section *section,
+                  uint64_t align);
+int append_zeroes(struct as_file *as, struct as_section *section,
+                  size_t count);
+struct as_symbol *get_symbol(struct as_file *as, const char *name);
+int parse_integer(const char *text, int64_t *value);
+int parse_reference(const char *text, char **symbol, char *modifier,
+                    size_t modifier_size, int64_t *addend, int *is_number);
+
+/* Assembler directive parsing (defined in as_parse.c). */
+int parse_directive(struct as_file *as, char *directive, char *rest);
+
 /* ELF ET_REL output writing (defined in as_elfout.c). */
 int write_object(struct as_file *as, const struct mt_target *target,
                  const char *output_path);
