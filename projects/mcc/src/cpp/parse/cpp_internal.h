@@ -19,4 +19,10 @@ extern unsigned long long g_cpp_cexpr_tmpl_vals[16];
 extern bool g_cpp_cexpr_tmpl_isval[16];
 extern int g_cpp_cexpr_tmpl_n;
 
+/* C++17 fold-expression expansion: scan `toks[0..n)` for folder shapes
+ * involving `pack_var` and emit an expanded token stream.  Called by the
+ * requires-expression / template-argument code in cpp_parse.c. */
+void cpp_expand_folds(struct token *toks, size_t n, const char *pack_var,
+                      int npack, struct token **out, size_t *outn);
+
 #endif /* MCC_CPP_PARSE_INTERNAL_H */
