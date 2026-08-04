@@ -157,7 +157,11 @@ fp_label(MConst *c)
 		MConst *x = fp_pool[i];
 		if (x->type != c->type)
 			continue;
-		if (x->type == MT_F32 ? x->u.s == c->u.s : x->u.d == c->u.d)
+		/* Compare the IEEE bit pattern (memcmp), not the value: -0.0 == +0.0
+		 * numerically but they differ in the sign bit and must stay distinct
+		 * constants (mir_util.c con_pool_find does the same). */
+		size_t sz = x->type == MT_F32 ? sizeof(float) : sizeof(double);
+		if (memcmp(&x->u, &c->u, sz) == 0)
 			return i;
 	}
 	if (nfp == cfp) {
