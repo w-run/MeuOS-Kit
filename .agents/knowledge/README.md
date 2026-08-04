@@ -13,6 +13,7 @@
 | [project_mcc_cpp.md](project_mcc_cpp.md) | 缺陷 | m++ 前端：C++23 四缺口、依赖 NTTP/constexpr 返回/consteval、缺陷 K/M/N、D4 非空类返回、-O0 UB |
 | [project_mcc_chibicc.md](project_mcc_chibicc.md) | 缺陷 | chibicc 套件根因、B 类修复、sema E1-E6 + array.len 字节坑、D3-PP #elifdef、审计回归 |
 | [project_meuos.md](project_meuos.md) | 项目 | 组件经验：libc C99 补全、libtui、Shell/Utils 现代优先、自主特性方向、归并记录 |
+| [project_mcc_toolchain.md](project_mcc_toolchain.md) | 缺陷 | mcc-toolchain P0 闭环：toolchain 3 门禁 + ARM 正则、mcc MIR 文档清扫、i386 PIC GOT（4 提交）、ld.so P0 实施 in progress |
 
 ## 使用约定
 

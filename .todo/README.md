@@ -20,6 +20,13 @@
 | [msh-bashcompat](meuos-shell/msh-bashcompat.md) | 🔄 | bash 兼容层完善（数组展开/`set -e`/shopt） |
 | [msh-zero-warning](meuos-shell/msh-zero-warning.md) | ⏳ | 零警告编译（cmd_dispatch/plugin.c 警告） |
 
+### meuos-toolchain
+
+| 任务 | 状态 | 说明 |
+|------|------|------|
+| [mt-readelf-pie-dynamic](meuos-toolchain/mt-readelf-pie-dynamic.md) | 🔄 | `mt/readelf -d` 对 PIE 误报 no dynamic section（pre-existing） |
+| [check-qemu-skip-wrapper](meuos-toolchain/check-qemu-skip-wrapper.md) | 🔄 | check-qemu-x86_64/i386 缺 SKIP 包装（pre-existing） |
+
 ### meuos-utils
 
 | 任务 | 状态 | 说明 |
