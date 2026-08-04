@@ -4,11 +4,11 @@
 #
 # 聚合执行以下检查，任一失败即以非零状态退出：
 #   1. check             冒烟：构建 mcc 并编译运行 hello
-#   2. check-mir         MIR 核心单元测试（types/passes/machine/abi/regalloc/bridge）
+#   2. check-mir         MIR 核心单元测试（types/passes/machine/abi/regalloc）
 #   3. check-cpp         m++ C++ 前端（lex/virtual/func/neg，含虚表与模板）
-#   3b. check-cpp × MIR-native/bridge 双后端显式复验（MCC_MIR_BACKEND=1/=0
-#       各跑一次 check-cpp-func/neg；Phase 2 后默认即 MIR-native，显式
-#       变体堵住"只覆盖单一后端"的覆盖缺口）
+#   3b. check-cpp-func/neg 显式复验（独立再跑 check-cpp-func/neg，守护
+#        C++ 前端核心功能；MCC_MIR_BACKEND 环境变量随 LIR 桥接层移除，
+#        已无双后端之分）
 #   4. check-c99         C 回归（c99 套，--specs=host 或 MEUOS_SYSROOT 模式按当前环境可用性）
 #   5. check-c11         C 回归（c11 套）
 #   6. check-c23         C 回归（c23 套，同样按环境选择 MEUOS_SYSROOT / --specs=host）
@@ -19,7 +19,8 @@
 #  11. check-arm / check-i386-runtime / check-aarch64-runtime  交叉运行时回归
 #                       （各自缺 sysroot / qemu 时脚本内自行 SKIP，退出 0）
 #  12. check-sysroot-static 自举：mcc 编译 mcc + 运行 hello
-#  13. check-c-mir       C 功能回归 × MIR/LIR 双路径矩阵（mir_matrix.sh：MIR=1 与 MIR=0 编译运行且 stdout 一致）
+#  13. check-c-mir       C 功能回归 × MIR 单路径矩阵（mir_matrix.sh：c99/c11/c23
+#                        三套正向用例全经唯一 MIR 路径编译并运行，退出码须为 0）
 #
 # 未纳入本门禁的目标及原因：
 #   check-pic-verify     PIC GOT 验证（x86_64/aarch64/riscv64/i386 四架构
@@ -135,10 +136,9 @@ else
         make check-cpp-lex check-cpp-func check-cpp-neg
 fi
 
-# 3b. C++ 套件 × MIR-native/bridge 双后端显式复验（Phase 2 后默认即
-#     MIR-native，此处显式锁定 MCC_MIR_BACKEND=1/0，防环境变量或未来
-#     默认值变化漏网——补上"verify-all 不设 MCC_MIR_BACKEND 导致 cpp
-#     套件只覆盖单一后端"的缺口）。
+# 3b. C++ 前端 func/neg 显式复验（无论是否设置 MCC_MIR_BACKEND，MIR 都是
+#     唯一 asm 生产者；该环境变量随 LIR 桥接层移除后不再被读取。下面两次
+#     run 等价，仅作回归冗余守护）。
 run "make check-cpp-func/neg (MCC_MIR_BACKEND=1)" \
     env MCC_MIR_BACKEND=1 make check-cpp-func check-cpp-neg
 run "make check-cpp-func/neg (MCC_MIR_BACKEND=0)" \
@@ -179,7 +179,7 @@ run "make check-aarch64-runtime" make check-aarch64-runtime
 # 7. 自举（内部自行构建 sysroot，任何环境下均执行）
 run "make check-sysroot-static" make check-sysroot-static
 
-# 8. C 功能回归 × MIR/LIR 双路径矩阵（mir_matrix.sh：MIR=1 与 MIR=0 均编译运行且 stdout 一致）
+# 8. C 功能回归 × MIR 单路径矩阵（mir_matrix.sh：c99/c11/c23 三套用例全经唯一 MIR 路径编译运行，退出码须为 0）
 run "make check-c-mir" make check-c-mir
 
 # 汇总
