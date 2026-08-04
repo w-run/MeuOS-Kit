@@ -119,3 +119,14 @@ PIC EBX 零临时分配 → 仍作 GOT base。mt 侧 i386 GOT 重定位留待 P1
 - 不得只在 target `memit.c` 定义——`check-mir-*` 手工链接清单含 `machine.c`、**不含** `main.c` 也不含 `memit.c`，放在后者会链接失败漏检；
 - PIC 改动前确认目标全局归属 MIR 层时，放到 machine.c 并同步跑 `verify-all.sh` 的 check-mir 门禁验证。
 
+## P1 GD TLS 进度（2026-08-04 集成验证）
+
+- **合并零回归**：`P1a`（commit `4948044`）+ `P1b`（commit `9b5b6e6` / `f65590c` / `d0b1e70`）已合并，门禁零回归。
+- **已闭环（静态/链接期）**：
+  - `D1`：`@PLT` 大小写（commit `f65590c`）；
+  - 静态 `GD→LE`（general dynamic → local exec）放松。
+- **进行中（GD 运行期）**：
+  - `D2`：exec-toolchain **JUMP_SLOT 收集**（commit `d0b1e70` 已提交）；
+  - `D3`：exec-mcc **GD store clobber**（修复中）。
+- **集成复测**：由 exec-integration-lite 负责（GD 运行期跨 mcc + mt/ld 端到端门禁）。
+
