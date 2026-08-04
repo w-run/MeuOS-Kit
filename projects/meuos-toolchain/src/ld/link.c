@@ -1763,14 +1763,19 @@ collect_got_relocations(struct ld_context *ctx)
 						unsigned rel_type = (unsigned)(info64 & 0xffffffff);
 						if (rel_type == 75 || rel_type == 76)
 							goto collect_got64;
-						/* x86_64 PLT32 undefined function imports need a
-						 * JUMP_SLOT GOT entry so that in a shared lib /
-						 * PIE `call foo@plt` resolves via ld.so (the
-						 * write_relocation PLT32 branch is otherwise dead
-						 * code, since the GOT entry was never collected). */
+						/* x86_64 PLT32 or PC32 undefined function imports
+						 * need a JUMP_SLOT GOT entry so that in a shared
+						 * lib / PIE `call foo` / `call foo@plt` resolves
+						 * via ld.so.  mcc emits a plain R_X86_64_PC32 for
+						 * `call foo` (no @PLT suffix); treating a PC32
+						 * reloc on an UNDEF symbol as a function import
+						 * mirrors gas/gcc's behaviour (PC32 to an external
+						 * is normally a call).  Local/data PC32 (SHN_UNDEF
+						 * != symbol) is left untouched. */
 						if (strcmp(ctx->target->name, "x86_64") == 0 &&
 						    (ctx->shared || ctx->pie) &&
-						    rel_type == LD_R_X86_64_PLT32) {
+						    (rel_type == LD_R_X86_64_PLT32 ||
+						     rel_type == LD_R_X86_64_PC32)) {
 							if (get_symbol_by_index(ctx, object,
 							                        info64 >> 32, &symbol,
 							                        &name) != 0 ||
