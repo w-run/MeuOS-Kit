@@ -772,15 +772,55 @@ rtld_main(size_t *sp)
 	main_lib->tls_align = 0;
 	main_lib->tls_image = 0;
 
-	/* Get the main executable's base from AT_PHDR.
-	 * For PIE, the program headers are at a vaddr relative to the
-	 * load base.  We compute the base by subtracting the first PHDR's
-	 * vaddr from the AT_PHDR pointer.  For shared libraries with
-	 * vaddr_start = 0, at_phdr equals main_base + 0x40 (ELF header). */
-	Phdr64 ph0;
-	parse_phdr((const unsigned char *)at_phdr, 0, &ph0);
-	uintptr_t phdr_vaddr = ph0.vaddr;
-	uintptr_t main_base = at_phdr - phdr_vaddr;
+	/* Get the main executable's load base (the address where vaddr 0
+	 * maps) from AT_PHDR.
+	 *
+	 * at_phdr = B + e_phoff + base_vaddr, where B is the kernel-assigned
+	 * base, e_phoff is the phdr table's file offset (offset 0x20 in the
+	 * ELF header, typically 0x40 for ELF64), and base_vaddr is the vaddr
+	 * of the lowest PT_LOAD segment (0 for a conventional PIE, but
+	 * 0x400000 for the mt/ld PIE layout).  We need the vaddr-0 base
+	 * (B + base_vaddr rounds to B + base_vaddr, so the runtime address
+	 * of an object at vaddr V is `main_base + V`).  Thus:
+	 *     main_base = at_phdr - e_phoff - base_vaddr.
+	 *
+	 * The original code used `at_phdr - ph0.vaddr` where ph0 is the
+	 * FIRST phdr entry.  That only works when the first entry is PT_PHDR
+	 * (whose p_vaddr == e_phoff + base_vaddr) — the mt/ld layout — but
+	 * breaks for host-ld PIEs whose first phdr is PT_INTERP (p_vaddr
+	 * 0x2a8), corrupting every RELATIVE/GLOB_DAT write by
+	 * (e_phoff + base_vaddr - INTERP.vaddr). */
+	const unsigned char *eh = (const unsigned char *)at_phdr;
+	uintptr_t main_base;
+	/* Read e_phoff from the ELF header that precedes the phdr table. */
+	uint64_t e_phoff = 0x40; /* standard ELF64 */
+	if (eh[-0x40 + 0] == 0x7f && eh[-0x40 + 1] == 'E' &&
+	    eh[-0x40 + 2] == 'L' && eh[-0x40 + 3] == 'F') {
+		e_phoff = read64(eh - 0x40 + 0x20);
+	} else {
+		/* Non-standard e_phoff: scan backward for the ELF magic. */
+		for (int back = 0x100; back >= 0; back -= 0x4) {
+			const unsigned char *c = eh - back;
+			if (c[0] == 0x7f && c[1] == 'E' && c[2] == 'L' &&
+			    c[3] == 'F') {
+				e_phoff = read64(c + 0x20);
+				break;
+			}
+		}
+	}
+	/* Find the base segment: the PT_LOAD with the lowest vaddr. */
+	uintptr_t base_vaddr = 0;
+	uint64_t min_v = ~0ULL;
+	for (unsigned i = 0; i < at_phnum; i++) {
+		Phdr64 ph;
+		parse_phdr((const unsigned char *)at_phdr,
+		            i * at_phent, &ph);
+		if (ph.type == PT_LOAD && ph.vaddr < min_v) {
+			min_v = ph.vaddr;
+			base_vaddr = (uintptr_t)ph.vaddr;
+		}
+	}
+	main_base = at_phdr - (uintptr_t)e_phoff - base_vaddr;
 	/* Remember the main executable's load base so RELATIVE relocations
 	 * resolve as `main_base + addend` instead of `0 + addend`. */
 	main_lib->base = main_base;
@@ -790,7 +830,7 @@ rtld_main(size_t *sp)
 		parse_phdr((const unsigned char *)at_phdr,
 		            i * at_phent, &ph);
 		if (ph.type == PT_DYNAMIC) {
-			main_lib->dynv = (Dyn64 *)(at_phdr + ph.vaddr - phdr_vaddr);
+			main_lib->dynv = (Dyn64 *)(main_base + ph.vaddr);
 		} else if (ph.type == PT_TLS) {
 			main_lib->tls_vaddr  = main_base + ph.vaddr;
 			main_lib->tls_filesz = (size_t)ph.filesz;
@@ -858,6 +898,25 @@ rtld_main(size_t *sp)
 	/* Then apply relocations for each loaded shared library */
 	for (int l = 1; l < st.lib_count; l++)
 		rtld_apply_rela(&st.libs[l], &st);
+
+	/* Point libc's `environ` at the kernel-provided environment array
+	 * on the initial stack.  The dynamic linker owns this hand-off: a
+	 * shared libc defines `environ` as a data symbol, and programs that
+	 * import it (via GLOB_DAT) dereference it to reach the environment.
+	 * Without this, `environ` stays NULL and such programs fail at
+	 * startup even though symbol resolution succeeded. */
+	{
+		const char *env_name = "environ";
+		int env_lib = -1;
+		Sym64 *env_sym = rtld_find_sym(&st, env_name, &env_lib);
+		if (env_sym && env_lib >= 0) {
+			size_t argc = sp[0];
+			char **argv = (char **)(sp + 1);
+			char **envp = argv + argc + 1;
+			char ***env_var = (char ***)(st.libs[env_lib].base + env_sym->value);
+			*env_var = envp;
+		}
+	}
 
 	/* Call init functions: main binary first, then libraries */
 	rtld_init_lib(main_lib);
