@@ -1,6 +1,6 @@
 ---
-name: mcc-toolchain 本轮进展汇总（TLS 闭环 / m++ P1 / libc P0.1 / 新阻塞 / 教训）
-description: 动态链接 TLS 静态 GD 闭环、m++ C++ P1 5 项、P0.1 动态 libc、mt/ld .dynamic 新阻塞、静态数组 segfault、关键教训
+name: mcc-toolchain 本轮进展汇总（TLS 闭环 / m++ P1 / libc P0.1 / P0.2 动态链接 / 新阻塞 / 教训）
+description: 动态链接 TLS 静态 GD 闭环、m++ C++ P1 5 项、P0.1 动态 libc、P0.2 完整动态链接链路、mt/ld .dynamic 新阻塞、静态数组 segfault、关键教训
 type: project
 ---
 
@@ -48,13 +48,25 @@ type: project
 - 基线 `07303b2` 亦复现（非本方案引入）。定位：mcc/mt 对 **R_X86_64_PC32 / 绝对数组寻址**组合的既有 bug，崩溃点在 crt `.fini`/`.init_array` 或 main 数组访问。
 - 已登记待办 `.todo/mcc/static-global-array-segfault.md`。
 
-## 6. 重要教训
+## 6. P0.2 动态链接里程碑达成（2026-08-04/05 完整链闭环）
+
+- **完整动态链接链路打通**：
+  - meuos-libc 产 `libc-meuos.so`（P0.1，`d224248`）；
+  - mt/ld `.dynamic` 写坏修复 `63c1d05`（tag/val 错乱 → SONAME 可读）；
+  - rtld `PT_LOAD` 段加载 `87fb856`（off-by-page 修正，vaddr-min_vaddr）；
+  - rtld `main_base` 跨 DSO 符号解析 `feacf6b`（host-ld PIE 首表项 PT_INTERP 算错位）；
+  - mt/ld PIE 外部 GOT/PLT `25bbee1`（JUMP_SLOT/GLOB_DAT / @GOTPCREL 大小写 / .plt stub）。
+- **端到端验证**：PIE 主程序 `DT_NEEDED=libc-meuos.so` → rtld 加载 → 跨库符号解析（GLOB_DAT/JUMP_SLOT）→ **exit 0**。
+- **P0.3 可立项**：dlopen + DTV + 共享库 GD 动态 TLS 可进入 P0.3 排期。
+
+## 7. 重要教训
 
 - **测 GD TLS 必须用 P1a 分支 mcc**（含 D3 `4e54505`）：主线 mcc 无 GD 生成，`-ftls-model=global-dynamic` 静默退化成 LE 假阳性，会误判 GD 已闭环。
 - **exec-toolchain-lite 状态被污染**：已 terminate，由其导致的中间产物/旧 hash（如 memory 里 `fc8aee8`）作废，以实际 commit（`ae88aa1`）为准，新 worker 重做。
 - **不要自动切 tmux 主线模型**：切主模型会致 tmux 卡死；改用**紧急 notify** 通知，不阻塞会话。
 - **429 时 dsv4flash fallback 已实测有效**：限流时回退到 DeepSeek-V4-Flash 保持并行不中断。
 - **GCC14 宿主兼容** `47f5f70`（mt）：修复 gcc14 `-Werror=format/implicit-declaration`（PRIx64 / rename 等）基线编译错误，保证宿主 GCC14 下 mt 全量可编译。
+- **⚠️ 指挥官叙述可能错**：`47f5f70` 并非 TLS 合入 hash（实为 gcc14 兼容）；沉淀事实一律以 `git log` 实测为准，不盲从叙述。
 
 ## Why / How to apply
 
