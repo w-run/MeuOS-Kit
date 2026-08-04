@@ -40,8 +40,35 @@ reasoning = custom-local:glm-5.2             → Ark Coding Plan
 ## 运行
 
 ```bash
-bash /workspace/MeuOS-Kit/.codebuddy/skills/ai-usage-monitor/query.sh   # JSON 快照 + 决策
+bash /workspace/MeuOS-Kit/.codebuddy/skills/ai-usage-monitor/query.sh   # 用量 JSON + variant 决策
+bash /workspace/MeuOS-Kit/.codebuddy/skills/ai-usage-monitor/probe-main.sh  # 主模型选择 + fallback 链
 /root/ai.sh                                                             # 交互式 TUI（每 10s）
+```
+
+## 主模型选择 + fallback 链（probe-main.sh）
+
+主模型优先级：**MiniMax M3 > codebuddy 自带 deepseek-v4-flash > DeepSeek platform v4flash**
+
+| 层级 | 条件 | 主模型 |
+|------|------|--------|
+| 1 | MiniMax 周配额 ≥20%（M3 充足） | `custom-local:MiniMax-M3` |
+| 2 | `codebuddy -p --model=deepseek-v4-flash` 有回复 | `custom-local:deepseek-v4-flash`（codebuddy 自带） |
+| 3 | DeepSeek 按量余额 ≥¥10 | `custom-local:deepseek-v4-flash`（DeepSeek platform） |
+| 4 | 全不足 | `hy3` |
+
+`probe-main.sh` 输出 `decided_main` / `needs_switch` / `availability`。若 `needs_switch=yes`，改 `/root/.codebuddy/settings.json` 的 `model` 字段（改前 `cp` 备份 `settings.json.bak.main.<HHMMSS>`）。
+
+探测命令（有副作用，按需/定时调用，非每次 query.sh）：
+```bash
+codebuddy -p --model=deepseek-v4-flash "reply with just: OK"   # 有 "OK" 即 codebuddy 自带 dsv4flash 可用
+```
+
+**当前模型配置（2026-08-04）**：
+```
+model       = custom-local:MiniMax-M3      # 主模型 M3（MiniMax 周配额 78% 充足）
+variantModels.lite      = custom-local:deepseek-v4-flash  # DS flash 常规性价比
+variantModels.default   = custom-local:deepseek-v4-flash  # 禁用
+variantModels.reasoning = custom-local:MiniMax-M3         # M3（原 glm-5.2/Ark，省 Ark 月额度）
 ```
 
 ## 决策逻辑（query.sh v4 内置，渠道策略 2026-08-04）
