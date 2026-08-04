@@ -128,4 +128,14 @@ int as_emit_instruction(struct as_file *as, char *mnemonic, char *operand_text);
 /* aarch64 instruction emitter */
 int as_emit_aarch64(struct as_file *as, char *mnemonic, char *operand_text);
 
+/* Arena/allocation and section helpers defined in assemble.c, shared
+ * with the extracted as_dwarf.c. */
+void *mt_malloc(size_t size);
+void *mt_realloc(void *old, size_t size);
+char *mt_strdup(const char *text);
+int get_section(struct as_file *as, const char *name);
+
+/* DWARF debug-information emission (defined in as_dwarf.c). */
+int emit_dwarf(struct as_file *as);
+
 #endif /* MT_AS_INT_H */
