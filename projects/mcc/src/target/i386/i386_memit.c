@@ -80,36 +80,6 @@ emit_const(FILE *f, MConst *c)
 	}
 }
 
-/* Print a register, or a slot as ebp-relative memory. */
-static void
-emit_mval(FILE *f, MVal *v)
-{
-	if (!v) {
-		fputs("%eax", f);
-		return;
-	}
-	switch (v->kind) {
-	case MV_REG:
-		fprintf(f, "%%%s", mreg_name(g_mt, v->reg));
-		break;
-	case MV_TEMP:
-		if (v->reg >= 0)
-			fprintf(f, "%%%s", mreg_name(g_mt, v->reg));
-		else
-			fprintf(f, "%d(%%ebp)", v->slot + g_slot_base);
-		break;
-	case MV_CONST:
-		emit_const(f, v->con);
-		break;
-	case MV_GLOBAL:
-		fprintf(f, "%s", v->sym ? v->sym : "0");
-		break;
-	default:
-		fputs("%eax", f);
-		break;
-	}
-}
-
 /* Load a value into a scratch register. */
 static void
 mv_to_scratch(FILE *f, MVal *v, const char *rn)
