@@ -92,6 +92,11 @@ PIC EBX 零临时分配 → 仍作 GOT base。mt 侧 i386 GOT 重定位留待 P1
 - 目标：mt/ld 生成的 `.dynamic` 节区符合 ELF 规范——`sh_type=SHT_DYNAMIC`、`sh_link`→`.dynstr`，从根源消除 readelf/外部工具对 PROGBITS+sh_link=0 的兼容负担。
 - **已闭环**（commit `0015271e`，`src/ld/link.c` L3830/L2839 两处 diff）；待办已关闭。
 
+### P2 代码注释 / 归属建议（待扫尾）
+
+- **regalloc.c:26 过时注释**：注释写 "from the driver (main.c)"，但实际全局 `g_pic` 归属 `src/mir/machine.c`（MIR 层强定义），注释与现状不符，建议后续清理。
+- **check-mir 手工清单与 MEMIT_SRCS 归属文档化**：建议在 Makefile / ARCHITECTURE 注明"**MIR 层被单测链接清单强引用的全局必须定义在 `src/mir/machine.c`**"（check-mir-* 手工清单含 machine.c，不含 main.c/memit.c），避免后续误放到 target memit.c。
+
 ## P2 后续任务（2026-08-04）
 
 ### rtld e2e 端到端实跑验证（需合并 rtld-p0）
@@ -100,4 +105,17 @@ PIC EBX 零临时分配 → 仍作 GOT base。mt 侧 i386 GOT 重定位留待 P1
 - mt/ld `.dynamic` 节区规范化（`0015271e`）已闭环，但仅限于"链接产物静态校验"层面；
 - rtld e2e **实跑验证**（PIE + 真实 ld.so：`mt/ld -pie -dynamic-linker` → 加载 → exit 42）需合并 `tmp/rtld-p0`（含 `-dynamic-linker`，commit `f88ae83` 的 check-rtld 端到端门禁）后由 exec-integration 跨域门禁覆盖；
 - 关联 commit：`0015271e`（.dynamic 节区）、`f88ae83`（check-rtld 端到端）、`tmp/rtld-p0` 4 提交（153be27/3f2c354/82a4b40/f88ae83）。
+
+## 验收纪律：PIC/GOT 改动必须跑 verify-all.sh（2026-08-04）
+
+> 教训来源：i386-pic-got 分支 `check-mir g_pic undefined` 漏检，由 exec-mcc-lite 在合入主分支时发现，commit `2d4b65a` 修复。
+
+- **PIC/GOT 相关 mcc 改动不能只跑 `check-pic-verify`**，必须**同时跑 `verify-all.sh`（含 check-mir）**；
+- 否则会漏检 **MIR 单测链接缺陷**：本次即 MIR 单测引用 `g_pic` 未定义（只跑 check-pic-verify 未触发，verify-all 的 check-mir 才暴露）。
+
+### MIR 层强定义纪律
+
+- **MIR 层需被单测链接清单强引用的全局（如 `g_pic`）必须定义在 `src/mir/machine.c`**；
+- 不得只在 target `memit.c` 定义——`check-mir-*` 手工链接清单含 `machine.c`、**不含** `main.c` 也不含 `memit.c`，放在后者会链接失败漏检；
+- PIC 改动前确认目标全局归属 MIR 层时，放到 machine.c 并同步跑 `verify-all.sh` 的 check-mir 门禁验证。
 
