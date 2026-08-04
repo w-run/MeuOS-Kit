@@ -58,6 +58,9 @@ cpp_parse.c 拆完后，把方法推广到**单一 `struct ld_context ctx` 状�
 - 提取后清理孤儿注释 + 悬挂 `};`（函数尾的孤立右括号）+ 多余空行；`-Werror` 立即报 expected identifier。
 - **`-Werror=unused-function` 暴露"被删域移到新文件后，原文件里只剩新文件用的工具变 unused"**：如 link.c 的 `object_get_strtab_string`/`archive_member_needed_impl`/`collect_one_object_sections` 只在 symbol.c 用 → 应把它们也移进 symbol.c（不能留原文件当 dead code）。这既是零回归纪律，也提高新文件自足性。
 - link.c 示例：4780→1063（-78%，达标 <1200），拆 6 模块；`-Werror=unused-function` 强制把共享工具正确归位。
+- **深耦合解析器也可拆**（assemble.c as_parse 示范）：源驱动/指令解析区虽通过 as_file 和 emit 工具互调，但按"parse 域"整体切（parse_string_bytes..parse_directive 连续区 658 行到 as_parse.c）可行；关键是先 promote 被该域调用的共享工具（align_section/append_zeroes/get_symbol/parse_integer/parse_reference/trim）进 internal header，新 .c 补缺省头（如 <ctype.h> 的 isxdigit/isspace）。
+- assemble.c 示例：2406→806（-66% 达标），拆 as_dwarf/as_elfout/as_parse。
+
 
 
 
