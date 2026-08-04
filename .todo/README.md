@@ -18,12 +18,7 @@
 | 任务 | 状态 | 说明 |
 |------|------|------|
 | [aarch64-qemu-segfault](mcc/aarch64-qemu-segfault.md) | 🔄 | mcc 编译 aarch64 hello qemu 运行 segfault(139)，疑栈帧序列/crt1-AAPCS |
-
-### meuos-libc
-
-| 任务 | 状态 | 说明 |
-|------|------|------|
-| [fp-fmt-negzero](meuos-libc/fp-fmt-negzero.md) | 🔄 | libc fp_fmt 负零符号位丢失（%f/%g 输出 0 应为 -0） |
+| [const-fold-negzero](mcc/const-fold-negzero.md) | 🔄 | mcc 常量折叠丢失负零符号（-0.0 折成正零，疑 const-fold 归并 0.0==-0.0） |
 
 ### meuos-shell（msh）
 
