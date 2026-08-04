@@ -22,6 +22,7 @@ struct scope;
 struct expr;
 struct decl;
 struct cpp_template;
+struct location;
 
 /* Member-method parsing context: the enclosing class and implicit
  * `this` parameter while a method body is being parsed.  Shared by the
@@ -32,6 +33,43 @@ struct cpp_method_ctx {
 	bool active;
 };
 extern struct cpp_method_ctx g_cpp_method;
+
+/* Temporary flags during member-function definition (defined in
+ * cpp_parse.c): the method being defined is `virtual` or `final`. */
+extern bool g_cpp_define_virtual;
+extern bool g_cpp_method_final;
+
+/* Two-phase class parsing: buffering/replaying method bodies (defined in
+ * cpp_parse.c, shared with the method-body replay module). */
+extern bool g_cpp_class_parsing;
+
+/* C++14 auto return-type deduction state: while parsing a method body
+ * whose declared return type is `auto`, the first return fixes the type.
+ * Defined in cpp_parse.c, used by cpp_parse_method_body in cpp_method.c. */
+extern struct type *g_cpp_auto_ret_type;
+extern struct func *g_cpp_auto_ret_func;
+
+/* Buffered member-function body, replayed after the class layout is known
+ * (so a body may reference members declared later).  Struct defined here
+ * (all pointer fields) so the method-body replay module can traverse it. */
+struct cpp_pending_method {
+	struct token *toks;      /* function-body tokens incl. braces */
+	size_t ntoks;
+	const char *mname;
+	const char *tag;
+	struct type *classt;     /* enclosing class */
+	struct type *mtype;      /* mangled signature incl. `this` */
+	struct decl *thisd;      /* implicit this parameter decl */
+	struct decl *d;          /* mangled function decl */
+	struct scope *s;         /* class's declaration scope */
+	bool is_static;          /* static member: no `this` */
+	/* Class-template instantiation context: the template parameter
+	 * bindings in effect when this body was buffered; re-installed
+	 * before the deferred replay. */
+	struct decl *binds[16];
+	int nbinds;
+	struct cpp_pending_method *next;
+};
 
 /* Constructor init-list item: `m(args)` or `Base(args)` in
  * `Derived(int v) : Base(v), m(v * 2) {}`.  Populated by
@@ -85,6 +123,13 @@ bool tmpl_param_is_nttp(struct cpp_template *tmpl, int i);
 /* Emit __mxx_global_var_init (defined in cpp_gcctor.c); called at the
  * end of the translation unit. */
 void cpp_emit_global_ctors(void);
+
+/* Member-method body buffering / replay (defined in cpp_method.c):
+ * flush_pending_methods is called after a class body is laid out,
+ * cpp_ss_addtok builds a synthesized token stream for inherited ctors. */
+void flush_pending_methods(void);
+void cpp_ss_addtok(struct token **toks, size_t *n, enum tokenkind k,
+    const char *lit, struct location loc);
 
 /* Template data structures shared by the template-instantiation code
  * (cpp_parse.c) and the member-template lowering (cpp_tmpl_member.c).
