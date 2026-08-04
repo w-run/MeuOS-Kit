@@ -274,6 +274,22 @@ static bool cpp_class_decl(struct scope *s);
 static void cpp_namespace_decl(struct scope *s);
 static void cpp_skip_branch(void);
 
+/* Namespaces made visible by `using namespace NAME;` directives and by
+ * `inline namespace` blocks.  Lookups that fail in the current scope
+ * consult these before giving up. */
+static struct scope *g_cpp_visible_ns[16];
+static int g_cpp_nvisible_ns;
+static void cpp_add_visible_ns(struct scope *ns);
+
+static bool cpp_is_namespace_decl(void);
+static void cpp_friend_decl(struct scope *s, struct type *classt);
+static void cpp_inherit_ctor(struct scope *s, struct type *derived,
+                             struct structbuilder *b);
+static void cpp_synth_inherited_ctor(struct scope *s, struct type *derived,
+    struct structbuilder *b, struct type *base, struct type *bctor);
+static void cpp_ss_addtok(struct token **toks, size_t *n, enum tokenkind k,
+    const char *lit, struct location loc);
+
 void
 cpp_set_qual_class(const char *tag)
 {
@@ -488,6 +504,16 @@ cpp_member_ident(struct scope *s, const char *name)
 	}
 	e = mkunaryexpr(TMUL, base);
 	e->lvalue = true;
+	/* C++ reference member: `(*this).name` is a hidden pointer, but the
+	 * expression denotes the referent — dereference it, mirroring the
+	 * identifier path in expr_primary.c for reference variables.  Lambda
+	 * reference captures (`[&x]`) rely on this: the closure member is
+	 * declared `T &` and every use inside the operator() body is the
+	 * referent lvalue. */
+	if (m->type && m->type->isref) {
+		e = mkunaryexpr(TMUL, e);
+		e->lvalue = true;
+	}
 	if (m->bits.before || m->bits.after) {
 		e = mkexpr(EXPRBITFIELD, e->type, e);
 		e->lvalue = true;
@@ -516,6 +542,9 @@ cpp_tok_kind(void)
 	switch (tok.kind) {
 	case TSTRUCT: return CPP_TSTRUCT;
 	case TUNION:  return CPP_TUNION;
+	/* `inline` is a C keyword (TINLINE, below TIDENT), so the
+	 * identifier-based classification above never sees it */
+	case TINLINE: return CPP_TINLINE;
 	default:      return CPP_TNONE;
 	}
 }
@@ -537,6 +566,7 @@ cpp_classify_token(struct token t)
 	switch (t.kind) {
 	case TSTRUCT: return CPP_TSTRUCT;
 	case TUNION:  return CPP_TUNION;
+	case TINLINE: return CPP_TINLINE;
 	default:      return CPP_TNONE;
 	}
 }
@@ -706,6 +736,20 @@ cpp_class_decl(struct scope *s)
 				next();
 				continue;
 			}
+			if (k == CPP_TFRIEND) {
+				/* friend declaration: a free function/operator defined
+				 * (or declared) here that may access this class's
+				 * private members, or a friend class */
+				cpp_friend_decl(s, t);
+				continue;
+			}
+			if (k == CPP_TUSING) {
+				/* C++11 inherited constructors: `using Base::Base;` —
+				 * synthesize derived constructors forwarding to the
+				 * base ones */
+				cpp_inherit_ctor(s, t, &b);
+				continue;
+			}
 			if (k == CPP_TCLASS || k == CPP_TSTRUCT || k == CPP_TUNION) {
 				/* nested class/struct definition; a struct/union only via
 				 * cpp_class_decl when it has a body or base-class list,
@@ -766,18 +810,257 @@ cpp_class_decl(struct scope *s)
 	return true;
 }
 
+/* friend declaration inside a class body: `friend int f() {...}` /
+ * `friend int operator==(...) {...}` (a file-scope free function granted
+ * access to this class's private members) or `friend class B;` (every
+ * method of B may access the private members).  The function form is
+ * parsed with the ordinary declaration machinery — tok is positioned
+ * after `friend` — with the method context pointed at the befriending
+ * class (no `this`), so the access checker (cpp_member_accessible /
+ * cpp_same_class_context) accepts private-member accesses from the
+ * function's body. */
+static void
+cpp_friend_decl(struct scope *s, struct type *classt)
+{
+	next(); /* consume 'friend' */
+	enum cpp_tokenkind k = cpp_tok_kind();
+	if (k == CPP_TCLASS || k == CPP_TSTRUCT || k == CPP_TUNION) {
+		/* friend class B; */
+		struct cpp_friend *fr;
+		struct type *ft;
+		next(); /* consume class/struct/union */
+		if (tok.kind < TIDENT)
+			error_code(E_SYNTAX, &tok.loc, "expected class name after 'friend'");
+		ft = scopegettag(s, tokenstr(tok.kind), false);
+		if (ft && ft->kind != TYPESTRUCT && ft->kind != TYPEUNION)
+			error_code(E_CTYPE, &tok.loc, "'%s' is not a class type",
+			    tokenstr(tok.kind));
+		if (!ft) {
+			/* `friend class B;` also introduces B as an incomplete
+			 * class in the enclosing scope (a later definition
+			 * completes the same type object) */
+			ft = mktype(TYPESTRUCT, 0);
+			ft->size = 0;
+			ft->align = 0;
+			ft->u.structunion.tag = (char *)tokenstr(tok.kind);
+			ft->u.structunion.members = NULL;
+			ft->incomplete = true;
+			scopeputtag(s, ft->u.structunion.tag, ft);
+		}
+		for (fr = classt->u.structunion.friends; fr; fr = fr->next)
+			if (fr->cls == ft)
+				break;
+		if (!fr) {
+			fr = xmalloc(sizeof *fr);
+			fr->cls = ft;
+			fr->next = classt->u.structunion.friends;
+			classt->u.structunion.friends = fr;
+		}
+		next(); /* consume the class name */
+		expect(TSEMICOLON, "after friend class declaration");
+		return;
+	}
+	{
+		struct cpp_method_ctx saved = g_cpp_method;
+		g_cpp_method.class_type = classt;
+		g_cpp_method.this_decl = NULL;
+		g_cpp_method.active = true;
+		decl(s, NULL);
+		g_cpp_method = saved;
+	}
+}
+
+/* C++11 inherited constructors: `using Base::Base;` inside a derived
+ * class synthesizes one derived-class constructor per base-class
+ * constructor signature, each forwarding every parameter to the base
+ * constructor via a `: Base(args) { }` body (so the normal
+ * init-list/base-ctor machinery emits the base call).  Other `using`
+ * forms inside a class body are not supported yet and are consumed
+ * silently. */
+static void
+cpp_inherit_ctor(struct scope *s, struct type *derived,
+                 struct structbuilder *b)
+{
+	extern void tokpush(struct token *, size_t);
+	extern void next(void);
+
+	struct type *base;
+	struct member *m;
+	const char *bname, *mname;
+
+	next(); /* consume 'using' */
+	if (tok.kind < TIDENT)
+		error_code(E_SYNTAX, &tok.loc,
+		    "expected base class name after 'using'");
+	bname = tokenstr(tok.kind);
+	next();
+	if (tok.kind != TCOLONCOLON) {
+		error_code(E_SYNTAX, &tok.loc,
+		    "expected '::' after base class name in using declaration");
+		return;
+	}
+	next();
+	if (tok.kind < TIDENT)
+		error_code(E_SYNTAX, &tok.loc,
+		    "expected member name after '::'");
+	mname = tokenstr(tok.kind);
+	next();
+	expect(TSEMICOLON, "after using declaration");
+
+	/* only constructor inheritance (`using Base::Base`) is supported */
+	if (strcmp(bname, mname) != 0)
+		return;
+
+	base = scopegettag(s, bname, false);
+	if (!base || (base->kind != TYPESTRUCT && base->kind != TYPEUNION))
+		error_code(E_CTYPE, &tok.loc, "'%s' is not a class type", bname);
+
+	/* the base must be a direct base (an anonymous subobject member) */
+	{
+		bool direct = false;
+		for (m = derived->u.structunion.members; m; m = m->next)
+			if (!m->name && m->type == base) {
+				direct = true;
+				break;
+			}
+		if (!direct)
+			error_code(E_CTYPE, &tok.loc,
+			    "'%s' is not a direct base of '%s'", bname,
+			    derived->u.structunion.tag);
+	}
+
+	/* one synthesized ctor per base ctor signature */
+	for (m = base->u.structunion.members; m; m = m->next)
+		if (m->name && strcmp(m->name, bname) == 0 &&
+		    m->type && m->type->kind == TYPEFUNC)
+			cpp_synth_inherited_ctor(s, derived, b, base, m->type);
+}
+
+/* Synthesize one inherited constructor `Derived(params) : Base(params) {}`
+ * from the base constructor type `bctor`.  The parameter decls are copied
+ * (unnamed parameters get internal names so the forwarding init list can
+ * reference them) and the `: Base(a0, ...) { }` token stream is replayed
+ * through cpp_define_method, which buffers it like any in-class method
+ * body (two-phase). */
+static void
+cpp_synth_inherited_ctor(struct scope *s, struct type *derived,
+    struct structbuilder *b, struct type *base, struct type *bctor)
+{
+	extern void cpp_define_method(struct scope *, struct type *,
+	    const char *, const char *, bool, bool, bool);
+	extern void tokpush(struct token *, size_t);
+	extern void next(void);
+
+	struct type *ct;
+	struct decl *sp, *pd, **pend;
+	struct token *toks = NULL;
+	size_t n = 0;
+	int argno = 0;
+	bool first = true;
+	struct location loc = tok.loc;
+
+	/* derived-class ctor type: same parameter list as the base ctor,
+	 * void return */
+	ct = mktype(TYPEFUNC, 0);
+	ct->qual = QUALNONE;
+	ct->base = &typevoid;
+	ct->u.func.isvararg = bctor->u.func.isvararg;
+	ct->u.func.params = NULL;
+	ct->u.func.nparam = 0;
+	pend = &ct->u.func.params;
+
+	/* synthesize `: Base(a0, a1, ...) { }` — the init list forwards
+	 * every parameter to the base ctor; the body is empty */
+	cpp_ss_addtok(&toks, &n, TCOLON, NULL, loc);
+	cpp_ss_addtok(&toks, &n, TIDENT, (char *)base->u.structunion.tag, loc);
+	cpp_ss_addtok(&toks, &n, TLPAREN, NULL, loc);
+	for (sp = bctor->u.func.params; sp; sp = sp->next) {
+		char namebuf[32];
+		const char *pname = sp->name;
+		if (!pname) {
+			snprintf(namebuf, sizeof namebuf, "__mcc_inh%d", argno);
+			pname = xmalloc(strlen(namebuf) + 1);
+			strcpy((char *)pname, namebuf);
+		}
+		pd = mkdecl((char *)pname, DECLOBJECT, sp->type, sp->qual,
+		            LINKNONE);
+		pd->u.obj.storage = SDAUTO;
+		*pend = pd;
+		pend = &pd->next;
+		++ct->u.func.nparam;
+		if (!first)
+			cpp_ss_addtok(&toks, &n, TCOMMA, NULL, loc);
+		first = false;
+		cpp_ss_addtok(&toks, &n, TIDENT, (char *)pname, loc);
+		++argno;
+	}
+	cpp_ss_addtok(&toks, &n, TRPAREN, NULL, loc);
+	cpp_ss_addtok(&toks, &n, TLBRACE, NULL, loc);
+	cpp_ss_addtok(&toks, &n, TRBRACE, NULL, loc);
+
+	/* replay: keep the following class-body token, push the synthesized
+	 * init list + body in front, and let cpp_define_method buffer it
+	 * (the class layout is not fixed yet).  tokpush keeps the token
+	 * pointer, so the saved token is heap-copied (like struct_decl's
+	 * '&' restore) */
+	{
+		struct token *cur = xmalloc(sizeof *cur);
+		*cur = tok;
+		tokpush(cur, 1);
+		tokpush(toks, n);
+		next(); /* position at the synthesized ':' */
+	}
+	cpp_define_method(s, ct, derived->u.structunion.tag,
+	    derived->u.structunion.tag, false, false, false);
+	addmember(b, (struct qualtype){ct, QUALNONE, NULL},
+	    derived->u.structunion.tag, 0, -1);
+	free(toks);
+}
+
 /* Parse a C++ `namespace NAME { ... }` block.  Inner declarations are
  * registered in a fresh scope named NAME; the namespace itself is
  * registered in the enclosing scope as a DECLNAMESPACE so `NAME::symbol`
  * can be resolved (single-level for now).  The namespace scope outlives
  * parsing (never delscope'd) so qualified lookups keep working. */
+/* Is the current token the start of a namespace declaration, possibly
+ * prefixed by the C++11 `inline` keyword (`inline namespace NAME {`)?
+ * Peeks one token ahead for the `inline` case and restores the stream. */
+static bool
+cpp_is_namespace_decl(void)
+{
+	enum cpp_tokenkind k = cpp_tok_kind();
+
+	if (k == CPP_TNAMESPACE)
+		return true;
+	if (k == CPP_TINLINE) {
+		struct token save = tok;
+		struct token peek;
+		struct token *tp;
+		next();
+		peek = tok;
+		tok = save;
+		/* tokpush stores the token pointer, so the peeked token must
+		 * outlive this frame (heap copy, like struct_decl's '&' restore) */
+		tp = xmalloc(sizeof *tp);
+		*tp = peek;
+		tokpush(tp, 1);
+		return cpp_classify_token(peek) == CPP_TNAMESPACE;
+	}
+	return false;
+}
+
 static void
 cpp_namespace_decl(struct scope *s)
 {
 	struct scope *ns;
 	struct decl *nd;
 	const char *name;
+	bool is_inline = false;
 
+	if (cpp_tok_kind() == CPP_TINLINE) {
+		is_inline = true;
+		next(); /* consume 'inline' */
+	}
 	next(); /* consume 'namespace' */
 	if (tok.kind < TIDENT)
 		error_code(E_SYNTAX, &tok.loc, "expected namespace name");
@@ -791,9 +1074,26 @@ cpp_namespace_decl(struct scope *s)
 	nd->u.ns = ns;
 	scopeputdecl(s, nd);
 
+	/* inline namespace (C++11): its members are visible in the enclosing
+	 * scope, like a `using namespace` directive — but only when the
+	 * enclosing scope is itself visible to name lookup (the file scope
+	 * or a namespace already brought in by a using-directive), so a
+	 * plain `namespace A { inline namespace B { ... } }` does not leak
+	 * B's members into the file scope. */
+	if (is_inline) {
+		extern struct scope filescope;
+		bool parent_visible = s == &filescope;
+		int i;
+		for (i = 0; !parent_visible && i < g_cpp_nvisible_ns; i++)
+			if (g_cpp_visible_ns[i] == s)
+				parent_visible = true;
+		if (parent_visible)
+			cpp_add_visible_ns(ns);
+	}
+
 	while (tok.kind != TRBRACE && tok.kind != TEOF) {
 		enum cpp_tokenkind k = cpp_tok_kind();
-		if (k == CPP_TNAMESPACE) {
+		if (cpp_is_namespace_decl()) {
 			cpp_namespace_decl(ns);
 			continue;
 		}
@@ -814,11 +1114,6 @@ cpp_namespace_decl(struct scope *s)
 	next(); /* consume '}' */
 	/* deliberately keep ns alive for later NAME::name lookups */
 }
-
-/* Namespaces made visible by `using namespace NAME;` directives.  Lookups
- * that fail in the current scope consult these before giving up. */
-static struct scope *g_cpp_visible_ns[16];
-static int g_cpp_nvisible_ns;
 
 static void
 cpp_add_visible_ns(struct scope *ns)
@@ -1031,7 +1326,7 @@ cpp_export_decl(struct scope *s)
 				cpp_template_decl(s, NULL);
 			else if (k2 == CPP_TCLASS || k2 == CPP_TSTRUCT || k2 == CPP_TUNION)
 				cpp_class_decl(s);
-			else if (k2 == CPP_TNAMESPACE)
+			else if (cpp_is_namespace_decl())
 				cpp_namespace_decl(s);
 			else
 				decl(s, NULL);
@@ -1084,7 +1379,7 @@ cpp_parse_translation_unit(void)
 			g_err_recovery_set = 0;
 			continue;
 		}
-		if (k == CPP_TNAMESPACE) {
+		if (cpp_is_namespace_decl()) {
 			cpp_namespace_decl(&filescope);
 			g_err_recovery_set = 0;
 			continue;
@@ -1150,7 +1445,7 @@ cpp_parse_translation_unit(void)
 							cpp_class_decl(&filescope);
 						else
 							decl(&filescope, NULL);
-					} else if (k2 == CPP_TNAMESPACE) {
+					} else if (cpp_is_namespace_decl()) {
 						cpp_namespace_decl(&filescope);
 					} else if (k2 == CPP_TUSING) {
 						cpp_using_decl(&filescope);
@@ -2055,11 +2350,23 @@ cpp_same_class_context(struct type *t)
 bool
 cpp_member_accessible(struct type *t, struct member *m)
 {
+	struct cpp_friend *fr;
+
 	if (!m || m->access == ACC_PUBLIC)
 		return true;
 	if (m->access == ACC_PROTECTED && cpp_is_derived(g_cpp_method.class_type, t))
 		return true;
-	return cpp_same_class_context(t);
+	if (cpp_same_class_context(t))
+		return true;
+	/* friend classes of `t` (recorded by `friend class B;` in its body)
+	 * may access its private/protected members from their own methods;
+	 * friend free functions are covered by cpp_friend_decl pointing the
+	 * method context at the befriending class while their body is parsed */
+	if (g_cpp_method.active && g_cpp_method.class_type)
+		for (fr = t->u.structunion.friends; fr; fr = fr->next)
+			if (fr->cls == g_cpp_method.class_type)
+				return true;
+	return false;
 }
 
 /* Define a member function as an out-of-line free function named
@@ -2428,16 +2735,38 @@ cpp_parse_free_operator(struct scope *s, struct qualtype base)
 	if (cpp_tok_kind() != CPP_TOPERATOR)
 		error_code(E_SYNTAX, &tok.loc, "expected 'operator'");
 	next(); /* consume 'operator' */
-	opcode = cpp_op_mangle(tok.kind);
-	if (!opcode)
-		error_code(E_OVERLOAD, &tok.loc, "unsupported operator for overloading");
-	next(); /* consume the operator token */
-	/* operator()/operator[]: the closing ')' / ']' of the operator token
-	 * follows; the next '(' is the parameter list. */
-	if (strcmp(opcode, "cl") == 0)
-		expect(TRPAREN, "after 'operator()'");
-	else if (strcmp(opcode, "ix") == 0)
-		expect(TRBRACK, "after 'operator[]'");
+	/* C++11 user-defined literal: `operator""_km` — the `""` string
+	 * literal token is followed by the user suffix identifier (`_km`).
+	 * Lowered to the free-function name `operator_udl_km` (standard
+	 * non-`_` suffixes are reserved and never reach here). */
+	if (tok.kind == TSTRINGLIT) {
+		const char *sfx;
+		if (strcmp(tok.lit, "\"\"") != 0)
+			error_code(E_OVERLOAD, &tok.loc,
+			    "user-defined literal must use operator\"\"");
+		next(); /* consume "" */
+		if (tok.kind < TIDENT)
+			error_code(E_SYNTAX, &tok.loc,
+			    "expected suffix identifier after operator\"\"");
+		sfx = tokenstr(tok.kind);
+		if (sfx[0] != '_')
+			error_code(E_OVERLOAD, &tok.loc,
+			    "user-defined literal suffix must begin with '_'");
+		next(); /* consume the suffix identifier */
+		snprintf(mname, sizeof mname, "operator_udl_%s", sfx + 1);
+	} else {
+		opcode = cpp_op_mangle(tok.kind);
+		if (!opcode)
+			error_code(E_OVERLOAD, &tok.loc, "unsupported operator for overloading");
+		next(); /* consume the operator token */
+		/* operator()/operator[]: the closing ')' / ']' of the operator
+		 * token follows; the next '(' is the parameter list. */
+		if (strcmp(opcode, "cl") == 0)
+			expect(TRPAREN, "after 'operator()'");
+		else if (strcmp(opcode, "ix") == 0)
+			expect(TRBRACK, "after 'operator[]'");
+		snprintf(mname, sizeof mname, "operator_%s", opcode);
+	}
 
 	ft = mktype(TYPEFUNC, 0);
 	ft->qual = QUALNONE;
@@ -2459,7 +2788,6 @@ cpp_parse_free_operator(struct scope *s, struct qualtype base)
 		}
 		next(); /* consume ')' */
 	}
-	snprintf(mname, sizeof mname, "operator_%s", opcode);
 	/* mkdecl/scopeputdecl keep the name pointer; persist it off the
 	 * stack (token strings from the C parser are stable, ours are not). */
 	pmangled = xmalloc(strlen(mname) + 1);
@@ -2496,6 +2824,82 @@ cpp_parse_free_operator(struct scope *s, struct qualtype base)
 	delscope(fs);
 	delfunc(f);
 	d->defined = true;
+}
+
+/* C++11 user-defined literal suffix detection.  Given the token text of a
+ * number literal (e.g. "1.5_km", "123_km2", "0x1_0000"), return a pointer
+ * to the `_suffix` part, or NULL when the text carries no UDL suffix.
+ * A UDL suffix is a `_` followed by an identifier start (alphabetic or
+ * underscore); a `_` followed by a digit is a C++14 digit separator
+ * (`0x1_0000`) and not a suffix.  Scanning back from the end, the first
+ * `_` decides: the suffix, if any, is the final `_identifier` run. */
+const char *
+cpp_udl_suffix_of(const char *lit)
+{
+	size_t n = strlen(lit);
+	size_t i;
+
+	if (n < 2)
+		return NULL;
+	for (i = n; i > 1; --i) {
+		if (lit[i - 1] == '_') {
+			unsigned char c = lit[i];
+			if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			    c == '_')
+				return &lit[i - 1];
+			return NULL; /* digit separator / non-suffix '_' */
+		}
+	}
+	return NULL;
+}
+
+/* Lower a user-defined literal to a call: `1.5_km` -> `operator_udl_km(e)`.
+ * The literal argument `arg` is already parsed (a numeric constant, or the
+ * decayed pointer of a string literal).  The UDL function's parameter list
+ * drives the binding: a string UDL takes (const char*, size_t), so the
+ * literal length (excluding NUL) is appended when a second parameter is
+ * declared.  Returns NULL when no matching operator is in scope. */
+struct expr *
+cpp_udl_literal_call(struct scope *s, const char *sfx, struct expr *arg)
+{
+	extern struct scope filescope;
+
+	char mname[128];
+	struct decl *fd, *pp;
+	struct expr *fn, *call, **end;
+
+	snprintf(mname, sizeof mname, "operator_udl_%s", sfx + 1);
+	fd = scopegetdecl(s, mname, 1);
+	if (!fd || fd->kind != DECLFUNC)
+		return NULL;
+	fn = mkexpr(EXPRIDENT, fd->type, NULL);
+	fn->u.ident.decl = fd;
+	fn = decay(fn); /* &operator_udl_km */
+
+	call = mkexpr(EXPRCALL, fd->type->base, fn);
+	call->u.call.args = NULL;
+	call->u.call.nargs = 0;
+	end = &call->u.call.args;
+	pp = fd->type->u.func.params;
+	{
+		struct expr *a = arg;
+		if (pp && pp->type && pp->type->isref)
+			a = mkunaryexpr(TBAND, arg);
+		*end = exprassign(a, pp ? pp->type : NULL);
+		end = &(*end)->next;
+		++call->u.call.nargs;
+	}
+	pp = pp ? pp->next : NULL;
+	if (pp) {
+		/* string UDL: append the literal length (chars, minus NUL) */
+		unsigned long long len = 0;
+		if (arg->kind == EXPRUNARY && arg->base &&
+		    arg->base->kind == EXPRSTRING)
+			len = arg->base->u.string.size - 1;
+		*end = exprassign(mkconstexpr(&typeulong, len), pp->type);
+		++call->u.call.nargs;
+	}
+	return call;
 }
 
 /* C++ member-function lookup helpers.  A function member is registered in
@@ -2879,10 +3283,14 @@ cpp_parse_init_list(struct func *f, struct scope *fs)
 		expect(TLPAREN, "'(' after initializer name");
 		{
 			/* one or more comma-separated argument expressions (parsed
-			 * with condexpr so the ',' between init items is not eaten) */
+			 * with condexpr so the ',' between init items is not eaten);
+			 * an empty argument list (`Base()`) is valid too */
 			struct expr *head = NULL, **ae = &head;
 			for (;;) {
-				struct expr *a = condexpr(fs);
+				struct expr *a;
+				if (tok.kind == TRPAREN)
+					break;
+				a = condexpr(fs);
 				*ae = a;
 				ae = &a->next;
 				if (tok.kind != TCOMMA)
@@ -7419,6 +7827,88 @@ cpp_is_lambda_closure(const struct type *t)
 	return tag && strncmp(tag, "__lambda", 8) == 0;
 }
 
+/* Gather the default captures of a lambda: every automatic object
+ * visible in the enclosing scopes (from `s` up to, but excluding, the
+ * file scope) that is not already in `caps[0..*ncap)`, appended either
+ * by reference (`[&]`) or by value (`[=]`).  A reference variable
+ * `T &r` is captured by reference as `T &` (of the referent) or by
+ * value as `T` (the referent's value). */
+static void
+cpp_lambda_default_captures(struct scope *s, struct cpp_lambda_cap *caps,
+    int *ncap, int capmax, bool by_ref)
+{
+	extern struct scope filescope;
+	struct scope *sc;
+
+	for (sc = s; sc && sc != &filescope; sc = sc->parent) {
+		struct map *m = &sc->decls;
+		size_t i;
+		if (!m->len)
+			continue;
+		for (i = 0; i < m->cap; ++i) {
+			struct decl *d;
+			struct expr *ie;
+			bool seen = false;
+			int j;
+
+			if (!m->keys[i].str)
+				continue;
+			d = m->vals[i].p;
+			if (!d || d->kind != DECLOBJECT)
+				continue;
+			if (d->linkage != LINKNONE || d->u.obj.storage != SDAUTO)
+				continue;
+			/* the implicit this parameter is not capturable */
+			if (d->name && strcmp(d->name, "this") == 0)
+				continue;
+			/* a default *by-value* capture skips lambda closure objects: the
+			 * synthesized closure class has no copy ctor, so `[=]` cannot
+			 * copy an enclosing lambda.  (`[&]` may still capture its
+			 * reference.) */
+			if (!by_ref && d->type && cpp_is_lambda_closure(d->type))
+				continue;
+			for (j = 0; j < *ncap; ++j)
+				if (strcmp(caps[j].name, d->name) == 0) {
+					seen = true;
+					break;
+				}
+			if (seen)
+				continue;
+			if (*ncap >= capmax)
+				error_code(E_SYNTAX, &tok.loc,
+				    "too many captures in lambda");
+			caps[*ncap].name = d->name;
+			caps[*ncap].d = d;
+			caps[*ncap].by_ref = by_ref;
+			ie = mkexpr(EXPRIDENT, d->type, NULL);
+			ie->qual = d->qual;
+			ie->lvalue = true;
+			ie->u.ident.decl = d;
+			if (by_ref && d->type && d->type->isref) {
+				/* `[&]` on a reference variable captures the referent:
+				 * member `T &`, ctor arg `&*r` */
+				caps[*ncap].t = d->type;
+				caps[*ncap].arg = mkunaryexpr(TMUL, ie);
+				caps[*ncap].arg->lvalue = true;
+			} else if (by_ref) {
+				caps[*ncap].t = mkpointertype(d->type, QUALNONE);
+				caps[*ncap].t->isref = true; /* T & */
+				caps[*ncap].arg = ie;
+			} else if (d->type && d->type->isref) {
+				/* `[=]` on a reference variable captures the referent's
+				 * value */
+				caps[*ncap].t = d->type->base;
+				caps[*ncap].arg = mkunaryexpr(TMUL, ie);
+				caps[*ncap].arg->lvalue = true;
+			} else {
+				caps[*ncap].t = d->type;
+				caps[*ncap].arg = ie;
+			}
+			++*ncap;
+		}
+	}
+}
+
 /* Parse a C++11 lambda expression `[captures](params) -> ret { body }` and
  * lower it to an anonymous closure class (`__lambdaN`) whose `operator()`
  * is the lambda body and whose members are the by-value captures; returns
@@ -7426,9 +7916,10 @@ cpp_is_lambda_closure(const struct type *t)
  *
  * The closure class is defined by replaying a synthesized
  * `class __lambdaN { ... }` through cpp_class_decl, reusing the existing
- * member/constructor/operator machinery.  By-reference captures, default
- * captures (`[=]` / `[&]`), init-captures and generic (auto) parameters
- * are not supported yet. */
+ * member/constructor/operator machinery.  By-reference captures
+ * (`[&x]`, `[&]`), default by-value captures (`[=]`), init-captures
+ * (`[n = expr]`) and mixed captures (`[=, &y]`, `[&, y]`) are
+ * supported; generic (auto) parameters use the same mechanism. */
 struct expr *
 cpp_lambda_expr(struct scope *s)
 {
@@ -7439,7 +7930,7 @@ cpp_lambda_expr(struct scope *s)
 	    bool);
 	extern void tokpush(struct token *, size_t);
 
-	struct cpp_lambda_cap caps[16];
+	struct cpp_lambda_cap caps[32];
 	int ncap = 0;
 	struct token *ptoks = NULL, *rtoks = NULL, *btoks = NULL;
 	size_t pn = 0, pcap = 0, rn = 0, rcap = 0, bn = 0, bcap = 0;
@@ -7460,55 +7951,159 @@ cpp_lambda_expr(struct scope *s)
 	struct decl *tmp;
 	int i;
 
-	/* --- capture list `[ x, y ]` --- */
+	/* --- capture list `[ x, &y, &, =, n = expr ]` ---
+	 * C++11/14 captures:
+	 *   `[x]`        by-value capture of local x
+	 *   `[&x]`       by-reference capture of local x
+	 *   `[&]`        default by-reference capture (all enclosing locals)
+	 *   `[=]`        default by-value capture (all enclosing locals)
+	 *   `[n = expr]` init-capture: new closure member n from expr
+	 *   `[&n = expr]` reference init-capture
+	 *   `[=, &y]` / `[&, y]`  default plus per-variable override
+	 *
+	 * A by-reference capture lowers as: the closure member is declared
+	 * `T &` (cpp_member_ident auto-dereferences it inside the operator()
+	 * body), the synthesized ctor takes a plain `T *` parameter (so it
+	 * does not auto-dereference), the ctor binds it through the
+	 * initializer-list item `name(__cN)` (`*(this + off) = __cN`), and
+	 * the closure object is constructed with `&x`. */
 	next(); /* consume '[' */
-	while (tok.kind != TRBRACK) {
-		if (tok.kind == TBAND)
-			error_code(E_CTYPE, &tok.loc, "reference capture '[&...]' is not supported yet (by-value capture only)");
-		if (tok.kind < TIDENT)
-			error_code(E_SYNTAX, &tok.loc, "expected capture name in lambda capture list");
-		if (ncap >= (int)countof(caps))
-			error_code(E_SYNTAX, &tok.loc, "too many captures in lambda");
-		caps[ncap].name = tokenstr(tok.kind);
-		caps[ncap].by_ref = false;
-		caps[ncap].d = scopegetdecl(s, caps[ncap].name, 1);
-		if (caps[ncap].d && caps[ncap].d->kind == DECLOBJECT) {
-			/* ordinary capture of an enclosing-scope local */
-			caps[ncap].t = caps[ncap].d->type;
-			caps[ncap].arg = mkexpr(EXPRIDENT, caps[ncap].t, NULL);
-			caps[ncap].arg->qual = caps[ncap].d->qual;
-			caps[ncap].arg->lvalue = true;
-			caps[ncap].arg->u.ident.decl = caps[ncap].d;
-		} else {
-			/* defect T: an outer lambda's captured variable lowers to a
-			 * member of its closure class, not a local; resolve it the
-			 * same way a bare member name in the operator() body is
-			 * resolved — as `(*this).name` of the current method's
-			 * class.  This lets an inner lambda re-capture anything the
-			 * outer one captured. */
-			struct expr *me = cpp_member_ident(s, caps[ncap].name);
-			if (!me || me->type->kind == TYPEFUNC) {
-				/* a member function (or non-member) is not capturable;
-				 * clear any pending member-call state cpp_member_ident
-				 * may have recorded */
-				g_cpp_member_this = NULL;
-				g_cpp_member_class = NULL;
-				g_cpp_member_name = NULL;
-				g_cpp_member_const = false;
-				error_code(E_DECL, &tok.loc, "cannot capture variable '%s'",
-				    caps[ncap].name);
+	{
+		bool def_ref = false, def_val = false, lead_ref = false;
+
+		/* leading default-capture specifier: `[&]` / `[=]`, optionally
+		 * followed by explicit captures (`[&, y]`, `[=, &y]`).  When the
+		 * specifier is directly followed by a capture name (`[&x]`) it is
+		 * a by-reference capture of that variable instead. */
+		if (tok.kind == TBAND || tok.kind == TASSIGN) {
+			bool br = tok.kind == TBAND;
+			next();
+			if (tok.kind == TRBRACK || tok.kind == TCOMMA) {
+				def_ref = br;
+				def_val = !br;
+				if (tok.kind == TCOMMA)
+					next();
+			} else {
+				if (!br)
+					error_code(E_SYNTAX, &tok.loc,
+					    "expected ']' or ',' after '=' in lambda capture list");
+				lead_ref = true; /* `[&name`: by-reference capture */
 			}
-			caps[ncap].d = NULL;
-			caps[ncap].t = me->type;
-			caps[ncap].arg = me;
 		}
-		++ncap;
-		next();
-		if (tok.kind == TRBRACK)
-			break;
-		expect(TCOMMA, "',' or ']' in lambda capture list");
+		while (tok.kind != TRBRACK) {
+			bool by_ref = lead_ref;
+			lead_ref = false;
+			if (tok.kind == TBAND) {
+				by_ref = true;
+				next();
+				if (tok.kind == TRBRACK || tok.kind == TCOMMA)
+					error_code(E_SYNTAX, &tok.loc,
+					    "expected capture name after '&' in lambda capture list");
+			}
+			if (tok.kind < TIDENT)
+				error_code(E_SYNTAX, &tok.loc,
+				    "expected capture name in lambda capture list");
+			if (ncap >= (int)countof(caps))
+				error_code(E_SYNTAX, &tok.loc, "too many captures in lambda");
+			caps[ncap].name = tokenstr(tok.kind);
+			caps[ncap].by_ref = by_ref;
+			next();
+			if (tok.kind == TASSIGN) {
+				/* init-capture `[n = expr]` / `[&n = expr]`: the name is not
+				 * an enclosing variable — it introduces a new closure member
+				 * initialized from the expression. */
+				next(); /* consume '=' */
+				caps[ncap].d = NULL;
+				caps[ncap].arg = assignexpr(s);
+				if (by_ref) {
+					caps[ncap].t = mkpointertype(caps[ncap].arg->type,
+					    QUALNONE);
+					caps[ncap].t->isref = true; /* T & */
+				} else {
+					caps[ncap].t = caps[ncap].arg->type;
+				}
+				++ncap;
+			} else {
+				caps[ncap].d = scopegetdecl(s, caps[ncap].name, 1);
+				if (caps[ncap].d && caps[ncap].d->kind == DECLOBJECT) {
+					/* ordinary capture of an enclosing-scope local */
+					struct decl *d = caps[ncap].d;
+					if (by_ref && d->type && d->type->isref) {
+						/* `[&r]` where `r` is `T &`: capture the referent —
+						 * member `T &`, ctor arg `&*r` */
+						struct expr *ie = mkexpr(EXPRIDENT, d->type, NULL);
+						ie->qual = d->qual;
+						ie->lvalue = true;
+						ie->u.ident.decl = d;
+						caps[ncap].t = d->type;
+						caps[ncap].arg = mkunaryexpr(TMUL, ie);
+						caps[ncap].arg->lvalue = true;
+					} else if (by_ref) {
+						caps[ncap].t = mkpointertype(d->type, QUALNONE);
+						caps[ncap].t->isref = true; /* T & */
+						caps[ncap].arg = mkexpr(EXPRIDENT, d->type, NULL);
+						caps[ncap].arg->qual = d->qual;
+						caps[ncap].arg->lvalue = true;
+						caps[ncap].arg->u.ident.decl = d;
+					} else if (d->type && d->type->isref) {
+						/* `[r]` on a reference variable captures the
+						 * referent's value */
+						struct expr *ie = mkexpr(EXPRIDENT, d->type, NULL);
+						ie->qual = d->qual;
+						ie->lvalue = true;
+						ie->u.ident.decl = d;
+						caps[ncap].t = d->type->base;
+						caps[ncap].arg = mkunaryexpr(TMUL, ie);
+						caps[ncap].arg->lvalue = true;
+					} else {
+						caps[ncap].t = d->type;
+						caps[ncap].arg = mkexpr(EXPRIDENT, d->type, NULL);
+						caps[ncap].arg->qual = d->qual;
+						caps[ncap].arg->lvalue = true;
+						caps[ncap].arg->u.ident.decl = d;
+					}
+				} else {
+					/* defect T: an outer lambda's captured variable lowers to
+					 * a member of its closure class, not a local; resolve it
+					 * the same way a bare member name in the operator() body
+					 * is resolved — as `(*this).name` of the current method's
+					 * class.  This lets an inner lambda re-capture anything the
+					 * outer one captured. */
+					struct expr *me = cpp_member_ident(s, caps[ncap].name);
+					if (!me || me->type->kind == TYPEFUNC) {
+						/* a member function (or non-member) is not capturable;
+						 * clear any pending member-call state cpp_member_ident
+						 * may have recorded */
+						g_cpp_member_this = NULL;
+						g_cpp_member_class = NULL;
+						g_cpp_member_name = NULL;
+						g_cpp_member_const = false;
+						error_code(E_DECL, &tok.loc,
+						    "cannot capture variable '%s'", caps[ncap].name);
+					}
+					caps[ncap].d = NULL;
+					if (by_ref) {
+						caps[ncap].t = mkpointertype(me->type, QUALNONE);
+						caps[ncap].t->isref = true; /* T & */
+					} else {
+						caps[ncap].t = me->type;
+					}
+					caps[ncap].arg = me;
+				}
+				++ncap;
+			}
+			if (tok.kind == TRBRACK)
+				break;
+			expect(TCOMMA, "',' or ']' in lambda capture list");
+		}
+		next(); /* consume ']' */
+
+		/* default captures `[&]` / `[=]`: gather every automatic object of
+		 * the enclosing scopes that was not explicitly captured above. */
+		if (def_ref || def_val)
+			cpp_lambda_default_captures(s, caps, &ncap,
+			    (int)countof(caps), def_ref);
 	}
-	next(); /* consume ']' */
 
 	/* --- C++20 lambda template parameter list `[captures]<typename T>(T x)`
 	 * (optional; buffer through the matching '>') --- */
@@ -7602,12 +8197,22 @@ cpp_lambda_expr(struct scope *s)
 		snprintf(tagname, sizeof tagname, "__lambda%d", g_cpp_lambda_count++);
 		for (i = 0; i < ncap; ++i) {
 			/* per-capture DECLTYPE `__lti` bound to the captured type;
-			 * the closure member declaration `__lti cap_i` is typed. */
+			 * the closure member declaration `__lti cap_i` is typed.  A
+			 * by-reference capture additionally gets `__ltpi` bound to
+			 * `T *` for the synthesized ctor's parameter. */
 			snprintf(tn, sizeof tn, "__lt%d", i);
 			td = mkdecl(xmalloc(strlen(tn) + 1), DECLTYPE, caps[i].t,
 			    QUALNONE, LINKNONE);
 			strcpy((char *)td->name, tn);
 			scopeputdecl(&filescope, td);
+			if (caps[i].by_ref) {
+				snprintf(tn, sizeof tn, "__ltp%d", i);
+				td = mkdecl(xmalloc(strlen(tn) + 1), DECLTYPE,
+				    mkpointertype(caps[i].t->base, QUALNONE),
+				    QUALNONE, LINKNONE);
+				strcpy((char *)td->name, tn);
+				scopeputdecl(&filescope, td);
+			}
 		}
 	}
 	wcap = 64 + (size_t)ncap * 32 + pn + rn + bn + 32;
@@ -7635,7 +8240,9 @@ cpp_lambda_expr(struct scope *s)
 	for (i = 0; i < ncap; ++i) {
 		if (i)
 			cpp_tb(wtoks, &wn, tmpl, TCOMMA, NULL);
-		snprintf(tn, sizeof tn, "__lt%d", i);
+		/* by-reference captures take a plain `T *` parameter so it does
+		 * not auto-dereference when bound by the ctor init list */
+		snprintf(tn, sizeof tn, caps[i].by_ref ? "__ltp%d" : "__lt%d", i);
 		cpp_tb(wtoks, &wn, tmpl, 0, tn);
 		snprintf(cn, sizeof cn, "__c%d", i);
 		cpp_tb(wtoks, &wn, tmpl, 0, cn);
@@ -7644,7 +8251,10 @@ cpp_lambda_expr(struct scope *s)
 	{
 		bool first = true;
 		for (i = 0; i < ncap; ++i) {
-			if (!cpp_lambda_cap_needs_ctor_init(&caps[i]))
+			/* by-reference captures must bind in the init list too: a
+			 * reference member can only be initialized, never assigned */
+			if (!cpp_lambda_cap_needs_ctor_init(&caps[i]) &&
+			    !caps[i].by_ref)
 				continue;
 			cpp_tb(wtoks, &wn, tmpl, first ? TCOLON : TCOMMA, NULL);
 			first = false;
@@ -7657,8 +8267,8 @@ cpp_lambda_expr(struct scope *s)
 	}
 	cpp_tb(wtoks, &wn, tmpl, TLBRACE, NULL);
 	for (i = 0; i < ncap; ++i) {
-		if (cpp_lambda_cap_needs_ctor_init(&caps[i]))
-			continue; /* already copy-constructed by the init list */
+		if (cpp_lambda_cap_needs_ctor_init(&caps[i]) || caps[i].by_ref)
+			continue; /* already initialized by the init list */
 		cpp_tb(wtoks, &wn, tmpl, 0, caps[i].name);
 		cpp_tb(wtoks, &wn, tmpl, TASSIGN, NULL);
 		snprintf(cn, sizeof cn, "__c%d", i);
@@ -7753,8 +8363,11 @@ cpp_lambda_expr(struct scope *s)
 	ae = &args;
 	for (i = 0; i < ncap; ++i) {
 		/* the capture's lvalue: a local variable's identifier, or an
-		 * outer closure member `(*this).m` (defect T) */
+		 * outer closure member `(*this).m` (defect T).  A by-reference
+		 * capture passes the address (`T *` ctor parameter). */
 		struct expr *cap = caps[i].arg;
+		if (caps[i].by_ref)
+			cap = mkunaryexpr(TBAND, cap);
 		*ae = cap;
 		ae = &cap->next;
 	}

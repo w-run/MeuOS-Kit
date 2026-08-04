@@ -125,6 +125,14 @@ struct member {
 /* C++ vtable slot (full definition in cpp/cpp.h). */
 struct cpp_vslot;
 
+/* C++ friend class of a class (recorded by `friend class B;` inside the
+ * class body).  Methods of a friend class may access the befriending
+ * class's private/protected members. */
+struct cpp_friend {
+	struct type *cls;
+	struct cpp_friend *next;
+};
+
 struct type {
 	enum typekind kind;
 	enum typeprop prop;
@@ -174,6 +182,9 @@ struct type {
 			struct cpp_vslot *vslots;       /* finalized vtable layout */
 			int nvslots;
 			struct type *primary_base;      /* first polymorphic base */
+			/* friend classes (`friend class B;` inside the body) whose
+			 * methods may access this class's private/protected members */
+			struct cpp_friend *friends;
 		} structunion;
 		struct {
 			enum typequal basequal;
