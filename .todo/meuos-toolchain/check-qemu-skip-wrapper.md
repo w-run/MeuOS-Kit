@@ -1,6 +1,6 @@
 # check-qemu-x86_64 / check-qemu-i386 缺 SKIP 包装 + 路径写死
 
-> 状态：🔄 开放（pre-existing，2026-08-04 由 reviewer-auditor 在 rtld P0 验收中发现）
+> 状态：✅ 无需改动（基线 df962a0 已含 commit de49e414 修复）
 > 分支参考：tmp/rtld-p0
 > 关联文件：projects/meuos-toolchain/Makefile
 
@@ -33,3 +33,16 @@ Makefile line 312-323（`check-qemu-x86_64` / `check-qemu-i386`）：
 - 仅 Makefile；
 - 不动 src/*；
 - 文件级 git commit `mt: add SKIP wrapper for check-qemu-x86_64 and check-qemu-i386`。
+
+## 核实记录（2026-08-04 exec-toolchain-lite-2）
+
+- **commit**：`de49e414`（"ci: 添加 check-qemu-x86_64/i386 + 6 架构统一 QEMU 测试"，2026-07-31，已合入基线 df962a0）。
+- **Makefile 312-324 现状摘要**：
+  - 路径由 `../../env/qemu/...` **写死改为 abspath 动态解析**（经 `$(abspath ...)` 定位项目根 `env/qemu`，规避 worktree 下相对路径失效）；
+  - 缺 QEMU 二进制 → `SKIP (no QEMU)`；
+  - 缺 sysroot → `SKIP (no sysroot)`；
+  - 与 aarch64/riscv64/loongarch64/arm 的统一 SKIP 包装一致。
+- **实测命令与结果**：
+  - `make -C projects/meuos-toolchain check-qemu-x86_64` / `check-qemu-i386`：worktree 无 QEMU 时输出 `SKIP (no QEMU)`，exit 0；
+  - `make -C projects/meuos-toolchain check`：全 PASS，无回归。
+- **误报说明**：该缺陷已在 2026-07-31 的 de49e414 合入基线 df962a0 后不复现；reviewer-auditor 于 rtld P0 验收时按旧情 reported，属**信息滞后**导致，无需代码改动，本待办关闭为 no-op。
