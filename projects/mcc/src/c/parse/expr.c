@@ -410,6 +410,14 @@ exprassign(struct expr *e, struct type *t)
 		assert(t->prop & PROPARITH);
 		if (!(et->prop & PROPARITH))
 			error_tok_code(E_TYPE, &tok, "assignment to arithmetic type must be from arithmetic type");
+		/* C++11 scoped enum does not implicitly convert to its
+		 * underlying or any integral type; an explicit cast is
+		 * required (`(int)c`). */
+		extern int g_lang;
+		if (g_lang == 1 && et->kind == TYPEENUM && et->scoped &&
+		    t->kind != TYPEENUM)
+			error_tok_code(E_TYPE, &tok,
+			    "scoped enumeration does not implicitly convert to an integer type; use an explicit cast");
 		/* -Wconversion: 隐式整数转换截断（宽 -> 窄） */
 		if (warn_level & WARN_CONVERSION)
 			warn_conv_trunc(&tok.loc, t, e);
@@ -456,6 +464,7 @@ mkbinaryexpr(struct location *loc, enum tokenkind op, struct expr *l, struct exp
 	struct type *t = NULL;
 	enum typeprop lp, rp;
 
+	extern int g_lang;
 	lp = l->type->prop;
 	rp = r->type->prop;
 	switch (op) {
@@ -470,6 +479,16 @@ mkbinaryexpr(struct location *loc, enum tokenkind op, struct expr *l, struct exp
 	case TEQL:
 	case TNEQ:
 		t = &typeint;
+		/* C++11 scoped enum only compares with the same scoped enum
+		 * type (`c == Color::Red`); it does not convert to/from int. */
+		if (g_lang == 1 &&
+		    ((l->type->kind == TYPEENUM && l->type->scoped) ||
+		     (r->type->kind == TYPEENUM && r->type->scoped))) {
+			if (!(l->type->kind == TYPEENUM && r->type->kind == TYPEENUM &&
+			      typecompatible(l->type, r->type)))
+				error_code(E_CTYPE, loc,
+				    "scoped enumeration may only be compared with the same scoped enumeration type");
+		}
 		if (lp & PROPARITH && rp & PROPARITH) {
 			if (warn_level & WARN_SIGN_COMPARE)
 				warn_sign_compare(loc, l, r);
@@ -537,6 +556,16 @@ mkbinaryexpr(struct location *loc, enum tokenkind op, struct expr *l, struct exp
 	case TGEQ:
 	case TSPACESHIP:
 		t = &typeint;
+		/* C++11 scoped enum: relational compare only with the same
+		 * scoped enum type. */
+		if (g_lang == 1 &&
+		    ((l->type->kind == TYPEENUM && l->type->scoped) ||
+		     (r->type->kind == TYPEENUM && r->type->scoped))) {
+			if (!(l->type->kind == TYPEENUM && r->type->kind == TYPEENUM &&
+			      typecompatible(l->type, r->type)))
+				error_code(E_CTYPE, loc,
+				    "scoped enumeration may only be compared with the same scoped enumeration type");
+		}
 		if (lp & PROPREAL && rp & PROPREAL) {
 			if (warn_level & WARN_SIGN_COMPARE)
 				warn_sign_compare(loc, l, r);

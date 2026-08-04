@@ -154,6 +154,11 @@ struct type {
 	 * temporary (rvalue) arguments; distinguishes the move-constructor /
 	 * move-assignment overloads from the by-value and lvalue-ref ones. */
 	bool isrref;
+	/* C++11 scoped enumeration (`enum class E`): enumerators live in the
+	 * enum's own scope (accessed as `E::Red`, not unqualified `Red`) and
+	 * the enum type does not implicitly convert to its underlying integer
+	 * type.  Only meaningful for TYPEENUM. */
+	bool scoped;
 	union {
 		struct {
 			bool issigned, iscomplex;
