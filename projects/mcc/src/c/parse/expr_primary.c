@@ -453,6 +453,7 @@ primaryexpr(struct scope *s)
 			e->qual = d->qual;
 			e->lvalue = d->kind == DECLOBJECT;
 			e->u.ident.decl = d;
+			d->isused = true;   /* -Wunused-variable/-Wunused-parameter 标记 */
 			if (d->kind != DECLBUILTIN)
 				e = decay(e);
 			/* C++ reference: the identifier denotes the referent, so

@@ -243,6 +243,17 @@ struct decl {
 	/* C++: destructor already emitted for this local object (so a
 	 * return-statement run and the block-exit run don't double-destroy). */
 	bool dtor_done;
+	/* 诊断/警告状态（p9-ui 扩展）：
+	 *   isused        名字在表达式中出现过（-Wunused-variable/-Wunused-parameter）
+	 *   isassigned    已被赋值或带初始化器声明（-Wuninitialized 抑制）
+	 *   isparam       函数参数（未使用分类为 -Wunused-parameter）
+	 *   warned_uninit 已对该变量发出过 uninitialized 警告（防重复） */
+	bool isused;
+	bool isassigned;
+	bool isparam;
+	bool warned_uninit;
+	/* 声明处源码位置（未使用/未初始化等警告的精确标记点） */
+	struct location loc;
 	struct decl *next;
 
 	union {

@@ -28,6 +28,12 @@
 #include "mcc.h"
 #include "expr_internal.h"
 
+/* p9-ui 警告：不包含整个 ir.h（其 IR 层类型与 mcc.h 前端类型同名冲突，
+ * 见下），只借用 warn_level 与所需警告位。 */
+extern int warn_level;
+#define WARN_CONVERSION   (1<<10)
+#define WARN_SIGN_COMPARE (1<<11)
+
 /* Forward declarations for functions defined in the sibling expr_*.c
  * files. Keeping these here lets the entry points in this file refer to
  * them without dragging the whole C grammar into one translation unit. */
@@ -284,6 +290,69 @@ nullpointer(struct expr *e)
 		return false;
 	return e->u.constant.u == 0;
 }
+/* -Wconversion / -Wsign-compare 的整数符号判断：TYPECHAR..TYPELLONG
+ * 使用 u.arith.issigned；其余（枚举/位域/浮点）保守返回 false。 */
+static bool
+inttype_signed(const struct type *t)
+{
+	if (t->kind >= TYPECHAR && t->kind <= TYPELLONG)
+		return t->u.arith.issigned;
+	return false;
+}
+
+/* -Wconversion: 隐式整数转换可能截断（宽 -> 窄，非常量表达式）。
+ * 常量在目标可表示范围内（char c = 'a';）不警告，避免噪音。 */
+static void
+warn_conv_trunc(const struct location *loc, const struct type *dst,
+    const struct expr *e)
+{
+	const struct type *src = e->type;
+
+	if (!dst || !src)
+		return;
+	/* 只对整数目标警告；bool 目标视为状态转换不警告 */
+	if (dst->kind < TYPECHAR || dst->kind > TYPELLONG)
+		return;
+	if (src->kind < TYPECHAR || src->kind > TYPELLONG)
+		return;
+	/* 位域结果宽度由存储单元决定，跳过避免误报 */
+	if (e->kind == EXPRBITFIELD || e->kind == EXPRCOMPOUND)
+		return;
+	if (dst->u.arith.width >= src->u.arith.width)
+		return;
+	/* 常量且值在目标类型可表示范围内：不警告 */
+	if (e->kind == EXPRCONST) {
+		unsigned long long v = e->u.constant.u;
+		unsigned bits = dst->u.arith.width;
+		if (inttype_signed(dst)) {
+			if (bits <= 1)
+				return;
+			if (v < (1ull << (bits - 1)))
+				return;
+		} else if (bits >= 64 || (v & ~((1ull << bits) - 1)) == 0) {
+			return;
+		}
+	}
+	cc_warn(loc, WARN_CONVERSION,
+	    "implicit conversion from wider to narrower integer type may truncate value");
+}
+
+/* -Wsign-compare: 比较运算中一个操作数有符号、另一个无符号。
+ * 只处理 TYPECHAR..TYPELLONG；枚举/位域/浮点保守跳过。 */
+static void
+warn_sign_compare(const struct location *loc, const struct expr *l,
+    const struct expr *r)
+{
+	const struct type *lt = l->type, *rt = r->type;
+
+	if (lt->kind < TYPECHAR || lt->kind > TYPELLONG ||
+	    rt->kind < TYPECHAR || rt->kind > TYPELLONG)
+		return;
+	if (inttype_signed(lt) != inttype_signed(rt))
+		cc_warn(loc, WARN_SIGN_COMPARE,
+		    "comparison of integer expressions of different signedness");
+}
+
 struct expr *
 exprassign(struct expr *e, struct type *t)
 {
@@ -341,6 +410,9 @@ exprassign(struct expr *e, struct type *t)
 		assert(t->prop & PROPARITH);
 		if (!(et->prop & PROPARITH))
 			error_tok_code(E_TYPE, &tok, "assignment to arithmetic type must be from arithmetic type");
+		/* -Wconversion: 隐式整数转换截断（宽 -> 窄） */
+		if (warn_level & WARN_CONVERSION)
+			warn_conv_trunc(&tok.loc, t, e);
 		break;
 	}
 	return exprconvert(e, t);
@@ -399,6 +471,8 @@ mkbinaryexpr(struct location *loc, enum tokenkind op, struct expr *l, struct exp
 	case TNEQ:
 		t = &typeint;
 		if (lp & PROPARITH && rp & PROPARITH) {
+			if (warn_level & WARN_SIGN_COMPARE)
+				warn_sign_compare(loc, l, r);
 			commonreal(&l, &r);
 			break;
 		}
@@ -464,6 +538,8 @@ mkbinaryexpr(struct location *loc, enum tokenkind op, struct expr *l, struct exp
 	case TSPACESHIP:
 		t = &typeint;
 		if (lp & PROPREAL && rp & PROPREAL) {
+			if (warn_level & WARN_SIGN_COMPARE)
+				warn_sign_compare(loc, l, r);
 			commonreal(&l, &r);
 		} else if (l->type->kind == TYPEPOINTER && r->type->kind == TYPEPOINTER) {
 			if (!typecompatible(l->type->base, r->type->base) || l->type->base->kind == TYPEFUNC)
@@ -650,6 +726,27 @@ assignexpr(struct scope *s)
 	e->next = mkassignexpr(l, r);
 	return mkexpr(EXPRCOMMA, l->type, e);
 }
+/* Mark every variable named in the assignment target as assigned
+ * (-Wuninitialized 抑制)。`a.b = v` / `arr[i] = v` 把 a/arr 视为已赋值；
+ * `*p = v` 也把 p 标记（漏报可接受，避免误报）。 */
+static void
+mark_assigned(struct expr *e)
+{
+	struct expr *b;
+
+	for (b = e; b; b = b->base) {
+		if (b->kind == EXPRIDENT && b->u.ident.decl)
+			b->u.ident.decl->isassigned = true;
+		/* 成员访问 a.b / 下标 a[i] 被解析为 *(&a + off)：其下的
+		 * a 是地址计算的一部分，视为已赋值，继续标记；而裸指针
+		 * 解引用 *p = v 中 p 是读取，停在这里（漏报可接受）。 */
+		if (b->kind == EXPRUNARY && b->op == TMUL &&
+		    !(b->base && (b->base->kind == EXPRBINARY ||
+		      b->base->kind == EXPRBITFIELD)))
+			break;
+	}
+}
+
 struct expr *
 mkassignexpr(struct expr *l, struct expr *r)
 {
@@ -658,5 +755,6 @@ mkassignexpr(struct expr *l, struct expr *r)
 	e = mkexpr(EXPRASSIGN, l->type, NULL);
 	e->u.assign.l = l;
 	e->u.assign.r = exprassign(r, l->type);
+	mark_assigned(l);
 	return e;
 }

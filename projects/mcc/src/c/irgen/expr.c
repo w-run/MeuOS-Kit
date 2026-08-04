@@ -162,6 +162,17 @@ funcexpr(struct func *f, struct expr *e)
 		d = e->u.ident.decl;
 		switch (d->kind) {
 		case DECLOBJECT:
+			/* -Wuninitialized: 读取可能未初始化的自动变量。
+			 * 参数由调用者传入、static 变量零初始化，均跳过；
+			 * 声明带初始化器或先前被赋值的 decl 已被标记。 */
+			if ((warn_level & WARN_UNINIT) &&
+			    d->u.obj.storage == SDAUTO && !d->isparam &&
+			    !d->isassigned && !d->warned_uninit) {
+				d->warned_uninit = true;
+				cc_warn(&d->loc, WARN_UNINIT,
+				    "'%s' is used uninitialized in this function",
+				    d->name);
+			}
 			if (e->qual & QUALATOMIC)
 				return atomicload(f, e->type, d->value);
 			return funcload(f, e->type, e->qual, (struct lvalue){d->value});

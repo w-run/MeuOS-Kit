@@ -3,6 +3,7 @@
 #include <string.h>
 #include "util.h"
 #include "mcc.h"
+#include "ir.h"
 
 struct scope filescope;
 
@@ -75,6 +76,23 @@ delscope(struct scope *s)
 {
 	struct scope *parent = s->parent;
 
+	/* -Wunused-variable: report block-scope automatic objects never
+	 * referenced.  Parameters are reported by decl.c (-Wunused-parameter)
+	 * after the function body is parsed; function-protype scopes only
+	 * contain parameters, so they are skipped here. */
+	if (s->decls.len && parent && (warn_level & WARN_UNUSED_VAR)) {
+		size_t i;
+		for (i = 0; i < s->decls.cap; ++i) {
+			if (s->decls.keys[i].str) {
+				struct decl *d = s->decls.vals[i].p;
+				if (d->kind == DECLOBJECT && d->name && !d->isused &&
+				    !d->isparam && d->linkage == LINKNONE &&
+				    d->u.obj.storage == SDAUTO)
+					cc_warn(&d->loc, WARN_UNUSED_VAR,
+					    "unused variable '%s'", d->name);
+			}
+		}
+	}
 	if (s->decls.len)
 		mapfree(&s->decls, NULL);
 	if (s->tags.len)

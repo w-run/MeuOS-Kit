@@ -317,6 +317,86 @@ token_width(const struct token *t)
 	return n > 0 ? n : 1;
 }
 
+/* 源码上下文打印（p9-ui 增强）：目标行 ±2 行上下文 + 行号 + 精确 caret。
+ *
+ *    test/cpp/foo.cc:3:14: 错误: E0006 语法错误
+ *       2 |     int x = 1;
+ *       3 |     auto f = ...;
+ *         |              ^~~~ 这里
+ *       4 |     return x;
+ *
+ * caret 用第一个 '^' + 后续 '~' 覆盖 token 宽度；fix-it 提示以
+ * note 行 + 绿色 caret 追加在上下文块之后。 */
+#define CTX_BEFORE 2
+#define CTX_AFTER  2
+static void
+diag_show_source(const char *file, size_t line0, size_t col1, size_t width,
+    const char *fix)
+{
+	FILE *src;
+	char lines[CTX_BEFORE + 1 + CTX_AFTER][4096];
+	char *target = NULL;
+	size_t first = 0, n = 0, maxnum, w, i, ln;
+
+	src = fopen(file, "r");
+	if (!src)
+		return;
+	/* 行号栏宽度：按最大显示行号的十进制位数 */
+	maxnum = line0 + CTX_AFTER + 1;
+	w = 1;
+	while (maxnum >= 10) { maxnum /= 10; ++w; }
+	/* 读目标行及上下各行（line 为 0-based） */
+	{
+		char buf[4096];
+		size_t want_lo = line0 > CTX_BEFORE ? line0 - CTX_BEFORE : 0;
+		size_t want_hi = line0 + CTX_AFTER;
+		size_t l = 0;
+		while (l <= want_hi && fgets(buf, sizeof buf, src)) {
+			if (l >= want_lo && n < CTX_BEFORE + 1 + CTX_AFTER) {
+				strncpy(lines[n], buf, sizeof lines[n] - 1);
+				lines[n][sizeof lines[n] - 1] = '\0';
+				if (n == 0)
+					first = l;
+				++n;
+			}
+			++l;
+		}
+	}
+	fclose(src);
+	for (i = 0; i < n; ++i) {
+		size_t len = strlen(lines[i]);
+		size_t ci, nmark;
+		ln = first + i;
+		while (len > 0 && (lines[i][len-1] == '\n' || lines[i][len-1] == '\r'))
+			lines[i][--len] = '\0';
+		if (ln == line0) {
+			target = lines[i];
+			fprintf(stderr, "%*zu | %s\n", (int)w, ln + 1, lines[i]);
+			fprintf(stderr, "%*s | %s", (int)w, "", dcol(DC_RED));
+			for (ci = 1; ci < col1; ci++)
+				fputc(lines[i][ci-1] == '\t' ? '\t' : ' ', stderr);
+			/* 第一个 '^'，其余 '~' 覆盖 token 宽度（cap 到行尾） */
+			nmark = width ? width : 1;
+			for (ci = 0; ci < nmark && col1 - 1 + ci < len; ci++)
+				fputc(ci == 0 ? '^' : '~', stderr);
+			fprintf(stderr, "%s%s\n", dcol(DC_RESET),
+			    g_msg_lang == 1 ? " 这里" : " here");
+		} else {
+			fprintf(stderr, "%*zu | %s\n", (int)w, ln + 1, lines[i]);
+		}
+	}
+	if (fix && target) {
+		size_t len = strlen(target), ci;
+		fprintf(stderr, "%*s | %s%s %s%s\n", (int)w, "",
+		    dcol(DC_BOLD DC_GREEN), msg_word_note(), fix, dcol(DC_RESET));
+		fprintf(stderr, "%*s | %s", (int)w, "", dcol(DC_GREEN));
+		for (ci = 1; ci < col1; ci++)
+			fputc(target[ci-1] == '\t' ? '\t' : ' ', stderr);
+		fputc('^', stderr);
+		fprintf(stderr, "%s\n", dcol(DC_RESET));
+	}
+}
+
 /* Core diagnostic.  All paths are non-returning: either the trial
  * rethrows, the JSON mode longjmps to the top-level recovery point (or
  * exits once the error limit is hit), or the process exits. */
@@ -377,46 +457,11 @@ error_common(enum errcode code, const struct location *loc, size_t width,
 	fputs(msg, stderr);
 	putc('\n', stderr);
 
-	/* Caret diagnostic: show the source line with a ^ marker covering the
-	 * token span (width columns).  loc->line is 0-based — the first line
-	 * is line 0; loc->col is 1-based. */
-	if (loc && loc->file) {
-		FILE *src = fopen(loc->file, "r");
-		if (src) {
-			char linebuf[4096];
-			size_t target = loc->line; /* 0-based */
-			size_t l = 0;
-			while (l <= target && fgets(linebuf, sizeof(linebuf), src))
-				l++;
-			if (l > target) {
-				size_t len = strlen(linebuf);
-				size_t n, ci;
-				while (len > 0 && (linebuf[len-1] == '\n' || linebuf[len-1] == '\r'))
-					linebuf[--len] = '\0';
-				fprintf(stderr, "    %s\n", linebuf);
-				fprintf(stderr, "    %s", dcol(DC_RED));
-				for (ci = 1; ci < loc->col; ci++)
-					fputc(linebuf[ci-1] == '\t' ? '\t' : ' ', stderr);
-				/* full-span caret: width ^ (capped at the line end) */
-				n = width ? width : 1;
-				for (ci = 0; ci < n && loc->col - 1 + ci < len; ci++)
-					fputc('^', stderr);
-				fprintf(stderr, "%s\n", dcol(DC_RESET));
-				if (fix) {
-					/* inline fix-it: note + its own caret */
-					fprintf(stderr, "    %s%s %s%s\n",
-					    dcol(DC_BOLD DC_GREEN), msg_word_note(), fix,
-					    dcol(DC_RESET));
-					fprintf(stderr, "    %s", dcol(DC_GREEN));
-					for (ci = 1; ci < loc->col; ci++)
-						fputc(linebuf[ci-1] == '\t' ? '\t' : ' ', stderr);
-					fputc('^', stderr);
-					fprintf(stderr, "%s\n", dcol(DC_RESET));
-				}
-			}
-			fclose(src);
-		}
-	}
+	/* Caret diagnostic: show the source with line numbers and ±2 lines
+	 * of context (loc->line is 0-based — the first line is line 0;
+	 * loc->col is 1-based). */
+	if (loc && loc->file)
+		diag_show_source(loc->file, loc->line, loc->col, width, fix);
 
 	exit(1);
 }
@@ -497,6 +542,10 @@ cc_warn(const struct location *loc, int kind, const char *fmt, ...)
 			fprintf(stderr, "%s%s%s", dcol(DC_CYAN), hint, dcol(DC_RESET));
 	}
 	putc('\n', stderr);
+
+	/* 源码上下文（与错误诊断一致的行号 + caret） */
+	if (loc && loc->file)
+		diag_show_source(loc->file, loc->line, loc->col, 1, NULL);
 
 	if (warn_as_error)
 		error(loc, "warning treated as error");

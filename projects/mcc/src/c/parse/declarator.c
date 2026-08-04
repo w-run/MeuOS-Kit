@@ -440,9 +440,36 @@ declarator(struct scope *s, struct qualtype base, char **name, int *align, struc
 		base.qual = tq;
 	}
 
+	/* C++11 trailing return type: `auto f(...) -> Ret { ... }` — the
+	 * type-id after '->' names the function's return type (replacing the
+	 * declspecs type, normally the `auto` placeholder).  C++20 abbreviated
+	 * function templates (`auto g(Integral auto x) -> int`) rely on it. */
+	extern int g_lang;
+	if (g_lang == 1 && tok.kind == TARROW) {
+		extern struct type *typename(struct scope *, enum typequal *,
+		    struct expr **);
+		struct type *rt;
+		enum typequal rtq = QUALNONE;
+		struct expr *toeval = NULL;
+		next(); /* consume '->' */
+		rt = typename(s, &rtq, &toeval);
+		if (!rt || toeval)
+			error_code(E_CTYPE, &tok.loc, "invalid trailing return type");
+		/* the outermost function type in the chain takes the trailing
+		 * type as its return type (the chain runs innermost -> outermost
+		 * from head to tail, so walk from the tail) */
+		for (l = result.prev; l != &result; l = l->prev) {
+			t = listelement(l, struct type, link);
+			if (t->kind == TYPEFUNC) {
+				t->base = rt;
+				t->qual = rtq;
+				break;
+			}
+		}
+	}
+
 	/* C++ constructor-call declarator: the base (class) type is the
 	 * object type; flag it to decl() with a sentinel expr. */
-	extern int g_lang;
 	if (g_lang == 1) {
 		extern bool cpp_ctor_is_active(void);
 		extern void cpp_ctor_clear_active(void);
@@ -473,5 +500,7 @@ parameter(struct scope *s)
 	t.type = typeadjust(t.type, &t.qual);
 	d = mkdecl(name, DECLOBJECT, t.type, t.qual, LINKNONE);
 	d->u.obj.storage = SDAUTO;
+	d->isparam = true;   /* 未使用分类为 -Wunused-parameter */
+	d->loc = tok.loc;
 	return d;
 }

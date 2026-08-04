@@ -18,6 +18,7 @@
 #include <string.h>
 #include "util.h"
 #include "mcc.h"
+#include "ir.h"
 #include "decl_internal.h"
 #include "cpp.h"
 struct decl *tentativedefns, **tentativedefnsend = &tentativedefns;
@@ -130,6 +131,7 @@ declcommon(struct scope *s, enum declkind kind, char *name, char *asmname, struc
 	}
 	d = mkdecl(name, kind, t, tq, linkage);
 	d->asmname = asmname;
+	d->loc = tok.loc;   /* 声明处位置：未使用/未初始化警告的标记点 */
 	scopeputdecl(s, d);
 	return d;
 }
@@ -200,6 +202,9 @@ defineobj(struct decl *d, struct init *init, bool hasinit, struct func *f)
 	else
 		emitdata(d, init);
 	d->defined = true;
+	/* 带初始化器的声明视为已赋值（-Wuninitialized 抑制） */
+	if (hasinit)
+		d->isassigned = true;
 }
 bool
 decl(struct scope *s, struct func *f)
@@ -752,6 +757,15 @@ decl(struct scope *s, struct func *f)
 					 * declaration may follow the definition, defer the
 					 * emission decision and keep the body (and its function
 					 * scope) alive until then. */
+					/* -Wunused-parameter: body is parsed; report parameters
+					 * never referenced in it. */
+					if (t && t->kind == TYPEFUNC && t->u.func.params) {
+						struct decl *p;
+						for (p = t->u.func.params; p; p = p->next)
+							if (p->name && !p->isused)
+								cc_warn(&p->loc, WARN_UNUSED_PARAM,
+								    "unused parameter '%s'", p->name);
+					}
 					if (!d->u.func.inlinedefn) {
 						emitfunc(f, s, d->linkage == LINKEXTERN || d->linkage == LINKC);
 						s = delscope(s);

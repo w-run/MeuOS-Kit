@@ -156,6 +156,15 @@ static const struct entry {
 	  "'%s' 运算符的指针操作数指向不兼容类型" },
 	{ "ignoring return value of nodiscard function '%s'",
 	  "忽略 nodiscard 函数 '%s' 的返回值" },
+	/* p9-ui 细粒度警告（-Wall/-Wextra/-Wxxx） */
+	{ "unused variable '%s'", "未使用的变量 '%s'" },
+	{ "unused parameter '%s'", "未使用的参数 '%s'" },
+	{ "implicit conversion from wider to narrower integer type may truncate value",
+	  "隐式整数转换可能截断数值" },
+	{ "comparison of integer expressions of different signedness",
+	  "有符号/无符号整数表达式的比较" },
+	{ "'%s' is used uninitialized in this function",
+	  "函数中使用了未初始化的变量 '%s'" },
 };
 
 static const char *
