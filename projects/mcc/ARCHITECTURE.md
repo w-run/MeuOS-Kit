@@ -22,7 +22,7 @@ split the backend into `libmcc.a` and added a C++ frontend (`m++`):
   `build/libmcc.a`.
 - **MIR core**: `src/mir/` — `MFn` intermediate (MType/MVal/MConst/MIns)
   plus passes (`mfold`/`msimpl`/`mdce`/`mcopy`/`mgvn`).
-- **Machine backend**: each `src/target/<arch>/<arch>_mabe.c` is a
+- **Machine backend**: each `src/target/<arch>/<arch>_mabi.c` is a
   machine-level `MFnM` lowering (`src/mir/{machine,regalloc}.c` +
   `src/target/<arch>/<arch>_m*.c`); the regalloc/machine layer converts
   the optimized `MFn` to a machine `MFnM`, and the target's `_memit.c`
