@@ -91,6 +91,16 @@ ASM
 "$readelf" -r "$work/tlslib.so" 2>/dev/null | grep -q "R_X86_64_DTPOFF64" || {
     echo "FAIL: shared TLS GD missing DTPOFF64 .rela.dyn entry"; fail=1
 }
+# D2: the undefined PLT32 import __tls_get_addr must become a JUMP_SLOT
+# GOT slot (otherwise `call __tls_get_addr@plt` points to address 0 and
+# crashes at runtime).  mt/readelf truncates the 18-char name to 17, so
+# match the unique "JUMP_SLO" prefix.
+"$readelf" -r "$work/tlslib.so" 2>/dev/null | grep "__tls_get_addr" | grep -q "JUMP_SLO" || {
+    echo "FAIL: shared TLS GD missing JUMP_SLOT for __tls_get_addr (D2)"; fail=1
+}
+"$readelf" -s "$work/tlslib.so" 2>/dev/null | grep "__tls_get_addr" | grep -q "UND" || {
+    echo "FAIL: __tls_get_addr not undefined in .dynsym (D2)"; fail=1
+}
 
 # --- mt/ld static executable TLS GD: relaxed, no GOT / no .rela.dyn ----
 cat >"$work/static.s" <<'ASM'

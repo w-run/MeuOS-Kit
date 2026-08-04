@@ -1651,6 +1651,25 @@ add_got_entry_tls(struct ld_context *ctx, const char *name, unsigned rel_type)
 	return 0;
 }
 
+/* Add a GOT entry for an undefined function import (PLT32).  The slot is
+ * resolved by ld.so via a JUMP_SLOT dynamic relocation so `call foo@plt`
+ * in a shared library reaches the correct address at load time. */
+static int
+add_got_jumpslot(struct ld_context *ctx, const char *name)
+{
+	size_t idx = 0;
+	if (got_index(ctx, name, &idx) == 0) {
+		/* Existing entry (e.g. from a GOTPCREL) — promote to JUMP_SLOT. */
+		ctx->got.items[idx].reloc_type = MT_R_X86_64_JUMP_SLOT;
+		return 0;
+	}
+	if (add_got_entry(ctx, name) != 0)
+		return -1;
+	idx = ctx->got.count - 1;
+	ctx->got.items[idx].reloc_type = MT_R_X86_64_JUMP_SLOT;
+	return 0;
+}
+
 static int
 collect_got_relocations(struct ld_context *ctx)
 {
@@ -1700,6 +1719,23 @@ collect_got_relocations(struct ld_context *ctx)
 						unsigned rel_type = (unsigned)(info64 & 0xffffffff);
 						if (rel_type == 75 || rel_type == 76)
 							goto collect_got64;
+						/* x86_64 PLT32 undefined function imports need a
+						 * JUMP_SLOT GOT entry so that in a shared lib /
+						 * PIE `call foo@plt` resolves via ld.so (the
+						 * write_relocation PLT32 branch is otherwise dead
+						 * code, since the GOT entry was never collected). */
+						if (strcmp(ctx->target->name, "x86_64") == 0 &&
+						    (ctx->shared || ctx->pie) &&
+						    rel_type == LD_R_X86_64_PLT32) {
+							if (get_symbol_by_index(ctx, object,
+							                        info64 >> 32, &symbol,
+							                        &name) != 0 ||
+							    symbol.section != MT_SHN_UNDEF)
+								goto collect_got64_skip;
+							if (add_got_jumpslot(ctx, name) != 0)
+								return -1;
+							continue;
+						}
 						/* x86_64 TLS GD/LD/IE relocations need GOT slots
 						 * only when the output is a shared lib or PIE
 						 * (static executables relax them to Local-Exec,
@@ -1719,6 +1755,7 @@ collect_got_relocations(struct ld_context *ctx)
 					                        &name) != 0 ||
 					    add_got_entry(ctx, name) != 0)
 						return -1;
+					collect_got64_skip:;
 					continue;
 					collect_tls_got64:;
 					if (get_symbol_by_index(ctx, object, info64 >> 32, &symbol,
@@ -2363,8 +2400,9 @@ fill_got(struct ld_context *ctx)
 		return 0;
 	got = &ctx->groups[ctx->got.group];
 	for (i = 0; i < ctx->got.count; ++i) {
-		if (ctx->got.items[i].tls)
-			continue;  /* TLS slots filled by ld.so via .rela.dyn */
+		if (ctx->got.items[i].tls ||
+		    ctx->got.items[i].reloc_type == MT_R_X86_64_JUMP_SLOT)
+			continue;  /* TLS slots + PLT imports filled by ld.so */
 		global = find_global(ctx, ctx->got.items[i].name);
 		if (global && global->alias)
 			global = global->alias;
