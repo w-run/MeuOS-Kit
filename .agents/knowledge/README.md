@@ -14,6 +14,7 @@
 | [project_mcc_chibicc.md](project_mcc_chibicc.md) | 缺陷 | chibicc 套件根因、B 类修复、sema E1-E6 + array.len 字节坑、D3-PP #elifdef、审计回归 |
 | [project_meuos.md](project_meuos.md) | 项目 | 组件经验：libc C99 补全、libtui、Shell/Utils 现代优先、自主特性方向、归并记录 |
 | [project_mcc_toolchain.md](project_mcc_toolchain.md) | 缺陷 | mcc-toolchain P0 闭环：toolchain 3 门禁 + ARM 正则、mcc MIR 文档清扫、i386 PIC GOT（4 提交）、ld.so P0 实施 in progress |
+| [feedback_aarch64_aapcs.md](feedback_aarch64_aapcs.md) | 缺陷 | aarch64 AAPCS64 三处缺陷闭环：selpar off=0、大帧 stp 超限、spill-slot 基址寻址丢 x29 |
 
 ## 使用约定
 
