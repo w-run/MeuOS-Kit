@@ -22,6 +22,12 @@
  * the QBE `Target T` global (purity rule), so TLS emission and any other
  * PIC-sensitive codegen consult this flag instead. */
 extern int g_pic;
+/* TLS access-model mirror (defined in src/mir/machine.c, set from the
+ * driver's `enum tls_model tls_model`).  Values match enum MTlsModel
+ * (include/mir.h): DEFAULT=0, GLOBAL_DYNAMIC=1, INITIAL_EXEC=2,
+ * LOCAL_EXEC=3.  Consumed by emit_tls_addr to select general-dynamic
+ * (GD) emission. */
+extern int g_tls_model;
 
 /* ---- width suffixes ----------------------------------------------------- */
 
@@ -284,15 +290,34 @@ emit_mval(FILE *f, MVal *v)
 	}
 }
 
-/* Emit the address of a TLS global into a scratch register: the thread
- * pointer (%fs:0) plus the link-time-resolved TLS offset.
- *   - non-PIC: local-exec @tpoff (TPOFF32), fast for executables;
- *   - PIC/shared (g_pic): initial-exec GOT form @gottpoff + %fs:0 (TPOFF64)
- *     — local-exec relocations are rejected in a DSO (mirrors the legacy
+/* Emit the address of a TLS global into a scratch register.  Model
+ * selection mirrors the driver's `enum tls_model` via g_tls_model
+ * (enum MTlsModel values):
+ *   - MTLS_GLOBAL_DYNAMIC: general-dynamic via __tls_get_addr
+ *       leaq sym@tlsgd(%rip), %rdi     ; R_X86_64_TLSGD, descriptor addr
+ *       call __tls_get_addr@PLT        ; R_X86_64_PLT32, TLS addr in %rax
+ *     The call clobbers caller-saved regs (incl. rdi), so the result is
+ *     taken from %rax and copied to `reg`; this is safe for every caller
+ *     (emit_mval writes rax; emit_addr_loads writes r10/r11 — we copy).
+ *   - else, PIC (g_pic): initial-exec GOT form
+ *       movq sym@gottpoff(%rip), %reg  ; R_X86_64_GOTTPOFF
+ *       addq %fs:0, %reg
+ *   - else, non-PIC: local-exec
+ *       movq %fs:0, %reg ; leaq sym@tpoff(%reg), %reg
+ *     (local-exec relocations are rejected in a DSO; mirrors the legacy
  *     x86_64_emit.c SThr path). */
 static void
 emit_tls_addr(FILE *f, const char *sym, int64_t off, const char *reg)
 {
+	if (g_tls_model == MTLS_GLOBAL_DYNAMIC) {
+		fprintf(f, "\tleaq\t%s@tlsgd(%%rip), %%rdi\n", sym ? sym : "0");
+		fprintf(f, "\tcall\t__tls_get_addr@PLT\n");
+		if (strcmp(reg, "rax") != 0)
+			fprintf(f, "\tmovq\t%%rax, %%%s\n", reg);
+		if (off)
+			fprintf(f, "\taddq\t$%lld, %%%s\n", (long long)off, reg);
+		return;
+	}
 	if (g_pic) {
 		fprintf(f, "\tmovq\t%s@gottpoff(%%rip), %%%s\n", sym ? sym : "0", reg);
 		fprintf(f, "\taddq\t%%fs:0, %%%s\n", reg);

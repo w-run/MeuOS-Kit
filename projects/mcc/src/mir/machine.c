@@ -650,6 +650,15 @@ static const int x64_argreg[] = {
  * the legacy QBE `Target T` PIC global -- this flag is the MIR-native one. */
 int g_pic;
 
+/* TLS access model mirror, set by the driver (main.c) from the global
+ * `enum tls_model tls_model` (see include/ir.h).  Same ownership pattern
+ * as g_pic: defined here so check-mir-* links resolve it, emitters that
+ * read it declare it extern.  The value is one of enum MTlsModel
+ * (include/mir.h), the MIR-layer mirror of tls_model:
+ *   MTLS_DEFAULT=0, MTLS_GLOBAL_DYNAMIC=1, MTLS_INITIAL_EXEC=2,
+ *   MTLS_LOCAL_EXEC=3.  x86_64_memit.c uses this to select GD vs IE/LE. */
+int g_tls_model;
+
 /* P2 ABI lowering for x86_64 SysV (src/target/x86_64/x86_64_mabi.c). */
 extern void mfnm_abi_x86_64(MFnM *fm);
 static const int x64_rsave[] = {
