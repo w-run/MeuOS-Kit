@@ -676,6 +676,33 @@ rtld_apply_rela(struct rtld_lib *lib, struct rtld_state *st)
 	}
 }
 
+/* Apply only R_X86_64_RELATIVE relocations for all loaded libraries.
+ * This runs BEFORE rtld_tls_setup so that when rtld notifies libc
+ * (__meuos_tls_add_module) the libc's own GOT data slots (built with
+ * RELATIVE relocs, e.g. &__meuos_tls_module_count) already carry the
+ * load-base-adjusted address.  Otherwise a libc function reading its own
+ * global data through a GOT slot would dereference a raw vaddr and fault.
+ * (DTPMOD/DTPOFF are deferred to rtld_apply_rela after tls_modid are
+ * assigned.) */
+static void
+rtld_apply_relative(struct rtld_state *st)
+{
+	for (int l = 0; l < st->lib_count; l++) {
+		struct rtld_lib *lib = &st->libs[l];
+		if (!lib->rela || lib->relasz == 0)
+			continue;
+		uintptr_t base = lib->base;
+		uint64_t n = lib->relasz / sizeof(Rela64);
+		for (uint64_t i = 0; i < n; i++) {
+			Rela64 *r = &lib->rela[i];
+			if (ELF64_R_TYPE(r->r_info) == R_X86_64_RELATIVE) {
+				uintptr_t *loc = (uintptr_t *)(base + r->r_offset);
+				*loc = base + (uintptr_t)r->r_addend;
+			}
+		}
+	}
+}
+
 /* ---- init/fini ---- */
 
 void
@@ -832,6 +859,35 @@ rtld_tls_setup(struct rtld_state *st)
  * points there; later dlopen'd modules start NULL and are lazily
  * allocated by rtld_tls_get_addr.  The DTV pointer is stored in the TCB
  * at %fs-8 so a DTV-based __tls_get_addr can find it via %fs. */
+/* Notify libc that a PT_TLS module was registered, so libc's module
+ * registry (read by allocate_tls/__meuos_tls_alloc when sizing a new
+ * thread's TLS area + DTV) stays in sync.  libc exports
+ * __meuos_tls_add_module(long modid, const void *tpl, size_t filesz,
+ * size_t memsz, size_t align) (see src/internal/tls.h); rtld is
+ * freestanding and can't link it directly, so it resolves the symbol in
+ * the already-loaded libc and calls through the function pointer.  If
+ * libc isn't loaded yet, the call is a no-op. */
+static void
+rtld_notify_tls_module(struct rtld_state *st, long modid,
+                       const void *tpl, size_t filesz, size_t memsz,
+                       size_t align)
+{
+	if (!st || !tpl)
+		return;
+	int lib_idx = -1;
+	Sym64 *sym = rtld_find_sym(st, "__meuos_tls_add_module", &lib_idx);
+	if (!sym || lib_idx < 0 || lib_idx >= st->lib_count)
+		return;
+	/* sym->value is the symbol's offset within libs[lib_idx]; the runtime
+	 * address is libs[lib_idx].base + sym->value. */
+	void (*fn)(long, const void *, size_t, size_t, size_t) =
+		(void (*)(long, const void *, size_t, size_t, size_t))
+		(st->libs[lib_idx].base + sym->value);
+	fn(modid, tpl, filesz, memsz, align);
+}
+
+/* DTV + module registry.  The DTV pointer lives at %fs+8 (TP+8),
+ * matching libc's MEUOS_TCB_DTV_OFF (see src/internal/tls.h). */
 static void
 rtld_tls_build_dtv(struct rtld_state *st)
 {
@@ -856,6 +912,10 @@ rtld_tls_build_dtv(struct rtld_state *st)
 		m->tls_align = lib->tls_align ? lib->tls_align : 1;
 		lib->tls_modid = m->modid;
 		st->tls_mod_count++;
+		/* Notify libc's registry so allocate_tls can size new threads. */
+		rtld_notify_tls_module(st, m->modid, (const void *)lib->tls_vaddr,
+		                       lib->tls_filesz, lib->tls_memsz,
+		                       lib->tls_align ? lib->tls_align : 1);
 	}
 
 	if (st->tls_mod_count == 0)
@@ -1007,6 +1067,11 @@ rtld_dlopen(const char *name)
 		m->tls_align = lib->tls_align ? lib->tls_align : 1;
 		lib->tls_modid = m->modid;
 		st->tls_mod_count++;
+		/* Notify libc's registry so new threads get a TLS block + DTV slot
+		 * for this dlopen'd module. */
+		rtld_notify_tls_module(st, m->modid, (const void *)lib->tls_vaddr,
+		                       lib->tls_filesz, lib->tls_memsz,
+		                       lib->tls_align ? lib->tls_align : 1);
 		/* DTV slot starts NULL: lazily allocated on first touch. */
 		if (m->modid >= st->dtv_len) {
 			int nlen = m->modid + 2;
@@ -1223,6 +1288,11 @@ rtld_main(size_t *sp)
 
 	/* Load shared libraries via DT_NEEDED (transitive) */
 	rtld_load_needed(&st, main_lib);
+
+	/* Apply RELATIVE relocations now so a libc function rtld calls during
+	 * rtld_tls_setup (e.g. __meuos_tls_add_module) can read its own GOT
+	 * data slots (which carry RELATIVE relocs) with correct base. */
+	rtld_apply_relative(&st);
 
 	/* Register TLS modules, assign module IDs, lay out the contiguous
 	 * TLS area, and set %fs before resolving DTPMOD64/DTPOFF64
