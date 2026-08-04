@@ -49,4 +49,13 @@ cpp_parse.c 拆完后，把方法推广到**单一 `struct ld_context ctx` 状�
 - 跨域函数去 static + header 原型；`-Werror` 下隐式声明即报错，快速暴露漏 decl。函数返回类型必须与 header 一致。
 - 每拆一域跑 `make -C projects/meuos-toolchain check`（含 rtld e2e）验证零回归。
 
+## 内聚状态机切分法（link.c/assemble.c 通用，2026-08-05）
+- 此法已成功用在 mt/ld link.c（4780→2055，dynamic/reloc/elfout/layout）与 mt/as assemble.c（2406→1464，as_dwarf/as_elfout）。
+- 判断标准：**单一 context struct（ld_context/as_file）指针传递、无文件级 static 全局** → 可按阶段/功能连续域切分。
+- 若子目标文件**已有 internal header**（如 assemble 的 mt/as_int.h），类型大多已在，只需补声明。
+- **#define 宏不随 include 传播**：跨文件用（如 MT_ST_INFO）要放进 internal header。
+- **struct 定义不共享 → 'struct X declared inside parameter list' / incomplete type**：被多文件用的 struct 定义必须移入 internal header。
+- 提取后清理孤儿注释 + 悬挂 `};`（函数尾的孤立右括号）+ 多余空行；`-Werror` 立即报 expected identifier。
+
+
 
