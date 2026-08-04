@@ -1,15 +1,12 @@
 #!/bin/sh
-# mir_matrix.sh — C 功能回归 × MIR/LIR 双路径矩阵。
+# mir_matrix.sh — C 功能回归 × MIR 单路径矩阵。
 #
-# mcc 双覆盖目标：MIR 路径（MCC_USE_MIR=1，默认）与 legacy 直接 LIR
-# 路径（MCC_USE_MIR=0）并存。既有 check-c99/check-c11/check-c23 只跑
-# 默认路径，LIR 路径与两路径一致性长期无守护。
-#
-# 本脚本把 c99/c11/c23 三套正向用例分别在 MCC_USE_MIR=1 与 =0 下编译
-# 并运行，要求：
-#   1) 两路径都能编译成功；
-#   2) 两路径运行退出码均为 0（正向用例约定 0=全部通过）；
-#   3) 两路径 stdout 完全一致（行为等价性）。
+# mcc 自 Phase 2 起强制 g_use_mir=1（MCC_USE_MIR env 已移除），MIR 是唯一
+# 的 asm 生产者；Phase 3e 又移除了 LIR 桥接层，machine backend 覆盖全部
+# 6 架构。因此历史上「MIR=1/MIR=0 双路径对比」已无意义（MCC_USE_MIR=0
+# 与 =1 走完全相同路径，对比恒等），本脚本降级为单路径 MIR 回归：
+#   1) c99/c11/c23 三套正向用例全部经唯一 MIR 路径编译并运行；
+#   2) 每个用例运行退出码均为 0（正向用例约定 0=全部通过）。
 # 任一违反即非零退出。接入 Makefile `check-c-mir` 目标。
 #
 # 用法：sh test/mir_matrix.sh ./mcc
@@ -22,27 +19,17 @@ fail=0
 run_case() {   # run_case <dir> <file> <extra_flags...>
 	dir=$1; file=$2; shift 2
 	base=$(basename "$file" .c)
-	out1=/tmp/mirm-$base-m1
-	out0=/tmp/mirm-$base-m0
-	if ! MCC_USE_MIR=1 "$BIN" --specs=host -o "$out1" "$@" "$file" 2>/tmp/mirm-e1; then
-		echo "FAIL($dir/$base) MIR=1 编译失败: $(head -1 /tmp/mirm-e1)"
+	out=/tmp/mirm-$base
+	if ! "$BIN" --specs=host -o "$out" "$@" "$file" 2>/tmp/mirm-e; then
+		echo "FAIL($dir/$base) MIR 路径编译失败: $(head -1 /tmp/mirm-e)"
 		fail=1; return
 	fi
-	if ! MCC_USE_MIR=0 "$BIN" --specs=host -o "$out0" "$@" "$file" 2>/tmp/mirm-e0; then
-		echo "FAIL($dir/$base) MIR=0 编译失败: $(head -1 /tmp/mirm-e0)"
+	"$out" >/tmp/mirm-o 2>&1; rc=$?
+	if [ "$rc" -ne 0 ]; then
+		echo "FAIL($dir/$base) 运行失败: rc=$rc"
 		fail=1; return
 	fi
-	"$out1" >/tmp/mirm-o1 2>&1; rc1=$?
-	"$out0" >/tmp/mirm-o0 2>&1; rc0=$?
-	if [ "$rc1" -ne 0 ] || [ "$rc0" -ne 0 ]; then
-		echo "FAIL($dir/$base) 运行失败: MIR=1 rc=$rc1, MIR=0 rc=$rc0"
-		fail=1; return
-	fi
-	if ! cmp -s /tmp/mirm-o1 /tmp/mirm-o0; then
-		echo "FAIL($dir/$base) MIR=1/MIR=0 输出不一致"
-		fail=1; return
-	fi
-	echo "ok  $dir/$base (MIR=1 == MIR=0)"
+	echo "ok  $dir/$base (MIR 路径)"
 }
 
 for t in test/c99/*.c; do
