@@ -833,6 +833,24 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 						tq = QUALNONE;
 						++ntypes;
 					}
+					/* C++11 template type alias: `template<typename T>
+					 * using Vec = T;`, used as `Vec<int>` — instantiate the
+					 * alias to its resolved type. */
+					extern bool cpp_tmpl_alias_lookup(const char *);
+					extern struct type *cpp_tmpl_alias_instantiate(struct scope *,
+					    const char *);
+					if (cpp_tmpl_alias_lookup(tokenstr(tok.kind))) {
+						struct token saved = tok;
+						next();
+						if (tok.kind == TLESS) {
+							t = cpp_tmpl_alias_instantiate(s,
+							    tokenstr(saved.kind));
+							tq = QUALNONE;
+							++ntypes;
+							break;
+						}
+						tok = saved;
+					}
 				}
 				goto done;
 			}
