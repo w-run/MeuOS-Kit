@@ -308,4 +308,33 @@ int write_relocation(struct ld_context *ctx, struct ld_object *object,
 int apply_relocations(struct ld_context *ctx);
 int fill_got(struct ld_context *ctx);
 
+/* ELF output writing (defined in elfout.c). */
+int write_executable(struct ld_context *ctx, const char *path,
+                     const char *entry, const struct mt_target *target);
+
+/* ELF output structures (layout/elfout domains). */
+struct ld_output_section {
+	const char *name;
+	uint32_t type;
+	uint64_t flags;
+	uint64_t address;
+	uint64_t offset;
+	uint64_t size;
+	uint64_t align;
+	uint32_t link;   /* sh_link */
+	uint32_t info;   /* sh_info */
+	uint64_t entry_size; /* sh_entsize */
+};
+struct ld_strings {
+	unsigned char *data;
+	size_t size;
+	size_t capacity;
+};
+/* Context for building .eh_frame_hdr */
+struct eh_frame_fde {
+	uint64_t pc_start;
+	uint64_t fde_offset; /* offset of FDE within .eh_frame */
+	int has_pc;          /* 1 if pc_start was successfully parsed */
+};
+
 #endif /* MEUOS_TOOLCHAIN_LD_INTERNAL_H */
