@@ -59,7 +59,7 @@ arch_lower=$(file "$work/hello.elf" 2>/dev/null | tr '[:upper:]' '[:lower:]')
 case "$arch" in
 	x86_64)      re='x86-64|amd64';;
 	i386)        re='intel 80386|i386';;
-	arm)         re='eabi|arm';;
+	arm)         re='arm, *eabi';;
 	riscv64)     re='risc-v';;
 	loongarch64) re='loongarch';;
 	aarch64)     re='aarch64';;
