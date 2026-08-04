@@ -27,6 +27,7 @@
 | [mt-readelf-pie-dynamic](meuos-toolchain/mt-readelf-pie-dynamic.md) | ✅ | `mt/readelf -d` 对 PIE 误报 no dynamic section（已完成 commit 49349b2） |
 | [check-qemu-skip-wrapper](meuos-toolchain/check-qemu-skip-wrapper.md) | ✅ | check-qemu-x86_64/i386 缺 SKIP 包装（no-op，基线 df962a0 已含 de49e414 修复） |
 | [mt-ld-dynamic-section](meuos-toolchain/mt-ld-dynamic-section.md) | ✅ | mt/ld 生成的 .dynamic 节区 sh_type 应为 SHT_DYNAMIC、sh_link→.dynstr（完成 commit 0015271e） |
+| [rtld-e2e-pie-verify](meuos-toolchain/rtld-e2e-pie-verify.md) | 🔄 | rtld e2e 实跑需合并 rtld-p0 后由 exec-integration 门禁覆盖 |
 
 ### meuos-utils
 
