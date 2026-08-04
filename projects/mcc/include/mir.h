@@ -384,6 +384,7 @@ enum MIRPass {
 	MIR_PASS_GVN,    /* global value numbering */
 	MIR_PASS_DCE,    /* dead code elimination */
 	MIR_PASS_IFCONV, /* constant-condition branch simplification */
+	MIR_PASS_COMBINE,/* instruction combining */
 	MIR_PASS_SSA,    /* SSA consistency check (mssa_check) */
 	MIR_PASS_N,
 };
@@ -396,6 +397,7 @@ uint32_t mcopy(MFn *fn);
 uint32_t mgvn(MFn *fn);
 uint32_t mloadfwd(MFn *fn);
 uint32_t mmem2reg(MFn *fn);
+uint32_t mcombine(MFn *fn);
 void mref_replace(MFn *fn, MVal *old, MRef nr);
 
 /* arena helpers (mir_util.c) */

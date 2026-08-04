@@ -1146,6 +1146,8 @@ run_mir_pass(MFn *fn, enum MIRPass pass)
 		} while (round);
 		return r;
 	}
+	case MIR_PASS_COMBINE:
+		return mcombine(fn);
 	case MIR_PASS_SSA:
 		return mssa_check(fn);
 	default:
@@ -1156,21 +1158,39 @@ run_mir_pass(MFn *fn, enum MIRPass pass)
 void
 run_mir_passes(MFn *fn, int optlevel)
 {
-	if (optlevel < 1)
+	/* -O 级别语义分级（细化：与任务描述对齐）：
+	 *   -O0: 仅 DCE（死代码消除）+ 基本 use chain 构建
+	 *   -O1: 基础优化 — 常量折叠(mfold) + 代数简化(msimpl) + 复制传播(mcopy)
+	 *        + 常量分支简化(mifconv)
+	 *   -O2（默认）: 全局优化 — 在 -O1 基础上 + mem2reg(提升) + mloadfwd(加载
+	 *        转发) + GVN(全局值编号) + 第二轮 ifconv + 第二轮 copy
+	 *   -O3: 激进优化 — 在 -O2 基础上 + mcombine(指令合并) + 有符号 div/rem
+	 *        强度削减(msdiv_pow2) + 第二轮折叠 + 激进强度削减(mul 2^n -> shift)
+	 *   -Os/-Oz: 尺寸导向 — 同 -O2 但加 mifconv 第二轮折叠 + 激进强度削减
+	 *   g_mir_fold_aggressive 按级别门控 msimp_block 的激进规则（mul 2^n -> shift
+	 *   和 signed div/rem 强度削减）。 */
+	uint32_t level = (uint32_t)(optlevel < 0 ? 0 : optlevel);
+	g_mir_fold_aggressive = (level >= 3 || g_opt_size);
+
+	if (level < 1) {
+		/* -O0: minimal — build uses + DCE only */
+		build_uses(fn);
+		run_mir_pass(fn, MIR_PASS_DCE);
+		/* SSA consistency gate */
+		if (mssa_check(fn))
+			fprintf(stderr, "mcc: %s: SSA consistency check FAILED\n",
+			        fn->name);
 		return;
-	/* -O 级别语义分级（对照 src/ir/passes.c 的 legacy ol>=1/ol>=2 分级，
-	 * 但只作用于 MIR 管线，不改动 legacy LIR pass 门控）：
-	 *   -O1: fold + copy（基础：常量折叠 + 复制传播）
-	 *   -O2（默认）: + GVN + DCE（全套）
-	 *   -O3: 在 -O2 基础上多跑一轮 FOLD，并开启强度削减（mul 2^n ->
-	 *        shift）；-Os/-Oz 同样开启强度削减（体积导向）。
-	 *   g_mir_fold_aggressive 按级别门控 msimp_block 的激进规则。 */
-	g_mir_fold_aggressive = (optlevel >= 3 || g_opt_size);
-	run_mir_pass(fn, MIR_PASS_FOLD);
-	run_mir_pass(fn, MIR_PASS_IFCONV);  /* fold constant-condition JNZ -> JMP */
-	run_mir_pass(fn, MIR_PASS_COPY);
-	if (optlevel >= 2) {
-		/* mem2reg first: promoting non-escaping scalar slots to SSA
+	}
+
+	/* -O1: 基础优化管线 */
+	run_mir_pass(fn, MIR_PASS_FOLD);       /* 常量折叠 + 代数简化 */
+	run_mir_pass(fn, MIR_PASS_IFCONV);     /* 常量分支简化 */
+	run_mir_pass(fn, MIR_PASS_COPY);       /* 复制传播 */
+
+	if (level >= 2) {
+		/* -O2: 全局优化管线
+		 * mem2reg first: promoting non-escaping scalar slots to SSA
 		 * values kills the load/store traffic across basic blocks that
 		 * LOADFWD (block-local) cannot reach — notably parameters and
 		 * induction variables reloaded on every loop iteration.  LOADFWD
@@ -1181,9 +1201,14 @@ run_mir_passes(MFn *fn, int optlevel)
 		run_mir_pass(fn, MIR_PASS_GVN);
 		run_mir_pass(fn, MIR_PASS_IFCONV);  /* GVN may expose new constants */
 		run_mir_pass(fn, MIR_PASS_COPY);   /* propagate load-forwarded copies */
-		if (optlevel >= 3) {
-			/* -O3/-Os/-Oz 增量：有符号 div/rem 按 2 的幂强度削减
-			 * （含向零舍入修正序列），再做一轮 FOLD 清扫 */
+
+		/* -Os/-Oz: 尺寸导向 — 同 -O2 水准但加 mifconv 第二轮折叠
+		 * （无需额外操作，ifconv 已在上方运行；保留 g_opt_size 标志
+		 * 供后端 emit 做尺寸优先的指令选择）。 */
+		if (level >= 3) {
+			/* -O3: 激进优化
+			 * 指令合并 + 有符号 div/rem 强度削减 + 第二轮折叠 */
+			run_mir_pass(fn, MIR_PASS_COMBINE);
 			msdiv_pow2(fn);
 			run_mir_pass(fn, MIR_PASS_FOLD);
 			run_mir_pass(fn, MIR_PASS_IFCONV);
