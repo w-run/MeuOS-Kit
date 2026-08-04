@@ -251,17 +251,25 @@ rtld_load_lib(const char *path, struct rtld_state *st)
 	if ((long)map_base < 0)
 		goto fail;
 
-	/* Now map each PT_LOAD segment at the right offset within our block */
+	/* Now map each PT_LOAD segment at the right offset within our block.
+	 * The destination must be `map_base + phdr.vaddr - min_vaddr` so that
+	 * the vaddr in PT_LOAD (and in DT_SYMTAB/STRTAB/HASH, which all carry
+	 * raw vaddrs) agrees with the address we later read via
+	 * `load_base + vaddr`.  Rounding vaddr up to the page (the previous
+	 * behaviour) silently shifts segments with non-page-aligned vaddr
+	 * (e.g. .dynamic at vaddr 0x3f40 inside a 0x4000-aligned PT_LOAD),
+	 * causing lib->dynv and friends to point into an unmapped/zero
+	 * region.  rtld_find_sym then reads garbage DT entries and returns
+	 * NULL, leaving the importer's GOT slot at zero → SIGSEGV. */
 	for (unsigned i = 0; i < phnum; i++) {
 		parse_phdr(file_map, phoff + i * ELF64_PHDR_SIZE, &phdr);
 		if (phdr.type != PT_LOAD)
 			continue;
 		uintptr_t load_addr = (uintptr_t)map_base
-		                      + page_align(phdr.vaddr, 4096)
-		                      - page_align(min_vaddr, 4096);
+		                      + phdr.vaddr
+		                      - min_vaddr;
 		size_t seg_file_size = (size_t)phdr.filesz;
 		if (seg_file_size > 0) {
-			/* Copy file data into the anonymous mapping */
 			/* Copy file data into the anonymous mapping */
 			unsigned char *src = file_map + (size_t)phdr.offset;
 			unsigned char *dst = (unsigned char *)load_addr;
@@ -272,10 +280,11 @@ rtld_load_lib(const char *path, struct rtld_state *st)
 	}
 
 	/* Calculate the actual load base: the base address of this library.
-	 * For shared libraries, vaddr starts at 0, so load_base = map_base.
-	 * The page alignment adjustment handles cases where vaddr != 0. */
-	uintptr_t load_base = (uintptr_t)map_base
-	                      - (page_align(min_vaddr, 4096) & ~4095);
+	 * `load_base + phdr.vaddr` is the address at which the segment lives
+	 * (as we just established), so load_base = map_base - min_vaddr.  No
+	 * page-alignment shenanigans: the offset arithmetic must match the
+	 * raw vaddrs the dynamic loader exchanges via DT_*. */
+	uintptr_t load_base = (uintptr_t)map_base - min_vaddr;
 
 	/* Fill in the struct */
 	struct rtld_lib *lib = &st->libs[st->lib_count++];
