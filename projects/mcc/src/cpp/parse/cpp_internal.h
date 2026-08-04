@@ -52,6 +52,10 @@ void cpp_emit_base_dtor(struct func *f);
 void cpp_parse_init_list(struct func *f, struct scope *fs);
 void cpp_emit_global_dtor(struct func *f, struct decl *d);
 
+/* Parse a `friend` declaration (defined in cpp_parse.c, class section);
+ * used by the access-control check in the operator lowering. */
+void cpp_friend_decl(struct scope *s, struct type *classt);
+
 /* Template data structures shared by the template-instantiation code
  * (cpp_parse.c) and the member-template lowering (cpp_tmpl_member.c).
  * Pure data: the registry/instantiation state (g_cpp_tmpl_stack, packs,
