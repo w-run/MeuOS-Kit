@@ -1,14 +1,15 @@
 /* emit.c — per-function lowering + global data emission.
  *
  * `emitfunc` lowers the frontend's `struct func` AST to MIR (func_to_mir,
- * src/c/irgen/func_to_mir.c), runs the MIR pass pipeline, then either
- * emits through the target's MIR-native machine backend (x86_64/riscv64/
- * loongarch64/aarch64) or falls back to the MIR → LIR bridge + legacy LIR
- * pipeline for targets without a machine backend yet.
+ * src/c/irgen/func_to_mir.c), runs the MIR pass pipeline, then dispatches
+ * to the target's MIR-native machine backend (mfnm_backend_<arch>).  All 6
+ * targets (x86_64/riscv64/loongarch64/aarch64/arm/i386) have a machine
+ * backend, so the LIR bridge fallback is gone — the MIR machine backend is
+ * the sole asm producer.
  *
- * The legacy direct-LIR Fn construction (previously the body of this
- * function) was removed in Phase 4 step 1 — it was unreachable since
- * Phase 2 forced g_use_mir=1 (MCC_USE_MIR=0 no longer exists).
+ * History: the legacy direct-LIR Fn construction and the MIR→LIR bridge
+ * fallback were removed (Phase 4 step 1 / Phase 3e) — they were unreachable
+ * once Phase 2 forced g_use_mir=1 (MCC_USE_MIR=0 no longer exists).
  *
  * `emitdata` translates a global/static object initializer into a stream
  * of IR `Dat` records emitted via `emitdat()` (DStart/DB/DH/DW/DL/DZ/DEnd),
@@ -78,8 +79,8 @@ dwarf_collect_vars(struct func *f, struct MFn *mf, Fn *fn)
 int g_use_mir;
 
 /* MIR-native backend switch (Phase 2): always 1 — the MCC_MIR_BACKEND
- * env var was removed in Phase 2.  Each target's machine backend is tried
- * first; if it rejects a construct, the LIR bridge fallback takes over. */
+ * env var was removed in Phase 2, as was the LIR bridge fallback
+ * (Phase 3e).  Backend dispatch is unconditional (see emitfunc). */
 int g_use_mir_backend;
 
 void
@@ -105,10 +106,9 @@ emitfunc(struct func *f, struct scope *fs, bool global)
 
 	/* MIR-only path (Phase 2): the frontend tree is always lowered to MIR
 	 * (func_to_mir never fails — unmapped ops die), MIR passes run, then
-	 * the x86_64 target uses the MIR-native machine backend (sole asm
-	 * producer; all fallbacks closed in Phase 1) and every other target
-	 * bridges to the LIR pipeline.  The legacy direct-LIR Fn construction
-	 * was deleted in Phase 4 step 1 (emit.c, previously unreachable). */
+	 * every supported target is emitted by its MIR-native machine backend
+	 * (mfnm_backend_<arch>).  The legacy direct-LIR Fn construction and the
+	 * MIR→LIR bridge fallback were deleted (Phase 4 step 1 / Phase 3e). */
 	if (g_use_mir) {
 		MFn *mf = func_to_mir(f, opt_level, global);
 		if (debug['X']) {

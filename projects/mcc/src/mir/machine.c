@@ -5,10 +5,11 @@
  * and machine functions/blocks/instructions (MFnM/MBlkM/MInsM).
  *
  * Purity rule (team decision): these are NEW MIR-native types.  No QBE
- * Fn/Ins/Ref, no Ref bitfield packing, no fill* pass names.  The existing
- * MIR pipeline (MFn -> lir_bridge -> LIR) is untouched; the machine layer
- * lives in its own MMOP/MREG/MFnM namespace and only consumes the shared
- * MVal/MConst pool through the owning MFn.
+ * Fn/Ins/Ref, no Ref bitfield packing, no fill* pass names.  The machine
+ * layer lives in its own MMOP/MREG/MFnM namespace and consumes the shared
+ * MVal/MConst pool through the owning MFn; it is the sole consumer of the
+ * MIR pipeline (the MIR→LIR bridge, `lir_bridge`, was removed in Phase 3e
+ * once all targets gained MIR-native machine backends).
  */
 #include <stdio.h>
 #include <stdlib.h>

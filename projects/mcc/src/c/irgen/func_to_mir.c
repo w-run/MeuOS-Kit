@@ -1,12 +1,17 @@
 /* func_to_mir.c — translate the frontend `struct func` (AST→IR builder
  * tree) into a MIR MFn.
  *
- * This is the B.4.2 transitional layer: the C frontend continues to build
+ * This is the B.4 transitional layer: the C frontend continues to build
  * its existing `struct func`/`struct value`/`struct inst` tree (zero
  * changes to src/{lex,parse,sema,irgen}), and emitfunc now lowers that
- * tree to MIR (MFn), runs the MIR passes, bridges to the LIR Fn, and runs
- * the LIR pipeline.  The result: C compilation genuinely flows through the
- * new MIR layer, and the MIR passes get real-workload validation.
+ * tree to MIR (MFn), runs the MIR passes, then hands the function to the
+ * target's MIR-native machine backend for asm emission.  The result: C
+ * compilation genuinely flows through the new MIR layer, and the MIR
+ * passes get real-workload validation.
+ *
+ * History: func_to_mir originally bridged the MFn to an LIR Fn and ran the
+ * LIR pipeline as a fallback; that bridge was removed in Phase 3e once all
+ * targets gained MIR-native machine backends.
  *
  * Mapping conventions mirror src/irgen/emit.c:emitfunc():
  *   - frontend value ids start at 1 (functemp increments f->lastid); we

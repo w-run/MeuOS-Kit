@@ -156,11 +156,11 @@ mcc_main(int argc, char *argv[])
 	extern int g_use_mir;
 	g_use_mir = 1;
 
-	/* P2+ MIR-native backend (Phase 2, Phase 4 step 2): always enabled.
-	 * Each target's machine backend runs first; if it rejects a construct
-	 * (e.g. arm/i386 aggregates), the LIR bridge fallback takes over.
-	 * The MCC_MIR_BACKEND env var was removed in Phase 2 — the MIR
-	 * backend is no longer optional. */
+	/* MIR-native backend (Phase 2 / Phase 4 step 2): always enabled.
+	 * Every supported target is lowered by its own MIR machine backend
+	 * (mfnm_backend_<arch>); the LIR bridge fallback and the
+	 * MCC_MIR_BACKEND env var were both removed (Phase 2 / Phase 3e) —
+	 * the MIR backend is the sole asm producer and no longer optional. */
 	extern int g_use_mir_backend;
 	g_use_mir_backend = 1;
 
