@@ -142,7 +142,13 @@ mv_to_scratch(FILE *f, MVal *v, const char *rn)
 		break;
 	case MV_GLOBAL: {
 		const char *sym = v->sym ? v->sym : "0";
-		fprintf(f, "\tmovl\t$%s, %%%s\n", sym, rn);
+		if (g_pic && v->isext && !v->tls) {
+			/* external global: load its address via the GOT (EBX is the
+			 * GOT base in PIC prologues) */
+			fprintf(f, "\tmovl\t%s@GOT(%%ebx), %%%s\n", sym, rn);
+		} else {
+			fprintf(f, "\tmovl\t$%s, %%%s\n", sym, rn);
+		}
 		break;
 	}
 	default:
@@ -196,7 +202,11 @@ emit_addr_str(FILE *f, MAddr a, char *buf, size_t bufsz)
 		fprintf(f, ", %%ecx\n");
 		base_s = "%ecx";
 	} else if (base && base->kind == MV_GLOBAL) {
-		fprintf(f, "\tmovl\t$%s, %%ecx\n", base->sym ? base->sym : "0");
+		if (g_pic && base->isext && !base->tls)
+			fprintf(f, "\tmovl\t%s@GOT(%%ebx), %%ecx\n",
+			        base->sym ? base->sym : "0");
+		else
+			fprintf(f, "\tmovl\t$%s, %%ecx\n", base->sym ? base->sym : "0");
 		base_s = "%ecx";
 	} else if (base) {
 		/* mreg_name returns bare name ("ebp"); AT&T syntax needs %ebp */
@@ -294,7 +304,13 @@ fload_scratch(FILE *f, MVal *v)
 			        mreg_name(g_mt, v->reg));
 		return;
 	case MV_GLOBAL:
-		fprintf(f, "\tmovsd\t%s, %%xmm0\n", v->sym ? v->sym : "0");
+		if (g_pic && v->isext && !v->tls) {
+			fprintf(f, "\tmovl\t%s@GOT(%%ebx), %%eax\n",
+			        v->sym ? v->sym : "0");
+			fprintf(f, "\tmovsd\t(%%eax), %%xmm0\n");
+		} else {
+			fprintf(f, "\tmovsd\t%s, %%xmm0\n", v->sym ? v->sym : "0");
+		}
 		return;
 	default:
 		fputs("\txorpd\t%xmm0, %xmm0\n", f);
@@ -976,7 +992,8 @@ emit_ins(FILE *f, MInsM *in)
 	}
 	case MMOP_CALL: {
 		if (s0 && s0->kind == MV_GLOBAL) {
-			fprintf(f, "\tcall\t%s\n", s0->sym ? s0->sym : "?");
+			fprintf(f, "\tcall\t%s%s\n", s0->sym ? s0->sym : "?",
+			        g_pic && s0->isext ? "@plt" : "");
 		} else if (s0) {
 			mv_to_scratch(f, s0, "eax");
 			fprintf(f, "\tcall\t*%%eax\n");
