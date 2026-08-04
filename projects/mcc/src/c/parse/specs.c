@@ -157,6 +157,7 @@ tagspec(struct scope *s)
 	struct structbuilder b;
 	unsigned long long value, max, min;
 	bool sign;
+	bool is_scoped = false;
 	int i;
 
 	allowedattr = 0;
@@ -167,6 +168,19 @@ tagspec(struct scope *s)
 	default: fatal("internal error: unknown tag kind");
 	}
 	next();
+	/* C++11 scoped enumeration: `enum class E` / `enum struct E`.  The C
+	 * lexer tokenizes `class` as an identifier (TIDENT) and `struct` as
+	 * TSTRUCT; both mark the enum as scoped when they directly follow
+	 * `enum`.  Consume the marker so the tag-name read below is correct. */
+	extern int g_lang;
+	if (kind == TYPEENUM && g_lang == 1) {
+		extern enum cpp_tokenkind cpp_tok_kind(void);
+		enum cpp_tokenkind ck = cpp_tok_kind();
+		if (ck == CPP_TCLASS || ck == CPP_TSTRUCT) {
+			is_scoped = true;
+			next();
+		}
+	}
 	a.kind = 0;
 	attr(&a, allowedattr);
 	gnuattr(&a, allowedattr);
@@ -191,6 +205,13 @@ tagspec(struct scope *s)
 		if (kind == TYPEENUM) {
 			t = mktype(kind, PROPSCALAR|PROPARITH|PROPREAL|PROPINT);
 			t->base = et;
+			if (is_scoped) {
+				extern struct scope *mkscope(struct scope *);
+				/* Scoped enum: enumerators live in the enum's own
+				 * scope (`E::Red`), not the enclosing scope. */
+				t->scoped = true;
+				t->scope = mkscope(s);
+			}
 		} else {
 			t = mktype(kind, 0);
 			t->size = 0;
@@ -302,7 +323,13 @@ tagspec(struct scope *s)
 			} else if (value > max) {
 				max = value;
 			}
-			scopeputdecl(s, d);
+			/* Scoped enum: enumerators are members of the enum's own
+			 * scope (`Color::Red`); unscoped enum pushes into the
+			 * enclosing scope. */
+			if (t->scoped)
+				scopeputdecl(t->scope, d);
+			else
+				scopeputdecl(s, d);
 			if (!consume(TCOMMA))
 				break;
 		}
@@ -320,13 +347,23 @@ tagspec(struct scope *s)
 				if (i == countof(inttypes))
 					error_code(E_CTYPE, &tok.loc, "no integer type can represent all enumerator values");
 				t->base = et;
-				for (d = enumconsts; d; d = d->next)
-					d->type = t;
 			}
+			/* Enumerators have the enum's own type (C23 / C++), not the
+			 * underlying type.  For a scoped enum this is required so that
+			 * `Color::Red` has type `Color` (used by the no-implicit-cast
+			 * and same-type-comparison rules). */
+			for (d = enumconsts; d; d = d->next)
+				d->type = t;
 			t->size = t->base->size;
 			t->align = t->base->align;
 			t->u.arith.issigned = t->base->u.arith.issigned;
 			t->u.arith.width = t->base->u.arith.width;
+		} else if (t->scoped) {
+			/* Explicit underlying type (`enum class E : unsigned char`):
+			 * the enumerators still have the enum type, not the
+			 * underlying type. */
+			for (d = enumconsts; d; d = d->next)
+				d->type = t;
 		}
 	}
 	t->incomplete = false;
@@ -761,7 +798,8 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 				extern int g_lang;
 				if (g_lang == 1) {
 					struct type *tt = scopegettag(s, tokenstr(tok.kind), 1);
-					if (tt && (tt->kind == TYPESTRUCT || tt->kind == TYPEUNION)) {
+					if (tt && (tt->kind == TYPESTRUCT || tt->kind == TYPEUNION ||
+					           tt->kind == TYPEENUM)) {
 						t = tt;
 						tq = QUALNONE;
 						++ntypes;
@@ -902,7 +940,8 @@ istypename(struct scope *s, const char *name)
 		if (strcmp(name, "char8_t") == 0)
 			return 1;
 		t = scopegettag(s, name, 1);
-		if (t && (t->kind == TYPESTRUCT || t->kind == TYPEUNION))
+		if (t && (t->kind == TYPESTRUCT || t->kind == TYPEUNION ||
+		           t->kind == TYPEENUM))
 			return 1;
 	}
 	return 0;

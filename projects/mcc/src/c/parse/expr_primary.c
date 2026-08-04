@@ -299,6 +299,32 @@ primaryexpr(struct scope *s)
 				if (g_lang == 1) {
 					struct type *ct = scopegettag(s,
 					    tokenstr(tok.kind), 1);
+					if (ct && ct->kind == TYPEENUM && ct->scoped) {
+						/* C++11 scoped enum: `Color::Red` names an
+						 * enumerator of a scoped enum. */
+						struct token saved = tok;
+						next();
+						if (tok.kind == TCOLONCOLON) {
+							struct decl *ed;
+							next(); /* consume '::' */
+							if (tok.kind < TIDENT)
+								error_code(E_SYNTAX, &tok.loc,
+								    "expected enumerator name after '::'");
+							ed = ct->scope
+							   ? scopegetdecl(ct->scope,
+							         tokenstr(tok.kind), 0)
+							   : NULL;
+							if (!ed || ed->kind != DECLCONST)
+								error_code(E_CTYPE, &tok.loc,
+								    "'%s' is not an enumerator of '%s'",
+								    tokenstr(tok.kind), tokenstr(saved.kind));
+							e = mkexpr(EXPRIDENT, ed->type, NULL);
+							e->u.ident.decl = ed;
+							next(); /* consume enumerator */
+							break;
+						}
+						tok = saved; /* not `Color::` — restore */
+					}
 					if (ct && (ct->kind == TYPESTRUCT ||
 					           ct->kind == TYPEUNION)) {
 						struct token saved = tok;

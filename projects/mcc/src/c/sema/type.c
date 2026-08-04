@@ -63,6 +63,7 @@ mktype(enum typekind kind, enum typeprop prop)
 	t->incomplete = false;
 	t->isref = false;
 	t->isrref = false;
+	t->scoped = false;
 	if (kind == TYPESTRUCT || kind == TYPEUNION) {
 		/* C++ virtual-dispatch fields must start zeroed: cpp_class_decl
 		 * and the vtable machinery read them before explicit init. */
