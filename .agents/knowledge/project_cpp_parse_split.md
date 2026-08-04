@@ -42,3 +42,11 @@ cpp_requires(871)/cpp_newdel(690)/cpp_lambda(656)/cpp_ctor(648)/cpp_method(613)/
 - g_cpp_tmpl_stack/depth/expl_*/pack_* → 解锁函数模板子簇
 这类"先开小路再拆"使能提交风险低、可独立验证，是拆深耦合状态机的标准手法。
 
+## 内聚状态机文件拆分（2026-08-05，link.c 成功示范）
+cpp_parse.c 拆完后，把方法推广到**单一 `struct ld_context ctx` 状态机的 mt/ld link.c**（4780 行）——之前误判为"内聚单体不可拆"是错的：
+- **关键判断**：即使逻辑内聚，只要**状态全装在单个 context 结构 + 指针传递**（无文件级 static 全局），就能按阶段函数域拆（layout/reloc/dynamic/elfout），共享 context struct 放 ld_internal.h 即可。
+- **可靠函数边界脚本**（brace-matching）：`^name(` 行后找 `{`，逐行计数 `{`/`}` 到匹配 `}`；向上回溯返回类型行作起点。跨多行注释会夹在函数边界断裂，提取后需清理**孤儿注释 + 悬挂 `};`**（`-Werror` 会立即报错，配合 grep 检查死代码）。
+- 跨域函数去 static + header 原型；`-Werror` 下隐式声明即报错，快速暴露漏 decl。函数返回类型必须与 header 一致。
+- 每拆一域跑 `make -C projects/meuos-toolchain check`（含 rtld e2e）验证零回归。
+
+
