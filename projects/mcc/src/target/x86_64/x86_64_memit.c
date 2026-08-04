@@ -906,9 +906,40 @@ emit_ins(FILE *f, MInsM *in)
 		return;
 	}
 	case MMOP_STORE: {
+		/* Is this a store into a TLS global under general-dynamic TLS?
+		 * The GD access (emit_tls_addr) issues `call __tls_get_addr`,
+		 * which clobbers every caller-saved register (GPR and XMM), so
+		 * the value operand must be preserved across the call (D3). */
+		bool gd_tls = g_tls_model == MTLS_GLOBAL_DYNAMIC &&
+			((in->addr.base && in->addr.base->kind == MV_GLOBAL &&
+			  in->addr.base->tls) ||
+			 (in->addr.index && in->addr.index->kind == MV_GLOBAL &&
+			  in->addr.index->tls));
 		if (in->dtype == MT_F32 || in->dtype == MT_F64) {
-			/* floating-point store: value through %xmm0 */
+			/* floating-point store: value through %xmm0.  For GD the
+			 * call clobbers caller-saved XMM (incl. the source reg the
+			 * allocator chose), so stash the 64-bit float pattern in
+			 * %rbx (callee-saved, reserved under GD) across the call. */
 			const char *sd = in->dtype == MT_F64 ? "sd" : "ss";
+			if (gd_tls) {
+				if (c && c->kind == MC_FLT) {
+					fprintf(f, "\tmov%s\t", sd);
+					emit_const(f, c);
+					fprintf(f, ", %%xmm0\n");
+				} else if (s0) {
+					fprintf(f, "\tmov%s\t", sd);
+					emit_mval(f, s0);
+					fprintf(f, ", %%xmm0\n");
+				}
+				fputs("\tmovq\t%xmm0, %rbx\n", f);
+				emit_addr_loads(f, in->addr);
+				fputs("\tmovq\t%rbx, %xmm0\n", f);
+				fprintf(f, "\tmov%s\t%%xmm0, ", sd);
+				emit_addr(f, in->addr);
+				fputs("\n", f);
+				return;
+			}
+			emit_addr_loads(f, in->addr);
 			if (c && c->kind == MC_FLT) {
 				fprintf(f, "\tmov%s\t", sd);
 				emit_const(f, c);
@@ -918,14 +949,39 @@ emit_ins(FILE *f, MInsM *in)
 				emit_mval(f, s0);
 				fprintf(f, ", %%xmm0\n");
 			}
-			emit_addr_loads(f, in->addr);
 			fprintf(f, "\tmov%s\t%%xmm0, ", sd);
 			emit_addr(f, in->addr);
 			fputs("\n", f);
 			return;
 		}
-		mov_to_rax(f, s0, c);
+		/* Integer store.  Under general-dynamic TLS the address operand
+		 * may be a TLS global whose access (emit_addr_loads →
+		 * emit_tls_addr) issues `call __tls_get_addr`, which clobbers
+		 * every caller-saved register including the %rax value operand
+		 * (D3).  To preserve the value across the call we keep it in
+		 * %rbx — a callee-saved register that regalloc leaves free under
+		 * -ftls-model=global-dynamic (see mreg_pool_build) — store it to
+		 * the TLS address, then move it back.  Non-GD stores have no
+		 * call (LE/IE are pure address computation), so they keep the
+		 * simple emit_addr_loads + mov_to_rax order. */
+		if (gd_tls) {
+			mov_to_rax(f, s0, c);
+			fputs("\tmovq\t%rax, %rbx\n", f);
+			emit_addr_loads(f, in->addr);
+			if (in->dtype == MT_I8)
+				fputs("\tmovb\t%bl, ", f);
+			else if (in->dtype == MT_I16)
+				fputs("\tmovw\t%bx, ", f);
+			else if (in->dtype == MT_I32)
+				fputs("\tmovl\t%ebx, ", f);
+			else
+				fputs("\tmovq\t%rbx, ", f);
+			emit_addr(f, in->addr);
+			fputs("\n", f);
+			return;
+		}
 		emit_addr_loads(f, in->addr);
+		mov_to_rax(f, s0, c);
 		if (in->dtype == MT_I8)
 			fputs("\tmovb\t%al, ", f);
 		else if (in->dtype == MT_I16)
@@ -1195,6 +1251,26 @@ mfnm_emit_x86_64(MFnM *fm, FILE *f)
 				break;
 			}
 		}
+	/* General-dynamic TLS store: the emitter keeps the value operand in
+	 * %rbx across the __tls_get_addr call (D3).  %rbx is callee-saved
+	 * and regalloc leaves it free under MTLS_GLOBAL_DYNAMIC, but the
+	 * emitter's use of it must still be saved/restored by the prologue/
+	 * epilogue, so mark it used here (before the callee-saved save loop
+	 * that keys off fm->regsused). */
+	if (g_tls_model == MTLS_GLOBAL_DYNAMIC)
+		for (MBlkM *b = fm->link; b; b = b->link)
+			for (uint32_t i = 0; i < b->nins; i++) {
+				MInsM *in = &b->ins[i];
+				if (in->op == MMOP_STORE &&
+				    ((in->addr.base && in->addr.base->kind == MV_GLOBAL &&
+				      in->addr.base->tls) ||
+				     (in->addr.index && in->addr.index->kind == MV_GLOBAL &&
+				      in->addr.index->tls))) {
+					fm->regsused |= (1ull << X64MREG_RBX);
+					goto gd_scan_done;
+				}
+			}
+gd_scan_done:
 	int extra = assign_extra_slots(fm);
 	nfp = 0;   /* fresh float pool per function */
 	g_fname = fm->name;

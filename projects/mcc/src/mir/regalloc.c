@@ -24,6 +24,7 @@
 #include "i386_m.h"     /* I386MREG_EBX (PIC GOT base, reserved under -fPIC) */
 
 extern int g_pic;       /* PIC/shared flag from the driver (main.c) */
+extern int g_tls_model; /* TLS access model (MTlsModel), set from tls_model */
 
 /* ---- interval bookkeeping ------------------------------------------------- */
 
@@ -268,6 +269,18 @@ mreg_pool_build(const MTargetM *mt, int pic, MRegPool *pc, MRegPool *px)
 	uint64_t no = mt->rglob | mt->reserved | mt->scratch;
 	if (pic && strcmp(mt->name, "i386") == 0)
 		no |= (1ull << I386MREG_EBX);
+	/* Under general-dynamic TLS (-ftls-model=global-dynamic) the x86_64
+	 * emitter reserves %rbx to hold a value across the __tls_get_addr
+	 * call in a GD TLS store (D3).  Keep it out of the allocator so it
+	 * is free for the emitter, mirroring the i386 PIC EBX reservation.
+	 * Look the register up by name so this MIR-generic file does not
+	 * pull in the arch header (mcc's preprocessor mishandles including
+	 * both i386_m.h and x86_64_m.h). */
+	if (g_tls_model == MTLS_GLOBAL_DYNAMIC && strcmp(mt->name, "x86_64") == 0) {
+		int rbx = mreg_id(mt, "rbx");
+		if (rbx >= 0)
+			no |= (1ull << rbx);
+	}
 	for (int r = mt->gpr0; r < mt->gpr0 + mt->ngpr; r++) {
 		if ((no >> r) & 1)
 			continue;
