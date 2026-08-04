@@ -576,9 +576,10 @@ const MTargetM mtarget_i386 = {
 	.fpr0 = I386MREG_XMM0,
 	.nfpr = 8,               /* xmm0-xmm7 */
 	.rglob = (1ull << I386MREG_EBP) | (1ull << I386MREG_ESP),
-	/* EBX is reserved for the PIC GOT base pointer (kept out of the
-	 * allocator); under non-PIC it simply goes unused. */
-	.reserved = (1ull << I386MREG_EBX),
+	/* EBX is NOT reserved here: it stays in the allocator pool for
+	 * non-PIC code.  Only under -fPIC does regalloc (mreg_pool_build)
+	 * carve out I386MREG_EBX as the GOT base pointer. */
+	.reserved = 0,
 	.argreg = i386_argreg,
 	.rsave = i386_rsave,
 	.rclob = i386_rclob,
