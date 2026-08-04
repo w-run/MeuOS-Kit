@@ -720,6 +720,11 @@ mcc_main(int argc, char *argv[])
 	 * which does not read the QBE `Target T` global (purity rule). */
 	extern int g_pic;
 	g_pic = pic;
+	/* TLS access-model mirror for the MIR machine layer.  x86_64_memit.c
+	 * consults g_tls_model to pick general-dynamic (GD) vs initial-exec
+	 * (IE) vs local-exec (LE) emission; same purity rule as g_pic. */
+	extern int g_tls_model;
+	g_tls_model = tls_model;
 
 	/* Triple → ABI auto-mapping (triple-abi-map). If the target triple
 	 * contains an ABI suffix (e.g. riscv64-meuos-linux-lp64d), extract

@@ -688,4 +688,15 @@ void mfnm_regalloc(MFnM *fm);
  * the ABI lowering. */
 void mfnm_ifconv(MFnM *fm);
 
+/* TLS access model, MIR-layer mirror of the QBE `enum tls_model`
+ * (include/ir.h).  Kept independent of the QBE enum so the MIR layer
+ * obeys the purity rule (no QBE structures).  The driver (main.c) copies
+ * `tls_model` into the machine-layer `g_tls_model`; backends read it. */
+enum MTlsModel {
+	MTLS_DEFAULT = 0,     /* auto: PIC -> IE, non-PIC -> LE */
+	MTLS_GLOBAL_DYNAMIC,  /* -ftls-model=global-dynamic: force GD */
+	MTLS_INITIAL_EXEC,    /* -ftls-model=initial-exec: force IE */
+	MTLS_LOCAL_EXEC,      /* -ftls-model=local-exec: force LE */
+};
+
 #endif /* MCC_MIR_H */
