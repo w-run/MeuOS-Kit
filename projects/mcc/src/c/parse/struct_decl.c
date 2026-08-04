@@ -365,6 +365,12 @@ structdecl(struct scope *s, struct structbuilder *b)
 		struct decl *pd, **pend;
 		char *mname;
 		bool is_const = false;
+		/* C++23 P1169: `static operator[]` / `static operator()` — the
+		 * object is an explicit first parameter and the member has no
+		 * implicit `this` (cpp_define_method gives it an "S" mangled
+		 * suffix and no `this` param).  `static` was consumed by
+		 * declspecs into `sc`. */
+		bool is_static = (sc & SCSTATIC) != 0;
 
 		next(); /* consume 'operator' */
 		opcode = cpp_op_mangle(tok.kind);
@@ -421,8 +427,8 @@ structdecl(struct scope *s, struct structbuilder *b)
 				mname = xmalloc(strlen(opcode) + 10);
 				sprintf(mname, "operator_%s", opcode);
 				cpp_define_method(s, ft, mname,
-				    b->type->u.structunion.tag,
-				    is_const, false, false);
+			    b->type->u.structunion.tag,
+			    is_const, is_static, false);
 				addmember(b, (struct qualtype){ft, QUALNONE, NULL},
 				    mname, 0, -1);
 				return;
@@ -434,8 +440,8 @@ structdecl(struct scope *s, struct structbuilder *b)
 				mname = xmalloc(strlen(opcode) + 10);
 				sprintf(mname, "operator_%s", opcode);
 				cpp_define_method(s, ft, mname,
-				    b->type->u.structunion.tag,
-				    is_const, false, false);
+			    b->type->u.structunion.tag,
+			    is_const, is_static, false);
 				addmember(b, (struct qualtype){ft, QUALNONE, NULL},
 				    mname, 0, -1);
 				return;
@@ -446,7 +452,7 @@ structdecl(struct scope *s, struct structbuilder *b)
 		mname = xmalloc(strlen(opcode) + 10);
 		sprintf(mname, "operator_%s", opcode);
 		cpp_define_method(s, ft, mname, b->type->u.structunion.tag,
-		                  is_const, false, false);
+		                  is_const, is_static, false);
 		addmember(b, (struct qualtype){ft, QUALNONE, NULL}, mname, 0, -1);
 		return;
 	}

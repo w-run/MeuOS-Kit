@@ -333,6 +333,59 @@ postfixexpr(struct scope *s, struct expr *r)
 						if (fd2 && fd2->kind == DECLFUNC)
 							snprintf(mname2, sizeof mname2, "%s", mval2);
 					}
+					/* C++23 P1169 static operator()/operator[] (and
+					 * `obj.static_method()`): a static member mangles as
+					 * `Class_name<objparam><args>S` — the explicit object
+					 * parameter is encoded before the args, plus the
+					 * static-member "S" suffix.  The object parameter's
+					 * cv-qualifiers are not encoded, so try the
+					 * reference / by-value / rvalue-reference object
+					 * encodings in value-category order.  The call
+					 * already prepends `&obj` as its first argument,
+					 * which binds the explicit object parameter (the
+					 * static function type has no implicit `this`). */
+					if ((!fd2 || fd2->kind != DECLFUNC) &&
+					    g_cpp_member_this && g_cpp_member_this->base) {
+						struct expr *objexpr = g_cpp_member_this->base;
+						const char *tag =
+						    g_cpp_member_class->u.structunion.tag;
+						char mtmp[256], objcode[64];
+						const char *suf;
+						const char *ord[3];
+						size_t plen;
+						int oi;
+
+						if (!tag)
+							tag = "anon";
+						/* encode the bracket args once with plain
+						 * param types: `Class_name<args>` */
+						cpp_mangled_name_args(g_cpp_member_class,
+						    g_cpp_member_name, arglist, mtmp,
+						    sizeof mtmp, false);
+						plen = strlen(tag) + 1 +
+						    strlen(g_cpp_member_name);
+						suf = mtmp + plen;
+						ord[0] = objexpr->lvalue ? "R" : "V";
+						ord[1] = "";
+						ord[2] = objexpr->lvalue ? "V" : "R";
+						for (oi = 0; oi < 3; oi++) {
+							char sman[256];
+							snprintf(objcode, sizeof objcode,
+							    "%so%s", ord[oi], tag);
+							snprintf(sman, sizeof sman,
+							    "%.*s%s%sS", (int)plen,
+							    mtmp, objcode, suf);
+							fd2 = scopegetdecl(
+							    g_cpp_member_class->scope
+							    ? g_cpp_member_class->scope : s,
+							    sman, 1);
+							if (fd2 && fd2->kind == DECLFUNC) {
+								snprintf(mname2, sizeof mname2,
+								    "%s", sman);
+								break;
+							}
+						}
+					}
 					if (!fd2 || fd2->kind != DECLFUNC)
 						error_code(E_DECL, &tok.loc,
 						    "no matching member function for '%s'",

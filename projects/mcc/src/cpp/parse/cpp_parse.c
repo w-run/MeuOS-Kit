@@ -171,6 +171,8 @@ static void cpp_emit_base_ctor(struct func *f);
 static void cpp_emit_base_dtor(struct func *f);
 static void cpp_parse_init_list(struct func *f, struct scope *fs);
 static void cpp_mangle_type(struct type *t, char *buf, size_t bufsz);
+static struct member *cpp_method_member(struct type *t, const char *name,
+                                        struct type **owner);
 static size_t cpp_requires_span_len(struct token **out);
 static void flush_pending_methods(void);
 static void cpp_emit_global_ctors(void);
@@ -1830,6 +1832,86 @@ cpp_subscript_call(struct scope *s, struct expr *obj, struct expr *args,
 			                                : NULL;
 			for (; args; args = args->next, param = param ? param->next : NULL) {
 				*end = exprassign(args, param ? param->type : NULL);
+				end = &(*end)->next;
+				++call->u.call.nargs;
+			}
+			*out = call;
+			return true;
+		}
+	}
+	/* C++23 P1169 static operator[]: `static int& operator[](Matrix& m,
+	 * int i, int j)`.  The object is an explicit first parameter and the
+	 * member has no implicit `this`, so the mangled name is
+	 * `Class_operator_ix<objparam><args>S` — the object-parameter type
+	 * (reference 'R'/'V' or by-value before the class code) is encoded
+	 * first, then the bracket args, then the static-member "S" suffix.
+	 * The encodings are tried in value-category order (an lvalue object
+	 * most likely binds a `T&` object parameter). */
+	{
+		const char *ord[3];
+		int oi;
+		struct type *owner = NULL;
+		const char *tag;
+
+		if (cpp_method_member(t, mname, &owner) && owner)
+			tag = owner->u.structunion.tag;
+		else
+			tag = t->u.structunion.tag;
+		if (!tag)
+			tag = "anon";
+		ord[0] = (obj && obj->lvalue) ? "R" : "V";
+		ord[1] = "";
+		ord[2] = (obj && obj->lvalue) ? "V" : "R";
+		for (oi = 0; oi < 3; oi++) {
+			char argcodes[256];
+			char *p = argcodes;
+			char *e = argcodes + sizeof argcodes - 1;
+			struct expr *a;
+
+			/* the bracket args encode once with plain param types (a
+			 * static declaration has no R/V lvalue prefixes) */
+			for (a = args; a && p < e; a = a->next) {
+				char code[64];
+				size_t cl;
+				cpp_mangle_type(a->type, code, sizeof code);
+				cl = strlen(code);
+				if (p + cl >= e)
+					break;
+				memcpy(p, code, cl);
+				p += cl;
+			}
+			*p = '\0';
+			snprintf(mangled, sizeof mangled, "%s_%s%so%s%sS",
+			    tag, mname, ord[oi], tag, argcodes);
+			fd = scopegetdecl(t->scope ? t->scope : &filescope,
+			    mangled, 1);
+			if (!fd || fd->kind != DECLFUNC)
+				continue;
+			fn = mkexpr(EXPRIDENT, fd->type, NULL);
+			fn->u.ident.decl = fd;
+			fn = decay(fn); /* &Class_operator_ix...S */
+
+			call = mkexpr(EXPRCALL, fd->type->base, fn);
+			call->u.call.args = NULL;
+			call->u.call.nargs = 0;
+			end = &call->u.call.args;
+			/* fd's first parameter is the explicit object parameter
+			 * (no implicit `this`); bind the object by address when it
+			 * is a reference, like every other reference param */
+			param = fd->type->u.func.params;
+			o = obj;
+			if (param && param->type && param->type->isref)
+				o = mkunaryexpr(TBAND, obj);
+			*end = exprassign(o, param ? param->type : NULL);
+			end = &(*end)->next;
+			++call->u.call.nargs;
+			param = param ? param->next : NULL;
+			for (; args; args = args->next,
+			    param = param ? param->next : NULL) {
+				struct expr *arg = args;
+				if (param && param->type && param->type->isref)
+					arg = mkunaryexpr(TBAND, args);
+				*end = exprassign(arg, param ? param->type : NULL);
 				end = &(*end)->next;
 				++call->u.call.nargs;
 			}
