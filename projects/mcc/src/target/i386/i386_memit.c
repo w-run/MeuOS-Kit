@@ -142,7 +142,16 @@ mv_to_scratch(FILE *f, MVal *v, const char *rn)
 		break;
 	case MV_GLOBAL: {
 		const char *sym = v->sym ? v->sym : "0";
-		if (g_pic && v->isext && !v->tls) {
+		if (v->tls) {
+			/* TLS: thread pointer (TP, %gs:0) plus the TLS offset.
+			 * PIC uses the initial-exec GOT form (R_386_TLS_GOTIE);
+			 * non-PIC uses local-exec (R_386_TLS_LE). */
+			fprintf(f, "\tmovl\t%%gs:0, %%%s\n", rn);
+			if (g_pic)
+				fprintf(f, "\taddl\t%s@gotntpoff, %%%s\n", sym, rn);
+			else
+				fprintf(f, "\taddl\t$%s@ntpoff, %%%s\n", sym, rn);
+		} else if (g_pic && v->isext) {
 			/* external global: load its address via the GOT (EBX is the
 			 * GOT base in PIC prologues) */
 			fprintf(f, "\tmovl\t%s@GOT(%%ebx), %%%s\n", sym, rn);
@@ -202,11 +211,21 @@ emit_addr_str(FILE *f, MAddr a, char *buf, size_t bufsz)
 		fprintf(f, ", %%ecx\n");
 		base_s = "%ecx";
 	} else if (base && base->kind == MV_GLOBAL) {
-		if (g_pic && base->isext && !base->tls)
+		if (base->tls) {
+			/* TLS base: TP + TLS offset (see mv_to_scratch). */
+			fprintf(f, "\tmovl\t%%gs:0, %%ecx\n");
+			if (g_pic)
+				fprintf(f, "\taddl\t%s@gotntpoff, %%ecx\n",
+				        base->sym ? base->sym : "0");
+			else
+				fprintf(f, "\taddl\t$%s@ntpoff, %%ecx\n",
+				        base->sym ? base->sym : "0");
+		} else if (g_pic && base->isext) {
 			fprintf(f, "\tmovl\t%s@GOT(%%ebx), %%ecx\n",
 			        base->sym ? base->sym : "0");
-		else
+		} else {
 			fprintf(f, "\tmovl\t$%s, %%ecx\n", base->sym ? base->sym : "0");
+		}
 		base_s = "%ecx";
 	} else if (base) {
 		/* mreg_name returns bare name ("ebp"); AT&T syntax needs %ebp */
