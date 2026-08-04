@@ -902,18 +902,41 @@ dump_dynamic(const unsigned char *bytes, size_t size,
 	enum mt_elf_status st;
 	uint16_t i;
 	int found = 0;
+	int from_phdr = 0;
 	uint64_t total, count, n;
 
-	/* 查找 SHT_DYNAMIC 节区。 */
-	for (i = 0; i < view->section_count; ++i) {
-		st = mt_elf64_get_section(bytes, size, view, i, &dyn);
-		if (st != MT_ELF_OK)
+	memset(&dyn, 0, sizeof(dyn));
+
+	/* 优先通过 PT_DYNAMIC program header 定位动态段。PIE/shared object
+	 * （ET_DYN）通常由 PT_DYNAMIC 段承载；某些链接器生成的 .dynamic 节区
+	 * sh_type/sh_link 不完整，但 phdr 始终可靠（与 GNU readelf 一致）。 */
+	for (i = 0; i < view->program_count; ++i) {
+		struct mt_elf64_phdr ph;
+		if (mt_elf64_get_phdr(bytes, size, view, i, &ph) != MT_ELF_OK)
 			continue;
-		if (dyn.type == MT_SHT_DYNAMIC) {
+		if (ph.type == MT_PT_DYNAMIC && ph.offset + ph.filesz <= size
+		    && ph.filesz >= 16) {
+			dyn.offset = ph.offset;
+			dyn.size = ph.filesz;
 			found = 1;
+			from_phdr = 1;
 			break;
 		}
 	}
+
+	/* 回退：扫描 SHT_DYNAMIC 节区头表（无 PT_DYNAMIC 的静态链接文件）。 */
+	if (!found) {
+		for (i = 0; i < view->section_count; ++i) {
+			st = mt_elf64_get_section(bytes, size, view, i, &dyn);
+			if (st != MT_ELF_OK)
+				continue;
+			if (dyn.type == MT_SHT_DYNAMIC) {
+				found = 1;
+				break;
+			}
+		}
+	}
+
 	if (!found) {
 		printf("\nThere is no dynamic section in this file.\n");
 		return;
@@ -936,13 +959,37 @@ dump_dynamic(const unsigned char *bytes, size_t size,
 		}
 	}
 
-	/* sh_link 指向 .dynstr。 */
+	/* .dynstr：优先用 .dynamic 节区的 sh_link；若动态段来自 PT_DYNAMIC
+	 * （节区头表可能缺 sh_link），则按名查找名为 .dynstr 的 STRTAB 节区。 */
 	memset(&strtab, 0, sizeof(strtab));
-	if (dyn.link < view->section_count) {
+	if (!from_phdr && dyn.link < view->section_count) {
 		st = mt_elf64_get_section(bytes, size, view,
 		                          (uint16_t)dyn.link, &strtab);
 		if (st != MT_ELF_OK || strtab.type != MT_SHT_STRTAB)
 			memset(&strtab, 0, sizeof(strtab));
+	}
+	if (strtab.type != MT_SHT_STRTAB) {
+		struct mt_elf64_section shstrtab;
+		memset(&shstrtab, 0, sizeof(shstrtab));
+		if (view->section_name_index < view->section_count)
+			mt_elf64_get_section(bytes, size, view,
+			                     view->section_name_index, &shstrtab);
+		for (i = 0; i < view->section_count; ++i) {
+			struct mt_elf64_section sec;
+			const char *name = NULL;
+			if (mt_elf64_get_section(bytes, size, view, i, &sec)
+			    != MT_ELF_OK)
+				continue;
+			if (sec.type != MT_SHT_STRTAB)
+				continue;
+			if (shstrtab.type == MT_SHT_STRTAB)
+				mt_elf64_get_string(bytes, size, &shstrtab,
+				                    sec.name, &name);
+			if (name && strcmp(name, ".dynstr") == 0) {
+				strtab = sec;
+				break;
+			}
+		}
 	}
 
 	printf("\nDynamic section at offset 0x%llx contains %llu entries:\n",
