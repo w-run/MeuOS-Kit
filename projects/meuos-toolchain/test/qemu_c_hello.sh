@@ -52,9 +52,21 @@ else
 	exit 1
 fi
 
-# Verify the ELF is for the correct architecture
-file "$work/hello.elf" | grep -qE "ELF.*$arch|ELF.*AArch64|ELF.*RISC-V|ELF.*LoongArch" || {
-	echo "  FAIL: unexpected ELF architecture"
+# Verify the ELF is for the correct architecture.
+# Normalize `file` output to lowercase and match a per-arch pattern so it
+# covers the real `file` naming (e.g. "x86-64", "Intel 80386", "ARM EABI").
+arch_lower=$(file "$work/hello.elf" 2>/dev/null | tr '[:upper:]' '[:lower:]')
+case "$arch" in
+	x86_64)      re='x86-64|amd64';;
+	i386)        re='intel 80386|i386';;
+	arm)         re='eabi|arm';;
+	riscv64)     re='risc-v';;
+	loongarch64) re='loongarch';;
+	aarch64)     re='aarch64';;
+	*)           re="$arch";;
+esac
+printf '%s' "$arch_lower" | grep -qE "$re" || {
+	echo "  FAIL: unexpected ELF architecture ($arch)"
 	file "$work/hello.elf"
 	fail=1
 	exit 1

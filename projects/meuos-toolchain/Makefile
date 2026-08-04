@@ -326,7 +326,10 @@ check-qemu-i386: $(AS_BIN) $(LD_BIN)
 check-as-sse-x86_64: $(AS_BIN)
 	sh test/as_sse_x86_64.sh "$(abspath $(AS_BIN))"
 
-check-ld-x86_64: $(AS_BIN) $(AR_BIN) $(LD_BIN)
+check-as-libc-x86_64: $(AS_BIN)
+	sh test/as_libc_x86_64.sh "$(abspath $(AS_BIN))"
+
+check-ld-x86_64: $(AS_BIN) $(AR_BIN) $(LD_BIN) $(MCC)
 	sh test/ld_smoke.sh "$(abspath $(AS_BIN))" "$(abspath $(AR_BIN))" "$(abspath $(LD_BIN))"
 	sh test/ld_sysroot.sh "$(abspath $(AS_BIN))" "$(abspath $(LD_BIN))"
 	sh test/ld_counter_e2e.sh "$(abspath $(AS_BIN))" "$(abspath $(LD_BIN))" "$(abspath $(MCC))" "$(SYSROOT)"
