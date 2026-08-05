@@ -29,6 +29,14 @@
 struct ExcB { int b; ExcB() : b(0) {} };
 struct ExcD : ExcB { int d; ExcD() : d(1) {} };
 
+/* stage-4 (base-subobject slicing, catch-by-reference): a multi-inherited
+ * class whose 2nd base sits at a non-zero offset.  catch(Second&) of a throw
+ * of the derived D must re-aim the pointer at the Second sub-object (mcc-side
+ * slice using the base offset), so accessing the base members works. */
+struct ExcFirst { int fa; ExcFirst() : fa(100) {} };
+struct ExcSecond { int sb; ExcSecond() : sb(200) {} };
+struct ExcBoth : ExcFirst, ExcSecond { int d; ExcBoth() : d(300) {} };
+
 /* stage-2: a throw from a callee crosses the function boundary. */
 static void
 may_throw_cross(int v)
@@ -132,6 +140,26 @@ main(void)
             rh = (e == 42) ? 1 : 0;
         }
         if (!rh) return 14;
+    }
+
+    /* stage-4: catch-by-reference base-subobject slicing.  throw a
+     * multi-inherited object and catch its 2nd base by reference; the
+     * mcc-side slice must re-aim the carried pointer to the base view so
+     * (*e).sb reads the second base's member (offset = sizeof(ExcFirst)). */
+    {
+        try {
+            throw ExcBoth();
+        } catch (ExcSecond &e) {
+            /* (ExcSecond*)((char*)carried + sizeof(ExcFirst)) → sb reads 200 */
+            if ((*e).sb != 200) return 15;
+        }
+        /* exact-type catch of the derived object by reference still works */
+        try {
+            throw ExcBoth();
+        } catch (ExcBoth &e) {
+            if ((*e).sb != 200) return 16;
+            if ((*e).d != 300) return 17;
+        }
     }
 
     return 0;

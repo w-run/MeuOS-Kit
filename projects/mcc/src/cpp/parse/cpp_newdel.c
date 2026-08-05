@@ -1147,6 +1147,37 @@ exc_member_is_base(struct member *m)
 	return 0;
 }
 
+/* Offset of the `base` sub-object within an instance of class `derived`,
+ * for base-subobject slicing in an exception catch.  The base appears as
+ * an anonymous member (name==NULL); with multiple/chain inheritance the
+ * base may sit at a non-zero offset (e.g. the 2nd base in `struct D : A,
+ * B` is at offset sizeof(A)).  Recurses through nested anonymous base
+ * members to sum the path.  Returns (unsigned long long)-1 when `derived`
+ * is NOT derived from `base` (callers guard with cpp_is_derived first). */
+static unsigned long long
+exc_base_slice_offset(struct type *derived, struct type *base)
+{
+	struct member *m;
+
+	if (!derived || !base)
+		return (unsigned long long)-1;
+	if (derived == base)
+		return 0;
+	if (derived->kind != TYPESTRUCT && derived->kind != TYPEUNION)
+		return (unsigned long long)-1;
+	for (m = derived->u.structunion.members; m; m = m->next) {
+		unsigned long long sub;
+		if (m->name || !m->type) /* virtual/regular members have a name */
+			continue;
+		if (m->type == base)
+			return m->offset;
+		sub = exc_base_slice_offset(m->type, base);
+		if (sub != (unsigned long long)-1)
+			return m->offset + sub;
+	}
+	return (unsigned long long)-1;
+}
+
 static struct expr *
 cpp_exc_throw_call_scalar(struct type *t, struct expr *value)
 {
@@ -1504,8 +1535,8 @@ for (;;) {
 							        ctx,
 							        mkconstexpr(&typeint,
 							            exc_tc_regs[i].code)));
-					}
-					/* integer widening is NOT implicit in C++ catch type
+						}
+						/* integer widening is NOT implicit in C++ catch type
 					 * matching (the standard says catch is exact-type +
 					 * derived-class only).  The assignment of the caught
 					 * value to the catch parameter is still handled by
@@ -1545,10 +1576,24 @@ for (;;) {
 						 * to NULL via the scalar path; guard against
 						 * deref).  For class types caught_is_obj is
 						 * true; for the (rare) scalar-throw with the
-						 * same typecode caught_obj stays NULL. */
+						 * same typecode caught_obj stays NULL.
+						 *
+						 * Base-subobject slicing: when this catch is a
+						 * base type (Base&) matching a derived throw
+						 * (D), the runtime carries the D object; we
+						 * adjust the pointer to the Base sub-object
+						 * (mcc-side slice, does not rely on the libc
+						 * offset argument).  A local __exc_slice offset
+						 * selects the base offset for whatever derived
+						 * type actually matched, defaulting to 0 (the
+						 * catch type itself, or an unambiguous base at
+						 * offset 0). */
 						struct expr *ep, *co, *cvs;
-						struct expr *isobj;
+						struct expr *isobj, *ct;
 						struct block *bp1, *bp0, *bpjoin;
+						struct decl *sd;
+						struct expr *se;
+						int i;
 						ep = mkexpr(EXPRIDENT,
 						    mkpointertype(ctype, QUALNONE),
 						    NULL);
@@ -1562,12 +1607,63 @@ for (;;) {
 						bpjoin = mkblock("exc_ref_join");
 						funcbranch(f, isobj, bp1, bp0);
 						funclabel(f, bp1);
+						/* unsigned long long __exc_slice = 0; then
+						 * if (_meuos_exc_caught_type()==tc(D_i))
+						 *   __exc_slice = base_offset_in(D_i, ctype);
+						 * for every registered derived type D_i that a
+						 * match could have come from. */
+						sd = mkdecl("__exc_slice", DECLOBJECT,
+						    &typeulong, QUALNONE, LINKNONE);
+						sd->u.obj.storage = SDAUTO;
+						funcinit(f, sd, NULL, false);
+						se = mkexpr(EXPRIDENT, &typeulong, NULL);
+						se->lvalue = true;
+						se->u.ident.decl = sd;
+						ct = NULL;
+						for (i = 0; i < exc_tc_n; i++) {
+							struct block *bsy, *bsn;
+							unsigned long long soff;
+							struct expr *cny;
+							if (exc_tc_regs[i].t == ctype)
+								continue;
+							if (!cpp_is_derived(exc_tc_regs[i].t,
+							                     ctype))
+								continue;
+							soff = exc_base_slice_offset(
+							    exc_tc_regs[i].t, ctype);
+							if (soff == (unsigned long long)-1)
+								continue;
+							if (!ct)
+								ct = cpp_exc_helper_call(
+								    "_meuos_exc_caught_type",
+								    &typeint, NULL, NULL);
+							bsy = mkblock("exc_slc_y");
+							bsn = mkblock("exc_slc_n");
+							funcbranch(f,
+							    mkbinaryexpr(&tok.loc, TEQL, ct,
+							        mkconstexpr(&typeint,
+							            exc_tc_regs[i].code)),
+							    bsy, bsn);
+							funclabel(f, bsy);
+							cny = mkassignexpr(se,
+							    mkconstexpr(&typeulong, soff));
+							funcexpr(f, cny);
+							funcjmp(f, bsn);
+							funclabel(f, bsn);
+						}
 						co = cpp_exc_helper_call(
 						    "_meuos_exc_caught_obj",
 						    mkpointertype(&typevoid, QUALCONST),
 						    NULL, NULL);
-						cvs = exprconvert(co,
-						    mkpointertype(ctype, QUALNONE));
+						/* (T*)((char*)co + __exc_slice) */
+						cvs = mkexpr(EXPRBINARY,
+						    mkpointertype(&typechar, QUALNONE), NULL);
+						cvs->op = TADD;
+						cvs->u.binary.l = mkexpr(EXPRCAST,
+						    mkpointertype(&typechar, QUALNONE), co);
+						cvs->u.binary.r = se;
+						cvs = mkexpr(EXPRCAST,
+						    mkpointertype(ctype, QUALNONE), cvs);
 						funcexpr(f, mkassignexpr(ep, cvs));
 						funcjmp(f, bpjoin);
 						funclabel(f, bp0);
