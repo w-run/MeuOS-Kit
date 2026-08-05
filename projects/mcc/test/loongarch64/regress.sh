@@ -7,7 +7,8 @@ varargs=${TMPDIR:-/tmp}/mcc-la64-varargs.$$.s
 vla=${TMPDIR:-/tmp}/mcc-la64-vla.$$.s
 abi=${TMPDIR:-/tmp}/mcc-la64-abi.$$.s
 tls=${TMPDIR:-/tmp}/mcc-la64-tls.$$.s
-trap 'rm -f "$asm" "$varargs" "$vla" "$abi" "$tls" "${asm}.large.c" "${asm}.large"' EXIT HUP INT TERM
+loc=${TMPDIR:-/tmp}/mcc-la64-localvar.$$.s
+trap 'rm -f "$asm" "$varargs" "$vla" "$abi" "$tls" "$loc" "${asm}.large.c" "${asm}.large"' EXIT HUP INT TERM
 
 "$mcc" --target=loongarch64-linux -S -o "$asm" "$root/test/loongarch64/regress.c"
 "$mcc" --target=loongarch64-linux -S -o "$varargs" "$root/test/loongarch64/varargs.c"
@@ -50,5 +51,22 @@ grep -Eq '%le_lo12\(tls_counter\)' "$tls"
 grep -Eq '%le64_lo20\(tls_counter\)' "$tls"
 grep -Eq '%le64_hi12\(tls_counter\)' "$tls"
 grep -Eq 'add[.]d[[:space:]].*\$tp' "$tls"
+
+# Function-entry CFG gate: each function must branch from entry to its MIR
+# start block (`.L<fn>.bb0`) rather than fall through to the first emitted
+# body block.  A function with locals reaches its stack-base setup only via
+# that start block; without the entry branch it dereferences garbage `a0`
+# (rr_struct local-access segfault).  use_locals materializes the base with
+# an `addi.d`/`or $a0` on `$fp`, so assert the entry `b .Lsuffix.bb0` for a
+# locals-bearing function and that the start block computes a fp-relative
+# local address before branching to the body.
+"$mcc" --target=loongarch64-linux -S -o "$loc" "$root/test/loongarch64/localvar.c"
+grep -Eq 'b[[:space:]]+\.Luse_locals\.bb0' "$loc"
+grep -Eq '^\.Luse_locals\.bb0:' "$loc"
+grep -Eq '\$fp' "$loc"
+# the locals-bearing body must access locals through the stack pointer
+# (a0 = fp-relative address), not a reg that the prologue never set
+grep -Eq 'addi[.]d[[:space:]]+\$fp' "$loc"
+grep -Eq 'or[[:space:]]+\$a0' "$loc"
 
 printf '%s\n' 'LoongArch64 regression checks passed'
