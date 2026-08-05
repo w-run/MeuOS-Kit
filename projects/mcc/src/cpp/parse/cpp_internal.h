@@ -276,6 +276,8 @@ void cpp_init_vptrs(struct func *f, struct type *t, struct expr *thisp);
  * cpp_tmpl_alias.c). */
 struct cpp_template *cpp_tmpl_find(const char *name);
 void cpp_template_decl(struct scope *s, struct type *owner);
+bool cpp_try_abbrev_decl(struct scope *s);
+extern struct cpp_template **g_cpp_templates_end;
 struct expr *cpp_tmpl_placeholder(const char *name);
 void cpp_tmpl_explicit_parse(struct scope *s);
 struct expr *cpp_tmpl_const_arg(struct scope *s);
