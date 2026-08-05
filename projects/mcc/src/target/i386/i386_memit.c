@@ -880,6 +880,38 @@ emit_ins(FILE *f, MInsM *in)
 			 * i64_store_pair (see i64_base). */
 			int sslot0 = i64_base(f, s0, 0);
 			int sslot1 = i64_base(f, s1, 1);
+			if (op == MMOP_DIV || op == MMOP_UDIV ||
+			    op == MMOP_REM || op == MMOP_UREM) {
+				/* i64 division/remainder on i386: no native 64-bit
+				 * idivl — the per-half 32-bit fallback overflows for
+				 * values > 32 bits (SIGFPE).  Lower to a call to a
+				 * soft helper that uses pure 32-bit arithmetic
+				 * (no 64-bit ops in its own body, avoiding the i386
+				 * i64 loop miscompilation under investigation).
+				 *
+				 * cdecl: push b (hi first), then a (hi first);
+				 * callee reads a at [ebp+8] (lo) and [ebp+0xc] (hi),
+				 * b at [ebp+0x10] (lo) / [ebp+0x14] (hi).
+				 * Result returned as EDX:EAX (hi:lo). */
+				const char *helper;
+				switch (op) {
+				case MMOP_DIV:  helper = "meuos_i64_div";  break;
+				case MMOP_UDIV: helper = "meuos_u64_divu"; break;
+				case MMOP_REM:  helper = "meuos_i64_rem";  break;
+				default:        helper = "meuos_u64_remu"; break;
+				}
+				/* arg1 = b (divisor): push hi word first */
+				fprintf(f, "\tpushl\t%d(%%ebp)\n", sslot1 + 4);
+				fprintf(f, "\tpushl\t%d(%%ebp)\n", sslot1);
+				/* arg0 = a (dividend): push hi word first */
+				fprintf(f, "\tpushl\t%d(%%ebp)\n", sslot0 + 4);
+				fprintf(f, "\tpushl\t%d(%%ebp)\n", sslot0);
+				/* call, then 16 bytes of caller cleanup (cdecl) */
+				fprintf(f, "\tcall\t%s\n", helper);
+				fputs("\taddl\t$16, %esp\n", f);
+				i64_store_pair(f, d);
+				return;
+			}
 			if (op == MMOP_ADD || op == MMOP_SUB) {
 				/* low: addl/subl into eax; high: adcl/sbbl into edx.
 				 * The high half is computed while the carry/borrow from
@@ -1071,10 +1103,11 @@ emit_ins(FILE *f, MInsM *in)
 			fputs("\tnegl\t%eax\n", f);
 			fputs("\tmovl\t%eax, %edx\n", f);   /* stash lo result */
 			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sbase + 4);
-			fputs("\tsbbl\t$0, %eax\n", f);
-			fputs("\tmovl\t%eax, %ecx\n", f);   /* hi result in ecx; the
-			                                      * sbbl consumed the CF from
-			                                      * the negl above */
+			/* hi = -(hi + CF_lo).  After negl lo, CF_lo = (lo != 0).
+			 * Add the carry first (adcl), then neg to get -hi-CF. */
+			fputs("\tadcl\t$0, %eax\n", f);    /* hi += CF_lo */
+			fputs("\tnegl\t%eax\n", f);        /* hi = -hi */
+			fputs("\tmovl\t%eax, %ecx\n", f);
 			scratch_to_dst_i64_lo(f, d, "%edx");
 			scratch_to_dst_i64_hi(f, d, "%ecx");
 			return;
