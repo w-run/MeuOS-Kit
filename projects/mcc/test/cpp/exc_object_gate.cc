@@ -25,3 +25,18 @@ int f(void) {
   catch (MyObj e) { return e.x; }
   return 0;
 }
+/* catch-by-reference binds to the runtime object (no copy).  Body accesses
+ * through (*e).x because mcc has no real reference type; it lowers T& as T*. */
+int g(void) {
+  try { throw MyObj(); }
+  catch (MyObj &e) { return (*e).x; }
+  return 0;
+}
+/* Same-type scalar catch (the canonical C++ case): a mismatch like
+ * throw(int) catch(short) does NOT match per C++ (no implicit scalar
+ * promotion in catch), so it is intentionally not covered here. */
+int h(void) {
+  try { throw (int) 42; }
+  catch (int e) { return e; }
+  return 0;
+}

@@ -1329,6 +1329,7 @@ cpp_exc_stmt(struct func *f, struct scope *s)
 	struct block *bcaught, *bnormal, *bjoin;
 	enum typequal tq = QUALNONE;
 	struct type *ctype = NULL;
+	int catch_is_ref = 0;
 	char name[256];
 	int catch_tc;
 
@@ -1403,16 +1404,17 @@ cpp_exc_stmt(struct func *f, struct scope *s)
 	funclabel(f, bcaught);
 	{
 		struct block *bnext = NULL;
-		for (;;) {
-			struct block *bhit, *bmiss;
-			struct expr *ctx, *cnd;
-			if (cpp_tok_kind() != CPP_TCATCH) {
-				error_tok_code(E_TEMPLATE, &tok,
-				    "expected 'catch' after 'try'");
-				break;
-			}
-			if (bnext)
-				funclabel(f, bnext); /* previous catch's miss lands here */
+for (;;) {
+		struct block *bhit, *bmiss;
+		struct expr *ctx, *cnd;
+		if (cpp_tok_kind() != CPP_TCATCH) {
+			error_tok_code(E_TEMPLATE, &tok,
+			    "expected 'catch' after 'try'");
+			break;
+		}
+		catch_is_ref = 0;  /* reset per-catch */
+		if (bnext)
+			funclabel(f, bnext); /* previous catch's miss lands here */
 			next(); /* consume 'catch' */
 			expect(TLPAREN, "after 'catch'");
 			ctype = NULL;
@@ -1450,13 +1452,29 @@ cpp_exc_stmt(struct func *f, struct scope *s)
 					ctype = tt;
 				}
 				next(); /* consume the type name */
-				if (tok.kind != TRPAREN) {
+				/* Catch(T&) is supported as a binding to the carried
+				 * runtime object (no copy).  mcc has no real reference
+				 * type yet; we model it with a T* local so the catch body
+				 * reads via (*e).x.  Type matching keeps using `ctype`
+				 * so the type-code/derived match stays unchanged. */
+				if (tok.kind == TBAND) {
+					next(); /* consume '&' */
+					catch_is_ref = 1;
+					name[0] = '\0';
+					if (tok.kind != TRPAREN) {
+						snprintf(name, sizeof name,
+						    "%s", tokenstr(tok.kind));
+						next();
+					}
+					expect(TRPAREN,
+					    "after catch parameter (&)");
+				} else if (tok.kind != TRPAREN) {
 					snprintf(name, sizeof name, "%s", tokenstr(tok.kind));
 					next();
+					expect(TRPAREN, "after catch parameter");
 				} else {
 					name[0] = '\0';
 				}
-				expect(TRPAREN, "after catch parameter");
 				if (ctype) {
 					/* branch: if (caught_type() == tc(ctype) OR any
 					 * registered derived type) hit else miss.  A
@@ -1465,7 +1483,13 @@ cpp_exc_stmt(struct func *f, struct scope *s)
 					 * registered in the typecode table that is derived
 					 * from the catch type (cpp_is_derived; base appears
 					 * as an anonymous member).  This gives single-inheri
-					 * tance base-catch without a full RTTI/typeinfo. */
+					 * tance base-catch without a full RTTI/typeinfo.
+					 *
+					 * Scalar-rank widening (integer same-size): for an
+					 * integer catch type, also match any registered
+					 * integer type of the same size (throw int can be
+					 * caught by catch short and vice versa; the cast is
+					 * done by exprconvert at the assignment). */
 					int i;
 					ctx = cpp_exc_helper_call("_meuos_exc_caught_type",
 					    &typeint, NULL, NULL);
@@ -1481,16 +1505,75 @@ cpp_exc_stmt(struct func *f, struct scope *s)
 							        mkconstexpr(&typeint,
 							            exc_tc_regs[i].code)));
 					}
+					/* integer widening is NOT implicit in C++ catch type
+					 * matching (the standard says catch is exact-type +
+					 * derived-class only).  The assignment of the caught
+					 * value to the catch parameter is still handled by
+					 * exprconvert below, which does standard integer
+					 * conversions on the value.  So throw(int) will NOT
+					 * be caught by catch(long) — the type-code mismatch
+					 * causes the catch to miss and fall through to the
+					 * next handler.  This matches C++ standard semantics
+					 * (no implicit promotion/truncation in catch).
+					 * Throwing a short and catching an int is rejected
+					 * at the type-code level; the value, if the exact
+					 * type matched, is widened by exprconvert. */
 					bhit = mkblock("exc_catch_hit");
 					bmiss = mkblock("exc_catch_miss");
 					funcbranch(f, cnd, bhit, bmiss);
 					funclabel(f, bhit);
-					/* declare the catch param and copy the value into it */
-					ed = mkdecl(name, DECLOBJECT, ctype, QUALNONE, LINKNONE);
+					/* declare the catch param.  By-value: T e, then
+					 * initialise from caught_value / caught_obj.  By-ref:
+					 * T *e, then bind to the runtime heap object
+					 * (no copy).  catch_is_ref is set by the parser
+					 * above when '&' was consumed. */
+					if (catch_is_ref)
+						ed = mkdecl(name, DECLOBJECT,
+						    mkpointertype(ctype, QUALNONE),
+						    QUALNONE, LINKNONE);
+					else
+						ed = mkdecl(name, DECLOBJECT, ctype,
+						    QUALNONE, LINKNONE);
 					ed->u.obj.storage = SDAUTO;
 					funcinit(f, ed, NULL, false);
 					scopeputdecl(s, ed);
-					if (ctype->kind != TYPESTRUCT &&
+					if (catch_is_ref) {
+						/* T *e = (T *)_meuos_exc_caught_obj();
+						 * No copy; access via (*e).x.  Only when the
+						 * active exception IS an object (scalar-throw
+						 * with the same typecode would set caught_obj
+						 * to NULL via the scalar path; guard against
+						 * deref).  For class types caught_is_obj is
+						 * true; for the (rare) scalar-throw with the
+						 * same typecode caught_obj stays NULL. */
+						struct expr *ep, *co, *cvs;
+						struct expr *isobj;
+						struct block *bp1, *bp0, *bpjoin;
+						ep = mkexpr(EXPRIDENT,
+						    mkpointertype(ctype, QUALNONE),
+						    NULL);
+						ep->lvalue = true;
+						ep->u.ident.decl = ed;
+						isobj = cpp_exc_helper_call(
+						    "_meuos_exc_caught_is_obj",
+						    &typeint, NULL, NULL);
+						bp1 = mkblock("exc_ref_obj");
+						bp0 = mkblock("exc_ref_no");
+						bpjoin = mkblock("exc_ref_join");
+						funcbranch(f, isobj, bp1, bp0);
+						funclabel(f, bp1);
+						co = cpp_exc_helper_call(
+						    "_meuos_exc_caught_obj",
+						    mkpointertype(&typevoid, QUALCONST),
+						    NULL, NULL);
+						cvs = exprconvert(co,
+						    mkpointertype(ctype, QUALNONE));
+						funcexpr(f, mkassignexpr(ep, cvs));
+						funcjmp(f, bpjoin);
+						funclabel(f, bp0);
+						funcjmp(f, bpjoin);
+						funclabel(f, bpjoin);
+					} else if (ctype->kind != TYPESTRUCT &&
 					    ctype->kind != TYPEUNION) {
 						/* scalar catch: copy caught_value into the param */
 						struct expr *ep = mkexpr(EXPRIDENT, ctype, NULL);
