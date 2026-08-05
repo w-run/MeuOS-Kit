@@ -1,6 +1,7 @@
 #ifndef MEUOS_UNISTD_H
 #define MEUOS_UNISTD_H
 
+#include <features.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>

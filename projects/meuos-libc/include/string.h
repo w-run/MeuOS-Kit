@@ -1,6 +1,7 @@
 #ifndef MEUOS_STRING_H
 #define MEUOS_STRING_H
 
+#include <features.h>
 #include <stddef.h>
 #include <errno.h>
 

@@ -1,6 +1,7 @@
 #ifndef MEUOS_STDIO_H
 #define MEUOS_STDIO_H
 
+#include <features.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
