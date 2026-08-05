@@ -21,11 +21,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <unistd.h>     /* rename(): this toolchain's glibc declares it in
                          * <unistd.h>, not <stdio.h> (gcc14 -std=c11) */
 #include <sys/stat.h>
 
 #define MT_OBJCOPY_VERSION "0.2.0"
+
+enum oc_format {
+	OC_FMT_ELF = 0,   /* default: ELF in/out */
+	OC_FMT_BINARY,    /* -O binary: raw loadable bytes, base at lowest addr */
+	OC_FMT_IHEX,      /* -O ihex: Intel HEX records */
+	OC_FMT_SREC       /* -O srec: Motorola S-record */
+};
 
 enum oc_action {
 	OC_KEEP = 0,
@@ -66,6 +74,8 @@ struct oc_opts {
 	struct oc_add *adds;        /* --add-section */
 	struct oc_dump *dumps;      /* --dump-section */
 	const char *output;
+	enum oc_format format;
+	const char *format_name;    /* for error messages */
 	int verbose;
 };
 
@@ -159,6 +169,234 @@ copy_file(const char *src, const char *dst)
 		free(buf);
 		return rc;
 	}
+}
+
+/* ---- 输出格式（-O binary/ihex/srec） ---- */
+static int
+write_alt_format(const struct oc_opts *opts, const char *path, FILE *out,
+                 const unsigned char *bytes, size_t size,
+                 const struct mt_elf64_section *secs, const char **names,
+                 const unsigned char *keep, uint16_t n, uint64_t entry)
+{
+	uint16_t i;
+	unsigned char *span = NULL;
+	size_t span_size = 0;
+	uint64_t span_base = 0;
+	int rc = 1;
+
+	/* Pass 1: address span [lo, hi) of all loadable (SHF_ALLOC, non-NOBITS,
+	 * kept) sections. */
+	uint64_t lo = UINT64_MAX, hi = 0;
+	int any = 0;
+	for (i = 0; i < n; ++i) {
+		if (!keep[i] || !names[i])
+			continue;
+		if (!(secs[i].flags & MT_SHF_ALLOC))
+			continue;
+		if (secs[i].type == MT_SHT_NOBITS)
+			continue;
+		if (secs[i].address > UINT64_MAX - secs[i].size)
+			continue;
+		if (secs[i].address < lo)
+			lo = secs[i].address;
+		if (secs[i].address + secs[i].size > hi)
+			hi = secs[i].address + secs[i].size;
+		any = 1;
+	}
+	if (!any) {
+		fprintf(stderr, "objcopy: %s: no loadable sections for %s output\n",
+		        path, opts->format_name ? opts->format_name : "alt");
+		return 1;
+	}
+
+	/* Fold loadable bytes into one zero-gap span; ihex/srec walk the same
+	 * span so addresses stay monotonic. */
+	span_base = lo;
+	span_size = (size_t)(hi - lo);
+	span = calloc(1, span_size ? span_size : 1);
+	if (!span) {
+		fprintf(stderr, "objcopy: out of memory\n");
+		return 1;
+	}
+	for (i = 0; i < n; ++i) {
+		size_t off, j;
+		uint64_t a;
+		if (!keep[i] || !names[i])
+			continue;
+		if (!(secs[i].flags & MT_SHF_ALLOC))
+			continue;
+		if (secs[i].type == MT_SHT_NOBITS)
+			continue;
+		a = secs[i].address;
+		if (a < span_base || a - span_base > span_size)
+			continue;
+		if (secs[i].offset + secs[i].size > size)
+			continue;
+		off = (size_t)(a - span_base);
+		for (j = 0; j < secs[i].size; ++j)
+			span[off + j] = bytes[secs[i].offset + j];
+	}
+
+	if (opts->format == OC_FMT_BINARY) {
+		if (fwrite(span, 1, span_size, out) != span_size) {
+			fprintf(stderr, "objcopy: %s: write failed\n", path);
+			goto done;
+		}
+	} else if (opts->format == OC_FMT_IHEX ||
+	           opts->format == OC_FMT_SREC) {
+		/* Address-tagged records per loadable section (gaps skipped; no
+		 * zero fill).  Contiguous bytes within a section are chunked and
+		 * tagged with the absolute address.  ihex switches the extended
+		 * linear-address segment (type 04) when a section's upper 16 bits
+		 * differ; srec picks the record/address width from the address. */
+		int is_ihex = opts->format == OC_FMT_IHEX;
+		uint32_t ihex_seg = 0xffffffff;   /* force first segment record */
+		unsigned int cnt = 0;
+		int any_record = 0;
+		for (i = 0; i < n; ++i) {
+			uint64_t a;
+			size_t c, step = is_ihex ? 16 : 32;
+			if (!keep[i] || !names[i])
+				continue;
+			if (!(secs[i].flags & MT_SHF_ALLOC))
+				continue;
+			if (secs[i].type == MT_SHT_NOBITS)
+				continue;
+			if (secs[i].offset + secs[i].size > size)
+				continue;
+			a = secs[i].address;
+			if (is_ihex) {
+				uint32_t seg = (uint32_t)(a >> 16);
+				if (seg != ihex_seg) {
+					unsigned int csum =
+					    2 /*len*/ + 0 + 0 /*addr*/ + 4 /*type*/ +
+					    ((seg >> 8) & 0xff) + (seg & 0xff);
+					fprintf(out, ":02000004%04X%02X\n",
+					        (unsigned)(seg & 0xffff),
+					        (unsigned)((~csum + 1) & 0xff));
+					ihex_seg = seg;
+				}
+			}
+			for (c = 0; c < secs[i].size; c += step) {
+				size_t len = secs[i].size - c;
+				unsigned int csum, k;
+				if (len > step)
+					len = step;
+				if (is_ihex) {
+					unsigned int lo = (unsigned)((a & 0xffff) + c);
+					csum = (unsigned int)(len & 0xff) +
+					       (unsigned int)((lo >> 8) & 0xff) +
+					       (unsigned int)(lo & 0xff);
+					fprintf(out, ":%02X%04X00", (unsigned)len, lo);
+					for (k = 0; k < len; ++k) {
+						unsigned int b = bytes[secs[i].offset + c + k];
+						fprintf(out, "%02X", b);
+						csum += b;
+					}
+					fprintf(out, "%02X\n",
+					        (unsigned)((~csum + 1) & 0xff));
+				} else {
+					/* srec address width by magnitude */
+					unsigned int aw = (a + c <= 0xffff) ? 1 :
+					                 (a + c <= 0xffffff) ? 2 : 3;
+					char t = (char)('0' + aw);   /* S1/S2/S3 data type */
+					unsigned int cntlen = aw + 1;
+					csum = (unsigned int)((len + cntlen + 1) & 0xff);
+					if (aw == 1) {
+						csum += (unsigned int)((a + c) & 0xff) +
+						        (unsigned int)(((a + c) >> 8) & 0xff);
+						fprintf(out, "S%c%02X%04X", t,
+						        (unsigned)(len + cntlen + 1),
+						        (unsigned)((a + c) & 0xffff));
+					} else if (aw == 2) {
+						csum += (unsigned int)((a + c) & 0xff) +
+						        (unsigned int)(((a + c) >> 8) & 0xff) +
+						        (unsigned int)(((a + c) >> 16) & 0xff);
+						fprintf(out, "S%c%02X%06X", t,
+						        (unsigned)(len + cntlen + 1),
+						        (unsigned)((a + c) & 0xffffff));
+					} else {
+						csum += (unsigned int)((a + c) & 0xff) +
+						        (unsigned int)(((a + c) >> 8) & 0xff) +
+						        (unsigned int)(((a + c) >> 16) & 0xff) +
+						        (unsigned int)(((a + c) >> 24) & 0xff);
+						fprintf(out, "S%c%02X%08X", t,
+						        (unsigned)(len + cntlen + 1),
+						        (unsigned)((a + c) & 0xffffffff));
+					}
+					for (k = 0; k < len; ++k) {
+						unsigned int b = bytes[secs[i].offset + c + k];
+						fprintf(out, "%02X", b);
+						csum += b;
+					}
+					fprintf(out, "%02X\n", (unsigned)(~csum & 0xff));
+					++cnt;
+				}
+				any_record = 1;
+			}
+		}
+		if (is_ihex) {
+			/* optional start-address record (type 05) for executables */
+			if (entry && (entry >> 16)) {
+				unsigned int csum =
+				    4 /*len*/ + 0 + 0 /*addr*/ + 5 /*type*/ +
+				    (unsigned)((entry >> 24) & 0xff) +
+				    (unsigned)((entry >> 16) & 0xff) +
+				    (unsigned)((entry >> 8) & 0xff) +
+				    (unsigned)(entry & 0xff);
+				fprintf(out, ":04000005%08X%02X\n",
+				        (unsigned)(entry & 0xffffffff),
+				        (unsigned)((~csum + 1) & 0xff));
+			}
+			fprintf(out, ":00000001FF\n");
+		} else {
+			/* S5 = 16-bit data-record count; S9/S8/S7 = termination by
+			 * address width (16/24/32 bits). */
+			uint64_t maxa = 0;
+			int aw;
+			unsigned int cnt_csum;
+			for (i = 0; i < n; ++i)
+				if (keep[i] && names[i] &&
+				    (secs[i].flags & MT_SHF_ALLOC) &&
+				    secs[i].type != MT_SHT_NOBITS &&
+				    secs[i].address > maxa)
+					maxa = secs[i].address;
+			aw = (maxa <= 0xffff) ? 1 : (maxa <= 0xffffff) ? 2 : 3;
+			if (any_record) {
+				cnt_csum = 3 + ((cnt >> 8) & 0xff) + (cnt & 0xff);
+				fprintf(out, "S5%02X%04X%02X\n", 3,
+				        (unsigned)(cnt & 0xffff),
+				        (unsigned)(~cnt_csum & 0xff));
+			}
+			{
+				uint64_t ta = entry ? entry : maxa;
+				unsigned int cs, a_lo = (unsigned)(ta & 0xff),
+				    a_2 = (unsigned)((ta >> 8) & 0xff),
+				    a_3 = (unsigned)((ta >> 16) & 0xff);
+				if (aw == 1) {
+					cs = 3 + a_2 + a_lo;
+					fprintf(out, "S903%04X%02X\n",
+					        (unsigned)(a_lo | (a_2 << 8)),
+					        (unsigned)(~cs & 0xff));
+				} else if (aw == 2) {
+					cs = 4 + a_3 + a_2 + a_lo;
+					fprintf(out, "S804%06X%02X\n",
+					        (unsigned)(ta & 0xffffff),
+					        (unsigned)(~cs & 0xff));
+				} else {
+					unsigned int a_4 = (unsigned)((ta >> 24) & 0xff);
+					cs = 5 + a_4 + a_3 + a_2 + a_lo;
+					fprintf(out, "S705%08X%02X\n",
+					        (unsigned)(ta & 0xffffffff),
+					        (unsigned)(~cs & 0xff));
+				}
+			}
+		}
+	}
+	rc = 0;
+done:
+	free(span);
+	return rc;
 }
 
 /* ---- 节区决策 ---- */
@@ -688,6 +926,37 @@ process_one(const char *path, const struct oc_opts *opts)
 			map[i] = keep[i] ? ++cnt : 0;
 	}
 
+	/* -O bination/ihex/srec：直接按地址折叠 loadable 节区输出。 */
+	if (opts->format != OC_FMT_ELF) {
+		FILE *out;
+		int r;
+		const char *target = opts->output;
+		if (!target) {
+			fprintf(stderr,
+			    "objcopy: -O %s requires an output file\n",
+			    opts->format_name);
+			goto done;
+		}
+		out = fopen(target, "wb");
+		if (!out) {
+			fprintf(stderr, "objcopy: %s: cannot create\n", target);
+			rc = 1;
+		} else {
+			r = write_alt_format(opts, target, out, bytes, size,
+			                     secs, names, keep, n, view.entry);
+			if (fclose(out) != 0)
+				r = 1;
+			if (r == 0) {
+				(void)chmod(target, src_mode);
+				rc = 0;
+			} else {
+				remove(target);
+				rc = 1;
+			}
+		}
+		goto done;
+	}
+
 	for (i = 1; i < n; ++i)
 		if (!keep[i]) { any_change = 1; break; }
 	if (add_count > 0)
@@ -766,6 +1035,8 @@ usage(FILE *out)
 	    "      --rename-section OLD=NEW[,FLAGS]\n"
 	    "      --set-section-flags SECTION=FLAGS\n"
 	    "      --dump-section NAME=FILE\n"
+	    "  -O, --output-format=FORMAT\n"
+	    "                    output format: elf64 (default), binary, ihex, srec\n"
 	    "  -o FILE                output file (default: in-place)\n"
 	    "  -v, --verbose          verbose output\n"
 	    "  -V, --version          print version\n"
@@ -991,6 +1262,43 @@ main(int argc, char **argv)
 				(void)v;
 				fprintf(stderr,
 				    "objcopy: --set-section-flags not yet supported\n");
+				continue;
+			}
+		}
+		/* -O <format> / --output-format=<format> */
+		{
+			const char *fmt = NULL;
+			const char *v;
+			if (strcmp(a, "-O") == 0) {
+				if (++i >= argc) {
+					usage(stderr);
+					return 2;
+				}
+				fmt = argv[i];
+			} else if (parse_eq_arg(a, "--output-format=", &v))
+				fmt = v;
+			if (fmt) {
+				if (strcmp(fmt, "binary") == 0) {
+					opts.format = OC_FMT_BINARY;
+					opts.format_name = "binary";
+				} else if (strcmp(fmt, "ihex") == 0) {
+					opts.format = OC_FMT_IHEX;
+					opts.format_name = "ihex";
+				} else if (strcmp(fmt, "srec") == 0) {
+					opts.format = OC_FMT_SREC;
+					opts.format_name = "srec";
+				} else if (strcmp(fmt, "elf64-x86-64") == 0 ||
+				           strcmp(fmt, "elf64-little") == 0 ||
+				           strcmp(fmt, "elf64-littleaarch64") == 0 ||
+				           strcmp(fmt, "elf64-little") == 0) {
+					opts.format = OC_FMT_ELF;
+					opts.format_name = fmt;
+				} else {
+					fprintf(stderr,
+					    "objcopy: unsupported output format: %s\n",
+					    fmt);
+					return 2;
+				}
 				continue;
 			}
 		}
