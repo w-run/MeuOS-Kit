@@ -29,4 +29,23 @@ LC_ALL=C readelf -h "$obj" | grep -Eq 'Machine:[[:space:]]+Intel 80386'
 "$mcc" --target=i386-linux -I"$root/../meuos-libc/include" -c -o "$obj" "$root/test/i386/fp_arith.c"
 "$mcc" --target=i386-linux -I"$root/../meuos-libc/include" -c -o "$obj" "$root/test/i386/fp_unsigned.c"
 
+# Non-negative int constant returns must be emitted as immediates, not
+# loaded from garbage stack offsets.  This guards mabi_selret's MV_CONST
+# path: before the fix, `return 42` produced `movl -1(%ebp), %eax` /
+# `movl 3(%ebp), %eax` (undefined s0->slot) and returned random values.
+"$mcc" --target=i386-linux -S -o "$asm" "$root/test/i386/retconst.c"
+grep -Eq 'movl[[:space:]]+\$42,[[:space:]]+%eax' "$asm"
+grep -Eq 'movl[[:space:]]+\$1000,[[:space:]]+%eax' "$asm"
+# The two negative returns must still be immediate moves, not slot loads.
+grep -Eq 'movl[[:space:]]+\$-1,[[:space:]]+%eax' "$asm"
+# And critically: no `movl <off>(%ebp), %eax` load from an uninit slot.
+if grep -Eq 'movl[[:space:]]+[^$][^[:space:]]*\(%ebp\),[[:space:]]+%eax' "$asm"; then
+	printf '%s\n' 'i386 constant return: FAIL (slot load of immediate constant)' >&2
+	exit 1
+fi
+
+"$mcc" --target=i386-linux -c -o "$obj" "$root/test/i386/retconst.c"
+LC_ALL=C readelf -h "$obj" | grep -Eq 'Class:[[:space:]]+ELF32'
+LC_ALL=C readelf -h "$obj" | grep -Eq 'Machine:[[:space:]]+Intel 80386'
+
 printf '%s\n' 'i386 integer ABI and ELF32 object regression checks passed'
