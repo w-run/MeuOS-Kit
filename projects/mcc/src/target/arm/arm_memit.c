@@ -667,7 +667,7 @@ emit_ins(FILE *f, MInsM *in)
 
 	switch (op) {
 	case MMOP_MOV:
-		if (in->dtype == MT_I64 || (s0 && s0->type == MT_I64)) {
+		if (in->dtype == MT_I64) {
 			/* i64 on arm: two 32-bit moves via slot.
 			 * Both source and destination are slot-resident
 			 * (kl_in_reg==0 forces spill). */
