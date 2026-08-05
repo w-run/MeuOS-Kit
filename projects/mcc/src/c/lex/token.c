@@ -512,6 +512,14 @@ bool warn_as_error;
 int g_error_json;    /* --error-json: emit structured JSON diagnostics */
 int g_error_explain; /* --explain: append a fix-hint suffix */
 
+/* --error-format=<fmt>: selects the diagnostic output format.  text (the
+ * default) keeps the current colored text + caret behaviour; json enables the
+ * structured error+warning emission that --error-json also turns on; sarif is
+ * reserved (declared, not yet mapped).  g_error_json mirrors FMT_JSON so the
+ * existing emission paths are unchanged.  (enum diag_fmt is declared in
+ * mcc.h.) */
+int g_diag_fmt = DIAG_TEXT;
+
 void
 cc_warn(const struct location *loc, int kind, const char *fmt, ...)
 {

@@ -533,10 +533,31 @@ mcc_main(int argc, char *argv[])
 	/* p9-ui 诊断输出模式：--error-json 结构化错误，--explain 附加修复建议 */
 	if (strcmp(a, "--error-json") == 0) {
 		g_error_json = 1;
+		g_diag_fmt = DIAG_JSON;
 		continue;
 	}
 	if (strcmp(a, "--explain") == 0) {
 		g_error_explain = 1;
+		continue;
+	}
+	/* --error-format=<text|json|sarif>: uniform format switch for errors and
+	 * warnings.  text (default) keeps the current colored text + caret; json
+	 * is the same as --error-json; sarif is declared but not yet mapped. */
+	if (strncmp(a, "--error-format=", 15) == 0) {
+		const char *fmt = a + 15;
+		if (strcmp(fmt, "text") == 0) {
+			g_diag_fmt = DIAG_TEXT;
+			g_error_json = 0;
+		} else if (strcmp(fmt, "json") == 0) {
+			g_diag_fmt = DIAG_JSON;
+			g_error_json = 1;
+		} else if (strcmp(fmt, "sarif") == 0) {
+			g_diag_fmt = DIAG_SARIF;
+			fprintf(stderr,
+			    "mcc: --error-format=sarif not yet supported (falling back to text)\n");
+		} else {
+			fatal("unknown --error-format '%s' (use text/json/sarif)", fmt);
+		}
 		continue;
 	}
 	/* i18n：--lang=en|zh 选择诊断/帮助语言（覆盖 LANG 环境推断）。 */

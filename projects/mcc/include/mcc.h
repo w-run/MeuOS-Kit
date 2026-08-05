@@ -515,6 +515,10 @@ int dwarf_loc_get(uint32_t, int32_t *, int32_t *);
 
 extern int g_error_explain;
 
+/* --error-format=<fmt> diagnostic output selection.  Defined in token.c. */
+enum diag_fmt { DIAG_TEXT = 0, DIAG_JSON, DIAG_SARIF };
+extern int g_diag_fmt;
+
 /* Target features bitmask (MT_FEATURE_*), set by -march=native or
  * -march=x86-64-vN. 0 = baseline only.
  *
