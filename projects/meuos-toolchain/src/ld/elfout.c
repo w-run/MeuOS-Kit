@@ -427,6 +427,8 @@ write_executable(struct ld_context *ctx, const char *path,
 			es = is_elf64 ? MT_ELF64_SYM_SIZE : (uint64_t)MT_ELF32_SYM_SIZE;
 		else if (gn && strcmp(gn, ".rela.dyn") == 0)
 			es = is_elf64 ? 24 : 12;
+		else if (gn && strcmp(gn, ".rela.plt") == 0)
+			es = is_elf64 ? 24 : 12;
 		else if (gn && strcmp(gn, ".hash") == 0)
 			es = 4;
 		sections[i + 1] = (struct ld_output_section){
@@ -456,6 +458,7 @@ write_executable(struct ld_context *ctx, const char *path,
 		uint32_t dynamic_sec = 0;
 		uint32_t hash_sec = 0;
 		uint32_t reladyn_sec = 0;
+		uint32_t relaplt_sec = 0;
 		for (i = 0; i < ctx->group_count; ++i) {
 			const char *gn = ctx->groups[i].name;
 			if (strcmp(gn, ".dynstr") == 0)
@@ -468,6 +471,8 @@ write_executable(struct ld_context *ctx, const char *path,
 				hash_sec = (uint32_t)(i + 1);
 			if (strcmp(gn, ".rela.dyn") == 0)
 				reladyn_sec = (uint32_t)(i + 1);
+			if (strcmp(gn, ".rela.plt") == 0)
+				relaplt_sec = (uint32_t)(i + 1);
 		}
 		if (dynsym_sec && dynstr_sec) {
 			sections[dynsym_sec].link = dynstr_sec;
@@ -475,11 +480,13 @@ write_executable(struct ld_context *ctx, const char *path,
 		}
 		if (dynamic_sec && dynstr_sec)
 			sections[dynamic_sec].link = dynstr_sec;
-		/* sh_link of .hash / .rela.dyn -> .dynsym (only if dynsym present) */
+		/* sh_link of .hash / .rela.dyn / .rela.plt -> .dynsym */
 		if (hash_sec && dynsym_sec)
 			sections[hash_sec].link = dynsym_sec;
 		if (reladyn_sec && dynsym_sec)
 			sections[reladyn_sec].link = dynsym_sec;
+		if (relaplt_sec && dynsym_sec)
+			sections[relaplt_sec].link = dynsym_sec;
 	}
 	/* ---- .note.gnu.build-id section (if --build-id) ---- */
 	if (ctx->build_id) {
