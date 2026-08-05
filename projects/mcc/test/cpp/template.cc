@@ -71,6 +71,18 @@ public:
     int pointed() { return p ? (int)*p : -1; }
 };
 
+/* A second, deeper partial `Box<T**>` (matches a pointer-to-pointer arg,
+ * deducing the base by stripping two levels).  When both `Box<T*>` and
+ * `Box<T**>` could match the same arg (e.g. `Box<int**>`), partial ordering
+ * must pick the most specialized: the `T**` body (marker 2 vs 1). */
+template <typename T> class Box<T**> {
+public:
+    T **p;
+    Box() { p = 0; }
+    int get() { return 2; }
+    int depth() { return 2; }
+};
+
 template <typename T> class Pair {
 public:
     T a, b;
@@ -151,6 +163,13 @@ main(void)
     if (bpi.pointed() != 7) return 27;         /* partial's substitution T=int */
     Box<double> bd2(1.5);
     if (bd2.get() != 1.5) return 28;           /* non-pointer -> primary */
+
+    /* partial ordering: Box<T**> (deepest) must win over Box<T*> */
+    Box<int**> bpp;                            /* T** spec (most specialized) */
+    if (bpp.get() != 2) return 29;
+    if (bpp.depth() != 2) return 30;
+    Box<int*> bp2; bp2.p = &pointee;           /* T* spec still matches */
+    if (bp2.get() != 1) return 31;
 
     /* member templates */
     Wrapper wp;

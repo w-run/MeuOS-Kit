@@ -39,7 +39,16 @@ cpp_mangle_type(struct type *t, char *buf, size_t bufsz)
 			*p++ = t->isrref ? 'V' : 'R';
 		t = t->base;
 	}
-	switch (t->kind) {
+	/* a pointer chain emits one 'p' per indirection, then recurses into the
+	 * pointee — `int*`, `int**`, `int***` mangle as `p i`, `p p i`, ... so
+	 * distinct types (and `Box<int*>` vs `Box<int**>` class keys) never
+	 * collide on a single `p`. */
+	for (; t && t->kind == TYPEPOINTER; t = t->base) {
+		if (p + 1 > end)
+			goto out;
+		*p++ = 'p';
+	}
+	switch (t ? t->kind : TYPEVOID) {
 	case TYPEVOID:     *p++ = 'v'; break;
 	case TYPEBOOL:     *p++ = 'b'; break;
 	case TYPECHAR:     *p++ = t->u.arith.issigned ? 'c' : 'C'; break;
@@ -51,7 +60,6 @@ cpp_mangle_type(struct type *t, char *buf, size_t bufsz)
 	case TYPEFLOAT:    *p++ = 'f'; break;
 	case TYPEDOUBLE:   *p++ = 'd'; break;
 	case TYPELDOUBLE:  *p++ = 'e'; break;
-	case TYPEPOINTER:  *p++ = 'p'; break;
 	case TYPEENUM:     *p++ = 'E'; break;
 	case TYPEARRAY:    *p++ = 'A'; break;
 	case TYPENULLPTR:  *p++ = 'n'; break;

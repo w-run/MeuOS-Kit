@@ -191,6 +191,7 @@ struct cpp_tmpl_partial {
 	size_t npatargs;
 	struct token *toks;
 	size_t ntoks;
+	int match_depth;             /* pointer-chain depth of the matched pattern (for partial ordering) */
 	struct cpp_tmpl_partial *next;
 };
 

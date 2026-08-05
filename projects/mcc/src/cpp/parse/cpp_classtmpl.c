@@ -47,13 +47,36 @@ cpp_tmpl_cls_partial_match(struct cpp_tmpl_partial *par,
 {
 	if (n < 1)
 		return false;
-	/* `T *` pattern: two tokens [param-name, TMUL] */
-	if (par->npatargs == 2 && par->patargs[1].kind == TMUL &&
-	    par->patargs[0].kind >= TIDENT) {
-		if (args[0]->kind != TYPEPOINTER)
+	/* Pointer-chain patterns: `[T, *, {*, ...×M}]` — a single template type
+	 * parameter followed by M ' *' operations (`T`, `T*`, `T**`, ...).  It
+	 * matches a concrete arg whose pointer-chain depth is at least M: the
+	 * base `T` is deduced by stripping M levels of pointer.  `Box<T**>`
+	 * thus matches `Box<int**>` (T=int), `Box<int***>` (T=int*), but not
+	 * `Box<int*>` (depth < 2). */
+	if (par->npatargs >= 2) {
+		int M = 0, p;
+		if (!(par->patargs[0].kind >= TIDENT))
 			return false;
-		subst[0] = args[0]->base;
+		for (p = 1; p < (int)par->npatargs; ++p) {
+			if (par->patargs[p].kind != TMUL)
+				return false;   /* only simple `T**...` chains so far */
+			++M;
+		}
+		int depth = 0;
+		struct type *t = args[0];
+		while (t && t->kind == TYPEPOINTER) {
+			++depth;
+			t = t->base;
+		}
+		if (depth < M)
+			return false;
+		/* strip M levels to get the deduced base T */
+		t = args[0];
+		for (p = 0; p < M; ++p)
+			t = t->base;
+		subst[0] = t;
 		*nsubst = 1;
+		par->match_depth = M;   /* specificity for partial ordering */
 		return true;
 	}
 	return false;
@@ -181,21 +204,33 @@ cpp_tmpl_class_do_inst(struct scope *s, struct cpp_template *tmpl,
 			return ci->t;
 
 	/* class-template partial specialization: try to match the concrete args
-	 * against each registered pattern (`Foo<T*>` matching `Foo<int*>`); if a
-	 * pattern matches, instantiate that partial's body instead of the primary
-	 * (more specific), register under the same key, and return. */
+	 * against each registered pattern (`Foo<T*>` matching `Foo<int*>`); if
+	 * one matches, instantiate that partial's body instead of the primary
+	 * (more specific), register under the same key, and return.  When more
+	 * than one pattern matches (e.g. `Box<T*>` and `Box<T**>` both match
+	 * `Box<int**>`), choose the most specialized by partial ordering (the
+	 * pattern with the deepest pointer chain derives the others). */
 	{
-		struct cpp_tmpl_partial *par;
+		struct cpp_tmpl_partial *par, *best = NULL;
+		struct type *bsub[16];
+		int bns = 0;
 		for (par = tmpl->partials; par; par = par->next) {
 			struct type *subst[16];
 			int nsubst = 0;
-			if (cpp_tmpl_cls_partial_match(par, args, tmpl->nparams,
-			                               subst, &nsubst)) {
-				struct type *pt = cpp_tmpl_cls_partial_inst(s, tmpl,
-				    par, subst, nsubst, key);
-				if (pt)
-					return pt;
+			if (!cpp_tmpl_cls_partial_match(par, args, tmpl->nparams,
+			                                subst, &nsubst))
+				continue;
+			if (best == NULL || par->match_depth > best->match_depth) {
+				best = par;
+				memcpy(bsub, subst, nsubst * sizeof *subst);
+				bns = nsubst;
 			}
+		}
+		if (best) {
+			struct type *pt = cpp_tmpl_cls_partial_inst(s, tmpl,
+			    best, bsub, bns, key);
+			if (pt)
+				return pt;
 		}
 	}
 
