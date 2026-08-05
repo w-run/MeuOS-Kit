@@ -27,6 +27,8 @@ fi
 # not a blind fallthrough to whatever block is physically next.  Assert the
 # cbnz/cbz is immediately followed by a `b .L<fn>.bb<k>`.
 work0=${TMPDIR:-/tmp}/mcc-aarch64-jcc.$$
+work=
+share=
 trap 'rm -rf "$work" "$share"/rt-* "$work0" 2>/dev/null || true' EXIT HUP INT TERM
 mkdir -p "$work0"
 "$mcc" --target=aarch64 --specs=meuos --sysroot="$sysroot" \

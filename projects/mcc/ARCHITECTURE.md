@@ -347,9 +347,11 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
 | mir-02 | J | slotmerge 自举破坏（长期禁用 97c8541；二期见 worker-slot2） | 🚫 长期禁用 |
 | mir-03 | I | slotmerge 崩溃（并入 J） | 🚫 禁用 |
 | x86-i64slot | — | i386 i64 常量槽位 lo/hi 约定不一致（物化端不 base 化 `g_slot_base` + `-1` sentinel 直用致 `-1(%ebp)`/`3(%ebp)`，`(1LL<<40)>>32` 读垃圾）→ rr_i64 | ✅ closed（6008c405；i386_memit 引入 i64_base/i64_dst_base 统一 base 约定 + 预留 scratch 半对；i386 test/i386/i64const.c 回归 + rt_matrix i386 8/8） |
-| x86-i64param | — | i386 i64 栈传参读 `-1(%ebp)`/`3(%ebp)`（mabi_selpar 用 lowering 期未分配 `dst->slot` 直赋 LOAD 目标） | 🔶 open（登记一致性专项；i64const 规避，constants 常量化路径同缺陷已一并修） |
+| x86-i64param | — | i386 i64 栈传参读 `-1(%ebp)`/`3(%ebp)`（mabi_selpar/selcall/selret/vaarg 用 lowering 期未分配 slot 直写；libc 侧 L".." 真实宽字面量需编译含 i64 形参代码） | ✅ closed（cfd39be9 + #16 系列；selpar 单 MMOP_LOAD MT_I64 / selcall 单 MMOP_STORE / ret const 保 imm / vaarg 单 load；rt_matrix rr_i64param 全架构 PASS） |
+| a64-jccfall | #19 | aarch64 JCC 终止子缺 s2 fallthrough 显式跳转（块按 fm->link 发射非 CFG 序，条件假时落任意块，多 if 的 main 无限循环 exit=124）→ rr_i64param 挂 | ✅ closed（fda34544；emit_block JCC 后无条件 `b .L<fn>.bb<s2>`，对齐 x86_64；test/aarch64/jccfall.c + gate；rt_matrix 解除 xfail，6 架构 9 程序全 PASS） |
+| x86-movzx-lea | #22a | i386 `i8/i16→i32` MOVZX 落入 MMOP_LEA 发 `leal 0,%eax` 清零，`(unsigned char)int` 返回 0 非 0x78 | ✅ closed（7b907823；emit_ins MOVZX 显式 movzbl/movzwl + scratch_to_dst） |
 | la64-fpconst | — | loongarch64 FP 常量物化成整数 0（`li.d $t0,0x0; movgr2fr.w` 从截断 bit pattern；LoongArch 无 64 位 FP 立即数）→ rr_fp | ✅ closed（090fa569；照抄 x86_64 fp_pool/.LlcN：FP 常量 stash .rodata + `pcalau12i/addi.d` 载址 + `fld.s/.d`；loongarch64 test/fp_const.c gate；rt_matrix loongarch64 8/8） |
-| crossarch-matrix | — | 跨架构 QEMU runtime 矩阵 xfail 收官 | ✅ 全 6 架构 8/8 绿、零 xfail（i386 rr_i64 6008c405 + loongarch rr_fp 090fa569 后 progs_xfail 清空） |
+| crossarch-matrix | — | 跨架构 QEMU runtime 矩阵 xfail 收官 | ✅ 全 6 架构 × 9 程序全 PASS、零 xfail（i386 6008c405/cfd39be9 + loongarch 090fa569 + aarch64 fda34544 后 progs_xfail 清空） |
 | wstring-dedup | — | 宽字面量同 TU 不同内容被误合并（`stringdecl` 用元素数 `size` 作 mapkey 长度，wchar 只比首元素字节 → L"abc"/L"abd" 都开 'a' 而合并成一个 .Lstring） | ✅ closed（6149ecde；`stringdecl` 改 `size * expr->type->base->size` 按字节比较；test/c99/wide_string_dedup.c 运行时回归） |
 | cpp-10 | — | 局部类（函数体内 `struct`）+ `new` 段错误：ctor 体即时代码生成污染全局 `curfunc` + 局部类 `t->scope` 未设（野指针） | ✅ closed（三处：mktype 初始化 `t->scope=NULL` + tagspec 普通 struct 设 `t->scope=s` + cpp_parse_method_body 恢复 `curfunc`；local_class_new.cc 回归） |
 | x86-00 | va_list | MIR 后端 va_list 溢出 | ✅ closed（222a28d） |
