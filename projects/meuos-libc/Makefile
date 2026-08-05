@@ -460,10 +460,8 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/wchar_num_gate test/wchar_num_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/wchar_fp_gate test/wchar_fp_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/wcsftime_gate test/wcsftime_gate.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/wchar_lit_gate test/wchar_lit_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/wctype_gate test/wctype_gate.c
-	# wchar_lit_gate (true wide-literal) deferred: blocked on mcc wide-literal
-	# dedup bug (different L".." collapse), tracked with mcc-worker; re-enable
-	# after mcc fix lands.
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/auxv test/auxv.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/uio test/uio.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/p2 test/p2.c
@@ -554,6 +552,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	/tmp/meuos-libc-check/wchar_num_gate
 	/tmp/meuos-libc-check/wchar_fp_gate
 	/tmp/meuos-libc-check/wcsftime_gate
+	/tmp/meuos-libc-check/wchar_lit_gate
 	/tmp/meuos-libc-check/wctype_gate
 	/tmp/meuos-libc-check/auxv
 	/tmp/meuos-libc-check/uio
