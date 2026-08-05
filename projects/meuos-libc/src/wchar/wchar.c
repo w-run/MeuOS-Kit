@@ -4,6 +4,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <limits.h>
+#include <errno.h>
 #include <stdio/internal.h>
 
 /* String operations */
@@ -509,6 +511,128 @@ wchar_t *wcstok(wchar_t *s, const wchar_t *delim, wchar_t **ptr) {
 		*ptr = wcslen(tok) + tok;
 	}
 	return tok;
+}
+
+/* ----------------------------------------------------------------------
+ * Wide numeric conversion (C11 7.29.4.1).  The C locale's wide chars equal
+ * their byte codes, so the parsing mirrors strtoul/strtol semantics.
+ * -------------------------------------------------------------------- */
+static int
+wdigit(unsigned wc)
+{
+	if (wc >= '0' && wc <= '9') return (int)(wc - '0');
+	if (wc >= 'a' && wc <= 'z') return (int)(wc - 'a' + 10);
+	if (wc >= 'A' && wc <= 'Z') return (int)(wc - 'A' + 10);
+	return 36;
+}
+
+/* Reusable magnitude converter given an explicit base. */
+static unsigned long long
+wc_mag(const wchar_t **pp, int base, int *overflow)
+{
+	const wchar_t *text = *pp;
+	unsigned long long value = 0;
+	if (base == 0) {
+		base = 10;
+		if (text[0] == L'0') {
+			base = 8;
+			if (text[1] == L'x' || text[1] == L'X') { base = 16; text += 2; }
+		}
+	} else if (base == 16 && text[0] == L'0' && (text[1] == L'x' || text[1] == L'X')) {
+		text += 2;
+	}
+	while (wdigit((unsigned)text[0]) < base) {
+		int d = wdigit((unsigned)text[0]);
+		if (!*overflow) {
+			if (value > (0xffffffffffffffffULL - (unsigned long long)d) / (unsigned long long)base)
+				*overflow = 1;
+			else
+				value = value * (unsigned long long)base + (unsigned long long)d;
+		}
+		++text;
+	}
+	*pp = text;
+	return value;
+}
+
+unsigned long
+wcstoul(const wchar_t *text, wchar_t **end, int base)
+{
+	int didsign = 0, overflow = 0;
+	const wchar_t *p = text;
+	while (*p == L' ' || *p == L'\t' || *p == L'\n')
+		++p;
+	if (*p == L'-') { didsign = 1; ++p; }
+	else if (*p == L'+') ++p;
+	/* C11 7.29.4.1.2: leading '-' is not interpreted as negative for
+	 * wcstoul (matches strtoul); the sign is ignored, but we still skip it. */
+	(void)didsign;
+	unsigned long long v = wc_mag(&p, base, &overflow);
+	if (end) *end = (wchar_t *)p;
+	if (overflow || v > ULONG_MAX) {
+		errno = ERANGE;
+		return ULONG_MAX;
+	}
+	return (unsigned long)v;
+}
+
+unsigned long long
+wcstoull(const wchar_t *text, wchar_t **end, int base)
+{
+	int overflow = 0;
+	const wchar_t *p = text;
+	while (*p == L' ' || *p == L'\t' || *p == L'\n')
+		++p;
+	if (*p == L'-' || *p == L'+')
+		++p;
+	unsigned long long v = wc_mag(&p, base, &overflow);
+	if (end) *end = (wchar_t *)p;
+	if (overflow) {
+		errno = ERANGE;
+		return 0xffffffffffffffffULL;
+	}
+	return v;
+}
+
+long
+wcstol(const wchar_t *text, wchar_t **end, int base)
+{
+	int negative = 0;
+	const wchar_t *p = text;
+	while (*p == L' ' || *p == L'\t' || *p == L'\n')
+		++p;
+	if (*p == L'-') { negative = 1; ++p; }
+	else if (*p == L'+') ++p;
+	int overflow = 0;
+	unsigned long long v = wc_mag(&p, base, &overflow);
+	unsigned long long m = negative ? (unsigned long long)LONG_MAX + 1
+	                                : (unsigned long long)LONG_MAX;
+	if (end) *end = (wchar_t *)p;
+	if (overflow || v > m) {
+		errno = ERANGE;
+		return negative ? LONG_MIN : LONG_MAX;
+	}
+	return negative ? -(long)v : (long)v;
+}
+
+long long
+wcstoll(const wchar_t *text, wchar_t **end, int base)
+{
+	int negative = 0;
+	const wchar_t *p = text;
+	while (*p == L' ' || *p == L'\t' || *p == L'\n')
+		++p;
+	if (*p == L'-') { negative = 1; ++p; }
+	else if (*p == L'+') ++p;
+	int overflow = 0;
+	unsigned long long v = wc_mag(&p, base, &overflow);
+	unsigned long long m = negative ? 0x8000000000000000ULL : 0x7fffffffffffffffULL;
+	if (end) *end = (wchar_t *)p;
+	if (overflow || v > m) {
+		errno = ERANGE;
+		return negative ? (-0x7fffffffffffffffLL - 1) : 0x7fffffffffffffffLL;
+	}
+	return negative ? -(long long)v : (long long)v;
 }
 
 /* ----------------------------------------------------------------------
