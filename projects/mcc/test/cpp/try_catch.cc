@@ -15,10 +15,13 @@
  *
  * Each check returns a distinct exit code; run via `check-cpp-func`.
  *
- * check-cpp-func compiles it with `-I../meuos-libc/include` so <meuos_exc.h>
- * (the libc exception runtime header) resolves when it is present in the
- * libc project; if the header is absent the target is skipped rather than
- * failing the gate.
+ * check-cpp-func compiles it with `-I<libcdir>/include` (default
+ * `../meuos-libc`, overridable via `MEUOS_LIBC_DIR` — used from an
+ * mcc-toolchain worktree whose own copy of meuos-libc may lack the exception
+ * header) so <meuos_exc.h> (the libc exception runtime header) resolves.
+ * It uses `--specs=meuos` and needs a meuos sysroot (MEUOS_SYSROOT) whose
+ * libc carries `_meuos_exc_throw`; if the header or symbol is absent the
+ * target is skipped rather than failing the gate.
  */
 #include <meuos_exc.h>
 

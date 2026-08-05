@@ -354,16 +354,25 @@ check-cpp-func: $(MPP_BIN)
 		case "$$t" in \
 		  */try_catch\.cc) \
 		    specsf="--specs=meuos"; \
-		    if [ ! -f ../meuos-libc/include/meuos_exc.h ]; then \
-		      echo "SKIP try_catch (meuos_exc.h not in ../meuos-libc/include)"; \
+		    src=/workspace/MeuOS-Kit/projects/sysroot; \
+		    if [ "$${MEUOS_SYSROOT:-}" != "$$src" ] && \
+		       nm "$${MEUOS_SYSROOT:-}/usr/lib/libc-meuos.a" 2>/dev/null | grep -q _meuos_exc_throw; then \
+		      src=$${MEUOS_SYSROOT:-$$src}; \
+		    fi; \
+		    libcd=$${MEUOS_LIBC_DIR:-/workspace/MeuOS-Kit/projects/meuos-libc}; \
+		    if [ ! -f "$$libcd/include/meuos_exc.h" ]; then \
+		      libcd=$$(cd ../.. && pwd)/projects/meuos-libc; \
+		    fi; \
+		    if [ ! -f "$$libcd/include/meuos_exc.h" ]; then \
+		      echo "SKIP try_catch (meuos_exc.h not found)"; \
 		      continue; \
 		    fi; \
-		    inc="-I../meuos-libc/include"; \
-		    sr=$${MEUOS_SYSROOT:-/workspace/MeuOS-Kit/sysroot}; \
-		    if ! nm "$$sr/usr/lib/libc-meuos.a" 2>/dev/null | grep -q _meuos_exc_throw; then \
-		      echo "SKIP try_catch (sysroot $$sr libc lacks _meuos_exc_throw)"; \
+		    if ! nm "$$src/usr/lib/libc-meuos.a" 2>/dev/null | grep -q _meuos_exc_throw; then \
+		      echo "SKIP try_catch (no sysroot libc with _meuos_exc_throw)"; \
 		      continue; \
 		    fi; \
+		    inc="-I$$libcd/include"; \
+		    specsf="--specs=meuos --sysroot=$$src"; \
 		    ;; \
 		esac; \
 		./$(MPP_BIN) $$specsf $$inc -o $$out $$t || exit $$?; \
