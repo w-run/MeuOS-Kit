@@ -54,6 +54,7 @@ int getopt(int, char * const[], const char *);
 /* Suspension (POSIX.1-2008). */
 unsigned int sleep(unsigned int);
 int usleep(unsigned int);
+int pause(void);
 
 #define SEEK_SET 0
 #define SEEK_CUR 1
