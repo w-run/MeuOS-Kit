@@ -949,11 +949,49 @@ cpp_ensure_exc_fn(const char *name)
 		p2->next->u.obj.storage = SDAUTO;
 		ft->u.func.params = p2;
 		fd = mkdecl("_meuos_exc_throw", DECLFUNC, ft, QUALNONE, LINKEXTERN);
+		fd->u.func.isnoreturn = true;
+	} else if (strcmp(name, "_meuos_exc_try_begin") == 0) {
+		/* void _meuos_exc_try_begin(_meuos_exc_frame *) */
+		struct type *ft = mktype(TYPEFUNC, 0);
+		struct decl *p0;
+		struct type *frame_t =
+		    scopegettag(&filescope, "_meuos_exc_frame", true);
+		ft->base = &typevoid;
+		ft->u.func.isvararg = false;
+		ft->u.func.nparam = 1;
+		p0 = mkdecl("frame", DECLOBJECT,
+		            frame_t ? mkpointertype(frame_t, QUALNONE)
+		                    : mkpointertype(&typevoid, QUALNONE),
+		            QUALNONE, LINKNONE);
+		p0->u.obj.storage = SDAUTO;
+		ft->u.func.params = p0;
+		fd = mkdecl("_meuos_exc_try_begin", DECLFUNC, ft, QUALNONE,
+		            LINKEXTERN);
+	} else if (strcmp(name, "_meuos_exc_try_end") == 0) {
+		struct type *ft = mktype(TYPEFUNC, 0);
+		ft->base = &typevoid;
+		ft->u.func.isvararg = false;
+		ft->u.func.nparam = 0;
+		fd = mkdecl("_meuos_exc_try_end", DECLFUNC, ft, QUALNONE,
+		            LINKEXTERN);
+	} else if (strcmp(name, "_meuos_exc_caught_type") == 0) {
+		struct type *ft = mktype(TYPEFUNC, 0);
+		ft->base = &typeint;
+		ft->u.func.isvararg = false;
+		ft->u.func.nparam = 0;
+		fd = mkdecl("_meuos_exc_caught_type", DECLFUNC, ft, QUALNONE,
+		            LINKEXTERN);
+	} else if (strcmp(name, "_meuos_exc_caught_value") == 0) {
+		struct type *ft = mktype(TYPEFUNC, 0);
+		ft->base = &typeullong;
+		ft->u.func.isvararg = false;
+		ft->u.func.nparam = 0;
+		fd = mkdecl("_meuos_exc_caught_value", DECLFUNC, ft, QUALNONE,
+		            LINKEXTERN);
 	} else {
 		return NULL;
 	}
 	fd->value = mkglobal(fd);
-	fd->u.func.isnoreturn = true; /* throwing never returns normally */
 	scopeputdecl(&filescope, fd);
 	return fd;
 }
@@ -996,20 +1034,207 @@ cpp_exc_throw_call(struct type *t, struct expr *value)
  * unwinder backend that routes a thrown exception to a catch block is not
  * yet implemented — so we emit a clear diagnostic rather than silent
  * miscompilation. */
+/* Build a call to a MeuOS exception-runtime helper by name (all from
+ * <meuos_exc.h>: _meuos_exc_try_begin/try_end/caught_type/caught_value),
+ * returning its value or void as a funcexpr'd statement.  Falls back to
+ * cpp_ensure_exc_fn for the throw helper. */
+static struct expr *
+cpp_exc_helper_call(const char *name, struct type *ret,
+                    struct expr *arg1, struct expr *arg2)
+{
+	extern struct scope filescope;
+	struct decl *fd = cpp_ensure_exc_fn(name);
+	struct expr *fn, *call;
+	if (!fd)
+		return mkexpr(EXPRCONST, &typevoid, NULL);
+	fn = mkexpr(EXPRIDENT, fd->type, NULL);
+	fn->u.ident.decl = fd;
+	fn = decay(fn);
+	call = mkexpr(EXPRCALL, ret, fn);
+	call->u.call.args = arg1;
+	call->u.call.nargs = arg1 ? 1 : 0;
+	if (arg2) {
+		arg1->next = arg2;
+		call->u.call.nargs = 2;
+	}
+	return call;
+}
+
+/* C++ `try { ... } catch (T e) { ... }` — lowered onto the libc
+ * setjmp/longjmp exception runtime (meuos_exc.h): declare a local
+ * `_meuos_exc_frame`, setjmp into it, register with try_begin, branch on
+ * the setjmp return: normal path runs the try body then try_end (pop); the
+ * longjmp path (r != 0) matches the caught type and, on hit, copy-inits the
+ * catch parameter from caught_value.  Uncaught type falls to a rethrow for
+ * now (phases 3-4 make this the precise multi-catch dispatch).
+ *
+ * The program must `#include <meuos_exc.h>` so `_meuos_exc_frame` and the
+ * helper declarations are in scope.
+ */
 void
 cpp_exc_stmt(struct func *f, struct scope *s)
 {
+	extern struct scope filescope;
 	extern void stmt(struct func *, struct scope *);
+	extern struct scope *mkscope(struct scope *);
+	extern struct scope *delscope(struct scope *);
 	extern void next(void);
+	extern struct block *mkblock(char *);
+	extern void funclabel(struct func *, struct block *);
+	extern struct value *funcbranch(struct func *, struct expr *,
+	    struct block *, struct block *);
+	extern void funcjmp(struct func *, struct block *);
+	extern struct type *typename(struct scope *, enum typequal *,
+	    struct expr **);
+	struct type *frame_t;
+	struct expr *frame_e, *addr, *st, *r_e, *cond, *cv, *casted;
+	struct decl *frame_d, *r_d, *fd_setjmp, *ed;
+	struct block *bcaught, *bnormal, *bjoin;
+	enum typequal tq = QUALNONE;
+	struct type *ctype = NULL;
+	char name[256];
+	int catch_tc;
 
 	if (cpp_tok_kind() != CPP_TTRY)
 		return;
+	/* The frame struct comes from <meuos_exc.h> (declared in filescope). */
+	frame_t = scopegettag(&filescope, "_meuos_exc_frame", true);
+	if (!frame_t || (frame_t->kind != TYPESTRUCT &&
+	                 frame_t->kind != TYPEUNION))
+		error_tok_code(E_TEMPLATE, &tok,
+		    "try/catch requires '#include <meuos_exc.h>' (defines _meuos_exc_frame)");
 	next(); /* consume 'try' */
-	error_tok_code(E_TEMPLATE, &tok,
-	    "'try'/'catch' exception handling requires the landingpad unwinder backend (not yet implemented in mcc)");
-	/* never reached */
+
+	s = mkscope(s);
+
+	/* local `_meuos_exc_frame frame;` */
+	frame_d = mkdecl("frame", DECLOBJECT, frame_t, QUALNONE, LINKNONE);
+	frame_d->u.obj.storage = SDAUTO;
+	funcinit(f, frame_d, NULL, false);
+	frame_e = mkexpr(EXPRIDENT, frame_t, NULL);
+	frame_e->lvalue = true;
+	frame_e->u.ident.decl = frame_d;
+
+	/* local `int __exc_r;` */
+	r_d = mkdecl("__exc_r", DECLOBJECT, &typeint, QUALNONE, LINKNONE);
+	r_d->u.obj.storage = SDAUTO;
+	funcinit(f, r_d, NULL, false);
+	r_e = mkexpr(EXPRIDENT, &typeint, NULL);
+	r_e->lvalue = true;
+	r_e->u.ident.decl = r_d;
+
+	/* __exc_r = setjmp(frame.env)   (env is the first member, offset 0) */
+	addr = mkunaryexpr(TBAND, frame_e);
+	fd_setjmp = scopegetdecl(&filescope, "setjmp", true);
+	if (fd_setjmp && fd_setjmp->kind == DECLFUNC) {
+		struct expr *fn, *call;
+		fn = mkexpr(EXPRIDENT, fd_setjmp->type, NULL);
+		fn->u.ident.decl = fd_setjmp;
+		fn = decay(fn);
+		call = mkexpr(EXPRCALL, &typeint, fn);
+		call->u.call.args = addr;
+		call->u.call.nargs = 1;
+		funcexpr(f, mkassignexpr(r_e, call));
+	} else {
+		error_tok_code(E_TEMPLATE, &tok,
+		    "setjmp not declared (meuos_exc.h requires <setjmp.h>)");
+	}
+
+	/* _meuos_exc_try_begin(&frame) */
+	st = cpp_exc_helper_call("_meuos_exc_try_begin", &typevoid,
+	                          frame_e, NULL);
+	funcexpr(f, st);
+
+	/* if (__exc_r != 0) -> caught branch, else try body */
+	cond = mkbinaryexpr(&tok.loc, TNEQ, r_e,
+	                    mkconstexpr(&typeint, 0));
+	bcaught = mkblock("exc_caught");
+	bnormal = mkblock("exc_normal");
+	bjoin = mkblock("exc_join");
+	funcbranch(f, cond, bcaught, bnormal);
+
+	/* normal (r == 0): run the try body, then pop the handler */
+	funclabel(f, bnormal);
 	stmt(f, s);
+	funcexpr(f, cpp_exc_helper_call("_meuos_exc_try_end", &typevoid,
+	                                NULL, NULL));
+	funcjmp(f, bjoin);
+
+	/* caught (r != 0): match the catch type and copy the value */
+	funclabel(f, bcaught);
+	{
+		if (cpp_tok_kind() != CPP_TCATCH)
+			error_tok_code(E_TEMPLATE, &tok, "expected 'catch' after 'try'");
+		next(); /* consume 'catch' */
+		expect(TLPAREN, "after 'catch'");
+		if (tok.kind == TELLIPSIS) {
+			next(); /* catch(...) — catch-all (phase 4) */
+		} else {
+			/* catch (int e) / catch (TN e) — a type name.  Match the
+			 * lexed spelling rather than a specific token kind so any
+			 * identifier-like C++ keyword (int/long/...) or user class
+			 * name (TIDENT/CPP tokens alike) is handled uniformly. */
+			const char *ts = tokenstr(tok.kind);
+			struct type *tt;
+			if (strcmp(ts, "int") == 0) {
+				ctype = &typeint;
+			} else if (strcmp(ts, "char") == 0) {
+				ctype = &typechar;
+			} else if (strcmp(ts, "long") == 0) {
+				ctype = &typelong;
+			} else if (strcmp(ts, "short") == 0) {
+				ctype = &typeshort;
+			} else if (strcmp(ts, "double") == 0) {
+				ctype = &typedouble;
+			} else {
+				tt = scopegettag(s, ts, true);
+				if (!tt)
+					tt = scopegettag(&filescope, ts, true);
+				if (!tt)
+					error_tok_code(E_TEMPLATE, &tok,
+					    "unknown catch parameter type");
+				ctype = tt;
+			}
+			next(); /* consume the type name */
+			if (tok.kind != TRPAREN) {
+				snprintf(name, sizeof name, "%s", tokenstr(tok.kind));
+				next();
+			} else {
+				name[0] = '\0';
+			}
+		}
+		expect(TRPAREN, "after catch parameter");
+
+		if (ctype) {
+			/* catch-param `e` declares a local; on type match copy
+			 * caught_value into it.  Phase 1 matches all caught values
+			 * (typecode currently always 0 / int-family). */
+			catch_tc = 0;
+			(void)catch_tc;
+			ed = mkdecl(name, DECLOBJECT, ctype, QUALNONE, LINKNONE);
+			ed->u.obj.storage = SDAUTO;
+			funcinit(f, ed, NULL, false);
+			scopeputdecl(s, ed); /* bind `e` so the catch body can read it */
+			{
+				struct expr *ep = mkexpr(EXPRIDENT, ctype, NULL);
+				struct expr *val;
+				ep->lvalue = true;
+				ep->u.ident.decl = ed;
+				val = cpp_exc_helper_call("_meuos_exc_caught_value",
+				                          &typeullong, NULL, NULL);
+				casted = exprconvert(val, ctype);
+				funcexpr(f, mkassignexpr(ep, casted));
+			}
+		} else {
+			/* catch(...) — for now consume the block, nothing to bind */
+		}
+		stmt(f, s);
+	}
+
+	funclabel(f, bjoin);
+	s = delscope(s);
 }
+
 
 /* C++ `throw` expression (`throw expr;` or bare `throw;` rethrow).
  * Lowered to a call to the exception runtime. */

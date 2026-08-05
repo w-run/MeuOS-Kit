@@ -348,7 +348,7 @@ check-cpp-virtual: $(MPP_BIN)
 # the host specs, keeping them runnable in any environment.  virtual.cc
 # needs the meuos sysroot and is exercised by check-cpp-virtual instead.
 check-cpp-func: $(MPP_BIN)
-	@for t in $$(ls test/cpp/*.cc | grep -v '\.neg\.cc' | grep -v '/virtual\.cc'); do \
+	@for t in $$(ls test/cpp/*.cc | grep -v '\.neg\.cc' | grep -v '/virtual\.cc' | grep -v '/try_catch\.cc'); do \
 		out=/tmp/mpp-$$(basename $$t .cc); \
 		./$(MPP_BIN) --specs=host -o $$out $$t || exit $$?; \
 		$$out || exit $$?; \
