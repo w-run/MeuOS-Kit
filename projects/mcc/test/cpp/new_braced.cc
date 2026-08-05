@@ -10,8 +10,10 @@
  * (`new Pt[2]{{1,2},{3,4}}` constructs each element from its nested
  * sub-list, with elements beyond a short list value-initialized).
  *
- * Class-array elements that are a single expression (`new Pt[2]{Pt(1,2)}`)
- * are not yet covered (the nested-sub-list form is the supported case).
+ * Class-array elements may also be a single value expression
+ * (`new Point[2]{Point(1,2), Point(3,4)}`), which copy-initializes each
+ * heap element from the temporary (mixed nested-sub-list / single-value
+ * forms are supported too).
  *
  * Each check returns a distinct exit code; run via `check-cpp-func`.
  */
@@ -79,6 +81,18 @@ main(void)
     Pt *sc = new Pt[3]{{1, 2}};
     if (sc[0].x != 1 || sc[0].y != 2) return 10;
     delete[] sc;
+
+    /* user-ctor class-array with single-value expression elements: each
+     * heap element is copy-initialized from the temporary */
+    Point *sv = new Point[2]{Point(1, 2), Point(3, 4)};
+    if (sv[0].x != 1 || sv[0].y != 2 || sv[1].x != 3 || sv[1].y != 4) return 11;
+    delete[] sv;
+
+    /* mixed single-value and nested-sub-list elements in one array */
+    Point *mx = new Point[3]{Point(1, 2), {3, 4}, Point(5, 6)};
+    if (mx[0].x != 1 || mx[0].y != 2 || mx[1].x != 3 || mx[1].y != 4 ||
+        mx[2].x != 5 || mx[2].y != 6) return 12;
+    delete[] mx;
 
     return 0;
 }

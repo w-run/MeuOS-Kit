@@ -374,9 +374,21 @@ cpp_parse_new_expr(struct scope *s)
 							pe->u.binary.r = mkbinaryexpr(&tok.loc, TMUL,
 							    mkconstexpr(&typeulong, (unsigned long long)k),
 							    mkconstexpr(&typeulong, t->size));
-							if (elem_val)
-								*ea = elem_val; /* value element: single arg */
-							if (cpp_has_ctor(t, t->u.structunion.tag)) {
+							if (elem_val && elem_val->type == t) {
+								/* single-value class element (`{Pt(1,2)}`):
+								 * copy-initialize the heap element from the
+								 * temporary — heap[k] = expr.  The temporary
+								 * was constructed by its own ctor;
+								 * assign its value into the array slot. */
+								struct expr *dst = mkunaryexpr(TMUL, pe);
+								dst->type = t;
+								dst->lvalue = true;
+								funcexpr(curfunc, mkassignexpr(dst, elem_val));
+								if (t->u.structunion.poly)
+									cpp_init_vptrs(curfunc, t, pe);
+							} else if (cpp_has_ctor(t, t->u.structunion.tag)) {
+								if (elem_val)
+									*ea = elem_val; /* scalar/other single arg */
 								struct expr *ce = cpp_ctor_expr(t, pe, elem_args);
 								if (!ce)
 									error_code(E_OVERLOAD, &tok.loc,
