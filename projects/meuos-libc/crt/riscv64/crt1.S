@@ -49,18 +49,21 @@ _start:
 	call __meuos_tls_init
 	mv tp, a0
 
-	/* reload argc/argv/envp from the saved kernel sp */
-	ld a0, 0(s0)			/* argc */
-	addi a1, s0, 8			/* argv */
-	slli a2, a0, 3
-	add a2, a2, a1
-	addi a2, a2, 8			/* envp */
-
-	call main
-
-	/* exit() runs atexit handlers and fflush(NULL) before the raw _exit
-	 * syscall, so buffered printf output is not lost. */
-	tail exit
+	/* __libc_start_main(main, argc, argv, NULL, NULL, NULL, stack_end).
+	 * The portable startup wrapper (src/startup.c) captures argv[0]/auxv,
+	 * runs the .preinit_array/.init_array constructors, registers the
+	 * .fini_array walk with atexit(), calls main() and hands its status to
+	 * exit() -- which drains atexit and flushes stdio, so buffered printf
+	 * output is not lost.  All seven arguments fit in a0-a6. */
+	lla a0, main			/* main */
+	ld a1, 0(s0)			/* argc */
+	addi a2, s0, 8			/* argv */
+	li a3, 0			/* init */
+	li a4, 0			/* fini */
+	li a5, 0			/* rtld_fini */
+	mv a6, s0			/* stack_end */
+	call __libc_start_main
+	unimp				/* unreachable: it exit()s */
 
 .bss
 .align 3

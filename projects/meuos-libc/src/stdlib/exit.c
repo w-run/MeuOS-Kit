@@ -32,6 +32,41 @@ exit(int status)
 	_exit(status);
 }
 
+/* C99 7.22.4.4.  Unlike exit(), no atexit handler runs and no stream is
+ * flushed -- control goes straight to the kernel.  Constructors and other
+ * code that must bail out without re-entering the termination chain (which
+ * would recurse, since the .fini_array walk is itself an atexit handler)
+ * use this. */
+_Noreturn void
+_Exit(int status)
+{
+	_exit(status);
+}
+
+/* quick_exit keeps a handler list of its own (C11 7.22.4.3): at_quick_exit
+ * registrations are not atexit registrations and vice versa. */
+static void (*quick_handlers[ATEXIT_MAX])(void);
+static unsigned int quick_handler_count;
+
+int
+at_quick_exit(void (*handler)(void))
+{
+	if (!handler || quick_handler_count == ATEXIT_MAX)
+		return -1;
+	quick_handlers[quick_handler_count++] = handler;
+	return 0;
+}
+
+/* C11 7.22.4.7: run the at_quick_exit handlers in reverse registration
+ * order, then terminate.  No atexit handler runs and nothing is flushed. */
+_Noreturn void
+quick_exit(int status)
+{
+	while (quick_handler_count)
+		quick_handlers[--quick_handler_count]();
+	_exit(status);
+}
+
 _Noreturn void
 abort(void)
 {

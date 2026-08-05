@@ -50,7 +50,17 @@ $(BUILD)/%.o: src/%.c
 $(COMPAT_LIB): $(OBJS)
 	$(AR) rcs $@ $^
 
+# Same host-tree guard as the parent Makefile: a bare `make install` would
+# drop argp.h / error.h / obstack.h / program-invocation.h into /usr/include.
 install: $(COMPAT_LIB)
+	@if [ -z "$(DESTDIR)" ] && [ "$(ALLOW_HOST_INSTALL)" != "1" ]; then \
+		case "$(PREFIX)" in \
+		/usr|/usr/|/usr/local|/usr/local/|/) \
+			echo "meuos-libc-compat: refusing to install into the host tree" >&2; \
+			echo "  Pass DESTDIR=<sysroot>, or ALLOW_HOST_INSTALL=1 to override." >&2; \
+			exit 1;; \
+		esac; \
+	fi
 	@mkdir -p $(DESTDIR)$(PREFIX)/lib $(DESTDIR)$(PREFIX)/include
 	cp -r include/. $(DESTDIR)$(PREFIX)/include/
 	cp $(COMPAT_LIB) $(DESTDIR)$(PREFIX)/lib/libc-meuos-compat.a

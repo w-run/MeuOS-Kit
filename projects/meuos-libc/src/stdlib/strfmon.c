@@ -24,6 +24,21 @@
 #include <string.h>
 #include <stdlib.h>
 
+/* The arithmetic below wants the widest available floating type.  mcc only
+ * supports long double on x86_64; on the other five targets it rejects the
+ * type outright ("long double is not yet supported"), which made this file
+ * -- and therefore the whole library -- unbuildable there.  Fall back to
+ * double where the wider type is unavailable: %Ln then formats at double
+ * precision instead of the build failing altogether.  Revisit once mcc
+ * grows long double on the remaining targets. */
+#if defined(__x86_64__)
+typedef long double money_float;
+#define MONEY_C(x) x##L
+#else
+typedef double money_float;
+#define MONEY_C(x) x
+#endif
+
 /* Append str to a growable-ish fixed buffer; returns bytes or -1 on overflow. */
 static size_t
 addstr(char **pp, size_t *left, const char *str)
@@ -116,8 +131,9 @@ strfmon(char *s, size_t maxsize, const char *format, ...)
 		char fmt = *f;
 		if (fmt == 'i' || fmt == 'n') {
 			int use_intl = (fmt == 'i');
-			long double val = is_ldouble ? va_arg(ap, long double)
-			                             : (long double)va_arg(ap, double);
+			money_float val = is_ldouble
+			        ? (money_float)va_arg(ap, money_float)
+			        : (money_float)va_arg(ap, double);
 			/* default precision = locale frac_digits or 2 */
 			if (precision < 0) {
 				int fd = use_intl ? lc->int_frac_digits : lc->frac_digits;
@@ -132,13 +148,13 @@ strfmon(char *s, size_t maxsize, const char *format, ...)
 				val = -val;
 
 			/* scale to fraction, rounding the last digit */
-			long double scaled = val;
-			long double unit = 1.0L;
+			money_float scaled = val;
+			money_float unit = MONEY_C(1.0);
 			for (int k = 0; k < precision; k++) {
-				scaled *= 10.0L;
-				unit *= 10.0L;
+				scaled *= MONEY_C(10.0);
+				unit *= MONEY_C(10.0);
 			}
-			scaled += 0.5L;
+			scaled += MONEY_C(0.5);
 			unsigned long long whole = (unsigned long long)(scaled / unit);
 			long long frac = (long long)(scaled - whole * unit);
 

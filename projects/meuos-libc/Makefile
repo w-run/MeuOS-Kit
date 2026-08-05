@@ -379,7 +379,24 @@ compat:
 # Install
 # ============================================================
 
+# Guard against installing over the host system tree.  PREFIX defaults to /usr
+# so a bare `make install` (no DESTDIR) overwrites /usr/include/*.h with the
+# meuos-libc headers, which silently breaks every host-cc build in the Kit.
+# That happened on 2026-08-06: 64 glibc-devel headers were clobbered and
+# meuos-toolchain stopped building from clean.  Always pass DESTDIR; set
+# ALLOW_HOST_INSTALL=1 only if you really do mean to install into the host.
 install: $(ATOMIC_LIB) $(LIBC_LIB) $(CRT1_OBJ) $(BUILD_SO) $(LIBGCC_LIB)
+	@if [ -z "$(DESTDIR)" ] && [ "$(ALLOW_HOST_INSTALL)" != "1" ]; then \
+		case "$(PREFIX)" in \
+		/usr|/usr/|/usr/local|/usr/local/|/) \
+			echo "meuos-libc: refusing to install into the host tree" >&2; \
+			echo "  PREFIX=$(PREFIX) with an empty DESTDIR would overwrite" >&2; \
+			echo "  the system headers under $(PREFIX)/include." >&2; \
+			echo "  Pass DESTDIR=<sysroot> (e.g. DESTDIR=\$$PWD/../../sysroot/$(ARCH))," >&2; \
+			echo "  or set ALLOW_HOST_INSTALL=1 to override deliberately." >&2; \
+			exit 1;; \
+		esac; \
+	fi
 	@mkdir -p $(DESTDIR)$(PREFIX)/lib $(DESTDIR)$(PREFIX)/include/sys
 	cp -r include/. $(DESTDIR)$(PREFIX)/include/
 	cp $(LIBC_LIB)    $(DESTDIR)$(PREFIX)/lib/libc-meuos.a
@@ -470,6 +487,20 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib --static -o /tmp/meuos-libc-check/libgcc test/libgcc.c -l:libgcc-meuos.a -l:libc-meuos.a
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/threads test/threads.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib -o /tmp/meuos-libc-check/crt test/crt.c -l:libc-meuos.a
+	# Startup contract gate: .init_array/.fini_array walked by
+	# __libc_start_main.  The array entries live in a companion .S (mcc
+	# accepts neither a top-level __asm__ nor a .o/.S input, and does not
+	# yet lower __attribute__((constructor)) into .init_array), so this
+	# gate assembles and links by hand instead of going through $(MCC)
+	# end-to-end like the single-source gates above.
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -c -o /tmp/meuos-libc-check/initarray.o test/initarray.c
+	$(AS) -c -o /tmp/meuos-libc-check/initarray_arr.o test/initarray_arr.S
+	$(HOST_CC) -nostdlib -static -o /tmp/meuos-libc-check/initarray \
+		$(abspath $(SYSROOT))/usr/lib/crt1.o \
+		/tmp/meuos-libc-check/initarray.o \
+		/tmp/meuos-libc-check/initarray_arr.o \
+		$(abspath $(SYSROOT))/usr/lib/libc-meuos.a \
+		$(abspath $(SYSROOT))/usr/lib/libgcc-meuos.a
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib -o /tmp/meuos-libc-check/env test/env.c -l:libc-meuos.a
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib -o /tmp/meuos-libc-check/bare-threads test/threads.c -l:libc-meuos.a
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib --static -o /tmp/meuos-libc-check/phase2-counter test/phase2_counter.c -l:libc-meuos.a
@@ -556,6 +587,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	/tmp/meuos-libc-check/wchar_lit_gate
 	/tmp/meuos-libc-check/wprintf_gate
 	/tmp/meuos-libc-check/wctype_gate
+	/tmp/meuos-libc-check/initarray
 	/tmp/meuos-libc-check/auxv
 	/tmp/meuos-libc-check/uio
 	/tmp/meuos-libc-check/p2
