@@ -11,6 +11,19 @@ typedef int wint_t;
 #define WCHAR_MIN (-2147483647 - 1)
 #define WCHAR_MAX 2147483647
 
+/* Multibyte conversion state (C11 7.29.1).  Internal layout: __left is the
+ * number of bytes still expected to finish the in-progress sequence (0 means
+ * idle), __acc accumulates the decoded code point, __nbits tracks the bit
+ * width of the pending lead byte.  Only UTF-8 is decoded; the state is small,
+ * trivially copyable, and mbsinit() reports idle when __left == 0. */
+typedef struct {
+	unsigned __left;
+	unsigned __acc;
+	unsigned __nbits;
+} mbstate_t;
+
+int mbsinit(const mbstate_t *);
+
 /* String operations */
 wchar_t *wcscpy(wchar_t *, const wchar_t *);
 wchar_t *wcsncpy(wchar_t *, const wchar_t *, size_t);
@@ -26,33 +39,21 @@ wchar_t *wcspbrk(const wchar_t *, const wchar_t *);
 wchar_t *wcsstr(const wchar_t *, const wchar_t *);
 size_t wcslen(const wchar_t *);
 
-/* Wide character classification */
-int iswalnum(wint_t);
-int iswalpha(wint_t);
-int iswcntrl(wint_t);
-int iswdigit(wint_t);
-int iswgraph(wint_t);
-int iswlower(wint_t);
-int iswprint(wint_t);
-int iswpunct(wint_t);
-int iswspace(wint_t);
-int iswupper(wint_t);
-int iswxdigit(wint_t);
-wint_t towlower(wint_t);
-wint_t towupper(wint_t);
+/* Wide character classification and mapping (C11 7.29.2 / 7.29.6.4) */
+#include <wctype.h>
 
 /* Conversion */
-size_t mbrtowc(wchar_t *, const char *, size_t, void *);
-size_t wcrtomb(char *, wchar_t, void *);
-size_t mbsrtowcs(wchar_t *, const char **, size_t, void *);
-size_t wcsrtombs(char *, const wchar_t **, size_t, void *);
+size_t mbrtowc(wchar_t *, const char *, size_t, mbstate_t *);
+size_t wcrtomb(char *, wchar_t, mbstate_t *);
+size_t mbsrtowcs(wchar_t *, const char **, size_t, mbstate_t *);
+size_t wcsrtombs(char *, const wchar_t **, size_t, mbstate_t *);
 int mbtowc(wchar_t *, const char *, size_t);
 int wctomb(char *, wchar_t);
 size_t mbstowcs(wchar_t *, const char *, size_t);
 size_t wcstombs(char *, const wchar_t *, size_t);
 wint_t btowc(int);
 int wctob(wint_t);
-size_t mbrlen(const char *, size_t, void *);
+size_t mbrlen(const char *, size_t, mbstate_t *);
 int wcwidth(wchar_t);
 
 /* I/O */
