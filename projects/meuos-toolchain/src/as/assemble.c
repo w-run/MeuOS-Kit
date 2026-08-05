@@ -569,6 +569,59 @@ emit_instruction(struct as_file *as, char *mnemonic, char *operand_text)
 }
 
 
+/* Resolve numeric label references (Nf for forward, Nb for backward) in
+ * operand text, replacing them with the unique .Lmt_num_N_M symbol names.
+ * The text buffer is modified in place (must be writable, e.g. the line
+ * buffer from parse_source).  Returns 0 on success, -1 on error. */
+static int
+resolve_numeric_references(struct as_file *as, char *text)
+{
+	char *p = text;
+	while (*p) {
+		/* Match a standalone Nf or Nb pattern (N = single digit 0-9).
+		 * The character before must be non-alphanumeric (or start of text),
+		 * and the character after must be non-alphanumeric (or end of text). */
+		if (p[0] >= '0' && p[0] <= '9' &&
+		    (p[1] == 'f' || p[1] == 'b') &&
+		    !isalnum((unsigned char)p[2]) &&
+		    (p == text || !isalnum((unsigned char)p[-1]))) {
+			int number = p[0] - '0';
+			int direction = p[1]; /* 'f' or 'b' */
+			int64_t count;
+			char replacement[64];
+			size_t rep_len, orig_len = 2, remaining;
+
+			if (direction == 'b') {
+				/* Backward: most recent label */
+				if (as->numeric_counts[number] == 0)
+					return as_error(as, "no previous label %d:", number);
+				count = (int64_t)as->numeric_counts[number];
+			} else {
+				/* Forward: next label (may not be defined yet) */
+				count = (int64_t)as->numeric_counts[number] + 1;
+			}
+
+			rep_len = (size_t)snprintf(replacement, sizeof(replacement),
+			                           ".Lmt_num_%d_%zu",
+			                           number, (size_t)count);
+			remaining = strlen(p + orig_len) + 1;
+			if (rep_len > orig_len)
+				memmove(p + rep_len, p + orig_len, remaining);
+			else if (rep_len < orig_len)
+				memmove(p + rep_len, p + orig_len, remaining);
+			memcpy(p, replacement, rep_len);
+
+			/* Ensure the symbol exists (may be undefined for forward refs) */
+			get_symbol(as, replacement);
+
+			p += rep_len;
+		} else {
+			++p;
+		}
+	}
+	return 0;
+}
+
 static int
 parse_line(struct as_file *as, char *line)
 {
@@ -626,6 +679,10 @@ parse_line(struct as_file *as, char *line)
 		rest = trim(text);
 	} else
 		rest = text;
+	/* Resolve numeric label references (Nf/Nb) in operand text before
+	 * dispatching to the encoder or directive parser. */
+	if (resolve_numeric_references(as, rest) != 0)
+		return -1;
 	if (mnemonic[0] == '.')
 		return parse_directive(as, mnemonic, rest);
 	return emit_instruction(as, mnemonic, rest);
