@@ -45,6 +45,9 @@ long wcstol(const wchar_t *, wchar_t **, int);
 long long wcstoll(const wchar_t *, wchar_t **, int);
 unsigned long wcstoul(const wchar_t *, wchar_t **, int);
 unsigned long long wcstoull(const wchar_t *, wchar_t **, int);
+double wcstod(const wchar_t *, wchar_t **);
+float wcstof(const wchar_t *, wchar_t **);
+/* long double wcstold: deferred — mcc 无 80-bit long double，与窄版 strtold 一致 */
 
 /* Wide character classification and mapping (C11 7.29.2 / 7.29.6.4) */
 #include <wctype.h>

@@ -635,6 +635,56 @@ wcstoll(const wchar_t *text, wchar_t **end, int base)
 	return negative ? -(long long)v : (long long)v;
 }
 
+/* C11 7.29.4.1.1: wcstod — parse a wide floating-point number, reusing the
+ * narrow strtod engine.  Wide chars in the C locale equal their byte codes;
+ * we mirror the first non-digit/non-sign char into a narrow buffer and let
+ * strtod do the real (decimal/hex/exponent) analysis.  Any character with
+ * no byte equivalent (value > 0xff) maps to a space so it terminates the
+ * narrow parse exactly where the wide parse must stop. */
+double
+wcstod(const wchar_t *text, wchar_t **end)
+{
+	const wchar_t *p = text;
+	while (*p == L' ' || *p == L'\t' || *p == L'\n' || *p == L'\f' || *p == L'\v')
+		++p;
+	/* count the mirror width; includes chars up to the terminator */
+	size_t len = 0;
+	{
+		const wchar_t *q = p;
+		while (*q)
+			len++, q++;
+	}
+	int has_buf = 0;
+	char *buf = malloc(len + 1);
+	if (buf) {
+		has_buf = 1;
+		for (size_t i = 0; i < len; i++)
+			buf[i] = (p[i] > 0xff) ? ' ' : (char)p[i];
+		buf[len] = '\0';
+	}
+	char *nend = NULL;
+	double val = buf ? strtod(buf, &nend) : strtod("", &nend);
+	/* consumed narrow bytes == consumed wide chars */
+	size_t consumed = buf ? (size_t)(nend - buf) : 0;
+	if (end) {
+		if (has_buf)
+			*end = (wchar_t *)(p + consumed);
+		else
+			*end = (wchar_t *)p;
+	}
+	if (has_buf)
+		free(buf);
+	return val;
+}
+
+/* C11 7.29.4.1.3: wcstof narrows wcstod.  (wcstold is deferred: mcc has no
+ * 80-bit long double, matching the narrow strtold.) */
+float
+wcstof(const wchar_t *text, wchar_t **end)
+{
+	return (float)wcstod(text, end);
+}
+
 /* ----------------------------------------------------------------------
  * wctype / iswctype / wctrans / towctrans  (C11 7.29.2.2 / 7.29.6.4)
  *
