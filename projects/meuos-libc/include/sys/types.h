@@ -16,6 +16,7 @@ typedef unsigned long nlink_t;
 typedef uint32_t uid_t;
 typedef uint32_t gid_t;
 typedef long pid_t;
+typedef unsigned int id_t;
 #if defined(__i386__)
 typedef int64_t time_t;
 #else

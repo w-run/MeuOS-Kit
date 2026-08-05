@@ -40,6 +40,11 @@ struct rlimit {
 #define RUSAGE_CHILDREN (-1)
 #define RUSAGE_THREAD 1
 
+/* getpriority/setpriority/nice scheduling-priority helpers. */
+#define PRIO_PROCESS 0
+#define PRIO_PGRP    1
+#define PRIO_USER    2
+
 struct rusage {
 	struct timeval ru_utime;
 	struct timeval ru_stime;
@@ -62,6 +67,10 @@ struct rusage {
 int getrlimit(int, struct rlimit *);
 int setrlimit(int, const struct rlimit *);
 int getrusage(int, struct rusage *);
+
+int getpriority(int, id_t);
+int setpriority(int, id_t, int);
+int nice(int);
 
 #ifdef __cplusplus
 }
