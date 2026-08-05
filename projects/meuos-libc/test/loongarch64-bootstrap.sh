@@ -30,6 +30,12 @@ mt_as=${MT_AS:-"$root/../meuos-toolchain/build/bin/as"}
 build=${BUILD:-"$root/build/loongarch64"}
 sysroot=${SYSROOT:-"$root/../sysroot/loongarch64"}
 qemu=${MEUOS_LOONGARCH64_QEMU:-}
+# Repo-root env/qemu (the $root-relative paths below are shallow / wrong in
+# linked-worktree checkouts; derive from git so the gate auto-finds qemu).
+QEMU_ROOT=""
+if command -v git >/dev/null 2>&1; then
+	QEMU_ROOT="$(dirname "$(git rev-parse --git-common-dir 2>/dev/null)")/env/qemu"
+fi
 work=${TMPDIR:-/tmp}/meuos-loongarch64-bootstrap.$$
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 mkdir -p "$work"
@@ -177,7 +183,7 @@ done
 # # ===== Optional runtime gate =====
 if [ "${MEUOS_LOONGARCH64_RUN:-0}" = 1 ]; then
 	if [ -z "$qemu" ]; then
-		for candidate in "$root/env/qemu/qemu-loongarch64-static" \
+		for candidate in "${QEMU_ROOT}/qemu-loongarch64-static" "$root/env/qemu/qemu-loongarch64-static" \
 		                  "$root/env/qemu/qemu-loongarch64" \
 		                  "$root/../env/qemu/qemu-loongarch64-static" \
 		                  "$root/../env/qemu/qemu-loongarch64" \

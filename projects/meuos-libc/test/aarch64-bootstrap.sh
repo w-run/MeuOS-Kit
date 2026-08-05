@@ -20,6 +20,12 @@ ascc=${ASCC:-aarch64-linux-gnu-gcc}
 build=${BUILD:-"$root/build/aarch64"}
 sysroot=${SYSROOT:-"$root/../sysroot/aarch64"}
 qemu=${MEUOS_AARCH64_QEMU:-}
+# Repo-root env/qemu (the $root-relative paths below are shallow / wrong in
+# linked-worktree checkouts; derive from git so the gate auto-finds qemu).
+QEMU_ROOT=""
+if command -v git >/dev/null 2>&1; then
+	QEMU_ROOT="$(dirname "$(git rev-parse --git-common-dir 2>/dev/null)")/env/qemu"
+fi
 work=${TMPDIR:-/tmp}/meuos-aarch64-bootstrap.$$
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 mkdir -p "$work"
@@ -183,7 +189,7 @@ done
 # # ===== Optional runtime gate =====
 if [ "${MEUOS_AARCH64_RUN:-0}" = 1 ]; then
 	if [ -z "$qemu" ]; then
-		for candidate in "$root/env/qemu/qemu-aarch64-static" \
+		for candidate in "${QEMU_ROOT}/qemu-aarch64-static" "$root/env/qemu/qemu-aarch64-static" \
 		                  "$root/../env/qemu/qemu-aarch64-static" \
 		                  qemu-aarch64-static qemu-aarch64; do
 			if command -v "$candidate" >/dev/null 2>&1 || [ -x "$candidate" ]; then
