@@ -881,7 +881,14 @@ stringdecl(struct expr *expr)
 	if (!strings.len)
 		mapinit(&strings, 64);
 	assert(expr->kind == EXPRSTRING);
-	mapkey(&key, expr->u.string.data, expr->u.string.size);
+	/* u.string.size is the number of elements (array length incl. the
+	 * null terminator), not the byte length.  The interning map compares
+	 * key bytes with memcmp(key->str, other, key->len), so de-duplicating
+	 * wide literals by element count compares only the first
+	 * sizeof(wchar_t) bytes — L"abc" and L"abd" share that prefix and got
+	 * merged into one object.  Intern by the full byte span instead. */
+	mapkey(&key, expr->u.string.data,
+	       expr->u.string.size * (expr->type->base ? expr->type->base->size : 1));
 	if (mapput(&strings, &key, &i)) {
 		d = mkdecl("string", DECLOBJECT, expr->type, QUALNONE, LINKNONE);
 		d->value = mkglobal(d);
