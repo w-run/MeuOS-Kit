@@ -94,6 +94,8 @@ __syscall_number(long number)
 	case 114: return 71;   /* setregid */
 	/* 进程身份读取（i386 独立号）。 */
 	case 110: return 64;   /* getppid */
+	/* 资源使用统计（i386 独立号）。 */
+	case 98:  return 77;   /* getrusage */
 	default: return number;
 	}
 #elif defined(__arm__)
@@ -156,6 +158,8 @@ __syscall_number(long number)
 	case 107: return 49;   /* geteuid */
 	case 108: return 50;   /* getegid */
 	case 110: return 64;   /* getppid */
+	/* 资源使用统计（与 i386 相同）。 */
+	case 98:  return 77;   /* getrusage */
 	case 127: return 176;  /* rt_sigpending */
 	case 130: return 179;  /* rt_sigsuspend */
 	case 131: return 186;  /* sigaltstack */
@@ -259,6 +263,8 @@ __syscall_number(long number)
 	case 107: return 175;  /* geteuid */
 	case 108: return 177;  /* getegid */
 	case 110: return 173;  /* getppid */
+	/* 资源使用统计：asm-generic 号。 */
+	case 98:  return 165;  /* getrusage */
 	case 127: return 136;  /* rt_sigpending */
 	case 130: return 133;  /* rt_sigsuspend */
 	case 131: return 132;  /* sigaltstack */
