@@ -28,7 +28,8 @@ getpriority(int which, id_t who)
 	errno = 0;
 	long v = __syscall2(LINUX_SYS_GETPRIORITY, which, who);
 	if (__syscall_error(v)) { errno = (int)-v; return -1; }
-	return (int)v;
+	/* kernel returns task_nice(p) + 20 (0..39); POSIX wants nice (-20..19). */
+	return (int)v - 20;
 }
 
 int
@@ -45,10 +46,8 @@ nice(int inc)
 	int prio = getpriority(PRIO_PROCESS, 0);
 	if (prio < 0 && errno)
 		return -1;
-	/* never raise below the current floor: POSIX expects the increment to
-	 * subtract (nice +1 = lower priority = higher nice number). */
-	if (prio > 0)
-		prio = 0;
+	/* POSIX says nice(inc) adds inc to the current nice value; the kernel
+	 * clamps to [-20, 19] and enforces privilege for raising priority. */
 	if (setpriority(PRIO_PROCESS, 0, prio + inc) != 0)
 		return -1;
 	return prio + inc;
