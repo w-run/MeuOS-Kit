@@ -150,6 +150,9 @@ arch_runtime_objs() {
 "$mcc" --target=riscv64 -I"$root/include" -c -o "$work/phase2.o" "$work/phase2.c"
 "$mcc" --target=riscv64 -I"$root/include" -c -o "$work/bare_tls.o" "$work/bare_tls.c"
 "$mcc" --target=riscv64 -I"$root/include" -c -o "$work/malloc_threads.o" "$work/malloc_threads.c"
+# exception runtime foundation (_meuos_exc_throw + setjmp chain): from the
+# libc test suite, exercises register->throw->longjmp->catch-value.
+"$mcc" --target=riscv64 -I"$root/include" -c -o "$work/exc.o" "$root/test/exc.c"
 arch_runtime_objs \
 	"$root/crt/riscv64/crt1.S" \
 	"$root/src/internal/arch/riscv64/syscall.S" \
@@ -175,9 +178,10 @@ link_full "$work/setjmp-test" "$work/setjmp.o"
 link_full "$work/phase2" "$work/phase2.o"
 link_full "$work/bare-tls" "$work/bare_tls.o"
 link_full "$work/malloc-threads" "$work/malloc_threads.o"
+link_full "$work/exc-test" "$work/exc.o"
 
 # # ===== ELF header check =====
-for bin in "$work/hello" "$work/atomic-test" "$work/setjmp-test" "$work/phase2" "$work/bare-tls" "$work/malloc-threads"; do
+for bin in "$work/hello" "$work/atomic-test" "$work/setjmp-test" "$work/phase2" "$work/bare-tls" "$work/malloc-threads" "$work/exc-test"; do
 	LC_ALL=C readelf -h "$bin" | grep -Eq 'Class:[[:space:]]+ELF64' \
 		|| { echo "FAIL: $bin is not ELF64" >&2; exit 1; }
 	LC_ALL=C readelf -h "$bin" | grep -Eq 'Machine:[[:space:]]+RISC-V' \
@@ -209,6 +213,9 @@ if [ "${MEUOS_RISCV64_RUN:-0}" = 1 ]; then
 	# 3) setjmp - "setjmp ok"
 	out=$("$qemu" "$work/setjmp-test" 2>&1) || { echo "setjmp failed: $out" >&2; exit 1; }
 	[ "$out" = "setjmp ok" ] || { echo "setjmp wrong output: $out" >&2; exit 1; }
+	# 3b) exc (_meuos_exc_throw setjmp chain) - "PASS exc"
+	out=$("$qemu" "$work/exc-test" 2>&1) || { echo "exc-test failed: $out" >&2; exit 1; }
+	[ "$out" = "PASS exc" ] || { echo "exc wrong output: $out" >&2; exit 1; }
 	# 4-6) phase2/bare-tls/malloc-threads: SKIPPED under qemu-user v7.2
 	#      CLONE_THREAD causes futex deadlock + segfault after child _exit().
 	#      This is a qemu-user limitation, not a libc bug — see .todo.
