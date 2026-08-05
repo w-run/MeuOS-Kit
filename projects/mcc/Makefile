@@ -387,13 +387,13 @@ check-x86_64-runtime: $(BIN)
 # riscv64 static binary under user-mode qemu; skips when the sysroot or
 # qemu-riscv64 is absent.
 check-riscv64-runtime: $(BIN)
-	sh test/riscv64/runtime.sh $(abspath $(BIN)) $(MEUOS_SYSROOT)
+	sh test/riscv64/runtime.sh $(abspath $(BIN))
 
 # loongarch64 static runtime regression (test/loongarch64/runtime.sh):
 # compile+run a loongarch64 static binary under user-mode qemu; skips when
 # the sysroot or qemu-loongarch64 is absent.
 check-loongarch64-runtime: $(BIN)
-	sh test/loongarch64/runtime.sh $(abspath $(BIN)) $(MEUOS_SYSROOT)
+	sh test/loongarch64/runtime.sh $(abspath $(BIN))
 
 # mcc/m++ -O 优化级别语义分级回归（test/olevel/run.sh）：
 # -O0..-O3/-Os/-Oz/-Og 运行时正确性 + 级别差异（if 转换/强度削减/

@@ -10,15 +10,22 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 mcc=${1:-"$root/mcc"}
 # loongarch64 MeuOS sysroot under the Kit top-level sysroot/<arch> layout.
-sysroot=${2:-"${MEUOS_SYSROOT:-$root/../sysroot}/loongarch64"}
-qemu=${QEMU_LOONGARCH64:-qemu-loongarch64}
+kit_sysroot="${MEUOS_SYSROOT:-$root/../sysroot}"
+sysroot="$kit_sysroot/loongarch64"
+# Prefer the Kit's bundled static user-mode qemu (env/qemu beside the
+# top-level sysroot), else a PATH qemu-loongarch64; SKIP when unavailable.
+if [ -x "$kit_sysroot/../env/qemu/qemu-loongarch64-static" ]; then
+	qemu="$kit_sysroot/../env/qemu/qemu-loongarch64-static"
+else
+	qemu=${QEMU_LOONGARCH64:-qemu-loongarch64}
+fi
 
 if [ ! -f "$sysroot/usr/lib/libc-meuos.a" ]; then
 	printf '%s\n' "loongarch64 runtime: sysroot not found at $sysroot, skipping"
 	exit 0
 fi
-if ! command -v "$qemu" >/dev/null 2>&1; then
-	printf '%s\n' "loongarch64 runtime: user-mode 'qemu-loongarch64' not found, skipping (cross-toolchain present, not exercised)"
+if ! command -v "$qemu" >/dev/null 2>&1 && [ ! -x "$qemu" ]; then
+	printf '%s\n' "loongarch64 runtime: user-mode '$qemu' not found, skipping"
 	exit 0
 fi
 

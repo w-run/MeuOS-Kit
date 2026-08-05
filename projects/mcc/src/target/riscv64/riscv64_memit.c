@@ -104,8 +104,10 @@ emit_global_addr(FILE *f, const char *sym, const char *rn)
 		        rn, g_got_id, rn);
 		return;
 	}
-	fprintf(f, "\tlui\t%s, %%pcrel_hi(%s)\n", rn, sym);
-	fprintf(f, "\taddi\t%s, %s, %%pcrel_lo(%s)\n", rn, rn, sym);
+	fprintf(f, ".Lrvpc%d:\n", ++g_got_id);
+	fprintf(f, "\tauipc\t%s, %%pcrel_hi(%s)\n", rn, sym);
+	fprintf(f, "\taddi\t%s, %s, %%pcrel_lo(.Lrvpc%d)\n",
+	        rn, rn, g_got_id);
 }
 
 /* Print a register, or a slot as fp-relative memory (only valid as a

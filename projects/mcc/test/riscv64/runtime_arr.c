@@ -1,15 +1,19 @@
 /* runtime_arr.c — riscv64 runtime regression: a statically-linked, runnable
- * MeuOS binary exercising index-scaled stack/data access plus a small ABI
- * width-arithmetic check.  NOTE: a *global* array on riscv64 currently trips
- * the assembler's `%pcrel_lo`/`%pcrel_hi` match check (mcc riscv64 emit of
- * global PC-relative data — the static-array analog tracked separately for
- * x86_64), so this runtime source deliberately uses a local array so the
- * binary still links; global-array ABI is covered by the x86_64 and
- * loongarch64 runtime batches.
+ * MeuOS binary exercising the global-array address path plus a small ABI
+ * width-arithmetic check.
+ *
+ * The global-array here is the point: riscv64 non-PIC global data used to
+ * emit `%pcrel_lo(sym)` (unpaired, link error `%pcrel_lo missing matching
+ * %pcrel_hi`), fixed to a paired `%pcrel_lo(.Lrvpc)` referencing the lui's
+ * label (riscv64_memit.c emit_global_addr).
  *
  * Exit 0 on success; nonzero per failed check.  Requires a riscv64
  * user-mode qemu to execute (run by test/riscv64/runtime.sh when present).
  */
+int gdata[4] = {11, 22, 33, 44};
+int gbss[6];
+int *gp = gdata;
+
 int
 rv64_abi(int value)
 {
@@ -22,15 +26,18 @@ rv64_abi(int value)
 int
 main(void)
 {
-	int a[6];
 	int i;
 
-	for (i = 0; i < 6; ++i)         /* index-scaled stack array writes */
-		a[i] = i * 7;
-	if (a[4] != 28) return 1;
-	if (a[0] != 0) return 2;
+	if (gdata[2] != 33) return 1;
+	gdata[0] = 99;
+	if (gdata[0] != 99) return 2;
 
-	if (rv64_abi(0x12345678) != (int)(0x78 + 0x5678 + 0x12345678)) return 3;
+	for (i = 0; i < 6; ++i)         /* .bss index-scaled writes */
+		gbss[i] = i * 7;
+	if (gbss[4] != 28) return 3;
+
+	if (*gp != 99) return 4;        /* global pointer follows array */
+	if (rv64_abi(0x12345678) != (int)(0x78 + 0x5678 + 0x12345678)) return 5;
 
 	return 0;
 }
