@@ -2,7 +2,7 @@
 #
 # Built as a separate archive (libc-meuos-compat.a) so applications can
 # opt-in by linking it explicitly. Provides error / error_at_line /
-# argp / obstack / funopen / fopencookie / getline / asprintf /
+# argp / obstack / funopen / fopencookie / asprintf /
 # vasprintf / weak __malloc_hook / weak __free_hook / strdupa /
 # strndupa -- symbols that glibc ships but POSIX does not require.
 #
