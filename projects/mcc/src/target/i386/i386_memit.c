@@ -161,6 +161,111 @@ scratch_to_dst(FILE *f, MVal *d, const char *rn)
 	}
 }
 
+/* ---- i64 (Kl) half-slot addressing --------------------------------------- */
+
+/*
+ * i386 splits a 64-bit value into a low/high 32-bit pair held at
+ * `off(%ebp)` and `off+4(%ebp)`.  Every i64 code path must agree on how
+ * an operand is turned into that base offset, otherwise the halves are
+ * read from a different place than they were written.  Two rules:
+ *
+ *   1. A slot-resident temp's frame offset is ALWAYS `slot + g_slot_base`
+ *      — the push area sits above the slot area, so omitting the base
+ *      shifts every access by 4 (non-PIC) or 8 (PIC) bytes.
+ *   2. An operand without a slot (`slot == -1`: a constant, a register-
+ *      resident temp, or a global) has no half-pair to read.  It must be
+ *      materialised into a reserved scratch pair first; using its `slot`
+ *      verbatim yields nonsense like `-1(%ebp)` / `3(%ebp)`, the latter
+ *      reaching into the caller's frame.
+ *
+ * Two 8-byte scratch pairs are reserved at the deepest end of the frame
+ * so a binary op can normalise both of its operands at once.
+ */
+#define I64_SCRATCH_PAIRS 2
+#define I64_SCRATCH_BYTES (I64_SCRATCH_PAIRS * 8)
+
+static int g_i64_scratch;  /* %ebp offset of scratch pair 0 (already based) */
+
+/* Frame offset of a slot-resident value's low half. */
+static int
+i64_slot(const MVal *v)
+{
+	return v->slot + g_slot_base;
+}
+
+static bool
+i64_has_slot(const MVal *v)
+{
+	return v && v->kind == MV_TEMP && v->reg < 0 && v->slot != -1;
+}
+
+/*
+ * Resolve an i64 operand to a frame offset whose low half is at the
+ * returned offset and high half at +4.  Slot-resident temps are used in
+ * place; everything else is materialised into scratch pair `nth`.
+ */
+static int
+i64_base(FILE *f, MVal *v, int nth)
+{
+	int off = g_i64_scratch + nth * 8;
+
+	if (i64_has_slot(v))
+		return i64_slot(v);
+	if (!v) {
+		fprintf(f, "\tmovl\t$0, %d(%%ebp)\n", off);
+		fprintf(f, "\tmovl\t$0, %d(%%ebp)\n", off + 4);
+		return off;
+	}
+	if (v->kind == MV_CONST && v->con && v->con->kind == MC_INT) {
+		int64_t cv = v->con->u.i;
+		fprintf(f, "\tmovl\t$%d, %d(%%ebp)\n", (int32_t)cv, off);
+		fprintf(f, "\tmovl\t$%d, %d(%%ebp)\n",
+		        (int32_t)((uint64_t)cv >> 32), off + 4);
+		return off;
+	}
+	/* register-resident temp or any other kind: only the low word is
+	 * addressable, so sign-extend it into the pair (i64 temps that made
+	 * it into a single register hold a 32-bit-representable value) */
+	mv_to_scratch(f, v, "eax");
+	fputs("\tcdq\n", f);
+	fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", off);
+	fprintf(f, "\tmovl\t%%edx, %d(%%ebp)\n", off + 4);
+	return off;
+}
+
+/*
+ * Resolve an i64 destination.  Returns the frame offset to write both
+ * halves to, or INT_MIN when the destination is not slot-resident (a
+ * register-resident i64 dest can only keep its low half, which the
+ * caller handles via scratch_to_dst).
+ */
+#define I64_NO_SLOT (-0x40000000)
+
+static int
+i64_dst_base(MVal *d)
+{
+	if (i64_has_slot(d))
+		return i64_slot(d);
+	return I64_NO_SLOT;
+}
+
+/* Store the eax(lo)/edx(hi) pair into an i64 destination. */
+static void
+i64_store_pair(FILE *f, MVal *d)
+{
+	int off;
+
+	if (!d)
+		return;
+	off = i64_dst_base(d);
+	if (off == I64_NO_SLOT) {
+		scratch_to_dst(f, d, "eax");
+		return;
+	}
+	fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", off);
+	fprintf(f, "\tmovl\t%%edx, %d(%%ebp)\n", off + 4);
+}
+
 /* ---- load/store addressing ---------------------------------------------- */
 
 /* Emit the address in MAddr into %ecx as a memory operand string. */
@@ -423,8 +528,8 @@ emit_setccr(FILE *f, MInsM *in)
 		 * low 32 bits with unsigned comparison.  Use a global counter
 		 * for unique labels across the whole assembly file. */
 		static uint32_t g_i64cc_id;
-		int sa = a->slot;
-		int sb = b->slot;
+		int sa = i64_base(f, a, 0);
+		int sb = i64_base(f, b, 1);
 		uint32_t id = g_i64cc_id++;
 		const char *suffix = i386_cc_suffix(cc);
 
@@ -547,21 +652,26 @@ emit_load(FILE *f, MMOP op, MType dt, MAddr a, MVal *d)
 		emit_addr_str(f, a, addr_buf, sizeof addr_buf);
 		fprintf(f, "\tmovl\t%s, %%eax\n", addr_buf);
 		if (d && d->kind == MV_TEMP) {
-			fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", d->slot);
-			/* high 32 bits: addr + 4 */
-			char addr2[64];
-			/* Build addr+4: append +4 to the offset or use offset+4 */
-			snprintf(addr2, sizeof addr2, "%d+%s",
-			         (int)(a.off + 4), /* actual offset + 4 */
-			         a.base ? "" : "");
-			/* Re-emit the address string with offset+4 */
-			if (a.base && a.base->kind == MV_REG) {
-				const char *rn = mreg_name(g_mt, a.base->reg);
-				snprintf(addr2, sizeof addr2, "%d(%%%s)",
-				         (int)(a.off + 4), rn ? rn : "ebp");
+			int dbase = i64_dst_base(d);
+			if (dbase != I64_NO_SLOT) {
+				fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dbase);
+				/* high 32 bits: addr + 4 */
+				char addr2[64];
+				/* Build addr+4: append +4 to the offset or use offset+4 */
+				snprintf(addr2, sizeof addr2, "%d+%s",
+				         (int)(a.off + 4), /* actual offset + 4 */
+				         a.base ? "" : "");
+				/* Re-emit the address string with offset+4 */
+				if (a.base && a.base->kind == MV_REG) {
+					const char *rn = mreg_name(g_mt, a.base->reg);
+					snprintf(addr2, sizeof addr2, "%d(%%%s)",
+					         (int)(a.off + 4), rn ? rn : "ebp");
+				}
+				fprintf(f, "\tmovl\t%s, %%eax\n", addr2);
+				fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dbase + 4);
+				return;
 			}
-			fprintf(f, "\tmovl\t%s, %%eax\n", addr2);
-			fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", d->slot + 4);
+			scratch_to_dst(f, d, "eax");
 		}
 		return;
 	}
@@ -594,10 +704,12 @@ emit_store(FILE *f, MType dt, MAddr a, MVal *s0)
 		return;
 	}
 	if (dt == MT_I64) {
-		/* i64 store: two 32-bit stores to addr and addr+4.
-		 * Source is slot-resident (kl_in_reg==0 forces spill). */
+		/* i64 store: two 32-bit stores to addr and addr+4, with the source
+		 * normalised into an addressable half-pair first (i64_base) so a
+		 * constant or register-resident source stores its real halves. */
+		int sbase = i64_base(f, s0, 0);
 		emit_addr_str(f, a, addr_buf, sizeof addr_buf);
-		fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", s0->slot);
+		fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sbase);
 		fprintf(f, "\tmovl\t%%eax, %s\n", addr_buf);
 		/* high 32 bits: build addr+4 */
 		char addr2[64];
@@ -609,7 +721,7 @@ emit_store(FILE *f, MType dt, MAddr a, MVal *s0)
 			snprintf(addr2, sizeof addr2, "%lld",
 			         (long long)(a.off + 4));
 		}
-		fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", s0->slot + 4);
+		fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sbase + 4);
 		fprintf(f, "\tmovl\t%%eax, %s\n", addr2);
 		return;
 	}
@@ -638,20 +750,20 @@ emit_ins(FILE *f, MInsM *in)
 			return;
 		}
 		if (in->dtype == MT_I64 || (s0 && s0->type == MT_I64)) {
-			/* i64 on i386: two 32-bit moves.
-			 * Both source and destination are slot-resident
-			 * (kl_in_reg==0 forces spill).  Move low 32 bits
-			 * first, then high 32 bits at slot+4. */
-			int sslot = s0->slot;
-			int dslot = d ? d->slot : 0;
-			/* low 32 bits */
+			/* i64 on i386: two 32-bit moves, normalised through a single
+			 * half-pair base so the source halves are read back from the
+			 * frame address they were actually written to (i64_base).
+			 * Move low 32 bits first, then high 32 bits at base+4. */
+			int sslot = i64_base(f, s0, 0);
+			int dbase = i64_dst_base(d);
 			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot);
-			if (d)
-				fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot);
-			/* high 32 bits */
+			if (dbase != I64_NO_SLOT)
+				fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dbase);
+			else
+				scratch_to_dst(f, d, "eax");
 			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot + 4);
-			if (d)
-				fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot + 4);
+			if (dbase != I64_NO_SLOT)
+				fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dbase + 4);
 			return;
 		}
 		mv_to_scratch(f, s0, "eax");
@@ -716,29 +828,26 @@ emit_ins(FILE *f, MInsM *in)
 	case MMOP_DIV: case MMOP_UDIV: case MMOP_REM: case MMOP_UREM: {
 		/* i64 on i386: split into low/high with carry/borrow */
 		if (in->dtype == MT_I64) {
-			int sslot0 = s0 ? s0->slot : 0;
-			int sslot1 = s1 ? s1->slot : 0;
-			int dslot = d ? d->slot : 0;
-			if (op == MMOP_ADD) {
-				/* low: addl; high: adcl (add with carry) */
+			/* Every arm below re-reads the operand halves from the
+			 * frame, so both operands are normalised into addressable
+			 * lo/hi pairs and the destination is written through
+			 * i64_store_pair (see i64_base). */
+			int sslot0 = i64_base(f, s0, 0);
+			int sslot1 = i64_base(f, s1, 1);
+			if (op == MMOP_ADD || op == MMOP_SUB) {
+				/* low: addl/subl into eax; high: adcl/sbbl into edx.
+				 * The high half is computed while the carry/borrow from
+				 * the low half is still live, so nothing may sit between
+				 * the two arithmetic instructions that touches EFLAGS —
+				 * hence edx is loaded before the low op runs. */
+				bool isadd = (op == MMOP_ADD);
+				fprintf(f, "\tmovl\t%d(%%ebp), %%edx\n", sslot0 + 4);
 				fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot0);
 				fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sslot1);
-				fputs("\taddl\t%ecx, %eax\n", f);
-				if (d) fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot);
-				fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot0 + 4);
+				fprintf(f, "\t%s\t%%ecx, %%eax\n", isadd ? "addl" : "subl");
 				fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sslot1 + 4);
-				fputs("\tadcl\t%ecx, %eax\n", f);
-				if (d) fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot + 4);
-			} else if (op == MMOP_SUB) {
-				/* low: subl; high: sbbl (subtract with borrow) */
-				fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot0);
-				fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sslot1);
-				fputs("\tsubl\t%ecx, %eax\n", f);
-				if (d) fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot);
-				fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot0 + 4);
-				fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sslot1 + 4);
-				fputs("\tsbbl\t%ecx, %eax\n", f);
-				if (d) fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot + 4);
+				fprintf(f, "\t%s\t%%ecx, %%edx\n", isadd ? "adcl" : "sbbl");
+				i64_store_pair(f, d);
 			} else if (op == MMOP_SHL || op == MMOP_SHR || op == MMOP_SAR) {
 				/* i64 shift on i386: the 64-bit value lives in two 32-bit
 				 * halves (lo @ sslot0, hi @ sslot0+4) and a correct shift must
@@ -756,19 +865,12 @@ emit_ins(FILE *f, MInsM *in)
 				const char *sh   = (op == MMOP_SHL) ? "shl"   :
 				                  (op == MMOP_SAR) ? "sar"   : "shr";
 				bool is_arith = (op == MMOP_SAR);
-				/* materialize const operands into their slots (i64 splitted
-				 * across a slot pair; a const shift count is scalar i32) */
-				if (s0 && s0->kind == MV_CONST && s0->con) {
-					int64_t cv = s0->con->u.i;
-					fprintf(f, "\tmovl\t$%d, %%eax\n", (int32_t)cv);
-					fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", sslot0);
-					fprintf(f, "\tmovl\t$%d, %%eax\n", (int32_t)((uint64_t)cv >> 32));
-					fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", sslot0 + 4);
-				}
-				if (s1 && s1->kind == MV_CONST && s1->con) {
-					fprintf(f, "\tmovl\t$%d, %%eax\n", (int32_t)s1->con->u.i);
-					fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", sslot1);
-				}
+				/* Normalise both operands into addressable lo/hi pairs: the
+				 * code below re-reads them from the frame across the two
+				 * arms, so a constant or register-resident operand must be
+				 * spilled to scratch first (see i64_base). */
+				sslot0 = i64_base(f, s0, 0);
+				sslot1 = i64_base(f, s1, 1);
 				/* load lo/hi/s; check s < 32 */
 				fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot0);
 				fprintf(f, "\tmovl\t%d(%%ebp), %%edx\n", sslot0 + 4);
@@ -834,23 +936,22 @@ emit_ins(FILE *f, MInsM *in)
 						fprintf(f, "\txorl\t%%edx, %%edx\n"); /* hi' = 0 */
 				}
 				fprintf(f, ".Li64sh_done%u:\n", sid);
-				if (d) {
-					fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot);
-					fprintf(f, "\tmovl\t%%edx, %d(%%ebp)\n", dslot + 4);
-				}
+				i64_store_pair(f, d);
 				return;
 			} else {
-				/* fallback: load low, do 32-bit op, store; then
-				 * load high, do 32-bit op (no carry), store */
+				/* fallback: load low, do 32-bit op into eax and save;
+				 * then load high, do 32-bit op into edx (no carry) */
 				const char *opn = binop_name(op);
 				fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot0);
 				fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sslot1);
 				fprintf(f, "\t%s\t%%ecx, %%eax\n", opn);
-				if (d) fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot);
+				fputs("\tpushl\t%eax\n", f);
 				fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot0 + 4);
 				fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sslot1 + 4);
 				fprintf(f, "\t%s\t%%ecx, %%eax\n", opn);
-				if (d) fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot + 4);
+				fputs("\tmovl\t%eax, %edx\n", f);
+				fputs("\tpopl\t%eax\n", f);
+				i64_store_pair(f, d);
 			}
 			return;
 		}
@@ -1286,9 +1387,14 @@ mfnm_emit_i386(MFnM *fm, FILE *f)
 			}
 		}
 
-	int framesize = fm->slot + alloca_total(fm) + pushbytes;
+	/* Reserve the i64 half-pair scratch below the register-allocated
+	 * slots (see i64_base): normalising a constant or register-resident
+	 * i64 operand needs a real lo/hi pair to read back from. */
+	g_i64_scratch = -(fm->slot + pushbytes + I64_SCRATCH_BYTES);
+
+	int framesize = fm->slot + I64_SCRATCH_BYTES + alloca_total(fm) + pushbytes;
 	framesize = (framesize + 15) & ~15;
-	g_alloca_cur = -(fm->slot + pushbytes);
+	g_alloca_cur = -(fm->slot + pushbytes + I64_SCRATCH_BYTES);
 
 	fprintf(f, ".text\n");
 	if (fm->name) {

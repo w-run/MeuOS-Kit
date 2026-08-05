@@ -66,6 +66,29 @@ grep -Eq 'shl[[:space:]]+%cl' "$shasm"
 grep -Eq 'sar[[:space:]]+\$31' "$shasm"
 printf '%s\n' 'i386 i64-shift compile gate passed'
 
+# i64 constant-slot-half gate: a 64-bit constant operand must be
+# materialised into a based frame slot (off(%ebp), off = slot + g_slot_base)
+# and re-read from the SAME based offset by its consumer.  Before the fix,
+# the emitter wrote the constant to the unbased slot (off-by-4) and read
+# the `-1` no-slot sentinel verbatim, producing `-1(%ebp)` / `3(%ebp)`
+# frame accesses — `1LL<<40` returned garbage.  The shifted value (low half)
+# must be stored back to a real based slot, never to `-1(%ebp)` / `3(%ebp)`.
+casm=${TMPDIR:-/tmp}/mcc-i386-i64const.$$.s
+trap 'rm -f "$asm" "$obj" "$shasm" "$casm"' EXIT HUP INT TERM
+"$mcc" --target=i386-linux -S -o "$casm" "$root/test/i386/i64const.c"
+if grep -Eq 'movl[[:space:]]+(1|3)\(%ebp\),[[:space:]]+%e[a-z][a-z]' "$casm"; then
+	printf '%s\n' 'i386 i64 constant-slot: FAIL (bogus -1(%ebp)/3(%ebp) frame read)' >&2
+	exit 1
+fi
+# The constant 1<<40 split must be loaded into a based slot, not an
+# immediate-into-frame against a bare offset, and the shift must re-read
+# that slot.  Assert a real based store of an immediate constant half:
+if ! grep -Eq 'movl[[:space:]]+\$[0-9]+,[[:space:]]+-[0-9]+\(%ebp\)' "$casm"; then
+	printf '%s\n' 'i386 i64 constant-slot: FAIL (constant not materialised into a based slot)' >&2
+	exit 1
+fi
+printf '%s\n' 'i386 i64 constant-slot compile gate passed'
+
 # i386 cdecl call-argument placement: a 2-int-arg call must store its args
 # at the bottom of the reserved block ((%esp) and 4(%esp)) so they are read
 # back at [ebp+8]/[ebp+12].  mabi_selcall previously wrote them at
