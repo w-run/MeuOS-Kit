@@ -367,10 +367,30 @@ mabi_selret(MFnM *fm, MOut *o, MInsM *term)
 	bool isf = s0->type == MT_F32 || s0->type == MT_F64;
 	if (s0->type == MT_I64) {
 		/* i64 return: EAX (low 32) + EDX (high 32). */
-		mout_addr(o, MMOP_LOAD, MT_I32, reg(fm, I386MREG_EAX),
-		          maddr(reg(fm, I386MREG_EBP), 0, 1, s0->slot), 0);
-		mout_addr(o, MMOP_LOAD, MT_I32, reg(fm, I386MREG_EDX),
-		          maddr(reg(fm, I386MREG_EBP), 0, 1, s0->slot + 4), 0);
+		if (s0->kind == MV_CONST && s0->con) {
+			/* Immediate constant return (e.g. `return 42`): load the
+			 * low/high 32-bit halves directly as cdecl i32 immediates.
+			 * A bare `ret (i64)42` has no stack slot; reading s0->slot
+			 * here would emit `movl <garbage>(%ebp), %eax` and return
+			 * whatever garbage sits on the uninitialized frame. */
+			int64_t cv = s0->con->u.i;
+			/* Load the high half into EDX first, then the low half
+			 * into EAX: memit's i32 const->mov materializes the
+			 * immediate through the %eax scratch register, so loading
+			 * the low half last keeps the return value (EAX) intact. */
+			mout(o, MMOP_MOV, MT_I32, reg(fm, I386MREG_EDX),
+			     mval_const(fm->host, MT_I32,
+			                imm(fm, MT_I32, (int32_t)(cv >> 32))), 0);
+			mout(o, MMOP_MOV, MT_I32, reg(fm, I386MREG_EAX),
+			     mval_const(fm->host, MT_I32,
+			                imm(fm, MT_I32, (int32_t)cv)), 0);
+		} else {
+			/* Slot-resident value: load from the return-value slot. */
+			mout_addr(o, MMOP_LOAD, MT_I32, reg(fm, I386MREG_EAX),
+			          maddr(reg(fm, I386MREG_EBP), 0, 1, s0->slot), 0);
+			mout_addr(o, MMOP_LOAD, MT_I32, reg(fm, I386MREG_EDX),
+			          maddr(reg(fm, I386MREG_EBP), 0, 1, s0->slot + 4), 0);
+		}
 	} else {
 		MVal *rreg = isf ? reg(fm, I386MREG_XMM0) : reg(fm, I386MREG_EAX);
 		mout(o, MMOP_MOV, s0->type, rreg, s0, 0);
