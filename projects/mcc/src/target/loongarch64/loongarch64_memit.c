@@ -891,6 +891,9 @@ mfnm_emit_loongarch64(MFnM *fm, FILE *f)
 			        mreg_name(fm->mt, fm->mt->rclob[i]), off);
 		}
 
+	if (fm->start)
+		fprintf(f, "\tb\t.L%s.bb%u\n", g_fname, fm->start->id);
+
 	for (MBlkM *b = fm->link; b; b = b->link)
 		emit_block(f, b);
 }
