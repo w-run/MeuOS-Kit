@@ -252,7 +252,7 @@ else
 DL_OBJS := $(BUILD)/dlfcn.o
 endif
 TERMIOS_OBJS := $(BUILD)/termios/termios.o
-TIME_OBJS    := $(BUILD)/time/time.o
+TIME_OBJS    := $(BUILD)/time/time.o $(BUILD)/time/strptime.o
 LIBC_LIB := $(BUILD)/libc-meuos.a
 
 ALL_OBJS := $(STRING_OBJS) $(STDLIB_OBJS) $(STDIO_OBJS) $(SYSCALL_OBJS) \
@@ -416,6 +416,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/kernel-interfaces test/kernel_interfaces.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/exc test/exc.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/exc_obj test/exc_obj_gate.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/strptime_gate test/strptime_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/getline_gate test/getline_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/inet test/inet.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/strfmon_gate test/strfmon_gate.c
@@ -474,6 +475,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	/tmp/meuos-libc-check/kernel-interfaces
 	/tmp/meuos-libc-check/exc
 	/tmp/meuos-libc-check/exc_obj
+	/tmp/meuos-libc-check/strptime_gate
 	/tmp/meuos-libc-check/getline_gate
 	/tmp/meuos-libc-check/inet
 	/tmp/meuos-libc-check/strfmon_gate

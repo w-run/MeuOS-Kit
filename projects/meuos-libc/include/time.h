@@ -26,6 +26,7 @@ time_t mktime(struct tm *);
 size_t strftime(char *, size_t, const char *, const struct tm *);
 char *asctime(const struct tm *);
 char *ctime(const time_t *);
+char *strptime(const char *restrict, const char *restrict, struct tm *restrict);
 double difftime(time_t, time_t);
 clock_t clock(void);
 __END_DECLS
