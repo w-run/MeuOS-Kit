@@ -162,6 +162,7 @@ cpp_parse_new_expr(struct scope *s)
 	struct expr *args = NULL, **ae = &args;
 	struct expr *ident, *ctor, *e, *place;
 	struct decl *tmp;
+	bool bracked = false; /* `new T{...}` — see the TLBRACE branch below */
 
 	next(); /* consume 'new' */
 	place = NULL;
@@ -190,6 +191,13 @@ cpp_parse_new_expr(struct scope *s)
 		next(); /* '[' */
 		cnt = assignexpr(s);
 		expect(TRBRACK, "after array size in 'new'");
+		/* `new T[n]{...}` (array braced-init list): not implemented yet.
+		 * Recognized so the element list is not silently left unparsed /
+		 * the array left default-initialized; emit a clear diagnostic
+		 * rather than miscompiling (TODO: per-element init). */
+		if (tok.kind == TLBRACE)
+			error_code(E_DECL, &tok.loc,
+			    "'new T[n]{...}' array braced initialization is not implemented yet");
 		if (!curfunc)
 			error_code(E_DECL, &tok.loc, "'new' outside of a function body is not supported");
 		pt = mkpointertype(t, QUALNONE);
@@ -328,6 +336,16 @@ cpp_parse_new_expr(struct scope *s)
 		e->u.ident.decl = tmp;
 		return e;
 	}
+	if (tok.kind == TLBRACE) {
+		/* `new T{args}` (braced-init, C++11): collect the brace elements
+		 * into `args` and fall through to the scalar/class construction
+		 * path below.  For a scalar this value-initializes the heap
+		 * scalar exactly like `new T(arg)` (C++ [expr.new]); for a class
+		 * the initializer-list / aggregate construction reuses the paren
+		 * constructor path. */
+		bracked = true;
+		args = cpp_braced_args_collect(s);
+	}
 	if (tok.kind == TLPAREN) {
 		next();
 		while (tok.kind != TRPAREN) {
@@ -391,13 +409,42 @@ cpp_parse_new_expr(struct scope *s)
 				    t->u.structunion.tag);
 			funcexpr(curfunc, ctor);
 		} else {
-			if (args)
-				error_code(E_DECL, &tok.loc, "'%s' has no constructor for 'new' with arguments",
-				    t->u.structunion.tag);
+			if (args) {
+				if (bracked) {
+					/* `new S{...}` aggregate braced-init: positionally
+					 * assign the data members through the heap pointer
+					 * (mirrors cpp_emit_ctor_call's aggregate path, but
+					 * addresses `*tmp` instead of a stack object). */
+					struct expr *a;
+					struct member *m;
+					for (m = t->u.structunion.members, a = args;
+					     m && a; m = m->next, a = a->next) {
+						struct expr *base, *dst;
+						if (m->name && m->name[0] == '~')
+							continue;
+						if (m->type && m->type->kind == TYPEFUNC)
+							continue;
+						base = mkbinaryexpr(&tok.loc, TADD,
+						    exprconvert(ident, &typeulong),
+						    mkconstexpr(&typeulong, m->offset));
+						base->type = mkpointertype(m->type, QUALNONE);
+						dst = mkunaryexpr(TMUL, base);
+						dst->type = m->type;
+						dst->lvalue = true;
+						funcexpr(curfunc, mkassignexpr(dst, a));
+					}
+					if (t->u.structunion.poly)
+						cpp_init_vptrs(curfunc, t, ident);
+				} else {
+					error_code(E_DECL, &tok.loc,
+					    "'%s' has no constructor for 'new' with arguments",
+					    t->u.structunion.tag);
+				}
+			}
 			/* A polymorphic class with no user ctor still needs its vptrs
 			 * installed on the heap object (its bases are trivially
 			 * constructed, but virtual dispatch reads the vptr). */
-			if (t->u.structunion.poly) {
+			if (!args && t->u.structunion.poly) {
 				struct expr *thisp = mkexpr(EXPRIDENT, pt, NULL);
 				thisp->qual = QUALNONE; thisp->lvalue = true;
 				thisp->u.ident.decl = tmp;
