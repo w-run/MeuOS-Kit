@@ -553,8 +553,20 @@ aarch64_encode_insn(const struct mt_target *target,
 		int rd = ops[0].reg;
 		uint64_t imm = (uint64_t)ops[1].imm;
 		int shift = 0;
-		if (nops >= 3 && ops[2].kind == 'i') shift = (int)ops[2].imm;
-		if (nops >= 4 && ops[3].kind == 'i' && ops[3].imm == 12) shift = (int)ops[3].imm; /* lsl #12 */
+		/* Shift source: `#N` inline, or the trailing `lsl #N` operand
+		 * (which arrives as a single "lsl #48" token). */
+		if (nops >= 3 && ops[2].kind == 'i') {
+			shift = (int)ops[2].imm;
+		} else if (nops >= 3 && ops[2].sym_start) {
+			const char *p = ops[2].sym_start;
+			while (*p == ' ' || *p == '\t') p++;
+			if (strncmp(p, "lsl", 3) == 0) {
+				p += 3;
+				while (*p == ' ' || *p == '\t') p++;
+				if (*p == '#') p++;
+				shift = (int)strtol(p, NULL, 10);
+			}
+		}
 		int hw = shift / 16;
 		if (hw > 3 || (shift % 16) != 0) return -1;
 		uint32_t enc = 0xD2800000 | ((unsigned)hw << 21) |
@@ -570,7 +582,18 @@ aarch64_encode_insn(const struct mt_target *target,
 		int rd = ops[0].reg;
 		uint64_t imm = (uint64_t)ops[1].imm;
 		int shift = 0;
-		if (nops >= 3 && ops[2].kind == 'i') shift = (int)ops[2].imm;
+		if (nops >= 3 && ops[2].kind == 'i') {
+			shift = (int)ops[2].imm;
+		} else if (nops >= 3 && ops[2].sym_start) {
+			const char *p = ops[2].sym_start;
+			while (*p == ' ' || *p == '\t') p++;
+			if (strncmp(p, "lsl", 3) == 0) {
+				p += 3;
+				while (*p == ' ' || *p == '\t') p++;
+				if (*p == '#') p++;
+				shift = (int)strtol(p, NULL, 10);
+			}
+		}
 		int hw = shift / 16;
 		if (hw > 3 || (shift % 16) != 0) return -1;
 		uint32_t enc = 0xF2800000 | ((unsigned)hw << 21) |
