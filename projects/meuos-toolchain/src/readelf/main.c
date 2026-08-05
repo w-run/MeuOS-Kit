@@ -1434,6 +1434,141 @@ dump_debug_line(const unsigned char *data, size_t dsize)
 	printf("\n");
 }
 
+/* Map a handful of DWARF tags / attributes to human-readable names;
+ * unknown ones fall back to "DW_TAG_*"/"DW_AT_*" numeric form. */
+static const char *
+dwarf_tag_name(uint64_t tag)
+{
+	switch (tag) {
+	case 0x0f: return "friend";
+	case 0x10: return "array_type";
+	case 0x11: return "compile_unit";
+	case 0x12: return "string_type";
+	case 0x13: return "structure_type";
+	case 0x14: return "union_type";
+	case 0x15: return "enumeration_type";
+	case 0x16: return "subrange_type";
+	case 0x17: return "pointer_type";
+	case 0x18: return "reference_type";
+	case 0x1c: return "const_type";
+	case 0x1d: return "volatile_type";
+	case 0x22: return "class_type";
+	case 0x24: return "base_type";
+	case 0x27: return "typedef";
+	case 0x2e: return "subprogram";
+	case 0x2f: return "dwarf_procedure";
+	case 0x34: return "variable";
+	case 0x36: return "formal_parameter";
+	case 0x3b: return "lexical_block";
+	case 0x3d: return "call_site";
+	default:  return NULL;
+	}
+}
+
+static const char *
+dwarf_attr_name(uint64_t attr)
+{
+	switch (attr) {
+	case 0x01: return "sibling";
+	case 0x02: return "location";
+	case 0x03: return "name";
+	case 0x0b: return "byte_size";
+	case 0x10: return "stmt_list";
+	case 0x11: return "low_pc";
+	case 0x12: return "high_pc";
+	case 0x13: return "language";
+	case 0x16: return "encoding";
+	case 0x3e: return "encoding"; /* mcc's DWARF emitter */
+	case 0x1b: return "comp_dir";
+	case 0x25: return "producer";
+	case 0x3a: return "decl_file";
+	case 0x3b: return "decl_line";
+	case 0x40: return "frame_base";
+	case 0x49: return "type";
+	default:  return NULL;
+	}
+}
+
+static const char *
+dwarf_form_name(uint64_t form)
+{
+	switch (form) {
+	case 0x01: return "addr";
+	case 0x03: return "block2";
+	case 0x04: return "block4";
+	case 0x05: return "data2";
+	case 0x06: return "data4";
+	case 0x07: return "data8";
+	case 0x08: return "string";
+	case 0x09: return "block";
+	case 0x0a: return "block1";
+	case 0x0b: return "data1";
+	case 0x0c: return "flag";
+	case 0x0d: return "sdata";
+	case 0x0e: return "strp";
+	case 0x0f: return "udata";
+	case 0x10: return "ref_addr";
+	case 0x11: return "ref1";
+	case 0x12: return "ref2";
+	case 0x13: return "ref4";
+	case 0x14: return "ref8";
+	case 0x15: return "ref_udata";
+	case 0x16: return "indirect";
+	case 0x17: return "sec_offset";
+	case 0x18: return "exprloc";
+	case 0x19: return "flag_present";
+	case 0x1a: return "strx";
+	default:  return NULL;
+	}
+}
+
+/* Decode and print the .debug_abbrev compilation-unit abbreviation table
+ * (a prefix of it, bounded by dsize).  Each entry: uleb abbreviation
+ * code, uleb tag, children byte, then (uleb attr, uleb form)* pairs ended
+ * by 0,0. */
+static void
+dump_debug_abbrev(const unsigned char *data, size_t dsize)
+{
+	const unsigned char *p = data, *end = data + dsize;
+	int shown = 0;
+
+	printf("\nThe .debug_abbrev section:\n");
+	while (p < end) {
+		uint64_t code = read_uleb(&p, end);
+		uint64_t tag, children;
+		const char *tag_name;
+		uint64_t attr, form;
+		int i;
+
+		if (code == 0)
+			break;
+		if (shown++ > 200)
+			break;
+		tag = read_uleb(&p, end);
+		children = (p < end) ? *p++ : 0;
+		tag_name = dwarf_tag_name(tag);
+		printf("  %llu DW_TAG_%s%s\n",
+		       (unsigned long long)code,
+		       tag_name ? tag_name : "<unknown>",
+		       children ? "\tDW_CHILDREN_yes" : "\tDW_CHILDREN_no");
+		for (i = 0; p < end; ++i) {
+			const char *an, *fn;
+			attr = read_uleb(&p, end);
+			form = read_uleb(&p, end);
+			if (attr == 0 && form == 0)
+				break;
+			if (i > 30)
+				break;
+			an = dwarf_attr_name(attr);
+			fn = dwarf_form_name(form);
+			printf("    DW_AT_%-12s DW_FORM_%s\n",
+			       an ? an : "<unknown>",
+			       fn ? fn : "<unknown>");
+		}
+	}
+	printf("\n");
+}
+
 /* Initial DWARF support: dump every .debug_* section's contents (name,
  * address, raw hex bytes).  This is deliberately a raw dump rather than a
  * DIE/line-program decode — it gives a faithful view of the debug data an
@@ -1468,6 +1603,10 @@ dump_debug(const unsigned char *bytes, size_t size,
 			continue;
 		if (strcmp(name, ".debug_line") == 0) {
 			dump_debug_line(bytes + sec.offset, sec.size);
+			continue;
+		}
+		if (strcmp(name, ".debug_abbrev") == 0) {
+			dump_debug_abbrev(bytes + sec.offset, sec.size);
 			continue;
 		}
 		dump_hexdump_section(bytes, size, &sec, name,
