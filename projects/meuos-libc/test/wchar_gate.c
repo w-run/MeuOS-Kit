@@ -46,6 +46,15 @@ main(void)
 	chk("wcwidth max", wcwidth(0x10ffff) == 1);
 	chk("wcwidth neg", wcwidth((wint_t)-1) == -1);
 
+	/* wcwidth wide / combining (Unicode 15 EA width) */
+	chk("wcwidth CJK",    wcwidth(0x4e2d) == 2);   /* 中 U+4E2D */
+	chk("wcwidth hangul", wcwidth(0xac00) == 2);   /* 가 U+AC00 */
+	chk("wcwidth fullw",  wcwidth(0xff21) == 2);   /* Ａ fullwidth A */
+	chk("wcwidth comb",   wcwidth(0x0301) == 0);   /* combining acute */
+	chk("wcwidth zwnj",   wcwidth(0x200b) == 0);   /* zero width space */
+	chk("wcwidth lat1",   wcwidth(0x00e9) == 1);   /* é (Latin-1, 1 wide) */
+	chk("wcwidth suppA",  wcwidth(0x1f600) == 2);  /* emoji wide */
+
 	/* wcrtomb then mbrtowc round trips */
 	{
 		char mb[4];
