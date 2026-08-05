@@ -73,4 +73,29 @@
 # define __END_DECLS
 #endif
 
+/* ---- opt-in glibc-compat surface (default OFF) ----
+ *
+ * The compat layer (meuos-libc-compat) exposes a glibc-compatible view for
+ * autotools and apps that probe `__GLIBC__`.  Defining the trigger macro
+ * `__MEUOS_GLIBC_COMPAT__` (normally added to the compile command by the
+ * compat layer's pkg-config) makes a guarded `__GLIBC__`/`__GLIBC_MINOR__`
+ * pair visible and relaxes the view to the full GNU set.  When the macro is
+ * NOT defined — the default, including every unaugmented mcc/meow build —
+ * this block contributes nothing, so core stays pure and self-bootstrap is
+ * unaffected.  This is a compile-time opt-in, never a runtime flag.
+ */
+#ifdef __MEUOS_GLIBC_COMPAT__
+# define __GLIBC__ 2
+# define __GLIBC_MINOR__ 34
+# define __GLIBC_PREREQ(Maj, Min) \
+	((__GLIBC__ << 16) + __GLIBC_MINOR__ >= ((Maj) << 16) + (Min))
+/* glibc probing apps frequently also need the broad GNU view. */
+# ifndef __USE_GNU
+#  define __USE_GNU 1
+# endif
+# ifndef __USE_MISC
+#  define __USE_MISC 1
+# endif
+#endif
+
 #endif /* _FEATURES_H */
