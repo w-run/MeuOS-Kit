@@ -996,14 +996,32 @@ cpp_ensure_exc_fn(const char *name)
 	return fd;
 }
 
-/* Integer type discriminant for catch-type matching.  By default every
- * integer family maps to 0 (int); a future multi-type ABI would assign
- * distinct codes per type. */
+/* Integer type discriminant for catch-type matching.
+ *
+ * Phase 2: a type->code registry.  Each distinct type (by struct type
+ * pointer — builtin singletons like &typeint and the canonical struct type
+ * from scopegettag) is assigned a stable, monotonically increasing code, so
+ * a `throw` of type T and a `catch (T e)` resolve to the *same* code and
+ * the front-end catch sequence matches on it.  This is pure-front-end: the
+ * libc runtime keeps an opaque int slot (exc_typecode) and never needs to
+ * change.  (Base-class catch / integer promotion widening is phase 3+.)
+ */
+struct exc_tc_reg { struct type *t; int code; };
+static struct exc_tc_reg exc_tc_regs[64];
+static int exc_tc_n = 0;
+
 static int
 cpp_exc_typecode(struct type *t)
 {
-	(void)t;
-	return 0;
+	int i;
+	for (i = 0; i < exc_tc_n; i++)
+		if (exc_tc_regs[i].t == t)
+			return exc_tc_regs[i].code;
+	if (exc_tc_n >= 64)
+		return 0;             /* fallback; table exhausted is unrealistic */
+	exc_tc_regs[exc_tc_n].t = t;
+	exc_tc_regs[exc_tc_n].code = exc_tc_n + 1;  /* code 0 reserved: no type */
+	return exc_tc_regs[exc_tc_n++].code;
 }
 
 /* Build a call `_meuos_exc_throw(typecode, value)`. */
@@ -1160,77 +1178,106 @@ cpp_exc_stmt(struct func *f, struct scope *s)
 	                                NULL, NULL));
 	funcjmp(f, bjoin);
 
-	/* caught (r != 0): match the catch type and copy the value */
+	/* caught (r != 0): dispatch over the catch sequence by type code */
 	funclabel(f, bcaught);
 	{
-		if (cpp_tok_kind() != CPP_TCATCH)
-			error_tok_code(E_TEMPLATE, &tok, "expected 'catch' after 'try'");
-		next(); /* consume 'catch' */
-		expect(TLPAREN, "after 'catch'");
-		if (tok.kind == TELLIPSIS) {
-			next(); /* catch(...) — catch-all (phase 4) */
-		} else {
-			/* catch (int e) / catch (TN e) — a type name.  Match the
-			 * lexed spelling rather than a specific token kind so any
-			 * identifier-like C++ keyword (int/long/...) or user class
-			 * name (TIDENT/CPP tokens alike) is handled uniformly. */
-			const char *ts = tokenstr(tok.kind);
-			struct type *tt;
-			if (strcmp(ts, "int") == 0) {
-				ctype = &typeint;
-			} else if (strcmp(ts, "char") == 0) {
-				ctype = &typechar;
-			} else if (strcmp(ts, "long") == 0) {
-				ctype = &typelong;
-			} else if (strcmp(ts, "short") == 0) {
-				ctype = &typeshort;
-			} else if (strcmp(ts, "double") == 0) {
-				ctype = &typedouble;
+		struct block *bnext = NULL;
+		for (;;) {
+			struct block *bhit, *bmiss;
+			struct expr *ctx, *cnd;
+			if (cpp_tok_kind() != CPP_TCATCH) {
+				error_tok_code(E_TEMPLATE, &tok,
+				    "expected 'catch' after 'try'");
+				break;
+			}
+			if (bnext)
+				funclabel(f, bnext); /* previous catch's miss lands here */
+			next(); /* consume 'catch' */
+			expect(TLPAREN, "after 'catch'");
+			ctype = NULL;
+			if (tok.kind == TELLIPSIS) {
+				next(); /* catch(...) — catch-all (stage 4, not yet) */
 			} else {
-				tt = scopegettag(s, ts, true);
-				if (!tt)
-					tt = scopegettag(&filescope, ts, true);
-				if (!tt)
-					error_tok_code(E_TEMPLATE, &tok,
-					    "unknown catch parameter type");
-				ctype = tt;
+				const char *ts = tokenstr(tok.kind);
+				struct type *tt;
+				if (strcmp(ts, "int") == 0)
+					ctype = &typeint;
+				else if (strcmp(ts, "char") == 0)
+					ctype = &typechar;
+				else if (strcmp(ts, "long") == 0)
+					ctype = &typelong;
+				else if (strcmp(ts, "short") == 0)
+					ctype = &typeshort;
+				else if (strcmp(ts, "double") == 0)
+					ctype = &typedouble;
+				else {
+					tt = scopegettag(s, ts, true);
+					if (!tt)
+						tt = scopegettag(&filescope, ts, true);
+					if (!tt)
+						error_tok_code(E_TEMPLATE, &tok,
+						    "unknown catch parameter type");
+					ctype = tt;
+				}
+				next(); /* consume the type name */
+				if (tok.kind != TRPAREN) {
+					snprintf(name, sizeof name, "%s", tokenstr(tok.kind));
+					next();
+				} else {
+					name[0] = '\0';
+				}
+				expect(TRPAREN, "after catch parameter");
+				if (ctype) {
+					/* branch: if (caught_type() == tc(ctype)) hit else miss */
+					ctx = cpp_exc_helper_call("_meuos_exc_caught_type",
+					    &typeint, NULL, NULL);
+					cnd = mkbinaryexpr(&tok.loc, TEQL, ctx,
+					    mkconstexpr(&typeint, cpp_exc_typecode(ctype)));
+					bhit = mkblock("exc_catch_hit");
+					bmiss = mkblock("exc_catch_miss");
+					funcbranch(f, cnd, bhit, bmiss);
+					funclabel(f, bhit);
+					/* declare the catch param and copy the value into it */
+					ed = mkdecl(name, DECLOBJECT, ctype, QUALNONE, LINKNONE);
+					ed->u.obj.storage = SDAUTO;
+					funcinit(f, ed, NULL, false);
+					scopeputdecl(s, ed);
+					{
+						struct expr *ep = mkexpr(EXPRIDENT, ctype, NULL);
+						struct expr *val;
+						ep->lvalue = true;
+						ep->u.ident.decl = ed;
+						val = cpp_exc_helper_call("_meuos_exc_caught_value",
+						    &typeullong, NULL, NULL);
+						funcexpr(f, mkassignexpr(ep, exprconvert(val, ctype)));
+					}
+					stmt(f, s); /* the catch body */
+					funcjmp(f, bjoin);
+				} else {
+					/* catch(...) — no param; for now just run the body */
+					stmt(f, s);
+					funcjmp(f, bjoin);
+				}
+				bnext = bmiss; /* next catch (or rethrow) lands on the miss */
 			}
-			next(); /* consume the type name */
-			if (tok.kind != TRPAREN) {
-				snprintf(name, sizeof name, "%s", tokenstr(tok.kind));
-				next();
-			} else {
-				name[0] = '\0';
-			}
+			if (cpp_tok_kind() != CPP_TCATCH)
+				break;
 		}
-		expect(TRPAREN, "after catch parameter");
-
-		if (ctype) {
-			/* catch-param `e` declares a local; on type match copy
-			 * caught_value into it.  Phase 1 matches all caught values
-			 * (typecode currently always 0 / int-family). */
-			catch_tc = 0;
-			(void)catch_tc;
-			ed = mkdecl(name, DECLOBJECT, ctype, QUALNONE, LINKNONE);
-			ed->u.obj.storage = SDAUTO;
-			funcinit(f, ed, NULL, false);
-			scopeputdecl(s, ed); /* bind `e` so the catch body can read it */
-			{
-				struct expr *ep = mkexpr(EXPRIDENT, ctype, NULL);
-				struct expr *val;
-				ep->lvalue = true;
-				ep->u.ident.decl = ed;
-				val = cpp_exc_helper_call("_meuos_exc_caught_value",
-				                          &typeullong, NULL, NULL);
-				casted = exprconvert(val, ctype);
-				funcexpr(f, mkassignexpr(ep, casted));
-			}
-		} else {
-			/* catch(...) — for now consume the block, nothing to bind */
+		/* no catch matched: rethrow the current exception (stage 3-4
+		 * will make this precise; rethrow targets an outer handler or
+		 * aborts if none, which matches uncaught semantics). */
+		if (bnext)
+			funclabel(f, bnext);
+		{
+			struct expr *ct, *cv, *rt;
+			ct = cpp_exc_helper_call("_meuos_exc_caught_type", &typeint,
+			    NULL, NULL);
+			cv = cpp_exc_helper_call("_meuos_exc_caught_value", &typeullong,
+			    NULL, NULL);
+			rt = cpp_exc_helper_call("_meuos_exc_throw", &typevoid, ct, cv);
+			funcexpr(f, rt);
 		}
-		stmt(f, s);
 	}
-
 	funclabel(f, bjoin);
 	s = delscope(s);
 }
