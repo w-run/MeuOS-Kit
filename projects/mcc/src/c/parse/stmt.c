@@ -989,7 +989,23 @@ stmt(struct func *f, struct scope *s)
 				v = funcexpr(f, e);
 				delexpr(e);
 			} else {
-				e = expr(s);
+				/* C++11 implicit braced-init-list return:
+				 * `T f() { return {a, b, ...}; }` — the braced list
+				 * initialises a temporary of the function's return
+				 * type via its constructor/aggregate-initialisation.
+				 * `return Vec{...}` (explicit) already works through the
+				 * normal expression path; here `{` begins the list
+				 * directly, so we build the temporary explicitly. */
+				extern int g_lang;
+				if (g_lang == 1 && tok.kind == TLBRACE) {
+					extern struct expr *cpp_temp_construct_braced(
+					    struct scope *, struct type *);
+					e = cpp_temp_construct_braced(s, t->base);
+					if (!e)
+						error_code(E_CTYPE, &tok.loc, "cannot braced-initialise a return value of this type");
+				} else {
+					e = expr(s);
+				}
 				/* C++ reference return: the expression must be an lvalue
 				 * and is returned by address (references are hidden
 				 * pointers).  Without this `T &f() { return lvalue; }`
