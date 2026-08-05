@@ -191,13 +191,14 @@ cpp_parse_new_expr(struct scope *s)
 		next(); /* '[' */
 		cnt = assignexpr(s);
 		expect(TRBRACK, "after array size in 'new'");
-		/* `new T[n]{...}` (array braced-init list): not implemented yet.
-		 * Recognized so the element list is not silently left unparsed /
-		 * the array left default-initialized; emit a clear diagnostic
-		 * rather than miscompiling (TODO: per-element init). */
-		if (tok.kind == TLBRACE)
-			error_code(E_DECL, &tok.loc,
-			    "'new T[n]{...}' array braced initialization is not implemented yet");
+		/* `new T[n]{list}` (array braced-init list): collect the brace
+		 * elements into `args`; each is assigned to the corresponding
+		 * element below, and any elements beyond the list are
+		 * value-initialized (scalar -> 0). (Moved out of "not implemented".) */
+		if (tok.kind == TLBRACE) {
+			bracked = true; /* even an empty list `new T[n]{}` needs fill */
+			args = cpp_braced_args_collect(s);
+		}
 		if (!curfunc)
 			error_code(E_DECL, &tok.loc, "'new' outside of a function body is not supported");
 		pt = mkpointertype(t, QUALNONE);
@@ -320,16 +321,86 @@ cpp_parse_new_expr(struct scope *s)
 					funcexpr(curfunc, mkassignexpr(ie, inc));
 					funcjmp(curfunc, bloop);
 					funclabel(curfunc, bdone);
-				} else if (args) {
-					error_code(E_OVERLOAD, &tok.loc,
-					    "'%s' has no constructor for 'new' with arguments",
-					    t->u.structunion.tag);
-				}
-			} else if (args) {
-				error_code(E_CTYPE, &tok.loc,
-				    "'new' with arguments requires a class type");
+				} else if (bracked) {
+				/* `new T[n]{list}` on a class array: per-element
+				 * construction from the braced list (with value-init
+				 * fill beyond the list) is not implemented yet; emit a
+				 * clear diagnostic rather than miscompiling. */
+				error_code(E_OVERLOAD, &tok.loc,
+				    "class-array 'new %s[]{%s}' braced init is not implemented yet",
+				    t->u.structunion.tag,
+				    "list");
 			}
+		} else if (bracked) {
+			/* `new T[n]{list}` scalar array braced-init: assign each
+			 * brace element to the corresponding element of the heap
+			 * array; if the list is shorter than n, value-initialize
+			 * the remaining elements (scalar -> 0) in a runtime loop. */
+			struct expr *a;
+			struct decl *iv;
+			struct expr *ie, *ptr, *dst, *lt, *inc;
+			struct block *bloop, *bbody, *bdone;
+			extern struct block *mkblock(char *);
+			extern void funclabel(struct func *, struct block *);
+			extern void funcjmp(struct func *, struct block *);
+			extern struct value *funcbranch(struct func *,
+			    struct expr *, struct block *, struct block *);
+			int k = 0;
+			for (a = args; a; a = a->next, ++k) {
+				struct expr *off, *arg;
+				/* tmp[i] = list_k (static, compile-time known) */
+				ptr = mkexpr(EXPRBINARY, pt, NULL);
+				ptr->op = TADD;
+				ptr->u.binary.l = ident;
+				off = mkbinaryexpr(&tok.loc, TMUL,
+				    mkconstexpr(&typeulong, k),
+				    mkconstexpr(&typeulong, t->size));
+				ptr->u.binary.r = off;
+				dst = mkunaryexpr(TMUL, ptr);
+				dst->type = t;
+				dst->lvalue = true;
+				arg = exprassign(a, t);
+				funcexpr(curfunc, mkassignexpr(dst, arg));
+			}
+			/* fill [k, n) with value-init (scalar 0) in a loop */
+			iv = mkdecl("__nw_i", DECLOBJECT, &typeint, QUALNONE, LINKNONE);
+			iv->u.obj.storage = SDAUTO;
+			funcinit(curfunc, iv, NULL, false);
+			ie = mkexpr(EXPRIDENT, &typeint, NULL);
+			ie->lvalue = true;
+			ie->u.ident.decl = iv;
+			funcexpr(curfunc, mkassignexpr(ie, mkconstexpr(&typeint, k)));
+			bloop = mkblock("loop");
+			bbody = mkblock("body");
+			bdone = mkblock("done");
+			funclabel(curfunc, bloop);
+			lt = mkexpr(EXPRBINARY, &typeint, NULL);
+			lt->op = TLESS;
+			lt->u.binary.l = ie;
+			lt->u.binary.r = mkexpr(EXPRCAST, &typeint, ne);
+			funcbranch(curfunc, lt, bbody, bdone);
+			funclabel(curfunc, bbody);
+			ptr = mkexpr(EXPRBINARY, pt, NULL);
+			ptr->op = TADD;
+			ptr->u.binary.l = ident;
+			{
+				struct expr *off = mkbinaryexpr(&tok.loc, TMUL,
+				    mkexpr(EXPRCAST, &typeulong, ie),
+				    mkconstexpr(&typeulong, t->size));
+				ptr->u.binary.r = off;
+			}
+			dst = mkunaryexpr(TMUL, ptr);
+			dst->type = t;
+			dst->lvalue = true;
+			funcexpr(curfunc, mkassignexpr(dst,
+			    mkconstexpr(&typeint, 0)));
+			inc = mkbinaryexpr(&tok.loc, TADD, ie,
+			    mkconstexpr(&typeint, 1));
+			funcexpr(curfunc, mkassignexpr(ie, inc));
+			funcjmp(curfunc, bloop);
+			funclabel(curfunc, bdone);
 		}
+	}
 		e = mkexpr(EXPRIDENT, pt, NULL);
 		e->qual = QUALNONE;
 		e->lvalue = true;

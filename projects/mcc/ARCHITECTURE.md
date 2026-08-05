@@ -290,7 +290,7 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
 | C++14/17 五项 | ✅ | 泛型 lambda（a28b0f5）、if constexpr（11d919d）、CTAD（a76e7ff）、结构化绑定+内联变量（70890fa） |
 | C++20 三项 | ✅ | 三向比较 `<=>`（34d0566）、consteval 立即函数（e698f37）、concepts/requires（8e07d08）+ 概念组合 `&&/||/!` 递归求值（b2da695）——**C++ 98~23 覆盖收官** |
 | m++ 边界 4 项 | ✅ | override/final（40d46f2）、ctor 初始化列表（1eb76da）、限定成员调用 `Base::get()`（35a6ede）、new/delete（ecc42cf）+ 数组形式 `new T[n]`/`delete[]`（329de75） |
-| new `{args}` braced-init | 🟡 部分 | `new T{...}`（C++11）：标量 value-init `new int{42}`、聚合逐成员 `new Pt{3,4}`、用户 ctor 构造 `new Point{3,4}` 已支持；数组 `new T[n]{...}` 明确报 not-implemented（TODO：逐元素 init）；局部类 + new 段错误为独立既有缺陷 |
+| new `{args}` braced-init | ✅ 标量 / 🟡 类数组 | `new T{...}`：标量 value-init、聚合逐成员、用户 ctor 构造已支持；scalar 数组 `new int[n]{...}` 逐个赋值 + 超出列表 value-init 补 0（含空列表 `{}`）已支持；**类元素数组 `new Pt[n]{...}` 逐元素构造仍为 TODO**（明确报 not-implemented） |
 | 6 架构 MIR 路径 | ✅ | varargs 全打通，扩展矩阵全 PASS（109a3ff） |
 | C 覆盖达成 | ✅ | C99/C11/C23 全部实现：__VA_OPT__/__has_c_attribute（c60874d）、C23 constexpr 函数求值（753df8a）——**C 90~23 目标达成** |
 | 验收门禁 | ✅ | `test/verify-all.sh` + `make check-all`（c940c34） |

@@ -3,16 +3,14 @@
  *
  * Covers scalar braced-init (`new int{42}` value-initialises the heap
  * scalar), aggregate braced-init (`new Pt{3,4}` positionally assigns the
- * data members), and braced-init through a user constructor
- * (`new Point{3,4}` overload-resolves the ctor).  All of these lower to
- * malloc + value-init/aggregate/ctor, returning the pointer.
+ * data members), braced-init through a user constructor
+ * (`new Point{3,4}` overload-resolves the ctor), and scalar-array
+ * braced-init (`new int[3]{1,2,3}` assigns each element, value-initializing
+ * any element beyond the list -> 0).
  *
- * Array braced-init `new int[n]{...}` is a known TODO (m++ emits a clear
- * "not implemented yet" diagnostic), so it is not exercised here.
- *
- * Note: the class types are declared at file scope — m++ `new` on a
- * struct defined inside a function body currently segfaults (a separate
- * pre-existing defect, unrelated to braced-init).
+ * Array braced-init on a class element type (`new Pt[3]{...}`) is a known
+ * TODO (m++ emits a clear "not implemented yet" diagnostic), so it is not
+ * exercised here.
  *
  * Each check returns a distinct exit code; run via `check-cpp-func`.
  */
@@ -46,6 +44,22 @@ main(void)
     Point *s = new Point{5, 6};
     if (s->x != 5 || s->y != 6) return 4;
     delete s;
+
+    /* scalar-array braced-init: every element assigned */
+    int *a = new int[3]{1, 2, 3};
+    if (a[0] != 1 || a[1] != 2 || a[2] != 3) return 5;
+    delete[] a;
+
+    /* scalar-array braced-init with a list shorter than n: the remaining
+     * elements are value-initialized to 0 */
+    int *b = new int[5]{1, 2, 3};
+    if (b[0] != 1 || b[1] != 2 || b[2] != 3 || b[3] != 0 || b[4] != 0) return 6;
+    delete[] b;
+
+    /* empty scalar-array braced-init: everything value-initialized to 0 */
+    int *c = new int[4]{};
+    if (c[0] != 0 || c[1] != 0 || c[2] != 0 || c[3] != 0) return 7;
+    delete[] c;
 
     return 0;
 }
