@@ -89,3 +89,13 @@ setlinebuf(FILE *stream)
 {
 	(void)setvbuf(stream, NULL, _IOLBF, 0);
 }
+
+/* C11 7.21.5.3: clearerr clears the error indicator for the stream.  The
+ * EOF indicator is positional for memory streams (feof derives it from the
+ * read position), so clearing the error flag is what error-recovery needs. */
+void
+clearerr(FILE *stream)
+{
+	if (stream)
+		stream->flags &= ~FILE_ERROR;
+}

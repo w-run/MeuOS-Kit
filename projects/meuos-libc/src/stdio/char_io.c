@@ -70,6 +70,8 @@ fputc(int character, FILE *stream)
 	unsigned char byte = (unsigned char)character;
 
 	if (!stream || !(stream->flags & FILE_WRITE) || (stream->flags & FILE_MEMORY)) {
+		if (stream)
+			stream->flags |= FILE_ERROR;
 		errno = EBADF;
 		return EOF;
 	}

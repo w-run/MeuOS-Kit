@@ -80,6 +80,7 @@ FILE *funopen(const void *, int (*)(void *, char *, int),
 int fclose(FILE *);
 int fflush(FILE *);
 int ferror(FILE *);
+void clearerr(FILE *);
 int setvbuf(FILE *, char *, int, size_t);
 void setbuf(FILE *, char *);
 void setlinebuf(FILE *);
