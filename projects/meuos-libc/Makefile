@@ -218,7 +218,7 @@ THREAD_OBJS    := $(BUILD)/thread/state.o $(BUILD)/thread/c11_threads.o \
                   $(BUILD)/thread/tss.o $(BUILD)/thread/mutex.o \
                   $(BUILD)/thread/condvar.o $(BUILD)/thread/call_once.o \
                   $(BUILD)/thread/pthread.o
-SUPPORT_OBJS   := $(BUILD)/ctype/ctype.o $(BUILD)/signal/signal.o \
+SUPPORT_OBJS   := $(BUILD)/ctype/ctype.o $(BUILD)/signal/signal.o $(BUILD)/signal/pause.o \
                   $(BUILD)/dirent/dirent.o $(BUILD)/dirent/nftw.o $(BUILD)/locale/locale.o \
                   $(BUILD)/glob/fnmatch.o $(BUILD)/glob/glob.o \
                   $(BUILD)/syslog/syslog.o \
@@ -418,6 +418,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/exc_obj test/exc_obj_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/strptime_gate test/strptime_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/sleep_gate test/sleep_gate.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/pause_gate test/pause_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/getline_gate test/getline_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/inet test/inet.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/strfmon_gate test/strfmon_gate.c
@@ -478,6 +479,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	/tmp/meuos-libc-check/exc_obj
 	/tmp/meuos-libc-check/strptime_gate
 	/tmp/meuos-libc-check/sleep_gate
+	/tmp/meuos-libc-check/pause_gate
 	/tmp/meuos-libc-check/getline_gate
 	/tmp/meuos-libc-check/inet
 	/tmp/meuos-libc-check/strfmon_gate
