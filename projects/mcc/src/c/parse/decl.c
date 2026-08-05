@@ -380,6 +380,42 @@ decl(struct scope *s, struct func *f)
 				}
 			}
 		}
+		/* C++17 braced-init CTAD: `Vec v{1, 2}` — when the declarator did
+		 * NOT take a `(args)` ctor-call (so the paren branch above was
+		 * skipped) but the type name was a class template used without
+		 * explicit arguments (g_cpp_ctad_tmpl was recorded by specs.c),
+		 * and the initializer is a braced list, collect the brace
+		 * elements, deduce the class template arguments from their types,
+		 * and re-route into the ctor-call path (cpp_emit_ctor_call runs
+		 * the deduced class's constructor with the brace elements). */
+		extern const char *g_cpp_ctad_tmpl;
+		if (g_cpp_ctad_tmpl && tok.kind == TLBRACE) {
+			extern int g_lang;
+			struct expr *bargs;
+			struct token save_tok;
+			struct type *inst;
+			if (g_lang == 1) {
+				/* consume `{ elem, ... }` into args; tok then sits just
+				 * after `}` (e.g. at `;`).  Save that position, since
+				 * cpp_tmpl_class_ctad replays the template definition
+				 * (advancing the shared token stream); restore it when
+				 * done so the enclosing initializer parse resumes at
+				 * the right point. */
+				bargs = cpp_braced_args_collect(s);
+				save_tok = tok;
+				inst = cpp_tmpl_class_ctad(s, g_cpp_ctad_tmpl, bargs);
+				tok = save_tok;
+				if (!inst)
+					error_code(E_TEMPLATE, &tok.loc,
+					    "cannot deduce template arguments for '%s'",
+					    g_cpp_ctad_tmpl);
+				ctor_call = true;
+				ctor_args = bargs;
+				t = inst;
+				tq = base.qual;
+				g_cpp_ctad_tmpl = NULL;
+			}
+		}
 		if (consume(T__ASM__)) {
 			struct stringlit lit;
 

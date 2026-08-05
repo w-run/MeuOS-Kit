@@ -448,6 +448,33 @@ cpp_temp_construct(struct scope *s, struct type *ct)
 	return e;
 }
 
+/* Parse `{ assignexpr, ... }` into a linked list of argument expressions
+ * (the brace elements, evaluated as expressions here — enough to read the
+ * element *types*; the caller is responsible for any real construction).
+ * tok must be at `{`.  Returns the head of the args list (or NULL for an
+ * empty list), with tok left just after `}`.  Used by C++17 CTAD for
+ * `Vec v{1, 2}` where the class-template arguments are deduced from the
+ * element types before the object is built. */
+struct expr *
+cpp_braced_args_collect(struct scope *s)
+{
+	struct expr *args = NULL, **ae = &args;
+	bool first = true;
+
+	next(); /* consume '{' */
+	for (;;) {
+		if (tok.kind == TRBRACE)
+			break;
+		if (!first)
+			expect(TCOMMA, "or '}' in braced initializer list");
+		*ae = assignexpr(s);
+		ae = &(*ae)->next;
+		first = false;
+	}
+	next(); /* consume '}' */
+	return args;
+}
+
 /* C++11 braced functional cast: `Vec{1, 2}` constructs a temporary with
  * the braced-init-list as the constructor arguments (aggregates fill
  * members positionally).  Mirrors cpp_temp_construct but consumes `{...}`
