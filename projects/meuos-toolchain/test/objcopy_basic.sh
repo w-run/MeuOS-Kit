@@ -56,4 +56,38 @@ test -s "$tmp/dump.text"
 "$OBJCOPY" -S "$EXEC" "$tmp/stripped.exec"
 "$tmp/stripped.exec"
 
+# 10. -O binary：dump 出可加载字节
+"$OBJCOPY" -O binary "$EXEC" "$tmp/out.bin"
+test -s "$tmp/out.bin"
+
+# 11. -O ihex：Intel HEX（data 记录 + EOF，每行校验和合法）
+"$OBJCOPY" -O ihex "$EXEC" "$tmp/out.hex"
+grep -Eq '^:[0-9A-Fa-f]{10,}$' "$tmp/out.hex"
+grep -Eq ':00000001FF$' "$tmp/out.hex"
+awk '
+  /^:[0-9A-Fa-f]+$/ {
+    s=substr($0,2);
+    n=length(s);
+    if (n % 2) { print "FAIL bad hex length: " $0; exit 1 }
+    sum=0;
+    for (i=1; i<=n; i+=2) {
+      byte=("0x" substr(s,i,2)) + 0;
+      sum=(sum+byte)%256;
+    }
+    if (sum != 0) { print "FAIL bad ihex checksum: " $0; exit 1 }
+    seen=1
+  }
+  END { if (!seen) { print "FAIL no ihex records"; exit 1 } }
+' "$tmp/out.hex" || { echo "FAIL: -O ihex output invalid"; exit 1; }
+
+# 12. -O srec：Motorola S-record（数据记录 + 终止记录）
+"$OBJCOPY" -O srec "$EXEC" "$tmp/out.srec"
+grep -Eq '^S[0-9A-F][0-9A-Fa-f]+$' "$tmp/out.srec"
+grep -Eq '^S[789][0-9A-Fa-f]+$' "$tmp/out.srec" || {
+    echo "FAIL: -O srec missing termination record"; exit 1; }
+
+# 13. 非法格式拒绝
+if "$OBJCOPY" -O bogus "$OBJ" "$tmp/x" >/dev/null 2>&1; then
+    echo "FAIL: -O bogus should fail"; exit 1; fi
+
 echo "mt objcopy basic: PASS"
