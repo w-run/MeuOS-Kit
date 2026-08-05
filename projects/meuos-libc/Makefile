@@ -201,6 +201,7 @@ SYSCALL_OBJS   := $(addprefix $(BUILD)/syscall/, \
                   clock_gettime.o getdents64.o socketcall.o chmod.o fchmod.o \
                   access.o sched_yield.o select.o \
                   fchown.o chown.o getuid.o getgid.o geteuid.o getegid.o \
+                  uid.o \
                   umask.o isatty.o fchdir.o symlink.o link.o readlink.o \
                   unlink.o mkdir.o rmdir.o rename.o mkstemp.o mkstemps.o \
                   time.o times.o utime.o gettimeofday.o sysconf.o flock.o \
@@ -435,6 +436,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/alarm_gate test/alarm_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/group_gate test/group_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/timecal_gate test/timecal_gate.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/uid_gate test/uid_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/auxv test/auxv.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/uio test/uio.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/p2 test/p2.c
@@ -502,6 +504,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	/tmp/meuos-libc-check/alarm_gate
 	/tmp/meuos-libc-check/group_gate
 	/tmp/meuos-libc-check/timecal_gate
+	/tmp/meuos-libc-check/uid_gate
 	/tmp/meuos-libc-check/auxv
 	/tmp/meuos-libc-check/uio
 	/tmp/meuos-libc-check/p2

@@ -87,6 +87,11 @@ __syscall_number(long number)
 	case 121: return 132;  /* getpgid */
 	case 112: return 66;   /* setsid */
 	case 124: return 147;  /* getsid */
+	/* 进程身份设置（i386 独立号）。 */
+	case 105: return 23;   /* setuid */
+	case 106: return 46;   /* setgid */
+	case 113: return 70;   /* setreuid */
+	case 114: return 71;   /* setregid */
 	default: return number;
 	}
 #elif defined(__arm__)
@@ -196,6 +201,11 @@ __syscall_number(long number)
 	case 121: return 132;  /* getpgid */
 	case 112: return 66;   /* setsid */
 	case 124: return 147;  /* getsid */
+	/* 进程身份设置（与 i386 相同）。 */
+	case 105: return 23;   /* setuid */
+	case 106: return 46;   /* setgid */
+	case 113: return 70;   /* setreuid */
+	case 114: return 71;   /* setregid */
 	default: return number;
 	}
 #elif defined(__aarch64__) || defined(__riscv) || defined(__loongarch64)
@@ -294,6 +304,12 @@ __syscall_number(long number)
 	case 121: return 155;  /* getpgid */
 	case 112: return 157;  /* setsid */
 	case 124: return 156;  /* getsid */
+	/* 进程身份设置：asm-generic 号（有独立 setuid/setgid/setreuid/
+	 * setregid；seteuid/isetegid 在 uid.c 用 setreuid/setregid 表达）。 */
+	case 105: return 146;  /* setuid */
+	case 106: return 144;  /* setgid */
+	case 113: return 145;  /* setreuid */
+	case 114: return 143;  /* setregid */
 	default: return number;
 	}
 #else

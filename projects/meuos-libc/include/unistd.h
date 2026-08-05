@@ -84,6 +84,10 @@ uid_t getuid(void);
 uid_t geteuid(void);
 gid_t getgid(void);
 gid_t getegid(void);
+int setuid(uid_t);
+int setgid(gid_t);
+int seteuid(uid_t);
+int setegid(gid_t);
 mode_t umask(mode_t);
 
 /* Process groups / sessions (POSIX.1-2008). */
