@@ -96,6 +96,9 @@ __syscall_number(long number)
 	case 110: return 64;   /* getppid */
 	/* 资源使用统计（i386 独立号）。 */
 	case 98:  return 77;   /* getrusage */
+	/* 文件截断（i386 独立号）。 */
+	case 76:  return 92;   /* truncate */
+	case 77:  return 93;   /* ftruncate */
 	default: return number;
 	}
 #elif defined(__arm__)
@@ -160,6 +163,9 @@ __syscall_number(long number)
 	case 110: return 64;   /* getppid */
 	/* 资源使用统计（与 i386 相同）。 */
 	case 98:  return 77;   /* getrusage */
+	/* 文件截断（与 i386 相同）。 */
+	case 76:  return 92;   /* truncate */
+	case 77:  return 93;   /* ftruncate */
 	case 127: return 176;  /* rt_sigpending */
 	case 130: return 179;  /* rt_sigsuspend */
 	case 131: return 186;  /* sigaltstack */
@@ -265,6 +271,9 @@ __syscall_number(long number)
 	case 110: return 173;  /* getppid */
 	/* 资源使用统计：asm-generic 号。 */
 	case 98:  return 165;  /* getrusage */
+	/* 文件截断：asm-generic 号（__NR3264_*，64-bit off_t）。 */
+	case 76:  return 45;   /* truncate */
+	case 77:  return 46;   /* ftruncate */
 	case 127: return 136;  /* rt_sigpending */
 	case 130: return 133;  /* rt_sigsuspend */
 	case 131: return 132;  /* sigaltstack */

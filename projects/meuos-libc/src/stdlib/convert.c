@@ -1,4 +1,6 @@
 #include <stdlib.h>
+#include <limits.h>
+#include <errno.h>
 
 static int
 digit_value(int character)
@@ -17,6 +19,7 @@ strtoul(const char *text, char **end, int base)
 {
 	unsigned long value = 0;
 	int digit;
+	int overflow = 0;
 
 	while (*text == ' ' || *text == '\t' || *text == '\n')
 		++text;
@@ -31,12 +34,23 @@ strtoul(const char *text, char **end, int base)
 	} else if (base == 16 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) {
 		text += 2;
 	}
+	/* C99 7.20.1.4: on overflow return ULONG_MAX and set errno=ERANGE, but
+	 * still consume every valid digit (so *end points past the digits). */
 	while ((digit = digit_value(*text)) < base) {
-		value = value * (unsigned long)base + (unsigned long)digit;
+		if (!overflow) {
+			if (value > (ULONG_MAX - (unsigned long)digit) / (unsigned long)base)
+				overflow = 1;
+			else
+				value = value * (unsigned long)base + (unsigned long)digit;
+		}
 		++text;
 	}
 	if (end)
 		*end = (char *)text;
+	if (overflow) {
+		errno = ERANGE;
+		return ULONG_MAX;
+	}
 	return value;
 }
 
@@ -77,11 +91,28 @@ long
 strtol(const char *text, char **end, int base)
 {
 	int negative = 0;
+	unsigned long u;
+	int was_overflow;
+
 	while (*text == ' ' || *text == '\t' || *text == '\n')
 		++text;
 	if (*text == '-') { negative = 1; ++text; }
 	else if (*text == '+') ++text;
-	return negative ? -(long)strtoul(text, end, base) : (long)strtoul(text, end, base);
+	u = strtoul(text, end, base);
+	was_overflow = (errno == ERANGE);
+	/* C99 7.20.1.4: strtol clamps to LONG_MAX/LONG_MIN on overflow. */
+	if (negative) {
+		if (was_overflow || u > (unsigned long)LONG_MAX + 1) {
+			errno = ERANGE;
+			return LONG_MIN;
+		}
+		return -(long)u;
+	}
+	if (u > (unsigned long)LONG_MAX) {
+		errno = ERANGE;
+		return LONG_MAX;
+	}
+	return (long)u;
 }
 
 long long

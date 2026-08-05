@@ -101,6 +101,8 @@ int fchdir(int);
 void sync(void);
 int fsync(int);
 int fdatasync(int);
+int truncate(const char *, off_t);
+int ftruncate(int, off_t);
 int nice(int);
 long pathconf(const char *, int);
 long fpathconf(int, int);
