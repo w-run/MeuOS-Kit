@@ -456,14 +456,30 @@ mabi_selret(MFnM *fm, MOut *o, MInsM *term)
 			term->td = 0;
 			return;
 		}
-		bool isf = s0->type == MT_F32 || s0->type == MT_F64;
-		if (s0->type == MT_I64) {
-			/* i64 return: r0 (low 32) + r1 (high 32). */
+	bool isf = s0->type == MT_F32 || s0->type == MT_F64;
+	if (s0->type == MT_I64) {
+		/* i64 return: r0 (low 32) + r1 (high 32). */
+		if (s0->kind == MV_CONST && s0->con) {
+			/* Immediate constant return (e.g. `return 42`): materialize
+			 * the low/high 32-bit halves directly as arm i32 moves, the
+			 * same way the i386 backend does.  A bare `ret (i64)42` has
+			 * no stack slot; reading s0->slot would emit `ldr r0,[fp+N]`
+			 * off the uninitialized frame and return garbage. */
+			int64_t cv = s0->con->u.i;
+			mout(o, MMOP_MOV, MT_I32, reg(fm, ARM_R0),
+			     mval_const(fm->host, MT_I32,
+			                imm(fm, MT_I32, (int32_t)cv)), 0);
+			mout(o, MMOP_MOV, MT_I32, reg(fm, ARM_R1),
+			     mval_const(fm->host, MT_I32,
+			                imm(fm, MT_I32, (int32_t)(cv >> 32))), 0);
+		} else {
+			/* Slot-resident value: load from the return-value slot. */
 			mout_addr(o, MMOP_LOAD, MT_I32, reg(fm, ARM_R0),
 			          maddr(reg(fm, ARM_R11), 0, 1, s0->slot), 0);
 			mout_addr(o, MMOP_LOAD, MT_I32, reg(fm, ARM_R1),
 			          maddr(reg(fm, ARM_R11), 0, 1, s0->slot + 4), 0);
-		} else {
+		}
+	} else {
 			MVal *rreg = isf ? reg(fm, ARM_D0) : reg(fm, ARM_R0);
 			mout(o, MMOP_MOV, s0->type, rreg, s0, 0);
 		}
