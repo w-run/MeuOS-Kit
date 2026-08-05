@@ -185,7 +185,7 @@ STDLIB_OBJS    := $(BUILD)/stdlib/malloc.o $(BUILD)/stdlib/convert.o \
                   $(BUILD)/stdlib/env.o $(BUILD)/stdlib/exit.o \
                   $(BUILD)/stdlib/process.o $(BUILD)/stdlib/search.o \
                   $(BUILD)/stdlib/math.o $(BUILD)/stdlib/strfmon.o \
-                  $(BUILD)/stdlib/realpath.o $(BUILD)/process/spawn.o $(BUILD)/process/wordexp.o
+                  $(BUILD)/stdlib/realpath.o $(BUILD)/process/spawn.o $(BUILD)/process/wordexp.o $(BUILD)/process/getopt.o
 STDIO_OBJS     := $(BUILD)/stdio/file.o $(BUILD)/stdio/char_io.o \
                   $(BUILD)/stdio/block_io.o $(BUILD)/stdio/position.o \
                   $(BUILD)/stdio/fmt_out.o $(BUILD)/stdio/fmt_in.o \
@@ -421,6 +421,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/ftw_gate test/ftw_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/spawn_gate test/spawn_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/wordexp_gate test/wordexp_gate.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/getopt_gate test/getopt_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/realpath_gate test/realpath_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/auxv test/auxv.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/uio test/uio.c
@@ -477,6 +478,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	/tmp/meuos-libc-check/ftw_gate
 	/tmp/meuos-libc-check/spawn_gate
 	/tmp/meuos-libc-check/wordexp_gate
+	/tmp/meuos-libc-check/getopt_gate
 	/tmp/meuos-libc-check/realpath_gate
 	/tmp/meuos-libc-check/auxv
 	/tmp/meuos-libc-check/uio

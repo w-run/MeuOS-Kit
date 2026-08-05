@@ -44,6 +44,13 @@ int brk(void *);
 void *sbrk(intptr_t);
 _Noreturn void _exit(int);
 
+/* getopt() command-line option parsing (POSIX.1-2008). */
+extern char *optarg;
+extern int optind;
+extern int opterr;
+extern int optopt;
+int getopt(int, char * const[], const char *);
+
 #define SEEK_SET 0
 #define SEEK_CUR 1
 #define SEEK_END 2
