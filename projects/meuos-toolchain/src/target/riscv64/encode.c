@@ -1390,21 +1390,52 @@ branch_fallthrough:
 		return 0;
 	}
 
-	/* li rd, imm  — materialize a constant (addi for 12-bit, else lui+addi) */
+	/* li rd, imm  — materialize a constant (addi for 12-bit, else lui+addi,
+	 * else a full RV64 sequence for constants that need >32 bits — e.g. the
+	 * bit patterns mcc uses to load doubles, which the old lui+addi path
+	 * silently truncated to a 32-bit low half). */
 	if (strcmp(mnemonic, "li") == 0 && nops == 2 && ops[0].kind == 1 &&
 	    ops[1].kind == 2) {
 		unsigned rd = (unsigned)ops[0].reg;
 		int64_t imm = ops[1].imm;
 		if (imm >= -2048 && imm <= 2047) {
 			emit32(out->bytes, i_type(0x13, rd, 0, 0, (int32_t)imm));
-		} else {
-			uint64_t u = (uint64_t)imm;
-			uint32_t hi20 = (uint32_t)(((u + 0x800) >> 12) & 0xFFFFF);
-			uint32_t lo12 = (uint32_t)(u & 0xFFF);
+			return 0;
+		}
+		if (imm >= -2147483648LL && imm <= 2147483647LL) {
+			uint32_t u32 = (uint32_t)imm;
+			uint32_t hi20 = (uint32_t)(((u32 + 0x800) >> 12) & 0xFFFFF);
+			uint32_t lo12 = u32 & 0xFFF;
 			out->size = 8;
 			emit32(out->bytes, u_type(0x37, rd, hi20));
 			emit32(out->bytes + 4,
 			       i_type(0x13, rd, 0, rd, (int32_t)(int16_t)lo12));
+			return 0;
+		}
+		/* Full 64-bit: build from the most-significant 11-bit gridchunk
+		 * down via `slli rd,rd,11` + `addi rd,rd,chunk`.  Using 11-bit
+		 * unsigned chunks keeps every addi positive within its 12-bit
+		 * signed range, so no sign-extension ever corrupts already-built
+		 * high bits. */
+		{
+			uint64_t u = (uint64_t)imm;
+			int top = 63;
+			while (top > 0 && !((u >> top) & 1)) top--;
+			int b = (top / 11) * 11;
+			int n = 0;
+			unsigned c = (unsigned)((u >> b) & 0x7FF);
+			emit32(out->bytes, i_type(0x13, rd, 0, 0, (int32_t)c));
+			n = 1;
+			for (b -= 11; b >= 0; b -= 11) {
+				c = (unsigned)((u >> b) & 0x7FF);
+				emit32(out->bytes + (uint32_t)n * 4,
+				       i_shift(0x13, rd, 1, rd, 11, 0)); /* slli rd,rd,11 */
+				n++;
+				emit32(out->bytes + (uint32_t)n * 4,
+				       i_type(0x13, rd, 0, rd, (int32_t)c)); /* addi rd,rd,c */
+				n++;
+			}
+			out->size = (uint32_t)n * 4;
 		}
 		return 0;
 	}
