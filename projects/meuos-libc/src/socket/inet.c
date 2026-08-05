@@ -34,23 +34,24 @@ inet_aton(const char *cp, struct in_addr *inp)
 			cp++;
 			continue;
 		}
-		if (count == 0 && !digit && *cp == '0') {
-			base = 8; /* octal */
-			cp++;
-			continue;
-		}
-		if (base == 10 && !digit && *cp == 'x') {
+	/* Part prefix: 0x/0X -> hex (consume '0' and 'x'); leading '0' alone
+	 * -> octal; else decimal.  The leading '0' of octal is not consumed so
+	 * a bare "0" part still parses to value 0 ("0.0.0.0" works). */
+	if (!digit && *cp == '0') {
+		if (cp[1] == 'x' || cp[1] == 'X') {
 			base = 16;
-			cp++;
+			cp += 2;
 			continue;
 		}
-		int c = (unsigned char)*cp;
-		int v = -1;
-		if (c >= '0' && c <= '9') v = c - '0';
-		else if (base >= 16 && c >= 'a' && c <= 'f') v = c - 'a' + 10;
-		else if (base >= 16 && c >= 'A' && c <= 'F') v = c - 'A' + 10;
-		else return 0;
-		if (v >= base) return 0;
+		base = 8;
+	}
+	int c = (unsigned char)*cp;
+	int v = -1;
+	if (c >= '0' && c <= '9') v = c - '0';
+	else if (base >= 16 && c >= 'a' && c <= 'f') v = c - 'a' + 10;
+	else if (base >= 16 && c >= 'A' && c <= 'F') v = c - 'A' + 10;
+	else return 0;
+	if (v >= base) return 0;
 		val = val * base + v;
 		if (val > 255 && count < 3) return 0; /* only last part can exceed 255 */
 		digit = 1;
@@ -83,8 +84,12 @@ char *
 inet_ntoa(struct in_addr in)
 {
 	static char buf[INET_ADDRSTRLEN];
-	unsigned char *b = (unsigned char *)&in.s_addr;
-	snprintf(buf, sizeof(buf), "%u.%u.%u.%u", b[0], b[1], b[2], b[3]);
+	/* s_addr is the dotted quad packed first-octet-most-significant (as
+	 * inet_aton stores it); extract high byte first so it is correct on
+	 * both endiannesses (raw memory-byte reads would be reversed on LE). */
+	uint32_t x = in.s_addr;
+	snprintf(buf, sizeof(buf), "%u.%u.%u.%u",
+		(x >> 24) & 0xff, (x >> 16) & 0xff, (x >> 8) & 0xff, x & 0xff);
 	return buf;
 }
 
@@ -105,9 +110,12 @@ const char *
 inet_ntop(int af, const void *src, char *dst, socklen_t size)
 {
 	if (af == AF_INET) {
-		const unsigned char *b = (const unsigned char *)src;
 		if (size < INET_ADDRSTRLEN) return NULL;
-		snprintf(dst, size, "%u.%u.%u.%u", b[0], b[1], b[2], b[3]);
+		/* s_addr packed first-octet-most-significant by inet_aton/pton;
+		 * extract high byte first (endian-independent). */
+		uint32_t x = ((const struct in_addr *)src)->s_addr;
+		snprintf(dst, size, "%u.%u.%u.%u",
+			(x >> 24) & 0xff, (x >> 16) & 0xff, (x >> 8) & 0xff, x & 0xff);
 		return dst;
 	}
 	return NULL;

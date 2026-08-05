@@ -329,6 +329,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/p2 test/p2.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/exc test/exc.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/getline_gate test/getline_gate.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/inet test/inet.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/socket test/socket.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib --static -o /tmp/meuos-libc-check/libgcc test/libgcc.c -l:libgcc-meuos.a -l:libc-meuos.a
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/threads test/threads.c
@@ -374,6 +375,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	/tmp/meuos-libc-check/p2
 	/tmp/meuos-libc-check/exc
 	/tmp/meuos-libc-check/getline_gate
+	/tmp/meuos-libc-check/inet
 	/tmp/meuos-libc-check/libgcc
 	/tmp/meuos-libc-check/socket
 	/tmp/meuos-libc-check/threads

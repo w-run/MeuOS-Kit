@@ -83,7 +83,7 @@ int main(void) {
 		struct sockaddr_in sa;
 		memset(&sa, 0, sizeof(sa));
 		sa.sin_family = AF_INET;
-		sa.sin_addr.s_addr = to_net32(0x01020304);
+		sa.sin_addr.s_addr = 0x01020304; /* 1.2.3.4 (network order = 1st octet MSB; no byte-swap, cf. 127.0.0.1=0x7f000001 above) */
 		sa.sin_port = to_net16(443);
 
 		char host[256], serv[32];
