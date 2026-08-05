@@ -398,6 +398,9 @@ check-cpp-exc-object: $(MPP_BIN)
 	@if ! grep -q '_meuos_exc_throw_obj' /tmp/mpp-exc-obj.s; then \
 		echo "FAIL: class throw did not lower to _meuos_exc_throw_obj"; exit 1; \
 	fi
+	@if ! grep -qE '_meuos_exc_caught_obj|_meuos_exc_caught_free|_meuos_exc_caught_is_obj' /tmp/mpp-exc-obj.s; then \
+		echo "FAIL: class catch did not lower to the object catch accessors"; exit 1; \
+	fi
 	@echo "PASS: check-cpp-exc-object"
 
 check-cpp: check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg check-cpp-exc-object

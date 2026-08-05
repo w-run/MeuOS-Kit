@@ -13,10 +13,15 @@ extern "C" _Noreturn void _meuos_exc_throw_obj(int, unsigned long, unsigned long
     void (*)(void*, const void*), void (*)(void*), int, const void*);
 extern "C" int _meuos_exc_caught_type(void);
 extern "C" unsigned long long _meuos_exc_caught_value(void);
+extern "C" const void *_meuos_exc_caught_obj(void);
+extern "C" void _meuos_exc_caught_free(void);
+extern "C" int _meuos_exc_caught_is_obj(void);
 
 struct MyObj { int x; };          /* trivial class (no dtor) */
 int f(void) {
-  try { throw MyObj(); }          /* must emit _meuos_exc_throw_obj(...) */
+  /* must emit _meuos_exc_throw_obj(...) AND (on the catch side)
+   * _meuos_exc_caught_is_obj / _meuos_exc_caught_obj / _meuos_exc_caught_free */
+  try { throw MyObj(); }
   catch (MyObj e) { return e.x; }
   return 0;
 }

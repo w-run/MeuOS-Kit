@@ -1028,6 +1028,30 @@ cpp_ensure_exc_fn(const char *name)
 		ft->u.func.nparam = 0;
 		fd = mkdecl("_meuos_exc_caught_value", DECLFUNC, ft, QUALNONE,
 		            LINKEXTERN);
+	} else if (strcmp(name, "_meuos_exc_caught_obj") == 0) {
+		/* const void *_meuos_exc_caught_obj(void) — object payload */
+		struct type *ft = mktype(TYPEFUNC, 0);
+		ft->base = mkpointertype(&typevoid, QUALCONST);
+		ft->u.func.isvararg = false;
+		ft->u.func.nparam = 0;
+		fd = mkdecl("_meuos_exc_caught_obj", DECLFUNC, ft, QUALNONE,
+		            LINKEXTERN);
+	} else if (strcmp(name, "_meuos_exc_caught_free") == 0) {
+		/* void _meuos_exc_caught_free(void) */
+		struct type *ft = mktype(TYPEFUNC, 0);
+		ft->base = &typevoid;
+		ft->u.func.isvararg = false;
+		ft->u.func.nparam = 0;
+		fd = mkdecl("_meuos_exc_caught_free", DECLFUNC, ft, QUALNONE,
+		            LINKEXTERN);
+	} else if (strcmp(name, "_meuos_exc_caught_is_obj") == 0) {
+		/* int _meuos_exc_caught_is_obj(void) */
+		struct type *ft = mktype(TYPEFUNC, 0);
+		ft->base = &typeint;
+		ft->u.func.isvararg = false;
+		ft->u.func.nparam = 0;
+		fd = mkdecl("_meuos_exc_caught_is_obj", DECLFUNC, ft, QUALNONE,
+		            LINKEXTERN);
 	} else {
 		return NULL;
 	}
@@ -1477,12 +1501,52 @@ cpp_exc_stmt(struct func *f, struct scope *s)
 						    &typeullong, NULL, NULL);
 						funcexpr(f, mkassignexpr(ep, exprconvert(val, ctype)));
 					} else {
-						/* class catch param: no member payload travels
-						 * through the 8-byte value slot (value-passing
-						 * ABI); stage-3 matches by type code only.  The
-						 * param is default-initialized. */
+						/* class catch param: rebuild the object from the
+						 * runtime's carried heap object (phase 4).  The
+						 * catch parameter is copy-initialized from
+						 * `*(T *)_meuos_exc_caught_obj()`.  Only when the
+						 * active exception IS an object (caught_is_obj) is
+						 * a pointer carried; a scalar-caught class (older
+						 * type-code-only path) leaves the param
+						 * default/uninitialized (no crash on NULL).  The
+						 * carried heap object is then released
+						 * (dtor+free) via _meuos_exc_caught_free.  For
+						 * byte-copyable classes struct assignment copies;
+						 * user copy ctors are a later increment (4b). */
+						struct expr *ep, *co, *cvs, *deref;
+						struct expr *isobj;
+						struct block *bp1, *bp0, *bpjoin;
+						ep = mkexpr(EXPRIDENT, ctype, NULL);
+						ep->lvalue = true;
+						ep->u.ident.decl = ed;
+						isobj = cpp_exc_helper_call("_meuos_exc_caught_is_obj",
+						    &typeint, NULL, NULL);
+						bp1 = mkblock("exc_param_obj");
+						bp0 = mkblock("exc_param_scalar");
+						bpjoin = mkblock("exc_param_join");
+						funcbranch(f, isobj, bp1, bp0);
+						funclabel(f, bp1);
+						co = cpp_exc_helper_call("_meuos_exc_caught_obj",
+						    mkpointertype(&typevoid, QUALCONST), NULL, NULL);
+						cvs = exprconvert(co,
+						    mkpointertype(ctype, QUALCONST));
+						deref = mkunaryexpr(TMUL, cvs);
+						funcexpr(f, mkassignexpr(ep, deref));
+						funcjmp(f, bpjoin);
+						funclabel(f, bp0);
+						/* scalar-or-none payload: leave param uninitialised */
+						funcjmp(f, bpjoin);
+						funclabel(f, bpjoin);
 					}
 					stmt(f, s); /* the catch body */
+					if (ctype && ctype->kind == TYPESTRUCT ||
+					    ctype && ctype->kind == TYPEUNION) {
+						/* release the runtime-carried heap object after the
+						 * catch consumed it (dtor + free; idempotent for a
+						 * scalar exception) */
+						funcexpr(f, cpp_exc_helper_call(
+						    "_meuos_exc_caught_free", &typevoid, NULL, NULL));
+					}
 					funcjmp(f, bjoin);
 				} else {
 					/* catch(...) — catch-all: matches every thrown
