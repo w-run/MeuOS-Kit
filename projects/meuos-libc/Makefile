@@ -182,6 +182,8 @@ SUPPORT_OBJS   := $(BUILD)/ctype/ctype.o $(BUILD)/signal/signal.o \
 # (loongarch64 previously used non-TLS errno_la64.c as a BFD 2.41 assertion
 # workaround; that is no longer needed with mt/ld linking.)
 SUPPORT_OBJS   += $(BUILD)/errno/errno.o
+# startup.c — entry contract (__progname, getauxval); called from crt1.S.
+SUPPORT_OBJS   += $(BUILD)/startup.o
 SUPPORT_OBJS   += $(BUILD)/netdb/gethost.o $(BUILD)/netdb/getserv.o \
                   $(BUILD)/netdb/getproto.o $(BUILD)/netdb/getnet.o \
                   $(BUILD)/netdb/getaddrinfo.o \
@@ -299,6 +301,7 @@ check: $(ATOMIC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/select test/select.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/process test/process.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/kernel-interfaces test/kernel_interfaces.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/auxv test/auxv.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/socket test/socket.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/threads test/threads.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib -o /tmp/meuos-libc-check/crt test/crt.c -l:libc-meuos.a
@@ -338,6 +341,7 @@ check: $(ATOMIC_LIB)
 	/tmp/meuos-libc-check/select
 	/tmp/meuos-libc-check/process
 	/tmp/meuos-libc-check/kernel-interfaces
+	/tmp/meuos-libc-check/auxv
 	/tmp/meuos-libc-check/socket
 	/tmp/meuos-libc-check/threads
 	@/tmp/meuos-libc-check/crt; status=$$?; test $$status -eq 42
