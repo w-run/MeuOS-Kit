@@ -1569,17 +1569,26 @@ dump_debug_abbrev(const unsigned char *data, size_t dsize)
 	printf("\n");
 }
 
+/* Decode and print the .debug_info compilation units (DWARF4): walk the
+ * DIE tree by looking each DIE's abbreviation code up in the
+ * .debug_abbrev table and printing the decoded attribute values for the
+ * common DWARF4 forms.  Defined below (after dump_debug). */
+static void dump_debug_info(const unsigned char *data, size_t dsize,
+                            int indent, const unsigned char *abbrev,
+                            size_t abbrev_size);
+
 /* Initial DWARF support: dump every .debug_* section's contents (name,
- * address, raw hex bytes).  This is deliberately a raw dump rather than a
- * DIE/line-program decode — it gives a faithful view of the debug data an
- * assembler/compiler emitted, and a stable base to add structural decoding
- * on top.  ELF32 reuses the same 64-bit parser for the section map. */
+ * address, raw hex bytes), with structural decoding for .debug_line and
+ * .debug_abbrev, and DIE traversal for .debug_info.  ELF32 reuses the same
+ * 64-bit parser for the section map. */
 static void
 dump_debug(const unsigned char *bytes, size_t size,
            const struct mt_elf64_view *view)
 {
 	struct mt_elf64_section shstrtab, sec;
 	enum mt_elf_status st;
+	unsigned char *abbrv_data = NULL;
+	size_t abbrv_size = 0;
 	uint16_t i;
 
 	if (view->section_name_index >= view->section_count)
@@ -1588,6 +1597,23 @@ dump_debug(const unsigned char *bytes, size_t size,
 	                          view->section_name_index, &shstrtab);
 	if (st != MT_ELF_OK || shstrtab.type != MT_SHT_STRTAB)
 		return;
+
+	/* First pass: locate .debug_abbrev (needed by .debug_info DIE
+	 * decoding). */
+	for (i = 0; i < view->section_count; ++i) {
+		const char *name;
+
+		if (mt_elf64_get_section(bytes, size, view, i, &sec) != MT_ELF_OK)
+			continue;
+		if (mt_elf64_get_string(bytes, size, &shstrtab, sec.name,
+		                        &name) != MT_ELF_OK || !name)
+			continue;
+		if (strcmp(name, ".debug_abbrev") == 0) {
+			abbrv_data = (unsigned char *)(bytes + sec.offset);
+			abbrv_size = sec.size;
+			break;
+		}
+	}
 
 	for (i = 0; i < view->section_count; ++i) {
 		const char *name;
@@ -1609,9 +1635,314 @@ dump_debug(const unsigned char *bytes, size_t size,
 			dump_debug_abbrev(bytes + sec.offset, sec.size);
 			continue;
 		}
+		if (strcmp(name, ".debug_info") == 0) {
+			dump_debug_info(bytes + sec.offset, sec.size, 0,
+			                abbrv_data, abbrv_size);
+			continue;
+		}
 		dump_hexdump_section(bytes, size, &sec, name,
 		                     section_has_relocations(bytes, size, view, i));
 	}
+}
+
+/* ---- .debug_info DIE decode ------------------------------------------ */
+
+/* A single attribute in one abbreviation. */
+struct dw_abbrev_attr {
+	uint64_t attr, form;
+};
+
+/* A resolved abbreviation declaration: tag, children flag, attribute
+ * signature. */
+struct dw_abbrev {
+	uint64_t tag;
+	unsigned char has_children;
+	struct dw_abbrev_attr attrs[24];
+	unsigned nattrs;
+};
+
+/* Parse the .debug_abbrev leaf list into `tab[1..ntab-1]` (indexed by
+ * abbreviation code).  Returns the number of entries + 1 (index 0 unused). */
+static int
+parse_abbrev_table(const unsigned char *abbrev, size_t abbrev_size,
+                   struct dw_abbrev *tab, int tabcap)
+{
+	const unsigned char *p = abbrev, *end = abbrev + abbrev_size;
+	uint64_t code, tag, attr, form;
+	unsigned char children;
+	int n = 0;
+
+	while (p < end) {
+		unsigned i;
+		code = read_uleb(&p, end);
+		if (code == 0)
+			break;
+		if (code >= (uint64_t)tabcap || n >= tabcap - 1) {
+			/* Reject overlarge/garbage codes; keep parsing to the
+			 * next entry anyway. */
+			if (p < end) {
+				tag = read_uleb(&p, end);
+				(void)tag;
+				if (p < end) children = *p++;
+				else children = 0;
+				for (i = 0; p < end; ++i) {
+					attr = read_uleb(&p, end);
+					form = read_uleb(&p, end);
+					if (attr == 0 && form == 0)
+						break;
+					if (i > 40)
+						break;
+				}
+			}
+			continue;
+		}
+		tag = read_uleb(&p, end);
+		children = (p < end) ? *p++ : 0;
+		tab[code].tag = tag;
+		tab[code].has_children = children;
+		tab[code].nattrs = 0;
+		for (i = 0; p < end; ++i) {
+			attr = read_uleb(&p, end);
+			form = read_uleb(&p, end);
+			if (attr == 0 && form == 0)
+				break;
+			if (tab[code].nattrs >= 24 || i > 40)
+				break;
+			tab[code].attrs[tab[code].nattrs].attr = attr;
+			tab[code].attrs[tab[code].nattrs].form = form;
+			tab[code].nattrs++;
+		}
+		if (code > (uint64_t)n)
+			n = (int)code;
+	}
+	return n + 1;
+}
+
+/* Skip/decode one attribute value at *pp per `form`, printing a
+ * human-readable value into `out` (bounded).  Advances *pp. */
+static void
+decode_attr_value(const unsigned char **pp, const unsigned char *end,
+                  uint64_t form, int address_size, char *out, size_t outsz)
+{
+	const unsigned char *p = *pp;
+	uint64_t u;
+	int64_t s;
+	size_t blk, i;
+
+	if (!outsz)
+		outsz = 1;
+	out[0] = '\0';
+	if (p >= end) {
+		*pp = p;
+		snprintf(out, outsz, "<eof>");
+		return;
+	}
+	switch (form) {
+	case 0x08: /* string */
+	{
+		size_t n = 0;
+		while (p + n < end && p[n] != 0)
+			++n;
+		i = n < outsz - 1 ? n : outsz - 1;
+		memcpy(out, p, i);
+		out[i] = '\0';
+		p += n + 1;
+		break;
+	}
+	case 0x01: /* addr */
+		u = 0;
+		for (i = 0; i < (size_t)address_size && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "0x%llx", (unsigned long long)u);
+		break;
+	case 0x0f: /* udata */
+		u = read_uleb(&p, end);
+		snprintf(out, outsz, "%llu", (unsigned long long)u);
+		break;
+	case 0x0d: /* sdata */
+		s = read_sleb(&p, end);
+		snprintf(out, outsz, "%lld", (long long)s);
+		break;
+	case 0x0b: /* data1 */
+		u = (p < end) ? *p++ : 0;
+		snprintf(out, outsz, "%llu", (unsigned long long)u);
+		break;
+	case 0x05: /* data2 */
+		u = 0;
+		for (i = 0; i < 2 && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "%llu", (unsigned long long)u);
+		break;
+	case 0x06: /* data4 */
+		u = 0;
+		for (i = 0; i < 4 && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "%llu", (unsigned long long)u);
+		break;
+	case 0x07: /* data8 */
+		u = 0;
+		for (i = 0; i < 8 && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "%llu", (unsigned long long)u);
+		break;
+	case 0x0c: /* flag */
+		u = (p < end) ? *p++ : 0;
+		snprintf(out, outsz, "%s", u ? "yes" : "no");
+		break;
+	case 0x19: /* flag_present */
+		snprintf(out, outsz, "yes");
+		break;
+	case 0x13: /* ref4 */
+		u = 0;
+		for (i = 0; i < 4 && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "0x%llx", (unsigned long long)u);
+		break;
+	case 0x11: /* ref1 */
+		u = (p < end) ? *p++ : 0;
+		snprintf(out, outsz, "0x%llx", (unsigned long long)u);
+		break;
+	case 0x12: /* ref2 */
+		u = 0;
+		for (i = 0; i < 2 && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "0x%llx", (unsigned long long)u);
+		break;
+	case 0x14: /* ref8 */
+		u = 0;
+		for (i = 0; i < 8 && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "0x%llx", (unsigned long long)u);
+		break;
+	case 0x15: /* ref_udata */
+		u = read_uleb(&p, end);
+		snprintf(out, outsz, "0x%llx", (unsigned long long)u);
+		break;
+	case 0x10: /* ref_addr */
+		u = 0;
+		for (i = 0; i < (size_t)address_size && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "0x%llx", (unsigned long long)u);
+		break;
+	case 0x0e: /* strp: offset into .debug_str; we print the raw offset */
+		u = 0;
+		for (i = 0; i < 4 && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "(str) 0x%llx", (unsigned long long)u);
+		break;
+	case 0x0a: /* block1 */
+	case 0x09: /* block */
+	case 0x18: /* exprloc */
+		blk = (form == 0x0a) ? ((p < end) ? *p++ : 0)
+		                     : (size_t)read_uleb(&p, end);
+		i = 0;
+		while (i < blk && p < end && i < 12) {
+			snprintf(out + strlen(out), outsz - strlen(out), "%s%02x",
+			         i ? " " : "", *p++);
+			++i;
+		}
+		if (i < blk)
+			snprintf(out + strlen(out), outsz - strlen(out), " ...");
+		while (i < blk && p < end) { ++p; ++i; }
+		break;
+	case 0x17: /* sec_offset */
+		u = 0;
+		for (i = 0; i < 4 && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "0x%llx", (unsigned long long)u);
+		break;
+	case 0x16: /* indirect */
+		snprintf(out, outsz, "<indirect>");
+		break;
+	default:
+		snprintf(out, outsz, "<form 0x%llx>", (unsigned long long)form);
+		break;
+	}
+	*pp = p;
+}
+
+/* Recursively walk DWARF4 DIEs and print the decoded tree. */
+static void
+dump_dies(const unsigned char **pp, const unsigned char *end,
+          struct dw_abbrev *tab, int indent, int address_size)
+{
+	while (*pp < end) {
+		uint64_t code = read_uleb(pp, end);
+		struct dw_abbrev *a;
+		const char *tn;
+		unsigned ai;
+
+		if (code == 0)     /* null DIE terminates a sibling list */
+			return;
+		if (code >= 256 || tab[(size_t)code].tag == 0)
+			break;   /* unknown abbrev: stop this CU */
+		a = &tab[(size_t)code];
+		tn = dwarf_tag_name(a->tag);
+		printf("%*s<%d> DW_TAG_%s\n", indent * 4, "", indent, tn ? tn : "<unknown>");
+		for (ai = 0; ai < a->nattrs; ++ai) {
+			char val[160];
+			const char *an;
+			decode_attr_value(pp, end, a->attrs[ai].form, address_size,
+			                  val, sizeof val);
+			an = dwarf_attr_name(a->attrs[ai].attr);
+			printf("%*s  DW_AT_%-12s: %s\n", indent * 4, "",
+			       an ? an : "<unknown>", val);
+		}
+		if (a->has_children)
+			dump_dies(pp, end, tab, indent + 1, address_size);
+	}
+}
+
+/* Parse a .debug_info CU header then walk its DIE tree.  abbrev points to
+ * the .debug_abbrev section; size is the .debug_info section size. */
+static void
+dump_debug_info(const unsigned char *data, size_t dsize,
+                int indent, const unsigned char *abbrev, size_t abbrev_size)
+{
+	struct dw_abbrev tab[256] = { { 0 } };
+	const unsigned char *p = data, *end = data + dsize;
+	uint64_t unit_length;
+	uint16_t version;
+	uint64_t abbrev_offset;
+	uint8_t address_size;
+	int ntab;
+	int cu = 0;
+
+	if (!abbrev || abbrev_size == 0)
+		return;
+	ntab = parse_abbrev_table(abbrev, abbrev_size, tab, 256);
+	(void)ntab;
+
+	printf("\nThe .debug_info section:\n");
+	while (p + 11 <= end) {
+		uint64_t cu_end;
+		size_t cu_off = (size_t)(p - data);
+
+		unit_length = (uint32_t)p[0] | (uint32_t)p[1] << 8 |
+		              (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+		p += 4;
+		if (unit_length >= 0xfffffff0u || p + unit_length > end)
+			break;
+		version = (uint16_t)p[0] | (uint16_t)p[1] << 8;
+		p += 2;
+		if (version < 2 || version > 5)
+			break;
+		abbrev_offset = (uint32_t)p[0] | (uint32_t)p[1] << 8 |
+		                (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+		p += 4;
+		address_size = *p++;
+		cu_end = (uint64_t)(size_t)(p - data) + unit_length;
+		if (cu_end > dsize)
+			cu_end = dsize;
+		printf("  Compilation Unit @ offset 0x%llx:\n",
+		       (unsigned long long)cu_off);
+		printf("   Version: %u  Abbrev Offset: %llu  Pointer Size: %u\n",
+		       version, (unsigned long long)abbrev_offset, address_size);
+		dump_dies(&p, data + cu_end, tab, indent + 1, address_size);
+		++cu;
+		p = data + cu_end;
+	}
+	printf("\n");
 }
 
 /* ---- 单文件处理 ---- */
