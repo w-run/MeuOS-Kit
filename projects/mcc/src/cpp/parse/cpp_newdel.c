@@ -243,9 +243,13 @@ cpp_parse_new_expr(struct scope *s)
 			cp->u.binary.r = mkconstexpr(&typeulong, sizeof(size_t));
 			funcexpr(curfunc, mkassignexpr(ident,
 			    mkexpr(EXPRCAST, pt, cp)));
-			/* value-construct each element for a class with a ctor */
+			/* value-construct each element for a class with a ctor, or
+			 * install each element's vptr for a polymorphic class with
+			 * no user ctor (virtual dispatch needs it) */
 			if (t->kind == TYPESTRUCT || t->kind == TYPEUNION) {
-				if (cpp_has_ctor(t, t->u.structunion.tag)) {
+				bool needs_elem = cpp_has_ctor(t, t->u.structunion.tag) ||
+				                  t->u.structunion.poly;
+				if (needs_elem && !args) {
 					struct decl *iv;
 					struct expr *ie, *lt, *ptr, *inc;
 					struct block *bloop, *bbody, *bdone;
@@ -290,12 +294,17 @@ cpp_parse_new_expr(struct scope *s)
 						    mkconstexpr(&typeulong, t->size);
 						ptr->u.binary.r = off;
 					}
-					ctor = cpp_ctor_expr(t, ptr, NULL);
-					if (!ctor)
-						error_code(E_OVERLOAD, &tok.loc,
-						    "no matching constructor for 'new %s[]'",
-						    t->u.structunion.tag);
-					funcexpr(curfunc, ctor);
+					ctor = NULL;
+					if (cpp_has_ctor(t, t->u.structunion.tag)) {
+						ctor = cpp_ctor_expr(t, ptr, NULL);
+						if (!ctor)
+							error_code(E_OVERLOAD, &tok.loc,
+							    "no matching constructor for 'new %s[]'",
+							    t->u.structunion.tag);
+						funcexpr(curfunc, ctor);
+					} else if (t->u.structunion.poly) {
+						cpp_init_vptrs(curfunc, t, ptr);
+					}
 					inc = mkexpr(EXPRBINARY, &typeint, NULL);
 					inc->op = TADD;
 					inc->u.binary.l = ie;
@@ -381,9 +390,19 @@ cpp_parse_new_expr(struct scope *s)
 				error_code(E_DECL, &tok.loc, "no matching constructor for 'new %s'",
 				    t->u.structunion.tag);
 			funcexpr(curfunc, ctor);
-		} else if (args) {
-			error_code(E_DECL, &tok.loc, "'%s' has no constructor for 'new' with arguments",
-			    t->u.structunion.tag);
+		} else {
+			if (args)
+				error_code(E_DECL, &tok.loc, "'%s' has no constructor for 'new' with arguments",
+				    t->u.structunion.tag);
+			/* A polymorphic class with no user ctor still needs its vptrs
+			 * installed on the heap object (its bases are trivially
+			 * constructed, but virtual dispatch reads the vptr). */
+			if (t->u.structunion.poly) {
+				struct expr *thisp = mkexpr(EXPRIDENT, pt, NULL);
+				thisp->qual = QUALNONE; thisp->lvalue = true;
+				thisp->u.ident.decl = tmp;
+				cpp_init_vptrs(curfunc, t, thisp);
+			}
 		}
 	} else if (args) {
 		error_code(E_CTYPE, &tok.loc, "'new' with arguments requires a class type");

@@ -50,6 +50,7 @@ struct decl *cpp_lookup_visible(struct scope *s, const char *name);
 struct expr *cpp_temp_construct(struct scope *s, struct type *ct);
 struct expr *cpp_temp_construct_braced(struct scope *s, struct type *ct);
 struct expr *cpp_braced_args_collect(struct scope *s);
+void cpp_init_vptrs(struct func *f, struct type *t, struct expr *thisp);
 extern struct type *g_cpp_member_class;
 extern const char *g_cpp_member_name;
 extern bool g_cpp_member_const;
