@@ -43,12 +43,15 @@ cpp_parse_method_body(struct cpp_pending_method *pm)
 	extern void emitfunc(struct func *, struct scope *, bool);
 	extern void funchlt(struct func *);
 	extern struct scope *delscope(struct scope *);
+	extern struct func *curfunc;
 
 	struct scope *fs;
 	struct decl *nd;
 	struct func *f;
+	struct func *saved_cf; /* restore the enclosing function's curfunc */
 
 	fs = mkscope(pm->s);
+	saved_cf = curfunc;
 	for (nd = pm->mtype->u.func.params; nd; nd = nd->next)
 		if (nd->name) /* unnamed parameters (`B(int)`) have no name to bind */
 			scopeputdecl(fs, nd);
@@ -95,6 +98,7 @@ cpp_parse_method_body(struct cpp_pending_method *pm)
 		delscope(fs);
 		delfunc(f);
 		pm->d->defined = true;
+		curfunc = saved_cf; /* the enclosing function must still be current */
 
 		g_cpp_method = saved;
 	}

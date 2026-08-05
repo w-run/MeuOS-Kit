@@ -218,6 +218,11 @@ tagspec(struct scope *s)
 			t->align = 0;
 			t->u.structunion.tag = tag;
 			t->u.structunion.members = NULL;
+			/* C++ member symbols (ctor/methods) are registered in the
+			 * class's declaration scope; record it so the ctor/method
+			 * lookup in cpp_newdel.c / cpp_ctor.c resolves the mangled
+			 * names there (local classes have a function-body scope). */
+			t->scope = s;
 		}
 		t->incomplete = true;
 		if (tag)

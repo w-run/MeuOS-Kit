@@ -64,6 +64,7 @@ mktype(enum typekind kind, enum typeprop prop)
 	t->isref = false;
 	t->isrref = false;
 	t->scoped = false;
+	t->scope = NULL; /* C++ class member scope; class-decl paths set it */
 	if (kind == TYPESTRUCT || kind == TYPEUNION) {
 		/* C++ virtual-dispatch fields must start zeroed: cpp_class_decl
 		 * and the vtable machinery read them before explicit init. */

@@ -337,6 +337,7 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
 | mir-01 | V | MIR msimp 有符号 div/rem 误削减 | ✅ closed（93ab4b4 夹带 + Test 3b/3c/3d + 4c24bfe） |
 | mir-02 | J | slotmerge 自举破坏（长期禁用 97c8541；二期见 worker-slot2） | 🚫 长期禁用 |
 | mir-03 | I | slotmerge 崩溃（并入 J） | 🚫 禁用 |
+| cpp-10 | — | 局部类（函数体内 `struct`）+ `new` 段错误：ctor 体即时代码生成污染全局 `curfunc` + 局部类 `t->scope` 未设（野指针） | ✅ closed（三处：mktype 初始化 `t->scope=NULL` + tagspec 普通 struct 设 `t->scope=s` + cpp_parse_method_body 恢复 `curfunc`；local_class_new.cc 回归） |
 | x86-00 | va_list | MIR 后端 va_list 溢出 | ✅ closed（222a28d） |
 | cpp-00 | A | size-0 类值传参（历史名，已被 cpp-0e 替代） | 🚫 废弃 |
 
