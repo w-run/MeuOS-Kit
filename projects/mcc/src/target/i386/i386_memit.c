@@ -982,9 +982,41 @@ emit_ins(FILE *f, MInsM *in)
 						fprintf(f, "\txorl\t%%edx, %%edx\n"); /* hi' = 0 */
 				}
 				fprintf(f, ".Li64sh_done%u:\n", sid);
-				i64_store_pair(f, d);
-				return;
-			} else {
+			i64_store_pair(f, d);
+			return;
+		} else if (op == MMOP_MUL) {
+			/* i64 multiply on i386: there is no 64-bit multiply, so compose
+			 * the result from three unsigned 32x32->64 multiplies (mull).
+			 * Two's-complement wrap makes the unsigned product's low 64 bits
+			 * equal the signed product, so MMOP_MUL (the single MIR opcode
+			 * for both signed and unsigned i64 multiply) is handled here.
+			 * Let a=a.hi:a.lo, b=b.hi:b.lo.  Then
+			 *   result.lo = (a.lo*b.lo).lo
+			 *   result.hi = (a.lo*b.lo).hi + (a.lo*b.hi).lo + (a.hi*b.lo).lo
+			 *               (mod 2^32; the a.hi*b.hi and carry-out past bit 63
+			 *               belong to bits 64+ and are discarded). */
+			/* step 1: a.lo * b.lo -> edx:eax */
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot0);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sslot1);
+			fprintf(f, "\tmull\t%%ecx\n");
+			fprintf(f, "\tmovl\t%%eax, %%edi\n");   /* edi = result.lo */
+			fprintf(f, "\tmovl\t%%edx, %%ebx\n");   /* ebx = (a.lo*b.lo).hi */
+			/* step 2: a.lo * b.hi -> edx:eax */
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot0);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sslot1 + 4);
+			fprintf(f, "\tmull\t%%ecx\n");
+			fprintf(f, "\taddl\t%%eax, %%ebx\n");   /* + (a.lo*b.hi).lo */
+			/* step 3: a.hi * b.lo -> edx:eax */
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot0 + 4);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sslot1);
+			fprintf(f, "\tmull\t%%ecx\n");
+			fprintf(f, "\taddl\t%%eax, %%ebx\n");   /* + (a.hi*b.lo).lo */
+			/* result.lo = edi, result.hi = ebx (mod 2^32) */
+			fprintf(f, "\tmovl\t%%edi, %%eax\n");
+			fprintf(f, "\tmovl\t%%ebx, %%edx\n");
+			i64_store_pair(f, d);
+			return;
+		} else {
 				/* fallback: load low, do 32-bit op into eax and save;
 				 * then load high, do 32-bit op into edx (no carry) */
 				const char *opn = binop_name(op);

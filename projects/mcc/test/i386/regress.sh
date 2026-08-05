@@ -235,3 +235,22 @@ fi
 # The high half must be a real based store at +4 from the base register.
 grep -Eq 'movl[[:space:]]+%eax,[[:space:]]+4\(%[a-z]+\)' "$stasm"
 printf '%s\n' 'i386 i64 memory-store high-half address compile gate passed'
+
+# i64 multiply gate (same systematic class as #22a/#22b: an i64 op previously
+# fell through to its 32-bit counterpart).  i386 has no 64-bit multiply, so a
+# correct i64 MUL must emit the unsigned 32x32->64 `mull` triple (cross terms),
+# not two independent 32-bit `imull`s of the halves.  Assert `mull` appears in
+# the i64 multiply and that no `imull %ecx, %eax` (the 32-bit fallback) is used
+# for it.
+mulasm=${TMPDIR:-/tmp}/mcc-i386-i64mul.$$.s
+trap 'rm -f "$asm" "$obj" "$shasm" "$casm" "$pasm" "$eqasm" "$bnasm" "$sbfasm" "$nnasm" "$ldasm" "$stasm" "$mulasm"' EXIT HUP INT TERM
+"$mcc" --target=i386-linux -O2 -S -o "$mulasm" "$root/test/i386/i64_mul.c"
+if ! grep -Eq 'mull[[:space:]]+%ecx' "$mulasm"; then
+	printf '%s\n' 'i386 i64 multiply: FAIL (no 32x32->64 `mull` for i64 MUL)' >&2
+	exit 1
+fi
+if grep -Eq 'imull[[:space:]]+%ecx, %eax' "$mulasm"; then
+	printf '%s\n' 'i386 i64 multiply: FAIL (32-bit imull fallback used for i64 MUL)' >&2
+	exit 1
+fi
+printf '%s\n' 'i386 i64 multiply compile gate passed'
