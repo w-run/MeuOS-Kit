@@ -38,6 +38,7 @@ size_t wcsspn(const wchar_t *, const wchar_t *);
 wchar_t *wcspbrk(const wchar_t *, const wchar_t *);
 wchar_t *wcsstr(const wchar_t *, const wchar_t *);
 size_t wcslen(const wchar_t *);
+wchar_t *wcstok(wchar_t *, const wchar_t *, wchar_t **);
 
 /* Wide character classification and mapping (C11 7.29.2 / 7.29.6.4) */
 #include <wctype.h>
@@ -61,4 +62,8 @@ wint_t fgetwc(FILE *);
 wint_t fputwc(wchar_t, FILE *);
 wint_t ungetwc(wint_t, FILE *);
 int fwide(FILE *, int);
+wchar_t *fgetws(wchar_t *, int, FILE *);
+wint_t fputws(const wchar_t *, FILE *);
+wint_t getwchar(void);
+wint_t putwchar(wchar_t);
 #endif

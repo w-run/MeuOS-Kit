@@ -447,6 +447,70 @@ int fwide(FILE *f, int mode) {
 	return 0;                       /* undecided, query only */
 }
 
+/* C11 7.29.3.2: fgetws — read up to n-1 wide chars from a stream, stopping
+ * at a newline or EOF; NUL terminates the buffer.  Returns s or NULL. */
+wchar_t *fgetws(wchar_t *s, int n, FILE *stream) {
+	if (!s || n <= 0)
+		return NULL;
+	int i = 0;
+	while (i < n - 1) {
+		wint_t wc = fgetwc(stream);
+		if (wc == WEOF) {
+			if (i == 0) return NULL;   /* EOF before any char */
+			break;
+		}
+		s[i++] = (wchar_t)wc;
+		if (wc == (wint_t)L'\n')
+			break;
+	}
+	s[i] = L'\0';
+	return s;
+}
+
+/* C11 7.29.3.4: fputws — write a wide string to a stream (up to and
+ * including, but not NUL).  Returns non-negative or WEOF on error. */
+wint_t fputws(const wchar_t *s, FILE *stream) {
+	if (!s)
+		return WEOF;
+	while (*s) {
+		if (fputwc(*s++, stream) == WEOF)
+			return WEOF;
+	}
+	return 1;   /* any non-negative value */
+}
+
+/* C11 7.29.3.1 / 7.29.3.3: getwchar / putwchar round-trip on stdio. */
+wint_t getwchar(void) {
+	return fgetwc(stdin);
+}
+
+wint_t putwchar(wchar_t wc) {
+	return fputwc(wc, stdout);
+}
+
+/* C11 7.29.4.5.7: wcstok — thread-safe tokeniser with an explicit state. */
+wchar_t *wcstok(wchar_t *s, const wchar_t *delim, wchar_t **ptr) {
+	wchar_t *tok;
+	if (!s)
+		s = *ptr;
+	/* skip leading delimiters */
+	s += wcsspn(s, delim);
+	if (!*s) {
+		*ptr = s;
+		return NULL;
+	}
+	tok = s;
+	/* find the end of the token */
+	s = wcspbrk(tok, delim);
+	if (s) {
+		*s = L'\0';
+		*ptr = s + 1;
+	} else {
+		*ptr = wcslen(tok) + tok;
+	}
+	return tok;
+}
+
 /* ----------------------------------------------------------------------
  * wctype / iswctype / wctrans / towctrans  (C11 7.29.2.2 / 7.29.6.4)
  *
