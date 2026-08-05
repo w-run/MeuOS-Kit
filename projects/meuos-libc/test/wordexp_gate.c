@@ -105,6 +105,65 @@ main(void)
 		expect("tilde", "~ f", 0, 0, w1, 2);
 	}
 
+	/* ---- wordfree() hardening: every wordexp_t must be wordfree-able ----
+	 * A mixed input (glob + quote + $VAR) then immediate wordfree, an empty
+	 * expansion (wordfree of the stored empty string must be safe), and a
+	 * wordfree after a *failed* wordexp (cmdsub leaves *pwordexp in a
+	 * safe/wordfree-no-op state). */
+	{
+		/* mixed: one glob match, one quoted, one $VAR */
+		wordexp_t wx;
+		memset(&wx, 0, sizeof wx);
+		setenv("MF", "mid", 1);
+		/* glob of a real temp file + a quoted literal + $VAR */
+		char tmp[64];
+		strcpy(tmp, "/tmp/we_mix.XXXXXX");
+		int tf = mkstemp(tmp);
+		if (tf < 0) { printf("FAIL: mkstemp mix\n"); fails++; }
+		else {
+			char input[140];
+			snprintf(input, sizeof input, "%s* 'a b' pre$MF post", tmp);
+			int e = wordexp(input, &wx, 0);
+			if (e != 0) { printf("FAIL: mixed wordexp ret=%d\n", e); fails++; }
+			else {
+				/* expect >= 4 words: glob(+1), 'a b', pre, mid, post */
+				int ok = wx.we_wordc >= 4;
+				if (!ok) printf("FAIL: mixed wordc=%zu want>=4\n", wx.we_wordc);
+				else {
+					/* glob[0] == tmp; $MF expands to "mid" glued to "pre" -> "premid" */
+					const char *mid = NULL;
+					for (size_t i = 1; i < wx.we_wordc; i++)
+						if (strcmp(wx.we_wordv[i], "premid") == 0) mid = wx.we_wordv[i];
+					if (strcmp(tmp, wx.we_wordv[0]) != 0) {
+						printf("FAIL: mixed glob[0]='%s' want '%s'\n", wx.we_wordv[0], tmp);
+						fails++;
+					}
+					if (!mid) { printf("FAIL: mixed missing pre$MF->premid\n"); fails++; }
+				}
+			}
+			wordfree(&wx); /* must not crash */
+			close(tf); unlink(tmp);
+		}
+	}
+	/* empty expansion -> stored empty string must be freeable */
+	{
+		wordexp_t we;
+		memset(&we, 0, sizeof we);
+		int e = wordexp("\"\"", &we, 0); /* empty double-quoted word */
+		if (e != 0) { printf("FAIL: empty qword e=%d\n", e); fails++; }
+		else if (we.we_wordc != 1) { printf("FAIL: empty qword wordc=%zu\n", we.we_wordc); fails++; }
+		wordfree(&we); /* must not crash freeing the empty string */
+	}
+	/* wordfree after a failed (cmdsub) wordexp */
+	{
+		wordexp_t wf;
+		memset(&wf, 0, sizeof wf);
+		int e = wordexp("$(no)", &wf, 0);
+		if (e != WRDE_CMDSUB) { printf("FAIL: cmdsub-fail e=%d\n", e); fails++; }
+		wordfree(&wf); /* must be a safe no-op (pw left NULL) */
+		wordfree(&wf); /* idempotent */
+	}
+
 	if (fails) {
 		printf("%d wordexp FAIL\n", fails);
 		return 1;
