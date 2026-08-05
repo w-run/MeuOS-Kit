@@ -537,7 +537,7 @@ int arm_encode_insn(const struct mt_target *target,
 		(void)parse_op_cond(mnemonic, &shift_base, &shift_cond);
 		for (int i = 0; shift_mn[i]; i++)
 			if (strcmp(shift_base, shift_mn[i]) == 0) { shift_type = i; break; }
-		if (shift_type >= 0 && nops >= 3) {
+		if (shift_type >= 0 && nops >= 3 && ops[2][0] == '#') {
 			int rd; if (reg_num(ops[0], &rd) < 0) return -1;
 			int rm; if (reg_num(ops[1], &rm) < 0) return -1;
 			int amt = 0; const char *sv = ops[2];
@@ -552,7 +552,7 @@ int arm_encode_insn(const struct mt_target *target,
 		 * if the third operand is a register name. */
 		if (shift_type >= 0 && nops >= 2) {
 			/* Shift by register: asr rd, rm, rs */
-			if (nops >= 3 && ops[2][0] != '#') {
+			if (nops >= 3) {
 				int rd; if (reg_num(ops[0], &rd) < 0) return -1;
 				int rm; if (reg_num(ops[1], &rm) < 0) return -1;
 				int rs; if (reg_num(ops[2], &rs) < 0) return -1;
