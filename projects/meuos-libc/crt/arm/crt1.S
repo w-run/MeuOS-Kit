@@ -4,11 +4,19 @@
 /* Linux ARM EABI (armv7) process entry.  The kernel supplies argc at [sp]
  * followed by argv[] (32-bit pointers) and envp[].  AAPCS requires SP to be
  * 8-byte aligned at function call boundaries.  Set up TLS (c13/TPIDRURO)
- * before calling main so that _Thread_local variables work, then terminate
- * via exit() so that atexit handlers run and stdio buffers are flushed.
+ * before handing control to the C library so that _Thread_local variables
+ * work.
  *
- * r4 is callee-saved; stash the kernel-supplied SP there so we can
- * re-read argc/argv/envp after alignment and __meuos_tls_init. */
+ * All the startup work -- capturing argv[0]/auxv, running the
+ * .preinit_array/.init_array constructors, registering the .fini_array walk
+ * with atexit(), calling main() and passing its status to exit() -- lives in
+ * the portable __libc_start_main() (src/startup.c), so this stub only
+ * marshals arguments.  Its GNU signature is
+ *   __libc_start_main(main, argc, argv, init, fini, rtld_fini, stack_end)
+ * so r0-r3 carry the first four and the remaining three go on the stack.
+ *
+ * r4 is callee-saved; stash the kernel-supplied SP there so we can re-read
+ * argc/argv after alignment and __meuos_tls_init. */
 
 .globl _start
 .type _start,%function
@@ -34,15 +42,23 @@ _start:
 	/* r0 = TLS base pointer; install into c13/TPIDRURO via mcr. */
 	bl __meuos_set_tls
 
-	/* Reload argc/argv/envp from saved kernel SP */
-	ldr r0, [r4]		/* argc */
-	add r1, r4, #4		/* argv */
-	add r2, r1, r0, lsl #2
-	add r2, r2, #4		/* envp */
+	/* __libc_start_main(main, argc, argv, NULL, NULL, NULL, stack_end).
+	 * r0-r3 take main/argc/argv/init; fini, rtld_fini and stack_end go on
+	 * the stack at [sp+0], [sp+4] and [sp+8].  A register list pushes in
+	 * ascending register order, so name the slots r5 < r6 < r7 < r8 to get
+	 * fini, rtld_fini, stack_end and a pad that keeps SP 8-byte aligned. */
+	mov r5, #0		/* fini      -> [sp+0] */
+	mov r6, #0		/* rtld_fini -> [sp+4] */
+	mov r7, r4		/* stack_end -> [sp+8] */
+	mov r8, #0		/* pad, keeps SP 8-byte aligned */
+	push {r5, r6, r7, r8}
 
-	bl main
-	bl exit
-	bkpt #0			/* unreachable */
+	ldr r0, =main		/* main */
+	ldr r1, [r4]		/* argc */
+	add r2, r4, #4		/* argv */
+	mov r3, #0		/* init */
+	bl __libc_start_main
+	bkpt #0			/* unreachable: it exit()s */
 
 .bss
 .align 4

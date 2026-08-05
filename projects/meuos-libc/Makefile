@@ -487,6 +487,20 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib --static -o /tmp/meuos-libc-check/libgcc test/libgcc.c -l:libgcc-meuos.a -l:libc-meuos.a
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/threads test/threads.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib -o /tmp/meuos-libc-check/crt test/crt.c -l:libc-meuos.a
+	# Startup contract gate: .init_array/.fini_array walked by
+	# __libc_start_main.  The array entries live in a companion .S (mcc
+	# accepts neither a top-level __asm__ nor a .o/.S input, and does not
+	# yet lower __attribute__((constructor)) into .init_array), so this
+	# gate assembles and links by hand instead of going through $(MCC)
+	# end-to-end like the single-source gates above.
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -c -o /tmp/meuos-libc-check/initarray.o test/initarray.c
+	$(AS) -c -o /tmp/meuos-libc-check/initarray_arr.o test/initarray_arr.S
+	$(HOST_CC) -nostdlib -static -o /tmp/meuos-libc-check/initarray \
+		$(abspath $(SYSROOT))/usr/lib/crt1.o \
+		/tmp/meuos-libc-check/initarray.o \
+		/tmp/meuos-libc-check/initarray_arr.o \
+		$(abspath $(SYSROOT))/usr/lib/libc-meuos.a \
+		$(abspath $(SYSROOT))/usr/lib/libgcc-meuos.a
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib -o /tmp/meuos-libc-check/env test/env.c -l:libc-meuos.a
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib -o /tmp/meuos-libc-check/bare-threads test/threads.c -l:libc-meuos.a
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib --static -o /tmp/meuos-libc-check/phase2-counter test/phase2_counter.c -l:libc-meuos.a
@@ -573,6 +587,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	/tmp/meuos-libc-check/wchar_lit_gate
 	/tmp/meuos-libc-check/wprintf_gate
 	/tmp/meuos-libc-check/wctype_gate
+	/tmp/meuos-libc-check/initarray
 	/tmp/meuos-libc-check/auxv
 	/tmp/meuos-libc-check/uio
 	/tmp/meuos-libc-check/p2

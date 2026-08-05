@@ -8,10 +8,19 @@
  * re-derives argv/envp the same way crt1 does, then caches the auxv
  * base before setenv(3) has a chance to reallocate environ (which would
  * otherwise break auxv lookup).
+ *
+ * This file also carries __libc_start_main(), the single portable
+ * implementation of the startup sequence shared by all six architectures:
+ * it runs the .preinit_array/.init_array constructors, calls main(), and
+ * hands main's status to exit() (which drains atexit -- including the
+ * .fini_array walk registered here -- and flushes stdio).  Keeping the
+ * sequence in C means each crt1.S only has to marshal argc/argv/envp and
+ * tail-call this function; no per-arch array-walking assembly.
  */
 
 #include <stddef.h>
 #include <errno.h>
+#include <stdlib.h>
 #include <sys/auxv.h>
 
 extern char **environ;
@@ -79,6 +88,108 @@ __meuos_startup(int argc, char **argv, char **envp)
 	}
 	if (!__auxv_cache)
 		__auxv_cache = find_auxv(envp);
+}
+
+/* Section-bound symbols for the static-link startup arrays.
+ *
+ * The linker places every `__attribute__((constructor))` function pointer
+ * into .init_array and every `__attribute__((destructor))` one into
+ * .fini_array, then synthesises the __{init,fini}_array_{start,end} pairs
+ * that delimit them.  Both bounds are declared weak so a program that has
+ * no constructors at all -- and therefore no such sections for the linker
+ * to bracket -- still links: the bounds then compare equal (both zero) and
+ * the walk below is a no-op.
+ *
+ * The arrays are `void (*)(void)` at the C level.  glibc passes
+ * (argc, argv, envp) to .init_array entries; nothing in the Kit relies on
+ * that GNU-ism, and the plain form is what the C and C++ standards need
+ * for constructors, so we call them with no arguments. */
+extern void (*__preinit_array_start[])(void) __attribute__((weak));
+extern void (*__preinit_array_end[])(void) __attribute__((weak));
+extern void (*__init_array_start[])(void) __attribute__((weak));
+extern void (*__init_array_end[])(void) __attribute__((weak));
+extern void (*__fini_array_start[])(void) __attribute__((weak));
+extern void (*__fini_array_end[])(void) __attribute__((weak));
+
+/* Legacy .init/.fini entry points emitted by crti.o/crtn.o.  Weak because a
+ * link that does not pull in the crti/crtn pair simply has neither. */
+extern void _init(void) __attribute__((weak));
+extern void _fini(void) __attribute__((weak));
+
+static void
+run_array(void (**start)(void), void (**end)(void))
+{
+	size_t i, n;
+
+	if (!start || !end || end <= start)
+		return;
+	n = (size_t)(end - start);
+	for (i = 0; i < n; ++i) {
+		if (start[i] && start[i] != (void (*)(void))-1)
+			start[i]();
+	}
+}
+
+/* Destructors run in reverse registration order, the mirror of .init_array. */
+static void
+run_array_reverse(void (**start)(void), void (**end)(void))
+{
+	size_t n;
+
+	if (!start || !end || end <= start)
+		return;
+	n = (size_t)(end - start);
+	while (n--) {
+		if (start[n] && start[n] != (void (*)(void))-1)
+			start[n]();
+	}
+}
+
+/* Registered with atexit() so destructors fire on the exit() path -- which
+ * covers both `return` from main and an explicit exit() from anywhere -- and
+ * run before stdio is flushed, so output from a destructor is not lost. */
+static void
+run_fini(void)
+{
+	run_array_reverse(__fini_array_start, __fini_array_end);
+	if (_fini)
+		_fini();
+}
+
+/* The libc startup wrapper.  Each crt1.S computes argc/argv/envp and calls
+ * this; it never returns.  `init` and `fini` are the legacy GNU slots
+ * (__libc_csu_init / __libc_csu_fini); the Kit's own crt1 passes NULL and
+ * lets the array walk below do the work, but a foreign crt1 -- or gcc/clang
+ * linking against this libc with its own startup files -- may pass them, so
+ * they are honoured when non-NULL. */
+_Noreturn void
+__libc_start_main(int (*main_fn)(int, char **, char **), int argc, char **argv,
+                  void (*init)(int, char **, char **), void (*fini)(void),
+                  void (*rtld_fini)(void), void *stack_end)
+{
+	char **envp = argv + argc + 1;
+
+	(void)stack_end;
+
+	environ = envp;
+	__meuos_startup(argc, argv, envp);
+
+	/* The dynamic loader's own teardown goes on first so it runs last. */
+	if (rtld_fini)
+		atexit(rtld_fini);
+	if (fini)
+		atexit(fini);
+	atexit(run_fini);
+
+	/* .preinit_array precedes every other constructor by definition. */
+	run_array(__preinit_array_start, __preinit_array_end);
+	if (_init)
+		_init();
+	if (init)
+		init(argc, argv, envp);
+	run_array(__init_array_start, __init_array_end);
+
+	exit(main_fn(argc, argv, envp));
 }
 
 unsigned long

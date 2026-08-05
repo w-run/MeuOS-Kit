@@ -46,8 +46,16 @@ int setenv(const char *, const char *, int);
 int unsetenv(const char *);
 int putenv(char *);
 _Noreturn void exit(int);
+/* C99 7.22.4.4: terminate without running atexit handlers and without
+ * flushing streams -- the escape hatch for code (constructors, signal
+ * paths) that must not re-enter the termination chain. */
+_Noreturn void _Exit(int);
 _Noreturn void abort(void);
 int atexit(void (*)(void));
+/* C11 7.22.4.7 / 7.22.4.3: the quick_exit path, with a handler list of its
+ * own that is independent of atexit's. */
+_Noreturn void quick_exit(int);
+int at_quick_exit(void (*)(void));
 int system(const char *);
 int mkstemp(char *);
 char *mktemp(char *);
