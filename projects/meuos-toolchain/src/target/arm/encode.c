@@ -70,6 +70,7 @@ static int reg_num(const char *s, int *r) {
 	if (s[0] == 's' && s[1]=='p') { *r=13; return 1; }
 	if (s[0] == 'l' && s[1]=='r') { *r=14; return 1; }
 	if (s[0] == 'p' && s[1]=='c') { *r=15; return 1; }
+	if (s[0] == 'f' && s[1]=='p') { *r=11; return 1; } /* fp == r11 frame pointer alias */
 	if (s[0] == 's' && s[1]>='0' && s[1]<='9') { int n = s[1]-'0'; if(s[2]>='0'&&s[2]<='9') n=n*10+s[2]-'0'; if(n>31)return -1; *r=16+n; return 1; }
 	if (s[0] == 'd' && s[1]>='0' && s[1]<='9') { int n = s[1]-'0'; if(s[2]>='0'&&s[2]<='9') n=n*10+s[2]-'0'; if(n>31)return -1; *r=n; return 1; }
 	return -1;
