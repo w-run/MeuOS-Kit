@@ -191,7 +191,8 @@ STDIO_OBJS     := $(BUILD)/stdio/file.o $(BUILD)/stdio/char_io.o \
                   $(BUILD)/stdio/fmt_out.o $(BUILD)/stdio/fmt_in.o \
                   $(BUILD)/stdio/fp_fmt.o $(BUILD)/stdio/memory_stream.o \
                   $(BUILD)/stdio/file_misc.o $(BUILD)/stdio/truncate.o \
-                  $(BUILD)/stdio/popen.o $(BUILD)/stdio/getline.o
+                  $(BUILD)/stdio/popen.o $(BUILD)/stdio/getline.o \
+                  $(BUILD)/stdio/sync.o
 SYSCALL_OBJS   := $(addprefix $(BUILD)/syscall/, \
                   read.o write.o open.o close.o fork.o execve.o exit.o \
                   mmap.o munmap.o mprotect.o brk.o stat.o fstat.o lstat.o lseek.o \
@@ -428,6 +429,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/getopt_gate test/getopt_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/realpath_gate test/realpath_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/rlimit_gate test/rlimit_gate.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/sync_gate test/sync_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/auxv test/auxv.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/uio test/uio.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/p2 test/p2.c
@@ -490,6 +492,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	/tmp/meuos-libc-check/getopt_gate
 	/tmp/meuos-libc-check/realpath_gate
 	/tmp/meuos-libc-check/rlimit_gate
+	/tmp/meuos-libc-check/sync_gate
 	/tmp/meuos-libc-check/auxv
 	/tmp/meuos-libc-check/uio
 	/tmp/meuos-libc-check/p2
