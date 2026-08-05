@@ -292,10 +292,72 @@ emit_base_ctors_for(struct func *f, struct type *classt, struct expr *thisp)
 /* Emit implicit base-class construction at the start of a derived-class
  * constructor: `class D : B { D() {...} }` first runs `B_B(&this)` for
  * each direct base with a user default constructor. */
+static void cpp_emit_delegating_ctor(struct func *f);
+
 void
 cpp_emit_base_ctor(struct func *f)
 {
 	emit_base_ctors_for(f, g_cpp_method.class_type, cpp_this_expr());
+	cpp_emit_delegating_ctor(f);
+}
+
+/* C++11 delegating constructor: `P() : P(7, 8) {}` forwards to another
+ * constructor of the same class.  The init-list item names the class's own
+ * tag (an entry that is not a base or member), so it is left unconsumed by
+ * emit_base_ctors_for.  Emit `P_P(&this, args…)` for it.  In standard C++
+ * a delegating ctor's own body must be empty; m++ does not enforce that,
+ * but the forwarded ctor initialises all members either way. */
+static void
+cpp_emit_delegating_ctor(struct func *f)
+{
+	extern struct value *funcexpr(struct func *, struct expr *);
+	extern struct scope filescope;
+	struct type *classt = g_cpp_method.class_type;
+	const char *tag = classt->u.structunion.tag;
+	struct cpp_init_item *it;
+
+	if (!tag)
+		return;
+	for (it = g_cpp_init_items; it; it = it->next) {
+		struct expr *fn, *call, *this_ = cpp_this_expr();
+		struct decl *fd, *p;
+		char code[256];
+		struct expr *a, **end;
+
+		if (strcmp(it->name, tag) != 0)
+			continue;
+		/* this is the delegating item; build P_P(&this, args…) */
+		cpp_mangled_name_args(classt, tag, it->args, code, sizeof code, true);
+		fd = scopegetdecl(classt->scope ? classt->scope : &filescope,
+		    code, true);
+		if (!fd || fd->kind != DECLFUNC) {
+			cpp_mangled_name_args(classt, tag, it->args,
+			    code, sizeof code, false);
+			fd = scopegetdecl(classt->scope ? classt->scope : &filescope,
+			    code, true);
+		}
+		if (!fd || fd->kind != DECLFUNC)
+			error_code(E_DECL, &tok.loc,
+			    "no matching constructor '%s' for delegating initializer", it->name);
+		fn = mkexpr(EXPRIDENT, fd->type, NULL);
+		fn->u.ident.decl = fd;
+		fn = decay(fn);   /* &P_P */
+		call = mkexpr(EXPRCALL, &typevoid, fn);
+		call->u.call.args = this_;
+		call->u.call.nargs = 1;
+		p = fd->type->u.func.params ? fd->type->u.func.params->next : NULL;
+		end = &this_->next;
+		for (a = it->args; a; a = a->next, p = p ? p->next : NULL) {
+			struct expr *arg = a;
+			if (p && p->type && p->type->isref)
+				arg = mkunaryexpr(TBAND, a);
+			*end = arg;
+			end = &arg->next;
+			++call->u.call.nargs;
+		}
+		funcexpr(f, call);
+		break;
+	}
 }
 
 /* Parse a constructor initializer list `: Base(v), m(v * 2)` that sits
