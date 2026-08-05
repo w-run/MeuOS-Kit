@@ -104,62 +104,190 @@ int iswxdigit(wint_t c) { return isxdigit((int)c); }
 wint_t towlower(wint_t c) { return tolower((int)c); }
 wint_t towupper(wint_t c) { return toupper((int)c); }
 
-/* MB/C conversion (simple: only ASCII, single-byte) */
-static int mb_cur_max = 1;
+/* ----------------------------------------------------------------------
+ * Multibyte <-> wide conversion.  The C locale decodes UTF-8; mbstate_t
+ * carries an in-progress sequence across calls so streaming conversion
+ * (mbrtowc / wcrtomb / mbrlen with a non-NULL ps) is correct.
+ * -------------------------------------------------------------------- */
 
+int mbsinit(const mbstate_t *ps) {
+	return !ps || ps->__left == 0;
+}
+
+/* Lead-byte -> (total length, payload bits in the lead byte). */
+static int utf8_seq_len(unsigned char c, unsigned *lead_bits)
+{
+	if (c < 0x80)      { *lead_bits = 7;  return 1; }
+	if ((c & 0xE0) == 0xC0) { *lead_bits = 5;  return 2; }
+	if ((c & 0xF0) == 0xE0) { *lead_bits = 4;  return 3; }
+	if ((c & 0xF8) == 0xF0) { *lead_bits = 3;  return 4; }
+	return -1; /* invalid lead byte */
+}
+
+/* mblen — length of the multibyte sequence at s (C locale: UTF-8).
+ * s == NULL resets the (per-thread) shift state and returns 0, since UTF-8
+ * is stateless.  Invalid sequences return -1. */
 int mblen(const char *s, size_t n) {
-	if (!s) return 0; /* no state-dependent encodings */
-	if (n == 0 || !*s) return 0;
-	return 1;
-}
-
-int mbtowc(wchar_t *pwc, const char *s, size_t n) {
-	if (!s) return 0; /* no state-dependent encodings */
-	if (n == 0 || !*s) return 0;
-	if (pwc) *pwc = (unsigned char)*s;
-	return (*s != '\0') ? 1 : 0;
-}
-
-int wctomb(char *s, wchar_t wc) {
 	if (!s) return 0;
-	if (wc > 0 && wc < 256) { *s = (char)(wc & 0xff); return 1; }
-	*s = '?'; return 1;
+	if (n == 0) return -1;
+	if (!*s) return 0;
+	unsigned lead_bits;
+	int len = utf8_seq_len((unsigned char)*s, &lead_bits);
+	if (len < 0 || (size_t)len > n) return -1;
+	for (int i = 1; i < len; i++)
+		if ((s[i] & 0xC0) != 0x80) return -1;
+	return len;
+}
+
+/* mbtowc — single-shot UTF-8 decode (no shift state, C locale). */
+int mbtowc(wchar_t *pwc, const char *s, size_t n) {
+	if (!s) return 0; /* no shift states in UTF-8 */
+	if (n == 0) return -1;
+	if (!*s) { if (pwc) *pwc = 0; return 0; }
+	unsigned lead_bits;
+	int len = utf8_seq_len((unsigned char)*s, &lead_bits);
+	if (len < 0 || (size_t)len > n) return -1;
+	unsigned acc = (unsigned char)*s & ((1u << lead_bits) - 1);
+	for (int i = 1; i < len; i++) {
+		if ((s[i] & 0xC0) != 0x80) return -1;
+		acc = (acc << 6) | (s[i] & 0x3F);
+	}
+	/* reject overlong / out-of-range code points */
+	if (acc > 0x10FFFF) return -1;
+	if (pwc) *pwc = (wchar_t)acc;
+	return len;
+}
+
+/* wctomb — single-shot UTF-8 encode (no shift state, C locale). */
+int wctomb(char *s, wchar_t wc) {
+	if (!s) return 1; /* UTF-8 is state-dependent-free but >1 byte */
+	unsigned u = (unsigned)wc;
+	if (u < 0x80) {
+		s[0] = (char)u; return 1;
+	}
+	if (u < 0x800) {
+		s[0] = (char)(0xC0 | (u >> 6));
+		s[1] = (char)(0x80 | (u & 0x3F)); return 2;
+	}
+	if (u < 0x10000) {
+		s[0] = (char)(0xE0 | (u >> 12));
+		s[1] = (char)(0x80 | ((u >> 6) & 0x3F));
+		s[2] = (char)(0x80 | (u & 0x3F)); return 3;
+	}
+	if (u <= 0x10FFFF) {
+		s[0] = (char)(0xF0 | (u >> 18));
+		s[1] = (char)(0x80 | ((u >> 12) & 0x3F));
+		s[2] = (char)(0x80 | ((u >> 6) & 0x3F));
+		s[3] = (char)(0x80 | (u & 0x3F)); return 4;
+	}
+	return -1;
 }
 
 size_t mbstowcs(wchar_t *pwcs, const char *s, size_t n) {
-	size_t i;
-	for (i = 0; i < n && *s; i++) pwcs[i] = (unsigned char)*s++;
-	if (i < n) pwcs[i] = 0;
+	size_t i = 0;
+	while (i < n) {
+		if (!*s) break;
+		int len = mbtowc(pwcs ? &pwcs[i] : NULL, s, (size_t)-1);
+		if (len < 0) return (size_t)-1;
+		s += len;
+		i++;
+	}
+	if (pwcs && i < n) pwcs[i] = 0;
 	return i;
 }
 
 size_t wcstombs(char *s, const wchar_t *pwcs, size_t n) {
-	size_t i;
-	for (i = 0; i < n && *pwcs; i++) s[i] = (char)*pwcs++;
-	if (i < n) s[i] = 0;
+	size_t i = 0;
+	while (i < n && *pwcs) {
+		int len = wctomb(s ? s + i : NULL, *pwcs);
+		if (len < 0) return (size_t)-1;
+		i += len;
+		pwcs++;
+	}
 	return i;
 }
 
-size_t mbrtowc(wchar_t *pwc, const char *s, size_t n, void *ps) {
-	(void)ps; return mbtowc(pwc, s, n);
+size_t mbrtowc(wchar_t *pwc, const char *s, size_t n, mbstate_t *ps) {
+	mbstate_t st;
+	if (ps) st = *ps; else { st.__left = 0; st.__acc = 0; st.__nbits = 0; }
+
+	if (s == NULL) { /* reset / query */
+		st.__left = 0; st.__acc = 0; st.__nbits = 0;
+		if (ps) *ps = st;
+		return 0;
+	}
+	if (n == 0) return (size_t)-2;
+
+	if (st.__left == 0) {
+		/* start a new sequence */
+		unsigned lead_bits;
+		int len = utf8_seq_len((unsigned char)*s, &lead_bits);
+		if (len < 0) return (size_t)-1;
+		if ((unsigned char)*s == 0) { /* NUL wide char: 0 bytes consumed */
+			if (pwc) *pwc = 0;
+			if (ps) { ps->__left = 0; ps->__acc = 0; ps->__nbits = 0; }
+			return 0;
+		}
+		st.__nbits = lead_bits;
+		st.__acc = (unsigned char)*s & ((1u << lead_bits) - 1);
+		st.__left = (unsigned)len - 1;
+		if (st.__left == 0) goto done;
+		s++; n--;
+	}
+	/* consume continuation bytes */
+	while (st.__left && n) {
+		if ((*s & 0xC0) != 0x80) return (size_t)-1;
+		st.__acc = (st.__acc << 6) | (*s & 0x3F);
+		st.__left--;
+		s++; n--;
+		if (st.__left == 0) goto done;
+	}
+	if (ps) *ps = st;
+	return (size_t)-2; /* need more input */
+
+done:
+	if (st.__acc > 0x10FFFF) return (size_t)-1;
+	if (pwc) *pwc = (wchar_t)st.__acc;
+	if (ps) { ps->__left = 0; ps->__acc = 0; ps->__nbits = 0; }
+	/* total sequence length derived from the persistable lead-bit width */
+	return (size_t)(st.__nbits == 7 ? 1 : (st.__nbits == 5 ? 2 :
+	       (st.__nbits == 4 ? 3 : 4)));
 }
 
-size_t wcrtomb(char *s, wchar_t wc, void *ps) {
-	(void)ps; return (size_t)wctomb(s, wc);
+size_t wcrtomb(char *s, wchar_t wc, mbstate_t *ps) {
+	(void)ps; /* UTF-8 has no shift state */
+	if (s == NULL) return 1; /* max bytes needed is 4, but 1 is fine for query */
+	return (size_t)wctomb(s, wc);
 }
 
-size_t mbsrtowcs(wchar_t *dst, const char **src, size_t n, void *ps) {
-	(void)ps;
-	size_t r = mbstowcs(dst, *src, n);
-	*src += r;
-	return r;
+size_t mbsrtowcs(wchar_t *dst, const char **src, size_t n, mbstate_t *ps) {
+	size_t total = 0;
+	const char *p = *src;
+	while (n > 0) {
+		if (!*p) { *src = NULL; return total; }
+		wchar_t wc;
+		size_t r = mbrtowc(&wc, p, (size_t)-1, ps);
+		if (r == (size_t)-1 || r == (size_t)-2) return (size_t)-1;
+		if (dst) dst[total] = wc;
+		p += r;
+		total++; n--;
+	}
+	*src = p;
+	return total;
 }
 
-size_t wcsrtombs(char *dst, const wchar_t **src, size_t n, void *ps) {
-	(void)ps;
-	size_t r = wcstombs(dst, *src, n);
-	*src += r;
-	return r;
+size_t wcsrtombs(char *dst, const wchar_t **src, size_t n, mbstate_t *ps) {
+	size_t total = 0;
+	const wchar_t *p = *src;
+	while (*p) {
+		int len = wctomb(dst ? dst + total : NULL, *p);
+		if (len < 0) return (size_t)-1;
+		total += len;
+		if (dst && total > n) return (size_t)-1;
+		p++;
+	}
+	*src = NULL;
+	return total;
 }
 
 /* C11 7.29.6.1.1: btowc — single byte to wide char. */
@@ -173,9 +301,8 @@ int wctob(wint_t wc) {
 }
 
 /* C11 7.29.6.3: mbrlen — size of the byte sequence for a multibyte char. */
-size_t mbrlen(const char *s, size_t n, void *ps) {
-	(void)ps;
-	return (size_t)mblen(s, n);
+size_t mbrlen(const char *s, size_t n, mbstate_t *ps) {
+	return mbrtowc(NULL, s, n, ps);
 }
 
 /* wcwidth — printable column width (Unicode 15.0 EA Width + combining).
