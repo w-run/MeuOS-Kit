@@ -41,9 +41,31 @@ void _meuos_exc_try_end(void);
  * registered handler; abort() if none (uncaught).  Never returns. */
 _Noreturn void _meuos_exc_throw(int typecode, unsigned long long value);
 
+/* Object-payload throw (phase 4): carry an arbitrarily-sized object (not
+ * just a u64 scalar) from throw to catch.  The runtime heap-allocates an
+ * aligned buffer, copies the object into it (calling `copy` if non-NULL,
+ * else memcpy), destroys the source temporary (via `dtor` if non-NULL), then
+ * unwinds exactly like the scalar throw.  `align` selects the object's
+ * alignment; `offset` is the base-subobject offset (base/catch slicing;
+ * 0 for the first increment).  Trivial classes pass copy=NULL (memcpy) and
+ * dtor=NULL (no destruction).  Never returns. */
+_Noreturn void _meuos_exc_throw_obj(int typecode, size_t size, size_t align,
+                                    void (*copy)(void *, const void *),
+                                    void (*dtor)(void *),
+                                    int offset, const void *obj);
+
 /* Read the exception that activated the current catch. */
 int _meuos_exc_caught_type(void);
 unsigned long long _meuos_exc_caught_value(void);
+
+/* Object-payload catch accessors (phase 4): the current exception object
+ * pointer (to build/rebind the catch parameter) and release of the
+ * runtime-held heap object after the catch consumes it.  _caught_is_obj
+ * reports whether the active exception is an object (vs scalar).
+ * _meuos_exc_caught_free is idempotent and safe for a scalar exception. */
+const void *_meuos_exc_caught_obj(void);
+void _meuos_exc_caught_free(void);
+int _meuos_exc_caught_is_obj(void);
 
 #ifdef __cplusplus
 }
