@@ -350,17 +350,23 @@ check-cpp-virtual: $(MPP_BIN)
 check-cpp-func: $(MPP_BIN)
 	@for t in $$(ls test/cpp/*.cc | grep -v '\.neg\.cc' | grep -v '/virtual\.cc'); do \
 		out=/tmp/mpp-$$(basename $$t .cc); \
-		inc=; \
+		inc=; specsf="--specs=host"; \
 		case "$$t" in \
 		  */try_catch\.cc) \
-		    if [ -f ../meuos-libc/include/meuos_exc.h ]; then \
-		      inc="-I../meuos-libc/include"; \
-		    else \
+		    specsf="--specs=meuos"; \
+		    if [ ! -f ../meuos-libc/include/meuos_exc.h ]; then \
 		      echo "SKIP try_catch (meuos_exc.h not in ../meuos-libc/include)"; \
 		      continue; \
-		    fi ;; \
+		    fi; \
+		    inc="-I../meuos-libc/include"; \
+		    sr=$${MEUOS_SYSROOT:-/workspace/MeuOS-Kit/sysroot}; \
+		    if ! nm "$$sr/usr/lib/libc-meuos.a" 2>/dev/null | grep -q _meuos_exc_throw; then \
+		      echo "SKIP try_catch (sysroot $$sr libc lacks _meuos_exc_throw)"; \
+		      continue; \
+		    fi; \
+		    ;; \
 		esac; \
-		./$(MPP_BIN) --specs=host $$inc -o $$out $$t || exit $$?; \
+		./$(MPP_BIN) $$specsf $$inc -o $$out $$t || exit $$?; \
 		$$out || exit $$?; \
 		if [ "$$(basename $$t)" = "global_dtor.cc" ]; then \
 			$$out | grep -q "^dtor 3$$" || { echo "FAIL: global_dtor order"; exit 1; }; \
