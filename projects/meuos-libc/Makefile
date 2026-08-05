@@ -77,6 +77,21 @@ INCLUDE := -Iinclude -Isrc
 ATOMIC_OBJ := $(BUILD)/arch/$(ARCH)/atomic.o
 ATOMIC_LIB := $(BUILD)/libatomic-meuos.a
 
+# libgcc-meuos.a — soft runtime helpers in the libgcc ABI (__divdi3, __ctzdi2,
+# __floatsidf, ...).  Independent archive so these never pollute the libc
+# symbol table; gcc/clang targeting this sysroot link it in place of a vendor
+# libgcc.  Sources are generic C in src/libgcc_meuos/.
+LIBGCC_SRCS := $(wildcard src/libgcc_meuos/*.c)
+LIBGCC_OBJS := $(patsubst src/libgcc_meuos/%.c,$(BUILD)/libgcc_meuos/%.o,$(LIBGCC_SRCS))
+LIBGCC_LIB  := $(BUILD)/libgcc-meuos.a
+
+$(BUILD)/libgcc_meuos/%.o: src/libgcc_meuos/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(INCLUDE) -c -o $@ $<
+
+$(LIBGCC_LIB): $(LIBGCC_OBJS)
+	$(AR) rcs $@ $(LIBGCC_OBJS)
+
 # Per-arch runtime helpers (TLS, setjmp, sigreturn, thread clone).
 # load_gs.S and soft_arith.c are i386-only; set_tls.S is aarch64/armv7-only
 # (variant I TLS 用 msr tpidr_el0 / mcr p15 直接设置线程指针)。
@@ -210,7 +225,7 @@ ALL_OBJS := $(STRING_OBJS) $(STDLIB_OBJS) $(STDIO_OBJS) $(SYSCALL_OBJS) \
 # Build rules
 # ============================================================
 
-all: $(ATOMIC_LIB) $(LIBC_LIB) $(CRT1_OBJ) compat
+all: $(ATOMIC_LIB) $(LIBC_LIB) $(CRT1_OBJ) $(LIBGCC_LIB) compat
 
 # Atomic shim: assembly only.
 $(ATOMIC_OBJ): src/arch/$(ARCH)/atomic.S
@@ -271,19 +286,20 @@ compat:
 # Install
 # ============================================================
 
-install: $(ATOMIC_LIB) $(LIBC_LIB) $(CRT1_OBJ)
+install: $(ATOMIC_LIB) $(LIBC_LIB) $(CRT1_OBJ) $(LIBGCC_LIB)
 	@mkdir -p $(DESTDIR)$(PREFIX)/lib $(DESTDIR)$(PREFIX)/include/sys
 	cp -r include/. $(DESTDIR)$(PREFIX)/include/
 	cp $(LIBC_LIB)    $(DESTDIR)$(PREFIX)/lib/libc-meuos.a
 	cp $(ATOMIC_LIB)  $(DESTDIR)$(PREFIX)/lib/libatomic-meuos.a
 	cp $(CRT1_OBJ)    $(DESTDIR)$(PREFIX)/lib/crt1.o
+	cp $(LIBGCC_LIB)  $(DESTDIR)$(PREFIX)/lib/libgcc-meuos.a
 	@$(MAKE) -C src/compat install DESTDIR=$(DESTDIR) PREFIX=$(PREFIX) ARCH=$(ARCH)
 
 # ============================================================
 # Tests
 # ============================================================
 
-check: $(ATOMIC_LIB)
+check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	$(MAKE) install DESTDIR=$(abspath $(SYSROOT)) PREFIX=/usr
 	@mkdir -p /tmp/meuos-libc-check
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/atomic test/atomic.c
@@ -303,6 +319,7 @@ check: $(ATOMIC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/kernel-interfaces test/kernel_interfaces.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/auxv test/auxv.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/socket test/socket.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib --static -o /tmp/meuos-libc-check/libgcc test/libgcc.c -l:libgcc-meuos.a -l:libc-meuos.a
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/threads test/threads.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib -o /tmp/meuos-libc-check/crt test/crt.c -l:libc-meuos.a
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib -o /tmp/meuos-libc-check/env test/env.c -l:libc-meuos.a
@@ -342,8 +359,19 @@ check: $(ATOMIC_LIB)
 	/tmp/meuos-libc-check/process
 	/tmp/meuos-libc-check/kernel-interfaces
 	/tmp/meuos-libc-check/auxv
+	/tmp/meuos-libc-check/libgcc
 	/tmp/meuos-libc-check/socket
 	/tmp/meuos-libc-check/threads
+	@# libgcc soft helpers must live ONLY in libgcc-meuos.a, never pollute libc.
+	@if nm $(LIBC_LIB) 2>/dev/null | grep -Eq ' (__divdi3|__udivdi3|__ctzdi2|__floatsidf|__multi3)$$'; then \
+		echo "FAIL: libc-meuos.a must not export libgcc helpers" >&2; exit 1; fi
+	@# ... but the libgcc archive must provide them.
+	@for s in __divdi3 __udivdi3 __moddi3 __umoddi3 __muldi3 __clzdi2 __ctzdi2 \
+	          __popcountdi2 __clzsi2 __ctzsi2 __bswapsi2 __bswapdi2 __floatsidf \
+	          __floatdidf __floatdisf __fixdfdi; do \
+		if nm $(LIBGCC_LIB) 2>/dev/null | grep -Eq " [Tt] $$s$$"; then :; else \
+			echo "FAIL: libgcc-meuos.a missing helper $$s" >&2; exit 1; fi; \
+	done
 	@/tmp/meuos-libc-check/crt; status=$$?; test $$status -eq 42
 	/tmp/meuos-libc-check/env
 	/tmp/meuos-libc-check/bare-threads
