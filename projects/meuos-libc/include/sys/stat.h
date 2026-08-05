@@ -1,6 +1,7 @@
 #ifndef MEUOS_SYS_STAT_H
 #define MEUOS_SYS_STAT_H
 
+#include <features.h>
 #include <sys/types.h>
 #include <time.h>
 
@@ -30,10 +31,12 @@ struct stat {
 #define S_ISDIR(mode) (((mode) & S_IFMT) == S_IFDIR)
 #define S_ISLNK(mode) (((mode) & S_IFMT) == S_IFLNK)
 
+__BEGIN_DECLS
 int stat(const char *, struct stat *);
 int fstat(int, struct stat *);
 int lstat(const char *, struct stat *);
 int chmod(const char *, mode_t);
+__END_DECLS
 
 #endif
 
@@ -70,4 +73,6 @@ int chmod(const char *, mode_t);
 #define st_atime st_atim.tv_sec
 #define st_mtime st_mtim.tv_sec
 #define st_ctime st_ctim.tv_sec
+__BEGIN_DECLS
 int fchmod(int, mode_t);
+__END_DECLS

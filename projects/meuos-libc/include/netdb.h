@@ -3,6 +3,7 @@
 
 #include <sys/types.h>
 #include <netinet/in.h>
+#include <features.h>
 
 struct addrinfo {
 	int ai_flags;
@@ -49,6 +50,7 @@ struct addrinfo {
 #define EAI_INTR       -104
 #define EAI_IDN_ENCODE -105
 
+__BEGIN_DECLS
 int getaddrinfo(const char *__restrict, const char *__restrict,
                 const struct addrinfo *__restrict,
                 struct addrinfo **__restrict);
@@ -139,6 +141,7 @@ int getservbyport_r(int, const char *, struct servent *, char *, size_t,
                     struct servent **);
 int getservbyname_r(const char *, const char *, struct servent *, char *,
                     size_t, struct servent **);
+__END_DECLS
 
 #define NI_MAXHOST 1025
 #define NI_MAXSERV 32

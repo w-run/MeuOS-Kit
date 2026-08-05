@@ -2,6 +2,7 @@
 #define _LOCALE_H
 
 #define LC_ALL          0
+#include <features.h>
 #define LC_COLLATE      1
 #define LC_CTYPE        2
 #define LC_MONETARY     3
@@ -34,7 +35,9 @@ struct lconv {
 	char int_n_sep_by_space;
 };
 
+__BEGIN_DECLS
 char *setlocale(int, const char *);
 struct lconv *localeconv(void);
+__END_DECLS
 
 #endif
