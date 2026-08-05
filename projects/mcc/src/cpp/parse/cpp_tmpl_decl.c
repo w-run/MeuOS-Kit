@@ -777,6 +777,7 @@ cpp_template_decl(struct scope *s, struct type *owner)
 	tmpl->insts_end = &tmpl->insts;
 	tmpl->cls_insts = NULL;
 	tmpl->cls_insts_end = &tmpl->cls_insts;
+	tmpl->partials = NULL;
 	tmpl->constraint = NULL;
 	tmpl->nconstraint = 0;
 	tmpl->next = NULL;
@@ -1049,6 +1050,7 @@ param_done:
 		ct->insts_end = &ct->insts;
 		ct->cls_insts = NULL;
 		ct->cls_insts_end = &ct->cls_insts;
+		ct->partials = NULL;
 		ct->next = NULL;
 		free(tmpl); /* the original was just a scaffolding copy */
 		tmpl = ct;
@@ -1266,6 +1268,78 @@ param_done:
 	}
 	if (!tmpl->name)
 		error_code(E_DECL, &tok.loc, "unable to determine template function name");
+
+	/* class-template partial specialization: `template<typename T> struct
+	 * Name<pattern> { ... }`.  The class-id's template argument list (the
+	 * `Name < pattern >` written against this template's own params) marks a
+	 * partial specialization of the already-registered primary `Name`, not a
+	 * primary declaration of its own.  Register its params + pattern + body
+	 * as a matching rule on the primary template and do not add a duplicate
+	 * primary entry. */
+	if (!tmpl->is_member && tmpl->is_class) {
+		struct cpp_template *prim;
+		size_t j = 0;
+		for (; j < ntoks; ++j)
+			if (toks[j].kind >= TIDENT &&
+			    strcmp(tokenstr(toks[j].kind), tmpl->name) == 0)
+				break;
+		if (j + 1 < ntoks && toks[j + 1].kind == TLESS) {
+			for (prim = g_cpp_templates; prim; prim = prim->next)
+				if (prim->is_class &&
+				    strcmp(prim->name, tmpl->name) == 0)
+					break;
+			if (!prim)
+				error_code(E_TEMPLATE, &tok.loc,
+				    "partial specialization of undeclared class template '%s'",
+				    tmpl->name);
+			{
+				struct cpp_tmpl_partial *par = xmalloc(sizeof *par);
+				struct token *ppat = NULL;
+				size_t npat = 0, k;
+				int d = 0;
+				/* copy the pattern-list tokens `T *` (between the class
+				 * name's '<' and its matching '>') */
+				for (k = j + 1; k < ntoks; ++k) {
+					if (k == j + 1)
+						continue; /* skip '<' */
+					if (toks[k].kind == TLESS)
+						++d;
+					else if (toks[k].kind == TGREATER) {
+						if (d == 0)
+							break;
+						--d;
+					}
+					ppat = xreallocarray(ppat, npat + 1, sizeof *ppat);
+					ppat[npat++] = toks[k];
+				}
+				par->params = tmpl->params;
+				par->patargs = ppat;
+				par->npatargs = npat;
+				/* body = tokens AFTER the class-id closing '>' */
+				{
+					size_t bodystart = 0, fd = 0, q;
+					for (q = j + 1; q < ntoks; ++q) {
+						if (toks[q].kind == TLESS)
+							++fd;
+						else if (toks[q].kind == TGREATER) {
+							--fd;
+							if (fd == 0) {
+								bodystart = q + 1;
+								break;
+							}
+						}
+					}
+					par->ntoks = ntoks - bodystart;
+					par->toks = xmalloc(par->ntoks * sizeof *par->toks);
+					for (q = 0; q < par->ntoks; ++q)
+						par->toks[q] = toks[bodystart + q];
+				}
+				par->next = prim->partials;
+				prim->partials = par;
+			}
+			return; /* partial spec registered on the primary; no new primary */
+		}
+	}
 
 	*g_cpp_templates_end = tmpl;
 	g_cpp_templates_end = &tmpl->next;
