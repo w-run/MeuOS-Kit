@@ -580,6 +580,7 @@ mcc_main(int argc, char *argv[])
 		case 'd': { for (char *p = a + 2; *p; ++p) {
 			if (*p <= 'Z') debug[(unsigned char)*p] = 1;
 			if (*p == 'P') g_opt_log = 1;   /* -dP: per-pass optimizer log */
+			if (*p == 'M') g_opt_snapshot = 1; /* -dM: per-pass MIR snapshot */
 		} break; }
 		case 'P': break;   /* suppress line markers in -E */
 		case 'H': break;   /* print includes */

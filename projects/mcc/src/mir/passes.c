@@ -44,6 +44,12 @@ int g_mir_fold_aggressive;
  * eliminated, ...).  Declared in ir.h; the driver sets it for -dP. */
 int g_opt_log;
 
+/* -dM (per-pass MIR snapshot): when nonzero, run_plog dumps the full MIR of
+ * the function to stderr after each pass, so the user can see exactly how
+ * each optimization step shaped the intermediate representation.  Declared
+ * in ir.h; driver sets it for -dM. */
+int g_opt_snapshot;
+
 /* ---- use chain construction ------------------------------------------- */
 
 static void
@@ -1181,11 +1187,18 @@ mir_pass_name(enum MIRPass pass)
 }
 
 /* Run a single pass; with g_opt_log (-dP) print one line recording how many
- * transformations it made (each pass already returns its change count). */
+ * transformations it made (each pass already returns its change count).  With
+ * g_opt_snapshot (-dM) dump the function MIR to stderr after the pass so the
+ * user sees the per-pass IR shaping. */
 static uint32_t
 run_plog(MFn *fn, enum MIRPass pass)
 {
 	uint32_t n = run_mir_pass(fn, pass);
+	if (g_opt_snapshot) {
+		fprintf(stderr, "\n> MIR after pass %s (%u change%s):\n",
+		    mir_pass_name(pass), n, n == 1 ? "" : "s");
+		mfn_dump(fn, stderr);
+	}
 	if (g_opt_log && n)
 		fprintf(stderr, "  [%s] %s: %u change%s\n", fn->name,
 		    mir_pass_name(pass), n, n == 1 ? "" : "s");

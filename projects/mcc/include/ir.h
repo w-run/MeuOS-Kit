@@ -541,6 +541,7 @@ extern int g_opt_size;  /* -Os/-Oz: size-oriented codegen */
 extern int g_opt_z;     /* -Oz: aggressive size */
 extern int g_fast_math; /* -Ofast: fast-math semantics (recorded only) */
 extern int g_opt_log;   /* -dP / --opt-log: per-pass optimizer change log */
+extern int g_opt_snapshot; /* -dM: per-pass MIR snapshot dump */
 extern int warn_level;  /* WARN_* bitmask, default WARN_ALL */
 
 /* TLS access model */
