@@ -31,6 +31,7 @@ extern FILE *stdin;
 extern FILE *stdout;
 extern FILE *stderr;
 
+__BEGIN_DECLS
 int putchar(int);
 int getchar(void);
 int getc(FILE *);
@@ -93,5 +94,6 @@ int vsscanf(const char *, const char *, va_list);
 int sscanf(const char *, const char *, ...);
 int scanf(const char *, ...);
 void perror(const char *);
+__END_DECLS
 
 #endif

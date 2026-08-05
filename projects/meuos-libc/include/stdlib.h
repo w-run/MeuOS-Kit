@@ -4,6 +4,7 @@
 #include <features.h>
 #include <stddef.h>
 
+__BEGIN_DECLS
 void *malloc(size_t);
 void free(void *);
 void *calloc(size_t, size_t);
@@ -32,5 +33,6 @@ char *mktemp(char *);
 char *mkdtemp(char *);
 char *canonicalize_file_name(const char *);
 char *realpath(const char *, char *);
+__END_DECLS
 
 #endif
