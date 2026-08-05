@@ -711,6 +711,106 @@ emit_ins(FILE *f, MInsM *in)
 				fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sslot1 + 4);
 				fputs("\tsbbl\t%ecx, %eax\n", f);
 				if (d) fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot + 4);
+			} else if (op == MMOP_SHL || op == MMOP_SHR || op == MMOP_SAR) {
+				/* i64 shift on i386: the 64-bit value lives in two 32-bit
+				 * halves (lo @ sslot0, hi @ sslot0+4) and a correct shift must
+				 * move bits across the halves, unlike the naive per-half
+				 * fallback (which loses the carried bits for shifts >= 32 —
+				 * `1LL << 40` would zero the high half instead of moving the
+				 * bit up).  i386 register shifts take the count in %cl (8-bit)
+				 * — never the whole %ecx — and we avoid shld/shrd (mt/as only
+				 * knows plain shl/shr/sar), so carry bits are combined by
+				 * re-reading operand halves from their slots.  Constant shift
+				 * counts/operands are normalised into their slots first so the
+				 * slot reads below see fully-stored values. */
+				static uint32_t g_i64sh_id;
+				uint32_t sid = g_i64sh_id++;
+				const char *sh   = (op == MMOP_SHL) ? "shl"   :
+				                  (op == MMOP_SAR) ? "sar"   : "shr";
+				bool is_arith = (op == MMOP_SAR);
+				/* materialize const operands into their slots (i64 splitted
+				 * across a slot pair; a const shift count is scalar i32) */
+				if (s0 && s0->kind == MV_CONST && s0->con) {
+					int64_t cv = s0->con->u.i;
+					fprintf(f, "\tmovl\t$%d, %%eax\n", (int32_t)cv);
+					fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", sslot0);
+					fprintf(f, "\tmovl\t$%d, %%eax\n", (int32_t)((uint64_t)cv >> 32));
+					fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", sslot0 + 4);
+				}
+				if (s1 && s1->kind == MV_CONST && s1->con) {
+					fprintf(f, "\tmovl\t$%d, %%eax\n", (int32_t)s1->con->u.i);
+					fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", sslot1);
+				}
+				/* load lo/hi/s; check s < 32 */
+				fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot0);
+				fprintf(f, "\tmovl\t%d(%%ebp), %%edx\n", sslot0 + 4);
+				fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sslot1);
+				fprintf(f, "\tcmpl\t$32, %%ecx\n");
+				fprintf(f, "\tjge\t.Li64sh_ge%u\n", sid);
+				if (op == MMOP_SHL) {
+					/* s < 32: lo' = lo<<s ; hi' = (hi<<s)|(lo>>(32-s)).
+					 * ebx is scratch (i386 MIR is slot-resident here).  The
+					 * shift count is always reloaded as %cl. */
+					fprintf(f, "\tmovl\t%%eax, %%ebx\n");   /* ebx = lo */
+					fprintf(f, "\tshl\t%%cl, %%eax\n");     /* eax = lo' */
+					fprintf(f, "\tnegl\t%%ecx\n");
+					fprintf(f, "\taddl\t$32, %%ecx\n");     /* cl = 32-s */
+					fprintf(f, "\tshr\t%%cl, %%ebx\n");     /* ebx = lo>>(32-s) = carry */
+					fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sslot1);  /* cl = s */
+					fprintf(f, "\tmovl\t%d(%%ebp), %%edx\n", sslot0 + 4);  /* edx = hi */
+					fprintf(f, "\tshl\t%%cl, %%edx\n");     /* edx = hi<<s */
+					fprintf(f, "\torl\t%%ebx, %%edx\n");    /* edx = hi' */
+				} else if (op == MMOP_SHR) {
+					/* s < 32 (logical): hi' = hi>>s ; lo' = (lo>>s)|(hi<<(32-s)) */
+					fprintf(f, "\tmovl\t%%edx, %%ebx\n");   /* ebx = hi */
+					fprintf(f, "\tshr\t%%cl, %%ebx\n");     /* ebx = hi' (saved) */
+					fprintf(f, "\tnegl\t%%ecx\n");
+					fprintf(f, "\taddl\t$32, %%ecx\n");     /* cl = 32-s */
+					fprintf(f, "\tshl\t%%cl, %%edx\n");     /* edx = hi<<(32-s) */
+					fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot0);  /* eax = lo */
+					fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sslot1);  /* cl = s */
+					fprintf(f, "\tshr\t%%cl, %%eax\n");     /* eax = lo>>s */
+					fprintf(f, "\torl\t%%edx, %%eax\n");    /* eax = lo' */
+					fprintf(f, "\tmovl\t%%ebx, %%edx\n");   /* edx = hi' */
+				} else {
+					/* SAR s < 32 (arithmetic): hi' = hi>>s (sign fill) ;
+					 * lo' = (lo>>s)|(hi<<(32-s)) */
+					fprintf(f, "\tmovl\t%%edx, %%ebx\n");   /* ebx = hi */
+					fprintf(f, "\tsar\t%%cl, %%ebx\n");     /* ebx = hi' (saved) */
+					fprintf(f, "\tnegl\t%%ecx\n");
+					fprintf(f, "\taddl\t$32, %%ecx\n");     /* cl = 32-s */
+					fprintf(f, "\tshl\t%%cl, %%edx\n");     /* edx = hi<<(32-s) */
+					fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot0);  /* eax = lo */
+					fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sslot1);  /* cl = s */
+					fprintf(f, "\tsar\t%%cl, %%eax\n");     /* eax = lo>>s */
+					fprintf(f, "\torl\t%%edx, %%eax\n");    /* eax = lo' */
+					fprintf(f, "\tmovl\t%%ebx, %%edx\n");   /* edx = hi' */
+				}
+				fprintf(f, "\tjmp\t.Li64sh_done%u\n", sid);
+				/* ---- s >= 32 ---- */
+				fprintf(f, ".Li64sh_ge%u:\n", sid);
+				if (op == MMOP_SHL) {
+					/* hi' = lo<<(s-32); lo' = 0 */
+					fprintf(f, "\tsubl\t$32, %%ecx\n");
+					fprintf(f, "\tmovl\t%%eax, %%edx\n");    /* edx = lo */
+					fprintf(f, "\tshl\t%%cl, %%edx\n");      /* edx = lo<<(s-32) */
+					fprintf(f, "\txorl\t%%eax, %%eax\n");    /* lo' = 0 */
+				} else {
+					/* SHR/SAR s >= 32: lo' = hi>>(s-32); hi' = 0 or sign fill */
+					fprintf(f, "\tsubl\t$32, %%ecx\n");
+					fprintf(f, "\tmovl\t%%edx, %%eax\n");    /* eax = hi */
+					fprintf(f, "\t%s\t%%cl, %%eax\n", sh);   /* eax = hi>>(s-32) = lo' */
+					if (is_arith)
+						fprintf(f, "\tsar\t$31, %%edx\n");  /* hi' = sign fill */
+					else
+						fprintf(f, "\txorl\t%%edx, %%edx\n"); /* hi' = 0 */
+				}
+				fprintf(f, ".Li64sh_done%u:\n", sid);
+				if (d) {
+					fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot);
+					fprintf(f, "\tmovl\t%%edx, %d(%%ebp)\n", dslot + 4);
+				}
+				return;
 			} else {
 				/* fallback: load low, do 32-bit op, store; then
 				 * load high, do 32-bit op (no carry), store */
