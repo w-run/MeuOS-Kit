@@ -29,8 +29,12 @@ cpp_tmpl_deduce(struct cpp_template *tmpl, struct scope *s,
 
 	for (p = tmpl->params; p && !p->is_pack; p = p->next)
 		++nfix;
-	/* explicit template arguments fill the leading parameters first */
-	for (p = tmpl->params; i < g_cpp_tmpl_expl_n && p; ++i, p = p->next) {
+	/* explicit template arguments fill the leading parameters first;
+	 * a trailing parameter pack keeps absorbing every remaining explicit
+	 * arg (don't advance past it), so `count<int, double, char>` binds all
+	 * three into the one pack. */
+	for (p = tmpl->params; i < g_cpp_tmpl_expl_n && p; ++i) {
+		bool is_pack_param = p->is_pack;
 		if (g_cpp_tmpl_expl_isval[i]) {
 			out[i] = g_cpp_tmpl_expl_types[i];
 			if (nttp_vals)
@@ -38,8 +42,11 @@ cpp_tmpl_deduce(struct cpp_template *tmpl, struct scope *s,
 		} else {
 			out[i] = g_cpp_tmpl_expl_types[i];
 		}
+		if (!is_pack_param)
+			p = p->next;
 	}
 	for (a = arglist; a; a = a->next, ++i) {
+		bool is_pack_param = p && p->is_pack;
 		if (i < 16) {
 			if (p && p->is_nttp) {
 				/* non-type template argument must be a constant
@@ -59,7 +66,9 @@ cpp_tmpl_deduce(struct cpp_template *tmpl, struct scope *s,
 		} else {
 			error_code(E_SYNTAX, &tok.loc, "too many arguments for template '%s'", tmpl->name);
 		}
-		if (p)
+		/* stay on a trailing pack so every remaining call arg deduces into
+		 * it (the pack absorbs an arbitrary number of elements) */
+		if (p && !is_pack_param)
 			p = p->next;
 	}
 	/* C++11 default template arguments: for remaining fixed parameters
