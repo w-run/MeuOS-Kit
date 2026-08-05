@@ -795,6 +795,158 @@ emit_ins(FILE *f, MInsM *in)
 					load_imm(f, "r12", dslot + 4 + g_slot_base);
 					fprintf(f, "\tstr\tr10, [fp, r12]\n");
 				}
+			} else if (op == MMOP_SHL || op == MMOP_SHR || op == MMOP_SAR) {
+				/* i64 shift on arm: the 64-bit value lives in two 32-bit
+				 * halves (lo @ sslot0, hi @ sslot0+4); a correct shift must
+				 * move bits across the halves, unlike the per-half fallback
+				 * (which loses the carried bits for shifts >= 32 — e.g.
+				 * `1LL << 40` would clear the low half instead of moving the
+				 * bit up into the high half).  `s` is the (possibly runtime)
+				 * shift count; operands are re-read from their slots so only
+				 * the r10/r12 scratch registers are needed, staging through
+				 * the destination slots.
+				 *
+				 *   SHL: lo' = lo<<s (s<32) / 0 (s>=32)
+				 *        hi' = (hi<<s)|(lo>>(32-s)) (s<32) / lo<<(s-32) (s<64) / 0
+				 *   SHR (logical): hi' = hi>>s (s<32) / 0 (s>=32)
+				 *        lo' = (lo>>s)|(hi<<(32-s)) (s<32) / hi>>(s-32) (s<64) / 0
+				 *   SAR (arith):   hi' = hi>>s (arith, sign fill)
+				 *        lo' as SHR for s<32; for s>=32 lo' = hi>>(s-32), hi' = hi>>31 */
+				const char *sh = (op == MMOP_SHL) ? "lsl" :
+				                 (op == MMOP_SAR) ? "asr" : "lsr";
+				/* is_arith: for SHR-style ops whose high half sign-fills */
+				bool is_arith = (op == MMOP_SAR);
+				/* unique label suffix per shift instruction (a function may
+				 * contain several shifts with the same op) */
+				static uint32_t g_i64sh_id;
+				uint32_t sid = g_i64sh_id++;
+				/* ---- branch: s < 32 vs s >= 32 ---- */
+				/* load s -> r12, compare */
+				load_imm(f, "r12", sslot1 + g_slot_base);
+				fprintf(f, "\tldr\tr12, [fp, r12]\n");
+				fprintf(f, "\tcmp\tr12, #32\n");
+				fprintf(f, "\tbge\t.Le64s_ge%u\n", sid);
+				/* ---- s < 32 path ---- */
+				if (op == MMOP_SHL) {
+					/* lo' = lo << s */
+					load_imm(f, "r10", sslot0 + g_slot_base);
+					fprintf(f, "\tldr\tr10, [fp, r10]\n");
+					load_imm(f, "r12", sslot1 + g_slot_base);
+					fprintf(f, "\tldr\tr12, [fp, r12]\n");
+					fprintf(f, "\tlsl\tr10, r10, r12\n");
+					load_imm(f, "r12", dslot + g_slot_base);
+					fprintf(f, "\tstr\tr10, [fp, r12]\n");
+					/* stage lo>>(32-s) in dst low slot */
+					load_imm(f, "r10", sslot0 + g_slot_base);
+					fprintf(f, "\tldr\tr10, [fp, r10]\n");
+					load_imm(f, "r12", sslot1 + g_slot_base);
+					fprintf(f, "\tldr\tr12, [fp, r12]\n");
+					fprintf(f, "\trsb\tr12, r12, #32\n");
+					fprintf(f, "\tlsr\tr10, r10, r12\n");
+					load_imm(f, "r12", dslot + g_slot_base);
+					fprintf(f, "\tstr\tr10, [fp, r12]\n");
+					/* hi' = (hi<<s) | (staged lo>>(32-s)) */
+					load_imm(f, "r10", sslot0 + 4 + g_slot_base);
+					fprintf(f, "\tldr\tr10, [fp, r10]\n");
+					load_imm(f, "r12", sslot1 + g_slot_base);
+					fprintf(f, "\tldr\tr12, [fp, r12]\n");
+					fprintf(f, "\tlsl\tr10, r10, r12\n");
+					load_imm(f, "r12", dslot + g_slot_base);
+					fprintf(f, "\tldr\tr12, [fp, r12]\n");
+					fprintf(f, "\torr\tr10, r10, r12\n");
+					load_imm(f, "r12", dslot + 4 + g_slot_base);
+					fprintf(f, "\tstr\tr10, [fp, r12]\n");
+					/* restore lo' (overwritten by the staged value) */
+					load_imm(f, "r10", sslot0 + g_slot_base);
+					fprintf(f, "\tldr\tr10, [fp, r10]\n");
+					load_imm(f, "r12", sslot1 + g_slot_base);
+					fprintf(f, "\tldr\tr12, [fp, r12]\n");
+					fprintf(f, "\tlsl\tr10, r10, r12\n");
+					load_imm(f, "r12", dslot + g_slot_base);
+					fprintf(f, "\tstr\tr10, [fp, r12]\n");
+				} else {
+					/* SHR/SAR, s < 32: hi' = hi>>s (arith for SAR) */
+					load_imm(f, "r10", sslot0 + 4 + g_slot_base);
+					fprintf(f, "\tldr\tr10, [fp, r10]\n");
+					load_imm(f, "r12", sslot1 + g_slot_base);
+					fprintf(f, "\tldr\tr12, [fp, r12]\n");
+					fprintf(f, "\t%s\tr10, r10, r12\n", sh);
+					load_imm(f, "r12", dslot + 4 + g_slot_base);
+					fprintf(f, "\tstr\tr10, [fp, r12]\n");
+					/* stage hi<<(32-s) in dst high slot (arm lsr on the
+					 * original hi for the OR contribution) */
+					load_imm(f, "r10", sslot0 + 4 + g_slot_base);
+					fprintf(f, "\tldr\tr10, [fp, r10]\n");
+					load_imm(f, "r12", sslot1 + g_slot_base);
+					fprintf(f, "\tldr\tr12, [fp, r12]\n");
+					fprintf(f, "\trsb\tr12, r12, #32\n");
+					fprintf(f, "\tlsl\tr10, r10, r12\n");
+					load_imm(f, "r12", dslot + 4 + g_slot_base);
+					fprintf(f, "\tstr\tr10, [fp, r12]\n");
+					/* lo' = (lo>>s) | (staged hi<<(32-s)) */
+					load_imm(f, "r10", sslot0 + g_slot_base);
+					fprintf(f, "\tldr\tr10, [fp, r10]\n");
+					load_imm(f, "r12", sslot1 + g_slot_base);
+					fprintf(f, "\tldr\tr12, [fp, r12]\n");
+					fprintf(f, "\t%s\tr10, r10, r12\n", sh);
+					load_imm(f, "r12", dslot + 4 + g_slot_base);
+					fprintf(f, "\tldr\tr12, [fp, r12]\n");
+					fprintf(f, "\torr\tr10, r10, r12\n");
+					load_imm(f, "r12", dslot + g_slot_base);
+					fprintf(f, "\tstr\tr10, [fp, r12]\n");
+					/* restore hi' (overwritten by staged) */
+					load_imm(f, "r10", sslot0 + 4 + g_slot_base);
+					fprintf(f, "\tldr\tr10, [fp, r10]\n");
+					load_imm(f, "r12", sslot1 + g_slot_base);
+					fprintf(f, "\tldr\tr12, [fp, r12]\n");
+					fprintf(f, "\t%s\tr10, r10, r12\n", sh);
+					load_imm(f, "r12", dslot + 4 + g_slot_base);
+					fprintf(f, "\tstr\tr10, [fp, r12]\n");
+				}
+				fprintf(f, "\tb\t.Le64s_done%u\n", sid);
+				/* ---- s >= 32 path ---- */
+				fprintf(f, ".Le64s_ge%u:\n", sid);
+				if (op == MMOP_SHL) {
+					/* hi' = lo << (s-32) — read lo BEFORE zeroing the dest
+					 * low half, in case dest aliases the source slot */
+					load_imm(f, "r10", sslot0 + g_slot_base);
+					fprintf(f, "\tldr\tr10, [fp, r10]\n");
+					load_imm(f, "r12", sslot1 + g_slot_base);
+					fprintf(f, "\tldr\tr12, [fp, r12]\n");
+					fprintf(f, "\tsub\tr12, r12, #32\n");
+					fprintf(f, "\tlsl\tr10, r10, r12\n");
+					load_imm(f, "r12", dslot + 4 + g_slot_base);
+					fprintf(f, "\tstr\tr10, [fp, r12]\n");
+					/* lo' = 0 */
+					load_imm(f, "r12", dslot + g_slot_base);
+					fprintf(f, "\tmov\tr10, #0\n");
+					fprintf(f, "\tstr\tr10, [fp, r12]\n");
+				} else {
+					/* SHR/SAR, s >= 32: lo' = hi >> (s-32), hi' = 0 (logical)
+					 * or the sign fill hi>>31 (arith).  Compute lo' first so
+					 * the source hi is read before the (possibly aliased)
+					 * destination high half is written. */
+					load_imm(f, "r10", sslot0 + 4 + g_slot_base);
+					fprintf(f, "\tldr\tr10, [fp, r10]\n");
+					load_imm(f, "r12", sslot1 + g_slot_base);
+					fprintf(f, "\tldr\tr12, [fp, r12]\n");
+					fprintf(f, "\tsub\tr12, r12, #32\n");
+					fprintf(f, "\t%s\tr10, r10, r12\n", sh);
+					load_imm(f, "r12", dslot + g_slot_base);
+					fprintf(f, "\tstr\tr10, [fp, r12]\n");
+					/* hi' = 0 (logical) or hi>>31 (arith sign fill) */
+					load_imm(f, "r12", dslot + 4 + g_slot_base);
+					if (is_arith) {
+						load_imm(f, "r10", sslot0 + 4 + g_slot_base);
+						fprintf(f, "\tldr\tr10, [fp, r10]\n");
+						fprintf(f, "\tasr\tr10, r10, #31\n");
+					} else {
+						fprintf(f, "\tmov\tr10, #0\n");
+					}
+					fprintf(f, "\tstr\tr10, [fp, r12]\n");
+				}
+				fprintf(f, ".Le64s_done%u:\n", sid);
+				return;
 			} else {
 				/* fallback: load low, do 32-bit op, store; then
 				 * load high, do 32-bit op (no carry), store */
