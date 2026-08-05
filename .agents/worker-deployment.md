@@ -36,8 +36,8 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 
 | 分支 | 用途 |
 |---|---|
-| `main` | 最终合流，核心交付完成前**禁止合并**（AGENTS.md 约束） |
-| `worktree-mxx-work` | mcc/m++ 开发主线（共享工作树 `.agents/worktrees/mxx-work/`） |
+| `main` | 最终合流，核心交付完成前**禁止合并** |
+| `feat/mpp-complete` | **m++ 完整战役永久主干分支**（取代旧的 mxx-work，m++ C++98~23 完整前不合并 main） |
 | `worktree-<wip>-<name>` | 各 worker 的在途半成品恢复点（每个都 push 远端） |
 | `worktree-tmp-<name>` | 各 worker 独立临时 worktree 分支（完成后合入主线） |
 
@@ -58,9 +58,16 @@ git checkout -b worktree-resume-<name> origin/worktree-<name>
 
 ---
 
-## 3. Worker 状态表（当前团队）
+## 3. Worker 状态表（当前团队 — 2026-08-06 m++ 完整战役）
 
-团队：`mcc-team-r5`（2026-08-03 网络故障后重建）
+团队：`mpp-campaign`（战役级永久团队，目标达成前不解散）
+
+| Worker | 模型 | 分支 | Worktree | 任务 | 状态 |
+|--------|------|------|----------|------|------|
+| backend-dev | reasoning | work/mcc-backend | .agents/worktrees/mcc-backend | Phase 1: verify-all FAIL=5 修复（check-driver/mt-integration/arm/i386-runtime/c-mir）→ Phase 2: 后端开放缺陷（static-array/i386 i64/loongarch64） | 🔄 Phase 1 |
+| mpp-dev | reasoning | work/mpp-cpp | .agents/worktrees/mpp-cpp | Phase 1: 缺陷 M + 预存 4 项缺陷（成员/模板决议）→ Phase 2: C++ 异常后端（.eh_frame/landingpad） | 🔄 Phase 1 |
+| libc-dev | lite | work/libc-full | .agents/worktrees/libc-full | Phase 1: vfprintf 负数修复 + i386 软除 helpers → Phase 2: C++ 异常运行时 | 🔄 Phase 1 |
+| toolchain-dev | lite | work/toolchain-deep | .agents/worktrees/toolchain-deep | Phase 1: mt/as 局部标签 + mt/ld PIE RELATIVE → Phase 2: JMPREL + EOVERFLOW + loongarch64 | 🔄 Phase 1 |
 命名规范：**常见女性英文名**（不用数字尾缀，避免重名）。
 
 | Worker | 模型 | 分支 | Worktree | 任务 | 状态 | 上次 push |
