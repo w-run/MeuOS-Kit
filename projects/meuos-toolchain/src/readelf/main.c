@@ -1835,15 +1835,27 @@ decode_attr_value(const unsigned char **pp, const unsigned char *end,
 	case 0x18: /* exprloc */
 		blk = (form == 0x0a) ? ((p < end) ? *p++ : 0)
 		                     : (size_t)read_uleb(&p, end);
-		i = 0;
-		while (i < blk && p < end && i < 12) {
-			snprintf(out + strlen(out), outsz - strlen(out), "%s%02x",
-			         i ? " " : "", *p++);
-			++i;
+		/* Common location expressions: a single DW_OP_reg<N> /
+		 * DW_OP_fbreg reads much more clearly than raw bytes. */
+		if (blk == 1 && p < end) {
+			unsigned char b = *p++;
+			if (b >= 0x50 && b <= 0x6f)
+				snprintf(out, outsz, "(DW_OP_reg%u)", b - 0x50);
+			else if (b == 0x91)
+				snprintf(out, outsz, "(DW_OP_fbreg)");
+			else
+				snprintf(out, outsz, "%02x", b);
+		} else {
+			i = 0;
+			while (i < blk && p < end && i < 12) {
+				snprintf(out + strlen(out), outsz - strlen(out), "%s%02x",
+				         i ? " " : "", *p++);
+				++i;
+			}
+			if (i < blk)
+				snprintf(out + strlen(out), outsz - strlen(out), " ...");
+			while (i < blk && p < end) { ++p; ++i; }
 		}
-		if (i < blk)
-			snprintf(out + strlen(out), outsz - strlen(out), " ...");
-		while (i < blk && p < end) { ++p; ++i; }
 		break;
 	case 0x17: /* sec_offset */
 		u = 0;
