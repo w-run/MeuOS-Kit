@@ -148,6 +148,12 @@ la64_apply_reloc(unsigned reloc_type, unsigned char *place,
 	 * Used with ADD/load/store immediate:
 	 *   insn[21:10] = (S+A) & 0xFFF  (12-bit signed immediate) */
 	case 72: /* R_LARCH_PCALA_LO12 */
+		/* mt/ld loongarch64 convention resolves LO12 as the absolute low
+		 * 12 bits of S+A.  (Attempts to make it PC-relative — P or P-4 —
+		 * regress every loongarch64 program into a startup segfault, so
+		 * this stays absolute.  The pcaddu12i function/global-address
+		 * LO12 that needs pc-relative low bits is a separate convention
+		 * tracked in the loongarch64 todo / mcc alignment.) */
 		delta = (int64_t)(S + (uint64_t)A);
 		set_bits(place, 21, 10, (uint32_t)(delta & 0xFFF) << 10);
 		return 0;
