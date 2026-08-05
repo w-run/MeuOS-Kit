@@ -11,11 +11,11 @@
 set -eu
 
 AS="${1:?usage: as_arm_neg.sh <as> [readelf]}"
-READELF="${2:-readelf}"
+READELF="${2:-$(command -v readelf 2>/dev/null || echo readelf)}"
 # Resolve to absolute so cd $work doesn't break them.
 AS=$(CDPATH= cd -- "$(dirname -- "$AS")" && pwd)/$(basename -- "$AS")
 case "$READELF" in
-	/*) ;; *) READELF=$(CDPATH= cd -- "$(dirname -- "$READELF")" && pwd)/$(basename -- "$READELF");;
+	/*) ;; *) READELF=$(command -v "$READELF");;
 esac
 
 work=$(mktemp -d /tmp/mt-as-armneg.XXXXXX)
@@ -28,11 +28,11 @@ inst_word() {
 	ins=$1
 	printf '.text\n.globl f\nf:\n\t%s\n\tbx lr\n' "$ins" > t.s
 	"$AS" --target=arm -o t.o t.s 2>/dev/null || return 1
-	off=$("$READELF" -S t.o 2>/dev/null | awk '/\.text/ {print $5}')
+	off=$("$READELF" -S t.o 2>/dev/null | awk '$0 ~ /\.text/ && $3==".text" {print $6}')
 	[ -n "$off" ] || return 1
 	bytes=$(od -An -tx1 -j $((0x$off)) -N 4 t.o | tr -d ' \n')
-	# bytes are little-endian on disk; emit as a big-endian word
-	echo "0x$(echo "$bytes" | sed 's/\(..\)\(..\)\(..\)\(..\)/\4\3\2\1/')"
+	# bytes are little-endian on disk; emit as a big-endian word, uppercase
+	echo "0x$(echo "$bytes" | sed 's/\(..\)\(..\)\(..\)\(..\)/\4\3\2\1/' | tr 'a-f' 'A-F')"
 }
 
 fail=0
