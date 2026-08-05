@@ -856,6 +856,21 @@ branch2:
 		return 0;
 	}
 
+	/* === pcaddu12i rd, %pc_hi20(sym) ===
+	 * PC-relative high 20 (large code model): rd = PC + signext(imm20)<<12.
+	 * Pairs with `addi.d rd, rd, %pc_lo12(sym)`.  Same 1RI20 imm20 field as
+	 * pcalau12i but opcode 0x1C.  R_LARCH_PCALA_HI20 patches the field. */
+	if (strcmp(mnemonic, "pcaddu12i") == 0 && nops == 2 &&
+	    ops[0].kind == 1 && ops[1].kind == 4) {
+		unsigned rd = (unsigned)ops[0].reg;
+		const char *lsym = ops[1].sym;
+		emit32(out->bytes, (0x1C << 24) | rd);
+		out->size = 4;
+		out->fixed = 0;
+		set_fixup(out, 0, 4, RLA_PCALA_HI20, lsym, ops[1].addend);
+		return 0;
+	}
+
 	/* === la rd, sym (pseudo-instruction — PC-relative address).
 	 * Expands to pcalau12i rd, %pc_hi20(sym) + addi.d rd, rd, %pc_lo12(sym)
 	 * (two real instructions with two fixups). */

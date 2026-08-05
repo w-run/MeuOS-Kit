@@ -134,10 +134,11 @@ la64_apply_reloc(unsigned reloc_type, unsigned char *place,
 	case 71: /* R_LARCH_PCALA_HI20 */
 		{
 			uint32_t rd = read32(place) & 0x1F;
+			uint32_t op = read32(place) & 0xFE000000;   /* keep opcode high byte */
 			int64_t hi20 = (int64_t)(((S + (uint64_t)A) >> 12) - (P >> 12));
 			if ((S + (uint64_t)A) & 0x800)
 				hi20++;
-			write32(place, 0x1A000000 | rd |
+			write32(place, op | rd |
 			        ((uint32_t)(hi20 & 0xFFFFF) << 5));
 		}
 		return 0;
