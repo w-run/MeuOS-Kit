@@ -338,8 +338,11 @@ static int cmd_hist_diff(const char *archive, const char *path, const char *rev1
 	/* Use fork+exec instead of system() to avoid command injection */
 	pid_t pid = fork();
 	if (pid == 0) {
-		/* Child: execute diff directly — no shell involved */
-		execlp("diff", "diff", "-u", f1, f2, (char *)NULL);
+		/* Child: execute diff directly — no shell involved.  execvp (POSIX,
+		 * declared under _POSIX_C_SOURCE) avoids execlp's implicit decl in
+		 * the strict feature-flag build. */
+		char *const argv[] = { "diff", "-u", f1, f2, NULL };
+		execvp("diff", argv);
 		_exit(127);
 	} else if (pid < 0) {
 		perror("fork");
