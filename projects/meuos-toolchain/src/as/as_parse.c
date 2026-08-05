@@ -283,15 +283,40 @@ parse_leb128(struct as_file *as, char *text, int signedness)
 	char *cursor = text;
 	char *item;
 	for (;;) {
-		uint64_t value;
 		item = next_csv(&cursor);
 		if (!*item)
 			return as_error(as, "empty LEB128 expression");
-		/* DWARF .uleb128/.sleb128 in mcc output are integer constants;
-		 * symbol references would need relocations and are not emitted. */
+		/* DWARF .uleb128/.sleb128 in mcc output may use symbol-difference
+		 * expressions (e.g. `.uleb128 main - add` in the .debug_line
+		 * program).  Detect and resolve at assembly time when both symbols
+		 * are in the same section, so the delta is a plain constant. */
 		int64_t sval;
-		if (parse_integer(item, &sval) != 0)
-			return as_error(as, "invalid LEB128 value");
+		{
+			char *minus = strstr(item, " - ");
+			if (minus) {
+				char *tail = minus + 3;
+				char *sym1 = mt_strdup(item);
+				sym1[minus - item] = '\0';
+				char *s1 = trim(sym1);
+				char *s2 = trim(tail);
+				struct as_symbol *a = find_symbol(as, s1);
+				struct as_symbol *b = find_symbol(as, s2);
+				if (!a || !b) {
+					free(sym1);
+					return as_error(as, "undefined symbol in LEB128 expression");
+				}
+				if (a->section < 0 || a->section != b->section) {
+					free(sym1);
+					return as_error(as, "cross-section symbol difference in LEB128");
+				}
+				sval = (int64_t)(a->value - b->value);
+				free(sym1);
+			} else {
+				if (parse_integer(item, &sval) != 0)
+					return as_error(as, "invalid LEB128 value");
+			}
+		}
+		/* Encode as LEB128 */
 		unsigned char out[16];
 		size_t n = 0;
 		if (signedness) {
@@ -308,7 +333,7 @@ parse_leb128(struct as_file *as, char *text, int signedness)
 				out[n++] = b;
 			}
 		} else {
-			value = (uint64_t)sval;
+			uint64_t value = (uint64_t)sval;
 			do {
 				unsigned char b = (unsigned char)(value & 0x7f);
 				value >>= 7;
