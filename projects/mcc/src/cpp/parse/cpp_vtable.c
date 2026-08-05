@@ -61,7 +61,7 @@ cpp_slot_mangled(struct type *owner, struct member *m,
 	snprintf(buf, bufsz, "%s_%s",
 	         (owner && owner->u.structunion.tag) ? owner->u.structunion.tag
 	                                            : "anon",
-	         m->name);
+	         m->name[0] == '~' ? "dtor" : m->name);
 	n = strlen(buf);
 	if (m->is_const && n + 1 < bufsz) {
 		strcpy(buf + n, "K");
@@ -96,7 +96,7 @@ cpp_find_final(struct type *d, const char *key, struct type **owner,
 		return false;
 	for (m = d->u.structunion.members; m; m = m->next) {
 		if (m->is_virtual && m->name) {
-			cpp_vkey(m->name, m->type, m->is_const, k, sizeof k);
+			cpp_vkey(m->name[0] == '~' ? "dtor" : m->name, m->type, m->is_const, k, sizeof k);
 			if (strcmp(k, key) == 0) {
 				if (owner)
 					*owner = d;
@@ -315,7 +315,7 @@ cpp_compute_vtable(struct type *t)
 	for (m = t->u.structunion.members; m; m = m->next) {
 		if (m->is_virtual && m->name) {
 			char key[256];
-			cpp_vkey(m->name, m->type, m->is_const, key, sizeof key);
+			cpp_vkey(m->name[0] == '~' ? "dtor" : m->name, m->type, m->is_const, key, sizeof key);
 			for (vs = t->u.structunion.own_virtuals; vs; vs = vs->next)
 				if (strcmp(vs->key, key) == 0) {
 					m->vslot = vs->index;

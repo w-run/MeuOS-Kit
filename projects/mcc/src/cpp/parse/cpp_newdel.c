@@ -713,32 +713,74 @@ cpp_parse_delete_expr(struct scope *s)
 	t = e->type->base;
 	if (t && (t->kind == TYPESTRUCT || t->kind == TYPEUNION) &&
 	    (tag = t->u.structunion.tag) && cpp_has_dtor(t)) {
-		snprintf(mname, sizeof mname, "%s_dtor", tag);
-		fd = scopegetdecl(t->scope ? t->scope : &filescope, mname, true);
-		if (fd && fd->kind == DECLFUNC) {
-			/* dtor runs only for a non-null pointer; free(NULL)
-			 * is a no-op so the destructor guard suffices */
-			struct block *bload, *bdone;
-			struct expr *nul;
-			nul = mkexpr(EXPRBINARY, &typeint, NULL);
-			nul->op = TNEQ;
-			nul->u.binary.l = e;
-			nul->u.binary.r = mkexpr(EXPRCONST, &typenullptr, NULL);
-			nul->u.binary.r->u.constant.u = 0;
-			bload = mkblock("body");
-			bdone = mkblock("done");
-			funcbranch(curfunc, nul, bload, bdone);
-			funclabel(curfunc, bload);
-			fn = mkexpr(EXPRIDENT, fd->type, NULL);
-			fn->u.ident.decl = fd;
-			fn = decay(fn); /* &Class_dtor */
-			dtor = mkexpr(EXPRCALL, &typevoid, fn);
-			dtor->u.call.args = e;
-			dtor->u.call.nargs = 1;
-			funcexpr(curfunc, dtor); /* destructor runs before free */
-			funcjmp(curfunc, bdone);
-			funclabel(curfunc, bdone);
+		/* dtor runs only for a non-null pointer; free(NULL) is a no-op,
+		 * so the destructor guard suffices */
+		struct block *bload, *bdone;
+		struct expr *nul;
+		nul = mkexpr(EXPRBINARY, &typeint, NULL);
+		nul->op = TNEQ;
+		nul->u.binary.l = e;
+		nul->u.binary.r = mkexpr(EXPRCONST, &typenullptr, NULL);
+		nul->u.binary.r->u.constant.u = 0;
+		bload = mkblock("body");
+		bdone = mkblock("done");
+		funcbranch(curfunc, nul, bload, bdone);
+		funclabel(curfunc, bload);
+		{
+			/* A virtual destructor must dispatch on the object's dynamic
+			 * type through its vtable (a `B*` that points to a `D`
+			 * object runs `D_dtor`), so deleting through a base pointer
+			 * does not leak the derived part.  A non-virtual destructor
+			 * resolves statically to the pointer's static type. */
+			struct member *dm, *vdm = NULL;
+			for (dm = t->u.structunion.members; dm; dm = dm->next)
+				if (dm->name && dm->name[0] == '~' &&
+				    dm->type && dm->type->kind == TYPEFUNC &&
+				    dm->is_virtual) {
+					vdm = dm;
+					break;
+				}
+			if (vdm && vdm->vslot >= 0) {
+				struct expr *vc = cpp_make_vcall(e, t, vdm, vdm->vslot);
+				dtor = mkexpr(EXPRCALL, &typevoid, vc);
+				dtor->u.call.args = e;
+				dtor->u.call.nargs = 1;
+				funcexpr(curfunc, dtor);
+			} else {
+				/* the dtor's vtable slot may be registered under the
+				 * mangled member name `dtor` (not the `~Class` marker),
+				 * so a cached member->vslot can be -1 even though the slot
+				 * exists; look it up by name. */
+				struct cpp_vslot *vs;
+				int dslot = -1;
+				for (vs = t->u.structunion.vslots; vs; vs = vs->next)
+					if (vs->name && strncmp(vs->name, "dtor", 4) == 0) {
+						dslot = vs->index;
+						break;
+					}
+				if (vdm && dslot >= 0) {
+					struct expr *vc = cpp_make_vcall(e, t, vdm, dslot);
+					dtor = mkexpr(EXPRCALL, &typevoid, vc);
+					dtor->u.call.args = e;
+					dtor->u.call.nargs = 1;
+					funcexpr(curfunc, dtor);
+				} else {
+					snprintf(mname, sizeof mname, "%s_dtor", tag);
+					fd = scopegetdecl(t->scope ? t->scope : &filescope, mname, true);
+					if (fd && fd->kind == DECLFUNC) {
+						fn = mkexpr(EXPRIDENT, fd->type, NULL);
+						fn->u.ident.decl = fd;
+						fn = decay(fn); /* &Class_dtor */
+						dtor = mkexpr(EXPRCALL, &typevoid, fn);
+						dtor->u.call.args = e;
+						dtor->u.call.nargs = 1;
+						funcexpr(curfunc, dtor);
+					}
+				}
+			}
 		}
+		funcjmp(curfunc, bdone);
+		funclabel(curfunc, bdone);
 	}
 	/* the free(p) call expression is returned so the caller's funcexpr
 	 * (e.g. the expression statement) executes it; a void EXPRCALL is a

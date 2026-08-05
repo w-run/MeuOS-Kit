@@ -294,7 +294,20 @@ structdecl(struct scope *s, struct structbuilder *b)
 			{
 				extern void cpp_define_method(struct scope *,
 				    struct type *, const char *, const char *, bool, bool, bool);
-				cpp_define_method(s, ct, "dtor", tag, false, false, false);
+				/* a `virtual ~B()` gets a vtable slot: pass the virtual
+				 * flag through so cpp_define_method registers a slot in
+				 * own_virtuals (needed for virtual-dispatch delete) */
+				cpp_define_method(s, ct, "dtor", tag, false, false,
+				    b->member_virtual);
+				/* an override of a base virtual destructor is virtual even
+				 * without the keyword: cpp_define_method sets
+				 * g_cpp_define_virtual — propagate it so addmember flags
+				 * the member (its vtable slot stays valid) */
+				{
+					extern bool g_cpp_define_virtual;
+					if (g_cpp_define_virtual)
+						b->member_virtual = true;
+				}
 			}
 			addmember(b, mt, name, align, width);
 			return;
