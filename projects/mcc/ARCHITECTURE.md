@@ -350,6 +350,7 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
 | x86-i64param | — | i386 i64 栈传参读 `-1(%ebp)`/`3(%ebp)`（mabi_selpar 用 lowering 期未分配 `dst->slot` 直赋 LOAD 目标） | 🔶 open（登记一致性专项；i64const 规避，constants 常量化路径同缺陷已一并修） |
 | la64-fpconst | — | loongarch64 FP 常量物化成整数 0（`li.d $t0,0x0; movgr2fr.w` 从截断 bit pattern；LoongArch 无 64 位 FP 立即数）→ rr_fp | ✅ closed（090fa569；照抄 x86_64 fp_pool/.LlcN：FP 常量 stash .rodata + `pcalau12i/addi.d` 载址 + `fld.s/.d`；loongarch64 test/fp_const.c gate；rt_matrix loongarch64 8/8） |
 | crossarch-matrix | — | 跨架构 QEMU runtime 矩阵 xfail 收官 | ✅ 全 6 架构 8/8 绿、零 xfail（i386 rr_i64 6008c405 + loongarch rr_fp 090fa569 后 progs_xfail 清空） |
+| wstring-dedup | — | 宽字面量同 TU 不同内容被误合并（`stringdecl` 用元素数 `size` 作 mapkey 长度，wchar 只比首元素字节 → L"abc"/L"abd" 都开 'a' 而合并成一个 .Lstring） | ✅ closed（6149ecde；`stringdecl` 改 `size * expr->type->base->size` 按字节比较；test/c99/wide_string_dedup.c 运行时回归） |
 | cpp-10 | — | 局部类（函数体内 `struct`）+ `new` 段错误：ctor 体即时代码生成污染全局 `curfunc` + 局部类 `t->scope` 未设（野指针） | ✅ closed（三处：mktype 初始化 `t->scope=NULL` + tagspec 普通 struct 设 `t->scope=s` + cpp_parse_method_body 恢复 `curfunc`；local_class_new.cc 回归） |
 | x86-00 | va_list | MIR 后端 va_list 溢出 | ✅ closed（222a28d） |
 | cpp-00 | A | size-0 类值传参（历史名，已被 cpp-0e 替代） | 🚫 废弃 |

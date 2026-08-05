@@ -881,7 +881,15 @@ stringdecl(struct expr *expr)
 	if (!strings.len)
 		mapinit(&strings, 64);
 	assert(expr->kind == EXPRSTRING);
-	mapkey(&key, expr->u.string.data, expr->u.string.size);
+	/* String-literal dedup must key on the full byte contents, not the
+	 * element count.  stringlit.size is the number of code units (for a
+	 * wide/u/U literal the buffer is size*width bytes), so for wide
+	 * literals using `size` alone hashes/compares only the first
+	 * element's bytes — L"abc" and L"abd" (differ only after the first
+	 * char) collide and are wrongly merged into one object.  Multiply by
+	 * the element width so the whole payload participates in the key. */
+	mapkey(&key, expr->u.string.data,
+	        expr->u.string.size * expr->type->base->size);
 	if (mapput(&strings, &key, &i)) {
 		d = mkdecl("string", DECLOBJECT, expr->type, QUALNONE, LINKNONE);
 		d->value = mkglobal(d);
