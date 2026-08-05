@@ -288,6 +288,14 @@ run_mt_ld(struct array *objects, const char *output, bool verbose,
 	}
 	if (meuos_specs && !nodefaultlibs && !shared)
 		arrayaddbuf(&cmd, " -lc-meuos", 10);
+	/* The sysroot's libgcc-meuos.a supplies soft runtime helpers in the
+	 * libgcc ABI (__divdi3, __ctzdi2, __floatsidf, ...).  As an archive it
+	 * contributes nothing unless the link references a helper, so pulling
+	 * it on every MeuOS link is harmless for code that mcc already inlines
+	 * natively; it only kicks in for 64-bit/128-bit ops or soft-float paths
+	 * that do not emit native instructions. */
+	if (meuos_specs && !nodefaultlibs && !shared)
+		arrayaddbuf(&cmd, " -lgcc-meuos", 12);
 	/* Atomic runtime: same detection as run_host_cc. */
 	if (!nostdlib && !nodefaultlibs && asm_path_for_atomic &&
 	    asm_requires_atomic(asm_path_for_atomic))
@@ -391,6 +399,11 @@ run_host_cc(const char *asm_path, const char *output, bool compile_only,
 	 * the following archive in one left-to-right link pass. */
 	if (!compile_only && meuos_specs && !nodefaultlibs)
 		arrayaddbuf(&cmd, " -lc-meuos", 10);
+	/* MeuOS sysroot soft-helper archive; see run_mt_ld for the rationale.
+	 * Placed after libc so unresolved 64-bit/bit-op/float-conversion symbols
+	 * are satisfied from the archive on a left-to-right link pass. */
+	if (!compile_only && meuos_specs && !nodefaultlibs)
+		arrayaddbuf(&cmd, " -lgcc-meuos", 12);
 	/* Atomic RMW expressions lower to the portable libatomic ABI.  Host
 	 * bootstrap links need this library even for widths that the host compiler
 	 * would normally inline itself.  A MeuOS sysroot supplies this ABI. */
@@ -462,6 +475,9 @@ run_host_link(struct array *objects, const char *output, bool verbose,
 	}
 	if (meuos_specs && !nodefaultlibs)
 		arrayaddbuf(&cmd, " -lc-meuos", 10);
+	/* MeuOS sysroot soft-helper archive; see run_mt_ld for the rationale. */
+	if (meuos_specs && !nodefaultlibs)
+		arrayaddbuf(&cmd, " -lgcc-meuos", 12);
 	arrayaddbuf(&cmd, " -o ", 4);
 	cmdadd(&cmd, output);
 	arrayaddbuf(&cmd, "", 1);
