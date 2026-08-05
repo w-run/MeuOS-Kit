@@ -260,6 +260,62 @@ tan(double x)
 	return s / c;
 }
 
+/* atan on |z| <= 1 via a 5th-order minimax on z^2 (~1e-7 absolute). */
+static double
+atan_small(double z)
+{
+	double z2 = z * z;
+	return z * (0.9998660 + z2 * (-0.3302995 +
+	       z2 * (0.1801410 + z2 * (-0.0851330 + z2 * 0.0208351))));
+}
+
+double
+atan(double x)
+{
+	if (x != x) return x;          /* NaN */
+	if (x > 1.0)
+		return m_pi_2() - atan_small(1.0 / x);
+	if (x < -1.0)
+		return -m_pi_2() - atan_small(1.0 / x);
+	return atan_small(x);
+}
+
+double
+atan2(double y, double x)
+{
+	double a;
+	if (x > 0)
+		a = atan(y / x);
+	else if (x < 0 && y >= 0)
+		a = atan(y / x) + m_pi();
+	else if (x < 0 && y < 0)
+		a = atan(y / x) - m_pi();
+	else if (y > 0)                 /* x == 0 */
+		a = m_pi_2();
+	else if (y < 0)
+		a = -m_pi_2();
+	else
+		a = 0.0;                    /* atan2(0,0) -> 0 (and errno EDOM) */
+	return a;
+}
+
+double
+asin(double x)
+{
+	if (x > 1.0)  x = 1.0;         /* clamp (domain error for |x|>1) */
+	if (x < -1.0) x = -1.0;
+	if (x == 1.0) return m_pi_2();
+	if (x == -1.0) return -m_pi_2();
+	return atan(x / sqrt((1.0 - x) * (1.0 + x)));
+}
+
+double
+acos(double x)
+{
+	/* acos(x) = pi/2 - asin(x); asin range [-pi/2,pi/2] forces acos in [0,pi] */
+	return m_pi_2() - asin(x);
+}
+
 float sqrtf(float x) { return (float)sqrt((double)x); }
 
 double

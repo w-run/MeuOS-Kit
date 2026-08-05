@@ -4,6 +4,32 @@
 #include <string.h>
 #include <stdlib.h>
 
+/* C11 7.24.4.4: strcoll compares according to the collation of the current
+ * locale.  In the C (and POSIX) locale — the only ones this library
+ * implements — collation is byte order, so it reduces to strcmp. */
+int
+strcoll(const char *s1, const char *s2)
+{
+	return strcmp(s1, s2);
+}
+
+/* C11 7.24.4.5: strxfrm transforms src into a form such that strcmp() on
+ * two transformed strings gives the same ordering as strcoll() on the
+ * originals, and returns the length (excluding the NUL) of the transformed
+ * string.  The C-locale transform is the identity: copy up to n bytes
+ * (including the terminating NUL) and report strlen(src). */
+size_t
+strxfrm(char *restrict dest, const char *restrict src, size_t n)
+{
+	size_t len = strlen(src);
+	if (n != 0) {
+		size_t put = len < n - 1 ? len : n - 1;
+		memcpy(dest, src, put);
+		dest[put] = '\0';
+	}
+	return len;
+}
+
 static char current_locale[64] = "C";
 
 char *

@@ -41,6 +41,8 @@ fwrite(const void *ptr, size_t size, size_t count, FILE *stream)
 	size_t i;
 
 	if (!stream || !(stream->flags & FILE_WRITE) || (stream->flags & FILE_MEMORY)) {
+		if (stream)
+			stream->flags |= FILE_ERROR;
 		errno = EBADF;
 		return 0;
 	}
