@@ -1053,8 +1053,8 @@ emit_ins(FILE *f, MInsM *in)
 			fputs("\tmovl\t%eax, %ecx\n", f);   /* hi result in ecx; the
 			                                      * sbbl consumed the CF from
 			                                      * the negl above */
-			scratch_to_dst_i64_lo(f, d, "edx");
-			scratch_to_dst_i64_hi(f, d, "ecx");
+			scratch_to_dst_i64_lo(f, d, "%edx");
+			scratch_to_dst_i64_hi(f, d, "%ecx");
 			return;
 		}
 		mv_to_scratch(f, s0, "eax");
@@ -1067,10 +1067,10 @@ emit_ins(FILE *f, MInsM *in)
 			int sbase = i64_base(f, s0, 0);
 			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sbase);
 			fputs("\tnotl\t%eax\n", f);
-			scratch_to_dst_i64_lo(f, d, "eax");
+			scratch_to_dst_i64_lo(f, d, "%eax");
 			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sbase + 4);
 			fputs("\tnotl\t%eax\n", f);
-			scratch_to_dst_i64_hi(f, d, "eax");
+			scratch_to_dst_i64_hi(f, d, "%eax");
 			return;
 		}
 		mv_to_scratch(f, s0, "eax");

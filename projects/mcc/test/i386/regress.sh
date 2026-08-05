@@ -187,3 +187,18 @@ else
 	exit 1
 fi
 printf '%s\n' 'i386 signed-byte constant-fold compile gate passed'
+
+# i64 NEG/NOT half-store register-name gate (emit-layer operand formatting,
+# same systematic class as #22a/#22b): i386_memit.c stored the i64 lo/hi
+# halves via scratch_to_dst_i64_lo/hi with a BARE register name, which
+# i64_store_half printed verbatim -> `movl edx, off(%ebp)` (no `%`).  GNU as
+# accepted it as a zero operand and produced garbage.  Assert the asm for an
+# i64 NEG/NOT source contains no un-percented GPR as a movl operand.
+nnasm=${TMPDIR:-/tmp}/mcc-i386-negnot.$$.s
+"$mcc" --target=i386-linux -O2 -S -o "$nnasm" "$root/test/i386/i64_neg_not.c"
+if grep -Eq 'movl[[:space:]]+(edx|ecx|ebx|eax|esi|edi)(,|$|[[:space:]])' "$nnasm" \
+   || grep -Eq 'movl[[:space:]]+[^,%]*[[:space:]]*,[[:space:]]+(edx|ecx|ebx|eax|esi|edi)(,|$|[[:space:]])' "$nnasm"; then
+	printf '%s\n' 'i386 i64 NEG/NOT: FAIL (bare/un-percented GPR in movl)' >&2
+	exit 1
+fi
+printf '%s\n' 'i386 i64 NEG/NOT half-store compile gate passed'
