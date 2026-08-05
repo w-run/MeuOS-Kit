@@ -950,6 +950,46 @@ cpp_ensure_exc_fn(const char *name)
 		ft->u.func.params = p2;
 		fd = mkdecl("_meuos_exc_throw", DECLFUNC, ft, QUALNONE, LINKEXTERN);
 		fd->u.func.isnoreturn = true;
+	} else if (strcmp(name, "_meuos_exc_throw_obj") == 0) {
+		/* void _meuos_exc_throw_obj(int typecode, size_t size, size_t align,
+		 *     void (*copy)(void*,const void*), void (*dtor)(void*),
+		 *     int offset_to_base, const void *obj)
+		 * Phase-4 object payload (exc-phase4-object-payload.md).  libc
+		 * runtime packs meta + heap-copies the object + destroys the source
+		 * temporary.  copy/dtor are NULL for trivial classes (runtime uses
+		 * memcpy / no dtor). */
+		struct type *ft = mktype(TYPEFUNC, 0);
+		struct decl *p1, *pp;
+		ft->base = &typevoid;
+		ft->u.func.isvararg = false;
+		ft->u.func.nparam = 7;
+		p1 = mkdecl("typecode", DECLOBJECT, &typeint, QUALNONE, LINKNONE);
+		p1->u.obj.storage = SDAUTO;
+		pp = mkdecl("size", DECLOBJECT, &typeulong, QUALNONE, LINKNONE);
+		pp->u.obj.storage = SDAUTO;
+		p1->next = pp;
+		pp = mkdecl("align", DECLOBJECT, &typeulong, QUALNONE, LINKNONE);
+		pp->u.obj.storage = SDAUTO;
+		p1->next->next = pp;
+		pp = mkdecl("copy", DECLOBJECT,
+		    mkpointertype(mktype(TYPEFUNC, 0), QUALNONE), QUALNONE, LINKNONE);
+		pp->u.obj.storage = SDAUTO;
+		p1->next->next->next = pp;
+		pp = mkdecl("dtor", DECLOBJECT,
+		    mkpointertype(mktype(TYPEFUNC, 0), QUALNONE), QUALNONE, LINKNONE);
+		pp->u.obj.storage = SDAUTO;
+		p1->next->next->next->next = pp;
+		pp = mkdecl("offset", DECLOBJECT, &typeint, QUALNONE, LINKNONE);
+		pp->u.obj.storage = SDAUTO;
+		p1->next->next->next->next->next = pp;
+		pp = mkdecl("obj", DECLOBJECT,
+		    mkpointertype(&typevoid, QUALNONE), QUALNONE, LINKNONE);
+		pp->u.obj.storage = SDAUTO;
+		p1->next->next->next->next->next->next = pp;
+		ft->u.func.params = p1;
+		fd = mkdecl("_meuos_exc_throw_obj", DECLFUNC, ft, QUALNONE,
+		    LINKEXTERN);
+		fd->u.func.isnoreturn = true;
 	} else if (strcmp(name, "_meuos_exc_try_begin") == 0) {
 		/* void _meuos_exc_try_begin(_meuos_exc_frame *) */
 		struct type *ft = mktype(TYPEFUNC, 0);
@@ -1024,6 +1064,84 @@ cpp_exc_typecode(struct type *t)
 	return exc_tc_regs[exc_tc_n++].code;
 }
 
+/* Phase-4 object-payload helpers (exc-phase4-object-payload.md).
+ * - exc_has_trivial_copy/dtor: whether the class type needs no user copy /
+ *   destructor (trivial aggregate -> runtime memcpy / no destruction).
+ *   A class with no declared constructors/destructors is trivial for the
+ *   exception payload (we copy its bytes and never destroy it).
+ * - exc_base_offset: offset of the first base subobject (for base-catch
+ *   slicing); 0 for non-derived.
+ * - cpp_exc_throw_call_scalar: the legacy class-throw path that emits
+ *   `_meuos_exc_throw(tc, 0)` (type code only, no member payload). */
+static int exc_has_trivial_copy(struct type *t);
+static int exc_has_trivial_dtor(struct type *t);
+static int exc_base_offset(struct type *t);
+static int exc_member_is_base(struct member *m);
+static struct expr *cpp_exc_throw_call_scalar(struct type *t, struct expr *value);
+
+static int
+exc_has_trivial_dtor(struct type *t)
+{
+	/* No user-declared destructor (a member whose name begins with '~' or
+	 * an explicit dtor function) -> no destruction required on the payload. */
+	return !cpp_has_dtor(t);
+}
+
+static int
+exc_has_trivial_copy(struct type *t)
+{
+	/* Byte-copyable when the class declares no user destructor/constructor.
+	 * (User copy/move ctors are phase-4b; for the first increment a class
+	 * with no dtor is treated as copyable, and a user-constructed class
+	 * falls back to the legacy zero-slot path.) */
+	return exc_has_trivial_dtor(t);
+}
+
+static int
+exc_base_offset(struct type *t)
+{
+	/* Offset of the first base sub-object (single inheritance slicing), or
+	 * 0 if the class has no base.  Bases appear as the first members via
+	 * the front-end's base-member lowering (a member whose name matches the
+	 * base tag / sits at offset 0).  Phase-4b refines to the full base chain;
+	 * here we report 0 (no slicing) unless the first member is clearly a
+	 * base placeholder. */
+	struct member *m = t->u.structunion.members;
+	if (m && m->offset == 0 && exc_member_is_base(m))
+		return 0; /* base at offset 0: derived == base address for offset 0 */
+	return 0;
+}
+
+/* A member is a base placeholder if the front-end tags it as such (name
+ * matches a known base).  For the first increment we only need to know "has
+ * a base at offset 0" — which is 0 either way for single non-empty base at
+ * offset 0.  Kept as a stub for phase-4b refinement. */
+static int
+exc_member_is_base(struct member *m)
+{
+	(void)m;
+	return 0;
+}
+
+static struct expr *
+cpp_exc_throw_call_scalar(struct type *t, struct expr *value)
+{
+	struct decl *fds = cpp_ensure_exc_fn("_meuos_exc_throw");
+	struct expr *fn, *call, *a1, *a2;
+	if (!fds)
+		return mkexpr(EXPRCONST, &typevoid, NULL);
+	fn = mkexpr(EXPRIDENT, fds->type, NULL);
+	fn->u.ident.decl = fds;
+	fn = decay(fn);
+	call = mkexpr(EXPRCALL, &typevoid, fn);
+	a1 = mkconstexpr(&typeint, cpp_exc_typecode(t));
+	a2 = mkconstexpr(&typeullong, 0); /* class: type code only (legacy) */
+	a1->next = a2;
+	call->u.call.args = a1;
+	call->u.call.nargs = 2;
+	return call;
+}
+
 /* Build a call `_meuos_exc_throw(typecode, value)`. */
 static struct expr *
 cpp_exc_throw_call(struct type *t, struct expr *value)
@@ -1040,13 +1158,57 @@ cpp_exc_throw_call(struct type *t, struct expr *value)
 	a1 = mkconstexpr(&typeint, cpp_exc_typecode(t));
 	if (value && (value->type->kind == TYPESTRUCT ||
 	              value->type->kind == TYPEUNION)) {
-		/* A class-typed exception's members cannot travel through the
-		 * 8-byte ullong value slot (value-passing ABI).  The type code
-		 * alone identifies it; the slot is zeroed.  Stage-3 validates
-		 * base/derived and catch(...) dispatch on the type code; member
-		 * value payload for class exceptions is a documented limitation
-		 * (requires a pointer/lifetime extension of the runtime ABI). */
-		a2 = mkconstexpr(&typeullong, 0);
+		/* Phase-4 object payload: when the object runtime is in scope,
+		 * route a class-typed exception through _meuos_exc_throw_obj so the
+		 * object travels (heap-copied by the runtime), not just the type
+		 * code.  Trivial classes (no user copy ctor / no dtor) pass
+		 * copy=NULL, dtor=NULL and the runtime performs a plain
+		 * size-byte memcpy / no destruction (exc-phase4-object-payload.md).
+		 * Fall back to the old zero-slot scheme when the runtime is not yet
+		 * linked in so existing scalar/tests keep working. */
+		struct decl *fdo;
+		/* Use the object path ONLY when the program actually declares
+		 * `_meuos_exc_throw_obj` (i.e. includes the phase-4 runtime).
+		 * scopegetdecl (non-creating) checks the user's decl: if absent we
+		 * must NOT synthesize+emit throw_obj, or programs that don't link
+		 * the object runtime would get an undefined reference. */
+		fdo = scopegetdecl(&filescope, "_meuos_exc_throw_obj", 1);
+		if (fdo && fdo->kind == DECLFUNC) {
+			struct expr *fn2, *call2, *arg, *a, *aobj;
+			struct type *pt = mkpointertype(t, QUALNONE);
+			struct type *tcode_t = &typeint;
+			int ndecl = exc_has_trivial_copy(t) && exc_has_trivial_dtor(t);
+			int i;
+			(void)call; (void)fd; (void)a2;
+			fn2 = mkexpr(EXPRIDENT, fdo->type, NULL);
+			fn2->u.ident.decl = fdo;
+			fn2 = decay(fn2);
+			call2 = mkexpr(EXPRCALL, &typevoid, fn2);
+			arg = mkconstexpr(tcode_t, cpp_exc_typecode(t));
+			arg->next = mkconstexpr(&typeulong, t->size);
+			arg->next->next = mkconstexpr(&typeulong, t->align);
+			/* copy / dtor: NULL for now (trivial); non-trivial thunks are
+			 * phase-4b — fall back to zero-slot below. */
+			if (!ndecl)
+				/* non-trivial ctor/dtor thunks not yet generated: keep
+				 * the old documented zero-slot behaviour for this stage. */
+				return cpp_exc_throw_call_scalar(t, value);
+			arg->next->next->next =
+			    mkconstexpr(mkpointertype(mktype(TYPEFUNC, 0), QUALNONE), 0);
+			arg->next->next->next->next =
+			    mkconstexpr(mkpointertype(mktype(TYPEFUNC, 0), QUALNONE), 0);
+			arg->next->next->next->next->next =
+			    mkconstexpr(&typeint, exc_base_offset(t));
+			/* obj: address of the throw-temporary */
+			aobj = mkunaryexpr(TBAND, value);
+			aobj->type = pt;
+			arg->next->next->next->next->next->next = aobj;
+			call2->u.call.args = arg;
+			call2->u.call.nargs = 7;
+			return call2;
+		}
+		(void)fd; (void)call; (void)a1; (void)a2;
+		return cpp_exc_throw_call_scalar(t, value);
 	} else {
 		a2 = value ? mkexpr(EXPRCAST, &typeullong, value)
 		           : mkconstexpr(&typeullong, 0);

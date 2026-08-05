@@ -348,7 +348,7 @@ check-cpp-virtual: $(MPP_BIN)
 # the host specs, keeping them runnable in any environment.  virtual.cc
 # needs the meuos sysroot and is exercised by check-cpp-virtual instead.
 check-cpp-func: $(MPP_BIN)
-	@for t in $$(ls test/cpp/*.cc | grep -v '\.neg\.cc' | grep -v '/virtual\.cc'); do \
+	@for t in $$(ls test/cpp/*.cc | grep -v '\.neg\.cc' | grep -v '/virtual\.cc' | grep -v '/exc_object_gate\.cc'); do \
 		out=/tmp/mpp-$$(basename $$t .cc); \
 		inc=; specsf="--specs=host"; \
 		case "$$t" in \
@@ -390,7 +390,17 @@ check-cpp-neg: $(MPP_BIN)
 		fi; \
 	done
 
-check-cpp: check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg
+# Phase-4 object-payload gate: a class-typed throw with the object runtime
+# declared must lower to `_meuos_exc_throw_obj` (asm-inspected; link comes
+# from libc's phase-4 extension).
+check-cpp-exc-object: $(MPP_BIN)
+	@./$(MPP_BIN) --specs=host -S -o /tmp/mpp-exc-obj.s test/cpp/exc_object_gate.cc
+	@if ! grep -q '_meuos_exc_throw_obj' /tmp/mpp-exc-obj.s; then \
+		echo "FAIL: class throw did not lower to _meuos_exc_throw_obj"; exit 1; \
+	fi
+	@echo "PASS: check-cpp-exc-object"
+
+check-cpp: check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg check-cpp-exc-object
 
 # Focused regression for the recently closed clusters (new/delete,
 # braced-init, destructor chains, virtual / pure-virtual dispatch): each
