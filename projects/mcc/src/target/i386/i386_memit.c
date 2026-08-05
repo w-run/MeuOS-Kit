@@ -694,17 +694,10 @@ emit_load(FILE *f, MMOP op, MType dt, MAddr a, MVal *d)
 			if (dbase != I64_NO_SLOT) {
 				fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dbase);
 				/* high 32 bits: addr + 4 */
+				MAddr a2 = a;
+				a2.off += 4;
 				char addr2[64];
-				/* Build addr+4: append +4 to the offset or use offset+4 */
-				snprintf(addr2, sizeof addr2, "%d+%s",
-				         (int)(a.off + 4), /* actual offset + 4 */
-				         a.base ? "" : "");
-				/* Re-emit the address string with offset+4 */
-				if (a.base && a.base->kind == MV_REG) {
-					const char *rn = mreg_name(g_mt, a.base->reg);
-					snprintf(addr2, sizeof addr2, "%d(%%%s)",
-					         (int)(a.off + 4), rn ? rn : "ebp");
-				}
+				emit_addr_str(f, a2, addr2, sizeof addr2);
 				fprintf(f, "\tmovl\t%s, %%eax\n", addr2);
 				fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dbase + 4);
 				return;

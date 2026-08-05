@@ -202,3 +202,20 @@ if grep -Eq 'movl[[:space:]]+(edx|ecx|ebx|eax|esi|edi)(,|$|[[:space:]])' "$nnasm
 	exit 1
 fi
 printf '%s\n' 'i386 i64 NEG/NOT half-store compile gate passed'
+
+# i64 memory-load high-half address gate (emit_load i64 branch): loading a
+# 64-bit value from memory into a slot-resident temp emits two 32-bit loads
+# at addr and addr+4.  The old code built the +4 address with
+# snprintf("%d+%s", a.off+4, a.base ? "" : "") -> `movl 4+, %eax` (malformed;
+# the host assembler rejects it).  The high half must now be a properly
+# formed `movl 4(%base), %eax`.  Assert no `movl <digits>+,` malformed addr.
+ldasm=${TMPDIR:-/tmp}/mcc-i386-i64load.$$.s
+trap 'rm -f "$asm" "$obj" "$shasm" "$casm" "$pasm" "$eqasm" "$bnasm" "$sbfasm" "$nnasm" "$ldasm"' EXIT HUP INT TERM
+"$mcc" --target=i386-linux -O2 -S -o "$ldasm" "$root/test/i386/i64_load_mem.c"
+if grep -Eq 'movl[[:space:]]+[0-9]+\+,' "$ldasm"; then
+	printf '%s\n' 'i386 i64 memory load: FAIL (malformed `movl 4+,` high-half address)' >&2
+	exit 1
+fi
+# The high half must be a real based load at +4 from the base register.
+grep -Eq 'movl[[:space:]]+4\(%[a-z]+\),[[:space:]]+%eax' "$ldasm"
+printf '%s\n' 'i386 i64 memory-load high-half address compile gate passed'
