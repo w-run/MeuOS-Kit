@@ -219,3 +219,19 @@ fi
 # The high half must be a real based load at +4 from the base register.
 grep -Eq 'movl[[:space:]]+4\(%[a-z]+\),[[:space:]]+%eax' "$ldasm"
 printf '%s\n' 'i386 i64 memory-load high-half address compile gate passed'
+
+# i64 memory-store high-half address gate (emit_store i64 branch, same class
+# as the emit_load 4+ bug): storing an i64 to a non-register-based address must
+# build addr+4 via emit_addr_str.  The old code did snprintf("%lld", a.off+4)
+# for a non-REG base -> `movl %eax, 4` (bare offset, no base register) — a
+# corrupt high-half store.  Assert no `movl %eax, <digits>` bare-offset store.
+stasm=${TMPDIR:-/tmp}/mcc-i386-i64store.$$.s
+trap 'rm -f "$asm" "$obj" "$shasm" "$casm" "$pasm" "$eqasm" "$bnasm" "$sbfasm" "$nnasm" "$ldasm" "$stasm"' EXIT HUP INT TERM
+"$mcc" --target=i386-linux -O2 -S -o "$stasm" "$root/test/i386/i64_store_mem.c"
+if grep -Eq 'movl[[:space:]]+%eax,[[:space:]]+[0-9]+$' "$stasm"; then
+	printf '%s\n' 'i386 i64 memory store: FAIL (bare high-half store `movl %eax, <off>` with no base)' >&2
+	exit 1
+fi
+# The high half must be a real based store at +4 from the base register.
+grep -Eq 'movl[[:space:]]+%eax,[[:space:]]+4\(%[a-z]+\)' "$stasm"
+printf '%s\n' 'i386 i64 memory-store high-half address compile gate passed'

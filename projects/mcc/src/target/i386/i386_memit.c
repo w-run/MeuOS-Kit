@@ -742,16 +742,13 @@ emit_store(FILE *f, MType dt, MAddr a, MVal *s0)
 		emit_addr_str(f, a, addr_buf, sizeof addr_buf);
 		fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sbase);
 		fprintf(f, "\tmovl\t%%eax, %s\n", addr_buf);
-		/* high 32 bits: build addr+4 */
+		/* high 32 bits: addr + 4, built via MAddr copy + emit_addr_str
+		 * so any base/index/offset is carried over correctly (matches the
+		 * low-half addr_buf construction above). */
+		MAddr a2 = a;
+		a2.off += 4;
 		char addr2[64];
-		if (a.base && a.base->kind == MV_REG) {
-			const char *rn = mreg_name(g_mt, a.base->reg);
-			snprintf(addr2, sizeof addr2, "%d(%%%s)",
-			         (int)(a.off + 4), rn ? rn : "ebp");
-		} else {
-			snprintf(addr2, sizeof addr2, "%lld",
-			         (long long)(a.off + 4));
-		}
+		emit_addr_str(f, a2, addr2, sizeof addr2);
 		fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sbase + 4);
 		fprintf(f, "\tmovl\t%%eax, %s\n", addr2);
 		return;
