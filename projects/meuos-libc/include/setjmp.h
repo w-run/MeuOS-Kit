@@ -1,6 +1,7 @@
 #ifndef MEUOS_SETJMP_H
 #define MEUOS_SETJMP_H
 
+#include <features.h>
 #include <stddef.h>
 
 #ifdef __cplusplus

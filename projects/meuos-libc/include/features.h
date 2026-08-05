@@ -73,6 +73,31 @@
 # define __END_DECLS
 #endif
 
+/* _Noreturn is a C11 keyword, but g++/C++ does not recognize it as such.
+ * Map it to the C++11 [[noreturn]] attribute so libc headers (which declare
+ * exit/abort/longjmp/_meuos_exc_throw etc. as _Noreturn) compile under both
+ * C and C++ (g++ throws "'_Noreturn' does not name a type"). */
+#ifdef __cplusplus
+# if defined(__has_cpp_attribute)
+#  if __has_cpp_attribute(noreturn)
+#   define _Noreturn [[noreturn]]
+#  else
+#   define _Noreturn /* [[noreturn]] unsupported */
+#  endif
+# else
+#  define _Noreturn [[noreturn]]
+# endif
+#endif
+
+/* `restrict` is a C99/C11 qualifier; in strict ISO C++ (-std=c++NN) it is an
+ * ordinary identifier, so `void *restrict` parses as a parameter *named*
+ * restrict and a second `const void *restrict` on the same function becomes
+ * two same-named parameters (conflicting declaration).  Map it to empty so
+ * the qualifier is dropped (aliasing-only, ABI/layout unchanged). */
+#ifdef __cplusplus
+# define restrict
+#endif
+
 /* ---- opt-in glibc-compat surface (default OFF) ----
  *
  * The compat layer (meuos-libc-compat) exposes a glibc-compatible view for
