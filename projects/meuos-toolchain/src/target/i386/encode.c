@@ -787,7 +787,11 @@ i386_encode_insn(const struct mt_target *target,
 	/* ---- LEA ---- */
 	if (strcmp(base, "lea") == 0 && nops == 2 && ops[1].kind == OP_REG &&
 	    (ops[0].kind == OP_MEM ||
-	     (ops[0].kind == OP_SYMBOL && !ops[0].is_imm))) {
+	     (ops[0].kind == OP_SYMBOL && !ops[0].is_imm) ||
+	     /* bare number (no '$') is an absolute-address operand, e.g. mcc's
+	      * `leal 0, %eax` (GNU-as accepts leal addr, reg).  A true immediate
+	      * (`leal $5`) stays rejected — lea has no immediate form. */
+	     (ops[0].kind == OP_IMM && !ops[0].is_imm))) {
 		/* leal disp(%base,%idx,scale), %reg / leal sym, %reg — 0x8D /r */
 		match = 1;
 		unsigned lea_reloc = ops[0].tls_le ? R_386_TLS_LE : R_386_32;
