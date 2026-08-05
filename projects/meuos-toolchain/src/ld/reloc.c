@@ -546,8 +546,17 @@ fill_got(struct ld_context *ctx)
 		global = find_global(ctx, ctx->got.items[i].name);
 		if (global && global->alias)
 			global = global->alias;
-		if (!global || !global->defined)
+		if (!global || !global->defined) {
+			/* Weak undefined: ELF spec says unresolved weak
+			 * symbols resolve to zero.  This is needed for e.g.
+			 * __init_array_start in a shared library that has
+			 * no .init_array / .fini_array section. */
+			if (global && global->weak) {
+				write64(got->data + ctx->got.items[i].offset, 0);
+				continue;
+			}
 			return ld_errorf(ctx, "undefined GOT symbol", ctx->got.items[i].name);
+		}
 		value = ctx->groups[global->group].address + global->offset;
 		write64(got->data + ctx->got.items[i].offset, value);
 	}
