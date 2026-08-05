@@ -22,6 +22,8 @@
 | [static-global-array-segfault](mcc/static-global-array-segfault.md) | 🔄 | 静态 exe + 全局数组运行 segfault(139)——mcc/mt 的 R_X86_64_PC32/绝对数组寻址既有 bug（基线 07303b2 复现，非 TLS 引入） |
 | [cpp-exception-runtime](mcc/cpp-exception-runtime.md) | 🔄 | C++ 异常运行期缺口：前端骨架已落地(9fc36de)，完整 catch+跨函数栈展开待后端 .eh_frame+landingpad 与运行时 unwinder+__cxa* ABI |
 | [refactor-large-files](mcc/refactor-large-files.md) | 🔄 | 大文件分层重构：cpp_parse.c(10569)/link.c(4761) 等超大头文件拆小提 token 命中率——纯重构零行为改变（面向 lead-doc-mir-baseline 主线） |
+| [exc-phase4-nontrivial-thunk](mcc/exc-phase4-nontrivial-thunk.md) | 🔄 | 异常4 增强：非 trivial 类 copy/dtor thunk 函数合成（用户拷贝构造/析构类真正携带对象）——需 mcc 前端 mkfunc+emit body 合成，脆前端风险，后置 |
+| [exc-phase4-base-slice](mcc/exc-phase4-base-slice.md) | 🔄 | 异常4 增强：基派生切片（catch Base 捕获 throw Derived 子对象）——需 libc 把 _meuos_exc_throw_obj 的 offset 落地（f63bff1 留 void），libc 小增量，后置 |
 
 ### meuos-shell（msh）
 
