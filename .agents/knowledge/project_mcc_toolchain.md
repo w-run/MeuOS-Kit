@@ -189,3 +189,18 @@ PIC EBX 零临时分配 → 仍作 GOT base。mt 侧 i386 GOT 重定位留待 P1
   - 指令字大小写敏感比较 → `tr a-f A-F` 统一大写。
   - 脚本 `cd $tmproot` 后，传入的相对路径参数（as/readelf）会失联 → 开头把参数 abs-olutize；对 PATH 命令用 `command -v` 解析。
 - **教训根因**：门禁是否"真实"取决于它能否把内部 stage 失败语义无损传到 make exit code。任何把"被测对象失败"改写为"环境缺失"的映射都是掩码，必须禁。
+
+## FP 立即数构造 × mt/as —— 编码 bug 家族（2026-08-05）
+
+**症状特征**：math 程序 mcc 编译正确（-S 汇编语义对），但跨架构运行 FP 常返 0 或错值。根因常不在 mcc 而在 **mt/as 对「构造 FP 位模式的立即数指令」编码错**。这一族已抓 3 个（同类）：
+
+1. **aarch64 `movz/movk #imm, lsl #N` 忽略 lsl**（fixed 7ebfe1b4）：`movk x9,#0x3ff8,lsl#48` 的 `lsl#48`（单 operand token）被 #imm 分支丢→x9=0x3ff8 非 0x3ff8000000000000 → FP 位模式错。修：从尾随 `lsl #N` token 解析 shift。
+2. **arm 寄存器可变移位被 #imm 吞并**（fixed ce0d0b70）：`lsl/lsr r10,r10,r12` 被 `nops>=3` 无条件进 #imm 分支，sscanf("r12")→0→错编立即数移位（`lsr r10,r10,#32`）。修：#imm 分支要求 ops[2][0]=='#'，寄存器走 MOV rd,rm,SHIFT rs。
+3. **riscv64 `li` 64 位立即数截断**（待修）：`li t0,0x3ff8000000000000` 只 lui+addi（32 位），高 32 归零→`lui t0,0`→FP 错。RV64 需 lui+addiw+slli 等长序列。
+
+**判定方法**（判断「mcc 错 vs mt/as 错」）：
+- mcc -S 产物语义对 + 宿主 gcc 同程序返回预期 → 排除 mcc。
+- mt/as 重组后 GNU 交叉 objdump 反汇编，对比编码是否匹配 mnemonic/立即数位位置。
+- FP 立即数构造点常在 movz/movk (aarch64)、li/lui/addi (riscv)、vmov (arm) 的位模式载入。
+
+**教训**：跨架构 FP bug 优先查「立即数→寄存器位模式装载」指令的 mt/as 编码（shift/lsl/lui），不是先查 FP 运算指令本身。
