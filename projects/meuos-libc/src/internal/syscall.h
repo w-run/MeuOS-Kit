@@ -79,6 +79,9 @@ __syscall_number(long number)
 	/* 调度优先级（i386 独立号）。 */
 	case 140: return 96;   /* getpriority */
 	case 141: return 97;   /* setpriority */
+	/* 间隔定时器：getitimer/setitimer（i386 独立号）。 */
+	case 36:  return 105;  /* getitimer */
+	case 38:  return 104;  /* setitimer */
 	default: return number;
 	}
 #elif defined(__arm__)
@@ -180,6 +183,9 @@ __syscall_number(long number)
 	/* 调度优先级（与 i386 相同）。 */
 	case 140: return 96;   /* getpriority */
 	case 141: return 97;   /* setpriority */
+	/* 间隔定时器（与 i386 相同）。 */
+	case 36:  return 105;  /* getitimer */
+	case 38:  return 104;  /* setitimer */
 	default: return number;
 	}
 #elif defined(__aarch64__) || defined(__riscv) || defined(__loongarch64)
@@ -270,6 +276,9 @@ __syscall_number(long number)
 	 * 内部 getpriority=140 → 原生 141；内部 setpriority=141 → 原生 140。 */
 	case 140: return 141;  /* getpriority */
 	case 141: return 140;  /* setpriority */
+	/* 间隔定时器：asm-generic 号（getitimer=102, setitimer=103）。 */
+	case 36:  return 102;  /* getitimer */
+	case 38:  return 103;  /* setitimer */
 	default: return number;
 	}
 #else

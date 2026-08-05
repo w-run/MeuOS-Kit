@@ -253,7 +253,8 @@ else
 DL_OBJS := $(BUILD)/dlfcn.o
 endif
 TERMIOS_OBJS := $(BUILD)/termios/termios.o
-TIME_OBJS    := $(BUILD)/time/time.o $(BUILD)/time/strptime.o $(BUILD)/time/sleep.o
+TIME_OBJS    := $(BUILD)/time/time.o $(BUILD)/time/strptime.o $(BUILD)/time/sleep.o \
+                  $(BUILD)/time/itimer.o $(BUILD)/time/alarm.o
 LIBC_LIB := $(BUILD)/libc-meuos.a
 
 ALL_OBJS := $(STRING_OBJS) $(STDLIB_OBJS) $(STDIO_OBJS) $(SYSCALL_OBJS) \
@@ -431,6 +432,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/rlimit_gate test/rlimit_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/sync_gate test/sync_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/prioritize_gate test/prioritize_gate.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/alarm_gate test/alarm_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/auxv test/auxv.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/uio test/uio.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/p2 test/p2.c
@@ -495,6 +497,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	/tmp/meuos-libc-check/rlimit_gate
 	/tmp/meuos-libc-check/sync_gate
 	/tmp/meuos-libc-check/prioritize_gate
+	/tmp/meuos-libc-check/alarm_gate
 	/tmp/meuos-libc-check/auxv
 	/tmp/meuos-libc-check/uio
 	/tmp/meuos-libc-check/p2
