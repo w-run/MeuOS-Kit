@@ -853,6 +853,18 @@ emit_ins(FILE *f, MInsM *in)
 			}
 			return;
 		}
+		/* Non-64 zero-extension (i8/i16 -> i32): movzbl/movzwl on the low
+		 * byte/half.  Without this the case fell through into MMOP_LEA and
+		 * emitted `leal 0,%eax`, which zeros eax and clobbered the value
+		 * (byte-narrowing return bug, defect #22a: f(200) returned 0). */
+		mv_to_scratch(f, s0, "eax");
+		switch (in->dtype) {
+		case MT_I8:  fputs("\tmovzbl\t%al, %eax\n", f); break;
+		case MT_I16: fputs("\tmovzwl\t%ax, %eax\n", f); break;
+		default:     break;
+		}
+		scratch_to_dst(f, d, "eax");
+		return;
 	case MMOP_LEA: {
 		char addr_buf[64];
 		emit_addr_str(f, in->addr, addr_buf, sizeof addr_buf);
