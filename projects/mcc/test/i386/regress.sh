@@ -120,3 +120,20 @@ if grep -Eq 'movl[[:space:]]+(1|3|5)\(%ebp\),[[:space:]]+%e[a-z][a-z]' "$pasm"; 
 	exit 1
 fi
 printf '%s\n' 'i386 i64 stack-param compile gate passed'
+
+# i64 compare truth-value gate (defect #16): the EQ branch of emit_setccr
+# must zero-extend `sete %al` with `movzbl %al,%eax` so the i64== result is
+# a clean 0/1.  Without it the %eax high 24 bits stay stale (from the
+# preceding `movl a.lo,%eax`), producing a garbage "truth" value that
+# corrupts boolean/phi logic.
+eqasm=${TMPDIR:-/tmp}/mcc-i386-i64cmpeq.$$.s
+trap 'rm -f "$asm" "$obj" "$shasm" "$casm" "$pasm" "$eqasm"' EXIT HUP INT TERM
+"$mcc" --target=i386-linux -S -o "$eqasm" "$root/test/i386/i64cmpeq.c"
+grep -Eq 'sete[[:space:]]+%al' "$eqasm"
+# movzbl must immediately follow the sete (zero-extend the eq result)
+if ! awk '/^[[:space:]]*sete[[:space:]]+%al/{getline; if ($0 ~ /^[[:space:]]*movzbl[[:space:]]+%al, %eax/) found=1}
+           END{exit !found}' "$eqasm"; then
+	printf '%s\n' 'i386 i64 compare: FAIL (sete %al not zero-extended with movzbl)' >&2
+	exit 1
+fi
+printf '%s\n' 'i386 i64 compare truth-value compile gate passed'

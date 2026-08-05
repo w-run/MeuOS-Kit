@@ -592,6 +592,11 @@ emit_setccr(FILE *f, MInsM *in)
 			fprintf(f, "\tmovl\t%d(%%ebp), %%ecx\n", sb);
 			fputs("\tcmpl\t%ecx, %eax\n", f);
 			fputs("\tsete\t%al\n", f);
+			/* zero-extend the low byte so the result is a clean 0/1:
+			 * sete only sets AL, leaving high 24 bits stale from the
+			 * preceding `movl a.lo,%eax` (defect #16: comparisons
+			 * produced a garbage i32 truth value). */
+			fputs("\tmovzbl\t%al, %eax\n", f);
 			fprintf(f, "\tjmp\t.Li64d%u\n.Li64ne%u:\n"
 			        "\txorl\t%%eax, %%eax\n.Li64d%u:\n", id, id, id);
 		} else if (cc == MCC_NE) {
