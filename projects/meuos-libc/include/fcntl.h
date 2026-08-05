@@ -18,6 +18,7 @@
 
 __BEGIN_DECLS
 int open(const char *, int, ...);
+int openat(int, const char *, int, ...);
 
 __END_DECLS
 #endif
