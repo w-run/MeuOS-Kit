@@ -41,13 +41,17 @@ printf '%s\n' 'arm constant-return compile gate passed'
 # two 32-bit halves.  `1<<40` (s>=32) must emit `sub r12,r12,#32` before
 # feeding the high half, and a <32 shift (asr7) must emit `rsb r12,r12,#32`
 # for the (32-s) carry contribution.  The pre-fix per-half fallback had
-# neither, silently clearing `1<<40` to 0.
+# neither, silently clearing `1<<40` to 0.  Const shift counts (<<40/>>33)
+# must also be materialised as immediates (movw #0x28/#0x21), not read from
+# an uninitialised slot.
 shtmp=${TMPDIR:-/tmp}/mcc-arm-i64shift.$$.s
 trap 'rm -f "$asmtmp" "$shtmp"' EXIT HUP INT TERM
 "$mcc" --target=arm -S -o "$shtmp" "$root/test/arm/i64shift.c"
 if ! grep -Eq 'sub[[:space:]]+r12, r12, #32' "$shtmp" ||
-   ! grep -Eq 'rsb[[:space:]]+r12, r12, #32' "$shtmp"; then
-	printf '%s\n' 'arm i64-shift: FAIL (missing s>=32 adjustment / <32 carry)' >&2
+   ! grep -Eq 'rsb[[:space:]]+r12, r12, #32' "$shtmp" ||
+   ! grep -Eq 'movw[[:space:]]+r10, #0x28' "$shtmp" ||
+   ! grep -Eq 'movw[[:space:]]+r10, #0x21' "$shtmp"; then
+	printf '%s\n' 'arm i64-shift: FAIL (missing s>=32 adjustment / <32 carry / const-shift materialization)' >&2
 	exit 1
 fi
 printf '%s\n' 'arm i64-shift compile gate passed'

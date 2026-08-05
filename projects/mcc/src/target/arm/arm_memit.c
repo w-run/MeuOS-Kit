@@ -820,6 +820,29 @@ emit_ins(FILE *f, MInsM *in)
 				 * contain several shifts with the same op) */
 				static uint32_t g_i64sh_id;
 				uint32_t sid = g_i64sh_id++;
+				/* ---- materialize constant operands into their slots ----
+				 * An i64 shift with a compile-time constant operand (`1LL<<40`,
+				 * `x>>32`) arrives here with s0/s1 as MV_CONST.  Arm stores a
+				 * 64-bit value in slot pairs (lo@slot, hi@slot+4), but the
+				 * const-to-slot fixup only ever materialises part (the lo half
+				 * of the value, and never the larger-than-i32 shift count), so
+				 * the slot reads below would see uninitialised stack memory.
+				 * Normalise MV_CONST operands to fully stored slots first so
+				 * the slot-based shift code is valid for every operand kind. */
+				if (s0 && s0->kind == MV_CONST && s0->con) {
+					int64_t cv = s0->con->u.i;
+					load_imm(f, "r10", (int32_t)cv);
+					load_imm(f, "r12", sslot0 + g_slot_base);
+					fprintf(f, "\tstr\tr10, [fp, r12]\n");
+					load_imm(f, "r10", (int32_t)((uint64_t)cv >> 32));
+					load_imm(f, "r12", sslot0 + 4 + g_slot_base);
+					fprintf(f, "\tstr\tr10, [fp, r12]\n");
+				}
+				if (s1 && s1->kind == MV_CONST && s1->con) {
+					load_imm(f, "r10", (int32_t)s1->con->u.i);
+					load_imm(f, "r12", sslot1 + g_slot_base);
+					fprintf(f, "\tstr\tr10, [fp, r12]\n");
+				}
 				/* ---- branch: s < 32 vs s >= 32 ---- */
 				/* load s -> r12, compare */
 				load_imm(f, "r12", sslot1 + g_slot_base);
