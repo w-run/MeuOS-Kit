@@ -13,6 +13,27 @@ memcpy(void *restrict destination, const void *restrict source, size_t count)
 	return result;
 }
 
+/* C11 7.24.2.1: memccpy copies at most n bytes, stopping after (and
+ * including) the first occurrence of c.  Returns a pointer to the byte
+ * after the copied c, or NULL if c was not found within n bytes. */
+void *
+memccpy(void *restrict destination, const void *restrict source,
+        int c, size_t n)
+{
+	unsigned char *out = destination;
+	const unsigned char *in = source;
+	unsigned char want = (unsigned char)c;
+	size_t i;
+
+	for (i = 0; i < n; ++i) {
+		unsigned char b = in[i];
+		out[i] = b;
+		if (b == want)
+			return out + i + 1;
+	}
+	return NULL;
+}
+
 void *
 memmove(void *destination, const void *source, size_t count)
 {

@@ -44,6 +44,7 @@ extern char **environ;
 char *getenv(const char *);
 int setenv(const char *, const char *, int);
 int unsetenv(const char *);
+int putenv(char *);
 _Noreturn void exit(int);
 _Noreturn void abort(void);
 int atexit(void (*)(void));

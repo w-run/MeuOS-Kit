@@ -164,3 +164,21 @@ unsetenv(const char *name)
 	*dst = NULL;
 	return 0;
 }
+
+/* POSIX putenv: string is "NAME=value".  Split it and set via setenv
+ * (overwrite, so it always replaces); the entry is copied by setenv. */
+int
+putenv(char *string)
+{
+	char *eq;
+	int rc;
+
+	if (!string || !(eq = strchr(string, '='))) {
+		errno = EINVAL;
+		return -1;
+	}
+	*eq = '\0';
+	rc = setenv(string, eq + 1, 1);
+	*eq = '=';
+	return rc;
+}
