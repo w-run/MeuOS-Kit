@@ -48,6 +48,7 @@ void cpp_parse_free_operator(struct scope *s, struct qualtype base);
 struct expr *cpp_member_ident(struct scope *s, const char *name);
 struct decl *cpp_lookup_visible(struct scope *s, const char *name);
 struct expr *cpp_temp_construct(struct scope *s, struct type *ct);
+struct expr *cpp_temp_construct_braced(struct scope *s, struct type *ct);
 extern struct type *g_cpp_member_class;
 extern const char *g_cpp_member_name;
 extern bool g_cpp_member_const;

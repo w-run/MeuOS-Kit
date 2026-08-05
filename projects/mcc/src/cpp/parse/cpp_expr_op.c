@@ -448,6 +448,50 @@ cpp_temp_construct(struct scope *s, struct type *ct)
 	return e;
 }
 
+/* C++11 braced functional cast: `Vec{1, 2}` constructs a temporary with
+ * the braced-init-list as the constructor arguments (aggregates fill
+ * members positionally).  Mirrors cpp_temp_construct but consumes `{...}`
+ * instead of `(...)`. */
+struct expr *
+cpp_temp_construct_braced(struct scope *s, struct type *ct)
+{
+	extern struct func *curfunc;
+	extern struct decl *mkdecl(char *, enum declkind, struct type *,
+	    enum typequal, enum linkage);
+	extern void funcinit(struct func *, struct decl *, struct init *,
+	    bool);
+
+	struct expr *args = NULL, **ae = &args;
+	struct expr *e;
+	struct decl *tmp;
+
+	if (!ct || (ct->kind != TYPESTRUCT && ct->kind != TYPEUNION))
+		return NULL;
+
+	next(); /* consume '{' */
+	while (tok.kind != TRBRACE) {
+		if (args)
+			expect(TCOMMA, "or '}' in braced initializer list");
+		*ae = assignexpr(s);
+		ae = &(*ae)->next;
+	}
+	next(); /* consume '}' */
+
+	if (!curfunc)
+		return NULL;
+
+	tmp = mkdecl("tmp", DECLOBJECT, ct, QUALNONE, LINKNONE);
+	tmp->u.obj.storage = SDAUTO;
+	funcinit(curfunc, tmp, NULL, false);
+	cpp_emit_ctor_call(curfunc, tmp, args);
+
+	e = mkexpr(EXPRIDENT, ct, NULL);
+	e->qual = QUALNONE;
+	e->lvalue = false;
+	e->u.ident.decl = tmp;
+	return e;
+}
+
 /* Is `t` the class whose method body is currently being parsed?  Inside a
  * method body, bare member names resolve (cpp_member_ident) and direct
  * member access is allowed regardless of access level. */

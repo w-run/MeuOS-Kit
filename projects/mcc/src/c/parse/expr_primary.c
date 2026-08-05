@@ -336,6 +336,16 @@ primaryexpr(struct scope *s)
 							if (e)
 								break;
 							tok = saved;
+						} else if (tok.kind == TLBRACE) {
+							/* C++11 braced functional cast:
+							 * `Vec{1, 2}`. */
+							extern struct expr *
+							    cpp_temp_construct_braced(
+							        struct scope *, struct type *);
+							e = cpp_temp_construct_braced(s, ct);
+							if (e)
+								break;
+							tok = saved;
 						} else if (tok.kind == TCOLONCOLON) {
 							/* `Class::static_method(args)` — no this */
 							extern void cpp_mangled_name_args(
