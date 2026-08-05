@@ -64,6 +64,9 @@ static const struct reg_entry regs[] = {
 	{"sp",   4, 2}, {"bp",   5, 2}, {"si",   6, 2}, {"di",   7, 2},
 	{"eax",  0, 4}, {"ecx",  1, 4}, {"edx",  2, 4}, {"ebx",  3, 4},
 	{"esp",  4, 4}, {"ebp",  5, 4}, {"esi",  6, 4}, {"edi",  7, 4},
+	/* XMM registers (SSE; width 16 flags them in the encoder) */
+	{"xmm0", 0, 16}, {"xmm1", 1, 16}, {"xmm2", 2, 16}, {"xmm3", 3, 16},
+	{"xmm4", 4, 16}, {"xmm5", 5, 16}, {"xmm6", 6, 16}, {"xmm7", 7, 16},
 };
 
 /* Strip leading '%' if present (AT&T syntax). */
@@ -1841,6 +1844,50 @@ skip_imul3:
 		}
 	}
 
+	/* ---- SSE2 (32-bit, no REX; XMM0-7 only) — supports the small subset
+	 * mcc uses for double arithmetic: movsd / mulsd / cvttsd2si.  The GP
+	 * register is the second operand in cvttsd2si (AT&T src,dst). */
+	if (nops == 2 && (strcmp(base, "movsd") == 0 ||
+	                  strcmp(base, "mulsd") == 0 ||
+	                  strcmp(base, "cvttsd2si") == 0)) {
+		int is_xmm0 = ops[0].kind == OP_REG && ops[0].width == 16;
+		int is_xmm1 = ops[1].kind == OP_REG && ops[1].width == 16;
+		unsigned opcode2 = 0;
+		if (strcmp(base, "movsd") == 0) {
+			if (is_xmm0 && is_xmm1)       opcode2 = 0x10;
+			else if (is_xmm1 && ops[0].kind == OP_MEM) opcode2 = 0x10; /* load */
+			else if (is_xmm0 && ops[1].kind == OP_MEM) opcode2 = 0x11; /* save */
+			else if (is_xmm0 && is_xmm1)  opcode2 = 0x11;
+			else goto sse_skip;
+		} else if (strcmp(base, "mulsd") == 0) {
+			if (is_xmm0 && is_xmm1) opcode2 = 0x59;
+			else goto sse_skip;
+		} else { /* cvttsd2si */
+			if (is_xmm0 && ops[1].kind == OP_REG) opcode2 = 0x2C;
+			else goto sse_skip;
+		}
+		match = 1;
+		emit8(p, 0xF2);
+		emit8(p + 1, 0x0F);
+		emit8(p + 2, opcode2);
+		p += 3;
+		if (strcmp(base, "cvttsd2si") == 0) {
+			/* modrm reg=GP dest (ops[1]), rm=XMM src (ops[0]) */
+			if (is_xmm0) emit8(p, modrm(3, ops[1].reg & 7, ops[0].reg & 7));
+			p += 1;
+		} else if (is_xmm0 && is_xmm1) {
+			emit8(p, modrm(3, ops[0].reg & 7, ops[1].reg & 7));
+			p += 1;
+		} else if (is_xmm1) {
+			emit_modrm_mem(&p, ops[1].reg & 7, &ops[0]);
+		} else {
+			emit_modrm_mem(&p, ops[0].reg & 7, &ops[1]);
+		}
+		out->size = (size_t)(p - out->bytes);
+		goto done;
+	}
+sse_skip:
+	;
 done:
 	out->ok = match;
 	/* Guard against a mnemonic "matched" by a block header but not by any
