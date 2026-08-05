@@ -66,6 +66,10 @@ int wctob(wint_t);
 size_t mbrlen(const char *, size_t, mbstate_t *);
 int wcwidth(wchar_t);
 
+/* Wide time formatting (C11 7.29.5.1) */
+struct tm;
+size_t wcsftime(wchar_t *, size_t, const wchar_t *, const struct tm *);
+
 /* I/O */
 wint_t fgetwc(FILE *);
 wint_t fputwc(wchar_t, FILE *);
