@@ -47,6 +47,7 @@
 | [i386-qemu-runtime-fail](meuos-toolchain/i386-qemu-runtime-fail.md) | ✅ | i386 QEMU runtime 返回 0 非 42——根因 mabi_selret i64 返回未处理 MV_CONST（return 42 读未初始化栈），已修 b6fb898/58af57a |
 | [arm-as-assemble-fail](meuos-toolchain/arm-as-assemble-fail.md) | ✅ | arm mt/as 无法组装 mcc arm 产物——双层：mt/as 缺 fp 别名+伪指令 no-op + mcc arm_mabi.c MV_CONST，已修 546e5af/a25cf3c 合入 c72597e |
 | [objcopy-o-format-gap](meuos-toolchain/objcopy-o-format-gap.md) | ✅ | mt/objcopy `-O binary/ihex/srec` 已实现（5b621b3/合 a28187b），与 GNU 对齐 |
+| [loongarch64-runtime-segfault](meuos-toolchain/loongarch64-runtime-segfault.md) | 🔄 | loongarch64 runtime 矩阵 segfault/as 缺口（mcc 后向+mt/ld+libc 综合），专项深挖待启动（2026-08-05 登记） |
 
 ### meuos-utils
 
