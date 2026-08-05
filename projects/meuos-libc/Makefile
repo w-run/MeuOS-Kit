@@ -204,6 +204,8 @@ SUPPORT_OBJS   += $(BUILD)/startup.o
 # P2 gap batch: config strings, signal strings, passwd/group, byte order.
 SUPPORT_OBJS   += $(BUILD)/confstr.o $(BUILD)/pwd.o $(BUILD)/grp.o
 SUPPORT_OBJS   += $(BUILD)/signal/strsignal.o $(BUILD)/socket/byteorder.o
+# Exception runtime (setjmp/longjmp base): _meuos_exc_throw + try helpers.
+SUPPORT_OBJS   += $(BUILD)/meuos_exc.o
 SUPPORT_OBJS   += $(BUILD)/netdb/gethost.o $(BUILD)/netdb/getserv.o \
                   $(BUILD)/netdb/getproto.o $(BUILD)/netdb/getnet.o \
                   $(BUILD)/netdb/getaddrinfo.o \
@@ -325,6 +327,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/auxv test/auxv.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/uio test/uio.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/p2 test/p2.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/exc test/exc.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/socket test/socket.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib --static -o /tmp/meuos-libc-check/libgcc test/libgcc.c -l:libgcc-meuos.a -l:libc-meuos.a
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/threads test/threads.c
@@ -368,6 +371,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	/tmp/meuos-libc-check/auxv
 	/tmp/meuos-libc-check/uio
 	/tmp/meuos-libc-check/p2
+	/tmp/meuos-libc-check/exc
 	/tmp/meuos-libc-check/libgcc
 	/tmp/meuos-libc-check/socket
 	/tmp/meuos-libc-check/threads
