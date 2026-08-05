@@ -47,6 +47,17 @@ public:
     Box(T v) { val = v; }
     T get() { return val; }
 };
+/* class-template explicit specialization: `template <> struct/class X<args>`.
+ * Box<int> redefines get() to return val*2 (distinct from the generic which
+ * returns val), proving the specialization shadows the primary body and that
+ * Box<double>/Box<float> still instantiate the generic. */
+template <> class Box<int> {
+public:
+    int val;
+    Box() { val = 0; }
+    Box(int v) { val = v; }
+    int get() { return val * 2; }
+};
 
 template <typename T> class Pair {
 public:
@@ -108,11 +119,13 @@ main(void)
 
     /* class templates */
     Box<int> bx(42);
-    if (bx.get() != 42) return 9;         /* int instantiation */
+    if (bx.get() != 84) return 9;         /* int: explicit spec get()=val*2 */
     Box<double> bd(2.5);
-    if (bd.get() != 2.5) return 10;       /* double instantiation */
+    if (bd.get() != 2.5) return 10;       /* double: generic instantiation */
+    Box<float> bf(2.5f);
+    if (bf.get() != 2.5f) return 11;      /* float: generic (not specialized) */
     Box<int> bx2;
-    if (bx2.get() != 0) return 11;        /* cache reuse */
+    if (bx2.get() != 0) return 25;        /* int cache reuse (spec, 0*2) */
     Pair<int> pr(10, 4);
     if (pr.sum() != 14) return 12;
     Pair<int> q(max(3, 8), max(1, 2));  /* class + function templates */
