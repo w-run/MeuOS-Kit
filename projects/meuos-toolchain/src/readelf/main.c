@@ -23,6 +23,7 @@ struct options {
 	int dump_symbols;     /* -s --symbols           */
 	int dump_relocs;      /* -r --relocs            */
 	int dump_dynamic;     /* -d --dynamic           */
+	int dump_debug;       /* -w --debug-dump        */
 	int wide;             /* -W --wide              */
 	const char *hex_secs[MT_READELF_MAX_HEX]; /* -x --hex-dump */
 	int hex_count;
@@ -42,6 +43,7 @@ usage(FILE *out)
 	        "  -s --symbols           Display the symbol table\n"
 	        "  -r --relocs            Display the relocations\n"
 	        "  -d --dynamic           Display the dynamic section\n"
+	        "  -w --debug-dump        Dump DWARF debug sections (raw)\n"
 	        "  -x <name|num>          Dump the contents of section <name|num>\n"
 	        "     --hex-dump=<name|num>\n"
 	        "  -W --wide              Allow output width beyond 80 columns\n"
@@ -1166,6 +1168,1130 @@ dump_hexdump(const unsigned char *bytes, size_t size,
 	printf("\nSection '%s' does not exist.\n", spec);
 }
 
+/* ---- DWARF debug-section dump (-w --debug-dump) ---------------------- */
+
+/* Read a DWARF LE uleb128 at *pp; advances *pp. */
+static uint64_t
+read_uleb(const unsigned char **pp, const unsigned char *end)
+{
+	const unsigned char *p = *pp;
+	uint64_t val = 0;
+	unsigned shift = 0;
+	unsigned char b;
+
+	if (p >= end)
+		return 0;
+	do {
+		b = *p++;
+		if (p > end)
+			break;
+		val |= (uint64_t)(b & 0x7f) << shift;
+		shift += 7;
+	} while (b & 0x80);
+	*pp = p;
+	return val;
+}
+
+/* Read a DWARF LE sleb128 at *pp; advances *pp. */
+static int64_t
+read_sleb(const unsigned char **pp, const unsigned char *end)
+{
+	const unsigned char *p = *pp;
+	uint64_t val = 0;
+	unsigned shift = 0;
+	unsigned char b;
+
+	if (p >= end)
+		return 0;
+	do {
+		b = *p++;
+		if (p > end)
+			break;
+		val |= (uint64_t)(b & 0x7f) << shift;
+		shift += 7;
+	} while (b & 0x80);
+	if (shift < 64 && (b & 0x40))
+		val |= (uint64_t)-1 << shift;
+	*pp = p;
+	return (int64_t)val;
+}
+
+/* Decode a DWARF v3/v4/v5 .debug_line line-number program and print the
+ * resulting (address, line) table plus file names.  Follows the DWARF
+ * 6.2.2 line-number program header and 6.2.5.1 standard opcodes.  v5 uses
+ * the revised header (address_size + segment_selector_size after version,
+ * entry-format directory/file tables) and line_strp file names resolved
+ * against the .debug_line_str section passed in `lstr`/`lstr_size`. */
+static void
+dump_debug_line(const unsigned char *data, size_t dsize,
+                const unsigned char *lstr, size_t lstr_size)
+{
+	const unsigned char *p = data;
+	uint64_t unit_length, header_length;
+	uint16_t version;
+	uint8_t min_ilen, max_ops, default_is_stmt,
+	        line_range, opcode_base;
+	int8_t line_base;
+	const unsigned char *prog, *prog_end, *q;
+	int64_t line;
+	uint64_t addr = 0, file = 1, col = 0, isa = 0;
+	int is_stmt;
+	unsigned opcodes[255];
+	unsigned i, op;
+
+	if (dsize < 14)
+		return;
+	unit_length = (uint32_t)p[0] | (uint32_t)p[1] << 8 |
+	              (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+	p += 4;
+	if (unit_length >= 0xfffffff0u || (uint64_t)unit_length > (uint64_t)dsize - 4) {
+		/* DWARF32 unit_length == 0xffffffff means DWARF64; not
+		 * supported here yet. */
+		return;
+	}
+	version = (uint16_t)p[0] | (uint16_t)p[1] << 8;
+	p += 2;
+	if (version < 3 || version > 5)
+		return;    /* only decode DWARF v3/v4/v5 header layout */
+	/* DWARF v5 inserts address_size and segment_selector_size between
+	 * version and header_length. */
+	if (version == 5)
+		p += 2;      /* address_size, seg_selector_size */
+	header_length = (uint32_t)p[0] | (uint32_t)p[1] << 8 |
+	                (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+	p += 4;
+	min_ilen = *p++;
+	if (version >= 4) {
+		max_ops = *p++;
+		if (max_ops == 0)
+			return;
+	} else {
+		max_ops = 1;
+	}
+	default_is_stmt = *p++;
+	line_base = *p++;
+	line_range = *p++;
+	opcode_base = *p++;
+	if (opcode_base == 0)
+		return;
+	for (i = 0; i + 1 < opcode_base; ++i)
+		opcodes[i] = *p++;
+	prog = p;
+	prog_end = data + 4 + unit_length;
+	if (prog > prog_end)
+		return;
+
+	printf("\nThe .debug_line section:\n");
+
+	/* include_directories / file_names.
+	 *
+	 * DWARF v3/v4 use fixed formats: a NUL-terminated name string followed
+	 * by three ULEB fields (dir_index/mtime/length) per directory, and for
+	 * files: name / dir_index / mtime / length.
+	 *
+	 * DWARF v5 replaces this with entry-format tables: a count of content
+	 * type/form pairs, then ULEB counts of entries, each entry parsed
+	 * according to the declared formats.
+	 *
+	 * We decode both header styles and, in the v5 case, decode the formats
+	 * enough to recover each name (DW_LNCT_path = content type 0x1,
+	 * typically DW_FORM_string or DW_FORM_line_strp). */
+	printf("\nFile name                Line number    Starting address\n");
+	q = prog;
+	if (version == 5) {
+		/* DWARF5 stores the header's directory and file tables as
+		 * entry-format tables.  Each table begins with a count of
+		 * (content_type, form) pairs, then a ULEB entry count, then that
+		 * many entries, each being one field per declared format, sized
+		 * by the form.  We decode the file table generically and print
+		 * each file's path (content type DW_LNCT_path = 0x1, typically
+		 * DW_FORM_line_strp into .debug_line_str, or DW_FORM_string). */
+		uint64_t nfmt, e, k;
+		unsigned ct[32], fm[32], n;
+
+		if (q < prog_end) {
+			/* directories table: formats, count, then that many entries,
+			 * each one field per declared format sized by the form. */
+			uint64_t ndir;
+
+			nfmt = read_uleb(&q, prog_end);
+			n = (unsigned)(nfmt < 32 ? nfmt : 32);
+			for (k = 0; k < n && q < prog_end; ++k) {
+				ct[k] = (unsigned)read_uleb(&q, prog_end);
+				fm[k] = (unsigned)read_uleb(&q, prog_end);
+			}
+			ndir = read_uleb(&q, prog_end);   /* directories_count */
+			for (e = 0; e < ndir && q < prog_end; ++e) {
+				for (k = 0; k < n && q < prog_end; ++k) {
+					if (fm[k] == 0x08 || fm[k] == 0x0a) {
+						while (q < prog_end && *q) ++q;
+						if (q < prog_end) ++q;
+					} else if (fm[k] == 0x1f) {
+						if (q + 4 <= prog_end) q += 4;
+					} else if (fm[k] == 0x05 || fm[k] == 0x0b) {
+						if (q + 1 <= prog_end) q += 1;
+					} else if (fm[k] == 0x0f) {
+						read_uleb(&q, prog_end);
+					} else if (fm[k] == 0x06 || fm[k] == 0x12 || fm[k] == 0x13) {
+						if (q + 4 <= prog_end) q += 4;
+					} else if (fm[k] == 0x07 || fm[k] == 0x14) {
+						if (q + 8 <= prog_end) q += 8;
+					}
+				}
+			}
+
+			/* file_names table */
+			nfmt = read_uleb(&q, prog_end);   /* format count */
+			n = (unsigned)(nfmt < 32 ? nfmt : 32);
+			for (k = 0; k < n && q < prog_end; ++k) {
+				unsigned c = (unsigned)read_uleb(&q, prog_end);
+				ct[k] = c;
+				fm[k] = (unsigned)read_uleb(&q, prog_end);
+			}
+			{
+				uint64_t nfiles = read_uleb(&q, prog_end);
+				int shown = 0;
+				for (e = 0; e < nfiles && q < prog_end && shown < 8; ++e) {
+					for (k = 0; k < n && q < prog_end; ++k) {
+						/* decode one file field */
+						if (fm[k] == 0x1f) {   /* line_strp */
+							uint64_t off = 0;
+							if (q + 4 <= prog_end) {
+								int j;
+								for (j = 0; j < 4; ++j)
+									off |= (uint64_t)q[j] << (8 * j);
+								q += 4;
+							}
+							if (ct[k] == 0x1 && (size_t)off < lstr_size) {
+								printf("%-25s%4llu\n",
+								       (const char *)(lstr + off),
+								       (unsigned long long)e + 1);
+								++shown;
+							}
+						} else if (fm[k] == 0x08) {   /* string */
+							const unsigned char *s = q;
+							while (q < prog_end && *q) ++q;
+							if (q < prog_end) ++q;
+							if (ct[k] == 0x1) {
+								printf("%-25s%4llu\n",
+								       (const char *)s,
+								       (unsigned long long)e + 1);
+								++shown;
+							}
+						} else {
+							/* scalar / ULEB-sized field: skip per form */
+							if (fm[k] == 0x0f || fm[k] == 0x0d ||
+							    fm[k] == 0x22 || fm[k] == 0x23) {
+								read_uleb(&q, prog_end);
+							} else if (fm[k] == 0x05 || fm[k] == 0x0b) {
+								if (q + 1 <= prog_end) q += 1;
+							} else if (fm[k] == 0x12 || fm[k] == 0x13) {
+								if (q + 4 <= prog_end) q += 4;
+							} else if (fm[k] == 0x0a) {   /* block1 */
+								if (q < prog_end) {
+									unsigned bl = *q++;
+									if (q + bl <= prog_end) q += bl;
+									else q = prog_end;
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	} else {
+		/* v3/v4: skip include_directories (empty/unused) */
+		while (q < prog_end && *q != 0) {
+			while (q < prog_end && *q != 0)
+				++q;
+			if (q < prog_end)
+				++q;
+		}
+		if (q < prog_end)
+			++q;   /* skip the terminating 0 */
+
+		/* file_names */
+		{
+			int idx = 1;
+			unsigned char *fname = NULL;
+			size_t flen = 0;
+			while (q < prog_end && *q != 0) {
+				const unsigned char *s = q;
+				size_t n = 0;
+				while (q < prog_end && *q != 0) {
+					++q; ++n;
+				}
+				if (q < prog_end)
+					++q;   /* skip null */
+				/* directory index */
+				read_uleb(&q, prog_end);
+				/* mtime */
+				read_uleb(&q, prog_end);
+				/* length */
+				read_uleb(&q, prog_end);
+				if (n + 1 > flen) {
+					fname = realloc(fname, n + 1);
+					flen = n + 1;
+				}
+				if (fname && n > 0) {
+					memcpy(fname, s, n);
+					fname[n] = '\0';
+					printf("%-25s%4d\n", fname, idx);
+				}
+				++idx;
+			}
+			free(fname);
+		}
+	}
+
+	/* line-number program starts after the header_length field, which is
+	 * measured from the byte following the header_length field:
+	 * offset = 4 (unit_length) + 2 (version) [+ 2 for v5 address_size and
+	 * segment_selector_size] + 4 (header_length), i.e. 10 or 12 from the
+	 * start of .debug_line. */
+	prog = data + (version == 5 ? 12 : 10) + header_length;
+	if (prog > prog_end)
+		prog = prog_end;
+	printf("\nAddress            Line   Column File   ISA  Discriminator Op\n");
+	line = default_is_stmt ? 1 : 0;
+	is_stmt = default_is_stmt;
+	while (prog < prog_end) {
+		unsigned char b = *prog++;
+		if (b == 0) {
+			/* extended opcode: 0x00, uleb length (incl. subopcode),
+			 * subopcode, then length-1 bytes of arguments.  The ULEB
+			 * length field may span multiple bytes, and `exlen` is the
+			 * number of bytes following that field (subopcode included),
+			 * so the next opcode sits at `uleb_end + exlen`. */
+			unsigned exlen = (unsigned)read_uleb(&prog, prog_end);
+			const unsigned char *uleb_end = prog;
+			unsigned char subop;
+			unsigned k;
+
+			if (exlen == 0 || prog >= prog_end)
+				break;
+			subop = *prog++;
+			if (subop == 1) {  /* DW_LNE_end_sequence */
+				printf("0x%08llx %8lld\n",
+				       (unsigned long long)addr,
+				       (long long)line);
+				line = default_is_stmt ? 1 : 0;
+				addr = 0;
+				is_stmt = default_is_stmt;
+			} else if (subop == 2 && exlen >= 2) {  /* set_address */
+				uint64_t a = 0;
+				int addr_size = (int)exlen - 1;
+				if (addr_size > 8) addr_size = 8;
+				for (k = 0; k < (unsigned)addr_size; ++k)
+					a |= (uint64_t)*prog++ << (8 * k);
+				addr = a;
+			} else if (subop == 3) {  /* define_file */
+				while (prog < prog_end && *prog)
+					++prog;
+				if (prog < prog_end) ++prog;
+				read_uleb(&prog, prog_end);
+				read_uleb(&prog, prog_end);
+				read_uleb(&prog, prog_end);
+			}
+			/* skip to end of the extended opcode */
+			prog = uleb_end + exlen;
+			if (prog > prog_end)
+				prog = prog_end;
+			continue;
+		} else if (b < opcode_base) {
+			switch (b) {
+			case 1: /* DW_LNS_copy */
+				printf("0x%08llx %8lld %3llu %2llu %3llu\n",
+				       (unsigned long long)addr,
+				       (long long)line, (unsigned long long)col,
+				       (unsigned long long)file,
+				       (unsigned long long)isa);
+				/* (basic_block / prologue_end / epilogue_begin state
+				 * reset after the row is emitted; not printed) */
+				(void)is_stmt;
+				break;			case 2: /* DW_LNS_advance_pc */
+				addr += read_uleb(&prog, prog_end) * min_ilen;
+				break;
+			case 3: /* DW_LNS_advance_line */
+				line += read_sleb(&prog, prog_end);
+				break;
+			case 4: /* DW_LNS_set_file */
+				file = read_uleb(&prog, prog_end);
+				break;
+			case 5: /* DW_LNS_set_column */
+				col = read_uleb(&prog, prog_end);
+				break;
+			case 6: /* DW_LNS_negate_stmt */
+				is_stmt = !is_stmt;
+				break;
+			case 7: /* DW_LNS_set_basic_block */
+				/* state consumed by the next row; not printed */
+				break;
+			case 8: /* DW_LNS_const_add_pc */
+				addr += ((255 - opcode_base) / line_range) * min_ilen;
+				break;
+			case 9: /* DW_LNS_fixed_advance_pc */
+				if (prog + 2 <= prog_end) {
+					addr += (unsigned)prog[0] | (unsigned)prog[1] << 8;
+					prog += 2;
+				}
+				break;
+			case 10: /* DW_LNS_set_prologue_end */
+			case 11: /* DW_LNS_set_epilogue_begin */
+				/* row flags; not printed */
+				break;
+			case 12: /* DW_LNS_set_isa */
+				isa = read_uleb(&prog, prog_end);
+				break;
+			default:
+				for (op = 0; op < opcodes[b - 1] && prog < prog_end; ++op)
+					read_uleb(&prog, prog_end);
+				break;
+			}
+		} else {
+			/* special opcode */
+			unsigned adj = b - opcode_base;
+			addr += (adj / line_range) * min_ilen;
+			line += line_base + (adj % line_range);
+			printf("0x%08llx %8lld %3llu %2llu %3llu\n",
+			       (unsigned long long)addr,
+			       (long long)line, (unsigned long long)col,
+			       (unsigned long long)file, (unsigned long long)isa);
+			(void)is_stmt;
+		}
+	}
+	printf("\n");
+}
+
+/* Map a handful of DWARF tags / attributes to human-readable names;
+ * unknown ones fall back to "DW_TAG_*"/"DW_AT_*" numeric form. */
+static const char *
+dwarf_tag_name(uint64_t tag)
+{
+	switch (tag) {
+	case 0x01: return "array_type";
+	case 0x02: return "class_type";
+	case 0x03: return "entry_point";
+	case 0x04: return "enumeration_type";
+	case 0x05: return "formal_parameter";
+	case 0x08: return "imported_declaration";
+	case 0x0a: return "label";
+	case 0x0b: return "lexical_block";
+	case 0x0d: return "member";
+	case 0x0f: return "pointer_type";
+	case 0x10: return "reference_type";
+	case 0x11: return "compile_unit";
+	case 0x12: return "string_type";
+	case 0x13: return "structure_type";
+	case 0x15: return "subroutine_type";
+	case 0x16: return "typedef";
+	case 0x17: return "union_type";
+	case 0x18: return "unspecified_parameters";
+	case 0x1c: return "inheritance";
+	case 0x1d: return "inlined_subroutine";
+	case 0x1f: return "ptr_to_member_type";
+	case 0x20: return "set_type";
+	case 0x21: return "subrange_type";
+	case 0x24: return "base_type";
+	case 0x26: return "const_type";
+	case 0x27: return "constant";
+	case 0x28: return "enumerator";
+	case 0x2a: return "friend";
+	case 0x2e: return "subprogram";
+	case 0x2f: return "template_type_parameter";
+	case 0x30: return "template_value_parameter";
+	case 0x34: return "variable";
+	case 0x35: return "volatile_type";
+	case 0x36: return "dwarf_procedure";
+	case 0x37: return "restrict_type";
+	case 0x39: return "namespace";
+	case 0x3b: return "unspecified_type";
+	case 0x40: return "call_site";
+	default:  return NULL;
+	}
+}
+
+static const char *
+dwarf_attr_name(uint64_t attr)
+{
+	switch (attr) {
+	case 0x01: return "sibling";
+	case 0x02: return "location";
+	case 0x03: return "name";
+	case 0x09: return "ordering";
+	case 0x0b: return "byte_size";
+	case 0x0d: return "bit_size";
+	case 0x10: return "stmt_list";
+	case 0x11: return "low_pc";
+	case 0x12: return "high_pc";
+	case 0x13: return "language";
+	case 0x16: return "encoding";
+	case 0x17: return "visibility";
+	case 0x18: return "import";
+	case 0x1c: return "const_value";
+	case 0x1b: return "comp_dir";
+	case 0x20: return "inline";
+	case 0x22: return "lower_bound";
+	case 0x25: return "producer";
+	case 0x27: return "prototyped";
+	case 0x2f: return "upper_bound";
+	case 0x31: return "abstract_origin";
+	case 0x34: return "artificial";
+	case 0x38: return "data_member_location";
+	case 0x39: return "decl_column";
+	case 0x3a: return "decl_file";
+	case 0x3b: return "decl_line";
+	case 0x3c: return "declaration";
+	case 0x3e: return "encoding";
+	case 0x3f: return "external";
+	case 0x40: return "frame_base";
+	case 0x42: return "identifier_case";
+	case 0x47: return "specification";
+	case 0x48: return "static_link";
+	case 0x49: return "type";
+	case 0x4f: return "associated";
+	case 0x6b: return "data_bit_offset";
+	case 0x6e: return "linkage_name";
+	case 0x79: return "macros";
+	case 0x7a: return "call_all_calls";
+	case 0x7b: return "call_all_source_calls";
+	case 0x7c: return "call_all_tail_calls";
+	case 0x7d: return "call_return_pc";
+	case 0x7e: return "call_value";
+	case 0x7f: return "call_origin";
+	case 0x2116: return "GNU_all_tail_call_sites";
+	case 0x2117: return "GNU_all_call_sites";
+	case 0x51: return "base_type"; /* reserved; unused in practice */
+	default:  return NULL;
+	}
+}
+
+static const char *
+dwarf_form_name(uint64_t form)
+{
+	switch (form) {
+	case 0x01: return "addr";
+	case 0x03: return "block2";
+	case 0x04: return "block4";
+	case 0x05: return "data2";
+	case 0x06: return "data4";
+	case 0x07: return "data8";
+	case 0x08: return "string";
+	case 0x09: return "block";
+	case 0x0a: return "block1";
+	case 0x0b: return "data1";
+	case 0x0c: return "flag";
+	case 0x0d: return "sdata";
+	case 0x0e: return "strp";
+	case 0x0f: return "udata";
+	case 0x10: return "ref_addr";
+	case 0x11: return "ref1";
+	case 0x12: return "ref2";
+	case 0x13: return "ref4";
+	case 0x14: return "ref8";
+	case 0x15: return "ref_udata";
+	case 0x16: return "indirect";
+	case 0x17: return "sec_offset";
+	case 0x18: return "exprloc";
+	case 0x19: return "flag_present";
+	case 0x1a: return "strx";
+	case 0x1b: return "addrx";
+	case 0x1c: return "ref_sup4";
+	case 0x1d: return "strp_sup";
+	case 0x1e: return "data16";
+	case 0x1f: return "line_strp";
+	case 0x20: return "ref_sig8";
+	case 0x21: return "implicit_const";
+	case 0x22: return "loclistx";
+	case 0x23: return "rnglistx";
+	case 0x24: return "ref_sup8";
+	case 0x25: return "strx1";
+	case 0x26: return "strx2";
+	case 0x27: return "strx3";
+	case 0x28: return "strx4";
+	case 0x29: return "addrx1";
+	case 0x2a: return "addrx2";
+	case 0x2b: return "addrx3";
+	case 0x2c: return "addrx4";
+	default:  return NULL;
+	}
+}
+
+/* Decode and print the .debug_abbrev compilation-unit abbreviation table
+ * (a prefix of it, bounded by dsize).  Each entry: uleb abbreviation
+ * code, uleb tag, children byte, then (uleb attr, uleb form)* pairs ended
+ * by 0,0. */
+static void
+dump_debug_abbrev(const unsigned char *data, size_t dsize)
+{
+	const unsigned char *p = data, *end = data + dsize;
+	int shown = 0;
+
+	printf("\nThe .debug_abbrev section:\n");
+	while (p < end) {
+		uint64_t code = read_uleb(&p, end);
+		uint64_t tag, children;
+		const char *tag_name;
+		uint64_t attr, form;
+		int i;
+
+		if (code == 0)
+			break;
+		if (shown++ > 200)
+			break;
+		tag = read_uleb(&p, end);
+		children = (p < end) ? *p++ : 0;
+		tag_name = dwarf_tag_name(tag);
+		printf("  %llu DW_TAG_%s%s\n",
+		       (unsigned long long)code,
+		       tag_name ? tag_name : "<unknown>",
+		       children ? "\tDW_CHILDREN_yes" : "\tDW_CHILDREN_no");
+		for (i = 0; p < end; ++i) {
+			const char *an, *fn;
+			attr = read_uleb(&p, end);
+			form = read_uleb(&p, end);
+			if (attr == 0 && form == 0)
+				break;
+			if (i > 30)
+				break;
+			an = dwarf_attr_name(attr);
+			fn = dwarf_form_name(form);
+			if (form == 0x21) {
+				/* DW_FORM_implicit_const: the attribute value is the
+				 * SLEB128 that follows here in the abbrev entry. */
+				int64_t c = read_sleb(&p, end);
+				printf("    DW_AT_%-12s DW_FORM_implicit_const: %lld\n",
+				       an ? an : "<unknown>", (long long)c);
+			} else {
+				printf("    DW_AT_%-12s DW_FORM_%s\n",
+				       an ? an : "<unknown>",
+				       fn ? fn : "<unknown>");
+			}
+		}
+	}
+	printf("\n");
+}
+
+/* Decode and print the .debug_info compilation units (DWARF4): walk the
+ * DIE tree by looking each DIE's abbreviation code up in the
+ * .debug_abbrev table and printing the decoded attribute values for the
+ * common DWARF4 forms.  Defined below (after dump_debug). */
+static void dump_debug_info(const unsigned char *data, size_t dsize,
+                            int indent, const unsigned char *abbrev,
+                            size_t abbrev_size);
+
+/* Initial DWARF support: dump every .debug_* section's contents (name,
+ * address, raw hex bytes), with structural decoding for .debug_line and
+ * .debug_abbrev, and DIE traversal for .debug_info.  ELF32 reuses the same
+ * 64-bit parser for the section map. */
+static void
+dump_debug(const unsigned char *bytes, size_t size,
+           const struct mt_elf64_view *view)
+{
+	struct mt_elf64_section shstrtab, sec;
+	enum mt_elf_status st;
+	unsigned char *abbrv_data = NULL;
+	size_t abbrv_size = 0;
+	unsigned char *lstr_data = NULL;
+	size_t lstr_size = 0;
+	uint16_t i;
+
+	if (view->section_name_index >= view->section_count)
+		return;
+	st = mt_elf64_get_section(bytes, size, view,
+	                          view->section_name_index, &shstrtab);
+	if (st != MT_ELF_OK || shstrtab.type != MT_SHT_STRTAB)
+		return;
+
+	/* First pass: locate .debug_abbrev (needed by .debug_info DIE
+	 * decoding) and .debug_line_str (needed to resolve v5 line_strp file
+	 * names). */
+	for (i = 0; i < view->section_count; ++i) {
+		const char *name;
+
+		if (mt_elf64_get_section(bytes, size, view, i, &sec) != MT_ELF_OK)
+			continue;
+		if (mt_elf64_get_string(bytes, size, &shstrtab, sec.name,
+		                        &name) != MT_ELF_OK || !name)
+			continue;
+		if (strcmp(name, ".debug_abbrev") == 0) {
+			abbrv_data = (unsigned char *)(bytes + sec.offset);
+			abbrv_size = sec.size;
+		} else if (strcmp(name, ".debug_line_str") == 0) {
+			lstr_data = (unsigned char *)(bytes + sec.offset);
+			lstr_size = sec.size;
+		}
+	}
+
+	for (i = 0; i < view->section_count; ++i) {
+		const char *name;
+
+		if (mt_elf64_get_section(bytes, size, view, i, &sec) != MT_ELF_OK)
+			continue;
+		if (mt_elf64_get_string(bytes, size, &shstrtab, sec.name,
+		                        &name) != MT_ELF_OK || !name)
+			continue;
+		if (strncmp(name, ".debug_", 7) != 0 &&
+		    strncmp(name, ".zdebug_", 8) != 0 &&
+		    strcmp(name, ".stab") != 0)
+			continue;
+		if (strcmp(name, ".debug_line") == 0) {
+			dump_debug_line(bytes + sec.offset, sec.size,
+			                lstr_data, lstr_size);
+			continue;
+		}
+		if (strcmp(name, ".debug_abbrev") == 0) {
+			dump_debug_abbrev(bytes + sec.offset, sec.size);
+			continue;
+		}
+		if (strcmp(name, ".debug_info") == 0) {
+			dump_debug_info(bytes + sec.offset, sec.size, 0,
+			                abbrv_data, abbrv_size);
+			continue;
+		}
+		dump_hexdump_section(bytes, size, &sec, name,
+		                     section_has_relocations(bytes, size, view, i));
+	}
+}
+
+/* ---- .debug_info DIE decode ------------------------------------------ */
+
+/* A single attribute in one abbreviation. */
+struct dw_abbrev_attr {
+	uint64_t attr, form;
+};
+
+/* A resolved abbreviation declaration: tag, children flag, attribute
+ * signature. */
+struct dw_abbrev {
+	uint64_t tag;
+	unsigned char has_children;
+	struct dw_abbrev_attr attrs[24];
+	unsigned nattrs;
+};
+
+/* Parse the .debug_abbrev leaf list into `tab[1..ntab-1]` (indexed by
+ * abbreviation code).  Returns the number of entries + 1 (index 0 unused). */
+static int
+parse_abbrev_table(const unsigned char *abbrev, size_t abbrev_size,
+                   struct dw_abbrev *tab, int tabcap)
+{
+	const unsigned char *p = abbrev, *end = abbrev + abbrev_size;
+	uint64_t code, tag, attr, form;
+	unsigned char children;
+	int n = 0;
+
+	while (p < end) {
+		unsigned i;
+		code = read_uleb(&p, end);
+		if (code == 0)
+			break;
+		if (code >= (uint64_t)tabcap || n >= tabcap - 1) {
+			/* Reject overlarge/garbage codes; keep parsing to the
+			 * next entry anyway. */
+			if (p < end) {
+				tag = read_uleb(&p, end);
+				(void)tag;
+				if (p < end) children = *p++;
+				else children = 0;
+				for (i = 0; p < end; ++i) {
+					attr = read_uleb(&p, end);
+					form = read_uleb(&p, end);
+					if (attr == 0 && form == 0)
+						break;
+					if (form == 0x21)   /* implicit_const:
+					                      * SLEB value follows */
+						read_sleb(&p, end);
+					if (i > 40)
+						break;
+				}
+			}
+			continue;
+		}
+		tag = read_uleb(&p, end);
+		children = (p < end) ? *p++ : 0;
+		tab[code].tag = tag;
+		tab[code].has_children = children;
+		tab[code].nattrs = 0;
+		for (i = 0; p < end; ++i) {
+			attr = read_uleb(&p, end);
+			form = read_uleb(&p, end);
+			if (attr == 0 && form == 0)
+				break;
+			if (tab[code].nattrs >= 24 || i > 40)
+				break;
+			tab[code].attrs[tab[code].nattrs].attr = attr;
+			tab[code].attrs[tab[code].nattrs].form = form;
+			tab[code].nattrs++;
+			/* implicit_const carries its value in the abbrev entry
+			 * (as SLEB128); there is nothing to read from .debug_info. */
+			if (form == 0x21)
+				read_sleb(&p, end);
+		}
+		if (code > (uint64_t)n)
+			n = (int)code;
+	}
+	return n + 1;
+}
+
+/* Skip/decode one attribute value at *pp per `form`, printing a
+ * human-readable value into `out` (bounded).  Advances *pp. */
+static void
+decode_attr_value(const unsigned char **pp, const unsigned char *end,
+                  uint64_t form, int address_size, char *out, size_t outsz)
+{
+	const unsigned char *p = *pp;
+	uint64_t u;
+	int64_t s;
+	size_t blk, i;
+
+	if (!outsz)
+		outsz = 1;
+	out[0] = '\0';
+	if (p >= end) {
+		*pp = p;
+		snprintf(out, outsz, "<eof>");
+		return;
+	}
+	switch (form) {
+	case 0x08: /* string */
+	{
+		size_t n = 0;
+		while (p + n < end && p[n] != 0)
+			++n;
+		i = n < outsz - 1 ? n : outsz - 1;
+		memcpy(out, p, i);
+		out[i] = '\0';
+		p += n + 1;
+		break;
+	}
+	case 0x01: /* addr */
+		u = 0;
+		for (i = 0; i < (size_t)address_size && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "0x%llx", (unsigned long long)u);
+		break;
+	case 0x0f: /* udata */
+		u = read_uleb(&p, end);
+		snprintf(out, outsz, "%llu", (unsigned long long)u);
+		break;
+	case 0x0d: /* sdata */
+		s = read_sleb(&p, end);
+		snprintf(out, outsz, "%lld", (long long)s);
+		break;
+	case 0x0b: /* data1 */
+		u = (p < end) ? *p++ : 0;
+		snprintf(out, outsz, "%llu", (unsigned long long)u);
+		break;
+	case 0x05: /* data2 */
+		u = 0;
+		for (i = 0; i < 2 && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "%llu", (unsigned long long)u);
+		break;
+	case 0x06: /* data4 */
+		u = 0;
+		for (i = 0; i < 4 && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "%llu", (unsigned long long)u);
+		break;
+	case 0x07: /* data8 */
+		u = 0;
+		for (i = 0; i < 8 && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "%llu", (unsigned long long)u);
+		break;
+	case 0x0c: /* flag */
+		u = (p < end) ? *p++ : 0;
+		snprintf(out, outsz, "%s", u ? "yes" : "no");
+		break;
+	case 0x19: /* flag_present */
+		snprintf(out, outsz, "yes");
+		break;
+	case 0x13: /* ref4 */
+		u = 0;
+		for (i = 0; i < 4 && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "0x%llx", (unsigned long long)u);
+		break;
+	case 0x11: /* ref1 */
+		u = (p < end) ? *p++ : 0;
+		snprintf(out, outsz, "0x%llx", (unsigned long long)u);
+		break;
+	case 0x12: /* ref2 */
+		u = 0;
+		for (i = 0; i < 2 && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "0x%llx", (unsigned long long)u);
+		break;
+	case 0x14: /* ref8 */
+		u = 0;
+		for (i = 0; i < 8 && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "0x%llx", (unsigned long long)u);
+		break;
+	case 0x15: /* ref_udata */
+		u = read_uleb(&p, end);
+		snprintf(out, outsz, "0x%llx", (unsigned long long)u);
+		break;
+	case 0x10: /* ref_addr */
+		u = 0;
+		for (i = 0; i < (size_t)address_size && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "0x%llx", (unsigned long long)u);
+		break;
+	case 0x0e: /* strp: offset into .debug_str; we print the raw offset */
+		u = 0;
+		for (i = 0; i < 4 && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "(str) 0x%llx", (unsigned long long)u);
+		break;
+	case 0x0a: /* block1 */
+	case 0x09: /* block */
+	case 0x18: /* exprloc */
+		blk = (form == 0x0a) ? ((p < end) ? *p++ : 0)
+		                     : (size_t)read_uleb(&p, end);
+		/* Decode a location-expression byte codes as readable DW_OP
+		 * names + operands; unknown opcodes fall back to raw hex. */
+		{
+			const unsigned char *sp = p, *sex_end = p + blk;
+			if (sex_end > end)
+				sex_end = end;
+			out[0] = '\0';
+			while (sp < sex_end) {
+				unsigned char opc = *sp++;
+				const char *oname = NULL;
+				size_t used;
+
+				if (opc >= 0x50 && opc <= 0x6f) {
+					snprintf(out + strlen(out), outsz - strlen(out),
+					         "%s(DW_OP_reg%u)",
+					         strlen(out) ? " " : "", opc - 0x50);
+					continue;
+				}
+				switch (opc) {
+				case 0x03: oname = "addr"; break;      /* 4/8-byte addr */
+				case 0x06: oname = "deref"; break;
+				case 0x08: oname = "const1u"; break;   /* 1-byte */
+				case 0x09: oname = "const1s"; break;
+				case 0x0a: oname = "const2u"; break;   /* 2-byte */
+				case 0x0b: oname = "const2s"; break;
+				case 0x0c: oname = "const4u"; break;   /* 4-byte */
+				case 0x0d: oname = "const4s"; break;
+				case 0x0e: oname = "const8u"; break;   /* 8-byte */
+				case 0x0f: oname = "const8s"; break;
+				case 0x10: oname = "constu"; break;    /* uleb */
+				case 0x11: oname = "consts"; break;    /* sleb */
+				case 0x12: oname = "dup"; break;
+				case 0x13: oname = "drop"; break;
+				case 0x14: oname = "over"; break;
+				case 0x17: oname = "swap"; break;
+				case 0x1c: oname = "plus"; break;
+				case 0x1f: oname = "minus"; break;
+				case 0x22: oname = "plus_uconst"; break; /* uleb */
+				case 0x23: oname = "breg0"; break;       /* sleb */
+				case 0x30: case 0x31: case 0x32: case 0x33: case 0x34:
+				case 0x35: case 0x36: case 0x37: case 0x38: case 0x39:
+				case 0x3a: case 0x3b: case 0x3c: case 0x3d: case 0x3e:
+				case 0x3f:
+					oname = "lit0"; break;              /* lit0..lit15 */
+				case 0x90: oname = "regx"; break;       /* uleb */
+				case 0x91: oname = "fbreg"; break;      /* sleb */
+				case 0x9d: oname = "bra"; break;        /* 2-byte */
+				case 0x9f: oname = "stack_value"; break;
+				case 0xa0: oname = "implicit_value"; break; /* 2-byte len */
+				default:   oname = NULL; break;
+				}
+				if (!oname) {
+					snprintf(out + strlen(out), outsz - strlen(out),
+					         "%s0x%02x", strlen(out) ? " " : "", opc);
+					continue;
+				}
+				if (opc >= 0x30 && opc <= 0x3f)
+					snprintf(out + strlen(out), outsz - strlen(out),
+					         "%sDW_OP_lit%u", strlen(out) ? " " : "",
+					         opc - 0x30);
+				else
+					snprintf(out + strlen(out), outsz - strlen(out),
+					         "%sDW_OP_%s", strlen(out) ? " " : "", oname);
+				/* consume operands */
+				used = 0;
+				switch (opc) {
+				case 0x03: used = 8; break;
+				case 0x08: case 0x09: used = 1; break;
+				case 0x0a: case 0x0b: used = 2; break;
+				case 0x0c: case 0x0d: case 0x9d: used = 4; break;
+				case 0x0e: case 0x0f: used = 8; break;
+				default:
+					if (opc == 0x10 || opc == 0x90 || opc == 0x22) {
+						/* uleb operand */
+						const unsigned char *s2 = sp;
+						read_uleb(&s2, sex_end);
+						used = (size_t)(s2 - sp);
+					} else if (opc == 0x11 || opc == 0x91 ||
+					           (opc >= 0x23 && opc <= 0x2e)) {
+						/* sleb operand */
+						const unsigned char *s2 = sp;
+						read_sleb(&s2, sex_end);
+						used = (size_t)(s2 - sp);
+					} else if (opc == 0xa0) {
+						used = 0;
+					}
+					break;
+				}
+				while (used > 0 && sp < sex_end) {
+					snprintf(out + strlen(out), outsz - strlen(out),
+					         "%s%02x", strlen(out) ? " " : "", *sp++);
+					--used;
+				}
+			}
+			p = sex_end;
+		}
+		break;
+	case 0x17: /* sec_offset */
+		u = 0;
+		for (i = 0; i < 4 && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "0x%llx", (unsigned long long)u);
+		break;
+	case 0x16: /* indirect */
+		snprintf(out, outsz, "<indirect>");
+		break;
+	case 0x1f: /* line_strp: 4-byte offset into .debug_line_str */
+		u = 0;
+		for (i = 0; i < 4 && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "(line_str) 0x%llx", (unsigned long long)u);
+		break;
+	case 0x1a: /* strx: uleb index into .debug_str_offsets */
+		u = read_uleb(&p, end);
+		snprintf(out, outsz, "(strx) %llu", (unsigned long long)u);
+		break;
+	case 0x1b: /* addrx: uleb index into .debug_addr */
+		u = read_uleb(&p, end);
+		snprintf(out, outsz, "(addrx) 0x%llx", (unsigned long long)u);
+		break;
+	case 0x21: /* implicit_const: value lives in the abbrev entry, not here */
+		snprintf(out, outsz, "<implicit>");
+		break;
+	case 0x25: case 0x26: case 0x27: case 0x28: { /* strx1..strx4 */
+		unsigned nb = 1u + (unsigned)(form - 0x25);
+		u = 0;
+		for (i = 0; i < nb && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "(strx) %llu", (unsigned long long)u);
+		break;
+	}
+	case 0x29: case 0x2a: case 0x2b: case 0x2c: { /* addrx1..addrx4 */
+		unsigned nb = 1u + (unsigned)(form - 0x29);
+		u = 0;
+		for (i = 0; i < nb && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "(addrx) 0x%llx", (unsigned long long)u);
+		break;
+	}
+	default:
+		snprintf(out, outsz, "<form 0x%llx>", (unsigned long long)form);
+		break;
+	}
+	*pp = p;
+}
+
+/* Recursively walk DWARF4 DIEs and print the decoded tree. */
+static void
+dump_dies(const unsigned char **pp, const unsigned char *end,
+          struct dw_abbrev *tab, int indent, int address_size)
+{
+	while (*pp < end) {
+		uint64_t code = read_uleb(pp, end);
+		struct dw_abbrev *a;
+		const char *tn;
+		unsigned ai;
+
+		if (code == 0)     /* null DIE terminates a sibling list */
+			return;
+		if (code >= 256 || tab[(size_t)code].tag == 0)
+			break;   /* unknown abbrev: stop this CU */
+		a = &tab[(size_t)code];
+		tn = dwarf_tag_name(a->tag);
+		printf("%*s<%d> DW_TAG_%s\n", indent * 4, "", indent, tn ? tn : "<unknown>");
+		for (ai = 0; ai < a->nattrs; ++ai) {
+			char val[160];
+			const char *an;
+			decode_attr_value(pp, end, a->attrs[ai].form, address_size,
+			                  val, sizeof val);
+			an = dwarf_attr_name(a->attrs[ai].attr);
+			printf("%*s  DW_AT_%-12s: %s\n", indent * 4, "",
+			       an ? an : "<unknown>", val);
+		}
+		if (a->has_children)
+			dump_dies(pp, end, tab, indent + 1, address_size);
+	}
+}
+
+/* Parse a .debug_info CU header then walk its DIE tree.  abbrev points to
+ * the .debug_abbrev section; size is the .debug_info section size. */
+static void
+dump_debug_info(const unsigned char *data, size_t dsize,
+                int indent, const unsigned char *abbrev, size_t abbrev_size)
+{
+	struct dw_abbrev tab[256] = { { 0 } };
+	const unsigned char *p = data, *end = data + dsize;
+	uint64_t unit_length;
+	uint16_t version;
+	uint64_t abbrev_offset;
+	uint8_t address_size;
+	int ntab;
+	int cu = 0;
+
+	if (!abbrev || abbrev_size == 0)
+		return;
+	ntab = parse_abbrev_table(abbrev, abbrev_size, tab, 256);
+	(void)ntab;
+
+	printf("\nThe .debug_info section:\n");
+	while (p + 11 <= end) {
+		uint64_t cu_end;
+		size_t cu_off = (size_t)(p - data);
+
+		unit_length = (uint32_t)p[0] | (uint32_t)p[1] << 8 |
+		              (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+		p += 4;
+		if (unit_length >= 0xfffffff0u || p + unit_length > end)
+			break;
+		version = (uint16_t)p[0] | (uint16_t)p[1] << 8;
+		p += 2;
+		if (version < 2 || version > 5)
+			break;
+		if (version >= 5) {
+			/* DWARF5: version, unit_type(1), address_size(1),
+			 * abbrev_offset(4). */
+			p++;                     /* unit_type */
+			address_size = *p++;
+			abbrev_offset = (uint32_t)p[0] | (uint32_t)p[1] << 8 |
+			                (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+			p += 4;
+		} else {
+			/* DWARF v2-v4: version, abbrev_offset(4), address_size(1). */
+			abbrev_offset = (uint32_t)p[0] | (uint32_t)p[1] << 8 |
+			                (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+			p += 4;
+			address_size = *p++;
+		}
+		cu_end = (uint64_t)(size_t)(p - data) + unit_length;
+		if (cu_end > dsize)
+			cu_end = dsize;
+		printf("  Compilation Unit @ offset 0x%llx:\n",
+		       (unsigned long long)cu_off);
+		printf("   Version: %u  Abbrev Offset: %llu  Pointer Size: %u\n",
+		       version, (unsigned long long)abbrev_offset, address_size);
+		dump_dies(&p, data + cu_end, tab, indent + 1, address_size);
+		++cu;
+		p = data + cu_end;
+	}
+	printf("\n");
+}
+
 /* ---- 单文件处理 ---- */
 
 static int
@@ -1218,6 +2344,8 @@ process_file(const char *path, struct options *opts)
 		dump_symbols(bytes, size, &view);
 	for (i = 0; i < opts->hex_count; ++i)
 		dump_hexdump(bytes, size, &view, opts->hex_secs[i]);
+	if (opts->dump_debug)
+		dump_debug(bytes, size, &view);
 
 	free(bytes);
 	return unsupported ? 1 : 0;
@@ -1251,6 +2379,7 @@ parse_short_cluster(const char *arg, struct options *opts)
 		case 's': opts->dump_symbols = 1; break;
 		case 'r': opts->dump_relocs = 1; break;
 		case 'd': opts->dump_dynamic = 1; break;
+		case 'w': opts->dump_debug = 1; break;
 		case 'W': opts->wide = 1; break;
 		case 'H': usage(stdout); return 1;
 		case 'V':
@@ -1313,6 +2442,11 @@ main(int argc, char **argv)
 		}
 		if (strcmp(arg, "--dynamic") == 0) {
 			opts.dump_dynamic = 1;
+			continue;
+		}
+		if (strcmp(arg, "--debug-dump") == 0 ||
+		    strcmp(arg, "--debug-dump=rawline") == 0) {
+			opts.dump_debug = 1;
 			continue;
 		}
 		if (strcmp(arg, "--wide") == 0 || strcmp(arg, "-W") == 0) {

@@ -1,6 +1,7 @@
 #include "ir.h"
 
 int emit_debug;  /* set by -g flag in main.c */
+int g_dwarf_level;  /* -g level: 0 = no debug info, 1+ = DWARF level */
 
 enum {
 	SecText,
@@ -209,7 +210,12 @@ elf_emitfin(FILE *f)
 	static char *sec[3] = { ".rodata", ".rodata", ".rodata" };
 
 	emitfin(f ,sec);
-	fprintf(f, ".section .note.GNU-stack,\"\",@progbits\n");
+	/* The empty-attribute form is rejected by the ARM GNU assembler
+	 * ("junk at end of line"), which accepts the plain form. */
+	if (strncmp(T.name, "arm", 3) == 0)
+		fprintf(f, ".section .note.GNU-stack\n");
+	else
+		fprintf(f, ".section .note.GNU-stack,\"\",@progbits\n");
 }
 
 void
@@ -268,7 +274,10 @@ emitdbgfile(char *fn, FILE *f)
 void
 emitdbgloc(uint line, uint col, FILE *f)
 {
-	if (!emit_debug) return;
+	/* -g with a DWARF level: the explicit .debug_line table in dwarf.c
+	 * supersedes gas's .loc-generated line table, so suppress .loc to
+	 * avoid two line tables in one .debug_line section. */
+	if (!emit_debug || g_dwarf_level > 0) return;
 	if (col != 0)
 		fprintf(f, "\t.loc %u %u %u\n", curfile, line, col);
 	else

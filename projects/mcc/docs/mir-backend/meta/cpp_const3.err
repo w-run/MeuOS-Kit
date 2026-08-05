@@ -1,0 +1,3 @@
+/tmp/mxx-t/const3.cc:5:29: error: cannot store to 'const' object
+        void bad() const { v = 5; }   /* should fail: modify in const method */
+                                ^

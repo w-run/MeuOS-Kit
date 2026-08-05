@@ -159,11 +159,21 @@ load(Ref r, bits x, int ip, Fn *fn, Slot *sl)
 {
 	int64_t off;
 	Slot *s;
+	bits m;
 
 	if (slot(&s, &off, r, fn, sl)) {
 		s->l |= x << off;
 		s->l &= s->m;
-		if (s->l)
+		/* Mark the slot's range as soon as any part of it is read.
+		 * `s->l` is the data-member bits read so far, which is empty
+		 * for a size-1 empty class (C++ `class Empty{}`): its alloca
+		 * slot has m==0, and a by-value pass/return reads the whole
+		 * object via Oargc/Jretc with x=-1.  Testing `if (s->l)` here
+		 * left that slot with an empty live range, so coalesce killed
+		 * it and replaced the Oargc source with CON_Z — a null pointer
+		 * the caller dereferenced at address 0 (defect U, side A). */
+		m = s->l | ~s->m;
+		if (m)
 			radd(&s->r, ip);
 	}
 }

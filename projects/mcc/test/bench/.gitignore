@@ -1,0 +1,3 @@
+# benchmark build artifacts (compare.sh outputs)
+mcc_*_O*
+gcc_*_O*

@@ -231,6 +231,7 @@ emitf(char *s, Ins *i, Fn *fn, FILE *f)
 static void
 loadaddr(Con *c, char *rn, FILE *f)
 {
+	static int gotid;
 	char off[32];
 
 	switch (c->sym.type) {
@@ -242,9 +243,24 @@ loadaddr(Con *c, char *rn, FILE *f)
 		fputs(")\n", f);
 		break;
 	case SExt:
-		fprintf(f, "\tla %s, ", rn);
-		emitaddr(c, f);
-		fputc('\n', f);
+		if (T.pic) {
+			/* -fPIC: load the symbol's address from the GOT.
+			 * auipc %got_pcrel_hi + ld %pcrel_lo(label) is the
+			 * PC-relative GOT access sequence (R_RISCV_GOT_HI20 +
+			 * R_RISCV_PCREL_LO12_I).  The %pcrel_lo side references
+			 * a label placed at the auipc so the assembler pairs the
+			 * two relocations (gas rejects the %got_pcrel_lo
+			 * modifier; this is the canonical paired form). */
+			fprintf(f, "%sgot%d:\n", T.asloc, ++gotid);
+			fprintf(f, "\tauipc %s, %%got_pcrel_hi(", rn);
+			emitaddr(c, f);
+			fprintf(f, ")\n\tld %s, %%pcrel_lo(%sgot%d)(%s)\n",
+				rn, T.asloc, gotid, rn);
+		} else {
+			fprintf(f, "\tla %s, ", rn);
+			emitaddr(c, f);
+			fputc('\n', f);
+		}
 		break;
 	case SThr:
 		if (c->bits.i)
@@ -445,7 +461,11 @@ emitins(Ins *i, Fn *fn, FILE *f)
 			|| (con->sym.type & SThr)
 			|| con->bits.i)
 				goto Invalid;
-			fprintf(f, "\tcall %s\n", str(con->sym.id));
+			if (T.pic && (con->sym.type & SExt))
+				/* -fPIC: external calls must go through the PLT */
+				fprintf(f, "\tcall %s@plt\n", str(con->sym.id));
+			else
+				fprintf(f, "\tcall %s\n", str(con->sym.id));
 			break;
 		case RTmp:
 			emitf("jalr %0", i, fn, f);

@@ -1,0 +1,1 @@
+/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_static5.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/static5.cc

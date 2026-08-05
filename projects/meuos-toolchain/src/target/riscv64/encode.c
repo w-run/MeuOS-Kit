@@ -1499,24 +1499,24 @@ try_atomic:
 	/* fmv.x.w rd, fs1 / fmv.x.d rd, fs1 — FS[fs1] → X[rd] */
 	if (strcmp(mnemonic, "fmv.x.w") == 0 && nops == 2) {
 		emit32(out->bytes, r_type(0x53, (unsigned)ops[0].reg, 0,
-		                          (unsigned)ops[1].reg, 0, 0x78));
+		                          (unsigned)ops[1].reg, 0, 0x70));
 		return 0;
 	}
 	if (strcmp(mnemonic, "fmv.x.d") == 0 && nops == 2) {
 		emit32(out->bytes, r_type(0x53, (unsigned)ops[0].reg, 0,
-		                          (unsigned)ops[1].reg, 0, 0x79));
+		                          (unsigned)ops[1].reg, 0, 0x71));
 		return 0;
 	}
 
 	/* fmv.w.x rd, rs1 / fmv.d.x rd, rs1 — X[rs1] → FS[rd] */
 	if (strcmp(mnemonic, "fmv.w.x") == 0 && nops == 2) {
-		emit32(out->bytes, r_type(0x53, (unsigned)ops[1].reg, 0,
-		                          (unsigned)ops[0].reg, 0, 0x78));
+		emit32(out->bytes, r_type(0x53, (unsigned)ops[0].reg, 0,
+		                          (unsigned)ops[1].reg, 0, 0x78));
 		return 0;
 	}
 	if (strcmp(mnemonic, "fmv.d.x") == 0 && nops == 2) {
-		emit32(out->bytes, r_type(0x53, (unsigned)ops[1].reg, 0,
-		                          (unsigned)ops[0].reg, 0, 0x79));
+		emit32(out->bytes, r_type(0x53, (unsigned)ops[0].reg, 0,
+		                          (unsigned)ops[1].reg, 0, 0x79));
 		return 0;
 	}
 

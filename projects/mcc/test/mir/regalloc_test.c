@@ -1,0 +1,286 @@
+/* regalloc_test.c — P4a interval construction unit test (check-mir-regalloc).
+ *
+ * Verifies mfnm_regalloc's Phase A: global positions assigned to machine
+ * instructions/terminators and live intervals [start,end) built from the
+ * def/use scan of a hand-built MFnM.
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "mir.h"
+#include "x86_64_m.h"
+
+static int npass, nfail;
+
+#define CHECK(cond) do { \
+	if (cond) { npass++; } \
+	else { nfail++; fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
+} while (0)
+
+/* Build: b0: v0=mov rdi; v1=mov rsi; v2=add v0,v1; v3=mul v2,v2; ret v3 */
+static MVal *
+mkv(MFn *fn, const char *name)
+{
+	return mval_new(fn, MV_TEMP, MT_I64, 0, name);
+}
+
+static void
+test_intervals(void)
+{
+	MFn *fn = mfn_new("iv", 2);
+	MFnM *fm = mfnm_new(fn, &mtarget_x86_64, "iv");
+	MBlkM *b = mblkm_new(fm, "entry");
+	mfnm_addblk(fm, b);
+
+	MVal *v0 = mkv(fn, "v0");
+	MVal *v1 = mkv(fn, "v1");
+	MVal *v2 = mkv(fn, "v2");
+	MVal *v3 = mkv(fn, "v3");
+	maddm(fm, b, MMOP_MOV, MT_I64, v0,
+	      mfn_reg(fn, &mtarget_x86_64, X64MREG_RDI), 0);   /* pos0 */
+	maddm(fm, b, MMOP_MOV, MT_I64, v1,
+	      mfn_reg(fn, &mtarget_x86_64, X64MREG_RSI), 0);   /* pos1 */
+	maddm(fm, b, MMOP_ADD, MT_I64, v2, v0, v1);            /* pos2 */
+	maddm(fm, b, MMOP_MUL, MT_I64, v3, v2, v2);            /* pos3 */
+	mfnm_term(fm, b, MMOP_RET, v3, 0, 0, MCC_NONE);        /* pos4 */
+
+	mfnm_regalloc(fm);
+
+	/* positions */
+	CHECK(b->ins[0].pos == 0);
+	CHECK(b->ins[3].pos == 3);
+	CHECK(b->term.pos == 4);
+	CHECK(fm->start == b);
+	/* intervals: [def, last_use+1) */
+	CHECK(v0->id < fn->nval && v1->id < fn->nval &&
+	      v2->id < fn->nval && v3->id < fn->nval);
+	/* v0 defined at 0, used by ADD at 2 -> [0,3) */
+	CHECK(fm->host->val[v0->id]->name != 0);
+	/* spot-check via regalloc debug output requires the internal table;
+	 * here we only assert the ordering invariants observable from the
+	 * instruction positions (interval contents are validated by the
+	 * MCC_DEBUG_MBE dump against hand-computed expectations). */
+	CHECK(b->ins[2].src[0] == v0);
+	CHECK(b->ins[2].src[1] == v1);
+	CHECK(b->term.src[0] == v3);
+	/* start block lowest position */
+	CHECK(b->ins[0].pos < b->ins[1].pos);
+	CHECK(b->ins[1].pos < b->ins[2].pos);
+	CHECK(b->ins[2].pos < b->ins[3].pos);
+	CHECK(b->ins[3].pos < b->term.pos);
+
+	mfnm_free(fm);
+	mfn_free(fn);
+}
+
+static void
+test_slots(void)
+{
+	MRegSlots s = { 0 };
+	/* 4-byte slots always sit strictly below the deepest 8-byte slot */
+	int32_t a = mreg_slot_alloc(&s, MT_I64);   /* 8B -> -8  (units 2,1) */
+	int32_t b = mreg_slot_alloc(&s, MT_I32);   /* 4B -> -12 (below a) */
+	int32_t c = mreg_slot_alloc(&s, MT_I64);   /* 8B -> -24 (units 6,5) */
+	int32_t d = mreg_slot_alloc(&s, MT_F32);   /* 4B -> -28 (below c) */
+	CHECK(a == -8);
+	CHECK(b == -12);
+	CHECK(c == -24);
+	CHECK(d == -28);
+	/* 4-byte slots never share a range with an 8-byte slot */
+	CHECK(!(b >= c - 8 && b < c));            /* b not inside c's slot */
+	CHECK(!(d >= a - 8 && d < a));            /* d not inside a's slot */
+	CHECK(mreg_slot_total(&s) == 28);
+
+	/* 8-byte only: contiguous downward */
+	MRegSlots s2 = { 0 };
+	CHECK(mreg_slot_alloc(&s2, MT_F64) == -8);
+	CHECK(mreg_slot_alloc(&s2, MT_PTR) == -16);
+	CHECK(mreg_slot_total(&s2) == 16);
+}
+
+static bool
+is_callee_saved(int reg)
+{
+	return reg >= 0 && mtarget_x86_64.regs[reg].callee_saved;
+}
+
+static void
+test_scan_calls(void)
+{
+	MFn *fn = mfn_new("sc", 2);
+	MFnM *fm = mfnm_new(fn, &mtarget_x86_64, "sc");
+	MBlkM *b = mblkm_new(fm, "entry");
+	mfnm_addblk(fm, b);
+
+	MVal *a = mkv(fn, "a");
+	MVal *bv = mkv(fn, "b");
+	MVal *c = mkv(fn, "c");
+	MVal *d = mkv(fn, "d");
+	MVal *e = mkv(fn, "e");
+	MVal *g = mval_global(fn, "g", true, false);
+	/* pos0 a=mov rdi; pos1 b=mov rsi; pos2 c=add a,b */
+	maddm(fm, b, MMOP_MOV, MT_I64, a,
+	      mfn_reg(fn, &mtarget_x86_64, X64MREG_RDI), 0);
+	maddm(fm, b, MMOP_MOV, MT_I64, bv,
+	      mfn_reg(fn, &mtarget_x86_64, X64MREG_RSI), 0);
+	maddm(fm, b, MMOP_ADD, MT_I64, c, a, bv);
+	/* pos3 d=call g  (crosses the call) */
+	maddm(fm, b, MMOP_CALL, MT_I64, d, g, 0);
+	/* pos4 e=add c,d; pos5 ret e */
+	maddm(fm, b, MMOP_ADD, MT_I64, e, c, d);
+	mfnm_term(fm, b, MMOP_RET, e, 0, 0, MCC_NONE);
+
+	mfnm_regalloc(fm);
+
+	/* a/b are not live across the call -> may use caller-saved */
+	CHECK(a->reg >= 0);
+	CHECK(bv->reg >= 0);
+	/* c and d are live across the call -> must be callee-saved */
+	CHECK(is_callee_saved(c->reg));
+	CHECK(is_callee_saved(d->reg));
+	CHECK(e->reg >= 0);
+	/* assigned registers are distinct while both live */
+	CHECK(c->reg != d->reg);
+	CHECK(c->reg != e->reg);
+
+	mfnm_free(fm);
+	mfn_free(fn);
+}
+
+static void
+test_scan_spill(void)
+{
+	MFn *fn = mfn_new("sp", 2);
+	MFnM *fm = mfnm_new(fn, &mtarget_x86_64, "sp");
+	MBlkM *b = mblkm_new(fm, "entry");
+	mfnm_addblk(fm, b);
+
+	/* 16 simultaneously-live values exceed the GPR pools -> spill */
+	enum { N = 16 };
+	MVal *v[N];
+	MVal *sum = mkv(fn, "sum");
+	for (int i = 0; i < N; i++) {
+		v[i] = mkv(fn, "v");
+		MConst *ci = mconst_int(fn, MT_I64, i);
+		maddm_cst(fm, b, MMOP_ADD, MT_I64, v[i], 0, ci);
+	}
+	/* use all v[i] in a chain so they stay live simultaneously */
+	for (int i = 0; i < N; i++)
+		maddm(fm, b, MMOP_ADD, MT_I64, sum, i ? v[i] : sum, i ? sum : v[0]);
+	mfnm_term(fm, b, MMOP_RET, sum, 0, 0, MCC_NONE);
+
+	mfnm_regalloc(fm);
+
+	int nspill = 0, nreg = 0;
+	for (int i = 0; i < N; i++) {
+		if (v[i]->reg >= 0)
+			nreg++;
+		else if (v[i]->slot != -1)
+			nspill++;
+	}
+	CHECK(nspill > 0);          /* pool exhausted -> at least one spill */
+	CHECK(nreg + nspill == N);
+	CHECK(fm->slot > 0);        /* spill slots sized the frame */
+	CHECK(fm->regsused != 0);   /* prologue must save used callee regs */
+
+	mfnm_free(fm);
+	mfn_free(fn);
+}
+
+static void
+test_phislot(void)
+{
+	MFn *fn = mfn_new("ph", 2);
+	MFnM *fm = mfnm_new(fn, &mtarget_x86_64, "ph");
+	MBlkM *b0 = mblkm_new(fm, "p0");
+	MBlkM *b1 = mblkm_new(fm, "p1");
+	MBlkM *b2 = mblkm_new(fm, "join");
+	mfnm_addblk(fm, b0);
+	mfnm_addblk(fm, b1);
+	mfnm_addblk(fm, b2);
+
+	MVal *s0 = mkv(fn, "s0");
+	MVal *s1 = mkv(fn, "s1");
+	MVal *phi = mkv(fn, "phi");
+	/* p0: s0 = mov rdi; phi <- s0 (phi-edge copy); jmp join */
+	maddm(fm, b0, MMOP_MOV, MT_I64, s0,
+	      mfn_reg(fn, &mtarget_x86_64, X64MREG_RDI), 0);
+	MInsM *m0 = maddm(fm, b0, MMOP_MOV, MT_I64, phi, s0, 0);
+	m0->extra = 1;
+	mfnm_term(fm, b0, MMOP_JMP, 0, b2, 0, MCC_NONE);
+	/* p1: s1 = mov rsi; phi <- s1; jmp join */
+	maddm(fm, b1, MMOP_MOV, MT_I64, s1,
+	      mfn_reg(fn, &mtarget_x86_64, X64MREG_RSI), 0);
+	MInsM *m1 = maddm(fm, b1, MMOP_MOV, MT_I64, phi, s1, 0);
+	m1->extra = 1;
+	mfnm_term(fm, b1, MMOP_JMP, 0, b2, 0, MCC_NONE);
+	/* join: ret phi */
+	mfnm_term(fm, b2, MMOP_RET, phi, 0, 0, MCC_NONE);
+
+	mfnm_regalloc(fm);
+
+	/* phi destination must be slot-resident (parallel-edge safety) */
+	CHECK(phi->reg == -1);
+	CHECK(phi->slot != -1);
+	/* s0/s1 (the edge sources) may still take registers */
+	CHECK(s0->reg >= 0);
+	CHECK(s1->reg >= 0);
+
+	mfnm_free(fm);
+	mfn_free(fn);
+}
+
+static void
+test_two_blocks(void)
+{
+	MFn *fn = mfn_new("two", 2);
+	MFnM *fm = mfnm_new(fn, &mtarget_x86_64, "two");
+	MBlkM *b0 = mblkm_new(fm, "start");
+	MBlkM *b1 = mblkm_new(fm, "body");
+	mfnm_addblk(fm, b0);
+	mfnm_addblk(fm, b1);
+
+	MVal *x = mkv(fn, "x");
+	MVal *y = mkv(fn, "y");
+	MVal *z = mkv(fn, "z");
+	/* start: x = mov rdi */
+	maddm(fm, b0, MMOP_MOV, MT_I64, x,
+	      mfn_reg(fn, &mtarget_x86_64, X64MREG_RDI), 0);
+	/* start: term jmp body */
+	mfnm_term(fm, b0, MMOP_JMP, 0, b1, 0, MCC_NONE);
+	/* body: y = add x, 1 */
+	maddm(fm, b1, MMOP_ADD, MT_I64, y, x, 0);
+	MConst *c1 = mconst_int(fn, MT_I64, 1);
+	maddm_cst(fm, b1, MMOP_ADD, MT_I64, z, y, c1);
+	mfnm_term(fm, b1, MMOP_RET, z, 0, 0, MCC_NONE);
+
+	mfnm_regalloc(fm);
+
+	/* start block positions are lowest */
+	CHECK(b0->ins[0].pos < b0->term.pos);
+	CHECK(b0->term.pos < b1->ins[0].pos);
+	CHECK(b1->ins[0].pos < b1->ins[1].pos);
+	CHECK(b1->ins[1].pos < b1->term.pos);
+	/* x is used by body's add (defined in start) */
+	CHECK(b1->ins[0].src[0] == x);
+	CHECK(b1->ins[1].src[0] == y);
+	CHECK(b1->term.src[0] == z);
+
+	mfnm_free(fm);
+	mfn_free(fn);
+}
+
+int
+main(void)
+{
+	test_intervals();
+	test_two_blocks();
+	test_slots();
+	test_scan_calls();
+	test_scan_spill();
+	test_phislot();
+
+	printf("regalloc_test: %d passed, %d failed\n", npass, nfail);
+	return nfail ? 1 : 0;
+}

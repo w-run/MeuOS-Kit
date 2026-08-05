@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <setjmp.h>
 
 struct func;
 
@@ -35,7 +36,8 @@ enum typequal {
 	QUALRESTRICT = 1<<2,
 	QUALVOLATILE = 1<<3,
 	QUALATOMIC   = 1<<4,
-	QUALCONSTEXPR = 1<<5
+	QUALCONSTEXPR = 1<<5,
+	QUALCONSTINIT = 1<<6
 };
 
 enum typekind {
@@ -44,6 +46,7 @@ enum typekind {
 	TYPEVOID,
 	TYPEBOOL,
 	TYPECHAR,
+	TYPECHAR8,
 	TYPESHORT,
 	TYPEINT,
 	TYPEENUM,
@@ -84,13 +87,52 @@ struct bitfield {
 	short after;   /* number of bits in the storage unit after the bit-field */
 };
 
+/* C++ member access control.  Stored in struct member.access (and the
+ * struct builder's current level); C aggregates are ACC_PUBLIC. */
+enum member_access {
+	ACC_PUBLIC = 0,
+	ACC_PRIVATE,
+	ACC_PROTECTED,
+};
+
 struct member {
 	char *name;
 	struct type *type;
 	enum typequal qual;
 	unsigned long long offset;
 	struct bitfield bits;
+	/* C++ access control (ACC_PUBLIC for C aggregates): enforced on
+	 * `obj.member` / `obj->member` access outside the member's class. */
+	unsigned char access;
+	/* C++ mutable member: writable even through a const this pointer. */
+	bool is_mutable;
+	/* C++ virtual member function: dispatched via the object's vtable. */
+	bool is_virtual;
+	/* C++ pure virtual member (`= 0`): its vtable slot stays null. */
+	bool is_pure;
+	/* C++ const member function (trailing `const` qualifier). */
+	bool is_const;
+	/* C++ explicit constructor/conversion (C++11 `explicit`, C++20
+	 * `explicit(bool)`).  When true, the implicit conversion path
+	 * through the overload set is blocked. */
+	bool is_explicit;
+	/* C++ vtable slot index (valid once the class layout is finalized). */
+	int vslot;
+	/* C++20 [[no_unique_address]]: this member may share its address
+	 * with another member (layout optimization). */
+	bool is_no_unique_address;
 	struct member *next;
+};
+
+/* C++ vtable slot (full definition in cpp/cpp.h). */
+struct cpp_vslot;
+
+/* C++ friend class of a class (recorded by `friend class B;` inside the
+ * class body).  Methods of a friend class may access the befriending
+ * class's private/protected members. */
+struct cpp_friend {
+	struct type *cls;
+	struct cpp_friend *next;
 };
 
 struct type {
@@ -101,9 +143,24 @@ struct type {
 	struct value *value;  /* used by the backend */
 	struct type *base;
 	struct list link;  /* used only during construction of type */
+	/* C++: the scope the class was declared in (namespace scope for
+	 * `namespace n { class C {}; }`); member symbols live there. */
+	struct scope *scope;
 	/* qualifiers of the base type */
 	enum typequal qual;
 	bool incomplete;
+	/* C++ reference type: a pointer that auto-dereferences in
+	 * expressions and binds to the address of its initializer. */
+	bool isref;
+	/* C++ rvalue reference (`T &&`): like a reference but only binds to
+	 * temporary (rvalue) arguments; distinguishes the move-constructor /
+	 * move-assignment overloads from the by-value and lvalue-ref ones. */
+	bool isrref;
+	/* C++11 scoped enumeration (`enum class E`): enumerators live in the
+	 * enum's own scope (accessed as `E::Red`, not unqualified `Red`) and
+	 * the enum type does not implicitly convert to its underlying integer
+	 * type.  Only meaningful for TYPEENUM. */
+	bool scoped;
 	union {
 		struct {
 			bool issigned, iscomplex;
@@ -116,12 +173,25 @@ struct type {
 		} array;
 		struct {
 			bool isvararg;
+			bool is_noexcept;
 			struct decl *params;
 			size_t nparam;
 		} func;
 		struct {
 			char *tag;
 			struct member *members;
+			/* C++ virtual dispatch (m++).  `own_poly` is set when the
+			 * class itself declares a virtual function; `poly` means the
+			 * object needs vptr initialization (own or inherited). */
+			bool poly;
+			bool own_poly;
+			struct cpp_vslot *own_virtuals; /* virtual fns declared here */
+			struct cpp_vslot *vslots;       /* finalized vtable layout */
+			int nvslots;
+			struct type *primary_base;      /* first polymorphic base */
+			/* friend classes (`friend class B;` inside the body) whose
+			 * methods may access this class's private/protected members */
+			struct cpp_friend *friends;
 		} structunion;
 		struct {
 			enum typequal basequal;
@@ -135,12 +205,14 @@ enum declkind {
 	DECLFUNC,
 	DECLCONST,
 	DECLBUILTIN,
+	DECLNAMESPACE,
 };
 
 enum linkage {
 	LINKNONE,
 	LINKINTERN,
 	LINKEXTERN,
+	LINKC,       /* C language linkage (extern "C") */
 };
 
 enum storageduration {
@@ -186,6 +258,20 @@ struct decl {
 	char *asmname;
 	bool defined;
 	bool tentative;
+	/* C++: destructor already emitted for this local object (so a
+	 * return-statement run and the block-exit run don't double-destroy). */
+	bool dtor_done;
+	/* 诊断/警告状态（p9-ui 扩展）：
+	 *   isused        名字在表达式中出现过（-Wunused-variable/-Wunused-parameter）
+	 *   isassigned    已被赋值或带初始化器声明（-Wuninitialized 抑制）
+	 *   isparam       函数参数（未使用分类为 -Wunused-parameter）
+	 *   warned_uninit 已对该变量发出过 uninitialized 警告（防重复） */
+	bool isused;
+	bool isassigned;
+	bool isparam;
+	bool warned_uninit;
+	/* 声明处源码位置（未使用/未初始化等警告的精确标记点） */
+	struct location loc;
 	struct decl *next;
 
 	union {
@@ -193,14 +279,29 @@ struct decl {
 			/* alignment of object storage (may be stricter than type requires) */
 			int align;
 			enum storageduration storage;
+			/* C++ constexpr variable: the constant value of its (folded)
+			 * initializer, usable in later constant expressions. */
+			unsigned long long constval;
+			bool has_constval;
 		} obj;
 		struct {
 			/* the function might have an "inline definition" (C11 6.7.4p7) */
 			bool inlinedefn;
 			bool isnoreturn;
+			bool isnodiscard;   /* [[nodiscard]] function */
+			bool isconstexpr;   /* C++ constexpr function */
+			bool isconsteval;   /* C++20 consteval (immediate) function */
+			/* C99 6.7.4p6: an inline definition is not itself an external
+			 * definition.  The body is deferred here (with its function
+			 * scope held open) until a later `extern`/non-inline
+			 * declaration promotes it to an external definition, or the
+			 * translation unit ends and it is dropped (defect c-01). */
+			struct func *deferfn;
+			struct scope *deferscope;
 		} func;
 		unsigned long long enumconst;
 		enum builtinkind builtin;
+		struct scope *ns; /* DECLNAMESPACE: the namespace's scope */
 	} u;
 };
 
@@ -211,6 +312,11 @@ struct scope {
 	struct block *continuelabel;
 	struct switchcases *switchcases;
 	struct scope *parent;
+	/* C++ namespace name (NULL for ordinary scopes). */
+	const char *name;
+	/* Class-typed objects declared in this scope, in declaration order
+	 * (C++ destroys them in reverse order at scope exit). */
+	struct decl *objects;
 };
 
 enum exprkind {
@@ -340,6 +446,49 @@ char *tokenstr(enum tokenkind);
 char *tokencheck(const struct token *, enum tokenkind, const char *);
 void diagloc(const struct location *);
 noreturn void error(const struct location *, const char *, ...);
+
+/* Diagnostic error codes (E####).  E_GENERIC is the fallback for
+ * diagnostics that do not yet carry an assigned code. */
+enum errcode {
+	E_GENERIC    = 0,  /* uncategorized */
+	E_SYNTAX     = 1,  /* malformed syntax: expected X, saw Y */
+	E_UNDECLARED = 2,  /* undeclared identifier */
+	E_TYPE       = 3,  /* type mismatch / invalid operands */
+	E_REDEF      = 4,  /* redefinition of a name/tag/member/enumerator */
+	E_DECL       = 5,  /* declaration error: storage class / typedef / linkage / initializer */
+	E_STMT       = 6,  /* statement error: break/continue/label/return outside context */
+	E_CTYPE      = 7,  /* conversion / type-system error (sema/irgen): illegal conversion, invalid operands */
+	E_INCOMPLETE = 8,  /* use of an incomplete type */
+	E_QUAL       = 9,  /* const / volatile qualification violation */
+	E_ACCESS     = 10, /* C++ access control violation */
+	E_TEMPLATE   = 11, /* C++ template error */
+	E_OVERLOAD   = 12, /* C++ overload resolution error */
+};
+
+/* Coded diagnostics.  error_tok_code/error_fixit render the caret across
+ * the whole token span (width derived from the token text); error() and
+ * error_code use a single caret at the location.  error_fixit appends an
+ * inline "note: <fix>" with its own caret after the primary diagnostic.
+ * All three are noreturn like error(): error_common always longjmps to the
+ * recovery point or exits(1), so the compiler must know the diagnostic
+ * path never falls through (a non-noreturn decl shifts the stack layout
+ * of hot parse functions and exposes latent stack bugs). */
+noreturn void error_code(enum errcode, const struct location *,
+    const char *, ...);
+noreturn void error_tok_code(enum errcode, const struct token *,
+    const char *, ...);
+noreturn void error_fixit(enum errcode, const struct token *, const char *,
+    const char *, ...);
+
+/* JSON multi-error collection: the top-level parse loop arms g_err_recovery
+ * (a jump buffer) and error() longjmps to it after emitting each collected
+ * error, so parsing can resume at the next top-level item. */
+void err_sync(void);
+extern int g_error_count;
+extern int g_error_limit;
+extern jmp_buf g_err_recovery;
+extern int g_err_recovery_set;
+
 void cc_warn(const struct location *, int, const char *, ...) __attribute__((format(printf, 3, 4)));
 extern int warn_level;
 extern bool warn_as_error;
@@ -347,7 +496,30 @@ extern bool warn_as_error;
 /* Diagnostic output mode (p9-ui): --error-json emits diagnostics as
  * structured JSON lines for tooling; --explain adds a fix-hint suffix. */
 extern int g_error_json;
+extern bool g_error_seen; /* set when a real error was emitted (vs g_error_count,
+                           * which can be perturbed by the adjacent setjmp buffer) */
+extern int g_dwarf_level; /* -g level: 0 = no debug info, 1+ = DWARF level */
+
+/* DWARF debug-info collection + emission (src/emit/dwarf.c). */
+void dwarf_set_file(const char *);
+int dwarf_begin_func(const char *, int, int);
+void dwarf_add_var(const char *, int, int, int, int);
+void dwarf_end_func(void);
+void dwarf_emit_func_end(FILE *, int);
+void dwarf_finalize(FILE *);
+/* machine-layer location feedback (memit records final stack/register
+ * positions keyed by MVal id). */
+void dwarf_loc_reset(void);
+void dwarf_set_framebase(int);
+void dwarf_loc_set_stack(uint32_t, int32_t);
+void dwarf_loc_set_reg(uint32_t, int32_t);
+int dwarf_loc_get(uint32_t, int32_t *, int32_t *);
+
 extern int g_error_explain;
+
+/* --error-format=<fmt> diagnostic output selection.  Defined in token.c. */
+enum diag_fmt { DIAG_TEXT = 0, DIAG_JSON, DIAG_SARIF };
+extern int g_diag_fmt;
 
 /* Target features bitmask (MT_FEATURE_*), set by -march=native or
  * -march=x86-64-vN. 0 = baseline only.
@@ -412,6 +584,9 @@ void ppdumpdeps(FILE *f, const char *target, const char *input);
 
 void next(void);
 bool peek(enum tokenkind);
+void tokpush(struct token *, size_t);
+size_t tokctx_depth(void);
+void tokctx_rewind(size_t);
 char *expect(enum tokenkind, const char *);
 bool consume(enum tokenkind);
 
@@ -439,7 +614,7 @@ bool typehasint(struct type *, unsigned long long, bool);
 
 extern struct type typevoid;
 extern struct type typebool;
-extern struct type typechar, typeschar, typeuchar;
+extern struct type typechar, typeschar, typeuchar, typechar8;
 extern struct type typeshort, typeushort;
 extern struct type typeint, typeuint;
 extern struct type typelong, typeulong;
@@ -447,6 +622,9 @@ extern struct type typellong, typeullong;
 extern struct type typefloat, typedouble, typeldouble;
 extern struct type typenullptr;
 extern struct type *typeadjvalist;
+/* C++11 `auto` placeholder type: `auto x = expr;` / `auto f() {...}`
+ * deduce the real type from the initializer / return statement. */
+extern struct type typeauto;
 
 /* targ */
 
@@ -480,6 +658,7 @@ enum attrkind {
 	ATTRUSED        = 1<<11,
 	ATTRNOINLINE    = 1<<12,
 	ATTRALWAYSINLINE = 1<<13,
+	ATTRNOUNIQUEADDRESS = 1<<14, /* C++20 [[no_unique_address]] */
 };
 
 struct attr {
@@ -515,6 +694,19 @@ struct type *scopegettag(struct scope *, const char *, bool);
 
 extern struct scope filescope;
 
+/* Trial-parse support (SFINAE-style well-formedness checks, used by the
+ * C++ requires-expression evaluator): error() longjmps to the innermost
+ * active trial instead of aborting.  cpp_trial_begin/end save/restore the
+ * enclosing trial's jump buffer so nested trials rethrow on error.
+ * cpp_trial_guard rewinds the token context to `depth` and pushes a
+ * bounded guard buffer so a caller resuming after a trial never falls
+ * through to source scanning. */
+void cpp_trial_begin(jmp_buf env);
+void cpp_trial_end(jmp_buf env);
+void cpp_trial_rethrow(void);
+int cpp_trial_depth(void);
+void cpp_trial_guard(size_t depth);
+
 /* expr */
 
 struct type *stringconcat(struct stringlit *, bool);
@@ -524,6 +716,7 @@ struct expr *assignexpr(struct scope *);
 struct expr *condexpr(struct scope *);
 unsigned long long intconstexpr(struct scope *, bool);
 void delexpr(struct expr *);
+struct expr *expr_dup(struct expr *);
 
 struct expr *exprassign(struct expr *, struct type *);
 struct expr *exprpromote(struct expr *);
@@ -572,6 +765,9 @@ struct value *mkintconst(unsigned long long);
 
 struct func *mkfunc(struct decl *, char *, struct type *, struct scope *);
 void delfunc(struct func *);
+/* C++20 coroutine: mark the function as containing co_await / co_yield /
+ * co_return (the body was parsed but lowering is not implemented). */
+void funcset_iscoroutine(struct func *);
 struct type *functype(struct func *);
 void funclabel(struct func *, struct block *);
 struct value *funcbranch(struct func *, struct expr *, struct block *, struct block *);
@@ -581,8 +777,11 @@ void funcjnz(struct func *, struct value *, struct type *, struct block *, struc
 void funcret(struct func *, struct value *);
 void funchlt(struct func *);
 struct gotolabel *funcgoto(struct func *, char *);
+bool func_falls_off_end(struct func *);
+void funcset_bodyend(struct func *, struct location);
+struct location funcget_bodyend(struct func *);
 void funcswitch(struct func *, struct value *, struct switchcases *, struct block *);
 void funcinit(struct func *, struct decl *, struct init *, bool);
 
-void emitfunc(struct func *, bool);
+void emitfunc(struct func *, struct scope *, bool);
 void emitdata(struct decl *, struct init *);

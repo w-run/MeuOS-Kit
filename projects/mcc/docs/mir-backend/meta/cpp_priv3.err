@@ -1,0 +1,3 @@
+/tmp/mxx-t/priv3.cc:10:7: error: 'hide' is not accessible from this context (member is private/protected)
+        g.hide();      /* private 方法外部调用应报错 */
+          ^

@@ -13,6 +13,7 @@
 | [project_mcc_cpp.md](project_mcc_cpp.md) | 缺陷 | m++ 前端：C++23 四缺口、依赖 NTTP/constexpr 返回/consteval、缺陷 K/M/N、D4 非空类返回、-O0 UB |
 | [project_mcc_chibicc.md](project_mcc_chibicc.md) | 缺陷 | chibicc 套件根因、B 类修复、sema E1-E6 + array.len 字节坑、D3-PP #elifdef、审计回归 |
 | [project_meuos.md](project_meuos.md) | 项目 | 组件经验：libc C99 补全、libtui、Shell/Utils 现代优先、自主特性方向、归并记录 |
+| [project_cpp_parse_split.md](project_cpp_parse_split.md) | 项目 | cpp_parse.c 拆分方法论：6 刀已拆(9088→6489)、跨文件函数/类型处理、自举一致性坑(零回归须跑 verify-all 的 check-sysroot-static) |
 | [project_mcc_toolchain.md](project_mcc_toolchain.md) | 缺陷 | mcc-toolchain P0 闭环：toolchain 3 门禁 + ARM 正则、mcc MIR 文档清扫、i386 PIC GOT（4 提交）、ld.so P0 实施 in progress |
 | [feedback_aarch64_aapcs.md](feedback_aarch64_aapcs.md) | 缺陷 | aarch64 AAPCS64 三处缺陷闭环：selpar off=0、大帧 stp 超限、spill-slot 基址寻址丢 x29 |
 | [project_mcc_mxx_rebase.md](project_mcc_mxx_rebase.md) | 项目 | mxx-work 残留 rebase 无损清理纪律；lead-doc-mir-baseline 实为 m++/MIR 主线（LIR 桥接移除/mcombine/cpp class/双二进制） |

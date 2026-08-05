@@ -109,6 +109,25 @@ sysrootpath(const char *root, const char *suffix)
 	return path;
 }
 
+/* The driver records the effective sysroot (command-line --sysroot wins,
+ * else MEUOS_SYSROOT env); consume it here so link-time decisions align with
+ * the sysroot that actually feeds -L/--sysroot to the linker. */
+extern const char *driver_sysroot;
+
+/* Whether the active MeuOS sysroot provisions libgcc-meuos.a (libgcc-ABI soft
+ * helpers: __divdi3/__udivdi3/__ctzdi2/...).  Old sysroots that predate the
+ * archive skip the link flag so --specs=meuos still works there. */
+static bool
+sysroot_has_libgcc(void)
+{
+	const char *r = driver_sysroot ? driver_sysroot : getenv("MEUOS_SYSROOT");
+	char p[1024];
+	if (!r || !*r)
+		return false;
+	snprintf(p, sizeof p, "%s/usr/lib/libgcc-meuos.a", r);
+	return access(p, R_OK) == 0;
+}
+
 /* Atomic RMW lowering uses the width-specific compiler-runtime ABI.  Inspect
  * the generated assembly immediately before the host link, so ordinary C
  * programs neither require nor accidentally acquire a libatomic dependency. */
@@ -288,6 +307,13 @@ run_mt_ld(struct array *objects, const char *output, bool verbose,
 	}
 	if (meuos_specs && !nodefaultlibs && !shared)
 		arrayaddbuf(&cmd, " -lc-meuos", 10);
+	/* The sysroot's libgcc-meuos.a supplies libgcc-ABI soft helpers
+	 * (__divdi3, __udivdi3, __ctzdi2, ...).  As an archive it contributes
+	 * nothing unless an emitted instruction sequence references a helper, so
+	 * pulling it on every MeuOS link is harmless for code mcc inlines
+	 * natively; it only kicks in for wide/soft ops without native forms. */
+	if (meuos_specs && !nodefaultlibs && !shared && sysroot_has_libgcc())
+		arrayaddbuf(&cmd, " -lgcc-meuos", 12);
 	/* Atomic runtime: same detection as run_host_cc. */
 	if (!nostdlib && !nodefaultlibs && asm_path_for_atomic &&
 	    asm_requires_atomic(asm_path_for_atomic))
@@ -307,7 +333,8 @@ void
 run_host_cc(const char *asm_path, const char *output, bool compile_only,
             bool verbose, struct array *libdirs, struct array *libs,
             bool static_link, bool shared, bool pie, bool nostdlib, bool nodefaultlibs,
-            bool meuos_specs, const char *target_triple)
+            bool meuos_specs, const char *target_triple,
+            struct array *wa_args, struct array *wl_args)
 {
 	struct array cmd = {0};
 	const char *cc = pick_host_cc(target_triple);
@@ -391,6 +418,8 @@ run_host_cc(const char *asm_path, const char *output, bool compile_only,
 	 * the following archive in one left-to-right link pass. */
 	if (!compile_only && meuos_specs && !nodefaultlibs)
 		arrayaddbuf(&cmd, " -lc-meuos", 10);
+	if (!compile_only && meuos_specs && !nodefaultlibs && sysroot_has_libgcc())
+		arrayaddbuf(&cmd, " -lgcc-meuos", 12);
 	/* Atomic RMW expressions lower to the portable libatomic ABI.  Host
 	 * bootstrap links need this library even for widths that the host compiler
 	 * would normally inline itself.  A MeuOS sysroot supplies this ABI. */
@@ -398,6 +427,16 @@ run_host_cc(const char *asm_path, const char *output, bool compile_only,
 	    asm_requires_atomic(asm_path))
 		arrayaddbuf(&cmd, meuos_specs ? " -latomic-meuos" : " -latomic",
 		            meuos_specs ? 15 : 9);
+	/* -Wa,<args> / -Wl,<args> passthrough: forwarded verbatim to the
+	 * host assembler/linker driver. */
+	for (i = 0, p = wa_args->val; i < wa_args->len / sizeof(char *); ++i) {
+		arrayaddbuf(&cmd, " -Wa,", 5);
+		cmdadd(&cmd, p[i]);
+	}
+	for (i = 0, p = wl_args->val; i < wl_args->len / sizeof(char *); ++i) {
+		arrayaddbuf(&cmd, " -Wl,", 5);
+		cmdadd(&cmd, p[i]);
+	}
 	arrayaddbuf(&cmd, " -o ", 4);
 	cmdadd(&cmd, output);
 	arrayaddbuf(&cmd, "", 1);  /* NUL terminator */
@@ -414,7 +453,7 @@ void
 run_host_link(struct array *objects, const char *output, bool verbose,
 	struct array *libdirs, struct array *libs, bool static_link, bool shared,
 	bool pie, bool nostdlib, bool nodefaultlibs, bool meuos_specs,
-	const char *target_triple)
+	const char *target_triple, struct array *wl_args)
 {
 	struct array cmd = {0};
 	const char *cc = pick_host_cc(target_triple);
@@ -462,6 +501,13 @@ run_host_link(struct array *objects, const char *output, bool verbose,
 	}
 	if (meuos_specs && !nodefaultlibs)
 		arrayaddbuf(&cmd, " -lc-meuos", 10);
+	if (meuos_specs && !nodefaultlibs && sysroot_has_libgcc())
+		arrayaddbuf(&cmd, " -lgcc-meuos", 12);
+	/* -Wl,<args> passthrough: forwarded verbatim to the host linker. */
+	for (i = 0, p = wl_args->val; i < wl_args->len / sizeof(char *); ++i) {
+		arrayaddbuf(&cmd, " -Wl,", 5);
+		cmdadd(&cmd, p[i]);
+	}
 	arrayaddbuf(&cmd, " -o ", 4);
 	cmdadd(&cmd, output);
 	arrayaddbuf(&cmd, "", 1);

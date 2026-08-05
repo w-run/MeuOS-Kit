@@ -51,13 +51,14 @@ printf '%s\n' "--- aarch64 PIC ---"
 "$mcc" --target=aarch64 -fPIC -S -o "$work/aarch64.s" "$work/test.c"
 check_pic "aarch64" "GOT global_var" ':got:global_var' "$work/aarch64.s"
 
-# riscv64 PIC verification (known gap: no GOT sequences emitted yet)
+# riscv64 PIC verification (auipc %got_pcrel_hi + ld %pcrel_lo label pair)
 printf '%s\n' "--- riscv64 PIC ---"
 "$mcc" --target=riscv64 -fPIC -S -o "$work/riscv64.s" "$work/test.c"
 if grep -q '%got_pcrel_hi' "$work/riscv64.s"; then
 	printf '  riscv64 PIC: GOT sequences present\n'
 else
-	printf '  riscv64 PIC: GOT sequences not found (known gap)\n'
+	printf '  riscv64 PIC: GOT sequences NOT FOUND (pattern: %%got_pcrel_hi)\n'
+	fail=1
 fi
 
 # i386 PIC verification

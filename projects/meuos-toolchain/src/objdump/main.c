@@ -17,6 +17,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* glibc's PRIx64 expands to "lx" (expects `unsigned long`), but in this
+ * environment uint64_t is `unsigned long long`, so gcc14 -Werror=format
+ * rejects it.  Force the correct length modifier for the local typedef. */
+#undef PRIx64
+#define PRIx64 "llx"
+
 #define MT_OBJDUMP_VERSION "0.2.0"
 
 enum od_format {
@@ -161,6 +167,20 @@ find_sym_at(const struct od_symtab *st, uint64_t addr)
 
 /* ---- 节区头显示 (-h) ---- */
 
+/* Portable count-trailing-zeros on 64-bit (log2 of a power of two, used
+ * for section alignment).  Avoids the host `__builtin_ctzll` so this
+ * toolchain does not depend on a GCC builtin (see mcc mir/passes.c). */
+static int
+portable_ctzll(uint64_t v)
+{
+	int n = 0;
+	while (!(v & 1)) {
+		v >>= 1;
+		n++;
+	}
+	return n;
+}
+
 static void
 show_section_headers(const unsigned char *bytes, size_t size,
                      const struct mt_elf64_section *secs,
@@ -189,7 +209,7 @@ show_section_headers(const unsigned char *bytes, size_t size,
 		       "%016" PRIx64 "  %08" PRIx64 "  2**%u  [%s]\n",
 		       i, nm, secs[i].size, secs[i].address, secs[i].address,
 		       secs[i].offset, /* log2(alignment) */
-		       secs[i].alignment ? __builtin_ctzll(secs[i].alignment)
+		       secs[i].alignment ? portable_ctzll(secs[i].alignment)
 		                        : 0,
 		       flagnames);
 	}

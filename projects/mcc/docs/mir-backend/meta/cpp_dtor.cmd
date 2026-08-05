@@ -1,0 +1,1 @@
+/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_dtor.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/dtor.cc

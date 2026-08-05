@@ -8,8 +8,7 @@
 # .todo/cpp-shared-backend.md stage A):
 #   include/        shared headers
 #   src/driver/     main.c unified driver                  (C frontend)
-#   src/{lex,parse,sema}/  frontend (lex/parsing/semantics) (C frontend)
-#   src/irgen/      AST -> IR direct construction           (C frontend)
+#   src/c/{lex,parse,sema,irgen}/  C frontend              (C frontend)
 #   src/util/       common utilities (xmalloc/utf/warn)     (shared)
 #   src/{ir,opt,abi,emit}/  IR core + optimization passes   (libmcc)
 #   src/target/{x86_64,aarch64,riscv64,i386,loongarch64}/  (libmcc)
@@ -60,10 +59,12 @@ CFLAGS += -DMCC_DEFAULT_TARGET=\"$(DEFAULT_TARGET)\"
 # language-agnostic). Stage A of the libmcc migration: BE objects are
 # archived into libmcc.a so a future m++ binary can link the same archive.
 # util/ is shared (utf/warn/xmalloc are used by both FE and BE).
-FE_DIRS := src/driver src/lex src/parse src/sema src/irgen
-BE_DIRS := src/ir src/opt src/abi src/emit src/target src/util
+FE_DIRS := src/driver src/cpp src/c
+BE_DIRS := src/mir src/ir src/opt src/abi src/emit src/target src/util
 
-FE_SRCS := $(shell find $(FE_DIRS) -name '*.c' | sort)
+# mpp_main.c provides the C++-mode main() (g_lang=1) and is linked only
+# into m++; mcc links c_main.c (C mode, g_lang=0).
+FE_SRCS := $(shell find $(FE_DIRS) -name '*.c' ! -name 'mpp_main.c' | sort)
 BE_SRCS := $(shell find $(BE_DIRS) -name '*.c' | sort)
 FE_OBJS := $(patsubst %.c,build/%.o,$(FE_SRCS))
 BE_OBJS := $(patsubst %.c,build/%.o,$(BE_SRCS))
@@ -83,9 +84,21 @@ MSYS_DIR  := $(abspath ../meuos-sysroot)
 $(MSYS_LIB):
 	$(MAKE) -C $(MSYS_DIR)
 
-# mcc = C frontend objects + libmcc.a (shared backend archive)
+# mcc = C frontend objects + libmcc.a (shared backend archive).
+# mcc links c_main.o (C mode, g_lang=0); m++ links mpp_main.o (g_lang=1).
+# share the driver; the m++ binary (target `mpp`) will link the C++
+# frontend objects instead of the C frontend objects (dual-binary
+# shared-backend design, see C.1).
 $(BIN): $(FE_OBJS) $(LIB)
 	$(HOST_CC) $(CFLAGS) $(LDFLAGS) -o $@ $(FE_OBJS) $(LIB) $(LDLIBS) -L../meuos-sysroot/build -lmsys
+
+# m++ (C++ compiler) — stage C.1: same driver, C++ frontend under
+# construction (falls back to the shared C driver for now).
+MPP_BIN := m++
+$(MPP_BIN): $(FE_OBJS) $(LIB) build/src/driver/mpp_main.o
+	$(HOST_CC) $(CFLAGS) $(LDFLAGS) -o $@ \
+	    $(filter-out build/src/driver/c_main.o,$(FE_OBJS)) \
+	    build/src/driver/mpp_main.o $(LIB) $(LDLIBS) -L../meuos-sysroot/build -lmsys
 
 # libmcc.a = backend objects (language-agnostic, future m++ shares this)
 $(LIB): $(BE_OBJS)
@@ -161,7 +174,8 @@ check-c11-atomic: $(BIN)
 # Full currently self-contained C11 matrix.  The installed libc headers are
 # a Phase 2 deliverable, so the atomic tests use test/c11/stdatomic.h.
 check-c11: $(BIN)
-	@for t in test/c11/*.c; do \
+	@export MEUOS_SYSROOT="$(abspath ../sysroot)"; \
+	for t in test/c11/*.c; do \
 		out=/tmp/mcc-c11-$$(basename $$t .c); \
 		case $$t in \
 			*atomic*|*thread_local*) ./$(BIN) -Itest/c11 -o $$out $$t -lpthread ;; \
@@ -173,7 +187,8 @@ check-c11: $(BIN)
 
 # C99 standard feature tests (§6).
 check-c99: $(BIN)
-	@for t in test/c99/*.c; do \
+	@export MEUOS_SYSROOT="$(abspath ../sysroot)"; \
+	for t in test/c99/*.c; do \
 		out=/tmp/mcc-c99-$$(basename $$t .c); \
 		case $$t in \
 			*extern_defs*) true ;; \
@@ -185,15 +200,40 @@ check-c99: $(BIN)
 	done
 
 check-c23: $(BIN)
-	@for t in test/c23/*.c; do \
+	@export MEUOS_SYSROOT="$(abspath ../sysroot)"; \
+	for t in test/c23/*.c; do \
 		out=/tmp/mcc-c23-$$(basename $$t .c); \
 		./$(BIN) -o $$out $$t 2>&1 || exit $$?; \
 		$$out || exit $$?; \
 	done
 
-check-driver: $(BIN)
+# C23 negative tests: test/c23/neg/*.neg.c must be REJECTED by mcc.
+# (A compile that succeeds is a regression: the invalid construct was not
+# diagnosed.)
+check-c23-neg: $(BIN)
+	@export MEUOS_SYSROOT="$(abspath ../sysroot)"; \
+	for t in test/c23/neg/*.neg.c; do \
+		if ./$(BIN) -o /tmp/mcc-c23-neg-$$(basename $$t .neg.c) $$t 2>/dev/null; then \
+			echo "REGRESSION: $$(basename $$t) compiled (expected rejection)"; exit 1; \
+		else \
+			echo "OK: $$(basename $$t) rejected"; \
+		fi; \
+	done
+
+# C 功能回归 × MIR 单路径：c99/c11/c23 三套正向用例在 MIR 路径下编译
+# 运行。MIR 是唯一汇编生产者（LIR 桥接层已移除）。
+check-c-mir: $(BIN)
+	@sh test/mir_matrix.sh ./$(BIN)
+
+check-driver: $(BIN) $(MPP_BIN)
 	sh test/driver/sysroot.sh ./$(BIN)
 	sh test/driver/feature-regress.sh ./$(BIN)
+	sh test/driver/cli-args.sh ./$(MPP_BIN) ./$(BIN)
+
+# p9-ui 诊断警告回归（默认关闭 / -Wall / -Wextra / -Wconversion /
+# -Wno-xxx / 源码上下文 / --lang=zh），见 test/driver/diag_warning.sh。
+check-diag-warning: $(BIN)
+	sh test/driver/diag_warning.sh ./$(BIN)
 
 # mcc-mt-integrate: verify MT_AS/MT_LD/MT_AR redirect mcc to the MeuOS toolchain
 # (mt/as, mt/ld) instead of the host cc.  SKIPs gracefully when
@@ -228,17 +268,171 @@ check-sysroot-static: $(BIN)
 	cp -a . "$$work/mcc"; \
 	$(MAKE) -C "$$work/mcc" clean; \
 	env -u MT_AS -u MT_LD -u MT_AR MCC_HOST_CC=cc $(MAKE) -C "$$work/mcc" HOST_CC="$(abspath $(BIN))" \
-		CFLAGS="-O2 -g -std=gnu11 -Iinclude -I$(abspath ../meuos-libc/include) -I$(abspath ../meuos-sysroot/include) -I$(abspath ../meuos-toolchain/include) -Wno-all --specs=meuos --sysroot=$(abspath ../sysroot) --nostdlib --static" \
+		CFLAGS="-O2 -g -std=gnu11 -Iinclude -I$(abspath ../meuos-libc/include) -I$(abspath ../meuos-sysroot/include) -I$(abspath ../meuos-toolchain/include) -Wno-all --sysroot=$(abspath ../sysroot) --nostdlib --static" \
 		LDLIBS="-L$(abspath ../meuos-sysroot/build) -lmsys -ldl"; \
 	"$$work/mcc/mcc" --version; \
 	printf '%s\n' 'int main(void) { return 0; }' > "$$work/hello.c"; \
-	"$$work/mcc/mcc" -o "$$work/hello" "$$work/hello.c"; \
+	MEUOS_SYSROOT="$(abspath ../sysroot)" "$$work/mcc/mcc" -o "$$work/hello" "$$work/hello.c"; \
 	"$$work/hello"
 
 # Compatibility alias for existing scripts.
 check-la64: check-loongarch64
 
-.PHONY: all clean check check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-driver check-mt-integration check-abi check-sysroot-static check-chibicc check-community
+# MIR core unit tests (B.1: types/aggregates/values/instructions/consts).
+# The mir/ sources are backend-side and belong to the libmcc BE_DIRS, but
+# they compile standalone here so the MIR core can be validated before it
+# is wired into the C frontend (see the MIR-first task line in .issues/).
+MIR_SRCS := $(wildcard src/mir/*.c)
+# machine.c references mtarget_x86_64.abi (mfnm_abi_x86_64) and
+# mtarget_riscv64.abi (mfnm_abi_riscv64), so every standalone link of
+# the mir/ sources also needs both machine ABIs.
+MABI_SRC := src/target/x86_64/x86_64_mabi.c src/target/riscv64/riscv64_mabi.c src/target/loongarch64/loongarch64_mabi.c src/target/aarch64/aarch64_mabi.c src/target/arm/arm_mabi.c src/target/i386/i386_mabi.c
+check-mir-types: $(MIR_SRCS) $(MABI_SRC)
+	@mkdir -p build
+	$(HOST_CC) $(CFLAGS) -Iinclude -o build/mir_test $^ test/mir/mir_test.c
+	./build/mir_test
+
+check-mir-passes: $(MIR_SRCS) $(MABI_SRC)
+	@mkdir -p build
+	$(HOST_CC) $(CFLAGS) -Iinclude -o build/mir_pass_test $^ test/mir/pass_test.c
+	./build/mir_pass_test
+
+# P4a register allocator: live-interval construction on machine IR.
+check-mir-regalloc: $(MIR_SRCS) $(MABI_SRC)
+	@mkdir -p build
+	$(HOST_CC) $(CFLAGS) -Iinclude -o build/regalloc_test $^ test/mir/regalloc_test.c
+	./build/regalloc_test
+
+# P1 machine layer: physical registers as MVal, addressing modes, machine
+# opcodes (MMOP), machine functions/blocks/instructions (MFnM/MBlkM/MInsM).
+# Independent of the LIR/QBE pipeline — links mir/ sources only (plus the
+# x86_64 machine ABI, which mtarget_x86_64.abi points at).
+check-mir-machine: $(MIR_SRCS) $(MABI_SRC)
+	@mkdir -p build
+	$(HOST_CC) $(CFLAGS) -Iinclude -o build/machine_test \
+		test/mir/machine_test.c src/mir/build.c src/mir/mir_util.c \
+		src/mir/machine.c src/mir/print.c $(MABI_SRC)
+	./build/machine_test
+
+# P2 x86-64 SysV ABI lowering on MIR-native data: eightbyte classification
+# (mabi_typclass/mabi_argsclass) + selpar/selcall/selret lowering.
+check-mir-abi: $(MIR_SRCS) $(MABI_SRC)
+	@mkdir -p build
+	$(HOST_CC) $(CFLAGS) -Iinclude -o build/mabi_test \
+		test/mir/mabi_test.c src/mir/build.c src/mir/mir_util.c \
+		src/mir/machine.c src/mir/print.c $(MABI_SRC)
+	./build/mabi_test
+
+# MIR 单元测试套件（LIR 桥接层已移除，check-mir-bridge 已删除）。
+check-mir: check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir-regalloc
+
+# m++ C++ lexer unit tests (C.1.2: keyword classification).
+CPP_SRCS := $(wildcard src/cpp/lex/*.c)
+check-cpp-lex: $(CPP_SRCS)
+	@mkdir -p build
+	$(HOST_CC) $(CFLAGS) -Iinclude -o build/cpp_lex_test $^ test/cpp/lex_test.c
+	./build/cpp_lex_test
+
+# C.2.5 virtual functions & vtables — end-to-end: m++ compiles
+# test/cpp/virtual.cc against the MeuOS sysroot and the binary asserts the
+# dispatch behavior (exit 0 = all checks passed).
+check-cpp-virtual: $(MPP_BIN)
+	@mkdir -p build
+	MEUOS_SYSROOT=$(abspath ../sysroot) ./m++ --specs=meuos \
+	    -o build/cpp_virtual test/cpp/virtual.cc
+	./build/cpp_virtual
+
+# m++ C++ functional tests: each test/cpp/*.cc is compiled with m++ and
+# run; non-zero exit (or compile failure) fails the target.  These are
+# freestanding user programs (no meuos-libc dependency) so they link with
+# the host specs, keeping them runnable in any environment.  virtual.cc
+# needs the meuos sysroot and is exercised by check-cpp-virtual instead.
+check-cpp-func: $(MPP_BIN)
+	@for t in $$(ls test/cpp/*.cc | grep -v '\.neg\.cc' | grep -v '/virtual\.cc'); do \
+		out=/tmp/mpp-$$(basename $$t .cc); \
+		inc=; specsf="--specs=host"; \
+		case "$$t" in \
+		  */try_catch\.cc) \
+		    specsf="--specs=meuos"; \
+		    src=/workspace/MeuOS-Kit/projects/sysroot; \
+		    if [ "$${MEUOS_SYSROOT:-}" != "$$src" ] && \
+		       nm "$${MEUOS_SYSROOT:-}/usr/lib/libc-meuos.a" 2>/dev/null | grep -q _meuos_exc_throw; then \
+		      src=$${MEUOS_SYSROOT:-$$src}; \
+		    fi; \
+		    libcd=$${MEUOS_LIBC_DIR:-/workspace/MeuOS-Kit/projects/meuos-libc}; \
+		    if [ ! -f "$$libcd/include/meuos_exc.h" ]; then \
+		      libcd=$$(cd ../.. && pwd)/projects/meuos-libc; \
+		    fi; \
+		    if [ ! -f "$$libcd/include/meuos_exc.h" ]; then \
+		      echo "SKIP try_catch (meuos_exc.h not found)"; \
+		      continue; \
+		    fi; \
+		    if ! nm "$$src/usr/lib/libc-meuos.a" 2>/dev/null | grep -q _meuos_exc_throw; then \
+		      echo "SKIP try_catch (no sysroot libc with _meuos_exc_throw)"; \
+		      continue; \
+		    fi; \
+		    inc="-I$$libcd/include"; \
+		    specsf="--specs=meuos --sysroot=$$src"; \
+		    ;; \
+		esac; \
+		./$(MPP_BIN) $$specsf $$inc -o $$out $$t || exit $$?; \
+		$$out || exit $$?; \
+		if [ "$$(basename $$t)" = "global_dtor.cc" ]; then \
+			$$out | grep -q "^dtor 3$$" || { echo "FAIL: global_dtor order"; exit 1; }; \
+		fi; \
+	done
+
+# m++ negative tests: test/cpp/*.neg.cc must be REJECTED by the compiler.
+check-cpp-neg: $(MPP_BIN)
+	@for t in test/cpp/*.neg.cc; do \
+		if ./$(MPP_BIN) --specs=host -o /tmp/mpp-neg-$$(basename $$t .neg.cc) $$t 2>/dev/null; then \
+			echo "FAIL: $$t should not compile"; exit 1; \
+		fi; \
+	done
+
+check-cpp: check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg
+
+# Focused regression for the recently closed clusters (new/delete,
+# braced-init, destructor chains, virtual / pure-virtual dispatch): each
+# semantic domain in test/cpp/focus_regress.sh is a PASS/FAIL group.
+check-cpp-focus: $(MPP_BIN)
+	sh test/cpp/focus_regress.sh --mpp $(abspath $(MPP_BIN))
+
+# Optional m++ vs g++ semantic parity (skips when g++ is unavailable, or a
+# test the other compiler does not accept), test/cpp/gcc_compare.sh.
+check-cpp-gcc: $(MPP_BIN)
+	sh test/cpp/gcc_compare.sh --mpp $(abspath $(MPP_BIN))
+
+# x86_64 static runtime regression (test/x86_64/runtime.sh): runs static
+# binaries exercising the global-array address path on the build host.
+check-x86_64-runtime: $(BIN)
+	sh test/x86_64/runtime.sh $(abspath $(BIN)) $(MEUOS_SYSROOT)
+
+# riscv64 static runtime regression (test/riscv64/runtime.sh): compile+run a
+# riscv64 static binary under user-mode qemu; skips when the sysroot or
+# qemu-riscv64 is absent.
+check-riscv64-runtime: $(BIN)
+	sh test/riscv64/runtime.sh $(abspath $(BIN))
+
+# loongarch64 static runtime regression (test/loongarch64/runtime.sh):
+# compile+run a loongarch64 static binary under user-mode qemu; skips when
+# the sysroot or qemu-loongarch64 is absent.
+check-loongarch64-runtime: $(BIN)
+	sh test/loongarch64/runtime.sh $(abspath $(BIN))
+
+# mcc/m++ -O 优化级别语义分级回归（test/olevel/run.sh）：
+# -O0..-O3/-Os/-Oz/-Og 运行时正确性 + 级别差异（if 转换/强度削减/
+# 帧指针）+ 非法级别（-O9 钳制、-Ox 拒绝）。
+check-olevel: $(BIN)
+	@sh test/olevel/run.sh ./$(BIN)
+
+# mcc/m++ i18n 双语消息目录回归（test/i18n/run.sh）：
+# --lang=en/zh 错误文本、--error-json message、--explain 修复建议、
+# --help 双语、LANG 环境推断、未收录消息降级。
+check-i18n: $(BIN) $(MPP_BIN)
+	@sh test/i18n/run.sh ./$(BIN) ./$(MPP_BIN)
+
+.PHONY: all clean check check-all check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-c23-neg check-c-mir check-driver check-diag-warning check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg check-cpp check-cpp-focus check-cpp-gcc check-x86_64-runtime check-riscv64-runtime check-loongarch64-runtime check-olevel check-i18n
 
 # chibicc community functional test suite (C11/C23 conformance).
 # Runs test/community/chibicc/run.sh against the MeuOS sysroot.
@@ -247,3 +441,8 @@ check-chibicc: $(BIN)
 	@sh test/community/chibicc/run.sh
 
 check-community: check-c99 check-chibicc
+
+# 一键回归验收门禁：聚合所有 check 目标（test/verify-all.sh），
+# 任一检查失败即以非零状态退出。只新增本目标，不改动已有 check 目标。
+check-all:
+	sh test/verify-all.sh

@@ -1,5 +1,10 @@
 #include "x86_64.h"
 
+/* -Og: keep a frame pointer。定义在本文件（唯一使用者）是因为
+ * check-mir-bridge 等单测链接 libmcc.a 中的 x86_64_emit.o，全局必须
+ * 落在后端层（ir.h 中 extern 声明，driver 在 -Og 时置位）。 */
+int g_force_fp;
+
 /* Forward declare ISA gating helper. Required by x86-isa-levels task:
  * check T.features for baseline ISA requirements before emitting SIMD
  * instructions. x86_64 baseline (SSE2) is always present; this establishes
@@ -114,6 +119,11 @@ static struct {
 	{ Oloadub,  Ki, "movzb%k %M0, %=" },
 	{ Oextsw,   Kl, "movslq %W0, %L=" },
 	{ Oextuw,   Kl, "movl %W0, %W=" },
+	/* the frontend can emit a same-width zext/sext of an i32 value
+	 * (e.g. a bool result widened to int and used in a branch); a 32→32
+	 * extend is a plain move, so accept the Kw class too. */
+	{ Oextsw,   Kw, "movl %W0, %W=" },
+	{ Oextuw,   Kw, "movl %W0, %W=" },
 	{ Oextsh,   Ki, "movsw%k %H0, %=" },
 	{ Oextuh,   Ki, "movzw%k %H0, %=" },
 	{ Oextsb,   Ki, "movsb%k %B0, %=" },
@@ -886,7 +896,9 @@ amd64_sysv_emitfn(Fn *fn, FILE *f)
 	e = &(E){.f = f, .fn = fn};
 	emitfnlnk(fn->name, &fn->lnk, f);
 	fputs("\tendbr64\n", f);
-	if (!fn->leaf || fn->vararg || fn->dynalloc) {
+	/* -Og (g_force_fp): keep a frame pointer even for leaf functions so
+	 * debuggers can unwind; prologue/epilogue already handle RBP frames. */
+	if (!fn->leaf || fn->vararg || fn->dynalloc || g_force_fp) {
 		e->fp = RBP;
 		fputs("\tpushq %rbp\n\tmovq %rsp, %rbp\n", f);
 	} else

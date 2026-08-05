@@ -60,6 +60,7 @@ static void
 typclass(AClass *a, Typ *t)
 {
 	uint sz, al;
+	int n;
 
 	sz = t->size;
 	al = 1u << t->align;
@@ -89,6 +90,17 @@ typclass(AClass *a, Typ *t)
 	a->cls[1] = Kx;
 	a->inmem = 0;
 	classify(a, t, 0);
+	/* An eightbyte that classify() left untouched (no scalar/float field
+	 * lands in it) is INTEGER per the SysV psABI — e.g. a size-0 C++
+	 * class with no data members (Empty{}) or a struct whose trailing
+	 * padding fills the whole chunk.  Leaving it Kx made KBASE() classify
+	 * it as SSE: retr() indexed retreg[-1] (memory corruption, the
+	 * compile-time crash on `Empty make()`), and argsclass() sent the
+	 * value to XMM0 while the frontend's `movss 0` read address 0 (the
+	 * runtime SEGV on by-value empty-class parameters). */
+	for (n = 0; (uint)n * 8 < sz; n++)
+		if (a->cls[n] == Kx)
+			a->cls[n] = Kl;
 }
 
 static int
@@ -399,7 +411,19 @@ selcall(Fn *fn, Ins *i0, Ins *i1, RAlloc **rap)
 				emit(Oload, a->cls[1], r2, r, R);
 				emit(Oadd, Kl, r, i->arg[1], getcon(8, fn));
 			}
-			emit(Oload, a->cls[0], r1, i->arg[1], R);
+			/* classify() reports every integer struct field as
+			 * Kl, so a small aggregate (e.g. a 4-byte Ref) would
+			 * otherwise be loaded as 8 bytes.  For the last
+			 * element of an array (seladdr's Num tree) that reads
+			 * 4 bytes past the allocation; use the actual struct
+			 * width so the load stays in bounds.  The value is
+			 * passed in the low 32 bits of the argument register;
+			 * selpar copies it into an 8-byte slot and the callee
+			 * only reads the low word. */
+			int lcls = a->cls[0];
+			if (a->type->size <= 4)
+				lcls = KBASE(lcls) == 0 ? Kw : Ks;
+			emit(Oload, lcls, r1, i->arg[1], R);
 		} else
 			emit(Ocopy, i->cls, r1, i->arg[0], R);
 	}

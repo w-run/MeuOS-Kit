@@ -1,0 +1,3 @@
+/tmp/mxx-t/staticmeth.cc:13:20: error: no matching constructor for object 'add'
+        Counter::add(5);
+                       ^

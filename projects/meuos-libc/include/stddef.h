@@ -13,4 +13,7 @@ typedef long ptrdiff_t;
 #define NULL ((void *)0)
 #define offsetof(type, member) ((size_t)&(((type *)0)->member))
 
+/* C99 7.17: wchar_t is provided by <stddef.h>; <wchar.h> reuses it. */
+typedef int wchar_t;
+
 #endif

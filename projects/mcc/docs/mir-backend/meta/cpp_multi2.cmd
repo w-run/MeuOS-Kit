@@ -1,0 +1,1 @@
+/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_multi2.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/multi2.cc

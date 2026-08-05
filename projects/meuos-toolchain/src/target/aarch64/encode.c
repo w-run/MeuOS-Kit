@@ -801,6 +801,36 @@ aarch64_encode_insn(const struct mt_target *target,
 			set_fixup(out, 0, 4, reloc, ops[1].sym_start, ops[1].imm);
 			return 0;
 		}
+		if (ops[1].imm < 0 && ops[1].imm != -1) {
+			/* Negative immediate offset → LDUR (unscaled, imm9).  A real
+			 * negative entry like [x29, #-8] must not fall through to the
+			 * register-offset path below (imm==-1 marks a register offset,
+			 * whose offset register is otherwise lost by the shared parsing).
+			 * imm==-1 alone (register offset marker) is kept as-is below. */
+			if (ops[1].imm < -256 || ops[1].imm > 255) return -1;
+			uint32_t base_op;
+			if (strcmp(mnemonic, "ldr") == 0) {
+				if (wreg == QREG)            base_op = 0x3CC00000;
+				else if (wreg == DREG)       base_op = 0xFC400000;
+				else if (wreg == SREG)       base_op = 0xBC400000;
+				else if (wreg == XREG)       base_op = 0xF8400000;
+				else                         base_op = 0xB8400000; /* w */
+			} else if (strcmp(mnemonic, "ldrb") == 0)
+				base_op = 0x38400000;
+			else if (strcmp(mnemonic, "ldrh") == 0)
+				base_op = 0x78400000;
+			else if (strcmp(mnemonic, "ldrsw") == 0)
+				base_op = 0xB8800000;
+			else if (strcmp(mnemonic, "ldrsb") == 0)
+				base_op = is64 ? 0x39800000 : 0x38800000;
+			else if (strcmp(mnemonic, "ldrsh") == 0)
+				base_op = is64 ? 0x79800000 : 0x78800000;
+			else return -1;
+			uint64_t uimm = (uint64_t)(ops[1].imm & 0x1FF);
+			emit32(out, &off, base_op | ((unsigned)uimm << 12) |
+			       (rn << 5) | rt);
+			return 0;
+		}
 		if (ops[1].imm >= 0) {
 			/* Scalar immediate offset */
 			unsigned size = 0;
@@ -944,7 +974,28 @@ aarch64_encode_insn(const struct mt_target *target,
 		} else return -1;
 
 		int64_t imm = ops[1].imm;
-		if (imm < 0) return -1; /* negative offset needs pre-indexed or STUR */
+		if (imm < 0) {
+			/* Negative immediate offset → STUR (unscaled, imm9).
+			 * Previously this returned -1, so mcc's valid [x29,#-N]
+			 * callee-save/frame save/restore could not be assembled. */
+			if (imm < -256 || imm > 255) return -1;
+			uint32_t base_op;
+			if (strcmp(mnemonic, "str") == 0) {
+				if (wreg == QREG)            base_op = 0x3C800000;
+				else if (wreg == DREG)       base_op = 0xFC000000;
+				else if (wreg == SREG)       base_op = 0xBC000000;
+				else if (wreg == XREG)       base_op = 0xF8000000;
+				else                         base_op = 0xB8000000; /* w */
+			} else if (strcmp(mnemonic, "strb") == 0)
+				base_op = 0x38000000;
+			else if (strcmp(mnemonic, "strh") == 0)
+				base_op = 0x78000000;
+			else return -1;
+			uint64_t uimm = (uint64_t)(imm & 0x1FF);
+			emit32(out, &off, base_op | ((unsigned)uimm << 12) |
+			       (rn << 5) | rt);
+			return 0;
+		}
 		uint64_t scaled = (uint64_t)imm >> size;
 		if (scaled > 0xFFF || (imm & ((1ULL << size) - 1)) != 0) return -1;
 		emit32(out, &off, base_op | ((unsigned)scaled << 10) |
@@ -1504,11 +1555,16 @@ aarch64_encode_insn(const struct mt_target *target,
 	/* cset rd, cond */
 	if (strcmp(mnemonic, "cset") == 0 && nops == 2 &&
 	    ops[0].kind == 'r') {
+		/* CSET Wd, cond aliases CSINC Wd, WZR, WZR, invert(cond);
+		 * the encoded condition is the *inverse* of the mnemonic's
+		 * condition code.  The table below holds the inverted codes,
+		 * so `cset w0, eq` emits the csinc with the ne condition
+		 * (0x1A9F17E0), matching binutils. */
 		static const struct { const char *name; unsigned cond; } conds[] = {
-			{"eq", 0}, {"ne", 1}, {"cs", 2}, {"cc", 3},
-			{"mi", 4}, {"pl", 5}, {"vs", 6}, {"vc", 7},
-			{"hi", 8}, {"ls", 9}, {"ge", 10}, {"lt", 11},
-			{"gt", 12}, {"le", 13}, {"hs", 2}, {"lo", 3},
+			{"eq", 1}, {"ne", 0}, {"cs", 3}, {"cc", 2},
+			{"mi", 5}, {"pl", 4}, {"vs", 7}, {"vc", 6},
+			{"hi", 9}, {"ls", 8}, {"ge", 11}, {"lt", 10},
+			{"gt", 13}, {"le", 12}, {"hs", 3}, {"lo", 2},
 			{NULL, 0}
 		};
 		const char *cname = opbuf[1];
@@ -1524,7 +1580,9 @@ aarch64_encode_insn(const struct mt_target *target,
 		}
 		if (!found) return -1;
 		int rd = ops[0].reg;
-		emit32(out, &off, 0x1A9F07E0 | (cond << 12) | ((unsigned)rd & 0x1F));
+		int is64 = (ops[0].wreg == XREG);
+		emit32(out, &off, (is64 ? 0x9A9F07E0 : 0x1A9F07E0) |
+		       (cond << 12) | ((unsigned)rd & 0x1F));
 		return 0;
 	}
 
@@ -1552,7 +1610,12 @@ aarch64_encode_insn(const struct mt_target *target,
 		if (!found) return -1;
 		int rd = ops[0].reg, rn = ops[1].reg, rm = ops[2].reg;
 		int is64 = (ops[0].wreg == XREG);
+		/* CSINC: the conditional-select family op2 field (bits 11:10)
+		 * is 01 for CSINC (CSEL=00, CSINV=10, CSNEG=11).  Emitting the
+		 * bare CSEL base produced csel instead of csinc, which broke
+		 * cset's sibling instruction. */
 		emit32(out, &off, (is64 ? 0x9A800000 : 0x1A800000) |
+		       0x400 |
 		       (((unsigned)rm & 0x1F) << 16) |
 		       ((cond & 0xF) << 12) |
 		       (((unsigned)rn & 0x1F) << 5) |

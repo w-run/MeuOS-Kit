@@ -7,29 +7,52 @@
 
 ## 1. Overview
 
-`mcc` is a single-binary C11 compiler built by source-level integration
-of cproc (frontend) and QBE (backend). Per AGENTS.md §2.3, the text-IL
-serialization step that originally bridged cproc -> QBE has been
-eliminated: the frontend's semantic phase builds the IR `Fn`
-**in memory** via `src/irgen/emit.c` and runs the optimization/codegen
-pipeline directly.
+`mcc` is now a **shared-backend multi-language compiler** (gcc-style).
+It started as a single-binary C11 compiler built by source-level
+integration of cproc (frontend) and QBE (backend); the 2026-08
+restructure (branch `worktree-mxx-work`, tracked in `.issues/0802.md`)
+split the backend into `libmcc.a` and added a C++ frontend (`m++`):
 
-The directory layout uses a unified `src/` tree (no frontend/backend
-split) preserving a logical pipeline:
+- **C frontend**: `src/{lex,parse,sema,irgen}` — C11 lex/parse/sema +
+  AST -> `MFn` (MIR) lowering (`src/c/irgen/func_to_mir.c`).
+- **C++ frontend**: `src/cpp/{lex,parse}` — the `m++` binary
+  (`g_lang=1`, driver `src/driver/mpp_main.c`). It lowers C++ constructs
+  (class/namespace/template/overload/…) onto the same C decl/expr/AST
+  machinery, then feeds the shared MIR path. Both binaries link
+  `build/libmcc.a`.
+- **MIR core**: `src/mir/` — `MFn` intermediate (MType/MVal/MConst/MIns)
+  plus passes (`mfold`/`msimpl`/`mdce`/`mcopy`/`mgvn`).
+- **Machine backend**: each `src/target/<arch>/<arch>_mabi.c` is a
+  machine-level `MFnM` lowering (`src/mir/{machine,regalloc}.c` +
+  `src/target/<arch>/<arch>_m*.c`); the regalloc/machine layer converts
+  the optimized `MFn` to a machine `MFnM`, and the target's `_memit.c`
+  emits the assembly. The legacy LIR bridge (`src/lir/bridge.c`) and the
+  `MCC_MIR_BACKEND` env override were both removed (Phase 2 / Phase 3e) —
+  the MIR machine backend is now the sole asm producer.
+
+Default pipeline (`g_use_mir = 1`; `MCC_USE_MIR` env has been removed, see
+`src/driver/main.c`):
 
 ```
-source.c -> src/{lex,parse,sema} -> src/irgen -> src/{ir,opt,abi,emit} + src/target -> asm
+source.c  -> src/c/{lex,parse,sema} -> src/c/irgen ----+
+                                                     v
+source.cc -> src/cpp/{lex,parse} ----------------> MFn (src/mir) -> MIR passes
+                                                        |
+                                                        v
+                              regalloc/machine (src/mir) -> <arch>_memit -> asm
 ```
 
-where each subdirectory corresponds to a pipeline stage, plus `src/driver/`
-for the unified `main` and `include/` for shared headers.
+The directory layout uses a unified `src/` tree preserving a logical
+pipeline, plus `src/driver/` for the per-language drivers (`c_main.c` /
+`mpp_main.c`) and `include/` for shared headers.
 
 ## 2. Directory Tree
 
 ```
 mcc/
 ├── Makefile                 # simple Makefile (AGENTS.md §4 forbids autotools/cmake)
-├── mcc                      # built binary (gitignored)
+├── mcc                      # C driver binary (gitignored)
+├── m++                      # C++ driver binary, links libmcc.a (gitignored)
 ├── ARCHITECTURE.md          # this file
 ├── include/                 # shared headers (consumed by every .c below)
 │   ├── mcc.h                #   frontend public API (types, decls, exprs, scopes)
@@ -40,6 +63,9 @@ mcc/
 │   ├── ops.h                #   frontend IR opcode X-macro list (IXXX)
 │   ├── ir.h                 #   IR types (Ref/Ins/Blk/Fn/Typ/Con/Dat/Target) + IR-construction API
 │   ├── ir_ops.h             #   IR opcode X-macro list (OXXX) + optab fields
+│   ├── mir.h                #   MIR core API (MType/MVal/MConst/MIns/MFn/MFnM)
+│   ├── cpp.h                #   C++ frontend API (m++ symbols, g_lang=1)
+│   ├── cpp/cpp_tokens.h     #   C++ keyword/token tables (C++98/11/20)
 │   ├── x86_64.h             #   x86-64 backend interface
 │   ├── aarch64.h            #   AArch64 backend interface
 │   ├── riscv64.h            #   RISC-V 64 backend interface
@@ -49,6 +75,8 @@ mcc/
 ├── src/                     # unified source tree (no frontend/backend split)
 │   ├── driver/
 │   │   ├── main.c            #   entry point: argv parse -> pp -> decl() loop -> emit
+│   │   ├── c_main.c          #   C-mode main() wrapper (g_lang=0), linked into mcc
+│   │   ├── mpp_main.c        #   C++-mode main() wrapper (g_lang=1), linked into m++
 │   │   ├── target_select.c   #   -target triplet -> Target* / canonical name
 │   │   ├── host_toolchain.c  #   host assembler/linker handoff (cc -c / cc link)
 │   │   ├── usage.c           #   --version / --help text
@@ -64,8 +92,12 @@ mcc/
 │   │   └── decl.c, expr.c, stmt.c, tree.c, attr.c
 │   ├── sema/                #   C11 frontend: semantic analysis
 │   │   └── type.c, scope.c, eval.c, init.c, map.c, targ.c
-│   ├── util/                #   C11 frontend: shared utilities
+│   ├── util/                #   shared utilities (used by both frontends + backend)
 │   │   └── util.c, utf.c
+│   ├── cpp/                 #   C++ frontend (m++ binary; lowers C++ -> C decl/expr AST)
+│   │   ├── lex/cpp_scan.c   #     C++ tokenizer (keyword table + classification test)
+│   │   └── parse/cpp_parse.c#     C++ parser: class/namespace/template/overload/
+│   │                         #       ctor/dtor/virtual lowering + mangled names
 │   ├── irgen/               # AST -> IR direct construction (was single irgen.c, now split)
 │   │   ├── irgen.h          #   internal shared header (struct value/block/func + helper decls)
 │   │   ├── value.c          #   mkblock/mkglobal/mkintconst/mkfltconst/irtype/switchcase
@@ -77,12 +109,22 @@ mcc/
 │   │   ├── expr.c           #   funcexpr/zero/funcinit (expression + initializer lowering)
 │   │   ├── switch.c         #   casesearch/funcswitch (binary-search switch lowering)
 │   │   ├── emittype.c       #   emittype (register frontend struct/union into IR typ[] table)
+│   │   ├── func_to_mir.c    #   func -> MFn (MIR) lowering (MIR-path entry, g_use_mir=1)
 │   │   └── emit.c           #   fe_to_ir_op/valref/run_passes/emitfunc/emitdata
+│   ├── mir/                 #   MIR core (shared intermediate, MFn) + machine/regalloc layer
+│   │   ├── build.c          #     MFn/MType/MVal/MConst construction API (arena)
+│   │   ├── passes.c         #     build_uses + mfold/msimpl/mdce + run_mir_passes()
+│   │   ├── copy.c           #     mcopy copy-propagation pass
+│   │   ├── gvn.c            #     mgvn global-value-numbering pass
+│   │   ├── machine.c        #     machine-level MInsM/MFnM (machine-backend input)
+│   │   ├── regalloc.c       #     linear-scan regalloc (calls crossing / hint / spills)
+│   │   ├── mir_util.c       #     arena / const-pool helpers
+│   │   └── print.c          #     -dmir MFn dumper
 │   ├── ir/                  #   IR core + utilities
 │   │   ├── optab.c          #     Op optab[NOp] attribute table
 │   │   ├── printfn.c        #     printcon/printref/printfn (debug IL dumper)
 │   │   └── ir_util.c        #     emit/newtmp/getcon/newcon/idup/vgrow/alloc/freeall + globals
-│   ├── opt/                 #   14 optimization passes:
+│   ├── opt/                 #   14 optimization passes (legacy LIR backend):
 │   │   ├── cfg.c             #     fillpreds/fillcfg/filldom/fillfron/fillloop/simplcfg
 │   │   ├── ssa.c             #     ssa (SSA construction)
 │   │   ├── copy.c            #     narrowpars
@@ -99,14 +141,17 @@ mcc/
 │   │   └── rega.c            #     register allocation
 │   ├── abi/abi.c             #   typclass/selcopy/insnew (shared ABI helpers)
 │   ├── emit/emit.c           #   emitfn/emitfin/emitdat (generic asm emission glue)
-│   └── target/               #   per-arch backends (one subdir per target)
+│   └── target/               #   per-arch machine backends (one subdir per target)
 │       ├── x86_64/           #     System V x86-64 target
-│       ├── aarch64/          #     same four files for AArch64 (AAPCS64 ABI)
-│       ├── riscv64/          #     same four files for RISC-V 64 (lp64d ABI)
+│       │   ├── x86_64_mabi.c #       MIR machine-backend ABI (mfnm_abi_x86_64)
+│       │   ├── x86_64_mbe.c  #       MIR machine-backend driver (mfnm_backend_x86_64)
+│       │   └── x86_64_memit.c#       MIR machine-backend asm emission
+│       ├── aarch64/          #     same three files for AArch64 (AAPCS64 ABI)
+│       ├── riscv64/          #     same three files for RISC-V 64 (lp64d ABI)
 │       ├── i386/             #     i386 System V ABI backend
 │       ├── loongarch64/      #     LoongArch64 LP64D ABI backend
 │       └── arm/              #     ARM 32-bit (v7+ with VFP) AAPCS ABI backend
-└── build/                   # object files + dep files (gitignored, auto-discovered)
+└── build/                   # object files + dep files + libmcc.a (gitignored)
 ```
 
 ## 3. Module Responsibilities
@@ -114,10 +159,12 @@ mcc/
 | Directory | Stage | Responsibility |
 |-----------|-------|----------------|
 | `src/driver/` | orchestration | gcc/clang-style argv parse, init target, run preprocessor, drive `decl()` loop until EOF, emit forward decls, route output (-c/-S/-E/-o), invoke host `cc` for assemble/link |
-| `src/lex/` | source -> tokens | UTF-8 scanner, C11 token table, full C preprocessor (`#if`/`#ifdef`/`#ifndef`/`#elif`/`#else`/`#endif`/`#include`/`#define`/`#undef`/`__VA_OPT__`, plus `-D`/`-U`/`-I` API) |
-| `src/parse/` | tokens -> AST | recursive-descent parser building `struct decl`/`expr`/`stmt` trees; `attr.c` handles `_Noreturn`/`_Alignas`/`fallthrough` etc. |
-| `src/sema/` | AST -> typed AST | type table (`type.c`), scope tracking (`scope.c`), constant folding (`eval.c`), initializer parsing (`init.c`), tree/map helpers, target-specific wchar_t / va_list layout (`targ.c`) |
-| `src/irgen/` | typed AST -> IR | the "integration boundary" - direct IR construction via `func*` builders, then `emitfunc` walks the per-function `struct func` CFG and translates to IR `Fn` in memory (no text IL) |
+| `src/c/lex/` | source -> tokens | UTF-8 scanner, C11 token table, full C preprocessor (`#if`/`#ifdef`/`#ifndef`/`#elif`/`#else`/`#endif`/`#include`/`#define`/`#undef`/`__VA_OPT__`, plus `-D`/`-U`/`-I` API) |
+| `src/c/parse/` | tokens -> AST | recursive-descent parser building `struct decl`/`expr`/`stmt` trees; `attr.c` handles `_Noreturn`/`_Alignas`/`fallthrough` etc. |
+| `src/c/sema/` | AST -> typed AST | type table (`type.c`), scope tracking (`scope.c`), constant folding (`eval.c`), initializer parsing (`init.c`), tree/map helpers, target-specific wchar_t / va_list layout (`targ.c`) |
+| `src/cpp/` | C++ source -> typed AST (m++) | C++ lexer (`lex/cpp_scan.c`) + parser (`parse/cpp_parse.c`); lowers class/namespace/template/overload/ctor-dtor/virtual to the C decl/expr machinery with mangled names |
+| `src/c/irgen/` | typed AST -> MFn | the "integration boundary" - direct IR construction via `func*` builders; `func_to_mir.c` lowers to MIR `MFn` (MIR path, `g_use_mir=1`); `emit.c` runs the MIR passes then dispatches to the target's machine backend (`mfnm_backend_<arch>`) |
+| `src/mir/` | typed AST -> MFn + MIR passes | MIR core construction (`build.c`), passes (`passes.c` mfold/msimpl/mdce, `copy.c` mcopy, `gvn.c` mgvn), machine layer + linear-scan regalloc (`machine.c`/`regalloc.c`) feeding each target's `_memit.c` |
 | `src/ir/` | IR utilities | `ir_util.c` provides the in-memory IR construction API (`emit`/`newtmp`/`getcon`/`idup`/`vgrow`); `optab.c` is the operator attribute table; `printfn.c` is a debug IL dumper |
 | `src/opt/` | IR -> optimized IR | 14 SSA passes: CFG construction -> SSA -> fold -> GVN -> GCM -> mem2reg -> load opt -> liveness -> spill -> regalloc |
 | `src/abi/` | ABI helpers | shared `typclass()` and copy/spill primitives consumed by each target's `abi.c` |
@@ -128,17 +175,17 @@ mcc/
 
 Useful jump points when investigating a specific bug or feature:
 
-- **Adding a new C11 feature** -> start in `src/parse/` (parser), then `src/sema/type.c` (type system), finally `src/irgen/expr.c` (IR lowering)
-- **Adding a new IR instruction** -> add to `include/ops.h` (X-macro) -> `src/irgen/expr.c` (emit) -> `src/irgen/emit.c:fe_to_ir_op()` (translate to IR op)
-- **mcc segfaults during compile** -> most likely `src/irgen/emit.c:emitfunc()` (Fn init) or `src/ir/ir_util.c:vgrow()` (Vec corruption)
-- **Wrong code generated** -> check `src/irgen/emit.c:valref()` (value -> Ref translation), then `src/opt/` passes in `run_passes()` order
+- **Adding a new C11 feature** -> start in `src/c/parse/` (parser), then `src/c/sema/type.c` (type system), finally `src/c/irgen/expr.c` (IR lowering)
+- **Adding a new IR instruction** -> add to `include/ops.h` (X-macro) -> `src/c/irgen/expr.c` (emit) -> `src/c/irgen/emit.c:fe_to_ir_op()` (translate to IR op)
+- **mcc segfaults during compile** -> most likely `src/c/irgen/emit.c:emitfunc()` (Fn init) or `src/ir/ir_util.c:vgrow()` (Vec corruption)
+- **Wrong code generated** -> check `src/c/irgen/emit.c:valref()` (value -> Ref translation), then `src/opt/` passes in `run_passes()` order
 - **ABI bug (struct return, varargs)** -> `src/target/<arch>/<arch>_abi.c` or `src/target/x86_64/x86_64_sysv.c`
 - **Adding a new target** -> add `src/target/<new>/` with 4 files mirroring `amd64/`, register it in `src/driver/target_select.c:pick_target()`
 - **`mcc -S` output wrong** -> `src/target/<arch>/<arch>_emit.c`
-- **Preprocessor bug** -> `src/lex/pp.c` (conditional compilation, #include, macro expansion, -D/-U/-I); `src/lex/pp_expr.c` (#if arithmetic evaluation)
+- **Preprocessor bug** -> `src/c/lex/pp.c` (conditional compilation, #include, macro expansion, -D/-U/-I); `src/c/lex/pp_expr.c` (#if arithmetic evaluation)
 - **Command-line option not working** -> `src/driver/main.c` (argv parsing) + `src/driver/arg_compat.c` (option normalization) + `include/arg.h` (ARGBEGIN macro)
 - **Phase 1a regression** -> `make check` (must print `exit=0`)
-- **IR pass ordering** -> `src/irgen/emit.c:run_passes()` mirrors `reference/qbe/main.c`'s `func()` callback
+- **IR pass ordering** -> `src/c/irgen/emit.c:run_passes()` mirrors `reference/qbe/main.c`'s `func()` callback
 
 ## 5. irgen/ Split Rationale
 
@@ -165,7 +212,7 @@ the AST -> IR translation:
 | `emittype.c` | register struct/union into IR `typ[]` | all of irgen/ (via `emittype`, called from `mkfunc`/`funcexpr`) |
 | `emit.c` | IR construction + pass pipeline | frontend (via `emitfunc`/`emitdata`) |
 
-`irgen.h` is **internal to `src/irgen/`**: it declares the `struct value`/
+`irgen.h` is **internal to `src/c/irgen/`**: it declares the `struct value`/
 `block`/`func` types and the cross-file helpers (`mkfltconst`,
 `irtype`, `functemp`, `funcinst`, `funcbits`, `convert`, `calcvla`,
 `funcalloc`, `funcstore`, `funcload`, `funclval`). The frontend
@@ -177,22 +224,29 @@ itself only sees the public API in `mcc.h` (`mkfunc`, `funcexpr`,
 Per AGENTS.md §4, mcc is built with a **simple Makefile** (no
 autotools/cmake/meson). Key Makefile mechanics:
 
-- `SRC_DIRS := src` - single root; `find` recursively auto-discovers
-  all `.c` files. **Adding/removing a `.c` file requires no Makefile
-  edit.**
+- Sources are split into `FE_DIRS` (C/C++ frontends:
+  `src/driver src/cpp src/c`) and
+  `BE_DIRS` (shared backend: `src/mir src/ir src/opt src/abi
+  src/emit src/target src/util`); `find` auto-discovers `.c` files in
+  both, so **adding/removing a `.c` file requires no Makefile edit.**
+- Backend objects are archived into `build/libmcc.a`. Two binaries
+  link it: `mcc` = C frontend + `src/driver/c_main.c` (g_lang=0);
+  `m++` = C++ frontend + `src/driver/mpp_main.c` (g_lang=1).
 - All six target backends (`x86_64`, `aarch64`, `riscv64`, `i386`,
-  `loongarch64`, `arm`) are always linked into a single `mcc` binary; runtime target selection is via
+  `loongarch64`, `arm`) are always linked into the shared backend; runtime target selection is via
   `pick_target()` in `src/driver/target_select.c` (consults `-target`/`-t` flag
   or host `uname -m`).
 - Build artifacts go to `build/` (mirrors source layout), which is
-  gitignored along with the `mcc` binary.
+  gitignored along with the `mcc`/`m++` binaries.
 - `CFLAGS = -O2 -g -std=gnu11 -Iinclude -Wno-all` - `-Wno-all` is
-  intentional; the integrated cproc/QBE source emits heavy `-Wall`
+  intentional; the cproc/QBE-derived source emits heavy `-Wall`
   noise (unused params, sign compares, missing braces in designated
   initializers). Warning hygiene will be revisited once mcc can
   self-host (Phase 4).
 - `make check` runs the Phase 1a gate: `int main(void){return 0;}`
-  must compile, link, run, and exit 0.
+  must compile, link, run, and exit 0. Backend/`m++` gates:
+  `check-mir` (types/passes/machine/abi/regalloc),
+  `check-cpp` (lex/virtual/func/neg), `check-all` (`test/verify-all.sh`).
 
 ## 7. Phase Status
 
@@ -208,10 +262,87 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
 | 1e - C23 features | PASS (mcc host gate) | `make check-c23`: 14 runtime tests |
 | 2 - meuos-libc | PASS (6 arch runtime) | `make -C projects/meuos-libc check` (x86_64 full; aarch64/arm qemu; riscv64/loongarch64/i386 bootstrap) |
 | 3 - meow | PASS | `meow build bzip2` (pure YAML); `make -C projects/meow check` |
-| 4 - bootstrap | PASS | `check-sysroot-static`: sysroot 内自重建 82 .c + libmcc.a + mcc 链接 |
+| 4 - bootstrap | PASS | `check-sysroot-static`: sysroot 内自重建全部 `src/` 源码 + libmcc.a + mcc/m++ 链接（0802 记录 self-mcc 105/105 编译通过，见 `.issues/0802.md`） |
 | 5 - toolchain | PASS | `check-mt-integration`: MT_AS/MT_LD 集成，零宿主 cc 依赖 |
 | 6 - buildtools | PENDING | meuos-buildtools (m4/bison/flex/gperf) 待启动 |
 | 7 - userspace | PENDING | meuos-utils/meuos-shell 待启动 |
+
+### m++ / MIR 重构进度（worktree-mxx-work，2026-08）
+
+在 bootstrap 阶段线之外，mcc 正并行执行「共享后端 + 多语言前端」重构。
+权威进度记录在 `.issues/0802.md`（随每个技术提交同步更新）。里程碑速览：
+
+| 里程碑 | 状态 | 说明 |
+|:-------|:-----|:-----|
+| M1 MIR 定型 | ✅ | B.1 MIR 核心（0fc8f8c）+ B.2 首批 passes（220086c）+ B.4 bridge 打通（753b00b） |
+| M2 C 迁移 | ✅ | `func_to_mir` 打通，`MCC_USE_MIR=1` 全源码编译通过 |
+| M3 m++ hello | ✅ | C.1 骨架 + 双二进制 mcc/m++ 共享 libmcc.a（3958de5） |
+| C.2.3 类/继承/重载/构造 | ✅ | 类、成员函数、构造/析构、访问控制、命名空间、单/多继承、运算符重载、引用、静态成员、嵌套类、临时对象 |
+| C.2.5 虚函数与虚表 | ✅ | vptr/vtable 布局 + 虚调用降级 + 多态继承（7442b6c） |
+| C.2.8 函数模板 | ✅ | instantiate-on-first-use（84727a6） |
+| C.2.8 类模板 | ✅ | `Foo<T>` 类型上下文实例化（642574b） |
+| C.2.8 成员模板 | ✅ | 类内模板方法 + 类模板实例内的成员模板 `obj.get<int>()`（c93d5f7） |
+| auto/decltype | ✅ | auto 变量声明（局部/全局）+ C++14 auto 返回类型推导，支持模板结果/链式/成员模板（160e2a2） |
+| 变参模板/包展开 | ✅ | `typename... Args` 包参数 + `f(args...)` 转发 + `sizeof...(Args)` + 空包（df0c489） |
+| lambda（匿名类降级） | ✅ | 闭包合成文件作用域 `__lambdaN` 类，值捕获=成员+合成构造、体=operator()、`obj(args)` 降级（877beed） |
+| constexpr 求值器 | ✅ | constexpr 函数体 token 缓冲回放 + 编译期折叠、constexpr 变量常量初值捕获、static_assert 编译期求值（3ac233b；阶段 1 + 阶段 2 的 static_assert 部分） |
+| 移动语义（右值引用） | ✅ | `T&&` + 引用折叠 + lvalue/rvalue 值类别重载（4491a27） |
+| C++14/17 五项 | ✅ | 泛型 lambda（a28b0f5）、if constexpr（11d919d）、CTAD（a76e7ff）、结构化绑定+内联变量（70890fa） |
+| C++20 三项 | ✅ | 三向比较 `<=>`（34d0566）、consteval 立即函数（e698f37）、concepts/requires（8e07d08）+ 概念组合 `&&/||/!` 递归求值（b2da695）——**C++ 98~23 覆盖收官** |
+| m++ 边界 4 项 | ✅ | override/final（40d46f2）、ctor 初始化列表（1eb76da）、限定成员调用 `Base::get()`（35a6ede）、new/delete（ecc42cf）+ 数组形式 `new T[n]`/`delete[]`（329de75） |
+| new `{args}` braced-init | ✅ | `new T{...}`：标量 value-init、聚合逐成员、用户 ctor 构造已支持；标量数组 `new int[n]{...}` 逐个赋值 + 超出列表 value-init 补 0（含空列表 `{}`）已支持；**类元素数组 `new Pt[n]{...}`**：聚合逐成员 + 用户 ctor 逐元素构造已支持，短列表其余元素 value-init（默认构造） |
+| 6 架构 MIR 路径 | ✅ | varargs 全打通，扩展矩阵全 PASS（109a3ff） |
+| C 覆盖达成 | ✅ | C99/C11/C23 全部实现：__VA_OPT__/__has_c_attribute（c60874d）、C23 constexpr 函数求值（753df8a）——**C 90~23 目标达成** |
+| 验收门禁 | ✅ | `test/verify-all.sh` + `make check-all`（c940c34） |
+| 全面验收基线 | ✅ | verify-all 6/6 + 自举产物 + 6 架构 qemu 矩阵（b5dcc8d，docs/acceptance.md） |
+| P2 spill slot 复用 | 📋 方案定稿 | rega/spill 长期专项，spill slot 生命周期复用方案（c84555f，p2-spill-slot-reuse.md）；实施中 |
+
+### m++ 已知限制（截至 2026-08-02）
+
+- **模板**：显式模板实参 `conv<int>(x)`（`<` 被当作比较符）、模板与重载共存、
+  非类型模板参数；类模板成员函数体急切实例化（C++ 语义为按需惰性）、
+  类模板作函数返回值触发既有聚合返回拷贝限制；变参模板无折叠表达式（C++17）、
+  无包嵌套、无类成员变参模板、无递归终止展开策略。
+- **继承**：虚继承。纯虚 `= 0` 已支持（纯虚成员/析构声明解析 + vtable 槽位留 0，派生覆写正常分派）；抽象类（含未覆写纯虚）实例化报错已支持（对象声明/`new T`/`new T[]`）；类外析构定义 `B::~B(){}` 已支持（纯虚析构完整对象生命周期可用）；多态 `delete` 基类指针已支持（虚析构经 vtable 分派跑派生析构 `~D` 再 `~B`，非虚析构仍静态决议，`delete[]` 数组仍走静态逐元素析构）。
+- **auto/decltype**：仅 `auto x = expr`（局部/全局）与 C++14 `auto f()` 返回类型推导；未做 `auto&` 引用折叠、decltype 独立推导（160e2a2 落地范围）。
+- **lambda**：值捕获与引用捕获均已支持——显式 `[&x]` / 默认 `[&]` 引用捕获（能读到活动变量更新）、默认按值 `[=]`、混捕 `[=,&y]`/`[&,z]`/`[x,&y]`、init-capture `[n=expr]`、泛型 lambda（c14c7a2 起支持引用/init 捕获）；跨函数传递捕获仍为限制。
+- **constexpr**：仅整型常量折叠（阶段 1）+ static_assert（阶段 2 部分）；未做数组维度/非类型模板实参的编译期求值、constexpr 对象含成员访问（需 mini 内存模型）、类静态 constexpr 成员在常量表达式中的折叠（3ac233b 落地范围）。
+- **其它**：函数指针声明参数里的类名未识别（独立问题）。
+- **MIR 路径遗留**（非 m++ 专属）：自举 mcc 编译「聚合参数+varargs+栈传参」组合在
+  declspecs 写 NULL（Bug B 待调）；atomic_concurrent/thread_local 多架构 TLS 既有问题。
+
+### m++ 缺陷队列（截至 2026-08-03，mcc-team-0599；编号迁移为组件前缀+hex）
+> **编号体系说明**：2026-08-03 起缺陷编号为「组件/阶段前缀 + 两位 hex」——`cpp-`（C++ 前端）、`c-`（C 前端）、`mir-`（MIR）、`x86-`（x86_64 后端）。旧字母保留对照。
+
+| 编号（新） | 旧 | 缺陷 | 状态 |
+|---|---|---|---|
+| cpp-01 | B | 自由函数重载被拒 | ✅ closed（83db5ff） |
+| cpp-02 | C | 继承析构链缺失 | ✅ closed（c19a351） |
+| cpp-03 | D | static void 方法误判构造 | ✅ closed（16f1948） |
+| cpp-04 | E | ns 四项限制 | ✅ closed（6f3d734） |
+| cpp-05 | G | 泛型 lambda 捕获 | ✅ closed（3f0ed41） |
+| cpp-06 | H | 限定+虚调用 | ✅ closed（a096b52） |
+| cpp-07 | K | concept 递归深度 | ✅ closed（2755fe3） |
+| cpp-08 | M | 未命名参数 ctor | ✅ closed（4d93a66） |
+| cpp-09 | N | 数组 new stride | ✅ closed（754b437） |
+| cpp-0a | Q | `delete nullptr`/`delete[] nullptr` 段错误 | ✅ closed（f8f0044） |
+| cpp-0b | R | concept 形参名 ≠ `T` 误判 undeclared | ✅ closed（93ab4b4） |
+| cpp-0c | S | lambda 按值捕获类对象不调拷贝构造 | ✅ closed（f8f0044 混入） |
+| cpp-0d | T | 嵌套 lambda 无法再捕获外层变量 | ✅ closed（f8f0044 混入） |
+| cpp-0e | Z/U | size-0 空类按值传参/返回崩溃（P0） | ✅ closed（三处：2be27a7 LIR 路径 + e4a885c MIR 后端空聚合 ABI 归一 + 00ed62b MIR 后端参数 DCE/regalloc；empty_class_value.cc 双路径完整闭环） |
+| cpp-0f | Y | `delete (T*)expr` 解析失败 | ✅ closed（9e43494，delete/delete[] operand 改 castexpr + new_delete_cast.cc） |
+| c-00 | W | `u8"..."` 字面量元素类型应为 `char`（C11 §6.4.5p6） | ✅ closed（604be9e，expr_literal.c case '8' 改 &typechar + u8_string.c 类型守卫） |
+| c-01 | X | inline 定义 + extern 声明未发外部定义（C99 §6.7.4p7） | ✅ closed（e9fae35，decl.c 延迟发射 + extern promote + inline.c 双向断言，自举通过） |
+| mir-00 | F | fold shl/sar(x,0) 优化缺口 | ✅ closed（647a05b 夹带 + 实证复验） |
+| mir-01 | V | MIR msimp 有符号 div/rem 误削减 | ✅ closed（93ab4b4 夹带 + Test 3b/3c/3d + 4c24bfe） |
+| mir-02 | J | slotmerge 自举破坏（长期禁用 97c8541；二期见 worker-slot2） | 🚫 长期禁用 |
+| mir-03 | I | slotmerge 崩溃（并入 J） | 🚫 禁用 |
+| cpp-10 | — | 局部类（函数体内 `struct`）+ `new` 段错误：ctor 体即时代码生成污染全局 `curfunc` + 局部类 `t->scope` 未设（野指针） | ✅ closed（三处：mktype 初始化 `t->scope=NULL` + tagspec 普通 struct 设 `t->scope=s` + cpp_parse_method_body 恢复 `curfunc`；local_class_new.cc 回归） |
+| x86-00 | va_list | MIR 后端 va_list 溢出 | ✅ closed（222a28d） |
+| cpp-00 | A | size-0 类值传参（历史名，已被 cpp-0e 替代） | 🚫 废弃 |
+
+> 状态规则：缺陷状态只标 open/pending；修复提交 push 后由 worker-doc 周期 pull 补记 closed + 哈希。C++ 覆盖状态见上表（C++98~23 收官 ✅，2026-08-02）。
+> MIR 单路径门禁：`make check-c-mir`（`test/mir_matrix.sh`），c99/c11/c23 用例全部经唯一 MIR 路径编译+运行，退出码均为 0（MIR 为唯一 asm 生产者，LIR 双路径对比已随 LIR 桥接层移除）。
 
 ## 8. Progressive Cleanup Notes
 
@@ -219,9 +350,9 @@ The user has asked for **progressive** removal of `cproc`/`qbe` naming
 artifacts and structural integration of the two source trees. Status:
 
 **Done in irgen-refactor (irgen/ split round)**:
-- `cproc_op_to_qbe()` -> `fe_to_ir_op()` (in `src/irgen/emit.c`)
+- `cproc_op_to_qbe()` -> `fe_to_ir_op()` (in `src/c/irgen/emit.c`)
 - Comment cleanup: most "cproc does X" -> "the frontend does X"
-- File split removed monolithic `irgen.c` (no cproc/qbe filename in `src/irgen/`)
+- File split removed monolithic `irgen.c` (no cproc/qbe filename in `src/c/irgen/`)
 
 **Done in Phase 1b (control flow + call round)**:
 - Pass 2 emit pattern switched from BACKWARD `emit()` to FORWARD
@@ -260,16 +391,16 @@ artifacts and structural integration of the two source trees. Status:
   - `driver/` -> `src/driver/`
   - `frontend/{lex,parse,sema,util}/` -> `src/{lex,parse,sema,util}/`
     (removed `frontend/` intermediate layer)
-  - `irgen/` -> `src/irgen/`
+  - `irgen/` -> `src/c/irgen/`
   - `backend/{ir,opt,abi,emit}/` -> `src/{ir,opt,abi,emit}/`
     (removed `backend/` intermediate layer)
   - `target/` -> `src/target/` (with amd64/arm64/rv64 subdirs)
 - **Makefile**: `SRC_DIRS := src` (single recursive root)
 - **Symbol renames** (internal API, no public ABI impact):
-  - `qbetype()` -> `irtype()` (in `src/irgen/value.c`)
+  - `qbetype()` -> `irtype()` (in `src/c/irgen/value.c`)
   - `b->qbe` -> `b->ir` (struct block field, IR Blk pointer)
-  - `run_qbe_passes()` -> `run_passes()` (in `src/irgen/emit.c`)
-  - `ir_to_qbe_op()` -> `fe_to_ir_op()` (in `src/irgen/emit.c`)
+  - `run_qbe_passes()` -> `run_passes()` (in `src/c/irgen/emit.c`)
+  - `ir_to_qbe_op()` -> `fe_to_ir_op()` (in `src/c/irgen/emit.c`)
 - **Comment cleanup**: "QBE" -> "IR" / "backend" (in src/ and include/
   .c/.h files, 78 files touched); "cproc" -> "the frontend" where
   referring to our own code. **Preserved**: `reference/cproc/` and
@@ -297,7 +428,7 @@ artifacts and structural integration of the two source trees. Status:
 - **`include/arg.h`**: ARGBEGIN macro extended with `case '-'` to
   dispatch long options (`--version`, `--help`) while staying
   backward-compatible with short-option cluster parsing.
-- **`src/lex/pp.c`**: implemented previously-missing preprocessor
+- **`src/c/lex/pp.c`**: implemented previously-missing preprocessor
   directives `#if`/`#ifdef`/`#ifndef`/`#elif`/`#else`/`#endif`
   (conditional compilation stack + skip logic), `#include` (with -I
   path search + quote/angle-bracket distinction), `#if` constant

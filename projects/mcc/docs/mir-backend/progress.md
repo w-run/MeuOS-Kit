@@ -1,0 +1,704 @@
+# MIR 直接后端进度（progress.md）
+
+> 运维约束：每完成一个可验证的里程碑立即 `git commit + push`，并更新本文档。
+> 若因 API/网络中断，从最近的 git 提交 + 本文档续接。
+
+## 概览
+
+- **目标**：MCC 的 MIR 原生后端（MFnM 机器层，替换 LIR bridge 路径），
+  新后端代码在 `src/mir/`、`src/target/x86_64/x86_64_m*.c`；参考源
+  `src/target/x86_64/x86_64_isel.c` 等**不修改**。
+- **开关**：`MCC_MIR_BACKEND=1` 启用新后端（标量函数）；聚合/varargs/TLS
+  fallback 到 bridge。`MCC_DEBUG_MBE=1` 输出机器层 dump。
+- **Oracle 基线**：`/tmp/mir-backend-base-p2/asm/`（123 测试 bridge 产物，
+  P2 时更新；bridge 路径必须字节一致）。
+- **P4 设计**：`docs/mir-backend/regalloc-design.md`（isel-debug，A→E 增量）。
+
+## Phase 状态
+
+| Phase | 内容 | 状态 | 提交 |
+|-------|------|------|------|
+| P0 | bridge 冻结为 oracle（collect.sh + 123 基线入库） | ✅ | 74e9321 |
+| P1 | 机器层：MVal/MAddr/MMOP/MFnM，MReg target 化（6 架构） | ✅ | d42efce, 1a5eacd |
+| P2 | x86-64 SysV ABI 移植（typclass/selpar/selcall/selret/va） | ✅ | a6c64e7 |
+| P3a | MIR 类型系统：func_to_mir 建 MTypeDesc，MV_TYPE 双轨(id+td) | ✅ | 0b07fa8 |
+| P3b | 完整 isel + emit：MFnM→x86-64 asm，可运行 | ✅ | eca97b7 |
+| P4a | regalloc：活跃区间构造（mreg_intervals） | ✅ | 5e87cce |
+| P4b | regalloc：槽分配（mreg_slots，slot4/8 打包） | ✅ | dc0de61 |
+| P4c | regalloc：线性扫描（mreg_scan，调用点双池+fixed 占用） | ✅ | 75a5d15 |
+| P4d | regalloc：phi 边移动（phi 值强制 spill 避免并行移动覆盖） | ✅ | 7c93bcd |
+| P4e | regalloc 接管 emit（寄存器感知 + callee-saved 保存 + 静态 alloca） | ✅ | 2664766 |
+| P4fix | Bug 1/2 边界修复（浮点 isel + 栈传参寻址） | ✅ | d6483d5, 3ce88c0 |
+| P5a | postra 冗余 mov 消除 + slot4/8 双游标复采 | ✅ | 33385f9, ab12b95, 5581557 |
+| P5b | hint 优先级（ABI 边界寄存器倾向） | ✅ | ab12b95 |
+| P6a | 聚合函数新后端（去 fallback：BLIT/sret/参数 pad） | ✅ | cc24361（先 2071ae6） |
+| P6b | varargs 新后端（去 fallback：ap alloca 32B/帧对齐/常量池标签） | ✅ | f9b9c34 |
+| P6d | 切换前验证：123 一致性 0 diff（shift/.globl/sret 修复 daab688） | ✅ | daab688 |
+| P6e | 自举验证：mcc_main 崩溃根因已修复（hint 跨 call da6aee4 + calls[64] 去上限 9718e44），self-mcc --version / 编译运行 hello 正常 | ✅ | da6aee4, 9718e44 |
+| P6c | 通用修复：slot4/8 无重叠打包 + 帧 rsp 16 对齐 | ✅ | 并入 P6a |
+| P6d | 宽度修复：32 位位移/比较（call 返回值高 32 位） | ✅ | 已提交 0612242 |
+| P6e | regalloc：hint 跨 call 检查（caller-saved 拒绝） | ✅ | 已提交 da6aee4 |
+| P6f | regalloc：calls 数组去 64 上限（超大函数漏 call） | ✅ | 已提交 9718e44 |
+| P6g | Bug B 修复：selcall sret 分配 pad（qualtype 24B） | ✅ | 已提交 eccf7ae |
+| P6h | Bug C 修复：meuos-libc strtod 不支持 hex float（0x1p63）→ self-mcc 编译 eval.c 崩溃。已修复并全量自举 105/105 | ✅ | 已提交 f412f75 |
+| P7 | x86_64 fallback 全部闭环（聚合实参/SALLOC、TLS、动态 alloca/VLA）：MCC_MIR_BACKEND=1 为完整路径，无 bridge fallback，自举通过 | ✅ | 4c908df, 1a1d599, 7e78598 |
+| Phase4-1 | **legacy 直接-LIR 构造块删除**：src/c/irgen/emit.c 的不可达直接-LIR Fn 构造（原 emitfunc 尾部）+ 仅服务该路径的 char_to_cls/fe_to_ir_op/valref/expand_gd_tls 静态函数删除；MIR 路径（func_to_mir → run_mir_passes → MIR-native/bridge → T.emitfn）完整保留。verify-all 19/19 + 自举通过 | ✅ | 见 worktree-tmp-eve-p4step1 |
+
+## 验证结果（截至 P3b）
+
+- `make check-mir`：mir_test / pass_test / machine_test(86) / mabi_test(43) /
+  regalloc_test(44) / bridge 全过。
+- `test/c99 + test/c11` 在 `MCC_MIR_BACKEND=1` 下编译 + 运行 **0 失败**。
+- 123 测试 bridge 路径 `.s` 与 P2 oracle **0 差异**（硬性回归标准）。
+- 新后端运行正确：hello（printf）、fib(10)=55（递归+分支）、gcd/sumsq/浮点/
+  extern/complex 均过。
+
+## 边界 bug 修复（isel-debug P3b 独立验证，2026-08-02）
+
+1. **浮点参数读取错误**：emit_addr 的 disp 错放括号内（`(8%rsp)`→`8(%rsp)`）、
+   emit_mov 浮点经 xmm0 中转覆盖 ABI 参数寄存器（改直接 movsd，mem→mem 经 r10）、
+   func_to_mir 未设 CALL 返回值 MVal.type（regalloc 误分 GPR，isel 补设）。
+2. **>6 参数栈传参非法寻址**：selcall 的栈参数空间（SALLOC +stk）未恢复 →
+   补 caller 清理 SALLOC -stk；emit 的 SALLOC 直接 subq $n（n 可负）。
+3. **浮点指令选择**：map_op 按 dtype 选 FADD/FSUB/FMUL/FDIV/FNEG（isel 层）。
+
+修复验证：fadd/fdiv/fneg 浮点参数、printf 7 参数全过；c99/c11 仍全过；
+check-mir 全绿；bridge 路径 0 回归。
+
+## ≤16B 聚合按值返回修复（2026-08-03，bella，Phase 2 验证发现）
+
+### 现象
+- `struct Foo{int a,b;} make(void){...}` + `struct Foo f = make()` 在
+  MCC_MIR_BACKEND=1 下 SIGSEGV（8/12/16B 全崩；24B+ sret 正常）。
+- 覆盖缺口：verify-all.sh 不设 MCC_MIR_BACKEND（当时默认 0）→ cpp 套件
+  实际走 bridge；c99/c11/c23 无 ≤16B 聚合按值返回测试。
+
+### 根因（两处，均在 x86_64_mabi.c / x86_64_memit.c）
+1. **混合类返回寄存器映射错误**：selret/selcall 用"位置式"映射
+   （slot1→XMM1/RDX），而 SysV 用**按类计数**（INTEGER: rax,rdx；
+   SSE: xmm0,xmm1）。`{int i; double d}`（{INTEGER,SSE}）的 SSE eightbyte
+   应回 XMM0 而非 XMM1（对照 LIR retr()）。
+2. **emit LOAD 浮点经 %rax 中转**：MMOP_LOAD 对 F64 目标先 `movq addr,%rax`
+   再 `movq %rax,%xmmN`。selret 两个返回块连续 load 时，第二块（F64）的
+   load 会把第一块刚放进 %rax 的 INTEGER 块覆盖。
+
+### 修复
+- mabi_selret / mabi_selcall 的 ≤16B 分支改为按类寄存器序列
+  （retreg[2][2] = {RAX,RDX}/{XMM0,XMM1}，逐 eightbyte 取类计数）。
+- emit MMOP_LOAD 增加 F64→XMM 寄存器的直接 `movsd` 路径（不再经 %rax）。
+- regalloc 区间起点取"首次 def"（sentinel UINT32_MAX + `min`）：聚合返回
+  call 的 dst 会被 mabi_selcall 先指向 pad、再由 call 重定义（multi-def），
+  区间必须从最早写入开始，否则线性扫描可能在该值最后一次 def 前把寄存器
+  让给邻居。
+- 回归测试：test/c11/aggregate_ret_small.c（8/12/16B int、16B SSE、
+  16B 混合 {INTEGER,SSE}、嵌套访问）+ test/cpp/aggregate_ret_small.cc
+  （链式 operator+ 临时值回传 + 混合 16B 返回）+ test/c11/aggregate_return.c
+  与 test/cpp/aggregate_return.cc（含混合 {double,int}→XMM0+RDX、返回值直
+  接作实参、24B sret 对照）。
+
+### 验证
+- 双路径（默认 bridge + MCC_MIR_BACKEND=1）：check-c-mir fail=0、
+  check-cpp-func/neg rc=0；cpp 套件在 MCC_MIR_BACKEND=1 下全绿。
+- 覆盖门禁建议：check-cpp 增加 MCC_MIR_BACKEND=1 变体。
+
+### 后续收口（MCC_MIR_BACKEND=1 全量 verify-all 17/17 所需的两个配套修复）
+1. **MCC_MIR_BACKEND 目标门控**（emit.c，72a04bd）：MIR-native 后端仅
+   x86_64 实现，但调用 mfnm_backend_x86_64 不检查目标，MCC_MIR_BACKEND=1
+   会劫持 i386/loongarch64/riscv64/aarch64 编译并输出 x86-64 指令
+   （pushq/%rsp）→ 汇编失败。按 `T.name=="x86_64"` 门控，非 x86_64 忽略
+   该 env 走 legacy LIR。
+2. **MIR-native TLS 适配 PIC**（x86_64_memit.c，16273af）：emit_tls_addr
+   一律 local-exec（%fs:0+@tpoff），--shared 下 R_X86_64_TPOFF32 被链接器
+   拒绝。T.pic 时改用 initial-exec GOT 形式
+   （`movq sym@gottpoff(%rip); addq %fs:0`），对照 legacy Oaddr。
+- 最终验证：`MCC_MIR_BACKEND=1 sh test/verify-all.sh` **17/17**（含
+  check-driver 的 shared/TLS 回归、check-i386/loongarch64/targets 交叉
+  目标）；默认模式 verify-all 亦 17/17，无回归。
+
+## Phase 2：x86_64 默认强制 MIR-native（2026-08-03，chloe，#80）
+
+### 内容
+- `g_use_mir` 恒 1（MCC_USE_MIR=0 不再生效）；`g_use_mir_backend` 默认 1
+  （x86_64 默认走 MIR-native）；emit.c 删 MIR lowering 的 NULL fall-through
+  死路径；MIR-native 调用按 `T.name` 门控限 x86_64（非 x86_64 仍走
+  MIR→bridge→LIR）。
+- TLS PIC 适配采用 `g_pic` 全局（main.c 与 T.pic 同步赋值）而非读 QBE
+  `Target T`——守 MIR 机器层纯 MIR 纪律，且补齐 emit_const MC_ADDR.tls
+  第三处发射点（bella 16273af 只补 2 处），已获 bella review 采纳为唯一正版。
+
+### 验证
+- `MCC_MIR_BACKEND=1` 与默认模式双路径 verify-all 均 **19/19**（新增
+  check-cpp-func/neg × MCC_MIR_BACKEND=1/0 双后端显式复验步骤，17→19）。
+- check-c-mir fail=0；check-cpp-func/neg、c99/c11/c23、自举全绿。
+
+## 当前工作点
+
+- **P4 regalloc 全部完成（A-E）**；isel-debug 验证发现的 P3b 遗留 2 个边界
+  bug（浮点参数/运算、>6 参数栈传参）已修复并验证（提交 d6483d5 + 3ce88c0）。
+- **P5 第一步完成**：`make check-sysroot-static` 自举回归通过（退出 0，
+  MIR 新后端改动不影响默认自举链路）。
+- **P5 第二步完成**：hello 走 MCC_MIR_BACKEND=1 新后端独立编译运行正确。
+- **P5 第三步（postra）完成**：emit_mov 直接 mov（reg↔reg、reg↔mem 不经
+  %rax 中转、同寄存器 no-op），add 指令量下降。
+- **P5 第四步（hint + slot4/8 复采）完成**：slot4/slot8 双游标恢复
+  （i32/f32 用 4 字节槽，emit 对 4 字节槽用 movl/movss），栈帧缩小；
+  regalloc 分配优先 MVal.hint 寄存器（机制就位，暂未设置 hint 源）。
+- **P5 全部完成**。MIR 新后端独立可用（hello 走 MCC_MIR_BACKEND=1）。
+- MCC_MIR_BACKEND=1：标量函数走完整新后端（isel + ABI + regalloc + emit），
+  聚合/varargs/TLS/VLA 动态 alloca fallback 到 bridge。
+- **P7（2026-08-03，bella）x86_64 fallback 全部闭环**：mbe_supported() 不再
+  有剩余 fallback——聚合实参（MOP_ARG/MOP_CALL MV_TYPE）、SALLOC、TLS 全局
+  （local-exec `%fs:0 + @tpoff`）、动态 alloca/VLA（MFnM.dynalloc + rsp 调整 +
+  epilogue 从 rbp 恢复）全部由 MIR-native 后端处理。验证：
+  - check-c-mir 默认与 MCC_MIR_BACKEND=1 双路径 fail=0；
+  - check-mir 全绿（mabi_test 45 / regalloc_test 45）；
+  - check-sysroot-static 自举默认路径与 MCC_MIR_BACKEND=1 均 exit 0
+    （self-mcc 全源码经 MIR-native 编译 + hello 运行正确）。
+
+## Bug 修复记录（isel-debug 验证发现）
+
+- **Bug 1 浮点**：isel 层浮点 ADD/SUB/MUL/DIV/NEG 选浮点 MMOP（FADD..FNEG，
+  之前用整数）；emit 的 FNEG 用 0.0-x；MOVSX/MOVZX 从 rax 低位扩展；
+  i32 除法从 eax 扩展。验证 fadd=9.0/fdiv=3.5/fneg=-7.0。
+- **Bug 2 栈传参**：emit_addr 的 AT&T 格式错误（disp 应在括号外、base 前
+  无逗号）导致 `(,%rsp)` 非法寻址；selcall 生成配对的 ±SALLOC（caller
+  cleanup），emit 按正负 subq/addq。验证 printf 7 参数正确。
+
+## 关键决策/发现
+
+- 机器层 MInsM 直接持有 MVal*（src/dst/addr），无反向 use 链；
+  regalloc 区间从指令扫描构造（非设计文档假设的 MUse 链）。
+- 机器层无 MPhi（P3b 已把 SSA phi 降级为 pred 块尾 MMOP_MOV copy），
+  phi 值经 `extra=1` 标记强制 spill（P4d，避免并行移动覆盖）。
+- emit 的 scratch 寄存器（rax/rcx/rdx/r9/r10/r11/xmm0）从 regalloc 池排除
+  （MTargetM.scratch），累加器不与操作数别名。
+- 线性扫描的回边缺口（循环头入口值被循环体临时值覆盖）经"区间跨回边
+  延伸"修复；`fm->regsused` 记录全部已分配寄存器（非当前活跃集）。
+- 所有 spill 槽 8 字节对齐（emit 用 movq 访问），4 字节值不越界。
+- 静态 alloca 用帧内 leaq 预留（不碰 %rsp），动态 alloca（VLA）fallback。
+
+## 独立验证记录（isel-debug，干净 worktree 全量复测）
+
+> 每轮均在**干净 worktree**（`git worktree add` 到已提交状态）构建验证，
+> 不混入工作区未提交改动。硬性标准：c99/c11 新后端 0 失败；123 测试
+> bridge 路径 .s 与 oracle 字节一致；代表性程序运行正确。
+
+### 轮 1 — P3b（eca97b7，2026-08-02）
+
+- c99/c11 34 测试 `MCC_MIR_BACKEND=1` 编译全通过；19 个有 main 测试
+  MIR 后端 vs bridge 退出码+stdout **19/19 一致**（确认真走新后端，均含
+  .bb 块结构）。
+- hello（printf）、fib(10)=55 运行正确；39 个 C 测试 bridge .s 与 oracle
+  **39/39 字节一致**。
+- 聚合/varargs fallback 混合模式不崩，汇编特征确认标量走 MIR、聚合走
+  bridge。
+- **发现 2 个 P3b 边界 bug**（已由 mir-backend 修复，见上方"边界 bug
+  修复"节）：
+  1. 浮点参数读取错误：`fadd(7,2)` 返回 0.0（bridge 3.5）——MIR 后端
+     prologue 参数 slot 偏移错乱 + 浮点用整数指令（addq 而非 addsd）。
+  2. >6 参数栈传参非法寻址：`printf` 7 参数生成 `movl %eax,(,%rsp)`
+     （rsp 作 index 非法）。
+
+### 轮 2 — d6483d5（Bug 1/2 修复 + P4 提交，2026-08-02）
+
+- **发现阻断性构建缺陷**：`x86_64_memit.c:637/784 'g_salloc' undeclared`
+  ——g_salloc 被 d6483d5 新增的 MMOP_SALLOC 分支使用但**从未定义**，干净
+  worktree 无法构建。验证时加本地补丁 `static int g_salloc;` 绕过。
+- Bug 1/2 复测通过：fadd(4,5)=9.0、fdiv(7,2)=3.5、fneg(7)=-7.0、printf
+  7/9 参数全对。
+- **发现 P4 参数传递段错误**：`int x=add(3,4); printf("%d",x)` GP fault
+  （libc 内）；simple/mul3/big/gcd+sumsq 组合**全部段错误**。根因：被调方
+  bb1 用 rsi/r8 解引用参数 slot，但 slot 指针语义跨块未保持，且调用方传值
+  （rdi/rsi=3,4）与被调方按地址解引用不匹配 → `movl (%rsi)` 把参数值当地址。
+- P4 regalloc 抽查：simple 汇编仍全栈槽解引用（`movl (%r10)`），未真正
+  用寄存器——当时判定"P4 未实现寄存器分配"（后经 f9b9c34 轮**修正**，
+  见下）。
+
+### 轮 3 — f9b9c34（P5/P6 后，2026-08-02）
+
+- **独立构建 ✅**：无 g_salloc 错误（P5/P6 重构移除该变量）。
+- **参数传递段错误已修复 ✅**：simple=7、mul3=15、big=7、gcd=12、
+  sumsq=385 全部正确，与 bridge 一致。
+- **regalloc 真实性确认 ✅（修正轮 2 误判）**：`MCC_DEBUG_MBE=1` dump 显示
+  simple/compute 全部中间值分配物理寄存器（reg=3/4/5，slots 全 -1，
+  regsused=0x38）；emit 有 `v->reg >= 0 → %reg` 分发（memit.c:212）。
+  此前误判为"全栈槽"的 `movl (%r10)` 实为 ABI 层把 SysV 参数（rdi/rsi）
+  落栈后的 load 指令（`@[%v3]` 地址），加载结果确在寄存器中运算。
+- **c99/c11 0 失败 ✅**：34 编译全过，19 个有 main 测试 MIR 新后端 vs
+  bridge **19/19 一致**。
+- **bridge 基线一致 ✅**：39 个 C 测试 .s 与 oracle **39/39 字节一致**
+  （84 cpp 为 m++ C++ 测试，不在 mcc 范围）。
+- hello + fib(10)=55 + varargs `sum_va(4,1,2,3,4)=10` 全部正确（P6b
+  varargs 新后端支持确认）。
+
+### 遗留（非正确性）
+
+- **isel 冗余 store/load**：中间值被 isel 层 store 到栈再 load（尽管
+  regalloc 已分配寄存器），如 `x=3` 存 -16(%rbp) 后立即重载。功能正确、
+  性能未优化；属 isel 缺少 copy-propagation/load-elimination，不影响
+  P4/P5 可靠性结论，后续可作为优化项。
+
+## 未初始化读排查 + calls 审计（isel-debug，2026-08-02）
+
+### calls[64] 修复完备性审计（9718e44 之后）
+- **calls 动态 realloc 已修复 mcc_main 崩溃**（mcc_main 241 个 call 远超
+  原 64 上限，超限 call 被丢弃 → 跨 call 区间误判不跨 → 分到 caller-saved
+  → call clobber）。self-mcc `--version` 稳定（干净 worktree 实测）。
+- 其余固定数组审计：
+  - `fixed[64]`/`busy[64]`：按物理寄存器索引，pos/bit 动态正确。
+  - `act[256]`：同时活跃区间上限，nact 满 256 时**强制 spill**（非崩溃，
+    性能隐患，超大函数可能 spill 过多）。
+  - `cand=malloc(nval)`（未清零）：只读前 ncand 个（已赋值），无泄漏。
+  - MVal 全 calloc 初始化（reg=-1/slot=-1/hint=-1），regalloc/spill/emit
+    路径未发现明确的未初始化读。
+
+### "不稳定崩溃"实测：是确定性 Bug B，不是未初始化读
+- 干净 worktree（9718e44）构建 self-mcc 编译最简 `int main(void){return 0;}`：
+  --specs=host **20/20 崩**、默认 specs **10/10 崩**（100% 确定性）。
+- 崩溃固定：`segfault at 0 ip 0x4a58d1 error 6`（declspecs 写 NULL）。
+
+### Bug B 根因：isel 错误消除空指针检查
+- declspecs 源码（src/parse/specs.c:299-302）：
+  ```c
+  if (sc) *sc = SCNONE;   if (fs) *fs = FUNCNONE;   if (align) *align = 0;
+  ```
+- **bridge 版保留空检查**（`cmpq $0,%rdx; jz`），**MIR 后端版无条件
+  `movl $0,(%rdx)` 写 NULL** → 崩溃。
+- 最小复现 `void set(int *p){ if(p) *p=0; }` MIR 后端**正确**（保留空检查），
+  说明是 declspecs 大函数的特定控制流触发 isel/opt 错误折叠条件 store。
+- 建议方向：检查 MIR fold/gvn 对 `if(ptr) *ptr=const` 的处理（对比
+  MCC_DEBUG_MBE 的 pre/post-pass MIR 定位空检查消失的 pass）。
+
+**结论**：P4 的两个阻断性缺陷（g_salloc 未定义、参数传递段错误）在
+P5/P6 已彻底修复；regalloc（线性扫描，依据 regalloc-design.md）真实
+分配寄存器；P4/P5 可靠，默认切换（MCC_MIR_BACKEND 接管）可评估。
+
+## Bug C 修复记录（P6h，2026-08-02）
+
+### 现象
+- self-mcc（MIR 编译的静态链接产物）编译 `src/sema/eval.c` 崩溃，
+  MIR dump 中断于 `$c336(i64)113` 附近（mark_use 阶段误报为崩溃点）。
+- host mcc 编译同一文件成功；self-mcc 报
+  `invalid floating constant suffix 'x1p63'`。
+
+### 根因
+- self-mcc 静态链接 **meuos-libc**（`--sysroot=... --nostdlib --static`），
+  其 `strtod`（src/stdlib/convert.c）不支持 C99 hex float（6.4.4.2）。
+- eval.c 含 `0x1p63`/`0x1p64` 字面量：meuos-libc strtod 解析 `0` 后把
+  `x1p63` 留给 expr_primary.c 判定为非法后缀 → 编译失败。
+- host mcc 动态链接 glibc，glibc strtod 支持 hex float → 正常。
+- "mark_use 带参函数崩溃" 是误诊：崩溃是 eval.c 编译失败的连锁表现。
+
+### 修复（f412f75）
+- meuos-libc strtod 增加 C99 hex float 解析（parse_hex_float：mantissa
+  精确二进制累积 + p 指数 2^exp 缩放）+ 纯 hex 整数回退（`0x10` → 16）。
+- 十进制路径不变；与 glibc 对照验证（0x1p63/0x1.8p3/0x1p-2/-0x1p4 全等）。
+
+### 验证
+- self-mcc 编译 eval.c（含 hex float）exit=0，产物与 host 相同（5416B）。
+- self-mcc 全量编译 mcc 自身源码 **105/105 通过**（此前 104/105，唯一失败 eval.c）。
+- hello 经 self-mcc 编译运行返回正确值。
+
+### 教训
+- 自举产物的 libc 依赖与 host 不同：静态链接 meuos-libc 的程序会暴露
+  libc 缺失特性，而 host 动态链接 glibc 掩盖。自举回归是 libc 完备性的
+  第一道防线。
+
+
+## MIR-native if-conversion（cmov）闭环（2026-08-03，bella，check-olevel 差距①）
+
+- 现象：check-olevel 断言 -O2 应 if 转换出 cmov 失败——x86_64_mbe.c isel
+  无分支到条件移动（三元/短 if-else 赋值仍发分支）。
+- 实现：机器层 ifconv 通道（src/mir/ifconv.c，`mfnm_ifconv`，isel 后、
+  ABI 前运行）：
+  - 识别分支 diamond（cmp/setcc/cmp bool,jcc + 双臂各为单写），整数选择
+    才转换（x86 无 FP cmov）；新增 MMOP_CMOV + mcc_neg。
+  - 发射要点（两个真实坑）：gas 拒绝 mem-dst cmov → 槽位 dst 经 %r9 中转
+    且按宽度匹配（8 字节写 4 字节槽覆盖相邻 callee-saved 保存区，曾致
+    template.cc/自举段错误）；global 源是地址须先 leaq 物化（emit_mval
+    打 sym(%rip) 会误读符号内容，曾致 self-mcc 的 vnew 崩溃）。
+- 验证：check-olevel cmov 断言转绿（O2=cmov/O1=分支）；grading.c 扩充
+  cmov 运行时模式（三元/abs/无符号/64位/直接布尔）7 级别全过；check-c-mir
+  双模式 fail=0、check-cpp-func 双模式 rc=0、自举 exit 0、verify-all
+  **19/19**（MIR-native + bridge 双路径）。commit bcd61f5 + 9f7682d。
+- 剩余 check-olevel 差距：② -O2 叶函数帧指针省略、③ -O1 内存局部常量
+  传播（均 MIR-native 后端，另有 task）。
+
+## Phase 3a：抽象扩展 + riscv64 MIR-native 试点（2026-08-03，bella）
+
+长期目标"完全抛弃 QBE LIR 仅用 MIR"（x86_64 已强制 MIR-native，5aa1154）。
+Phase 3a 按 chloe 调研的移植顺序（riscv64→loongarch64→aarch64→arm→i386）
+交付 riscv64 试点。
+
+### 抽象扩展（commit 258f303）
+- **MTargetM.sret_reg**：隐藏返回缓冲寄存器从硬编码 X64MREG_RDI/
+  MFnM.sret_rdi 泛化为目标参数（x86_64=RDI、riscv64=A0）；regalloc.c
+  去掉 x86_64_m.h 依赖。
+- **MMOP_SETCCR**（寄存器比较）：无 flags ISA 替代 CMP+SETCC 的 flags
+  模型；riscv64 isel 用 slt/sltu 派生全条件。
+- **MTF_CMOV** 特性位；machine.c 注册 mtarget_riscv64（32 GPR+32 FPR、
+  a0-a7/fa0-fa7、无 cmov/无 scale-index）。
+
+### riscv64 MIR-native 标量后端（commit af0d958）
+- riscv64_mabi.c（LP64D 标量 ABI）+ riscv64_mbe.c（isel，比较→SETCCR、
+  分支→JCC 带布尔值）+ riscv64_memit.c（无 flags 发射，fp 固定帧）。
+- mbe_supported 限定标量整数函数；聚合/浮点/varargs/TLS/VLA 回退 legacy
+  riscv64 LIR 后端（正确性兜底）。
+
+### gate 泛化（commit 6c2a068）
+- emit.c 按 target 分派 mfnm_backend_x86_64/riscv64，未覆盖构造回退
+  bridge。
+
+### 验证
+- 24 个可编译 test/c99 样例经 MIR-native 交叉编译 riscv64 汇编全部通过
+  riscv64-linux-gnu-as（含 8 参数/循环/比较分支）。
+- test/riscv64/{regress,abi,tls,varargs,vla} 经 legacy 回退同样汇编通过。
+- x86_64 无回归：check-c-mir 双模式 fail=0、check-cpp-func rc=0、
+  check-mir 全绿、自举 exit 0、verify-all 19/19（MIR-native+bridge 双路径）。
+
+### 剩余工作（后续 Phase 3a/3b）
+- ~~riscv64 后端补齐~~（2026-08-03 chloe 完成，见下）
+- 移植顺序下一目标：loongarch64（同样无 flags，复用 SETCCR 模型）。
+
+## Phase 3b：loongarch64 MIR-native 试点（2026-08-03，bella）
+
+延续 Phase 3a 的移植顺序（riscv64→loongarch64），loongarch64 与 riscv64
+同为无 flags RISC 风格，直接复用 SETCCR 抽象与 riscv64 三件套骨架。
+
+### 提交
+- `e73469b` machine.c 注册 mtarget_loongarch64（32 GPR + 32 FPR，
+  a0-a7/fa0-fa7，sret=A0）+ include/loongarch64_m.h。
+- `cca9c13` loongarch64_mabi.c/mbe.c/memit.c（LP64D 标量核心）。
+- `e888880` emit.c gate 分派 + 大帧/TLS 修复 + check-loongarch64 门禁适配。
+
+### 踩坑（两架构共用修复，随 loongarch64 一并合入）
+1. **大帧 >2KB**：addi 12 位立即数溢出。根因 alloca 大小存在 src[0] 常量
+   而非 cst 字段（alloca_size_ins 只读 cst 均 NULL）。修复：读 src[0] 常量、
+   寻址用 li+add 序列、prologue 大帧用 li.d $t8/sub.d（riscv64 li t6/sub）。
+2. **TLS 全局**：标量核不发射 TLS 重定位，mbe_supported 拒绝 tls 全局值
+   （两架构）→ 回退 legacy。
+3. **门禁断言**：check-loongarch64 的 regress.c/.large 现走 MIR-native
+   （标量），分隔符断言放宽为 [[:space:]]、fp 保存偏移按帧大小变化；
+   varargs/abi/tls/vla 仍走 legacy，原断言保留。
+
+### 验证
+- 29 个可编译 test/c99 样例经 MIR-native 交叉编译 loongarch64 汇编全部通过
+  loongarch64-linux-gnu-as（含 4096B 大帧、循环、比较分支、函数调用）。
+- check-loongarch64 门禁转绿（"LoongArch64 regression checks passed"）。
+- x86_64 无回归：check-c-mir 双模式 fail=0、check-cpp-func rc=0、
+  check-mir 全绿、自举 exit 0、verify-all 19/19（MIR-native+bridge 双路径）。
+- riscv64 同步修复大帧/TLS 后仍 29/33 汇编通过。
+
+### 剩余（后续）
+- loongarch64/riscv64 补齐：聚合返回/参数、浮点、varargs、TLS、VLA。
+
+---
+## Phase 3b：aarch64 MIR-native 移植（2026-08-03，hazel）
+
+按 Phase 3a 移植顺序的第二目标（riscv64 之后）。aarch64 有 NZCV flags
+（cmp 设置、b.cc 分支、cset 物化 0/1），但复用 riscv64 的 SETCCR 寄存器
+比较模型（isel 比较→MMOP_SETCCR、JNZ→JCC 布尔值），emit 用
+`cmp + cset` 与 `cbnz/cbz` 实现，避免 flags 跨指令存活问题——无需抽象
+扩展。
+
+### aarch64 标量后端（5 commit，branch worktree-tmp-hazel-aarch64）
+- **5163191** mtarget_aarch64 注册：include/aarch64_m.h（31 GPR x0-x30 +
+  32 V，x31=sp 不分配），machine.c regs 表（x19-x28/v8-v15 callee-saved、
+  x0-x18/v0-v7/v16-v31 caller-saved），rglob=fp/lr/sp，sret_reg=x8
+  （AAPCS64 间接结果），scratch=x9/x10/x11/ip0/ip1，argreg=x0-x7+v0-v7。
+- **3e2ca4d** aarch64_mabi.c（AAPCS64 标量）：selpar/selcall/selret；
+  溢出参数从 **fp+16** 加载（prologue `stp x29,x30` 推入后 fp=old_sp-16，
+  区别于 riscv64 的 fp+0）。
+- **9e2029e** aarch64_mbe.c（isel）：比较→SETCCR、JNZ→JCC 布尔值、
+  mbe_supported 限定标量整数（聚合/浮点/varargs/TLS/VLA 回退 legacy）。
+- **23eee7c** aarch64_memit.c：帧 `sub sp,#N + stp x29,x30,[sp,#N-16] +
+  add x29,sp,#N`；movz/movk 立即数；SETCCR=cmp+cset；JCC=cbnz/cbz 或
+  cmp+b.cc；REM=sdiv+mul+sub；MOVSX/MOVZX=sxtb/sxth/sxtw/uxtb/uxth；
+  返回 `ldr x30/x29 + add sp,x29,#0 + ret`（dynalloc 安全）。
+- **15d4261** gate 接入：emit.c mfnm_backend_aarch64、Makefile
+  MABI_SRC/check-mir-machine/abi、test/targets/regress.sh aarch64 返回
+  断言兼容 MIR-native（add x0 或 mov x0）。
+
+### 验证
+- 52/53 可编译 test/c99+c11 样例（MIR-native 或 legacy 回退）经
+  aarch64-linux-gnu-as 汇编全部通过（另 c23 61 样例单独验证通过）；
+  唯一失败 varargs_overflow 为 aarch64 legacy LIR 既有 `invalid class`
+  崩溃（MCC_MIR_BACKEND=0 同样复现，非 MIR-native 引入）。
+- 逻辑模式与 riscv64/x86_64 一致（参数落地、slot 寻址、SETCCR、帧
+  布局）；栈参数 fp+16 路径验证正确。
+- x86_64 无回归：verify-all 全 PASS（含 check-c-mir 双模式、自举、
+  check-targets 更新断言后兼容 MIR-native/legacy）。
+
+### 剩余工作（后续 Phase 3b）
+- aarch64 后端补齐：聚合（sret_reg=X8 已就绪）、浮点（V 寄存器池已建）、
+  varargs、TLS、VLA、动态 alloca。
+
+
+
+### riscv64 全功能补齐（#119，chloe，worktree-tmp-chloe-rv64fill）
+5 项独立提交，riscv64 MIR-native 覆盖标量+浮点+聚合+varargs+TLS+VLA：
+- **浮点**（5e8594a）：FPR 临时寄存器 f28/f29；fadd/sub/mul/div/neg/
+  sqrt、flw/fld/fsw/fsd、fcvt.*（F2I 带 rtz 保证 C 截断）；浮点比较
+  flt/fle/feq（目标整数寄存器）；mir_cmp_cc 补 CF*；mbe 转换 op 映射。
+  附带后端基础修复：入口块跳转（多块函数）、JCC 显式 fall-through
+  （块反转发射）、静态 alloca 越界、callee-saved FPR 用 fsd/fld。
+- **聚合**（b286463）：LP64D ≤16B 拆 8B 块回寄存器（非 FP 结构
+  a0/a1、全浮点结构 fa0/fa1）、>16B sret；RvClass 分类器 + mout_blit；
+  selpar/selcall/selret 全链路；MMOP_CALL 聚合返回不搬 a0 到 pad 指针；
+  大帧（>2047）li t6 前记；alloca 尺寸 cst 传递（修大结构溢出）。
+- **TLS**（9430114）：内部 tprel（lui %tprel_hi + add tp + addi
+  %tprel_lo）、外部 la.tls.ie（initial-exec）。
+- **VLA**（5fc57dd）：放开动态 alloca（memit 已有 sub sp + dynalloc）。
+- **varargs**（18f7348）：指针型 va_list（targ.c typevalist）；a0-a7
+  存 64B 保存区，*ap 指向首未消耗 GP 或栈区，va_arg 每次 +8；MFnM 加
+  va_save；mbe 补 VASTART/VAARG 映射。限制（与 legacy 一致）：double
+  varargs 与 >8 GP varargs 不支持。
+- 验证：qemu-riscv64-static 运行时（浮点/聚合/varargs/VLA/整数）全过；
+  test/riscv64/{abi,tls,varargs,vla} 全走 MIR-native 且汇编通过；
+  c99+c11 54 样例交叉汇编全过；x86_64 verify-all 19/19 + 自举 exit 0。
+
+## Phase 3b：riscv64/aarch64 浮点补齐（2026-08-03，hazel）
+
+riscv64（Phase 3a）与 aarch64（Phase 3b 移植）的 MIR-native 后端此前
+仅支持标量整数。本批补齐浮点路径（FPR 传参/返回、浮点运算、转换、
+常量、比较），仅聚合/varargs/TLS/VLA 仍回退 legacy。FPR 池（riscv64
+f0-f31 / aarch64 v0-v31）与 mabi 的 isf 槽此前已建。
+
+### 提交（branch worktree-tmp-hazel-fpfill，先 merge aarch64 三件套）
+- **242ed8b** machine.c FPR scratch（riscv64 f0/f1、aarch64 v16/v17）
+  入池，regalloc 不再分配 emitter 浮点临时。
+- **754569d** riscv64/aarch64 isel：mir_cmp_cc 补 MOP_CF*（浮点比较 →
+  EQ/NE/LT/LE/GT/GE）；F2I/I2F/UI2F 按宽度选 MMOP_CVT*，FEXT/FTRUNC →
+  CVTSS2SD/CVTSD2SS；mbe_supported 收窄（允许浮点）。
+- **9f2f176** riscv64 发射：F* 指令（fadd.s/d 等）、FCVT、fcvt.w/l rtz
+  （F2I）、fcvt.s/d.w/l(u)（I2F/UI2F）、浮点 SETCCR（feq/flt/fle，结果
+  整数寄存器）、MOV/LOAD/STORE 浮点（flw/fld/fsw/fsd）、CALL/RET 用
+  fa0；callee-saved FPR 用 fsd/fld。
+- **bbf7561** aarch64 发射：F* 指令（fadd s/d 等）、fcvt/fcvtzs/scvtf/
+  ucvtf、浮点 SETCCR（fcmp+cset）、MOV/LOAD/STORE 浮点（ldr/str s16/d16）、
+  CALL/RET 用 v0；freg_name（V→sN/dN 视图）、csave_reg_name（V8-V15 用
+  d64 视图，AAPCS64 只保低 64 位）。
+- **ab7e500** 回归测试：test/targets/fp.c + fpfill.sh（双 target 浮点
+  汇编 + as + 关键指令断言）。
+
+### 验证
+- 双 target：test/c99 全量 28 样例（含 float/float_expr/hex_float/
+  complex/narrow_cast 等浮点样例）MCC_MIR_BACKEND=1 汇编全部通过
+  riscv64-linux-gnu-as / aarch64-linux-gnu-as；fpfill.sh 通过。
+- 浮点逻辑覆盖：fadd/fsub/fmul/fdiv/fneg、SETCCR 比较、int↔fp 转换
+  （含 unsigned）、FEXT/FTRUNC、常量位模式（li+fmv.d.x / movz+fmov）、
+  多浮点参数（v0-v7/fa0-fa7）、跨调用浮点传参返回、callee-saved FPR。
+- x86_64 无回归：verify-all 全 PASS（check-c-mir 双模式、自举、自举
+  exit 0）、check-mir 全绿。
+
+### 剩余工作（后续）
+- riscv64/aarch64 聚合（sret）与 varargs/TLS/VLA；移植顺序下一目标
+  loongarch64。
+
+## Phase 3b：aarch64 全功能补齐（2026-08-03，hazel）
+
+aarch64 在标量+浮点之后补齐聚合/varargs/TLS/VLA，MIR-native 全功能
+（对齐 chloe 的 riscv64 补齐 49c2ac1）。AAPCS64 差异：sret 用 X8、
+栈参数 fp+16、va_list 为 32 字节双指针结构（__stack/__gr_top/__vr_top/
+__gr_offs/__vr_offs）。
+
+### 提交（branch worktree-tmp-hazel-aafill，基于主线 43d1507）
+- **c74f59b** aarch64_mabi.c 聚合 + varargs：A64Class 分类器（≤16B 拆
+  8 字节块，all-FP → v0/v1，否则 x0/x1；>16B sret X8）；selpar/selcall/
+  selret 聚合参数/返回 + sret 缓冲跨调用保存；varargs 192B reg_save_area
+  （8 GP + 8 V）+ AAPCS64 双指针 va_list + 无分支 va_arg select。
+- **2df2c8d** aarch64_memit.c：MMOP_BLIT（8 字节块 + 字节余数）；TLS
+  emit_tls_addr（mrs tpidr_el0 + :tprel_hi12/lo12 local-exec、:gottprel
+  initial-exec）；emit_setccr i32 用 w 比较（va_arg 负偏移判断）。
+- **411dcc1** aarch64 mbe_supported 全放开（聚合/varargs/TLS/VLA 不再
+  回退 legacy）。
+- **2fd881c** 回归测试：test/targets/aggva.c + fpfill.sh 扩展（aarch64
+  全功能编译 + as + tpidr_el0 断言）。
+
+### 验证
+- aarch64 c99+c11 全量 54/54 样例 MIR-native 汇编通过 aarch64-linux-gnu-as
+  （含 varargs/vla/varargs_overflow——后者 legacy 曾崩溃 invalid class，
+  现由 MIR-native 处理）。
+- 聚合（≤16B 块、all-FP v 块、>16B sret）、varargs（GP/FP/混合）、TLS
+  （tpidr_el0 + tprel 重定位）、VLA 专项样例 as 通过。
+- x86_64 无回归：verify-all PASS=19 FAIL=0、自举 exit 0。
+
+### 剩余工作（后续）
+- aarch64 浮点 va_arg 的 FP 块宽度（16B 槽 vs 实际 8B）边界、聚合块
+  分类的混合块（int+float 同一 8B 块）细化；loongarch64 已由 bella
+  补齐（见下）。
+
+## Phase 3b（续）：loongarch64 MIR-native 全功能补齐（2026-08-03，bella，#141）
+
+loongarch64 从标量整数扩展到全功能（参照 chloe 的 riscv64 补齐 49c2ac1）。
+commit：a4b28cd（聚合+varargs ABI）、2045931（浮点/TLS/BLIT 发射）、
+052fcb2（门禁适配）。
+
+### 聚合
+- LvClass 分类器：≤16B 拆 8B 块——全 FP 结构用 fa0/fa1，否则 a0/a1；
+  >16B/不完整走 sret（a0 隐藏缓冲，selpar 存槽、selret 重载 + BLIT）。
+- selpar/selcall/selret 聚合参数/返回 + 寄存器回填 pad。
+
+### varargs
+- 单指针 va_list：selpar 建 64B va_save 区存 a0-a7；vastart 指向首个
+  未消费 GP 寄存器或栈参数；vaarg 读 *ap 并步进 8。
+
+### 浮点
+- fadd/fsub/fmul/fdiv/fneg/fsqrt.s/d；movgr2fr+ffint（int→fp）、
+  ftintrz+movfr2gr（fp→int 截断 = C cast）；fcvt.s/d 互转。
+- 浮点比较：fcmp.clt/cle/ceq.s/d $fcc0 + movcf2gr（结果落 GPR）。
+- 踩坑：工具链 as（2.41）缺无符号 ffint.*.u——32 位无符号源已零扩展，
+  用有符号转换精确。
+
+### TLS
+- local-exec（lu12i.w %le_hi20/ori %le_lo12/lu32i.d %le64_lo20/
+  lu52i.d %le64_hi12/add.d $tp）与 initial-exec。
+
+### 验证
+- 29 个可编译 test/c99 样例（含 float/float_expr/hex_float/complex）
+  全部经 loongarch64-linux-gnu-as 汇编通过。
+- 综合样例（聚合 float 返回 fa0/fa1、>16B sret、varargs 含 double、
+  VLA、TLS）汇编通过。
+- check-loongarch64 门禁双后端（MIR-native 默认 + bridge）均转绿。
+- x86_64 无回归：verify-all 19/19（双路径）、自举 exit 0。
+
+### 下一目标
+- aarch64 已由 hazel 补齐（见上）；arm 已由 chloe 补齐（见下）。
+
+### Phase 3c：arm（armv7-a）MIR-native 移植（#154，chloe，worktree-tmp-chloe-arm）
+按 grace i386/arm 决策（16 GPR + 32 D 扁平寄存器、AAPCS32 R0-R3/D0-D7
+传参、CPSR flags 存在），复用 aarch64 骨架裁剪为 32 位：
+- **标量整数后端**（`6cdd504`）：arm_m.h 寄存器枚举 + mtarget_arm
+  （gpr0=r0/ngpr=16、fpr0=d0/nfpr=32、rglob=fp/sp/lr/pc、argreg=
+  r0-r3+d0-d7、sret_reg=r0、ptrsize=4、stackalign=8）；arm_mabi.c
+  AAPCS32 标量核；arm_mbe.c isel（SETCCR cmp+条件 mov、JNZ→JCC）；
+  arm_memit.c 发射（ldr/str/ldrb/ldrh/ldrsb/ldrsh、movw/movt、sdiv/
+  udiv/rem、mul Rd!=Rm、rsb/mvn；帧 push+vpush+sub sp+add fp；头
+  .syntax unified/.arch armv7ve/.fpu neon）。emit.c 分派
+  mfnm_backend_arm（T.name="armv7"）。附带：emit.c GNU-stack 行对
+  arm as 改简单形式、legacy arm_emit.c 补 VFP 头、Makefile MABI_SRC。
+- **浮点使能**（`8dec5a1`）：mbe_supported 只拒 MT_I64（放行 MT_PTR，
+  仅函数引用）；VFP 运算/转换/比较（vcmp+vmrs+条件 mov）；浮点常量
+  位 memcpy、fload_scratch 目标 scratch 参数化（修两操作数同寄存器）、
+  CALL 浮点返回 d0→dst、静态 alloca 去 +g_slot_base、浮点 store 先装
+  值再取地址。
+- mbe_supported：32 位标量整数 + 浮点走 MIR-native；MT_I64（long
+  long 需寄存器对）、聚合、varargs、TLS、VLA 回退 legacy。
+- 验证：qemu-arm-static 运行时全过（浮点运算/转换/比较/循环/Newton
+  迭代/unsigned 转换/浮点函数调用传参返回 + 标量 fib/divmod/数组/
+  移位）；test/c99+c11 54 样例交叉汇编全过（49 走 MIR-native）；
+  x86_64 verify-all 19/19 + 自举 exit 0。
+- 已知限制（与 legacy 一致）：long long 算术、聚合、varargs、TLS、
+  VLA 走 legacy；legacy TLS 的 tprel 修饰符需对应 as 支持。
+
+## MIR 机器层性能优化（2026-08-03，bella，#156）
+
+三个独立优化（commit a7dc321 / 628f17b / 3ebd775）。
+
+### 1. regalloc spill-either 启发式（a7dc321）
+- 线性扫描无空闲寄存器时不再总是 spill 新区间；改优先 spill 活跃区间中
+  结束最晚的 victim（同类、无固定冲突、跨调用时取 callee-saved），把
+  寄存器留给短命值。中途 spill 正确性：发射端对槽位值每 def 存/每 use
+  载，但需同步清 cand[].reg 防 write-back 覆盖。
+- **基准 perf_bench：3.43s → 0.52s（≈6.6×）**，输出一致。
+
+### 2. load 转发/死存储消除 + DCE 不动点（628f17b）
+- 前端把每个标量经槽位 store/load 往返。新增 MIR_PASS_LOADFWD：直接
+  alloca 结果的块内 store→load 转发（COPY 再传播）+ 只写槽死 store 删。
+  仅限直接 alloca（base+off 计算地址可能别名）。正确性关键：① 移除指令
+  使 MVal.def 失效 → 用前向 is_alloca 位图；② 删除前统一决策。
+- DCE 迭代到不动点。
+- **基准 perf_dead：218→146 asm（-33%）**。
+
+### 3. -O3 有符号 div/rem 按 2 的幂强度削减（3ebd775）
+- 有符号除因 C 向零舍入 vs SAR 向 -inf 未削减。msdiv_pow2 生成修正序列
+  （q=(x+((x>>31)&(2^n-1)))>>n；r=x-(q<<n)），逐块重建指令数组 +
+  msdiv_emit 维护显式 SSA。
+- **基准 perf_div：O3 idiv 4→0**；±7/2、INT_MIN/8 等边界全过。
+
+### 综合验证
+- check-c-mir 双模式 fail=0、check-cpp-func/neg rc=0、check-mir 全绿、
+  check-olevel rc=0、verify-all 19/19（MIR-native + bridge 双路径）、
+  自举 exit 0。
+
+## MIR alloca 提升 mem2reg（2026-08-03，chloe，#3）
+
+新增 `src/mir/mem2reg.c`（751 行）+ 管线注册 + 一处 bridge 预存在 bug
+修复。分支 worktree-wip-chloe-mem2reg（f1e56cb..e9712be），归并 b8225ad。
+
+### 动机与分工（与上节 LOADFWD 的关系）
+前端给每个标量（含参数）建 alloca 槽并全程 load/store 往返，循环内表现
+为 `mov r10,slot; mov (r10),eax` 的指针解引用。LOADFWD 只做**块内**转发，
+循环体每轮仍从内存重载归纳变量与参数。mem2reg 做完整提升：把非逃逸标量
+槽整体升为 SSA 值，连 alloca 一起消失，跨块（循环/分支/switch）全覆盖。
+
+**两者互补，不可互相替代。** 实测：禁 LOADFWD 只留 mem2reg，编译器自身
+90+ 源文件 asm 共 761824 行；两者都开 755840 行——**LOADFWD 边际仍减
+5984 行**。分工边界：mem2reg 吃干净标量槽；LOADFWD 收 mem2reg 主动拒绝
+的槽（地址逃逸/聚合/base+off/未定值读）——这些无法整体提升，但块内转发
+依然合法。**顺序必须 mem2reg 在前**，否则 LOADFWD 白做一遍马上被删的槽。
+
+### 算法
+自带 CFG 分析（前驱/RPO/迭代 idom/支配边界，照搬 gvn.c 写法但本文件
+私有），在存储块的迭代支配边界插 phi，再按支配树重命名（显式 worklist
++ 栈深度回退标记，不递归，深 CFG 不爆栈）。
+
+准入条件（全满足才提升）：① 直接 MOP_ALLOCA 结果（拒 base+off，可能
+别名）；② 标量（I8/16/32/64、F32/F64、PTR，拒 MT_AGG 与带 td）；
+③ **地址不逃逸**——只能出现在 load 的 src[0] 或 store 的 src[1]，出现在
+ARG/phi/store 值位/其它任何位置一律拒绝；④ 所有访问类型一致且无常量
+位移 cst（拒类型双关与子对象访问）；⑤ alloca 字节数为常量且等于该标量
+宽度（排除数组/带 padding 对象）。
+
+### 正确性关键（两个坑，与 LOADFWD 记录的同源）
+- **MVal.def 失效**：每次压缩块指令数组后统一刷 def 回指；删 store 时
+  **就地改 MOP_NOP** 不移动索引，把失效窗口压到最小，NOP 留给 DCE 收。
+- **别边遍历边删**：alloca 移除是跑完 rename 后统一压缩；phi 撤销也是
+  先标记再统一处理。候选判定全程靠开局 build_uses 后建的 slotof[] 映射，
+  不依赖会变陈旧的 def 指针（故不需要 LOADFWD 那张 is_alloca 位图）。
+
+### probe 预演：未定值读的槽不提升
+给"先读后写"路径合成零常量时，浮点常量 COPY 在目标被 spill 后会退化成
+`movss .Lxx(%rip), 12(%rsp)` 这种 mem→mem，汇编器报 operand size
+mismatch（自举编译 src/opt/fold.c 的 `float xs,ls,rs; double xd,ld,rd;`
+条件赋值时暴露）。读未初始化本属 UB，故加 probe 阶段：用完全相同的
+支配树走法空跑一遍，标记需要 undef 的槽并整体退出提升。**放弃提升永远
+安全**，正确性优先。
+
+### bridge.c 预存在 bug 修复（勿 revert）
+`src/lir/bridge.c` 原为 `phi->link = NULL; qb->phi = phi;`——**每轮覆盖**，
+一个块有多个 phi 时前面的全被丢弃，其余 phi 目标值变成 "used undefined"。
+改为 `Phi **phitail = &qb->phi;` 链式追加（约 10 行）。
+
+**根因**：此前 MIR 侧没有任何 pass 会在单块内造多个 phi，故该 bug 长期
+潜伏；mem2reg 是第一个（每个提升槽一个 phi），才把它暴露出来。症状为
+`ssa temporary %m2r.phi.N is used undefined in @<blk>`，命中 5 个 cpp
+用例。**后续任何多 phi pass 都依赖此修复；它看似与 mem2reg 无关，但不能
+随 mem2reg 一起回退。**
+
+### 效果
+- 样例 `sum_range(int lo,int hi,int step)`（MIR-native）：指针间接
+  `movl (%r10)` **15→0**；栈帧 **120→32 字节**；prologue 5 条
+  `leaq NN(%rsp)` 槽地址计算全消；callee-saved 压栈 4→3。
+- 编译器自身 90+ 源文件：`(%r10)` 间接访问 **92576→55005（-41%）**；
+  asm 总行数 **816020→755840（-7.4%）**。
+
+### 验证
+- verify-all 双模式各 **19/19**（含自举 check-sysroot-static）。
+- 全语料（test/c/*.c + test/cpp/*.cc）双模式扫描，`SSA consistency
+  check FAILED` **0 次**。
+- 13 函数用例（嵌套循环 break/continue、取地址局部量、struct 传参、
+  switch fallthrough、浮点递推、移位寄存器、全局变量、short/unsigned
+  窄类型）**bridge / MIR-native / gcc 三方输出一致**；-O2/-O3/-Os/-Oz
+  × 双模式全过。
+- 注：-O0/-O1/-Og 在 bridge 模式有 cvtsi2sd 报错与数值偏差，已在**基线
+  mcc 上复现相同现象**，属预存在缺陷；mem2reg 仅在 optlevel>=2 运行，
+  与本次改动无关。
+
+### 二期方向
+1. 未定值读的槽当前不提升。后端补浮点常量 materialize（先入 xmm 再
+   spill）或引入真正的 MOP_UNDEF 后可覆盖。
+2. 提升后残留的 `movl 20(%rsp)` 是 regalloc 对 phi 值的 spill，非指针
+   间接，属寄存器分配议题。
+3. 仅标量；聚合体 SROA（拆字段再提升）是独立的更大工作。
+4. 带常量位移的 load/store 一律拒绝略保守，位移为 0 时其实可放行。

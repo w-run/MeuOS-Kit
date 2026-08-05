@@ -93,6 +93,9 @@ int printf(const char *, ...);
 int vsscanf(const char *, const char *, va_list);
 int sscanf(const char *, const char *, ...);
 int scanf(const char *, ...);
+int vscanf(const char *, va_list);
+int vfscanf(FILE *, const char *, va_list);
+int fscanf(FILE *, const char *, ...);
 void perror(const char *);
 __END_DECLS
 

@@ -1,3 +1,6 @@
+#ifndef MCC_IR_H
+#define MCC_IR_H
+
 #include <assert.h>
 #include <inttypes.h>
 #include <limits.h>
@@ -429,6 +432,7 @@ struct Fn {
 	Blk **rpo;
 	bits reg;
 	int slot;
+	int front_slot; /* slots owned by frontend locals (spill input frame) */
 	int salign;
 	char vararg;
 	char va_gpregs;
@@ -461,6 +465,23 @@ struct Fn {
 #define WARN_STYLE       (WARN_UNUSED|WARN_RETURN)  /* 风格分组 */
 #define WARN_ALL         (WARN_UNUSED|WARN_TYPE|WARN_IMPLICIT|WARN_RETURN|WARN_PERFORMANCE)
 #define WARN_ERROR       (1<<7)  /* -Werror flag (or'd into warnlevel) */
+
+/* 细粒度警告（p9-ui 扩展，默认关闭——与 gcc/clang 一致，显式
+ * -Wxxx / -Wall / -Wextra 开启）：
+ *   -Wunused-variable  未使用的局部变量
+ *   -Wunused-parameter 未使用的函数参数
+ *   -Wconversion       隐式整数转换截断（宽 -> 窄）
+ *   -Wsign-compare     有符号/无符号整数比较
+ *   -Wuninitialized    使用可能未初始化的自动变量
+ * -Wall  = WARN_WALL（gcc 语义：常用组，含 unused-variable/uninitialized）
+ * -Wextra = WARN_WEXTRA（gcc 语义：-Wall + unused-parameter/sign-compare） */
+#define WARN_UNUSED_VAR   (1<<8)   /* -Wunused-variable */
+#define WARN_UNUSED_PARAM (1<<9)   /* -Wunused-parameter */
+#define WARN_CONVERSION   (1<<10)  /* -Wconversion */
+#define WARN_SIGN_COMPARE (1<<11)  /* -Wsign-compare */
+#define WARN_UNINIT       (1<<12)  /* -Wuninitialized */
+#define WARN_WALL         (WARN_ALL|WARN_UNUSED_VAR|WARN_UNINIT)
+#define WARN_WEXTRA       (WARN_WALL|WARN_UNUSED_PARAM|WARN_SIGN_COMPARE)
 
 struct Typ {
 	char *name;
@@ -515,6 +536,12 @@ struct Dat {
 extern Target T;
 extern char debug['Z'+1];
 extern int opt_level;   /* -O0..3, default 2 */
+extern int g_force_fp;  /* -Og: keep a frame pointer (debug-friendly) */
+extern int g_opt_size;  /* -Os/-Oz: size-oriented codegen */
+extern int g_opt_z;     /* -Oz: aggressive size */
+extern int g_fast_math; /* -Ofast: fast-math semantics (recorded only) */
+extern int g_opt_log;   /* -dP / --opt-log: per-pass optimizer change log */
+extern int g_opt_snapshot; /* -dM: per-pass MIR snapshot dump */
 extern int warn_level;  /* WARN_* bitmask, default WARN_ALL */
 
 /* TLS access model */
@@ -535,7 +562,7 @@ typedef enum {
 extern Typ *typ;
 extern Ins insb[NIns], *curi;
 uint32_t hash(const char *);
-void die_(char *, char *, ...) __attribute__((noreturn));
+void die_(char *, char *, ...) __attribute__((__noreturn__));
 void *emalloc(size_t);
 void *alloc(size_t);
 void freeall(void);
@@ -595,7 +622,7 @@ extern Op optab[NOp];
 void parse(FILE *, char *, void (char *), void (Dat *), void (Fn *));
 void printfn(Fn *, FILE *);
 void printref(Ref, Fn *, FILE *);
-void err(char *, ...) __attribute__((noreturn));
+void err(char *, ...) __attribute__((__noreturn__));
 
 /* abi.c */
 void elimsb(Fn *);
@@ -677,6 +704,9 @@ void rega(Fn *);
 /* postra.c */
 void postra(Fn *);
 
+/* slotmerge.c */
+void slotmerge(Fn *);
+
 /* emit.c */
 void emitfnlnk(char *, Lnk *, FILE *);
 void emitdat(Dat *, FILE *);
@@ -687,3 +717,7 @@ void elf_emitfnfin(char *, FILE *);
 void elf_emitfin(FILE *);
 void macho_emitfin(FILE *);
 void pe_emitfin(FILE *);
+/* run the full LIR pass pipeline (abi0..rega..postra) on a function */
+void run_passes(Fn *);
+
+#endif /* MCC_IR_H */

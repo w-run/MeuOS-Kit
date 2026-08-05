@@ -7,10 +7,10 @@ obj=${TMPDIR:-/tmp}/mcc-i386-regress.$$.o
 trap 'rm -f "$asm" "$obj"' EXIT HUP INT TERM
 
 "$mcc" --target=i386-linux -S -o "$asm" "$root/test/i386/regress.c"
-grep -Eq 'pushl %ebp' "$asm"
-grep -Eq 'call sum6' "$asm"
-grep -Eq 'call wide_add' "$asm"
-grep -Eq 'addl .*%eax' "$asm"
+grep -Eq 'pushl[[:space:]]+%ebp' "$asm"
+grep -Eq 'call[[:space:]]+sum6' "$asm"
+grep -Eq 'call[[:space:]]+wide_add' "$asm"
+grep -Eq 'addl[[:space:]]+.*%eax' "$asm"
 
 # The i386 target must reach the host assembler in ELF32 mode, not merely
 # produce textual assembly.  This remains executable on an x86_64 kernel

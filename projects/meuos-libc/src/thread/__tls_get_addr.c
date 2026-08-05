@@ -5,9 +5,14 @@
  * TLS GD descriptor (module ID + offset) and calls __tls_get_addr
  * to resolve the address for the current thread.
  *
- * In a purely static environment (no dlopen), the module ID is always
- * the main executable (module 1).  The function simply adds the offset
- * to the thread pointer.
+ * This implementation is the WEAK, static path: it assumes a purely
+ * static process (no daemon loader / dlopen), where the module ID is
+ * always the main executable (module 1), so the address is just
+ * `tp + ti_offset`.  In a dynamically-linked process ld.so exports a
+ * STRONG, DTV-backed __tls_get_addr that wins over this one at run
+ * time (standard dl behavior); that version resolves `DTV[ti_module]
+ * + ti_offset` with per-thread lazy allocation.  Keeping this weak
+ * symbol guarantees static-only builds still link and run.
  *
  * Architecture note:
  *   x86_64:       __tls_get_addr  — %fs:0       (Variant II TP)
@@ -16,20 +21,11 @@
  *   riscv64:      __tls_get_addr  — tp          (Variant I  TP)
  *   loongarch64:  __tls_get_addr  — $tp/$r2     (Variant I  TP)
  *
- * The dynamic linker fills ti_offset as the signed offset from the
- * thread pointer to the variable, so `tp + ti_offset` is correct for
- * both Variant I and Variant II regardless of TCB layout.
- *
- * Reference: ELF Handling For Thread-Local Storage (Ulrich Drepper),
- * Section 5.3.2 "General Dynamic Access".
+ * Reference: ELF Handling For Thread-Local Storage (Ulrich Drepper).
  */
 
 #include <stddef.h>
-
-typedef struct {
-	unsigned long ti_module;
-	unsigned long ti_offset;
-} tls_index;
+#include "../internal/tls.h"
 
 /* x86_64 uses host cc (supports inline asm).  For i386 (compiled by mcc
  * which has no inline assembly support), the implementation lives in
@@ -39,7 +35,8 @@ typedef struct {
  * following the i386 precedent. */
 #if defined(__x86_64__)
 
-void *__tls_get_addr(tls_index *ti)
+__attribute__((weak)) void *
+__tls_get_addr(tls_index *ti)
 {
 	void *tp;
 	__asm__("movq %%fs:0, %0" : "=r"(tp));
@@ -48,7 +45,8 @@ void *__tls_get_addr(tls_index *ti)
 
 #elif defined(__aarch64__)
 
-void *__tls_get_addr(tls_index *ti)
+__attribute__((weak)) void *
+__tls_get_addr(tls_index *ti)
 {
 	void *tp;
 	__asm__("mrs %0, tpidr_el0" : "=r"(tp));
@@ -57,7 +55,8 @@ void *__tls_get_addr(tls_index *ti)
 
 #elif defined(__riscv) && (__riscv_xlen == 64)
 
-void *__tls_get_addr(tls_index *ti)
+__attribute__((weak)) void *
+__tls_get_addr(tls_index *ti)
 {
 	void *tp;
 	__asm__("mv %0, tp" : "=r"(tp));
@@ -66,7 +65,8 @@ void *__tls_get_addr(tls_index *ti)
 
 #elif defined(__loongarch64)
 
-void *__tls_get_addr(tls_index *ti)
+__attribute__((weak)) void *
+__tls_get_addr(tls_index *ti)
 {
 	void *tp;
 	__asm__("move %0, $tp" : "=r"(tp));

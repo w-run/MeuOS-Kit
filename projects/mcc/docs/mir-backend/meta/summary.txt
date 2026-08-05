@@ -1,0 +1,425 @@
+=== P0 MIR-backend oracle baseline ===
+date:      2026-08-01T19:49:38Z
+mcc:       /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc
+m++:       /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++
+src tree:  /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc
+libc incl: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include
+mcc ver:   mcc (MeuOS C Compiler) 0.1.0
+mpp ver:   m++ (MeuOS C++ Compiler) 0.1.0
+
+--- C tests (c99/c11/abi) ---
+=== c99_bool ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c99_bool.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c99/bool.c
+status: OK    exit=0
+=== c99_complex ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c99_complex.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c99/complex.c
+status: OK    exit=0
+=== c99_compound_lit ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c99_compound_lit.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c99/compound_lit.c
+status: OK    exit=0
+=== c99_desig_init ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c99_desig_init.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c99/desig_init.c
+status: OK    exit=0
+=== c99_extern ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c99_extern.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c99/extern.c
+status: OK    exit=0
+=== c99_extern_defs ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c99_extern_defs.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c99/extern_defs.c
+status: OK    exit=0
+=== c99_flex_array_member ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c99_flex_array_member.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c99/flex_array_member.c
+status: OK    exit=0
+=== c99_float ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c99_float.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c99/float.c
+status: OK    exit=0
+=== c99_long_long ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c99_long_long.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c99/long_long.c
+status: OK    exit=0
+=== c99_offsetof ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c99_offsetof.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c99/offsetof.c
+status: OK    exit=0
+=== c99_pragma_operator ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c99_pragma_operator.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c99/pragma_operator.c
+status: OK    exit=0
+=== c99_restrict ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c99_restrict.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c99/restrict.c
+status: OK    exit=0
+=== c99_stdint ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c99_stdint.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c99/stdint.c
+status: OK    exit=0
+=== c99_varargs ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c99_varargs.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c99/varargs.c
+status: OK    exit=0
+=== c99_vla ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c99_vla.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c99/vla.c
+status: OK    exit=0
+=== c11_alignas ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c11_alignas.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11 -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11/alignas.c
+status: OK    exit=0
+=== c11_alignof ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c11_alignof.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11 -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11/alignof.c
+status: OK    exit=0
+=== c11_anon_struct ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c11_anon_struct.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11 -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11/anon_struct.c
+status: OK    exit=0
+=== c11_atomic_basic ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c11_atomic_basic.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11 -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11/atomic_basic.c
+status: OK    exit=0
+=== c11_atomic_concurrent ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c11_atomic_concurrent.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11 -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11/atomic_concurrent.c
+status: OK    exit=0
+=== c11_atomic_typename ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c11_atomic_typename.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11 -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11/atomic_typename.c
+status: OK    exit=0
+=== c11_complex ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c11_complex.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11 -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11/complex.c
+status: OK    exit=0
+=== c11_compound_lit ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c11_compound_lit.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11 -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11/compound_lit.c
+status: OK    exit=0
+=== c11_desig_init ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c11_desig_init.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11 -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11/desig_init.c
+status: OK    exit=0
+=== c11_generic ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c11_generic.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11 -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11/generic.c
+status: OK    exit=0
+=== c11_macro_paste ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c11_macro_paste.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11 -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11/macro_paste.c
+status: OK    exit=0
+=== c11_noreturn ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c11_noreturn.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11 -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11/noreturn.c
+status: OK    exit=0
+=== c11_real_imag ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c11_real_imag.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11 -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11/real_imag.c
+status: OK    exit=0
+=== c11_static_assert ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c11_static_assert.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11 -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11/static_assert.c
+status: OK    exit=0
+=== c11_stmt_expr ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c11_stmt_expr.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11 -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11/stmt_expr.c
+status: OK    exit=0
+=== c11_thread_local ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c11_thread_local.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11 -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11/thread_local.c
+status: OK    exit=0
+=== c11_type_same ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c11_type_same.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11 -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11/type_same.c
+status: OK    exit=0
+=== c11_varargs ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c11_varargs.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11 -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11/varargs.c
+status: OK    exit=0
+=== c11_vla ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/c11_vla.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11 -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/c11/vla.c
+status: OK    exit=0
+=== abi_bitfield_aggregate ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/abi_bitfield_aggregate.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/test/abi/bitfield_aggregate.c
+status: OK    exit=0
+--- C++ tests (m++ / /tmp/mxx-t) ---
+=== cpp_acc2 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_acc2.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/acc2.cc
+status: OK    exit=0
+=== cpp_access ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_access.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/access.cc
+status: OK    exit=0
+=== cpp_adv ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_adv.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/adv.cc
+status: OK    exit=0
+=== cpp_all ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_all.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/all.cc
+status: OK    exit=0
+=== cpp_ccompat ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_ccompat.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/ccompat.cc
+status: OK    exit=0
+=== cpp_const2 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_const2.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/const2.cc
+status: EXPECTED exit=0 (negative test)
+stderr:
+/tmp/mxx-t/const2.cc:9:13: error: no matching member function for 'set'
+        a.set(5);   /* should fail: set is non-const, a is const */
+                ^
+=== cpp_const3 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_const3.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/const3.cc
+status: EXPECTED exit=0 (negative test)
+stderr:
+/tmp/mxx-t/const3.cc:5:29: error: cannot store to 'const' object
+        void bad() const { v = 5; }   /* should fail: modify in const method */
+                                ^
+=== cpp_const4 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_const4.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/const4.cc
+status: OK    exit=0
+=== cpp_constmeth ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_constmeth.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/constmeth.cc
+status: OK    exit=0
+=== cpp_counter ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_counter.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/counter.cc
+status: OK    exit=0
+=== cpp_ctor2 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_ctor2.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/ctor2.cc
+status: OK    exit=0
+=== cpp_ctor3 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_ctor3.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/ctor3.cc
+status: OK    exit=0
+=== cpp_ctor4 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_ctor4.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/ctor4.cc
+status: OK    exit=0
+=== cpp_ctor5 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_ctor5.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/ctor5.cc
+status: OK    exit=0
+=== cpp_ctor6 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_ctor6.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/ctor6.cc
+status: OK    exit=0
+=== cpp_ctor ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_ctor.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/ctor.cc
+status: OK    exit=0
+=== cpp_defonly ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_defonly.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/defonly.cc
+status: OK    exit=0
+=== cpp_dtor2 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_dtor2.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/dtor2.cc
+status: OK    exit=0
+=== cpp_dtor3 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_dtor3.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/dtor3.cc
+status: OK    exit=0
+=== cpp_dtor4 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_dtor4.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/dtor4.cc
+status: OK    exit=0
+=== cpp_dtor ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_dtor.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/dtor.cc
+status: OK    exit=0
+=== cpp_dtororder ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_dtororder.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/dtororder.cc
+status: OK    exit=0
+=== cpp_full ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_full.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/full.cc
+status: OK    exit=0
+=== cpp_global2 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_global2.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/global2.cc
+status: OK    exit=0
+=== cpp_global ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_global.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/global.cc
+status: OK    exit=0
+=== cpp_inherit2 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_inherit2.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/inherit2.cc
+status: OK    exit=0
+=== cpp_inherit ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_inherit.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/inherit.cc
+status: OK    exit=0
+=== cpp_leak2 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_leak2.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/leak2.cc
+status: OK    exit=0
+=== cpp_leak ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_leak.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/leak.cc
+status: EXPECTED exit=0 (negative test)
+stderr:
+/tmp/mxx-t/leak.cc:12:10: error: address of overloaded member function is ambiguous (use an explicit cast)
+        f.set;            /* obj.meth without call — must not leak this */
+             ^
+=== cpp_memctor2 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_memctor2.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/memctor2.cc
+status: OK    exit=0
+=== cpp_memctor ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_memctor.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/memctor.cc
+status: OK    exit=0
+=== cpp_methcall ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_methcall.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/methcall.cc
+status: OK    exit=0
+=== cpp_multi2 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_multi2.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/multi2.cc
+status: OK    exit=0
+=== cpp_multi3 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_multi3.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/multi3.cc
+status: OK    exit=0
+=== cpp_multi ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_multi.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/multi.cc
+status: OK    exit=0
+=== cpp_mutable ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_mutable.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/mutable.cc
+status: OK    exit=0
+=== cpp_nested2 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_nested2.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/nested2.cc
+status: OK    exit=0
+=== cpp_nested ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_nested.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/nested.cc
+status: OK    exit=0
+=== cpp_ns2 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_ns2.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/ns2.cc
+status: OK    exit=0
+=== cpp_ns3 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_ns3.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/ns3.cc
+status: OK    exit=0
+=== cpp_ns4 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_ns4.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/ns4.cc
+status: OK    exit=0
+=== cpp_ns5 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_ns5.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/ns5.cc
+status: OK    exit=0
+=== cpp_ns6 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_ns6.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/ns6.cc
+status: OK    exit=0
+=== cpp_ns ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_ns.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/ns.cc
+status: OK    exit=0
+=== cpp_nsoutline ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_nsoutline.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/nsoutline.cc
+status: OK    exit=0
+=== cpp_opcall ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_opcall.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/opcall.cc
+status: OK    exit=0
+=== cpp_opchain2 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_opchain2.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/opchain2.cc
+status: OK    exit=0
+=== cpp_opchain3 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_opchain3.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/opchain3.cc
+status: OK    exit=0
+=== cpp_opchain4 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_opchain4.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/opchain4.cc
+status: OK    exit=0
+=== cpp_opchain5 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_opchain5.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/opchain5.cc
+status: OK    exit=0
+=== cpp_opchain6 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_opchain6.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/opchain6.cc
+status: OK    exit=0
+=== cpp_opchain7 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_opchain7.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/opchain7.cc
+status: OK    exit=0
+=== cpp_opchain8 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_opchain8.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/opchain8.cc
+status: OK    exit=0
+=== cpp_opchain ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_opchain.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/opchain.cc
+status: OK    exit=0
+=== cpp_opdbg ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_opdbg.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/opdbg.cc
+status: OK    exit=0
+=== cpp_opdef ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_opdef.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/opdef.cc
+status: OK    exit=0
+=== cpp_opeq ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_opeq.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/opeq.cc
+status: OK    exit=0
+=== cpp_opvec ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_opvec.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/opvec.cc
+status: OK    exit=0
+=== cpp_order ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_order.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/order.cc
+status: OK    exit=0
+=== cpp_outline2 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_outline2.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/outline2.cc
+status: OK    exit=0
+=== cpp_outline ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_outline.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/outline.cc
+status: OK    exit=0
+=== cpp_ovl ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_ovl.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/ovl.cc
+status: OK    exit=0
+=== cpp_priv2 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_priv2.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/priv2.cc
+status: EXPECTED exit=0 (negative test)
+stderr:
+/tmp/mxx-t/priv2.cc:12:7: error: 'p' is not accessible from this context (member is private/protected)
+        g.p = 5;       /* protected 外部访问应报错 */
+          ^
+=== cpp_priv3 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_priv3.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/priv3.cc
+status: EXPECTED exit=0 (negative test)
+stderr:
+/tmp/mxx-t/priv3.cc:10:7: error: 'hide' is not accessible from this context (member is private/protected)
+        g.hide();      /* private 方法外部调用应报错 */
+          ^
+=== cpp_priv ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_priv.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/priv.cc
+status: EXPECTED exit=0 (negative test)
+stderr:
+/tmp/mxx-t/priv.cc:8:7: error: 'count' is not accessible from this context (member is private/protected)
+        c.count = 5;    /* should fail: count is private */
+          ^
+=== cpp_ref2 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_ref2.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/ref2.cc
+status: OK    exit=0
+=== cpp_ref ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_ref.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/ref.cc
+status: OK    exit=0
+=== cpp_s5a ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_s5a.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/s5a.cc
+status: OK    exit=0
+=== cpp_s5b ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_s5b.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/s5b.cc
+status: OK    exit=0
+=== cpp_s7a ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_s7a.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/s7a.cc
+status: OK    exit=0
+=== cpp_simple ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_simple.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/simple.cc
+status: OK    exit=0
+=== cpp_static2 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_static2.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/static2.cc
+status: OK    exit=0
+=== cpp_static3 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_static3.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/static3.cc
+status: OK    exit=0
+=== cpp_static4 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_static4.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/static4.cc
+status: OK    exit=0
+=== cpp_static5 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_static5.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/static5.cc
+status: OK    exit=0
+=== cpp_static6 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_static6.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/static6.cc
+status: OK    exit=0
+=== cpp_static7 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_static7.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/static7.cc
+status: OK    exit=0
+=== cpp_staticinit ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_staticinit.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/staticinit.cc
+status: OK    exit=0
+=== cpp_staticmeth ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_staticmeth.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/staticmeth.cc
+status: FAIL  exit=0
+stderr:
+/tmp/mxx-t/staticmeth.cc:13:20: error: no matching constructor for object 'add'
+        Counter::add(5);
+                       ^
+=== cpp_stru ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_stru.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/stru.cc
+status: OK    exit=0
+=== cpp_two ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_two.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/two.cc
+status: OK    exit=0
+=== cpp_twophase ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_twophase.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/twophase.cc
+status: OK    exit=0
+=== cpp_using1 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_using1.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/using1.cc
+status: OK    exit=0
+=== cpp_using2 ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/m++ -S --specs=host -o /tmp/mir-backend-base/asm/cpp_using2.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mxx-t/using2.cc
+status: OK    exit=0
+--- representative programs ---
+=== rep_hello ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/rep_hello.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mir-backend-base/gen/hello.c
+status: OK    exit=0
+rep_hello: asm linked, run rc=0
+=== rep_fib ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/rep_fib.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mir-backend-base/gen/fib.c
+status: OK    exit=0
+rep_fib: asm linked, run rc=0
+=== rep_struct ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/rep_struct.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mir-backend-base/gen/struct.c
+status: OK    exit=0
+rep_struct: asm linked, run rc=0
+=== rep_aggregate ===
+cmd: /workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/mcc -S --specs=host -o /tmp/mir-backend-base/asm/rep_aggregate.s -I/workspace/MeuOS-Kit/.agents/worktrees/mxx-work/projects/mcc/../meuos-libc/include /tmp/mir-backend-base/gen/aggregate.c
+status: OK    exit=0
+rep_aggregate: asm linked, run rc=0
+--- reproducibility check ---
+reproducible: abi_bitfield_aggregate
+reproducible: c11_alignas
+reproducible: c11_alignof
+reproducible: c11_anon_struct
+reproducible: c11_atomic_basic
+reproducible: c11_atomic_concurrent
+repro: 6 identical, 0 differ/fail
+
+=== summary ===
+total: 123, ok: 116, expected-fail: 6, unexpected-fail: 1
+asm files: 123

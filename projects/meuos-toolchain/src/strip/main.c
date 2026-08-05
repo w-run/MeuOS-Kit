@@ -17,6 +17,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>     /* rename(): this toolchain's glibc declares it in
+                         * <unistd.h>, not <stdio.h> (gcc14 -std=c11) */
 #include <sys/stat.h>
 
 #define MT_STRIP_VERSION "0.2.0"

@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <sys/times.h>
 
 /* Days in month for non-leap and leap years */
 static const int days_in_mon[2][12] = {
@@ -286,4 +287,38 @@ strftime(char *s, size_t max, const char *format, const struct tm *tm)
 	}
 	memcpy(s, buf, pos + 1);
 	return pos;
+}
+
+double
+difftime(time_t a, time_t b)
+{
+	return (double)(a - b);
+}
+
+/* C99 7.23.3.1: "Sun Jan  1 00:00:00 1900\n"-style fixed format. */
+char *
+asctime(const struct tm *tm)
+{
+	static char buf[26];
+	if (strftime(buf, sizeof buf, "%a %b %e %H:%M:%S %Y\n", tm) == 0)
+		return NULL;
+	return buf;
+}
+
+char *
+ctime(const time_t *t)
+{
+	struct tm *tmp = localtime(t);
+	if (!tmp)
+		return NULL;
+	return asctime(tmp);
+}
+
+clock_t
+clock(void)
+{
+	struct tms usage;
+	if (times(&usage) == (clock_t)-1)
+		return (clock_t)-1;
+	return usage.tms_utime + usage.tms_stime;
 }

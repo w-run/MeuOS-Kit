@@ -1,0 +1,640 @@
+/* parse/struct_decl.c -- struct/union/enum member declarations.
+ *
+ * Implements the struct/union member grammar:
+ *   addmember()      -> register one member in a struct/union being built
+ *   staticassert()   -> _Static_assert declarations
+ *   structdecl()     -> struct-or-union-specifier parser
+ *
+ * addmember() is also used during enums (anonymous-bit-field handling).
+ * structdecl() is called from declspecs() (in specs.c) when a tag is
+ * parsed and no prior definition exists in the scope. */
+#include <assert.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "util.h"
+#include "mcc.h"
+#include "decl_internal.h"
+#include "cpp/cpp_tokens.h"
+
+void
+addmember(struct structbuilder *b, struct qualtype mt, char *name, int align, unsigned long long width)
+{
+	struct type *t = b->type;
+	struct member *m;
+	size_t end;
+
+	if (t->kind == TYPESTRUCT && t->prop & PROPFLEX)
+		error_code(E_DECL, &tok.loc, "struct has member '%s' after flexible array member", name);
+	if (mt.type->incomplete) {
+		if (mt.type->kind != TYPEARRAY)
+			error_code(E_INCOMPLETE, &tok.loc, "struct member '%s' has incomplete type", name);
+		t->prop |= PROPFLEX;
+	}
+	if (mt.type->prop & PROPFLEX) {
+		/*
+		ISO C doesn't allow structures with members containing
+		FAMs, but allow it as an extension
+		*/
+		t->prop |= PROPFLEX;
+	}
+	if (mt.type->kind == TYPEFUNC) {
+		/* C++ member function: register it in the member list (so member
+		 * calls can be lowered to `Class_name(&obj, ...)`), then consume
+		 * the body (lowered to an out-of-line function by the C++ frontend
+		 * via structdecl's TYPEFUNC path).  In C++ mode we add the member
+		 * and return; the body itself is consumed by structdecl. */
+		extern int g_lang;
+		if (g_lang == 1) {
+			/* register the function-typed member for call lowering */
+			if (name) {
+				struct member *mf = xmalloc(sizeof(*mf));
+				mf->type = mt.type;
+				mf->qual = mt.qual;
+				mf->name = name;
+				mf->next = NULL;
+				mf->offset = 0;
+				mf->bits.before = mf->bits.after = 0;
+				mf->access = b->access;
+				mf->is_mutable = false;
+				mf->is_virtual = b->member_virtual;
+				mf->is_pure = b->member_pure;
+				mf->is_const = b->member_const;
+				mf->is_explicit = b->member_explicit;
+				mf->vslot = -1;
+				if (b->last)
+					*b->last = mf;
+				else
+					b->type->u.structunion.members = mf;
+				b->last = &mf->next;
+			}
+			/* the body is consumed by structdecl's TYPEFUNC branch */
+			return;
+		}
+		error_code(E_DECL, &tok.loc, "struct member '%s' has function type", name);
+	}
+	if (mt.type->prop & PROPVM)
+		error_code(E_CTYPE, &tok.loc, "struct member '%s' has variably modified type", name);
+	assert(mt.type->align > 0);
+	/* C++ (E2): duplicate data members in one class are ill-formed
+	 * (`struct A { int x; int x; };`).  Member functions are registered
+	 * earlier (the TYPEFUNC branch returns above) and may legitimately
+	 * overload, so only check data members here. */
+	{
+		extern int g_lang;
+		if (g_lang == 1 && name) {
+			struct member *it;
+			for (it = b->type->u.structunion.members; it; it = it->next)
+				if (it->name && strcmp(it->name, name) == 0 &&
+				    it->type && it->type->kind != TYPEFUNC)
+					error_tok_code(E_REDEF, &tok, "redefinition of member '%s'", name);
+		}
+	}
+	if (name || width == -1) {
+		m = xmalloc(sizeof(*m));
+		m->type = mt.type;
+		m->qual = mt.qual;
+		m->name = name;
+		m->next = NULL;
+		m->access = b->access;
+		m->is_mutable = b->member_mutable;
+		m->is_virtual = b->member_virtual;
+		m->is_pure = b->member_pure;
+		m->is_const = b->member_const;
+		m->is_no_unique_address = b->member_no_unique_address;
+		m->vslot = -1;
+		*b->last = m;
+		b->last = &m->next;
+	} else {
+		m = NULL;
+	}
+	if (width == -1) {
+		m->bits.before = 0;
+		m->bits.after = 0;
+		if (align < mt.type->align) {
+			if (align)
+				error_code(E_DECL, &tok.loc, "specified alignment of struct member '%s' is less strict than is required by type", name);
+			align = b->pack ? 1 : mt.type->align;
+		}
+		/* C++20 [[no_unique_address]]: an empty class member may share
+		 * its address with another member.  Skip size contribution for
+		 * zero-sized or empty-class (size == 1) members and place them
+		 * at offset 0 so they overlap with the first member. */
+		bool no_size = m && m->is_no_unique_address &&
+		                mt.type->size <= 1 && mt.type->kind == TYPESTRUCT;
+		if (no_size) {
+			m->offset = 0;
+		} else if (t->kind == TYPESTRUCT) {
+			m->offset = ALIGNUP(t->size, align);
+		} else {
+			m->offset = 0;
+		}
+		if (t->kind == TYPESTRUCT) {
+			if (!no_size)
+				t->size = m->offset + mt.type->size;
+		} else {
+			if (!no_size && t->size < mt.type->size)
+				t->size = mt.type->size;
+		}
+		b->bits = 0;
+	} else {  /* bit-field */
+		if (!(mt.type->prop & PROPINT))
+			error_code(E_CTYPE, &tok.loc, "bit-field '%s' has invalid type", name);
+		if (align)
+			error_code(E_DECL, &tok.loc, "alignment specified for bit-field '%s'", name);
+		if (b->pack)
+			error_code(E_DECL, &tok.loc, "bit-field '%s' in packed struct is not supported", name);
+		if (!width && name)
+			error_code(E_DECL, &tok.loc, "bit-field '%s' with zero width must not have declarator", name);
+		if (width > mt.type->u.arith.width)
+			error_code(E_CTYPE, &tok.loc, "bit-field '%s' exceeds width of underlying type", name);
+		align = mt.type->align;
+		if (t->kind == TYPESTRUCT) {
+			/* calculate end of the storage-unit for this bit-field */
+			end = ALIGNUP(t->size, mt.type->size);
+			if (!width || width > (end - t->size) * 8 + b->bits) {
+				/* no room, allocate a new storage-unit */
+				t->size = end;
+				b->bits = 0;
+			}
+			if (m) {
+				m->offset = ALIGNDOWN(t->size - !!b->bits, mt.type->size);
+				m->bits.before = (t->size - m->offset) * 8 - b->bits;
+				m->bits.after = mt.type->size * 8 - width - m->bits.before;
+			}
+			t->size += (width - b->bits + 7) / 8;
+			b->bits = (b->bits - width) % 8;
+		} else if (m) {
+			m->offset = 0;
+			m->bits.before = 0;
+			m->bits.after = mt.type->size * 8 - width;
+			if (t->size < mt.type->size)
+				t->size = mt.type->size;
+		}
+	}
+	if (m && t->align < align)
+		t->align = align;
+}
+bool
+staticassert(struct scope *s)
+{
+	struct stringlit msg;
+	unsigned long long c;
+
+	if (!consume(TSTATIC_ASSERT))
+		return false;
+	expect(TLPAREN, "after static_assert");
+	c = intconstexpr(s, true);
+	if (consume(TCOMMA)) {
+		tokencheck(&tok, TSTRINGLIT, "after static assertion expression");
+		stringconcat(&msg, true);
+		if (!c)
+			error_code(E_DECL, &tok.loc, "static assertion failed: %.*s", (int)(msg.size - 1), (char *)msg.data);
+	} else if (!c) {
+		error_code(E_DECL, &tok.loc, "static assertion failed");
+	}
+	expect(TRPAREN, "after static assertion");
+	expect(TSEMICOLON, "after static assertion");
+	return true;
+}
+void
+structdecl(struct scope *s, struct structbuilder *b)
+{
+	struct qualtype base, mt;
+	char *name;
+	unsigned long long width;
+	int align;
+	enum storageclass sc;
+	enum funcspec fs;
+
+	extern enum cpp_tokenkind cpp_tok_kind(void);
+	if (staticassert(s))
+		return;
+	attr(NULL, 0);
+	b->member_mutable = false;
+	b->member_virtual = false;
+	b->member_const = false;
+	b->member_pure = false;
+	/* C++ `mutable` storage: writable via const this. */
+	extern int g_lang;
+	if (g_lang == 1 && cpp_tok_kind() == CPP_TMUTABLE) {
+		b->member_mutable = true;
+		next();
+	}
+	/* C++ `virtual` member function: dispatched via the object's vtable. */
+	if (g_lang == 1 && cpp_tok_kind() == CPP_TVIRTUAL) {
+		b->member_virtual = true;
+		next();
+	}
+	/* C++ `explicit` constructor/conversion: `explicit S(int)` or
+	 * C++20 `explicit(bool)` — `explicit(true) S(int)`.  The `explicit`
+	 * keyword is a C++-only identifier; consume it and optionally parse
+	 * a constant-expression argument.  A `false` constant means the
+	 * constructor is NOT explicit (same as omitting `explicit`). */
+	if (g_lang == 1 && cpp_tok_kind() == CPP_TEXPLICIT) {
+		next(); /* consume `explicit` */
+		if (tok.kind == TLPAREN) {
+			/* C++20 explicit(bool): `explicit(constant-expression)`. */
+			next();
+			b->member_explicit = intconstexpr(s, false) != 0;
+			expect(TRPAREN, "to close explicit(bool)");
+		} else {
+			b->member_explicit = true;
+		}
+	}
+	/* C++ destructor: `~Class() { ... }`.  Detect it before declspecs
+	 * (which does not understand '~').  Lowered to `Class_dtor` via
+	 * cpp_define_method; the member is registered under a `~Class` marker
+	 * name so cpp_has_dtor can find it without colliding with a user
+	 * method literally named `dtor`. */
+	extern int g_lang;
+	if (g_lang == 1 && tok.kind == TBNOT) {
+		const char *tag = b->type->u.structunion.tag;
+		next(); /* consume '~' */
+		if (tok.kind >= TIDENT && tag &&
+		    strcmp(tokenstr(tok.kind), tag) == 0) {
+			struct type *ct;
+			char *marker;
+			next(); /* consume the class name */
+			expect(TLPAREN, "after destructor name");
+			ct = mktype(TYPEFUNC, 0);
+			ct->qual = QUALNONE;
+			ct->base = &typevoid;
+			ct->u.func.isvararg = false;
+			ct->u.func.params = NULL;
+			ct->u.func.nparam = 0;
+			expect(TRPAREN, "after destructor parameters");
+			/* C++ pure virtual destructor: `virtual ~B() = 0;`.  Accept
+			 * the `= 0` pure-virtual specifier; a pure dtor still
+			 * requires an out-of-line definition (`B::~B(){}`), which
+			 * the destructor-chain lowering resolves. */
+			{
+				extern int g_lang;
+				if (g_lang == 1 && tok.kind == TASSIGN) {
+					unsigned long long pv;
+					extern unsigned long long intconstexpr(struct scope *, bool);
+					next(); /* consume '=' */
+					pv = intconstexpr(s, false);
+					if (pv != 0)
+						error_code(E_SYNTAX, &tok.loc,
+						    "argument of pure virtual must be 0");
+					b->member_virtual = true;
+					b->member_pure = true;
+				}
+			}
+			marker = xmalloc(strlen(tag) + 2);
+			sprintf(marker, "~%s", tag);
+			mt.type = ct;
+			mt.qual = QUALNONE;
+			mt.expr = NULL;
+			name = marker;
+			width = -1;
+			{
+				extern void cpp_define_method(struct scope *,
+				    struct type *, const char *, const char *, bool, bool, bool);
+				/* a `virtual ~B()` gets a vtable slot: pass the virtual
+				 * flag through so cpp_define_method registers a slot in
+				 * own_virtuals (needed for virtual-dispatch delete) */
+				cpp_define_method(s, ct, "dtor", tag, false, false,
+				    b->member_virtual);
+				/* an override of a base virtual destructor is virtual even
+				 * without the keyword: cpp_define_method sets
+				 * g_cpp_define_virtual — propagate it so addmember flags
+				 * the member (its vtable slot stays valid) */
+				{
+					extern bool g_cpp_define_virtual;
+					if (g_cpp_define_virtual)
+						b->member_virtual = true;
+				}
+			}
+			addmember(b, mt, name, align, width);
+			return;
+		}
+		error_code(E_SYNTAX, &tok.loc, "expected class name after '~'");
+	}
+	base = declspecs(s, &sc, &fs, &align);
+	if (!base.type)
+		error_code(E_CTYPE, &tok.loc, "no type in struct member declaration");
+	/* C++ constructor: `ClassName(...) { ... }`.  declspecs parsed the
+	 * class tag as a bare type name; a following '(' means it was really
+	 * the constructor name (which has no return type).  Parse the
+	 * parameter list by hand — declarator() cannot because the name was
+	 * consumed — and define it as `Class_Class` like any other method. */
+	extern int g_lang;
+	if (g_lang == 1 && tok.kind == TLPAREN &&
+	    base.type->kind == TYPESTRUCT && base.type->u.structunion.tag &&
+	    b->type->u.structunion.tag &&
+	    strcmp(base.type->u.structunion.tag, b->type->u.structunion.tag) == 0) {
+		struct type *ct;
+		struct decl *pd, **pend;
+		const char *tag = base.type->u.structunion.tag;
+
+		ct = mktype(TYPEFUNC, 0);
+		ct->qual = QUALNONE;
+		ct->base = &typevoid; /* constructor has no return type */
+		ct->u.func.isvararg = false;
+		ct->u.func.params = NULL;
+		ct->u.func.nparam = 0;
+		pend = &ct->u.func.params;
+		next(); /* consume '(' */
+		while (tok.kind != TRPAREN) {
+			pd = parameter(s);
+			*pend = pd;
+			pend = &pd->next;
+			++ct->u.func.nparam;
+			if (tok.kind == TRPAREN)
+				break;
+			expect(TCOMMA, "or ')' after constructor parameter");
+		}
+		next(); /* consume ')' */
+		mt.type = ct;
+		mt.qual = QUALNONE;
+		mt.expr = NULL;
+		name = (char *)tag;
+		width = -1;
+		{
+			extern void cpp_define_method(struct scope *,
+			    struct type *, const char *, const char *, bool, bool, bool);
+			cpp_define_method(s, ct, tag, tag, false, false, false);
+		}
+		addmember(b, mt, name, align, width);
+		return;
+	}
+	/* C++ operator overload: `Vec operator+(const Vec &o) {...}`.  The
+	 * return type was parsed by declspecs; parse the operator token and
+	 * parameter list by hand and lower it to `Class_operator_pl`. */
+	extern int g_lang;
+	/* `T &operator...` / `T &&operator...`: declspecs leaves the leading
+	 * reference declarator pending (`&` is part of the declarator, not the
+	 * specifiers); fold it into the return type before the operator path.
+	 * When the '&' does not precede 'operator' (ordinary reference member
+	 * or method), restore the stream exactly: tokpush the consumed token
+	 * back on the heap (tokpush keeps the pointer) so declarator() sees
+	 * `& name` unchanged. */
+	if (g_lang == 1 && (tok.kind == TBAND || tok.kind == TLAND)) {
+		struct token save = tok;
+		next();
+		if (cpp_tok_kind() == CPP_TOPERATOR) {
+			struct type *rt = mkpointertype(base.type, QUALNONE);
+			rt->isref = true;
+			rt->isrref = save.kind == TLAND;
+			base.type = rt;
+		} else {
+			struct token *t = xmalloc(sizeof *t);
+			*t = tok;
+			if (t->lit)
+				t->lit = strdup(t->lit);
+			tokpush(t, 1);
+			tok = save; /* restore '&' as the current token */
+		}
+	}
+	if (g_lang == 1 && cpp_tok_kind() == CPP_TOPERATOR) {
+		extern const char *cpp_op_mangle(enum tokenkind);
+		extern void cpp_define_method(struct scope *, struct type *,
+		    const char *, const char *, bool, bool, bool);
+		const char *opcode;
+		struct type *ft;
+		struct decl *pd, **pend;
+		char *mname;
+		bool is_const = false;
+		/* C++23 P1169: `static operator[]` / `static operator()` — the
+		 * object is an explicit first parameter and the member has no
+		 * implicit `this` (cpp_define_method gives it an "S" mangled
+		 * suffix and no `this` param).  `static` was consumed by
+		 * declspecs into `sc`. */
+		bool is_static = (sc & SCSTATIC) != 0;
+
+		next(); /* consume 'operator' */
+		opcode = cpp_op_mangle(tok.kind);
+		if (!opcode)
+			error_code(E_OVERLOAD, &tok.loc, "unsupported operator for overloading");
+		next(); /* consume the operator token */
+		/* operator()/operator[]: the closing ')' or ']' of the operator
+		 * token follows (`operator()`, `operator[]`); the next '(' is the
+		 * parameter list. */
+		if (strcmp(opcode, "cl") == 0)
+			expect(TRPAREN, "after 'operator()'");
+		else if (strcmp(opcode, "ix") == 0)
+			expect(TRBRACK, "after 'operator[]'");
+
+		ft = mktype(TYPEFUNC, 0);
+		ft->qual = QUALNONE;
+		ft->base = base.type; /* return type */
+		ft->u.func.isvararg = false;
+		ft->u.func.params = NULL;
+		ft->u.func.nparam = 0;
+		pend = &ft->u.func.params;
+		if (tok.kind == TLPAREN) {
+			next();
+			while (tok.kind != TRPAREN) {
+				pd = parameter(s);
+				*pend = pd;
+				pend = &pd->next;
+				++ft->u.func.nparam;
+				if (tok.kind == TRPAREN)
+					break;
+				expect(TCOMMA, "or ')' after operator parameter");
+			}
+			next(); /* consume ')' */
+		}
+		if (tok.kind == TCONST) {
+			is_const = true;
+			b->member_const = true;
+			next();
+		}
+		/* C++20 `= default` / `= delete` on operators: consume the
+		 * trailing specifier (if present) so the declaration is accepted
+		 * without a body.  `= delete` marks the function as not callable;
+		 * `= default` on `<=>` synthesizes the member-wise comparison
+		 * body (the operator must be 'ss' for a synthesized body — other
+		 * operators are still accepted syntactically). */
+		if (tok.kind == TASSIGN) {
+			next();
+			/* `default` is a C keyword (TDEFAULT), so cpp_tok_kind()
+			 * does NOT map it to CPP_TDEFAULT — use tok.kind instead.
+			 * `delete` is a C++-only keyword and goes through TIDENT,
+			 * so cpp_tok_kind() works for it. */
+			if (tok.kind == TDEFAULT) {
+				next();
+				expect(TSEMICOLON, "after '= default'");
+				mname = xmalloc(strlen(opcode) + 10);
+				sprintf(mname, "operator_%s", opcode);
+				if (strcmp(opcode, "ss") == 0) {
+					/* defaulted `<=>`: generate the body comparing
+					 * every non-static data member in order */
+					extern void cpp_synth_default_spaceship(struct scope *,
+					    struct type *, const char *, const char *, bool);
+					cpp_synth_default_spaceship(s, ft, mname,
+					    b->type->u.structunion.tag, is_const);
+				} else {
+					cpp_define_method(s, ft, mname,
+					    b->type->u.structunion.tag,
+					    is_const, is_static, false);
+				}
+				addmember(b, (struct qualtype){ft, QUALNONE, NULL},
+				    mname, 0, -1);
+				return;
+			} else if (cpp_tok_kind() == CPP_TDELETE) {
+				next();
+				expect(TSEMICOLON, "after '= delete'");
+				/* register the deleted function so name lookup
+				 * finds it, but mark it as deleted (no body). */
+				mname = xmalloc(strlen(opcode) + 10);
+				sprintf(mname, "operator_%s", opcode);
+				cpp_define_method(s, ft, mname,
+			    b->type->u.structunion.tag,
+			    is_const, is_static, false);
+				addmember(b, (struct qualtype){ft, QUALNONE, NULL},
+				    mname, 0, -1);
+				return;
+			}
+			error_code(E_SYNTAX, &tok.loc,
+			    "expected 'default' or 'delete' after '='");
+		}
+		mname = xmalloc(strlen(opcode) + 10);
+		sprintf(mname, "operator_%s", opcode);
+		cpp_define_method(s, ft, mname, b->type->u.structunion.tag,
+		                  is_const, is_static, false);
+		addmember(b, (struct qualtype){ft, QUALNONE, NULL}, mname, 0, -1);
+		return;
+	}
+	if (tok.kind == TSEMICOLON) {
+		if ((base.type->kind != TYPESTRUCT && base.type->kind != TYPEUNION) || base.type->u.structunion.tag)
+			error_code(E_DECL, &tok.loc, "struct declaration must declare at least one member");
+		next();
+		addmember(b, base, NULL, align, -1);
+		return;
+	}
+	for (;;) {
+		if (consume(TCOLON)) {
+			width = intconstexpr(s, false);
+			addmember(b, base, NULL, 0, width);
+		} else {
+			mt = declarator(s, base, &name, &align, NULL, false, NULL);
+			/* a C++ member function's trailing ':' is the ctor init list
+			 * (`Derived(int v) : Base(v), m(v) {}`), not a bitfield width
+			 * (functions are never bitfields); leave it for cpp side. */
+			{
+				extern int g_lang;
+				if (!(g_lang == 1 && mt.type->kind == TYPEFUNC))
+					width = consume(TCOLON) ? intconstexpr(s, false) : -1;
+				else
+					width = -1;
+			}
+			/* C++ member function: define it as an out-of-line free
+			 * function `ClassName_method` (this-pointer lowering and
+			 * in-body member access are handled by the C++ frontend).
+			 * In C++ mode we consume the body via cpp_define_method and
+			 * end the member. */
+			extern int g_lang;
+			if (g_lang == 1 && mt.type->kind == TYPEFUNC) {
+				extern void cpp_define_method(struct scope *,
+				    struct type *, const char *, const char *, bool, bool, bool);
+				/* const member function: `void get() const {...}` */
+				bool is_const = false;
+				if (tok.kind == TCONST) {
+					is_const = true;
+					b->member_const = true;
+					next();
+				}
+				/* C++11 override/final specifiers: `void f() override {}`,
+				 * `virtual void f() final {}`.  Syntactically accepted and
+				 * consumed here; `override` also marks the member virtual
+				 * (so the vtable slot is allocated) and `final` records
+				 * the flag for the virtual-table checks. */
+				{
+					extern enum cpp_tokenkind cpp_tok_kind(void);
+					extern bool g_cpp_define_virtual;
+					extern bool g_cpp_method_final;
+					while (cpp_tok_kind() == CPP_TOVERRIDE ||
+					    cpp_tok_kind() == CPP_TFINAL) {
+						if (cpp_tok_kind() == CPP_TOVERRIDE)
+							g_cpp_define_virtual = true;
+						else
+							g_cpp_method_final = true;
+						next();
+					}
+				}
+				/* C++ pure-virtual specifier: `virtual void f() = 0;`.
+				 * Accept and consume it (a pure virtual is still a virtual
+				 * with a null vtable slot until overridden). */
+				{
+					extern int g_lang;
+					if (g_lang == 1 && tok.kind == TASSIGN) {
+						unsigned long long pv;
+						extern unsigned long long intconstexpr(struct scope *, bool);
+						next(); /* consume '=' */
+						pv = intconstexpr(s, false);
+						if (pv != 0)
+							error_code(E_SYNTAX, &tok.loc,
+							    "argument of pure virtual must be 0");
+						b->member_virtual = true;
+						b->member_pure = true;
+					}
+				}
+				bool is_static = (sc & SCSTATIC) != 0;
+				/* class tag for name mangling (Class_method) */
+				extern bool g_cpp_define_virtual;
+				g_cpp_define_virtual = false;
+				cpp_define_method(s, mt.type, name,
+				    b->type->u.structunion.tag, is_const, is_static,
+				    b->member_virtual);
+				/* an override of a base virtual is virtual even without
+				 * the keyword: propagate so addmember flags the member */
+				if (g_cpp_define_virtual)
+					b->member_virtual = true;
+				/* register the function member for call lowering */
+				addmember(b, mt, name, align, width);
+				/* leave the following token (class-body '}' or next
+				 * member) unconsumed for the caller's loop */
+				return;
+			}
+			/* C++ static data member: declare `Class_member` as a file
+			 * symbol; it occupies no per-object storage. */
+			extern int g_lang;
+			if (g_lang == 1 && (sc & SCSTATIC) && name) {
+				struct decl *sd;
+				char mangled[256];
+				char *pm;
+				struct scope *cs = b->type->scope ? b->type->scope : s;
+				snprintf(mangled, sizeof mangled, "%s_%s",
+				    b->type->u.structunion.tag, name);
+				pm = xmalloc(strlen(mangled) + 1);
+				strcpy(pm, mangled);
+				sd = mkdecl(pm, DECLOBJECT, mt.type, mt.qual, LINKEXTERN);
+				sd->u.obj.storage = SDSTATIC;
+				sd->value = mkglobal(sd); /* symbol slot exists before
+				                             the out-of-line definition */
+				scopeputdecl(cs, sd);
+				/* in-class initializer: `static int count = 5;` */
+				if (tok.kind == TASSIGN) {
+					struct init *init;
+					next();
+					init = parseinit(s, mt.type);
+					emitdata(sd, init);
+					sd->defined = true;
+					expect(TSEMICOLON, "after static member initializer");
+					return;
+				}
+				/* C++17 inline static member without an initializer is a
+				 * definition: emit a zero-initialized object (unlike a
+				 * plain `static` member, which is only a declaration). */
+				if ((fs & FUNCINLINE) && mt.type->kind != TYPEFUNC) {
+					emitdata(sd, NULL);
+					sd->defined = true;
+					expect(TSEMICOLON, "after inline static member");
+					return;
+				}
+				/* skip addmember: no layout space */
+			} else {
+				addmember(b, mt, name, align, width);
+			}
+		}
+		if (tok.kind == TSEMICOLON)
+			break;
+		expect(TCOMMA, "or ';' after declarator");
+	}
+	next();
+}
