@@ -195,6 +195,13 @@ if [ "${MEUOS_ARMV7_RUN:-0}" = 1 ]; then
 	[ "$out" = "setjmp ok" ] || { echo "setjmp wrong output: $out" >&2; exit 1; }
 	# 4-6) phase2/bare-tls/malloc-threads: SKIPPED under qemu-user (CLONE_THREAD limitation)
 	printf '%s\n' "arm runtime: phase2/bare-tls/malloc-threads SKIPPED (qemu-user CLONE_THREAD limitation)"
+	# 7) TLS/errno & _meuos_exc (thread-local TPIDRURO): NOT verifiable here.
+	#    qemu-arm-static cannot program ARM TPIDRURO (kuser set_tls is a no-op,
+	#    direct mcr -> SIGILL), so any _Thread_local access (errno, exc state,
+	#    bare_tls) faults.  This is a qemu-user limitation, not a libc defect:
+	#    on real ARM Linux hardware/kernel the kuser page provides TPIDRURO.
+	#    Needs qemu-system + ARM kernel (or real hardware) to verify.
+	printf '%s\n' "arm runtime: TLS/errno & _meuos_exc NOT verifiable (qemu-user cannot program TPIDRURO; needs qemu-system/real hw)"
 fi
 
 printf '%s\n' 'arm bootstrap ELF32/ARM check passed'
