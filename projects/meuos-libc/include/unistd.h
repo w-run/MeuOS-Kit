@@ -85,6 +85,13 @@ uid_t geteuid(void);
 gid_t getgid(void);
 gid_t getegid(void);
 mode_t umask(mode_t);
+
+/* Process groups / sessions (POSIX.1-2008). */
+int setpgid(pid_t, pid_t);
+pid_t getpgid(pid_t);
+pid_t getpgrp(void);
+pid_t setsid(void);
+pid_t getsid(pid_t);
 int isatty(int);
 int fchdir(int);
 void sync(void);

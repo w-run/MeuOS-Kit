@@ -82,6 +82,11 @@ __syscall_number(long number)
 	/* 间隔定时器：getitimer/setitimer（i386 独立号）。 */
 	case 36:  return 105;  /* getitimer */
 	case 38:  return 104;  /* setitimer */
+	/* 进程组 / 会话（i386 独立号）。 */
+	case 109: return 57;   /* setpgid */
+	case 121: return 132;  /* getpgid */
+	case 112: return 66;   /* setsid */
+	case 124: return 147;  /* getsid */
 	default: return number;
 	}
 #elif defined(__arm__)
@@ -186,6 +191,11 @@ __syscall_number(long number)
 	/* 间隔定时器（与 i386 相同）。 */
 	case 36:  return 105;  /* getitimer */
 	case 38:  return 104;  /* setitimer */
+	/* 进程组 / 会话（与 i386 相同）。 */
+	case 109: return 57;   /* setpgid */
+	case 121: return 132;  /* getpgid */
+	case 112: return 66;   /* setsid */
+	case 124: return 147;  /* getsid */
 	default: return number;
 	}
 #elif defined(__aarch64__) || defined(__riscv) || defined(__loongarch64)
@@ -279,6 +289,11 @@ __syscall_number(long number)
 	/* 间隔定时器：asm-generic 号（getitimer=102, setitimer=103）。 */
 	case 36:  return 102;  /* getitimer */
 	case 38:  return 103;  /* setitimer */
+	/* 进程组 / 会话：asm-generic 号。 */
+	case 109: return 154;  /* setpgid */
+	case 121: return 155;  /* getpgid */
+	case 112: return 157;  /* setsid */
+	case 124: return 156;  /* getsid */
 	default: return number;
 	}
 #else
