@@ -165,7 +165,7 @@ build/%.o: %.c
 
 -include $(DEPS)
 
-check: check-as-x86_64 check-as-tls-x86_64 check-as-sse-x86_64 check-as-libc-x86_64 check-as-sse-i386 check-as-cdq-i386 check-as-leal-i386 check-as-dwarf check-as-arm-neg check-ld-x86_64 check-ld-cref check-ar-bsd check-ld-libpath check-ranlib check-libelf check-nm check-readelf check-strip check-objcopy check-objdump check-rtld $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(STRIP_BIN) $(OBJCOPY_BIN) $(OBJDUMP_BIN) $(ELF_PROBE) $(TEST_ARCHIVE)
+check: check-as-x86_64 check-as-tls-x86_64 check-as-sse-x86_64 check-as-libc-x86_64 check-as-sse-i386 check-as-cdq-i386 check-as-leal-i386 check-as-dwarf check-as-arm-neg check-ld-x86_64 check-ld-cref check-ar-bsd check-ld-libpath check-ranlib check-libelf check-nm check-readelf check-strip check-objcopy check-objdump check-objdump-dwarf check-rtld $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(STRIP_BIN) $(OBJCOPY_BIN) $(OBJDUMP_BIN) $(ELF_PROBE) $(TEST_ARCHIVE)
 	@set -eu; \
 	test "$$($(AR_BIN) --version)" = "meuos-toolchain ar 0.2.0 (x86_64 bootstrap)"; \
 	test "$$($(AR_BIN) t $(TEST_ARCHIVE))" = hello.o; \
@@ -406,6 +406,9 @@ check-objcopy: $(OBJCOPY_BIN) $(TEST_FIXTURE_OBJ) $(TEST_EXEC)
 check-objdump: $(OBJDUMP_BIN) $(TEST_EXEC)
 	sh test/objdump_basic.sh "$(abspath $(OBJDUMP_BIN))" "$(abspath $(TEST_EXEC))"
 
+check-objdump-dwarf: $(OBJDUMP_BIN) $(MCC)
+	sh test/objdump_line.sh "$(abspath $(OBJDUMP_BIN))" "$(abspath $(MCC))"
+
 install: $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(STRIP_BIN) $(OBJCOPY_BIN) $(OBJDUMP_BIN) $(RTLD_BIN)
 	@mkdir -p $(DESTDIR)$(PREFIX)/bin
 	cp $(AR_BIN) $(DESTDIR)$(PREFIX)/bin/ar
@@ -423,4 +426,4 @@ install: $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all check check-elf check-ar check-as-x86_64 check-as-tls-x86_64 check-target-dispatch check-as-sse-x86_64 check-as-libc-x86_64 check-as-sse-i386 check-as-cdq-i386 check-as-leal-i386 check-as-dwarf check-as-arm-neg check-ld-x86_64 check-ar-bsd check-ld-libpath check-rtld check-rtld-dtv check-ranlib check-libelf check-nm check-readelf check-strip check-objcopy check-objdump check-qemu-x86_64 check-qemu-i386 check-qemu-aarch64 check-qemu-riscv64 check-qemu-loongarch64 check-qemu-arm check-qemu-rtmatrix-x86_64 check-qemu-rtmatrix-i386 check-qemu-rtmatrix-aarch64 check-qemu-rtmatrix-riscv64 check-qemu-rtmatrix-loongarch64 check-qemu-rtmatrix-arm check-qemu-all install clean
+.PHONY: all check check-elf check-ar check-as-x86_64 check-as-tls-x86_64 check-target-dispatch check-as-sse-x86_64 check-as-libc-x86_64 check-as-sse-i386 check-as-cdq-i386 check-as-leal-i386 check-as-dwarf check-as-arm-neg check-ld-x86_64 check-ar-bsd check-ld-libpath check-rtld check-rtld-dtv check-ranlib check-libelf check-nm check-readelf check-strip check-objcopy check-objdump check-objdump-dwarf check-qemu-x86_64 check-qemu-i386 check-qemu-aarch64 check-qemu-riscv64 check-qemu-loongarch64 check-qemu-arm check-qemu-rtmatrix-x86_64 check-qemu-rtmatrix-i386 check-qemu-rtmatrix-aarch64 check-qemu-rtmatrix-riscv64 check-qemu-rtmatrix-loongarch64 check-qemu-rtmatrix-arm check-qemu-all install clean
