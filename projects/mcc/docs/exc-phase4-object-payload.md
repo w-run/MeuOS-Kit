@@ -127,3 +127,14 @@ mcc 需能对类类型生成：
 - 对 stub 版 `__meuos_exc_meta`（还没 libc 实现时）用 mcc 侧临时头/内联定义验证降级**生成正确调用 + 链接独立**（可先以手写 stub 运行时测汇编/链接，等 libc 接口合入后真跑）。
 
 **验收**：`throw MyObj(int)` 编译成 `_meuos_exc_throw_obj(tc, &meta, &obj)` + copy/dtor thunk 正确；用 stub 运行时独立链接验证生成调用形状；mcc verify 24/24 不破。
+
+### 进度（至 2026-08-05，libc f63bff1 定档后）
+
+已完成（commit 754f176 = 第1段，1d08c14 = 第2段 catch 侧）：
+- 第1段：类 throw 降级 `_meuos_exc_throw_obj(tc,size,align,copy,dtor,offset,&tmp)`（trivial: copy/dtor=NULL → 运行时 memcpy/免析构）；仅当程序声明运行时走对象路径，否则回退零 slot 标量（无 undefined 引用）。`check-cpp-exc-object` 门禁。
+- 第2段 catch 侧：`catch(T e)` 类参数从 `_meuos_exc_caught_obj()` 拷贝重建（guarded 在 `_meuos_exc_caught_is_obj()`，防标量回退类 NULL deref）+ 消费后 `_meuos_exc_caught_free`。运行时全链 exit 0（trivial 类 throw→catch 重建→free）。verify 24/24 + try_catch SKIP 0。
+
+**剩余（4b，待定档）**：
+- 非 trivial 类：`copy`/`dtor` thunk 合成 —— 有用户拷贝构造/析构的类需 mcc 生成 thunk 函数传入运行时（当前字节可拷贝类已 memcpy 承载；用户 ctor/dtor thunk 需 mcc 合成函数机制）。
+- 基派生切片：`catch(Base)` 捕获 `throw(Derived)` 用 `base_offset` 调整对象指针 —— libc f63bff1 把 offset 置 `(void)`（later increment），需 libc 实现 offset 调整（或 mcc 在 caught 端按 offset 自行切片）。
+
