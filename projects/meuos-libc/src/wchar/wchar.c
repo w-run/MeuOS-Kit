@@ -162,6 +162,32 @@ size_t wcsrtombs(char *dst, const wchar_t **src, size_t n, void *ps) {
 	return r;
 }
 
+/* C11 7.29.6.1.1: btowc — single byte to wide char. */
+wint_t btowc(int c) {
+	return (c == EOF || c < 0 || c > 255) ? WEOF : (wint_t)(unsigned char)c;
+}
+
+/* C11 7.29.6.1.2: wctob — wide char to single byte; EOF if not single-byte. */
+int wctob(wint_t wc) {
+	return (wc < 0 || wc > 255) ? EOF : (int)wc;
+}
+
+/* C11 7.29.6.3: mbrlen — size of the byte sequence for a multibyte char. */
+size_t mbrlen(const char *s, size_t n, void *ps) {
+	(void)ps;
+	return (size_t)mblen(s, n);
+}
+
+/* wcwidth — printable column width.  Control chars occupy 0, everything
+ * else in the Unicode range occupies 1 in the C locale. */
+int wcwidth(wchar_t c) {
+	if (c < 0 || c > 0x10FFFF)
+		return -1;
+	if (c < 0x20 || (c >= 0x7f && c < 0xa0))
+		return 0;               /* control / C1 area */
+	return 1;
+}
+
 /* Wide I/O (simple wrappers around byte I/O) */
 wint_t fgetwc(FILE *f) {
 	int c = fgetc(f);

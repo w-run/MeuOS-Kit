@@ -50,6 +50,10 @@ int mbtowc(wchar_t *, const char *, size_t);
 int wctomb(char *, wchar_t);
 size_t mbstowcs(wchar_t *, const char *, size_t);
 size_t wcstombs(char *, const wchar_t *, size_t);
+wint_t btowc(int);
+int wctob(wint_t);
+size_t mbrlen(const char *, size_t, void *);
+int wcwidth(wchar_t);
 
 /* I/O */
 wint_t fgetwc(FILE *);
