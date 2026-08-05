@@ -457,6 +457,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/wchar_mb_gate test/wchar_mb_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/wchar_stream_gate test/wchar_stream_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/wchar_io2_gate test/wchar_io2_gate.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/wchar_num_gate test/wchar_num_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/wctype_gate test/wctype_gate.c
 	# wchar_lit_gate (true wide-literal) deferred: blocked on mcc wide-literal
 	# dedup bug (different L".." collapse), tracked with mcc-worker; re-enable
@@ -548,6 +549,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	/tmp/meuos-libc-check/wchar_mb_gate
 	/tmp/meuos-libc-check/wchar_stream_gate
 	/tmp/meuos-libc-check/wchar_io2_gate
+	/tmp/meuos-libc-check/wchar_num_gate
 	/tmp/meuos-libc-check/wctype_gate
 	/tmp/meuos-libc-check/auxv
 	/tmp/meuos-libc-check/uio

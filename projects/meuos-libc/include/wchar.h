@@ -40,6 +40,12 @@ wchar_t *wcsstr(const wchar_t *, const wchar_t *);
 size_t wcslen(const wchar_t *);
 wchar_t *wcstok(wchar_t *, const wchar_t *, wchar_t **);
 
+/* Wide numeric conversion (C11 7.29.4.1) */
+long wcstol(const wchar_t *, wchar_t **, int);
+long long wcstoll(const wchar_t *, wchar_t **, int);
+unsigned long wcstoul(const wchar_t *, wchar_t **, int);
+unsigned long long wcstoull(const wchar_t *, wchar_t **, int);
+
 /* Wide character classification and mapping (C11 7.29.2 / 7.29.6.4) */
 #include <wctype.h>
 
