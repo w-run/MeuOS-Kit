@@ -23,6 +23,7 @@ struct options {
 	int dump_symbols;     /* -s --symbols           */
 	int dump_relocs;      /* -r --relocs            */
 	int dump_dynamic;     /* -d --dynamic           */
+	int dump_debug;       /* -w --debug-dump        */
 	int wide;             /* -W --wide              */
 	const char *hex_secs[MT_READELF_MAX_HEX]; /* -x --hex-dump */
 	int hex_count;
@@ -42,6 +43,7 @@ usage(FILE *out)
 	        "  -s --symbols           Display the symbol table\n"
 	        "  -r --relocs            Display the relocations\n"
 	        "  -d --dynamic           Display the dynamic section\n"
+	        "  -w --debug-dump        Dump DWARF debug sections (raw)\n"
 	        "  -x <name|num>          Dump the contents of section <name|num>\n"
 	        "     --hex-dump=<name|num>\n"
 	        "  -W --wide              Allow output width beyond 80 columns\n"
@@ -1166,6 +1168,45 @@ dump_hexdump(const unsigned char *bytes, size_t size,
 	printf("\nSection '%s' does not exist.\n", spec);
 }
 
+/* ---- DWARF debug-section dump (-w --debug-dump) ---------------------- */
+
+/* Initial DWARF support: dump every .debug_* section's contents (name,
+ * address, raw hex bytes).  This is deliberately a raw dump rather than a
+ * DIE/line-program decode — it gives a faithful view of the debug data an
+ * assembler/compiler emitted, and a stable base to add structural decoding
+ * on top.  ELF32 reuses the same 64-bit parser for the section map. */
+static void
+dump_debug(const unsigned char *bytes, size_t size,
+           const struct mt_elf64_view *view)
+{
+	struct mt_elf64_section shstrtab, sec;
+	enum mt_elf_status st;
+	uint16_t i;
+
+	if (view->section_name_index >= view->section_count)
+		return;
+	st = mt_elf64_get_section(bytes, size, view,
+	                          view->section_name_index, &shstrtab);
+	if (st != MT_ELF_OK || shstrtab.type != MT_SHT_STRTAB)
+		return;
+
+	for (i = 0; i < view->section_count; ++i) {
+		const char *name;
+
+		if (mt_elf64_get_section(bytes, size, view, i, &sec) != MT_ELF_OK)
+			continue;
+		if (mt_elf64_get_string(bytes, size, &shstrtab, sec.name,
+		                        &name) != MT_ELF_OK || !name)
+			continue;
+		if (strncmp(name, ".debug_", 7) != 0 &&
+		    strncmp(name, ".zdebug_", 8) != 0 &&
+		    strcmp(name, ".stab") != 0)
+			continue;
+		dump_hexdump_section(bytes, size, &sec, name,
+		                     section_has_relocations(bytes, size, view, i));
+	}
+}
+
 /* ---- 单文件处理 ---- */
 
 static int
@@ -1218,6 +1259,8 @@ process_file(const char *path, struct options *opts)
 		dump_symbols(bytes, size, &view);
 	for (i = 0; i < opts->hex_count; ++i)
 		dump_hexdump(bytes, size, &view, opts->hex_secs[i]);
+	if (opts->dump_debug)
+		dump_debug(bytes, size, &view);
 
 	free(bytes);
 	return unsupported ? 1 : 0;
@@ -1251,6 +1294,7 @@ parse_short_cluster(const char *arg, struct options *opts)
 		case 's': opts->dump_symbols = 1; break;
 		case 'r': opts->dump_relocs = 1; break;
 		case 'd': opts->dump_dynamic = 1; break;
+		case 'w': opts->dump_debug = 1; break;
 		case 'W': opts->wide = 1; break;
 		case 'H': usage(stdout); return 1;
 		case 'V':
@@ -1313,6 +1357,11 @@ main(int argc, char **argv)
 		}
 		if (strcmp(arg, "--dynamic") == 0) {
 			opts.dump_dynamic = 1;
+			continue;
+		}
+		if (strcmp(arg, "--debug-dump") == 0 ||
+		    strcmp(arg, "--debug-dump=rawline") == 0) {
+			opts.dump_debug = 1;
 			continue;
 		}
 		if (strcmp(arg, "--wide") == 0 || strcmp(arg, "-W") == 0) {
