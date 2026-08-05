@@ -379,7 +379,24 @@ compat:
 # Install
 # ============================================================
 
+# Guard against installing over the host system tree.  PREFIX defaults to /usr
+# so a bare `make install` (no DESTDIR) overwrites /usr/include/*.h with the
+# meuos-libc headers, which silently breaks every host-cc build in the Kit.
+# That happened on 2026-08-06: 64 glibc-devel headers were clobbered and
+# meuos-toolchain stopped building from clean.  Always pass DESTDIR; set
+# ALLOW_HOST_INSTALL=1 only if you really do mean to install into the host.
 install: $(ATOMIC_LIB) $(LIBC_LIB) $(CRT1_OBJ) $(BUILD_SO) $(LIBGCC_LIB)
+	@if [ -z "$(DESTDIR)" ] && [ "$(ALLOW_HOST_INSTALL)" != "1" ]; then \
+		case "$(PREFIX)" in \
+		/usr|/usr/|/usr/local|/usr/local/|/) \
+			echo "meuos-libc: refusing to install into the host tree" >&2; \
+			echo "  PREFIX=$(PREFIX) with an empty DESTDIR would overwrite" >&2; \
+			echo "  the system headers under $(PREFIX)/include." >&2; \
+			echo "  Pass DESTDIR=<sysroot> (e.g. DESTDIR=\$$PWD/../../sysroot/$(ARCH))," >&2; \
+			echo "  or set ALLOW_HOST_INSTALL=1 to override deliberately." >&2; \
+			exit 1;; \
+		esac; \
+	fi
 	@mkdir -p $(DESTDIR)$(PREFIX)/lib $(DESTDIR)$(PREFIX)/include/sys
 	cp -r include/. $(DESTDIR)$(PREFIX)/include/
 	cp $(LIBC_LIB)    $(DESTDIR)$(PREFIX)/lib/libc-meuos.a
