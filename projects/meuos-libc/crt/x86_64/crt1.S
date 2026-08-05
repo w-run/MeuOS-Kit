@@ -16,6 +16,13 @@ _start:
 	andq $-16, %rsp
 	movq %rdx, %rdi
 	call __meuos_tls_init
+	/* Capture the process image for the C library: __meuos_startup saves
+	 * argv[0] (-> __progname) and the auxv base (-> getauxval).  These
+	 * must be taken before setenv() can reallocate environ. */
+	movq (%rsp), %rdi		/* argc */
+	leaq 8(%rsp), %rsi		/* argv */
+	leaq 8(%rsi,%rdi,8), %rdx	/* envp */
+	call __meuos_startup
 	movq (%rsp), %rdi
 	leaq 8(%rsp), %rsi
 	leaq 8(%rsi,%rdi,8), %rdx
