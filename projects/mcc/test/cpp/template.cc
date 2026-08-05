@@ -11,6 +11,12 @@
 template <typename T> T max(T a, T b) { return a > b ? a : b; }
 template <typename T, typename U> U add(T a, U b) { return a + b; }
 template <typename T> T square(T v) { return v * v; }
+/* function-template explicit specialization (`template <>`): the int
+ * specialization of `xsp` returns the loser+1 (distinct from the generic
+ * which returns `a>b?a:b`), so a matching call proves the specialization
+ * shadows the primary body. */
+template <typename T> T xsp(T a, T b) { return a > b ? a : b; }
+template <> int xsp<int>(int a, int b) { return a > b ? b + 1 : a + 1; }
 
 class Counter {
 public:
@@ -84,6 +90,11 @@ main(void)
     if (max(1.5, 2.5) != 2.5) return 2;      /* double instantiation */
     if (max(10, 20) != 20) return 3;         /* cache reuse */
     if (add(1, 2.5) != 3.5) return 4;        /* T=int, U=double */
+
+    /* template explicit specialization: xsp<int> shadows the primary body.
+     * spec: a>b ? b+1 : a+1  (primary would return the loser unchanged) */
+    if (xsp(3, 7) != 4) return 41;           /* a+1 (3+1), not generic 7 */
+    if (xsp(5, 2) != 3) return 42;           /* b+1 (2+1), not generic 5 */
 
     Counter c;
     if (probe(c, 3) != 3) return 5;          /* class-type instantiation */
