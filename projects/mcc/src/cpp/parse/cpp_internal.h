@@ -272,4 +272,19 @@ bool cpp_find_final(struct type *d, const char *key, struct type **owner,
                     struct member **outm);
 void cpp_init_vptrs(struct func *f, struct type *t, struct expr *thisp);
 
+/* Function-template declaration / alias machinery (cpp_parse.c +
+ * cpp_tmpl_alias.c). */
+struct cpp_template *cpp_tmpl_find(const char *name);
+void cpp_template_decl(struct scope *s, struct type *owner);
+struct expr *cpp_tmpl_placeholder(const char *name);
+void cpp_tmpl_explicit_parse(struct scope *s);
+struct expr *cpp_tmpl_const_arg(struct scope *s);
+void cpp_constraint_add(struct token **buf, size_t *n, size_t *cap,
+                        struct token t);
+void cpp_register_alias(const char *name, const char **params, int nparams,
+                        struct token *toks, size_t ntoks);
+bool cpp_tmpl_alias_lookup(const char *name);
+struct type *cpp_tmpl_alias_instantiate(struct scope *s, const char *name);
+void cpp_template_alias(struct cpp_template *tmpl);
+
 #endif /* MCC_CPP_PARSE_INTERNAL_H */
