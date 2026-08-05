@@ -674,5 +674,16 @@ parse_directive(struct as_file *as, char *directive, char *rest)
 		fprintf(stderr, "%s:%u: warning: %s\n", as->filename, as->line, msg);
 		return 0;
 	}
+	/* Architecture-announcing directives emitted by mcc/other frontends.
+	 * These are assembler-metadata (the encoding is already resolved in
+	 * the instruction mnemonics), so mt/as treats them as no-ops rather
+	 * than failing: `.syntax unified` (ARM), `.arch <arch>`, `.fpu <fpu>`,
+	 * plus the generic `.align`/.cpu` variants some frontends emit. */
+	if (strcmp(directive, ".syntax") == 0 ||
+	    strcmp(directive, ".arch") == 0 ||
+	    strcmp(directive, ".arch_extension") == 0 ||
+	    strcmp(directive, ".cpu") == 0 ||
+	    strcmp(directive, ".fpu") == 0)
+		return 0;
 	return as_error(as, "unsupported directive: %s", directive);
 }
