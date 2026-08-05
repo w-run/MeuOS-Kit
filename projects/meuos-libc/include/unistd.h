@@ -8,6 +8,8 @@
 
 ssize_t read(int, void *, size_t);
 ssize_t write(int, const void *, size_t);
+ssize_t pread(int, void *, size_t, off_t);
+ssize_t pwrite(int, const void *, size_t, off_t);
 int close(int);
 int open(const char *, int, ...);
 pid_t getpid(void);
@@ -28,6 +30,11 @@ int chdir(const char *);
 char *getcwd(char *, size_t);
 int dup(int);
 int dup2(int, int);
+int dup3(int, int, int);
+int pipe2(int [2], int);
+#ifndef AT_FDCWD
+#define AT_FDCWD (-100)
+#endif
 int unlink(const char *);
 int rmdir(const char *);
 int rename(const char *, const char *);

@@ -16,6 +16,7 @@
 #define O_NONBLOCK 04000
 
 int open(const char *, int, ...);
+int openat(int, const char *, int, ...);
 
 #endif
 int fcntl(int, int, ...);

@@ -62,6 +62,16 @@ __syscall_number(long number)
 	case 62:  return 37;  /* kill */
 	case 63:  return 122; /* uname */
 	case 234: return 270; /* tgkill */
+	/* 向量 / 定位 I/O + *at / pipe / dup 扩展（i386 32 位号）。 */
+	case 19:  return 145;  /* readv */
+	case 20:  return 146;  /* writev */
+	case 17:  return 180;  /* pread */
+	case 18:  return 181;  /* pwrite */
+	case 295: return 333;  /* preadv */
+	case 296: return 334;  /* pwritev */
+	case 257: return 295;  /* openat */
+	case 292: return 330;  /* dup3 */
+	case 293: return 354;  /* pipe2 */
 	default: return number;
 	}
 #elif defined(__arm__)
@@ -149,6 +159,13 @@ __syscall_number(long number)
 	case 302: return 369;  /* prlimit64 */
 	case 332: return 383;  /* statx */
 	case 412: return 348;  /* utimensat */
+	/* 向量 / 定位 I/O（ARM 32 位号）。 */
+	case 19:  return 145;  /* readv */
+	case 20:  return 146;  /* writev */
+	case 17:  return 180;  /* pread */
+	case 18:  return 181;  /* pwrite */
+	case 295: return 333;  /* preadv */
+	case 296: return 334;  /* pwritev */
 	default: return number;
 	}
 #elif defined(__aarch64__) || defined(__riscv) || defined(__loongarch64)
@@ -224,6 +241,13 @@ __syscall_number(long number)
 	case 293: return 59;   /* pipe2 */
 	case 332: return 291;  /* statx（stat/lstat/fstat 的 aarch64 分支用） */
 	case 412: return 88;   /* utimensat（utime.c 的 aarch64 分支复用 i386 路径） */
+	/* 向量 / 定位 I/O：asm-generic 自有 readv/writev/pread64/pwrite64 号。 */
+	case 19:  return 65;   /* readv */
+	case 20:  return 66;   /* writev */
+	case 17:  return 67;   /* pread64（pread） */
+	case 18:  return 68;   /* pwrite64（pwrite） */
+	case 295: return 69;   /* preadv */
+	case 296: return 70;   /* pwritev */
 	default: return number;
 	}
 #else
