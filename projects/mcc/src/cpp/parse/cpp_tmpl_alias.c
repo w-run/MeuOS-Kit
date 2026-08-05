@@ -83,12 +83,23 @@ cpp_tmpl_explicit_parse(struct scope *s)
 	 * template instantiation).  A type-dependent NTTP (`template<typename
 	 * T, T N>`) falls out naturally: N is a value of the *argument's*
 	 * concrete type, recorded here and bound at instantiation. */
+	int saved_depth;
 	if (g_cpp_tmpl_depth > 0)
 		tmpl = cpp_tmpl_find(g_cpp_tmpl_stack[g_cpp_tmpl_depth - 1]);
 	else
 		tmpl = NULL;
 	if (tmpl)
 		p = tmpl->params;
+	/* Hide the pending template name while parsing the explicit-argument
+	 * expressions.  `arrsize<sq(3)>()` pushes `arrsize` as pending; an
+	 * inner call `sq(3)` in an argument would otherwise have its `(`
+	 * lowered by cpp_tmpl_instantiate, which pops the *outer* name and
+	 * instantiates `arrsize` with `sq(3)` as its argument list
+	 * ("too many arguments").  Setting depth 0 here lets inner calls
+	 * resolve as plain expressions; the saved depth is restored so the
+	 * outer `<...>(...)` still instantiates the template at its `(`. */
+	saved_depth = g_cpp_tmpl_depth;
+	g_cpp_tmpl_depth = 0;
 	while (tok.kind != TGREATER) {
 		if (g_cpp_tmpl_expl_n >= 16)
 			error_code(E_SYNTAX, &tok.loc, "too many template arguments");
@@ -117,6 +128,7 @@ cpp_tmpl_explicit_parse(struct scope *s)
 		expect(TCOMMA, "',' or '>' in template argument list");
 	}
 	next(); /* consume '>' */
+	g_cpp_tmpl_depth = saved_depth;   /* re-expose pending outer template */
 }
 
 struct expr *
