@@ -24,6 +24,10 @@
  */
 #include <meuos_exc.h>
 
+/* stage-3: a small class hierarchy for base/derived catch matching. */
+struct ExcB { int b; ExcB() : b(0) {} };
+struct ExcD : ExcB { int d; ExcD() : d(1) {} };
+
 /* stage-2: a throw from a callee crosses the function boundary. */
 static void
 may_throw_cross(int v)
@@ -82,6 +86,51 @@ main(void)
         return 8; /* should not run: thrown type is long */
     } catch (long e) {
         if (e != 7L) return 9;
+    }
+
+    /* stage-3: catch(Base) matches a throw(Derived) — single-inheritance
+     * base catch by type code (no full RTTI/typeinfo) */
+    {
+        int inhit = 0;
+        try {
+            throw ExcD();
+        } catch (ExcB e) {
+            inhit = 1; /* base catch of a derived throw */
+        }
+        if (!inhit) return 10;
+    }
+
+    /* stage-3: catch(...) swallows any thrown value */
+    {
+        int all = 0;
+        try {
+            throw 42;
+        } catch (long e) {
+            return 11; /* should not run: type is int */
+        } catch (...) {
+            all = 1;
+        }
+        if (!all) return 12;
+    }
+
+    /* stage-3: explicit bare `throw;` rethrows to an OUTER handler (the
+     * inner try must not re-catch it — verified by it terminating) */
+    {
+        int rh;
+        /* outer handler */
+        try {
+            void inner(void);
+            /* inline inner try that rethrows */
+            try {
+                throw 42;
+            } catch (int e) {
+                throw; /* rethrow current exception */
+            }
+            return 13; /* unreachable: rethrow skipped past this block */
+        } catch (int e) {
+            rh = (e == 42) ? 1 : 0;
+        }
+        if (!rh) return 14;
     }
 
     return 0;

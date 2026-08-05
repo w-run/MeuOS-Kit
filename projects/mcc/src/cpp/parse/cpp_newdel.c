@@ -1038,11 +1038,44 @@ cpp_exc_throw_call(struct type *t, struct expr *value)
 	fn = decay(fn);
 	call = mkexpr(EXPRCALL, &typevoid, fn);
 	a1 = mkconstexpr(&typeint, cpp_exc_typecode(t));
-	a2 = value ? mkexpr(EXPRCAST, &typeullong, value)
-	           : mkconstexpr(&typeullong, 0);
+	if (value && (value->type->kind == TYPESTRUCT ||
+	              value->type->kind == TYPEUNION)) {
+		/* A class-typed exception's members cannot travel through the
+		 * 8-byte ullong value slot (value-passing ABI).  The type code
+		 * alone identifies it; the slot is zeroed.  Stage-3 validates
+		 * base/derived and catch(...) dispatch on the type code; member
+		 * value payload for class exceptions is a documented limitation
+		 * (requires a pointer/lifetime extension of the runtime ABI). */
+		a2 = mkconstexpr(&typeullong, 0);
+	} else {
+		a2 = value ? mkexpr(EXPRCAST, &typeullong, value)
+		           : mkconstexpr(&typeullong, 0);
+	}
 	a2->next = NULL;
 	a1->next = a2;
 	call->u.call.args = a1;
+	call->u.call.nargs = 2;
+	return call;
+}
+
+/* Build a call `_meuos_exc_throw(typecode_expr, value_expr)` with already
+ * computed operands (used by bare rethrow `throw;`). */
+static struct expr *
+cpp_exc_throw_call2(struct expr *tcode, struct expr *value)
+{
+	struct decl *fd = cpp_ensure_exc_fn("_meuos_exc_throw");
+	struct expr *fn, *call;
+
+	if (!fd)
+		return mkexpr(EXPRCONST, &typevoid, NULL);
+	fn = mkexpr(EXPRIDENT, fd->type, NULL);
+	fn->u.ident.decl = fd;
+	fn = decay(fn);
+	call = mkexpr(EXPRCALL, &typevoid, fn);
+	value = exprconvert(value, &typeullong);
+	value->next = NULL;
+	tcode->next = value;
+	call->u.call.args = tcode;
 	call->u.call.nargs = 2;
 	return call;
 }
@@ -1158,11 +1191,6 @@ cpp_exc_stmt(struct func *f, struct scope *s)
 		    "setjmp not declared (meuos_exc.h requires <setjmp.h>)");
 	}
 
-	/* _meuos_exc_try_begin(&frame) */
-	st = cpp_exc_helper_call("_meuos_exc_try_begin", &typevoid,
-	                          frame_e, NULL);
-	funcexpr(f, st);
-
 	/* if (__exc_r != 0) -> caught branch, else try body */
 	cond = mkbinaryexpr(&tok.loc, TNEQ, r_e,
 	                    mkconstexpr(&typeint, 0));
@@ -1171,8 +1199,15 @@ cpp_exc_stmt(struct func *f, struct scope *s)
 	bjoin = mkblock("exc_join");
 	funcbranch(f, cond, bcaught, bnormal);
 
-	/* normal (r == 0): run the try body, then pop the handler */
+	/* normal (r == 0): register the handler, run the try body, then pop.
+	 * try_begin is only called on the first setjmp pass (r == 0); an
+	 * exceptional longjmp returns with r != 0 straight into the caught
+	 * branch WITHOUT re-registering — re-registering would re-push this
+	 * frame and make a `throw;` rethrow re-enter this same catch (loop). */
 	funclabel(f, bnormal);
+	st = cpp_exc_helper_call("_meuos_exc_try_begin", &typevoid,
+	                          frame_e, NULL);
+	funcexpr(f, st);
 	stmt(f, s);
 	funcexpr(f, cpp_exc_helper_call("_meuos_exc_try_end", &typevoid,
 	                                NULL, NULL));
@@ -1195,8 +1230,17 @@ cpp_exc_stmt(struct func *f, struct scope *s)
 			next(); /* consume 'catch' */
 			expect(TLPAREN, "after 'catch'");
 			ctype = NULL;
-			if (tok.kind == TELLIPSIS) {
-				next(); /* catch(...) — catch-all (stage 4, not yet) */
+			if (strcmp(tokenstr(tok.kind), "...") == 0) {
+				next(); /* consume '...' */
+				expect(TRPAREN, "after catch(...)");
+				/* catch-all: no param, matches anything, runs the body,
+				 * then terminates the sequence (C++ requires it last).
+				 * bnext is cleared so the rethrow-after-loop does not
+				 * re-label the previous catch's miss onto the rethrow. */
+				stmt(f, s);
+				funcjmp(f, bjoin);
+				bnext = NULL;
+				break;
 			} else {
 				const char *ts = tokenstr(tok.kind);
 				struct type *tt;
@@ -1228,11 +1272,29 @@ cpp_exc_stmt(struct func *f, struct scope *s)
 				}
 				expect(TRPAREN, "after catch parameter");
 				if (ctype) {
-					/* branch: if (caught_type() == tc(ctype)) hit else miss */
+					/* branch: if (caught_type() == tc(ctype) OR any
+					 * registered derived type) hit else miss.  A
+					 * catch(Base) matches a throw(Derived) because we
+					 * widen the condition over every type already
+					 * registered in the typecode table that is derived
+					 * from the catch type (cpp_is_derived; base appears
+					 * as an anonymous member).  This gives single-inheri
+					 * tance base-catch without a full RTTI/typeinfo. */
+					int i;
 					ctx = cpp_exc_helper_call("_meuos_exc_caught_type",
 					    &typeint, NULL, NULL);
 					cnd = mkbinaryexpr(&tok.loc, TEQL, ctx,
 					    mkconstexpr(&typeint, cpp_exc_typecode(ctype)));
+					for (i = 0; i < exc_tc_n; i++) {
+						if (exc_tc_regs[i].t == ctype)
+							continue;
+						if (cpp_is_derived(exc_tc_regs[i].t, ctype))
+							cnd = mkbinaryexpr(&tok.loc, TLOR, cnd,
+							    mkbinaryexpr(&tok.loc, TEQL,
+							        ctx,
+							        mkconstexpr(&typeint,
+							            exc_tc_regs[i].code)));
+					}
 					bhit = mkblock("exc_catch_hit");
 					bmiss = mkblock("exc_catch_miss");
 					funcbranch(f, cnd, bhit, bmiss);
@@ -1242,7 +1304,9 @@ cpp_exc_stmt(struct func *f, struct scope *s)
 					ed->u.obj.storage = SDAUTO;
 					funcinit(f, ed, NULL, false);
 					scopeputdecl(s, ed);
-					{
+					if (ctype->kind != TYPESTRUCT &&
+					    ctype->kind != TYPEUNION) {
+						/* scalar catch: copy caught_value into the param */
 						struct expr *ep = mkexpr(EXPRIDENT, ctype, NULL);
 						struct expr *val;
 						ep->lvalue = true;
@@ -1250,13 +1314,25 @@ cpp_exc_stmt(struct func *f, struct scope *s)
 						val = cpp_exc_helper_call("_meuos_exc_caught_value",
 						    &typeullong, NULL, NULL);
 						funcexpr(f, mkassignexpr(ep, exprconvert(val, ctype)));
+					} else {
+						/* class catch param: no member payload travels
+						 * through the 8-byte value slot (value-passing
+						 * ABI); stage-3 matches by type code only.  The
+						 * param is default-initialized. */
 					}
 					stmt(f, s); /* the catch body */
 					funcjmp(f, bjoin);
 				} else {
-					/* catch(...) — no param; for now just run the body */
+					/* catch(...) — catch-all: matches every thrown
+					 * value, no parameter, runs the body.  C++ requires
+					 * it last, so no further catch follows.  Clear bnext
+					 * so the rethrow-after-loop doesn't re-label the
+					 * previous catch's miss onto the rethrow: the
+					 * catch-all already swallowed everything. */
 					stmt(f, s);
 					funcjmp(f, bjoin);
+					bnext = NULL;
+					break;
 				}
 				bnext = bmiss; /* next catch (or rethrow) lands on the miss */
 			}
@@ -1284,7 +1360,12 @@ cpp_exc_stmt(struct func *f, struct scope *s)
 
 
 /* C++ `throw` expression (`throw expr;` or bare `throw;` rethrow).
- * Lowered to a call to the exception runtime. */
+ *
+ * `throw expr` lowers to `_meuos_exc_throw(typecode(expr), value)`.  A bare
+ * `throw;` (no operand) rethrows the currently-handled exception — in the
+ * value-passing ABI that is simply re-raising (caught_type, caught_value),
+ * which the runtime routes to the next outer handler or aborts if none.
+ */
 struct expr *
 cpp_parse_throw_expr(struct scope *s)
 {
@@ -1294,5 +1375,15 @@ cpp_parse_throw_expr(struct scope *s)
 	next(); /* consume 'throw' */
 	if (tok.kind != TSEMICOLON && tok.kind != TEOF)
 		e = assignexpr(s);
-	return cpp_exc_throw_call(e ? e->type : &typeint, e);
+	if (e)
+		return cpp_exc_throw_call(e->type, e);
+	/* bare `throw;` — rethrow the current exception */
+	{
+		struct expr *ct, *cv;
+		ct = cpp_exc_helper_call("_meuos_exc_caught_type", &typeint,
+		    NULL, NULL);
+		cv = cpp_exc_helper_call("_meuos_exc_caught_value", &typeullong,
+		    NULL, NULL);
+		return cpp_exc_throw_call2(ct, cv);
+	}
 }
