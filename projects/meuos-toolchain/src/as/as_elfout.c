@@ -10,6 +10,7 @@
 #include "mt/elf32.h"
 #include "mt/target.h"
 
+#include <errno.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -260,6 +261,36 @@ resolve_fixups(struct as_file *as, const int *section_map,
 		symbol = find_symbol(as, fix->symbol);
 		if (!symbol)
 			return as_error(as, "undefined internal symbol: %s", fix->symbol);
+		/* Symbol-difference fixups (e.g. DWARF unit_length / high_pc):
+		 * the delta between two same-section symbols is base-independent,
+		 * so it can be folded to a constant at assembly time. */
+		if (fix->symbol2) {
+			struct as_symbol *symbol2 = find_symbol(as, fix->symbol2);
+			if (!symbol2)
+				return as_error(as,
+				    "undefined internal symbol: %s", fix->symbol2);
+			if (symbol->defined && symbol2->defined &&
+			    symbol->section == fix->section &&
+			    symbol2->section == fix->section) {
+				int64_t delta = (int64_t)symbol->value -
+				                (int64_t)symbol2->value +
+				                fix->addend;
+				if (patch_le(as, section, fix->offset, fix->width,
+				             (uint64_t)delta) != 0)
+					return -1;
+				continue;
+			}
+			/* Cross-section difference: keep a normal SYMA-relative
+			 * relocation; SYMB is folded into the addend (linker sets
+			 * SYMA, and the constant part already accounts for SYMB's
+			 * section offset).  This is best-effort and only matters
+			 * for non-DWARF difference expressions. */
+			if (reloc_add(&groups[fix->section], fix->offset, fix->type,
+			              symbol->output_index,
+			              fix->addend - (int64_t)symbol2->value) != 0)
+				return as_error(as, "out of memory");
+			continue;
+		}
 		/* Only PC-relative relocations can be folded at assembly time
 		 * (the same-section offset delta is known).  Absolute data
 		 * relocations must always go to the linker: the section base

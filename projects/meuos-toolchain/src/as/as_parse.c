@@ -126,15 +126,50 @@ parse_data_value(struct as_file *as, struct as_section *section,
 	int is_number;
 	size_t offset = section->size;
 	uint64_t value;
+	char *diff_sym2 = NULL;
+	int64_t diff_const = 0;
+	char *diff_cursor;
+
+	/* DWARF and other debug sections use symbol-difference expressions
+	 * such as `.4byte .Lend - .Lstart - 4`.  Detect `SYMA - SYMB` here
+	 * before the plain single-symbol parse_reference path. */
+	diff_cursor = trim(text);
+	{
+		char *minus = strstr(diff_cursor, " - ");
+		if (minus) {
+			char *tail = minus + 3;
+			char *sym1 = mt_strdup(diff_cursor);
+			sym1[minus - diff_cursor] = '\0';
+			/* tail is SYMB [+- CONST]; split a trailing arithmetic const */
+			char *op = tail;
+			while (*op && *op != '+' && *op != '-')
+				++op;
+			if (*op) {
+				char saved = *op;
+				*op = '\0';
+				if (parse_integer(op + 1, &diff_const) != 0) {
+					free(sym1);
+					return as_error(as,
+					    "invalid symbol-difference expression: %s",
+					    text);
+				}
+				if (saved == '-')
+					diff_const = -diff_const;
+			}
+			diff_sym2 = mt_strdup(trim(tail));
+			text = sym1;   /* first symbol becomes the primary operand */
+		}
+	}
 
 	if (parse_reference(trim(text), &symbol, modifier, sizeof(modifier),
 	                    &addend, &is_number) != 0)
 		return as_error(as, "invalid data expression: %s", text);
 	if (modifier[0] != '\0') {
 		free(symbol);
+		free(diff_sym2);
 		return as_error(as, "unsupported data relocation modifier: %s", modifier);
 	}
-	if (is_number) {
+	if (is_number && !diff_sym2) {
 		value = (uint64_t)addend;
 		free(symbol);
 		return as_emit_le(as, section, value, width);
@@ -143,10 +178,37 @@ parse_data_value(struct as_file *as, struct as_section *section,
 		struct as_symbol *referenced = get_symbol(as, symbol);
 		if (!referenced) {
 			free(symbol);
+			free(diff_sym2);
 			return -1;
 		}
 		if (!referenced->defined && symbol[0] != '.')
 			referenced->bind = MT_STB_GLOBAL;
+	}
+	if (diff_sym2) {
+		/* symbol-difference fixup: resolved at assembly time when both
+		 * symbols share the section (the delta is base-independent, e.g.
+		 * DWARF unit_length / high_pc).  Otherwise deferred to the linker
+		 * as a SYMA-relative relocation carrying SYMB via addend. */
+		struct as_symbol *ref2 = get_symbol(as, diff_sym2);
+		if (!ref2) {
+			free(symbol);
+			free(diff_sym2);
+			return -1;
+		}
+		if (!ref2->defined && diff_sym2[0] != '.')
+			ref2->bind = MT_STB_GLOBAL;
+		if (as_emit_le(as, section, 0, width) != 0 ||
+		    as_add_fixup_diff(as, section, offset, width,
+		                     data_reloc_type(as->target, width),
+		                     addend + diff_const, symbol,
+		                     diff_sym2) != 0) {
+			free(symbol);
+			free(diff_sym2);
+			return -1;
+		}
+		free(symbol);
+		free(diff_sym2);
+		return 0;
 	}
 	if (as_emit_le(as, section, 0, width) != 0 ||
 	    as_add_fixup(as, section, offset, width,
@@ -208,6 +270,54 @@ parse_data_list(struct as_file *as, char *text, unsigned width)
 		if (!*item)
 			return as_error(as, "empty data expression");
 		if (parse_data_value(as, &as->sections[as->current], item, width) != 0)
+			return -1;
+		if (!*cursor)
+			break;
+	}
+	return 0;
+}
+
+static int
+parse_leb128(struct as_file *as, char *text, int signedness)
+{
+	char *cursor = text;
+	char *item;
+	for (;;) {
+		uint64_t value;
+		item = next_csv(&cursor);
+		if (!*item)
+			return as_error(as, "empty LEB128 expression");
+		/* DWARF .uleb128/.sleb128 in mcc output are integer constants;
+		 * symbol references would need relocations and are not emitted. */
+		int64_t sval;
+		if (parse_integer(item, &sval) != 0)
+			return as_error(as, "invalid LEB128 value");
+		unsigned char out[16];
+		size_t n = 0;
+		if (signedness) {
+			/* signed LEB128 */
+			int more = 1;
+			while (more) {
+				unsigned char b = (unsigned char)(sval & 0x7f);
+				sval >>= 7; /* arithmetic shift preserves sign */
+				if ((sval == 0 && !(b & 0x40)) ||
+				    (sval == -1 && (b & 0x40)))
+					more = 0;
+				else
+					b |= 0x80;
+				out[n++] = b;
+			}
+		} else {
+			value = (uint64_t)sval;
+			do {
+				unsigned char b = (unsigned char)(value & 0x7f);
+				value >>= 7;
+				if (value)
+					b |= 0x80;
+				out[n++] = b;
+			} while (value);
+		}
+		if (as_append_bytes(as, &as->sections[as->current], out, n) != 0)
 			return -1;
 		if (!*cursor)
 			break;
@@ -358,6 +468,17 @@ parse_directive(struct as_file *as, char *directive, char *rest)
 		return parse_data_list(as, rest, 4);
 	if (strcmp(directive, ".quad") == 0)
 		return parse_data_list(as, rest, 8);
+	/* GNU-as size-suffixed aliases used by some DWARF emitters */
+	if (strcmp(directive, ".2byte") == 0)
+		return parse_data_list(as, rest, 2);
+	if (strcmp(directive, ".4byte") == 0)
+		return parse_data_list(as, rest, 4);
+	if (strcmp(directive, ".8byte") == 0)
+		return parse_data_list(as, rest, 8);
+	if (strcmp(directive, ".uleb128") == 0)
+		return parse_leb128(as, rest, 0);
+	if (strcmp(directive, ".sleb128") == 0)
+		return parse_leb128(as, rest, 1);
 	if (strcmp(directive, ".ascii") == 0 ||
 	    strcmp(directive, ".asciz") == 0 ||
 	    strcmp(directive, ".string") == 0)
