@@ -71,6 +71,21 @@ if ! grep -Eq 'movw[[:space:]]+r10, #0x14' "$cctmp" ||
 fi
 printf '%s\n' 'arm const-arg call compile gate passed'
 
+# i64 sign/zero-extension gate: `long long y = 5;` (i64 sext of a 32-bit
+# const) must materialise BOTH 32-bit halves of the result.  The pre-fix
+# emitter only wrote the low half (hi uninitialised), so an i64 constant's
+# high word was garbage.  Assert a movw#imm for the value and a separate
+# register-zero store for the high half.
+extmp=${TMPDIR:-/tmp}/mcc-arm-i64sext.$$.s
+trap 'rm -f "$asmtmp" "$shtmp" "$cctmp" "$extmp"' EXIT HUP INT TERM
+"$mcc" --target=arm -S -o "$extmp" "$root/test/arm/i64sext.c"
+if ! grep -Eq 'movw[[:space:]]+r10, #0x5' "$extmp" ||
+   ! grep -Eq '\bmov[[:space:]]+r10, #0' "$extmp"; then
+	printf '%s\n' 'arm i64 sext/zext: FAIL (high half of i64 constant not materialised)' >&2
+	exit 1
+fi
+printf '%s\n' 'arm i64 sext/zext compile gate passed'
+
 if [ ! -f "$sysroot/usr/lib/libc-meuos.a" ]; then
 	printf '%s\n' "arm runtime: sysroot not found at $sysroot, skipping"
 	exit 0
