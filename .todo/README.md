@@ -43,7 +43,20 @@
 | [pie-bss-relative](meuos-toolchain/pie-bss-relative.md) | 🔄 | PIE 动态链接里 libc 静态 .bss 全局（thread_controls/guard）缺 R_X86_64_RELATIVE → 线程控制崩(SIGSEGV)；非 DTV/TLS，独立缺陷，静态 exe 正常 |
 | [mt-ld-pie-jmprel](meuos-toolchain/mt-ld-pie-jmprel.md) | 🔄 | mt/ld 构建的 PIE 主程序 JUMP_SLOT 入 .rela.dyn(DT_RELA) 非 .rela.plt(DT_JMPREL) → rtld_dlopen GOT 槽=0 崩；独立缺陷，host-ld 链可绕过，不阻塞方案 a |
 
-### meuos-utils
+### meuos-sysroot
+
+| 任务 | 状态 | 说明 |
+|------|------|------|
+| [execlp-implicit-decl](meuos-sysroot/execlp-implicit-decl.md) | 🔄 | msysctl `execlp` 隐式声明编译错（src/msysctl/main.c:342，`-Werror`+`_POSIX_C_SOURCE`）；libmsys.a 已产出不阻塞 mcc/libc |
+
+### meuos-libc
+
+| 任务 | 状态 | 说明 |
+|------|------|------|
+| [make-j-parallel-build-bug](meuos-libc/make-j-parallel-build-bug.md) | 🔄 | `make -j$(nproc)` 只编 1 个 .o 就 exit 0、无 .a 产出（非并行正常）；影响 meow `-jN` 生态 |
+| [init-array-compat-data-hook](meuos-libc/init-array-compat-data-hook.md) | 🔄 | 工具链缺 `.init_array` 数据钩子 → compat 归档无法挂构造器/跨归档写；根治后可将 program_invocation_* 数据移回 compat |
+
+### meuos-utils### meuos-utils
 
 | 任务 | 状态 | 说明 |
 |------|------|------|
