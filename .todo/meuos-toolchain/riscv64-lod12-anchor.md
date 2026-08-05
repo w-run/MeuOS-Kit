@@ -38,3 +38,26 @@ rr_global 的 `g++/return g` 三处 `auipc %pcrel_hi(g); addi %pcrel_lo(.LrvpcN)
 
 - mt 下阶段专项（可与 loongarch64 runtime/segfault 并行或其后）；
 - 修后经验沉淀 `.agents/knowledge/`。
+
+## 最新精确定位（2026-08-05 大块推进）
+
+**根因 = mt/as 发 LO12 relocation type 27，reloc.c 只对 24/25 走 PCREL_LO12 配对 → 45/25 配对是死代码，实际 LO12 走简单 `symbol_value(.LrvpcN)` → p_hi 用错 → `addi` 低 12 位错（+0x14 应 −0x14）**。
+
+证据链：
+- mt/as 生成的 .o，LO12 relocation 是 **type 27**（mt readelf 与 binutils 均读 0x1b=27）；reloc.c L230 只判 `type==24||25` → **30-291 行的 HI20 配对块对 mt/as 产物是死代码**。
+- 因此 LO12 的 `resolved_value` = line 129 简单 `symbol_value(.LrvpcN)`（= .L0 标签地址），未做 `(S_hi + A_hi − P_hi)` 校正 → `addi` 立即数偏差（实测 +0x14 应 −0x14，差 0x28）。
+- 手动把 reloc.c 条件扩成含 27/28：LO12 配对块**开始执行**，暴露出**第二层**：部分对象（如 libc 的 `handlers`）报 `PCREL_LO12 without paired HI20` —— 配对 `roff==p_off`（p_off=lo_sym.value）对某些对象找不到正确 HI20。两层都需修复：
+  1. reloc.c LO12 分支接受 type 27/28（apply.c 已支持 27/28）；
+  2. HI20 配对逻辑对「.L0 标签 offset vs auipc/HI20 reloc offset」需正确匹配（当前对 libc 某些对象失败）。
+
+**注意**：reloc.c 还原为 24/25（保持现状稳定）；此专项需 mt/ld ELF relocation 解析层仔细修（type 归一 + HI20 配对），属真深面。
+
+## 更深发现（2026-08-05 迭代，配对需跨两种约定 + 可能跨 reloc section）
+
+扩 type 27/28 + HI20 配对后，逐对象暴露**第二种 LO12 名约**：
+- **约定 (a)**：LO12 symbol = 局部标签 `.L0`/`.LrvpcN`（value=auipc offset）→ 配对按 `roff == p_off`（auipc offset）。
+- **约定 (b)**：LO12 symbol = **真实目标符号**（如 libc exit.o 的 `handlers`），其 value=8 ≠ auipc offset，且需配对的 HI20 可能在**不同 reloc section**（LO12 in one section, HI20 in another）→ 当前只扫 `reloc_section` 单个 section + 按 offset 无法找到。
+
+且 `rsym == symbol_index`（同符号 index）也没命中 `handlers`（HI20 与 LO12 的 symbol index 可能不同，或用 local vs global）。
+
+**结论**：riscv64 PC-relative 在 mt/ld 需**两约定 + 跨 reloc section** 的 HI20 配对重构，才可能正确解析所有全局/函数引用。这是 mt/ld relocation 层的**中大型重构**，非小补丁；需专项迭代（逐对象 + GNU 对照）。mt/as emit type 27 是 GNU 正确行为，不背锅。

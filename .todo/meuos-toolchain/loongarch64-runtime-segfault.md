@@ -39,3 +39,23 @@
 
 - 跨域：mcc loongarch 后端 + mt/ld 链接 + libc crt；
 - mut 线下一阶段专项方向（2026-08-05 收束时登记）。
+
+## 精确根因（2026-08-05 大块推进，mcc 域 CFG）
+
+**mcc loongarch64 函数入口控制流布局错**：设局部变量基址的 setup block（`.Lmain.bb0`）被放到 .s **末尾且是死代码**，入口 prologue 后**直接 fallthrough 到 `.Lmain.bb1`**（用 a0 访问局部变量/结构体，a0 此时未初始化=调用者垃圾）→ 向非法地址写 → **segfault 139**。
+
+证据（mcc loongarch64 产物，rr_struct）：
+```
+main:
+  addi.d sp,sp,-32; st.d ra,sp,24; ...   # prologue
+.Lmain.bb1:                               # ← 入口 fallthrough 直接执行
+  addi.d t0,a0,0                          # 用 a0 写 struct.s.a —— a0 未初始化=垃圾地址
+  st.w   t1,t0,0                          # 写非法地址 → SEGFAULT
+  ... ret
+.Lmain.bb0:                               # ← 设 a0=fp-24 的 setup block 在末尾，死代码
+  addi.d t0,fp,-24; or a0,t0
+  b .Lmain.bb1
+```
+rr_array/rr_ptr 同模式（局部数组/指针基址 bb0 在尾部死代码）。hello.c（`return 42` 无局部访问）不受影响故过。
+
+已用 mt/as + GNU loongarch64 as 逐字节验证**各指令/分支编码正确**、mt/ld 链接正确 → **非 mt/as/ld，是 mcc 后端**：loongarch64 emit 时 entry 缺 `b .Lmain.bb0`（或 block 排序错，bb0 应前置/入口应跳它）。待 mcc-worker 修 loongarch64 后端 CFG/entry 跳转。
