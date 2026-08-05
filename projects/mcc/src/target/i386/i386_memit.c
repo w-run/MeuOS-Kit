@@ -1341,8 +1341,15 @@ emit_block(FILE *f, MBlkM *b)
 	case MMOP_RET: {
 		MInsM t = b->term;
 		t.blk = b;
-		/* return value move: eax (int) / xmm0 (float) */
-		if (t.src[0] && (t.src[0]->type == MT_F32 || t.src[0]->type == MT_F64)) {
+		/* return value move: eax (int) / edx:eax (i64) / xmm0 (float) */
+		if (t.src[0] && t.src[0]->type == MT_I64) {
+			/* i64: lo -> EAX, hi -> EDX.  i64_base resolves the value's
+			 * halves regardless of whether it is a constant, register, or
+			 * slot-resident temp. */
+			int base = i64_base(f, t.src[0], 0);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", base);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%edx\n", base + 4);
+		} else if (t.src[0] && (t.src[0]->type == MT_F32 || t.src[0]->type == MT_F64)) {
 			MVal *v = t.src[0];
 			fload_scratch(f, v);
 		} else if (t.src[0]) {
