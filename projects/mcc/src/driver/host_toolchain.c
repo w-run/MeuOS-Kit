@@ -109,6 +109,20 @@ sysrootpath(const char *root, const char *suffix)
 	return path;
 }
 
+/* Whether the active MeuOS sysroot provisions libgcc-meuos.a (libgcc-ABI soft
+ * helpers: __divdi3/__udivdi3/__ctzdi2/...).  Old sysroots that predate the
+ * archive skip the link flag so --specs=meuos still works there. */
+static bool
+sysroot_has_libgcc(void)
+{
+	const char *r = getenv("MEUOS_SYSROOT");
+	char p[1024];
+	if (!r || !*r)
+		return false;
+	snprintf(p, sizeof p, "%s/usr/lib/libgcc-meuos.a", r);
+	return access(p, R_OK) == 0;
+}
+
 /* Atomic RMW lowering uses the width-specific compiler-runtime ABI.  Inspect
  * the generated assembly immediately before the host link, so ordinary C
  * programs neither require nor accidentally acquire a libatomic dependency. */
@@ -288,6 +302,13 @@ run_mt_ld(struct array *objects, const char *output, bool verbose,
 	}
 	if (meuos_specs && !nodefaultlibs && !shared)
 		arrayaddbuf(&cmd, " -lc-meuos", 10);
+	/* The sysroot's libgcc-meuos.a supplies libgcc-ABI soft helpers
+	 * (__divdi3, __udivdi3, __ctzdi2, ...).  As an archive it contributes
+	 * nothing unless an emitted instruction sequence references a helper, so
+	 * pulling it on every MeuOS link is harmless for code mcc inlines
+	 * natively; it only kicks in for wide/soft ops without native forms. */
+	if (meuos_specs && !nodefaultlibs && !shared && sysroot_has_libgcc())
+		arrayaddbuf(&cmd, " -lgcc-meuos", 12);
 	/* Atomic runtime: same detection as run_host_cc. */
 	if (!nostdlib && !nodefaultlibs && asm_path_for_atomic &&
 	    asm_requires_atomic(asm_path_for_atomic))
@@ -392,6 +413,8 @@ run_host_cc(const char *asm_path, const char *output, bool compile_only,
 	 * the following archive in one left-to-right link pass. */
 	if (!compile_only && meuos_specs && !nodefaultlibs)
 		arrayaddbuf(&cmd, " -lc-meuos", 10);
+	if (!compile_only && meuos_specs && !nodefaultlibs && sysroot_has_libgcc())
+		arrayaddbuf(&cmd, " -lgcc-meuos", 12);
 	/* Atomic RMW expressions lower to the portable libatomic ABI.  Host
 	 * bootstrap links need this library even for widths that the host compiler
 	 * would normally inline itself.  A MeuOS sysroot supplies this ABI. */
@@ -473,6 +496,8 @@ run_host_link(struct array *objects, const char *output, bool verbose,
 	}
 	if (meuos_specs && !nodefaultlibs)
 		arrayaddbuf(&cmd, " -lc-meuos", 10);
+	if (meuos_specs && !nodefaultlibs && sysroot_has_libgcc())
+		arrayaddbuf(&cmd, " -lgcc-meuos", 12);
 	/* -Wl,<args> passthrough: forwarded verbatim to the host linker. */
 	for (i = 0, p = wl_args->val; i < wl_args->len / sizeof(char *); ++i) {
 		arrayaddbuf(&cmd, " -Wl,", 5);
