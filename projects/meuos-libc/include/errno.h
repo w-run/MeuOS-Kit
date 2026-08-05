@@ -1,7 +1,11 @@
 #ifndef MEUOS_ERRNO_H
 #define MEUOS_ERRNO_H
 
+#include <features.h>
+
+__BEGIN_DECLS
 int *__errno_location(void);
+__END_DECLS
 #define errno (*__errno_location())
 
 #define EPERM 1

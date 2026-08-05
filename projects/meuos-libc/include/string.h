@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <errno.h>
 
+__BEGIN_DECLS
 void *memcpy(void *restrict, const void *restrict, size_t);
 void *memmove(void *, const void *, size_t);
 void *memset(void *, int, size_t);
@@ -34,5 +35,6 @@ size_t strspn(const char *, const char *);
 size_t strcspn(const char *, const char *);
 int strcasecmp(const char *, const char *);
 int strncasecmp(const char *, const char *, size_t);
+__END_DECLS
 
 #endif

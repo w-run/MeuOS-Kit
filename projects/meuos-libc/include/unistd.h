@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+__BEGIN_DECLS
 ssize_t read(int, void *, size_t);
 ssize_t write(int, const void *, size_t);
 ssize_t pread(int, void *, size_t, off_t);
@@ -110,3 +111,5 @@ size_t confstr(int, char *, size_t);
 #define _SC_GETPW_R_SIZE_MAX 68
 #define _SC_ATEXIT_MAX 78
 #define _SC_NPROCESSORS_ONLN 84
+
+__END_DECLS
