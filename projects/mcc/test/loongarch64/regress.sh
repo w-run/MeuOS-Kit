@@ -82,4 +82,24 @@ grep -Eq 'pcalau12i[[:space:]].*pc_hi20\(g\)' "$glob"
 grep -Eq 'pcalau12i[[:space:]].*pc_hi20\(add2\)' "$glob"
 ! grep -Eq 'pcaddu12i' "$glob"
 
+# FP-constant .rodata gate (rr_fp): LoongArch has no 64-bit FP immediate, so
+# every float/double constant must be stashed in .rodata and loaded with
+# fld.s/fld.d via its pcalau12i-computed address.  The pre-fix emitter
+# materialised it with `li.d $t0, 0x0; movgr2fr.w` from a truncated bit
+# pattern, so `double d=1.5; (int)(d*28)` returned 0 instead of 42.  Assert
+# the .rodata stash (.quad/.long), the fld load, and the pcalau12i address
+# sequence; and forbid the old broken movgr2fr-from-constant materialisation.
+fpc=${TMPDIR:-/tmp}/mcc-la64-fpconst.$$.s
+trap 'rm -f "$asm" "$varargs" "$vla" "$abi" "$tls" "$loc" "$glob" "$fpc" "${asm}.large.c" "${asm}.large"' EXIT HUP INT TERM
+"$mcc" --target=loongarch64-linux -S -o "$fpc" "$root/test/loongarch64/fp_const.c"
+grep -Eq '^[.]section[[:space:]]+[.]rodata' "$fpc"
+# 1.5 (double) = 4609434218613702656 ; 2.25f (float) = 1073741824
+grep -Eq '\.quad[[:space:]]+4609434218613702656' "$fpc"
+grep -Eq '\.long[[:space:]]+1073741824' "$fpc"
+grep -Eq 'fld[.][ds][[:space:]]+\$f[0-9]+, \$t0, 0' "$fpc"
+grep -Eq 'pcalau12i[[:space:]]+\$t0, %pc_hi20\([.]L' "$fpc"
+# the old broken immediate + movgr2fr-from-gpr materialisation must not occur
+! grep -Eq 'movgr2fr[.][wd][[:space:]]' "$fpc"
+printf '%s\n' 'LoongArch64 FP-constant .rodata gate passed'
+
 printf '%s\n' 'LoongArch64 regression checks passed'

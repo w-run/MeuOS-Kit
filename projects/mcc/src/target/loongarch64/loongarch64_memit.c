@@ -28,6 +28,60 @@ static int g_alloca_cur;   /* frame-relative cursor for static allocas */
 static const char *g_fname;
 static int g_slot_base;    /* -16: ra+fp save area above the slots */
 
+/* ---- float constant pool (per emitted function) ------------------------- */
+/*
+ * LoongArch has no way to materialise a 64-bit IEEE-754 double (or a
+ * 32-bit float) as an immediate: `li.d` only loads 32-bit sign-extended
+ * values, so a double bit pattern like 0x3FF8000000000000 (1.5) cannot be
+ * built with a single instruction.  Match x86_64: FP constants are stashed
+ * into .rodata (fp_pool) and loaded into the FPR scratch with `fld.s/.d`.
+ * Labels carry g_fname so they stay unique across functions.
+ */
+static MConst **fp_pool;
+static uint32_t nfp, cfp;
+
+/* find or add a float constant, returning its .rodata label index */
+static uint32_t
+fp_label(MConst *c)
+{
+	for (uint32_t i = 0; i < nfp; i++) {
+		MConst *x = fp_pool[i];
+		if (x->type != c->type)
+			continue;
+		/* Compare the IEEE bit pattern (memcmp), not the value: -0.0 == +0.0
+		 * numerically but they differ in the sign bit and must stay distinct
+		 * constants (mir_util.c con_pool_find does the same). */
+		size_t sz = x->type == MT_F32 ? sizeof(float) : sizeof(double);
+		if (memcmp(&x->u, &c->u, sz) == 0)
+			return i;
+	}
+	if (nfp == cfp) {
+		cfp = cfp ? cfp * 2 : 8;
+		fp_pool = realloc(fp_pool, cfp * sizeof *fp_pool);
+	}
+	fp_pool[nfp++] = c;
+	return nfp - 1;
+}
+
+static void
+fp_pool_emit(FILE *f)
+{
+	if (!nfp)
+		return;
+	fputs(".section .rodata\n", f);
+	for (uint32_t i = 0; i < nfp; i++) {
+		MConst *c = fp_pool[i];
+		fprintf(f, ".L%s.lc%u:\n", g_fname ? g_fname : "f", i);
+		if (c->type == MT_F32) {
+			union { float s; uint32_t u; } x = { .s = c->u.s };
+			fprintf(f, "\t.long %u\n", x.u);
+		} else {
+			union { double d; uint64_t u; } x = { .d = c->u.d };
+			fprintf(f, "\t.quad %llu\n", (unsigned long long)x.u);
+		}
+	}
+}
+
 /* ---- width helpers ------------------------------------------------------ */
 
 static int
@@ -234,16 +288,23 @@ fmv_to_scratch(FILE *f, MVal *v, const char *rn)
 	switch (v->kind) {
 	case MV_CONST: {
 		if (v->con->kind == MC_FLT) {
-			uint32_t bits;
-			memcpy(&bits, &v->con->u.s, 4);
-			fprintf(f, "\tli.d\t$t0, 0x%x\n", bits);
-			fprintf(f, "\tmovgr2fr.w\t%s, $t0\n", rn);
+			/* A float/double constant cannot be built with li.d (no
+			 * 64-bit immediate for the IEEE bit pattern).  Load it from
+			 * the .rodata pool via its address in $t0, then fld into the
+			 * FPR scratch (mirrors x86_64's .L.lcN + movsd pattern). */
+			bool is32 = v->con->type == MT_F32;
+			uint32_t idx = fp_label(v->con);
+			fprintf(f, "\tpcalau12i\t$t0, %%pc_hi20(.L%s.lc%u)\n",
+			        g_fname ? g_fname : "f", idx);
+			fprintf(f, "\taddi.d\t$t0, $t0, %%pc_lo12(.L%s.lc%u)\n",
+			        g_fname ? g_fname : "f", idx);
+			fprintf(f, "\t%s\t%s, $t0, 0\n",
+			        is32 ? "fld.s" : "fld.d", rn);
 		} else {
-			uint64_t bits;
-			memcpy(&bits, &v->con->u.d, 8);
-			fprintf(f, "\tli.d\t$t0, 0x%llx\n",
-			        (unsigned long long)bits);
-			fprintf(f, "\tmovgr2fr.d\t%s, $t0\n", rn);
+			/* Non-FP constant reaching an FP operand: zero is the only
+			 * safe fallback (int->fp conversions go through CVT ops, not
+			 * here). */
+			fprintf(f, "\tfmov.d\t%s, $zero\n", rn);
 		}
 		return;
 	}
@@ -903,4 +964,6 @@ mfnm_emit_loongarch64(MFnM *fm, FILE *f)
 
 	for (MBlkM *b = fm->link; b; b = b->link)
 		emit_block(f, b);
+
+	fp_pool_emit(f);
 }
