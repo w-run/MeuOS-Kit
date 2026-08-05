@@ -637,6 +637,12 @@ i386_encode_insn(const struct mt_target *target,
 	 * unknown "sh" base. */
 	if (strcmp(mnemonic, "shl") == 0 || strcmp(mnemonic, "sal") == 0)
 		suffix = '\0';
+	/* cdq ends in 'q' but that 'q' is intrinsic (GNU-as Intel-name alias of
+	 * cltd, no explicit width suffix) — stripping it would turn `cdq` into
+	 * an unknown "cd" base.  Keep the full mnemonic so the CLTD/CDQ<+0x99>
+	 * branch below is reachable. */
+	if (strcmp(mnemonic, "cdq") == 0)
+		suffix = '\0';
 	if (suffix) {
 		size_t i;
 		for (i = 0; i < mlen - 1 && i < sizeof(base_buf) - 1; ++i)
