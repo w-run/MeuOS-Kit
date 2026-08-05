@@ -85,10 +85,41 @@ meuos-libc/
 |------|------|
 | `libc-meuos.a` | 核心库：string/stdlib/stdio/syscall/thread/signal/ctype/errno/dirent + arch runtime + syscall gate |
 | `libatomic-meuos.a` | 仅 `arch/<arch>/atomic.o`，供需要原子 runtime 的程序显式链接 |
+| `libgcc-meuos.a` | libgcc ABI 软 helper 独立归档（`__divdi3/__ctzdi2/__floatsidf` 等 44 符号），gcc/clang 无厂商 libgcc 时链接用；不污染 libc 符号表 |
 | `crt1.o` | 启动入口 |
 | `libc-meuos-compat.a` | GNU 扩展兼容层（由 `src/compat/Makefile` 独立构建） |
 
-## 5. 多 arch 构建
+## 5. 入口契约（entry contract）与分层
+
+`crt1.S` 进入 `main()` 前调用 `__meuos_startup(argc, argv, envp)`（`src/startup.c`），
+捕获进程镜像：`argv[0]` 与 auxv 基址。
+
+| 符号 | 归属 | 说明 |
+|------|------|------|
+| `__progname` | core | BSD/glibc 惯用，进程名（argv[0]） |
+| `getauxval` | core | 读取 auxv（`<sys/auxv.h>` + AT_* 常量） |
+| `program_invocation_name` / `program_invocation_short_name` | **core（数据）+ compat（声明头）** | glibc 惯例启动信息；见下方偏离记录 |
+
+### 记录：program_invocation_* 数据为何落 core（偏离 compat）
+
+`program_invocation_*` 属 glibc 惯例符号，按分层铁律本应进 opt-in 的 compat
+归档（只暴露标准符号于 core）。实际落地为 core 拥有数据、compat（
+`program-invocation.h`）拥有公开声明面，是**工具链能力缺口**驱动的必要偏离，
+`musl` 亦将此类 argv[0] 驱动的启动信息放 libc 核心。具体限制（均实证）：
+
+1. **crt 无 `.init_array`**：6 架构 `crt1.S` 均无 `.init_array`/`__libc_start_main`
+   wrapper，opt-in compat 归档没有启动钩子在运行时填值。
+2. **core 对未定义 weak 符号的写被工具链打爆**：`extern char *x (weak); x=...`
+   → 链接器生成「从地址 0 的 pcrel load」→ 运行 SIGSEGV（gdb 回溯 __meuos_startup+0x34）；
+   工具链未把 unresolved weak 折叠成 0 常量引用。
+3. **GAS `.set` 别名跨 archive 不可链接**：汇编 `.set a, __progname` 不产生消费者
+   可解析的公开符号；GCC `__attribute__((alias))` 又要求同 TU 定义目标。
+
+> 根治方向：给 crt 加 `.init_array`/`__libc_start_main` 支持，或修复上传符号折叠，
+> 之后可评估将 `program_invocation_*` 数据移回 compat（登记于
+> `.todo/meuos-libc/init-array-compat-data-hook.md`）。core **不**做 `__GLIBC__` 伪装。
+
+## 6. 多 arch 构建
 
 `make ARCH=<arch>` 切换目标：
 - `x86_64`（默认）：宿主 `cc` 编译 C，宿主汇编器处理 `.S`；当前完整运行验证基线。
@@ -101,7 +132,7 @@ meuos-libc/
 arch 的原生编号；ABU 形状不同的 syscall（如 i386 的 mmap2/socketcall）用
 专用 wrapper 而非静默翻译。
 
-## 6. 待实现项
+## 7. 待实现项
 
 见 [`PORTING.md`](PORTING.md) 的架构状态、ABI 契约、time64 策略和验收清单；
 各 `src/arch/<arch>/.todo` 记录具体 runtime 移植任务，根目录 `.todo/` 记录跨架构
