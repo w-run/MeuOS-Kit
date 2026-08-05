@@ -553,8 +553,7 @@ mcc_main(int argc, char *argv[])
 			g_error_json = 1;
 		} else if (strcmp(fmt, "sarif") == 0) {
 			g_diag_fmt = DIAG_SARIF;
-			fprintf(stderr,
-			    "mcc: --error-format=sarif not yet supported (falling back to text)\n");
+			g_error_json = 0; /* sarif uses its own envelope, not line-JSON */
 		} else {
 			fatal("unknown --error-format '%s' (use text/json/sarif)", fmt);
 		}
@@ -957,7 +956,7 @@ mcc_main(int argc, char *argv[])
 			 * next top-level item (err_sync skips to the next ';'/'}').
 			 * Without --error-json, error() exits on the first error. */
 			while (tok.kind != TEOF) {
-				if (g_error_json) {
+				if (g_error_json || g_diag_fmt == DIAG_SARIF) {
 					if (setjmp(g_err_recovery) != 0) {
 						g_err_recovery_set = 0;
 						err_sync();
@@ -975,7 +974,7 @@ mcc_main(int argc, char *argv[])
 				g_err_recovery_set = 0;
 			}
 		}
-		if (g_error_json && g_error_count > 0)
+		if ((g_error_json || g_diag_fmt == DIAG_SARIF) && g_error_count > 0)
 			exit(1); /* errors were collected: fail even if under the limit */
 		emittentativedefns();
 

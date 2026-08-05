@@ -397,6 +397,62 @@ diag_show_source(const char *file, size_t line0, size_t col1, size_t width,
 	}
 }
 
+/* SARIF 2.1.0 emitter (--error-format=sarif).  Streams one result object per
+ * diagnostic: begin() prints the single-run envelope on first use, emit()
+ * writes a result (http status 200-style minimal but schema-valid), and
+ * end() (registered via atexit) closes it on any exit path.  The tool.driver
+ * declares mcc + version; ruleId is the diagnostic kind (error code or warn
+ * bit).  codeFlows are left empty. */
+static bool sarif_started;
+static bool first_sarif_result = true;
+static void sarif_end(void); /* atexit handler closes the envelope */
+static const char *sarif_version(void)
+{
+	return "0.1.0"; /* mirrors driver_internal.h MCC_VERSION */
+}
+static void
+sarif_begin(void)
+{
+	if (sarif_started)
+		return;
+	sarif_started = true;
+	atexit(sarif_end); /* close the envelope on (any) exit path */
+	fprintf(stderr,
+	    "{\"version\":\"2.1.0\",\"$schema\":"
+	    "\"https://json.schemastore.org/sarif-2.1.0.json\","
+	    "\"runs\":[{\"tool\":{\"driver\":{\"name\":\"mcc\","
+	    "\"version\":\"%s\"}},\"results\":[",
+	    sarif_version());
+}
+static void
+sarif_emit(const char *level, const char *rule, const char *msg,
+    const struct location *loc, size_t width)
+{
+	sarif_begin();
+	if (first_sarif_result)
+		first_sarif_result = false;
+	else
+		fprintf(stderr, ",");
+	fprintf(stderr,
+	    "{\"ruleId\":\"%s\",\"level\":\"%s\",\"message\":{\"text\":\"%s\"},"
+	    "\"locations\":[{\"physicalLocation\":{\"artifactLocation\":"
+	    "{\"uri\":\"%s\"},\"region\":{\"startLine\":%zu,\"startColumn\":%zu,"
+	    "\"endColumn\":%zu}}}]}",
+	    rule, level, msg,
+	    loc && loc->file ? loc->file : "",
+	    loc ? loc->line + 1 : 1,
+	    loc ? loc->col : 0,
+	    loc ? loc->col + (width ? width - 1 : 0) : 1);
+}
+static void
+sarif_end(void)
+{
+	if (!sarif_started)
+		return;
+	sarif_started = false;
+	fprintf(stderr, "]}]}\n");
+}
+
 /* Core diagnostic.  All paths are non-returning: either the trial
  * rethrows, the JSON mode longjmps to the top-level recovery point (or
  * exits once the error limit is hit), or the process exits. */
@@ -430,16 +486,20 @@ error_common(enum errcode code, const struct location *loc, size_t width,
 	 * {"level":"error","code":"E0001","file":...,"line":N,"col":M,
 	 *  "end_col":P,"message":"..."}  Multiple errors are collected (up to
 	 * g_error_limit) before the process exits non-zero. */
-	if (g_error_json) {
-		fprintf(stderr, "{\"level\":\"error\",\"code\":\"%s\","
-		    "\"file\":\"%s\",\"line\":%zu,\"col\":%zu,\"end_col\":%zu,"
-		    "\"message\":\"%s\"}\n",
-		    errcode_str(code),
-		    loc && loc->file ? loc->file : "",
-		    loc ? loc->line + 1 : 0,
-		    loc ? loc->col : 0,
-		    loc ? loc->col + (width ? width - 1 : 0) : 0,
-		    msg);
+	if (g_error_json || g_diag_fmt == DIAG_SARIF) {
+		if (g_diag_fmt == DIAG_SARIF) {
+			sarif_emit("error", errcode_str(code), msg, loc, width);
+		} else {
+			fprintf(stderr, "{\"level\":\"error\",\"code\":\"%s\","
+			    "\"file\":\"%s\",\"line\":%zu,\"col\":%zu,\"end_col\":%zu,"
+			    "\"message\":\"%s\"}\n",
+			    errcode_str(code),
+			    loc && loc->file ? loc->file : "",
+			    loc ? loc->line + 1 : 0,
+			    loc ? loc->col : 0,
+			    loc ? loc->col + (width ? width - 1 : 0) : 0,
+			    msg);
+		}
 		if (++g_error_count >= g_error_limit)
 			exit(1);
 		if (g_err_recovery_set)
@@ -540,16 +600,22 @@ cc_warn(const struct location *loc, int kind, const char *fmt, ...)
 	/* --error-json: emit a structured JSON object for warnings too, so CI /
 	 * editors can collect errors and warnings uniformly.  (Errors exit; a
 	 * warning is incidental and does not terminate compilation.) */
-	if (g_error_json) {
-		fprintf(stderr,
-		    "{\"level\":\"warning\",\"file\":\"%s\",\"line\":%zu,"
-		    "\"col\":%zu,\"end_col\":%zu,\"kind\":%d,"
-		    "\"message\":\"%s\"}\n",
-		    loc && loc->file ? loc->file : "",
-		    loc ? loc->line + 1 : 0,
-		    loc ? loc->col : 0,
-		    loc ? loc->col : 0,
-		    kind, msgbuf);
+	if (g_error_json || g_diag_fmt == DIAG_SARIF) {
+		if (g_diag_fmt == DIAG_SARIF) {
+			char rule[16];
+			snprintf(rule, sizeof rule, "W%d", kind);
+			sarif_emit("warning", rule, msgbuf, loc, 1);
+		} else {
+			fprintf(stderr,
+			    "{\"level\":\"warning\",\"file\":\"%s\",\"line\":%zu,"
+			    "\"col\":%zu,\"end_col\":%zu,\"kind\":%d,"
+			    "\"message\":\"%s\"}\n",
+			    loc && loc->file ? loc->file : "",
+			    loc ? loc->line + 1 : 0,
+			    loc ? loc->col : 0,
+			    loc ? loc->col : 0,
+			    kind, msgbuf);
+		}
 		goto warn_done;
 	}
 
