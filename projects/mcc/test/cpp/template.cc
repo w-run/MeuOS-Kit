@@ -58,6 +58,18 @@ public:
     Box(int v) { val = v; }
     int get() { return val * 2; }
 };
+/* class-template partial specialization: `template<typename T> struct
+ * X<pattern>` matches any concrete arg with that shape.  Box<T*> matches a
+ * pointer arg and redefines get() (returning 1 for a non-null pointer) plus
+ * a pointer-aware method; Box<int>/Box<double> (non-pointer) fall back to
+ * the primary/explicit-specialization definitions. */
+template <typename T> class Box<T*> {
+public:
+    T *p;
+    Box() { p = 0; }
+    int get() { return p ? 1 : 0; }
+    int pointed() { return p ? (int)*p : -1; }
+};
 
 template <typename T> class Pair {
 public:
@@ -130,6 +142,15 @@ main(void)
     if (pr.sum() != 14) return 12;
     Pair<int> q(max(3, 8), max(1, 2));  /* class + function templates */
     if (q.sum() != 10) return 13;
+
+    /* class-template partial specialization: Box<T*> matches pointer args */
+    int pointee = 7;
+    Box<int*> bpi;
+    bpi.p = &pointee;
+    if (bpi.get() != 1) return 26;             /* T* spec: pointer non-null */
+    if (bpi.pointed() != 7) return 27;         /* partial's substitution T=int */
+    Box<double> bd2(1.5);
+    if (bd2.get() != 1.5) return 28;           /* non-pointer -> primary */
 
     /* member templates */
     Wrapper wp;

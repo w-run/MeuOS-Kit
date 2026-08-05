@@ -33,6 +33,117 @@ cpp_tmpl_class_lookup(const char *name)
 	return NULL;
 }
 
+/* Match a class partial-specialization pattern `template<typename T> struct
+ * Foo<T*> { ... }` against concrete template args (`Foo<int*>`).  For the
+ * common pointer pattern `T*`, a concrete arg X matches iff X is a pointer
+ * type; the pattern parameter T binds to the pointed-to type (base of X).
+ * Returns true and fills `subst[0..]` with the bound types (one per pattern
+ * parameter).  Non-pointer patterns are not yet handled (fall back to the
+ * primary instantiation). */
+static bool
+cpp_tmpl_cls_partial_match(struct cpp_tmpl_partial *par,
+                           struct type **args, int n,
+                           struct type **subst, int *nsubst)
+{
+	if (n < 1)
+		return false;
+	/* `T *` pattern: two tokens [param-name, TMUL] */
+	if (par->npatargs == 2 && par->patargs[1].kind == TMUL &&
+	    par->patargs[0].kind >= TIDENT) {
+		if (args[0]->kind != TYPEPOINTER)
+			return false;
+		subst[0] = args[0]->base;
+		*nsubst = 1;
+		return true;
+	}
+	return false;
+}
+
+/* Instantiate a matched partial specialization: replay the partial's class
+ * body with its own template parameters bound to the substituted concrete
+ * types, naming the resulting class by the PRIMARY template's mangled key
+ * (so `Foo<int*>` lands on the same cache entry regardless of which
+ * definition produced it).  Mirrors cpp_tmpl_class_do_inst's replay. */
+static struct type *
+cpp_tmpl_cls_partial_inst(struct scope *s, struct cpp_template *tmpl,
+                          struct cpp_tmpl_partial *par,
+                          struct type **subst, int nsubst,
+                          const char *key)
+{
+	extern struct scope filescope;
+	struct cpp_tmpl_param *pp;
+	struct decl *td;
+	struct type *t;
+	struct token *rtoks;
+	size_t depth;
+	struct token cur;
+	int rn, i;
+
+	/* bind the partial's parameters to the matched concrete types */
+	g_cpp_tmpl_nbinds = 0;
+	for (pp = par->params, i = 0; pp; pp = pp->next, ++i) {
+		struct type *bt = i < nsubst ? subst[i] : &typevoid;
+		td = mkdecl((char *)pp->name, DECLTYPE, bt, QUALNONE, LINKNONE);
+		scopeputdecl(&filescope, td);
+		if (g_cpp_tmpl_nbinds < 16)
+			g_cpp_tmpl_binds[g_cpp_tmpl_nbinds++] = td;
+	}
+	/* build `struct <key> <body> ;` replay; rename the class-name token and
+	 * any constructor/destructor tokens (which spell the primary class name)
+	 * to the mangled key so they define the instantiated class's ctors. */
+	rn = par->ntoks + 3;
+	rtoks = xmalloc(rn * sizeof *rtoks);
+	rtoks[0].kind = tokenget("struct", strlen("struct"));
+	rtoks[0].space = false;
+	rtoks[1].kind = tokenget(key, strlen(key));
+	rtoks[1].space = true;
+	for (i = 0; i < (int)par->ntoks; ++i) {
+		const char *nm;
+		if (par->toks[i].kind >= TIDENT) {
+			nm = tokenstr(par->toks[i].kind);
+			if (cpp_classify_ident(nm, strlen(nm)) == CPP_TNONE &&
+			    strcmp(nm, tmpl->name) == 0) {
+				rtoks[2 + i] = par->toks[i];
+				rtoks[2 + i].kind = tokenget(key, strlen(key));
+				continue;
+			}
+		}
+		rtoks[2 + i] = par->toks[i];
+	}
+	rtoks[rn - 1].kind = TSEMICOLON;
+	rtoks[rn - 1].space = false;
+
+	depth = tokctx_depth();
+	cur = tok;
+	tokpush(&cur, 1);
+	tokpush(rtoks, rn);
+	next();
+	{
+		extern struct func *curfunc;
+		struct func *saved_cf = curfunc;
+		bool saved_inst = g_cpp_tmpl_instantiating;
+		g_cpp_tmpl_instantiating = true;
+		cpp_class_decl(&filescope);
+		g_cpp_tmpl_instantiating = saved_inst;
+		curfunc = saved_cf;
+	}
+	tok = cur;
+	tokctx_rewind(depth);
+
+	t = scopegettag(&filescope, key, 1);
+	if (t) {
+		struct cpp_tmpl_cls_inst *ci = xmalloc(sizeof *ci);
+		snprintf(ci->key, sizeof ci->key, "%s", key);
+		ci->t = t;
+		ci->next = tmpl->cls_insts;
+		tmpl->cls_insts = ci;
+		if (!ci->next)
+			tmpl->cls_insts_end = &ci->next;
+	}
+	free(rtoks);
+	return t;
+}
+
 /* Instantiate a class template with the given type arguments: replay the
  * buffered `class Foo { ... }` declaration (with each parameter bound and
  * the tag renamed to the mangled instantiation name `Foo_<codes>`) through
@@ -68,6 +179,25 @@ cpp_tmpl_class_do_inst(struct scope *s, struct cpp_template *tmpl,
 	for (ci = tmpl->cls_insts; ci; ci = ci->next)
 		if (strcmp(ci->key, key) == 0)
 			return ci->t;
+
+	/* class-template partial specialization: try to match the concrete args
+	 * against each registered pattern (`Foo<T*>` matching `Foo<int*>`); if a
+	 * pattern matches, instantiate that partial's body instead of the primary
+	 * (more specific), register under the same key, and return. */
+	{
+		struct cpp_tmpl_partial *par;
+		for (par = tmpl->partials; par; par = par->next) {
+			struct type *subst[16];
+			int nsubst = 0;
+			if (cpp_tmpl_cls_partial_match(par, args, tmpl->nparams,
+			                               subst, &nsubst)) {
+				struct type *pt = cpp_tmpl_cls_partial_inst(s, tmpl,
+				    par, subst, nsubst, key);
+				if (pt)
+					return pt;
+			}
+		}
+	}
 
 	/* bind the parameters as type names / constants (re-put replaces the
 	 * previous binding; the names are generic template params and stay

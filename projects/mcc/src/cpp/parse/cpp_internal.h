@@ -179,6 +179,21 @@ struct cpp_tmpl_cls_inst {
 	struct cpp_tmpl_cls_inst *next;
 };
 
+/* A partial specialization of a class template: `template<typename T>
+ * struct Foo<T*> { ... }`.  `params` are this partial's own template
+ * parameters, `patargs` is the template-id argument list written against
+ * those params (`T`, `*` — the pattern to match concrete args against),
+ * and `toks`/`ntoks` is the class body following the class-id (the leading
+ * `struct Foo <pattern>` is not included). */
+struct cpp_tmpl_partial {
+	struct cpp_tmpl_param *params;
+	struct token *patargs;
+	size_t npatargs;
+	struct token *toks;
+	size_t ntoks;
+	struct cpp_tmpl_partial *next;
+};
+
 /* A function or class template declaration.  `toks` holds the declaration
  * tokens after the `template <...>` header (function declaration + body,
  * or `class Foo { ... }`); it is replayed with each concrete parameter
@@ -195,6 +210,7 @@ struct cpp_template {
 	struct type *owner;          /* enclosing class (member templates) */
 	struct token *constraint;    /* requires-clause tokens (`requires Expr<T>`) */
 	size_t nconstraint;
+	struct cpp_tmpl_partial *partials; /* partial specializations (class only) */
 	struct cpp_tmpl_inst *insts;
 	struct cpp_tmpl_inst **insts_end;
 	struct cpp_tmpl_cls_inst *cls_insts;
