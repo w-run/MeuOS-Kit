@@ -1216,11 +1216,15 @@ read_sleb(const unsigned char **pp, const unsigned char *end)
 	return (int64_t)val;
 }
 
-/* Decode a DWARF v4 .debug_line line-number program and print the
- * resulting (address, line) table plus file names.  Follows the DWARF4
- * 6.2.2 line-number program header and 6.2.5.1 standard opcodes. */
+/* Decode a DWARF v3/v4/v5 .debug_line line-number program and print the
+ * resulting (address, line) table plus file names.  Follows the DWARF
+ * 6.2.2 line-number program header and 6.2.5.1 standard opcodes.  v5 uses
+ * the revised header (address_size + segment_selector_size after version,
+ * entry-format directory/file tables) and line_strp file names resolved
+ * against the .debug_line_str section passed in `lstr`/`lstr_size`. */
 static void
-dump_debug_line(const unsigned char *data, size_t dsize)
+dump_debug_line(const unsigned char *data, size_t dsize,
+                const unsigned char *lstr, size_t lstr_size)
 {
 	const unsigned char *p = data;
 	uint64_t unit_length, header_length;
@@ -1249,6 +1253,10 @@ dump_debug_line(const unsigned char *data, size_t dsize)
 	p += 2;
 	if (version < 3 || version > 5)
 		return;    /* only decode DWARF v3/v4/v5 header layout */
+	/* DWARF v5 inserts address_size and segment_selector_size between
+	 * version and header_length. */
+	if (version == 5)
+		p += 2;      /* address_size, seg_selector_size */
 	header_length = (uint32_t)p[0] | (uint32_t)p[1] << 8 |
 	                (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
 	p += 4;
@@ -1275,55 +1283,173 @@ dump_debug_line(const unsigned char *data, size_t dsize)
 
 	printf("\nThe .debug_line section:\n");
 
-	/* include_directories (empty in our output) */
-	q = prog;
-	while (q < prog_end && *q != 0) {
-		while (q < prog_end && *q != 0)
-			++q;
-		if (q < prog_end)
-			++q;
-	}
-	if (q < prog_end)
-		++q;   /* skip the terminating 0 */
-
-	/* file_names */
+	/* include_directories / file_names.
+	 *
+	 * DWARF v3/v4 use fixed formats: a NUL-terminated name string followed
+	 * by three ULEB fields (dir_index/mtime/length) per directory, and for
+	 * files: name / dir_index / mtime / length.
+	 *
+	 * DWARF v5 replaces this with entry-format tables: a count of content
+	 * type/form pairs, then ULEB counts of entries, each entry parsed
+	 * according to the declared formats.
+	 *
+	 * We decode both header styles and, in the v5 case, decode the formats
+	 * enough to recover each name (DW_LNCT_path = content type 0x1,
+	 * typically DW_FORM_string or DW_FORM_line_strp). */
 	printf("\nFile name                Line number    Starting address\n");
-	{
-		int idx = 1;
-		unsigned char *fname = NULL;
-		size_t flen = 0;
-		while (q < prog_end && *q != 0) {
-			const unsigned char *s = q;
-			size_t n = 0;
-			while (q < prog_end && *q != 0) {
-				++q; ++n;
+	q = prog;
+	if (version == 5) {
+		/* DWARF5 stores the header's directory and file tables as
+		 * entry-format tables.  Each table begins with a count of
+		 * (content_type, form) pairs, then a ULEB entry count, then that
+		 * many entries, each being one field per declared format, sized
+		 * by the form.  We decode the file table generically and print
+		 * each file's path (content type DW_LNCT_path = 0x1, typically
+		 * DW_FORM_line_strp into .debug_line_str, or DW_FORM_string). */
+		uint64_t nfmt, e, k;
+		unsigned ct[32], fm[32], n;
+
+		if (q < prog_end) {
+			/* directories table: formats, count, then that many entries,
+			 * each one field per declared format sized by the form. */
+			uint64_t ndir;
+
+			nfmt = read_uleb(&q, prog_end);
+			n = (unsigned)(nfmt < 32 ? nfmt : 32);
+			for (k = 0; k < n && q < prog_end; ++k) {
+				ct[k] = (unsigned)read_uleb(&q, prog_end);
+				fm[k] = (unsigned)read_uleb(&q, prog_end);
 			}
-			if (q < prog_end)
-				++q;   /* skip null */
-			/* directory index */
-			read_uleb(&q, prog_end);
-			/* mtime */
-			read_uleb(&q, prog_end);
-			/* length */
-			read_uleb(&q, prog_end);
-			if (n + 1 > flen) {
-				fname = realloc(fname, n + 1);
-				flen = n + 1;
+			ndir = read_uleb(&q, prog_end);   /* directories_count */
+			for (e = 0; e < ndir && q < prog_end; ++e) {
+				for (k = 0; k < n && q < prog_end; ++k) {
+					if (fm[k] == 0x08 || fm[k] == 0x0a) {
+						while (q < prog_end && *q) ++q;
+						if (q < prog_end) ++q;
+					} else if (fm[k] == 0x1f) {
+						if (q + 4 <= prog_end) q += 4;
+					} else if (fm[k] == 0x05 || fm[k] == 0x0b) {
+						if (q + 1 <= prog_end) q += 1;
+					} else if (fm[k] == 0x0f) {
+						read_uleb(&q, prog_end);
+					} else if (fm[k] == 0x06 || fm[k] == 0x12 || fm[k] == 0x13) {
+						if (q + 4 <= prog_end) q += 4;
+					} else if (fm[k] == 0x07 || fm[k] == 0x14) {
+						if (q + 8 <= prog_end) q += 8;
+					}
+				}
 			}
-			if (fname && n > 0) {
-				memcpy(fname, s, n);
-				fname[n] = '\0';
-				printf("%-25s%4d\n", fname, idx);
+
+			/* file_names table */
+			nfmt = read_uleb(&q, prog_end);   /* format count */
+			n = (unsigned)(nfmt < 32 ? nfmt : 32);
+			for (k = 0; k < n && q < prog_end; ++k) {
+				unsigned c = (unsigned)read_uleb(&q, prog_end);
+				ct[k] = c;
+				fm[k] = (unsigned)read_uleb(&q, prog_end);
 			}
-			++idx;
+			{
+				uint64_t nfiles = read_uleb(&q, prog_end);
+				int shown = 0;
+				for (e = 0; e < nfiles && q < prog_end && shown < 8; ++e) {
+					for (k = 0; k < n && q < prog_end; ++k) {
+						/* decode one file field */
+						if (fm[k] == 0x1f) {   /* line_strp */
+							uint64_t off = 0;
+							if (q + 4 <= prog_end) {
+								int j;
+								for (j = 0; j < 4; ++j)
+									off |= (uint64_t)q[j] << (8 * j);
+								q += 4;
+							}
+							if (ct[k] == 0x1 && (size_t)off < lstr_size) {
+								printf("%-25s%4llu\n",
+								       (const char *)(lstr + off),
+								       (unsigned long long)e + 1);
+								++shown;
+							}
+						} else if (fm[k] == 0x08) {   /* string */
+							const unsigned char *s = q;
+							while (q < prog_end && *q) ++q;
+							if (q < prog_end) ++q;
+							if (ct[k] == 0x1) {
+								printf("%-25s%4llu\n",
+								       (const char *)s,
+								       (unsigned long long)e + 1);
+								++shown;
+							}
+						} else {
+							/* scalar / ULEB-sized field: skip per form */
+							if (fm[k] == 0x0f || fm[k] == 0x0d ||
+							    fm[k] == 0x22 || fm[k] == 0x23) {
+								read_uleb(&q, prog_end);
+							} else if (fm[k] == 0x05 || fm[k] == 0x0b) {
+								if (q + 1 <= prog_end) q += 1;
+							} else if (fm[k] == 0x12 || fm[k] == 0x13) {
+								if (q + 4 <= prog_end) q += 4;
+							} else if (fm[k] == 0x0a) {   /* block1 */
+								if (q < prog_end) {
+									unsigned bl = *q++;
+									if (q + bl <= prog_end) q += bl;
+									else q = prog_end;
+								}
+							}
+						}
+					}
+				}
+			}
 		}
-		free(fname);
+	} else {
+		/* v3/v4: skip include_directories (empty/unused) */
+		while (q < prog_end && *q != 0) {
+			while (q < prog_end && *q != 0)
+				++q;
+			if (q < prog_end)
+				++q;
+		}
+		if (q < prog_end)
+			++q;   /* skip the terminating 0 */
+
+		/* file_names */
+		{
+			int idx = 1;
+			unsigned char *fname = NULL;
+			size_t flen = 0;
+			while (q < prog_end && *q != 0) {
+				const unsigned char *s = q;
+				size_t n = 0;
+				while (q < prog_end && *q != 0) {
+					++q; ++n;
+				}
+				if (q < prog_end)
+					++q;   /* skip null */
+				/* directory index */
+				read_uleb(&q, prog_end);
+				/* mtime */
+				read_uleb(&q, prog_end);
+				/* length */
+				read_uleb(&q, prog_end);
+				if (n + 1 > flen) {
+					fname = realloc(fname, n + 1);
+					flen = n + 1;
+				}
+				if (fname && n > 0) {
+					memcpy(fname, s, n);
+					fname[n] = '\0';
+					printf("%-25s%4d\n", fname, idx);
+				}
+				++idx;
+			}
+			free(fname);
+		}
 	}
 
 	/* line-number program starts after the header_length field, which is
-	 * measured from the byte following the header_length field (i.e.
-	 * offset 4+2+4 = 10 from the start of .debug_line). */
-	prog = data + 10 + header_length;
+	 * measured from the byte following the header_length field:
+	 * offset = 4 (unit_length) + 2 (version) [+ 2 for v5 address_size and
+	 * segment_selector_size] + 4 (header_length), i.e. 10 or 12 from the
+	 * start of .debug_line. */
+	prog = data + (version == 5 ? 12 : 10) + header_length;
 	if (prog > prog_end)
 		prog = prog_end;
 	printf("\nAddress            Line   Column File   ISA  Discriminator Op\n");
@@ -1333,9 +1459,12 @@ dump_debug_line(const unsigned char *data, size_t dsize)
 		unsigned char b = *prog++;
 		if (b == 0) {
 			/* extended opcode: 0x00, uleb length (incl. subopcode),
-			 * subopcode, then length-1 bytes of arguments. */
-			const unsigned char *op_start = prog - 1;
+			 * subopcode, then length-1 bytes of arguments.  The ULEB
+			 * length field may span multiple bytes, and `exlen` is the
+			 * number of bytes following that field (subopcode included),
+			 * so the next opcode sits at `uleb_end + exlen`. */
 			unsigned exlen = (unsigned)read_uleb(&prog, prog_end);
+			const unsigned char *uleb_end = prog;
 			unsigned char subop;
 			unsigned k;
 
@@ -1365,7 +1494,7 @@ dump_debug_line(const unsigned char *data, size_t dsize)
 				read_uleb(&prog, prog_end);
 			}
 			/* skip to end of the extended opcode */
-			prog = op_start + 1 + exlen;
+			prog = uleb_end + exlen;
 			if (prog > prog_end)
 				prog = prog_end;
 			continue;
@@ -1663,6 +1792,8 @@ dump_debug(const unsigned char *bytes, size_t size,
 	enum mt_elf_status st;
 	unsigned char *abbrv_data = NULL;
 	size_t abbrv_size = 0;
+	unsigned char *lstr_data = NULL;
+	size_t lstr_size = 0;
 	uint16_t i;
 
 	if (view->section_name_index >= view->section_count)
@@ -1673,7 +1804,8 @@ dump_debug(const unsigned char *bytes, size_t size,
 		return;
 
 	/* First pass: locate .debug_abbrev (needed by .debug_info DIE
-	 * decoding). */
+	 * decoding) and .debug_line_str (needed to resolve v5 line_strp file
+	 * names). */
 	for (i = 0; i < view->section_count; ++i) {
 		const char *name;
 
@@ -1685,7 +1817,9 @@ dump_debug(const unsigned char *bytes, size_t size,
 		if (strcmp(name, ".debug_abbrev") == 0) {
 			abbrv_data = (unsigned char *)(bytes + sec.offset);
 			abbrv_size = sec.size;
-			break;
+		} else if (strcmp(name, ".debug_line_str") == 0) {
+			lstr_data = (unsigned char *)(bytes + sec.offset);
+			lstr_size = sec.size;
 		}
 	}
 
@@ -1702,7 +1836,8 @@ dump_debug(const unsigned char *bytes, size_t size,
 		    strcmp(name, ".stab") != 0)
 			continue;
 		if (strcmp(name, ".debug_line") == 0) {
-			dump_debug_line(bytes + sec.offset, sec.size);
+			dump_debug_line(bytes + sec.offset, sec.size,
+			                lstr_data, lstr_size);
 			continue;
 		}
 		if (strcmp(name, ".debug_abbrev") == 0) {
