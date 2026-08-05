@@ -577,7 +577,10 @@ mcc_main(int argc, char *argv[])
 			emit_debug = lvl > 0;
 			break;
 		}
-		case 'd': { for (char *p = a + 2; *p; ++p) if (*p <= 'Z') debug[(unsigned char)*p] = 1; break; }
+		case 'd': { for (char *p = a + 2; *p; ++p) {
+			if (*p <= 'Z') debug[(unsigned char)*p] = 1;
+			if (*p == 'P') g_opt_log = 1;   /* -dP: per-pass optimizer log */
+		} break; }
 		case 'P': break;   /* suppress line markers in -E */
 		case 'H': break;   /* print includes */
 		case 'D': arrayaddptr(&defines, ARGVAL(a + 2)); break;

@@ -38,6 +38,12 @@ int g_fast_math;
  * run_mir_passes for -O3 and -Os/-Oz (optlevel >= 3 || g_opt_size). */
 int g_mir_fold_aggressive;
 
+/* -dP / --opt-log: when nonzero, run_mir_passes prints a per-pass line for
+ * each optimization pass recording how many transformations it performed
+ * (folds, simplifications, copies propagated, GVN numbers, dead insns
+ * eliminated, ...).  Declared in ir.h; the driver sets it for -dP. */
+int g_opt_log;
+
 /* ---- use chain construction ------------------------------------------- */
 
 static void
@@ -1155,6 +1161,37 @@ run_mir_pass(MFn *fn, enum MIRPass pass)
 	}
 }
 
+/* -dP optimization log: human-readable per-pass name. */
+static const char *
+mir_pass_name(enum MIRPass pass)
+{
+	switch (pass) {
+	case MIR_PASS_USES:    return "uses";
+	case MIR_PASS_FOLD:    return "fold";
+	case MIR_PASS_COPY:    return "copy";
+	case MIR_PASS_LOADFWD: return "loadfwd";
+	case MIR_PASS_MEM2REG: return "mem2reg";
+	case MIR_PASS_GVN:     return "gvn";
+	case MIR_PASS_IFCONV:  return "ifconv";
+	case MIR_PASS_DCE:     return "dce";
+	case MIR_PASS_COMBINE: return "combine";
+	case MIR_PASS_SSA:     return "ssa";
+	default:               return "?";
+	}
+}
+
+/* Run a single pass; with g_opt_log (-dP) print one line recording how many
+ * transformations it made (each pass already returns its change count). */
+static uint32_t
+run_plog(MFn *fn, enum MIRPass pass)
+{
+	uint32_t n = run_mir_pass(fn, pass);
+	if (g_opt_log && n)
+		fprintf(stderr, "  [%s] %s: %u change%s\n", fn->name,
+		    mir_pass_name(pass), n, n == 1 ? "" : "s");
+	return n;
+}
+
 void
 run_mir_passes(MFn *fn, int optlevel)
 {
@@ -1171,11 +1208,13 @@ run_mir_passes(MFn *fn, int optlevel)
 	 *   和 signed div/rem 强度削减）。 */
 	uint32_t level = (uint32_t)(optlevel < 0 ? 0 : optlevel);
 	g_mir_fold_aggressive = (level >= 3 || g_opt_size);
+	if (g_opt_log)
+		fprintf(stderr, "== opt-log: %s (optlevel %d) ==\n", fn->name, optlevel);
 
 	if (level < 1) {
 		/* -O0: minimal — build uses + DCE only */
 		build_uses(fn);
-		run_mir_pass(fn, MIR_PASS_DCE);
+		run_plog(fn, MIR_PASS_DCE);
 		/* SSA consistency gate */
 		if (mssa_check(fn))
 			fprintf(stderr, "mcc: %s: SSA consistency check FAILED\n",
@@ -1184,9 +1223,9 @@ run_mir_passes(MFn *fn, int optlevel)
 	}
 
 	/* -O1: 基础优化管线 */
-	run_mir_pass(fn, MIR_PASS_FOLD);       /* 常量折叠 + 代数简化 */
-	run_mir_pass(fn, MIR_PASS_IFCONV);     /* 常量分支简化 */
-	run_mir_pass(fn, MIR_PASS_COPY);       /* 复制传播 */
+	run_plog(fn, MIR_PASS_FOLD);       /* 常量折叠 + 代数简化 */
+	run_plog(fn, MIR_PASS_IFCONV);     /* 常量分支简化 */
+	run_plog(fn, MIR_PASS_COPY);       /* 复制传播 */
 
 	if (level >= 2) {
 		/* -O2: 全局优化管线
@@ -1195,12 +1234,12 @@ run_mir_passes(MFn *fn, int optlevel)
 		 * LOADFWD (block-local) cannot reach — notably parameters and
 		 * induction variables reloaded on every loop iteration.  LOADFWD
 		 * then mops up the slots mem2reg conservatively declined. */
-		run_mir_pass(fn, MIR_PASS_MEM2REG);
-		run_mir_pass(fn, MIR_PASS_COPY);
-		run_mir_pass(fn, MIR_PASS_LOADFWD);
-		run_mir_pass(fn, MIR_PASS_GVN);
-		run_mir_pass(fn, MIR_PASS_IFCONV);  /* GVN may expose new constants */
-		run_mir_pass(fn, MIR_PASS_COPY);   /* propagate load-forwarded copies */
+		run_plog(fn, MIR_PASS_MEM2REG);
+		run_plog(fn, MIR_PASS_COPY);
+		run_plog(fn, MIR_PASS_LOADFWD);
+		run_plog(fn, MIR_PASS_GVN);
+		run_plog(fn, MIR_PASS_IFCONV);  /* GVN may expose new constants */
+		run_plog(fn, MIR_PASS_COPY);   /* propagate load-forwarded copies */
 
 		/* -Os/-Oz: 尺寸导向 — 同 -O2 水准但加 mifconv 第二轮折叠
 		 * （无需额外操作，ifconv 已在上方运行；保留 g_opt_size 标志
@@ -1208,13 +1247,13 @@ run_mir_passes(MFn *fn, int optlevel)
 		if (level >= 3) {
 			/* -O3: 激进优化
 			 * 指令合并 + 有符号 div/rem 强度削减 + 第二轮折叠 */
-			run_mir_pass(fn, MIR_PASS_COMBINE);
+			run_plog(fn, MIR_PASS_COMBINE);
 			msdiv_pow2(fn);
-			run_mir_pass(fn, MIR_PASS_FOLD);
-			run_mir_pass(fn, MIR_PASS_IFCONV);
-			run_mir_pass(fn, MIR_PASS_COPY);
+			run_plog(fn, MIR_PASS_FOLD);
+			run_plog(fn, MIR_PASS_IFCONV);
+			run_plog(fn, MIR_PASS_COPY);
 		}
-		run_mir_pass(fn, MIR_PASS_DCE);
+		run_plog(fn, MIR_PASS_DCE);
 	}
 	/* B.6 验收项 2: explicit-SSA consistency gate after the pipeline. */
 	if (mssa_check(fn))
