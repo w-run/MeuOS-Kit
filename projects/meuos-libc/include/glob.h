@@ -2,6 +2,7 @@
 #define _GLOB_H
 
 #include <sys/types.h>
+#include <features.h>
 
 #define GLOB_ERR      1
 #define GLOB_MARK     2
@@ -32,7 +33,9 @@ typedef struct glob_t {
 	size_t capacity;
 } glob_t;
 
+__BEGIN_DECLS
 void globfree(struct glob_t *);
 int glob(const char *restrict, int, int (*)(const char *, int), struct glob_t *restrict);
+__END_DECLS
 
 #endif

@@ -2,6 +2,7 @@
 #define MEUOS_SYS_SOCKET_H
 
 #include <sys/types.h>
+#include <features.h>
 
 typedef unsigned int socklen_t;
 
@@ -51,6 +52,7 @@ struct sockaddr {
 	char sa_data[14];
 };
 
+__BEGIN_DECLS
 int socket(int, int, int);
 int socketpair(int, int, int, int[2]);
 int bind(int, const struct sockaddr *, socklen_t);
@@ -67,5 +69,6 @@ ssize_t recvfrom(int, void *, size_t, int, struct sockaddr *, socklen_t *);
 int shutdown(int, int);
 int setsockopt(int, int, int, const void *, socklen_t);
 int getsockopt(int, int, int, void *, socklen_t *);
+__END_DECLS
 
 #endif

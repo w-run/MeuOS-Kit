@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <sys/types.h>
+#include <features.h>
 
 typedef long long regoff_t;
 
@@ -43,9 +44,11 @@ typedef struct {
 #define REG_ESPACE   12
 #define REG_BADRPT   13
 
+__BEGIN_DECLS
 int regcomp(regex_t *restrict, const char *restrict, int);
 int regexec(const regex_t *restrict, const char *restrict, size_t, regmatch_t [restrict], int);
 size_t regerror(int, const regex_t *restrict, char *restrict, size_t);
 void regfree(regex_t *);
+__END_DECLS
 
 #endif
