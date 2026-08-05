@@ -120,8 +120,14 @@ localtime(const time_t *t)
 	return gmtime(t);
 }
 
-time_t
-mktime(struct tm *tm)
+/* Core broken-down->seconds conversion, interpreting the fields as UTC.
+ * Shared by mktime() and timegm(): mktime() will observe local time once
+ * timezone support lands, timegm() stays on this UTC path, so the two keep
+ * their distinct semantics even though they coincide today (localtime is
+ * currently identity with gmtime).  Recomputes wday/yday and leaves isdst
+ * indeterminate. */
+static time_t
+mktime_utc(struct tm *tm)
 {
 	int y = tm->tm_year + 1900;
 	int m = tm->tm_mon;
@@ -143,6 +149,28 @@ mktime(struct tm *tm)
 	tm->tm_isdst = -1;
 
 	return result;
+}
+
+time_t
+mktime(struct tm *tm)
+{
+	/* No timezone support yet: local time is UTC. */
+	return mktime_utc(tm);
+}
+
+/* timegm(): broken-down time interpreted as UTC -> time_t. */
+time_t
+timegm(struct tm *tm)
+{
+	return mktime_utc(tm);
+}
+
+/* timelocal: broken-down time interpreted as local -> time_t.  This is
+ * mktime() under its historical XSI name; they share semantics here. */
+time_t
+timelocal(struct tm *tm)
+{
+	return mktime(tm);
 }
 
 size_t

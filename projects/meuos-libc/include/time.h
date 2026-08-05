@@ -23,6 +23,8 @@ struct tm *gmtime_r(const time_t *, struct tm *);
 struct tm *localtime(const time_t *);
 struct tm *localtime_r(const time_t *, struct tm *);
 time_t mktime(struct tm *);
+time_t timegm(struct tm *);
+time_t timelocal(struct tm *);
 size_t strftime(char *, size_t, const char *, const struct tm *);
 char *asctime(const struct tm *);
 char *ctime(const time_t *);
