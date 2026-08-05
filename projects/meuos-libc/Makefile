@@ -188,7 +188,7 @@ THREAD_OBJS    := $(BUILD)/thread/state.o $(BUILD)/thread/c11_threads.o \
                   $(BUILD)/thread/condvar.o $(BUILD)/thread/call_once.o \
                   $(BUILD)/thread/pthread.o
 SUPPORT_OBJS   := $(BUILD)/ctype/ctype.o $(BUILD)/signal/signal.o \
-                  $(BUILD)/dirent/dirent.o $(BUILD)/locale/locale.o \
+                  $(BUILD)/dirent/dirent.o $(BUILD)/dirent/nftw.o $(BUILD)/locale/locale.o \
                   $(BUILD)/glob/fnmatch.o $(BUILD)/glob/glob.o \
                   $(BUILD)/syslog/syslog.o \
                   $(BUILD)/socket/socket.o $(BUILD)/socket/inet.o \
@@ -328,6 +328,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/getline_gate test/getline_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/inet test/inet.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/strfmon_gate test/strfmon_gate.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/ftw_gate test/ftw_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/auxv test/auxv.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/uio test/uio.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/p2 test/p2.c
@@ -375,6 +376,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	/tmp/meuos-libc-check/getline_gate
 	/tmp/meuos-libc-check/inet
 	/tmp/meuos-libc-check/strfmon_gate
+	/tmp/meuos-libc-check/ftw_gate
 	/tmp/meuos-libc-check/auxv
 	/tmp/meuos-libc-check/uio
 	/tmp/meuos-libc-check/p2
