@@ -256,23 +256,22 @@ mabi_selcall(MFnM *fm, MOut *o, MInsM *args, int n, MInsM *call)
 	 * read uninitialized stack.) */
 	int soff = argbytes;   /* args occupy the bottom of the reserved block */
 
-	/* Aggregate return: sret pointer goes first (at the lowest address,
-	 * i.e. rightmost in cdecl — it's the last thing pushed, so it's
-	 * at [esp] after all args are placed).  But we're writing to
-	 * [esp + soff] in order, so we need to place the sret pointer at
-	 * the lowest offset.  First, reserve space for the regular args,
-	 * then write the sret pointer at the end. */
+	/* Aggregate return: the hidden sret pointer sits at the LOWEST stack
+	 * offset ([esp+0]), which the callee reads as [ebp+8] (its first
+	 * incoming arg slot); the regular args follow it at higher offsets,
+	 * so arg[0] lands at [esp+4] and is read as the callee's [ebp+12]. */
 	if (call->td) {
-		soff -= 4;
 		/* Allocate a local pad for the return value, pass its address
 		 * as the hidden sret pointer */
 		MVal *pad = tmp(fm, MT_PTR, "abi");
 		mout_cst(o, MMOP_ALLOCA16, MT_PTR, pad, 0,
 		         mconst_int(fm->host, MT_I32, call->td->size));
 		mout(o, MMOP_MOV, MT_PTR, call->dst, pad, 0);
-		/* Store the pad address to the stack at the sret slot */
+		/* Store the pad address to the stack at the sret slot ([esp+0]).
+		 * Note we do NOT advance soff here: the args are placed above the
+		 * sret, so arg[0] naturally lands at [esp+4] -> callee [ebp+12]. */
 		mout_addr(o, MMOP_STORE, MT_PTR, 0,
-		          maddr(reg(fm, I386MREG_ESP), 0, 1, soff),
+		          maddr(reg(fm, I386MREG_ESP), 0, 1, 0),
 		          call->dst);
 	}
 
