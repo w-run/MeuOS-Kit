@@ -64,7 +64,6 @@ pid_t wait(int *);
 #include <time.h>
 int select(int, fd_set *, fd_set *, fd_set *, struct timeval *);
 
-#endif
 int fchmod(int, mode_t);
 int fchown(int, uid_t, gid_t);
 int chown(const char *, uid_t, gid_t);
@@ -113,3 +112,5 @@ size_t confstr(int, char *, size_t);
 #define _SC_NPROCESSORS_ONLN 84
 
 __END_DECLS
+
+#endif /* MEUOS_UNISTD_H */
