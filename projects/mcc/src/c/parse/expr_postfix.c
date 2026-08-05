@@ -402,13 +402,23 @@ postfixexpr(struct scope *s, struct expr *r)
 				}
 				/* C++ function template call: instantiate the template
 				 * from the argument types (pending callee was recorded by
-				 * cpp_tmpl_placeholder). */
+				 * cpp_tmpl_placeholder).  Only run this when the callee is
+				 * actually the template placeholder (`r` was produced by
+				 * cpp_tmpl_placeholder, whose EXPRIDENT.decl is the dummy
+				 * callee).  A NORMAL function call inside a template's
+				 * explicit-argument replay (e.g. the constexpr call
+				 * `arrsize<sq(3)>()` stepping through `sq(3)`) must NOT
+				 * consume/pop the outer template's pending placeholder. */
 				{
 					extern struct expr *cpp_tmpl_instantiate(struct scope *,
 					    struct expr *);
-					struct expr *nf = cpp_tmpl_instantiate(s, arglist);
-					if (nf)
-						r = nf;
+					extern struct decl *cpp_tmpl_dummy_callee(void);
+					if (r->kind == EXPRIDENT &&
+					    r->u.ident.decl == cpp_tmpl_dummy_callee()) {
+						struct expr *nf = cpp_tmpl_instantiate(s, arglist);
+						if (nf)
+							r = nf;
+					}
 				}
 				t = r->type->base;
 				e = mkexpr(EXPRCALL, t->base, r);
