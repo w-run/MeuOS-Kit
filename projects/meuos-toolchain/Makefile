@@ -286,8 +286,46 @@ check-qemu-arm: $(AS_BIN) $(LD_BIN)
 	$(call RUN_QEMU_ARCH,arm)
 	@echo "check-qemu-arm: PASS"
 
-check-qemu-all: check-qemu-x86_64 check-qemu-i386 check-qemu-aarch64 check-qemu-riscv64 check-qemu-loongarch64 check-qemu-arm
+check-qemu-all: check-qemu-x86_64 check-qemu-i386 check-qemu-aarch64 check-qemu-riscv64 check-qemu-loongarch64 check-qemu-arm check-qemu-rtmatrix-x86_64 check-qemu-rtmatrix-i386 check-qemu-rtmatrix-aarch64 check-qemu-rtmatrix-riscv64 check-qemu-rtmatrix-loongarch64 check-qemu-rtmatrix-arm
 	@echo "check-qemu-all: DONE"
+
+# check-qemu-rtmatrix-* : per-arch depth (8-feature C runtime matrix) on top
+# of the hello pipeline.  Same SKIP/FAIL semantics as RUN_QEMU_ARCH; the
+# matrix script tracks known cross-arch defects as XFAIL (registered, not
+# masked) so any unregistered regression still fails loudly.
+RT_MATRIX := test/rt_matrix.sh
+define RUN_RT_MATRIX
+	@arch=$(1); qemu="$(abspath ../../env/qemu/qemu-$$arch-static)"; \
+	sysroot="$(abspath ../../sysroot/$$arch)"; \
+	if [ ! -x "$$qemu" ]; then echo "check-qemu-rtmatrix-$$arch: SKIP (no QEMU)"; exit 0; fi; \
+	if [ ! -d "$$sysroot" ]; then echo "check-qemu-rtmatrix-$$arch: SKIP (no sysroot)"; exit 0; fi; \
+	sh $(RT_MATRIX) "$(abspath $(MCC))" "$(abspath $(AS_BIN))" "$(abspath $(LD_BIN))" \
+		"$$qemu" "$$sysroot" "$$arch"
+endef
+
+check-qemu-rtmatrix-x86_64: $(AS_BIN) $(LD_BIN)
+	$(call RUN_RT_MATRIX,x86_64)
+	@echo "check-qemu-rtmatrix-x86_64: PASS"
+
+check-qemu-rtmatrix-i386: $(AS_BIN) $(LD_BIN)
+	$(call RUN_RT_MATRIX,i386)
+	@echo "check-qemu-rtmatrix-i386: PASS"
+
+check-qemu-rtmatrix-aarch64: $(AS_BIN) $(LD_BIN)
+	$(call RUN_RT_MATRIX,aarch64)
+	@echo "check-qemu-rtmatrix-aarch64: PASS"
+
+check-qemu-rtmatrix-riscv64: $(AS_BIN) $(LD_BIN)
+	$(call RUN_RT_MATRIX,riscv64)
+	@echo "check-qemu-rtmatrix-riscv64: PASS"
+
+check-qemu-rtmatrix-loongarch64: $(AS_BIN) $(LD_BIN)
+	$(call RUN_RT_MATRIX,loongarch64)
+	@echo "check-qemu-rtmatrix-loongarch64: PASS"
+
+check-qemu-rtmatrix-arm: $(AS_BIN) $(LD_BIN)
+	$(call RUN_RT_MATRIX,arm)
+	@echo "check-qemu-rtmatrix-arm: PASS"
 
 check-qemu-x86_64: $(AS_BIN) $(LD_BIN)
 	$(call RUN_QEMU_ARCH,x86_64)
@@ -373,4 +411,4 @@ install: $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all check check-elf check-ar check-as-x86_64 check-as-tls-x86_64 check-target-dispatch check-as-sse-x86_64 check-as-libc-x86_64 check-as-arm-neg check-ld-x86_64 check-ar-bsd check-ld-libpath check-rtld check-rtld-dtv check-ranlib check-libelf check-nm check-readelf check-strip check-objcopy check-objdump check-qemu-x86_64 check-qemu-i386 check-qemu-aarch64 check-qemu-riscv64 check-qemu-loongarch64 check-qemu-arm check-qemu-all install clean
+.PHONY: all check check-elf check-ar check-as-x86_64 check-as-tls-x86_64 check-target-dispatch check-as-sse-x86_64 check-as-libc-x86_64 check-as-arm-neg check-ld-x86_64 check-ar-bsd check-ld-libpath check-rtld check-rtld-dtv check-ranlib check-libelf check-nm check-readelf check-strip check-objcopy check-objdump check-qemu-x86_64 check-qemu-i386 check-qemu-aarch64 check-qemu-riscv64 check-qemu-loongarch64 check-qemu-arm check-qemu-rtmatrix-x86_64 check-qemu-rtmatrix-i386 check-qemu-rtmatrix-aarch64 check-qemu-rtmatrix-riscv64 check-qemu-rtmatrix-loongarch64 check-qemu-rtmatrix-arm check-qemu-all install clean
