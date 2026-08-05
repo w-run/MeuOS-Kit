@@ -257,6 +257,14 @@ wordexp(const char *words, wordexp_t *pw, int flags)
 	char **vec = NULL;
 	size_t cap = 0;
 
+	/* Always leave *pwordexp in a wordexp/wordfree-safe state: on any early
+	 * return (including error) the caller may still call wordfree(). */
+	if (!(flags & WRDE_APPEND)) {
+		pw->we_wordc = 0;
+		pw->we_wordv = NULL;
+		pw->we_offs = 0;
+	}
+
 	if (flags & WRDE_APPEND) {
 		/* start from existing words */
 		vec = pw->we_wordv;
@@ -291,8 +299,17 @@ wordexp(const char *words, wordexp_t *pw, int flags)
 			cap = ncap;
 		}
 		field = f.data;
-		if (!field)
-			field = (char *)"";
+		if (!field) {
+			/* word expanded to zero bytes (e.g. an empty $VAR, or an empty
+			 * quoted literal): store a real, freeable empty string instead of
+			 * a string literal, so wordfree() can free() every we_wordv[i]. */
+			field = (char *)malloc(1);
+			if (!field) {
+				e = WRDE_NOSPACE;
+				goto fail;
+			}
+			field[0] = 0;
+		}
 		/* glob expansion if metachars present */
 		if (has_globmeta(field)) {
 			glob_t g;
@@ -331,6 +348,10 @@ fail:
 			free(vec[i]);
 		free(vec);
 	}
+	/* Leave *pwordexp wordfree-safe even on error. */
+	pw->we_wordv = NULL;
+	pw->we_wordc = 0;
+	pw->we_offs = 0;
 	return e;
 }
 
