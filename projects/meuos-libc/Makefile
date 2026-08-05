@@ -256,7 +256,7 @@ DL_OBJS := $(BUILD)/dlfcn.o
 endif
 TERMIOS_OBJS := $(BUILD)/termios/termios.o
 TIME_OBJS    := $(BUILD)/time/time.o $(BUILD)/time/strptime.o $(BUILD)/time/sleep.o \
-                  $(BUILD)/time/itimer.o $(BUILD)/time/alarm.o
+                  $(BUILD)/time/itimer.o $(BUILD)/time/alarm.o $(BUILD)/time/wcsftime.o
 LIBC_LIB := $(BUILD)/libc-meuos.a
 
 ALL_OBJS := $(STRING_OBJS) $(STDLIB_OBJS) $(STDIO_OBJS) $(SYSCALL_OBJS) \
@@ -459,6 +459,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/wchar_io2_gate test/wchar_io2_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/wchar_num_gate test/wchar_num_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/wchar_fp_gate test/wchar_fp_gate.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/wcsftime_gate test/wcsftime_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/wctype_gate test/wctype_gate.c
 	# wchar_lit_gate (true wide-literal) deferred: blocked on mcc wide-literal
 	# dedup bug (different L".." collapse), tracked with mcc-worker; re-enable
@@ -552,6 +553,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	/tmp/meuos-libc-check/wchar_io2_gate
 	/tmp/meuos-libc-check/wchar_num_gate
 	/tmp/meuos-libc-check/wchar_fp_gate
+	/tmp/meuos-libc-check/wcsftime_gate
 	/tmp/meuos-libc-check/wctype_gate
 	/tmp/meuos-libc-check/auxv
 	/tmp/meuos-libc-check/uio

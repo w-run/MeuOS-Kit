@@ -173,148 +173,40 @@ timelocal(struct tm *tm)
 	return mktime(tm);
 }
 
+/* Shared wide formatting core defined in wcsftime.c; strftime converts its
+ * narrow format to wide, runs the core, then converts the wide result back to
+ * multibyte (statefully) so the two functions share one %-directive table. */
+size_t __wcsftime_core(wchar_t *, const wchar_t *, const struct tm *);
+
 size_t
 strftime(char *s, size_t max, const char *format, const struct tm *tm)
 {
-	char buf[4096];
-	size_t pos = 0;
-	static const char *wday_names[] = {"Sunday","Monday","Tuesday","Wednesday",
-		"Thursday","Friday","Saturday"};
-	static const char *wday_abbr[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
-	static const char *mon_names[] = {"January","February","March","April","May","June",
-		"July","August","September","October","November","December"};
-	static const char *mon_abbr[] = {"Jan","Feb","Mar","Apr","May","Jun",
-		"Jul","Aug","Sep","Oct","Nov","Dec"};
+	/* Wide conversion buffers (same render ceiling as the old strftime). */
+	wchar_t wfmt[4096], wbuf[4096];
+	size_t i = 0, wf = 0;
 
-	/* Append a snprintf result, counting only the bytes actually written
-	 * into buf (snprintf's return value is the would-be length and can
-	 * exceed the available space, which would drive pos past the end of
-	 * buf and then overflow at the terminating NUL). */
-#define STRFTIME_ADD(...) do { \
-		int __r = snprintf(buf + pos, sizeof(buf) - pos, __VA_ARGS__); \
-		int __avail = (int)(sizeof(buf) - 1 - pos); \
-		pos += (size_t)(__r < __avail ? __r : __avail); \
-	} while (0)
+	/* Narrow format -> wide (byte-as-wchar ASCII conversion; the format's
+	 * ASCII metacharacters and our handling are locale-independent). */
+	for (i = 0; format[i] && wf < 4095; i++)
+		wfmt[wf++] = (wchar_t)(unsigned char)format[i];
+	wfmt[wf] = L'\0';
 
-	for (const char *f = format; *f && pos < sizeof(buf) - 1; f++) {
-		if (*f != '%') {
-			buf[pos++] = *f;
-			continue;
-		}
-		f++;
-		int pad = 0; /* 0=none, 1=zero, 2=space */
-		if (*f == '0') { pad = 1; f++; }
-		else if (*f == '-') { pad = 0; f++; }
-		else if (*f == '^') { f++; } /* uppercase — skip for now */
+	size_t len = __wcsftime_core(wbuf, wfmt, tm);
 
-		switch (*f) {
-		case 'Y': STRFTIME_ADD("%04d", tm->tm_year + 1900); break;
-		case 'y': STRFTIME_ADD("%02d", tm->tm_year % 100); break;
-		case 'C': STRFTIME_ADD("%02d", (tm->tm_year + 1900) / 100); break;
-		case 'm': STRFTIME_ADD("%02d", tm->tm_mon + 1); break;
-		case 'd': STRFTIME_ADD("%02d", tm->tm_mday); break;
-		case 'e': STRFTIME_ADD("%2d", tm->tm_mday); break;
-		case 'H': STRFTIME_ADD("%02d", tm->tm_hour); break;
-		case 'I': {
-			int h12 = tm->tm_hour % 12;
-			if (h12 == 0) h12 = 12;
-			STRFTIME_ADD("%02d", h12); break;
+	/* Wide result -> multibyte. All rendered fields are ASCII, so a plain
+	 * byte-per-wchar fill is exact and avoids needing a locale state here. */
+	if (len >= max) {
+		if (max > 0) {
+			for (i = 0; i < max - 1; i++)
+				s[i] = (char)wbuf[i];
+			s[max - 1] = '\0';
 		}
-		case 'M': STRFTIME_ADD("%02d", tm->tm_min); break;
-		case 'S': STRFTIME_ADD("%02d", tm->tm_sec); break;
-		case 'p': STRFTIME_ADD("%s", tm->tm_hour < 12 ? "AM" : "PM"); break;
-		case 'P': STRFTIME_ADD("%s", tm->tm_hour < 12 ? "am" : "pm"); break;
-		case 'a': STRFTIME_ADD("%s", wday_abbr[tm->tm_wday]); break;
-		case 'A': STRFTIME_ADD("%s", wday_names[tm->tm_wday]); break;
-		case 'w': STRFTIME_ADD("%d", tm->tm_wday); break;
-		case 'u': STRFTIME_ADD("%d", tm->tm_wday ? tm->tm_wday : 7); break;
-		case 'b':
-		case 'h': STRFTIME_ADD("%s", mon_abbr[tm->tm_mon]); break;
-		case 'B': STRFTIME_ADD("%s", mon_names[tm->tm_mon]); break;
-		case 'j': STRFTIME_ADD("%03d", tm->tm_yday + 1); break;
-		case 'U': {
-			int w = (tm->tm_yday + 7 - tm->tm_wday) / 7;
-			STRFTIME_ADD("%02d", w); break;
-		}
-		case 'W': {
-			int first_wday = (tm->tm_yday - tm->tm_wday + 7) % 7;
-			int w = (tm->tm_yday + 7 - first_wday) / 7;
-			STRFTIME_ADD("%02d", w); break;
-		}
-		case 'V': {
-			/* ISO week number */
-			int jan1_wday = (tm->tm_wday - tm->tm_yday % 7 + 7) % 7;
-			int week = (tm->tm_yday + 7 - jan1_wday + 1) / 7;
-			STRFTIME_ADD("%02d", week); break;
-		}
-		case 'G': STRFTIME_ADD("%04d", tm->tm_year + 1900); break;
-		case 'g': STRFTIME_ADD("%02d", (tm->tm_year + 1900) % 100); break;
-		case 'c': {
-			/* %a %b %e %T %Y */
-			STRFTIME_ADD("%s %s %2d %02d:%02d:%02d %04d",
-				wday_abbr[tm->tm_wday], mon_abbr[tm->tm_mon], tm->tm_mday,
-				tm->tm_hour, tm->tm_min, tm->tm_sec, tm->tm_year + 1900);
-			break;
-		}
-		case 'x': /* %m/%d/%y */
-			STRFTIME_ADD("%02d/%02d/%02d",
-				tm->tm_mon+1, tm->tm_mday, tm->tm_year % 100);
-			break;
-		case 'X':
-			STRFTIME_ADD("%02d:%02d:%02d",
-				tm->tm_hour, tm->tm_min, tm->tm_sec);
-			break;
-		case 'D': /* %m/%d/%y */
-			STRFTIME_ADD("%02d/%02d/%02d",
-				tm->tm_mon+1, tm->tm_mday, tm->tm_year % 100);
-			break;
-		case 'F': /* %Y-%m-%d */
-			STRFTIME_ADD("%04d-%02d-%02d",
-				tm->tm_year+1900, tm->tm_mon+1, tm->tm_mday);
-			break;
-		case 'T': /* %H:%M:%S */
-			STRFTIME_ADD("%02d:%02d:%02d",
-				tm->tm_hour, tm->tm_min, tm->tm_sec);
-			break;
-		case 'r': /* %I:%M:%S %p */
-			STRFTIME_ADD("%02d:%02d:%02d %s",
-				tm->tm_hour % 12 ? tm->tm_hour % 12 : 12,
-				tm->tm_min, tm->tm_sec,
-				tm->tm_hour < 12 ? "AM" : "PM");
-			break;
-		case 'R': /* %H:%M */
-			STRFTIME_ADD("%02d:%02d", tm->tm_hour, tm->tm_min);
-			break;
-		case 'z': /* timezone offset — not supported */
-			break;
-		case 'Z': /* timezone name — not supported */
-			break;
-		case '%':
-			buf[pos++] = '%';
-			break;
-		case 'n':
-			buf[pos++] = '\n';
-			break;
-		case 't':
-			buf[pos++] = '\t';
-			break;
-		default:
-			/* Unknown specifier: copy literally */
-			buf[pos++] = '%';
-			if (*f) buf[pos++] = *f;
-			break;
-		}
-		if (pos >= sizeof(buf)) break;
-	}
-	if (pos >= sizeof(buf))
-		pos = sizeof(buf) - 1;
-	buf[pos] = '\0';
-	if (pos >= max) {
-		if (max > 0) { memcpy(s, buf, max - 1); s[max - 1] = '\0'; }
 		return 0;
 	}
-	memcpy(s, buf, pos + 1);
-	return pos;
+	for (i = 0; i < len; i++)
+		s[i] = (char)wbuf[i];
+	s[len] = '\0';
+	return len;
 }
 
 double
