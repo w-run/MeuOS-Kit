@@ -1,10 +1,15 @@
-#include <stdio.h>
-#include <errno.h>
-#include <stdlib.h>
-#include <stddef.h>
+/* stdio/getline.c -- getline(3) / getdelim(3), POSIX.1-2008.
+ *
+ * In glibc these live in libc proper; real programs (mini-bc, config
+ * helpers) depend on them without an opt-in compat archive, so they are
+ * core here.  Implemented on top of fgetc/realloc; no FILE internals.
+ */
 
-/* getline / getdelim -- POSIX.1-2008, but historically a glibc extension.
- * Implemented on top of fgetc/realloc; no FILE internals needed. */
+#include <errno.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+
 ssize_t
 getdelim(char **lineptr, size_t *n, int delimiter, FILE *stream)
 {
