@@ -404,8 +404,23 @@ cpp_parse_new_expr(struct scope *s)
 				cpp_init_vptrs(curfunc, t, thisp);
 			}
 		}
-	} else if (args) {
-		error_code(E_CTYPE, &tok.loc, "'new' with arguments requires a class type");
+	} else {
+		/* scalar new: `new int(42)` value-initialises the heap scalar with
+		 * the argument (C++ [expr.new]).  Without an argument the storage
+		 * is left indeterminate, as the standard allows. */
+		if (args) {
+			struct expr *arg = args;
+			struct expr *dp;
+			extern struct expr *exprassign(struct expr *, struct type *);
+			if (arg->next)
+				error_code(E_CTYPE, &tok.loc,
+				    "scalar 'new' takes a single value-init argument");
+			dp = mkexpr(EXPRUNARY, t, ident);
+			dp->op = TMUL;
+			dp->lvalue = true;
+			arg = exprassign(arg, t);
+			funcexpr(curfunc, mkassignexpr(dp, arg));
+		}
 	}
 	/* the new-expression's value: the pointer stored in tmp */
 	e = mkexpr(EXPRIDENT, pt, NULL);
