@@ -18,6 +18,7 @@
 | [feedback_aarch64_aapcs.md](feedback_aarch64_aapcs.md) | 缺陷 | aarch64 AAPCS64 三处缺陷闭环：selpar off=0、大帧 stp 超限、spill-slot 基址寻址丢 x29 |
 | [project_mcc_mxx_rebase.md](project_mcc_mxx_rebase.md) | 项目 | mxx-work 残留 rebase 无损清理纪律；lead-doc-mir-baseline 实为 m++/MIR 主线（LIR 桥接移除/mcombine/cpp class/双二进制） |
 | [project_mcc_toolchain_roundup.md](project_mcc_toolchain_roundup.md) | 项目 | 本轮进展：TLS 静态 GD 闭环(方案B ae88aa1)、m++ C++ P1 5 项、P0.1 动态 libc(d224248)、mt/ld .dynamic 新阻塞、静态数组 segfault、教训 |
+| [rules_mxx_complete_campaign.md](rules_mxx_complete_campaign.md) | 规约 | **终极战役规约**：永久分支开发(m++ 完前不合并main)、全缺陷清零、自主特性不做缝合怪、完全自举C90~23+C++98~23、禁止向用户提问/终止目标、及时提交防断档 |
 
 ## 使用约定
 
