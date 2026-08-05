@@ -517,6 +517,7 @@ cc_warn(const struct location *loc, int kind, const char *fmt, ...)
 {
 	va_list ap;
 	const char *efmt = fmt;   /* 原始英文格式串（供 --explain 分类匹配） */
+	char msgbuf[1024];
 
 	if (!(warn_level & kind))
 		return;
@@ -524,6 +525,25 @@ cc_warn(const struct location *loc, int kind, const char *fmt, ...)
 	/* i18n: 正文按当前语言翻译；--explain 分类基于英文源串匹配，
 	 * 提示文本随语言选择（en/zh 一致）。 */
 	fmt = msg_tr(fmt);
+	va_start(ap, fmt);
+	vsnprintf(msgbuf, sizeof msgbuf, fmt, ap);
+	va_end(ap);
+
+	/* --error-json: emit a structured JSON object for warnings too, so CI /
+	 * editors can collect errors and warnings uniformly.  (Errors exit; a
+	 * warning is incidental and does not terminate compilation.) */
+	if (g_error_json) {
+		fprintf(stderr,
+		    "{\"level\":\"warning\",\"file\":\"%s\",\"line\":%zu,"
+		    "\"col\":%zu,\"end_col\":%zu,\"kind\":%d,"
+		    "\"message\":\"%s\"}\n",
+		    loc && loc->file ? loc->file : "",
+		    loc ? loc->line + 1 : 0,
+		    loc ? loc->col : 0,
+		    loc ? loc->col : 0,
+		    kind, msgbuf);
+		goto warn_done;
+	}
 
 	if (loc)
 		fprintf(stderr, "%s%s:%zu:%zu:%s ", dcol(DC_CYAN), loc->file,
@@ -532,9 +552,7 @@ cc_warn(const struct location *loc, int kind, const char *fmt, ...)
 		fprintf(stderr, "%s%s: %s", dcol(DC_CYAN), argv0, dcol(DC_RESET));
 	fprintf(stderr, "%s%s %s", dcol(DC_BOLD DC_YELLOW),
 	        msg_word_warning(), dcol(DC_RESET));
-	va_start(ap, fmt);
-	vfprintf(stderr, fmt, ap);
-	va_end(ap);
+	fputs(msgbuf, stderr);
 	/* --explain: append a localized fix-hint suffix. */
 	if (g_error_explain) {
 		const char *hint = msg_explain(efmt);
@@ -547,6 +565,7 @@ cc_warn(const struct location *loc, int kind, const char *fmt, ...)
 	if (loc && loc->file)
 		diag_show_source(loc->file, loc->line, loc->col, 1, NULL);
 
+warn_done:
 	if (warn_as_error)
 		error(loc, "warning treated as error");
 }
