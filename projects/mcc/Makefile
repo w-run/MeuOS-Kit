@@ -126,6 +126,9 @@ check-loongarch64: $(BIN)
 check-i386: $(BIN)
 	sh test/i386/regress.sh ./$(BIN)
 
+check-dwarf: $(BIN)
+	sh test/dwarf/line.sh ./$(BIN)
+
 # arm runtime regression: compiles and runs arm static binaries through
 # qemu-arm (user-mode).  Exercises AAPCS base-standard vararg
 # marshalling — 8-byte stack alignment and 64-bit Kl packing.  Requires
@@ -445,7 +448,7 @@ check-olevel: $(BIN)
 check-i18n: $(BIN) $(MPP_BIN)
 	@sh test/i18n/run.sh ./$(BIN) ./$(MPP_BIN)
 
-.PHONY: all clean check check-all check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-c23-neg check-c-mir check-driver check-diag-warning check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg check-cpp check-cpp-focus check-cpp-gcc check-x86_64-runtime check-riscv64-runtime check-loongarch64-runtime check-olevel check-i18n
+.PHONY: all clean check check-all check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-c23-neg check-c-mir check-driver check-diag-warning check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg check-cpp check-cpp-focus check-cpp-gcc check-x86_64-runtime check-riscv64-runtime check-loongarch64-runtime check-olevel check-i18n check-dwarf
 
 # chibicc community functional test suite (C11/C23 conformance).
 # Runs test/community/chibicc/run.sh against the MeuOS sysroot.

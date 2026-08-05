@@ -308,11 +308,36 @@ dwarf_finalize(FILE *f)
 	fprintf(f, ".Ldwarf_line_hdr_end:\n");
 	for (i = 0; i < g_nfuncs; i++) {
 		struct dwarf_func *fu = &g_funcs[i];
-		fprintf(f, "\t.byte 0,9,2\n");                /* DW_LNE_set_address */
+		/* DW_LNE_set_address (extended opcode 2): length = 1 + ptrsize,
+		 * followed by the address.  (The old code hard-wired 9, which is
+		 * only correct for 64-bit; 32-bit targets got a malformed address.) */
+		fprintf(f, "\t.byte 0,%d,2\n", 1 + ptrsize);
 		fprintf(f, "\t.%sbyte %s\n", ASZ, fu->name);
-		fprintf(f, "\t.sleb128 %d\n", fu->line - 1);  /* advance_line */
-		fprintf(f, "\t.byte 1\n");                    /* DW_LNS_copy */
-		fprintf(f, "\t.byte 0,1,1\n");                /* DW_LNE_end_sequence */
+		/* DW_LNS_advance_line (standard opcode 3) + signed line delta.
+		 * The line register starts at 1, so the delta to reach fu->line
+		 * is fu->line - 1.  Emitting the bare .sleb128 without the opcode
+		 * byte made the reader parse it as an extended opcode prefix
+		 * (e.g. the delta 0 became "extended opcode 0: UNKNOWN"), which
+		 * desynchronised the whole program. */
+		fprintf(f, "\t.byte 3\n");
+		fprintf(f, "\t.sleb128 %d\n", fu->line - 1);
+		/* DW_LNS_copy (standard opcode 1): commit the row at the entry. */
+		fprintf(f, "\t.byte 1\n");
+		/* Give the row a non-zero address range so the debugger can map
+		 * this function's entry to its line.  Extend the PC to the next
+		 * function's entry (functions are emitted in order, so addresses
+		 * increase); for the last function advance by 1.  DW_LNS_advance_pc
+		 * is standard opcode 2 with a uleb128 delta. */
+		if (i + 1 < g_nfuncs) {
+			fprintf(f, "\t.byte 2\n");
+			fprintf(f, "\t.uleb128 %s - %s\n",
+			        g_funcs[i + 1].name, fu->name);
+		} else {
+			fprintf(f, "\t.byte 2\n");
+			fprintf(f, "\t.uleb128 1\n");
+		}
+		/* DW_LNE_end_sequence (extended opcode 1): terminate the row. */
+		fprintf(f, "\t.byte 0,1,1\n");
 	}
 	fprintf(f, ".Ldwarf_line_end:\n");
 

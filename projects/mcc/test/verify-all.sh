@@ -166,6 +166,7 @@ else
 fi
 run "make check-driver" make check-driver
 run "make check-mt-integration" make check-mt-integration
+run "make check-dwarf" make check-dwarf
 run "make check-i386" make check-i386
 run "make check-loongarch64" make check-loongarch64
 run "make check-targets" make check-targets
