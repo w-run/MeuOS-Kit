@@ -1440,27 +1440,44 @@ static const char *
 dwarf_tag_name(uint64_t tag)
 {
 	switch (tag) {
-	case 0x0f: return "friend";
-	case 0x10: return "array_type";
+	case 0x01: return "array_type";
+	case 0x02: return "class_type";
+	case 0x03: return "entry_point";
+	case 0x04: return "enumeration_type";
+	case 0x05: return "formal_parameter";
+	case 0x08: return "imported_declaration";
+	case 0x0a: return "label";
+	case 0x0b: return "lexical_block";
+	case 0x0d: return "member";
+	case 0x0f: return "pointer_type";
+	case 0x10: return "reference_type";
 	case 0x11: return "compile_unit";
 	case 0x12: return "string_type";
 	case 0x13: return "structure_type";
-	case 0x14: return "union_type";
-	case 0x15: return "enumeration_type";
-	case 0x16: return "subrange_type";
-	case 0x17: return "pointer_type";
-	case 0x18: return "reference_type";
-	case 0x1c: return "const_type";
-	case 0x1d: return "volatile_type";
-	case 0x22: return "class_type";
+	case 0x15: return "subroutine_type";
+	case 0x16: return "typedef";
+	case 0x17: return "union_type";
+	case 0x18: return "unspecified_parameters";
+	case 0x1c: return "inheritance";
+	case 0x1d: return "inlined_subroutine";
+	case 0x1f: return "ptr_to_member_type";
+	case 0x20: return "set_type";
+	case 0x21: return "subrange_type";
 	case 0x24: return "base_type";
-	case 0x27: return "typedef";
+	case 0x26: return "const_type";
+	case 0x27: return "constant";
+	case 0x28: return "enumerator";
+	case 0x2a: return "friend";
 	case 0x2e: return "subprogram";
-	case 0x2f: return "dwarf_procedure";
+	case 0x2f: return "template_type_parameter";
+	case 0x30: return "template_value_parameter";
 	case 0x34: return "variable";
-	case 0x36: return "formal_parameter";
-	case 0x3b: return "lexical_block";
-	case 0x3d: return "call_site";
+	case 0x35: return "volatile_type";
+	case 0x36: return "dwarf_procedure";
+	case 0x37: return "restrict_type";
+	case 0x39: return "namespace";
+	case 0x3b: return "unspecified_type";
+	case 0x40: return "call_site";
 	default:  return NULL;
 	}
 }
@@ -1472,19 +1489,50 @@ dwarf_attr_name(uint64_t attr)
 	case 0x01: return "sibling";
 	case 0x02: return "location";
 	case 0x03: return "name";
+	case 0x09: return "ordering";
 	case 0x0b: return "byte_size";
+	case 0x0d: return "bit_size";
 	case 0x10: return "stmt_list";
 	case 0x11: return "low_pc";
 	case 0x12: return "high_pc";
 	case 0x13: return "language";
 	case 0x16: return "encoding";
-	case 0x3e: return "encoding"; /* mcc's DWARF emitter */
+	case 0x17: return "visibility";
+	case 0x18: return "import";
+	case 0x1c: return "const_value";
 	case 0x1b: return "comp_dir";
+	case 0x20: return "inline";
+	case 0x22: return "lower_bound";
 	case 0x25: return "producer";
+	case 0x27: return "prototyped";
+	case 0x2f: return "upper_bound";
+	case 0x31: return "abstract_origin";
+	case 0x34: return "artificial";
+	case 0x38: return "data_member_location";
+	case 0x39: return "decl_column";
 	case 0x3a: return "decl_file";
 	case 0x3b: return "decl_line";
+	case 0x3c: return "declaration";
+	case 0x3e: return "encoding";
+	case 0x3f: return "external";
 	case 0x40: return "frame_base";
+	case 0x42: return "identifier_case";
+	case 0x47: return "specification";
+	case 0x48: return "static_link";
 	case 0x49: return "type";
+	case 0x4f: return "associated";
+	case 0x6b: return "data_bit_offset";
+	case 0x6e: return "linkage_name";
+	case 0x79: return "macros";
+	case 0x7a: return "call_all_calls";
+	case 0x7b: return "call_all_source_calls";
+	case 0x7c: return "call_all_tail_calls";
+	case 0x7d: return "call_return_pc";
+	case 0x7e: return "call_value";
+	case 0x7f: return "call_origin";
+	case 0x2116: return "GNU_all_tail_call_sites";
+	case 0x2117: return "GNU_all_call_sites";
+	case 0x51: return "base_type"; /* reserved; unused in practice */
 	default:  return NULL;
 	}
 }
@@ -1518,6 +1566,24 @@ dwarf_form_name(uint64_t form)
 	case 0x18: return "exprloc";
 	case 0x19: return "flag_present";
 	case 0x1a: return "strx";
+	case 0x1b: return "addrx";
+	case 0x1c: return "ref_sup4";
+	case 0x1d: return "strp_sup";
+	case 0x1e: return "data16";
+	case 0x1f: return "line_strp";
+	case 0x20: return "ref_sig8";
+	case 0x21: return "implicit_const";
+	case 0x22: return "loclistx";
+	case 0x23: return "rnglistx";
+	case 0x24: return "ref_sup8";
+	case 0x25: return "strx1";
+	case 0x26: return "strx2";
+	case 0x27: return "strx3";
+	case 0x28: return "strx4";
+	case 0x29: return "addrx1";
+	case 0x2a: return "addrx2";
+	case 0x2b: return "addrx3";
+	case 0x2c: return "addrx4";
 	default:  return NULL;
 	}
 }
@@ -1561,9 +1627,17 @@ dump_debug_abbrev(const unsigned char *data, size_t dsize)
 				break;
 			an = dwarf_attr_name(attr);
 			fn = dwarf_form_name(form);
-			printf("    DW_AT_%-12s DW_FORM_%s\n",
-			       an ? an : "<unknown>",
-			       fn ? fn : "<unknown>");
+			if (form == 0x21) {
+				/* DW_FORM_implicit_const: the attribute value is the
+				 * SLEB128 that follows here in the abbrev entry. */
+				int64_t c = read_sleb(&p, end);
+				printf("    DW_AT_%-12s DW_FORM_implicit_const: %lld\n",
+				       an ? an : "<unknown>", (long long)c);
+			} else {
+				printf("    DW_AT_%-12s DW_FORM_%s\n",
+				       an ? an : "<unknown>",
+				       fn ? fn : "<unknown>");
+			}
 		}
 	}
 	printf("\n");
@@ -1690,6 +1764,9 @@ parse_abbrev_table(const unsigned char *abbrev, size_t abbrev_size,
 					form = read_uleb(&p, end);
 					if (attr == 0 && form == 0)
 						break;
+					if (form == 0x21)   /* implicit_const:
+					                      * SLEB value follows */
+						read_sleb(&p, end);
 					if (i > 40)
 						break;
 				}
@@ -1711,6 +1788,10 @@ parse_abbrev_table(const unsigned char *abbrev, size_t abbrev_size,
 			tab[code].attrs[tab[code].nattrs].attr = attr;
 			tab[code].attrs[tab[code].nattrs].form = form;
 			tab[code].nattrs++;
+			/* implicit_const carries its value in the abbrev entry
+			 * (as SLEB128); there is nothing to read from .debug_info. */
+			if (form == 0x21)
+				read_sleb(&p, end);
 		}
 		if (code > (uint64_t)n)
 			n = (int)code;
@@ -1835,26 +1916,101 @@ decode_attr_value(const unsigned char **pp, const unsigned char *end,
 	case 0x18: /* exprloc */
 		blk = (form == 0x0a) ? ((p < end) ? *p++ : 0)
 		                     : (size_t)read_uleb(&p, end);
-		/* Common location expressions: a single DW_OP_reg<N> /
-		 * DW_OP_fbreg reads much more clearly than raw bytes. */
-		if (blk == 1 && p < end) {
-			unsigned char b = *p++;
-			if (b >= 0x50 && b <= 0x6f)
-				snprintf(out, outsz, "(DW_OP_reg%u)", b - 0x50);
-			else if (b == 0x91)
-				snprintf(out, outsz, "(DW_OP_fbreg)");
-			else
-				snprintf(out, outsz, "%02x", b);
-		} else {
-			i = 0;
-			while (i < blk && p < end && i < 12) {
-				snprintf(out + strlen(out), outsz - strlen(out), "%s%02x",
-				         i ? " " : "", *p++);
-				++i;
+		/* Decode a location-expression byte codes as readable DW_OP
+		 * names + operands; unknown opcodes fall back to raw hex. */
+		{
+			const unsigned char *sp = p, *sex_end = p + blk;
+			if (sex_end > end)
+				sex_end = end;
+			out[0] = '\0';
+			while (sp < sex_end) {
+				unsigned char opc = *sp++;
+				const char *oname = NULL;
+				size_t used;
+
+				if (opc >= 0x50 && opc <= 0x6f) {
+					snprintf(out + strlen(out), outsz - strlen(out),
+					         "%s(DW_OP_reg%u)",
+					         strlen(out) ? " " : "", opc - 0x50);
+					continue;
+				}
+				switch (opc) {
+				case 0x03: oname = "addr"; break;      /* 4/8-byte addr */
+				case 0x06: oname = "deref"; break;
+				case 0x08: oname = "const1u"; break;   /* 1-byte */
+				case 0x09: oname = "const1s"; break;
+				case 0x0a: oname = "const2u"; break;   /* 2-byte */
+				case 0x0b: oname = "const2s"; break;
+				case 0x0c: oname = "const4u"; break;   /* 4-byte */
+				case 0x0d: oname = "const4s"; break;
+				case 0x0e: oname = "const8u"; break;   /* 8-byte */
+				case 0x0f: oname = "const8s"; break;
+				case 0x10: oname = "constu"; break;    /* uleb */
+				case 0x11: oname = "consts"; break;    /* sleb */
+				case 0x12: oname = "dup"; break;
+				case 0x13: oname = "drop"; break;
+				case 0x14: oname = "over"; break;
+				case 0x17: oname = "swap"; break;
+				case 0x1c: oname = "plus"; break;
+				case 0x1f: oname = "minus"; break;
+				case 0x22: oname = "plus_uconst"; break; /* uleb */
+				case 0x23: oname = "breg0"; break;       /* sleb */
+				case 0x30: case 0x31: case 0x32: case 0x33: case 0x34:
+				case 0x35: case 0x36: case 0x37: case 0x38: case 0x39:
+				case 0x3a: case 0x3b: case 0x3c: case 0x3d: case 0x3e:
+				case 0x3f:
+					oname = "lit0"; break;              /* lit0..lit15 */
+				case 0x90: oname = "regx"; break;       /* uleb */
+				case 0x91: oname = "fbreg"; break;      /* sleb */
+				case 0x9d: oname = "bra"; break;        /* 2-byte */
+				case 0x9f: oname = "stack_value"; break;
+				case 0xa0: oname = "implicit_value"; break; /* 2-byte len */
+				default:   oname = NULL; break;
+				}
+				if (!oname) {
+					snprintf(out + strlen(out), outsz - strlen(out),
+					         "%s0x%02x", strlen(out) ? " " : "", opc);
+					continue;
+				}
+				if (opc >= 0x30 && opc <= 0x3f)
+					snprintf(out + strlen(out), outsz - strlen(out),
+					         "%sDW_OP_lit%u", strlen(out) ? " " : "",
+					         opc - 0x30);
+				else
+					snprintf(out + strlen(out), outsz - strlen(out),
+					         "%sDW_OP_%s", strlen(out) ? " " : "", oname);
+				/* consume operands */
+				used = 0;
+				switch (opc) {
+				case 0x03: used = 8; break;
+				case 0x08: case 0x09: used = 1; break;
+				case 0x0a: case 0x0b: used = 2; break;
+				case 0x0c: case 0x0d: case 0x9d: used = 4; break;
+				case 0x0e: case 0x0f: used = 8; break;
+				default:
+					if (opc == 0x10 || opc == 0x90 || opc == 0x22) {
+						/* uleb operand */
+						const unsigned char *s2 = sp;
+						read_uleb(&s2, sex_end);
+						used = (size_t)(s2 - sp);
+					} else if (opc == 0x11 || opc == 0x91 ||
+					           (opc >= 0x23 && opc <= 0x2e)) {
+						/* sleb operand */
+						const unsigned char *s2 = sp;
+						read_sleb(&s2, sex_end);
+						used = (size_t)(s2 - sp);
+					} else if (opc == 0xa0) {
+						used = 0;
+					}
+					break;
+				}
+				while (used > 0 && sp < sex_end) {
+					snprintf(out + strlen(out), outsz - strlen(out),
+					         "%s%02x", strlen(out) ? " " : "", *sp++);
+					--used;
+				}
 			}
-			if (i < blk)
-				snprintf(out + strlen(out), outsz - strlen(out), " ...");
-			while (i < blk && p < end) { ++p; ++i; }
+			p = sex_end;
 		}
 		break;
 	case 0x17: /* sec_offset */
@@ -1866,6 +2022,39 @@ decode_attr_value(const unsigned char **pp, const unsigned char *end,
 	case 0x16: /* indirect */
 		snprintf(out, outsz, "<indirect>");
 		break;
+	case 0x1f: /* line_strp: 4-byte offset into .debug_line_str */
+		u = 0;
+		for (i = 0; i < 4 && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "(line_str) 0x%llx", (unsigned long long)u);
+		break;
+	case 0x1a: /* strx: uleb index into .debug_str_offsets */
+		u = read_uleb(&p, end);
+		snprintf(out, outsz, "(strx) %llu", (unsigned long long)u);
+		break;
+	case 0x1b: /* addrx: uleb index into .debug_addr */
+		u = read_uleb(&p, end);
+		snprintf(out, outsz, "(addrx) 0x%llx", (unsigned long long)u);
+		break;
+	case 0x21: /* implicit_const: value lives in the abbrev entry, not here */
+		snprintf(out, outsz, "<implicit>");
+		break;
+	case 0x25: case 0x26: case 0x27: case 0x28: { /* strx1..strx4 */
+		unsigned nb = 1u + (unsigned)(form - 0x25);
+		u = 0;
+		for (i = 0; i < nb && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "(strx) %llu", (unsigned long long)u);
+		break;
+	}
+	case 0x29: case 0x2a: case 0x2b: case 0x2c: { /* addrx1..addrx4 */
+		unsigned nb = 1u + (unsigned)(form - 0x29);
+		u = 0;
+		for (i = 0; i < nb && p < end; ++i)
+			u |= (uint64_t)*p++ << (8 * i);
+		snprintf(out, outsz, "(addrx) 0x%llx", (unsigned long long)u);
+		break;
+	}
 	default:
 		snprintf(out, outsz, "<form 0x%llx>", (unsigned long long)form);
 		break;
@@ -1939,10 +2128,21 @@ dump_debug_info(const unsigned char *data, size_t dsize,
 		p += 2;
 		if (version < 2 || version > 5)
 			break;
-		abbrev_offset = (uint32_t)p[0] | (uint32_t)p[1] << 8 |
-		                (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
-		p += 4;
-		address_size = *p++;
+		if (version >= 5) {
+			/* DWARF5: version, unit_type(1), address_size(1),
+			 * abbrev_offset(4). */
+			p++;                     /* unit_type */
+			address_size = *p++;
+			abbrev_offset = (uint32_t)p[0] | (uint32_t)p[1] << 8 |
+			                (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+			p += 4;
+		} else {
+			/* DWARF v2-v4: version, abbrev_offset(4), address_size(1). */
+			abbrev_offset = (uint32_t)p[0] | (uint32_t)p[1] << 8 |
+			                (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+			p += 4;
+			address_size = *p++;
+		}
 		cu_end = (uint64_t)(size_t)(p - data) + unit_length;
 		if (cu_end > dsize)
 			cu_end = dsize;
