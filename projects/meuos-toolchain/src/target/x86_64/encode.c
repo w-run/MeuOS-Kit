@@ -15,6 +15,7 @@
 #include <errno.h>
 
 /* ---- Relocation type constants (matching <mt/elf.h> values) ---- */
+#define R_X86_64_64       1
 #define R_X86_64_PC32     2
 #define R_X86_64_PLT32    4
 #define R_X86_64_GOTPCREL 9
@@ -1184,6 +1185,17 @@ x86_64_encode_insn(const struct mt_target *target,
 		char suffix_char = base[3];
 		width = suffix_char == 'b' ? 1 : suffix_char == 'w' ? 2 :
 		        suffix_char == 'l' ? 4 : 8;
+		/* movq $symbol, %reg — load absolute address of a symbol
+		 * into a register (movabs form).  GNU as encodes this as
+		 * R_X86_64_64 (64-bit absolute relocation). */
+		if (op[0].kind == OP_SYMBOL && op[1].kind == OP_REG) {
+			emit_rex(out->bytes, &out->size, 1, 0, op[1].reg, -1);
+			emit_u8(out->bytes, &out->size, 0xb8 + (op[1].reg & 7));
+			size_t fix_off = out->size;
+			emit_le(out->bytes, &out->size, 0, 8);
+			set_fixup(out, fix_off, 8, R_X86_64_64, op[0].symbol, op[0].addend);
+			goto done;
+		}
 		if (op[0].kind == OP_IMM && op[1].kind == OP_REG) {
 			if (width == 8 && (op[0].displacement > INT32_MAX ||
 			                   op[0].displacement < INT32_MIN)) {

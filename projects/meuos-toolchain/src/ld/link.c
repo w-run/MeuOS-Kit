@@ -916,6 +916,37 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 			}
 		}
 	}
+	/* Auto-define __init_array_start/__init_array_end/__fini_array_start/
+	 * __fini_array_end as weak absolute symbols (value 0) so that libc's
+	 * startup.c weak references don't cause "undefined symbol" errors.
+	 * GNU ld defines these from section boundaries; defining them as
+	 * weak absolutes preserves the existing behavior (empty array walk
+	 * when the sections are absent) and satisfies the --no-undefined gate. */
+	{
+		static const char *crt_boundary_syms[] = {
+			"_init",
+			"_fini",
+			"__preinit_array_start",
+			"__preinit_array_end",
+			"__init_array_start",
+			"__init_array_end",
+			"__fini_array_start",
+			"__fini_array_end",
+			NULL
+		};
+		for (int si = 0; crt_boundary_syms[si]; si++) {
+			struct ld_global *g = get_global(&ctx, crt_boundary_syms[si]);
+			if (g && !g->defined) {
+				g->defined = 1;
+				g->offset = 0;
+				g->absolute = 1;
+				g->weak = 1;
+				g->common = 0;
+				g->group = -1;
+			}
+		}
+	}
+
 	/* --wrap: redirect references to SYM to __wrap_SYM.
 	 * Must run after all symbols are collected (including from archives)
 	 * but before --no-undefined and relocation resolution. */
