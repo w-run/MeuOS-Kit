@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <unistd.h>
+#include <features.h>
 #include "../internal/syscall.h"
 #define LINUX_SYS_SYSCONF 158
 
@@ -29,7 +30,7 @@ long sysconf(int name) {
 	case _SC_OPEN_MAX: return 256;
 	case _SC_JOB_CONTROL: return 1;
 	case _SC_SAVED_IDS: return 1;
-	case _SC_VERSION: return 1;
+	case _SC_VERSION: return _POSIX_VERSION;
 	case _SC_TZNAME: return 1;
 	case _SC_PAGESIZE: return 4096;
 	case _SC_PHYS_PAGES: return 2;
