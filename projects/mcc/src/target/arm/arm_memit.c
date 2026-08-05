@@ -723,6 +723,30 @@ emit_ins(FILE *f, MInsM *in)
 		scratch_to_dst(f, d, "r10");
 		return;
 	case MMOP_MOVSX:
+		if (in->dtype == MT_I64) {
+			/* Widen a 32-bit source to 64: lo' = value, hi' = sign fill.
+			 * Constant sources materialise both halves; runtime sources are
+			 * sign-extended with asr #31 (the same "i64 hi is never written"
+			 * gap this fills on i386). */
+			if (s0 && s0->kind == MV_CONST && s0->con) {
+				int64_t cv = s0->con->u.i;
+				load_imm(f, "r10", (int32_t)cv);
+				load_imm(f, "r12", d->slot + g_slot_base);
+				fprintf(f, "\tstr\tr10, [fp, r12]\n");
+				load_imm(f, "r10", (int32_t)((uint64_t)cv >> 32));
+				load_imm(f, "r12", d->slot + 4 + g_slot_base);
+				fprintf(f, "\tstr\tr10, [fp, r12]\n");
+			} else {
+				/* runtime source: lo' = value; hi' = sign fill */
+				mv_to_scratch(f, s0, "r10");
+				scratch_to_dst(f, d, "r10");         /* lo' stored */
+				mv_to_scratch(f, d, "r10");          /* reload lo */
+				fprintf(f, "\tasr\tr10, r10, #31\n"); /* hi' = sign fill */
+				load_imm(f, "r12", d->slot + 4 + g_slot_base);
+				fprintf(f, "\tstr\tr10, [fp, r12]\n");
+			}
+			return;
+		}
 		mv_to_scratch(f, s0, "r10");
 		switch (in->dtype) {
 		case MT_I8:  fputs("\tsxtb\tr10, r10\n", f); break;
@@ -732,6 +756,25 @@ emit_ins(FILE *f, MInsM *in)
 		scratch_to_dst(f, d, "r10");
 		return;
 	case MMOP_MOVZX:
+		if (in->dtype == MT_I64) {
+			/* Zero-extension to 64: lo' = value, hi' = 0 */
+			if (s0 && s0->kind == MV_CONST && s0->con) {
+				int64_t cv = s0->con->u.i;
+				load_imm(f, "r10", (int32_t)cv);
+				load_imm(f, "r12", d->slot + g_slot_base);
+				fprintf(f, "\tstr\tr10, [fp, r12]\n");
+				load_imm(f, "r10", 0);
+				load_imm(f, "r12", d->slot + 4 + g_slot_base);
+				fprintf(f, "\tstr\tr10, [fp, r12]\n");
+			} else {
+				mv_to_scratch(f, s0, "r10");
+				scratch_to_dst(f, d, "r10");
+				load_imm(f, "r12", d->slot + 4 + g_slot_base);
+				fprintf(f, "\tmov\tr10, #0\n");
+				fprintf(f, "\tstr\tr10, [fp, r12]\n");
+			}
+			return;
+		}
 		mv_to_scratch(f, s0, "r10");
 		switch (in->dtype) {
 		case MT_I8:  fputs("\tuxtb\tr10, r10\n", f); break;

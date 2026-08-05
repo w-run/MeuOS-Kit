@@ -658,6 +658,26 @@ emit_ins(FILE *f, MInsM *in)
 		scratch_to_dst(f, d, "eax");
 		return;
 	case MMOP_MOVSX:
+		if (in->dtype == MT_I64) {
+			/* Widening a 32-bit source to 64 bits: lo' = value, hi' = sign.
+			 * A constant source must materialise BOTH halves; mv_to_scratch
+			 * only loads the low word (i386 has no 32->64 extension to a
+			 * pair here), so a runtime source is sign-extended with cdq. */
+			if (s0 && s0->kind == MV_CONST && s0->con) {
+				int64_t cv = s0->con->u.i;
+				fprintf(f, "\tmovl\t$%d, %%eax\n", (int32_t)cv);
+				fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", d->slot + g_slot_base);
+				fprintf(f, "\tmovl\t$%d, %%eax\n", (int32_t)((uint64_t)cv >> 32));
+				fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", d->slot + 4 + g_slot_base);
+			} else {
+				mv_to_scratch(f, s0, "eax");
+				fputs("\tcdq\n", f);         /* sign-extend eax -> edx */
+				scratch_to_dst(f, d, "eax");
+				int off = d->slot + 4 + g_slot_base;
+				fprintf(f, "\tmovl\t%%edx, %d(%%ebp)\n", off);
+			}
+			return;
+		}
 		mv_to_scratch(f, s0, "eax");
 		switch (in->dtype) {
 		case MT_I8:  fputs("\tmovsbl\t%al, %eax\n", f); break;
@@ -667,14 +687,22 @@ emit_ins(FILE *f, MInsM *in)
 		scratch_to_dst(f, d, "eax");
 		return;
 	case MMOP_MOVZX:
-		mv_to_scratch(f, s0, "eax");
-		switch (in->dtype) {
-		case MT_I8:  fputs("\tmovzbl\t%al, %eax\n", f); break;
-		case MT_I16: fputs("\tmovzwl\t%ax, %eax\n", f); break;
-		default:     break;
+		if (in->dtype == MT_I64) {
+			/* Zero-extension to 64: lo' = value, hi' = 0 */
+			if (s0 && s0->kind == MV_CONST && s0->con) {
+				int64_t cv = s0->con->u.i;
+				fprintf(f, "\tmovl\t$%d, %%eax\n", (int32_t)cv);
+				fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", d->slot + g_slot_base);
+				fprintf(f, "\tmovl\t$0, %%eax\n");
+				fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", d->slot + 4 + g_slot_base);
+			} else {
+				mv_to_scratch(f, s0, "eax");
+				scratch_to_dst(f, d, "eax");
+				int off = d->slot + 4 + g_slot_base;
+				fprintf(f, "\tmovl\t$0, %d(%%ebp)\n", off);
+			}
+			return;
 		}
-		scratch_to_dst(f, d, "eax");
-		return;
 	case MMOP_LEA: {
 		char addr_buf[64];
 		emit_addr_str(f, in->addr, addr_buf, sizeof addr_buf);
