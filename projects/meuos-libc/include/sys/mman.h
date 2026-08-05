@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <sys/types.h>
+#include <features.h>
 
 #define PROT_NONE 0
 #define PROT_READ 1
@@ -14,8 +15,10 @@
 #define MAP_ANON MAP_ANONYMOUS
 #define MAP_FAILED ((void *)-1)
 
+__BEGIN_DECLS
 void *mmap(void *, size_t, int, int, int, off_t);
 int munmap(void *, size_t);
 int mprotect(const void *, size_t, int);
+__END_DECLS
 
 #endif
