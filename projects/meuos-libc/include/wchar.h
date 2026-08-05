@@ -70,6 +70,15 @@ int wcwidth(wchar_t);
 struct tm;
 size_t wcsftime(wchar_t *, size_t, const wchar_t *, const struct tm *);
 
+/* Wide formatted I/O (C11 7.29.2.3) */
+#include <stdarg.h>
+int wprintf(const wchar_t *, ...);
+int fwprintf(FILE *, const wchar_t *, ...);
+int swprintf(wchar_t *, size_t, const wchar_t *, ...);
+int vwprintf(const wchar_t *, va_list);
+int vfwprintf(FILE *, const wchar_t *, va_list);
+int vswprintf(wchar_t *, size_t, const wchar_t *, va_list);
+
 /* I/O */
 wint_t fgetwc(FILE *);
 wint_t fputwc(wchar_t, FILE *);

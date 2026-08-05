@@ -66,6 +66,7 @@ int __meuos_sink_number(struct __meuos_print_sink *sink,
     int negative, const char *prefix, int left, int plus, int min_digits,
     int upper);
 int __meuos_vformat(struct __meuos_print_sink *sink, const char *format, va_list arguments);
+int __meuos_wvformat(struct __meuos_print_sink *sink, const wchar_t *format, va_list arguments);
 
 /* Floating-point formatter for %f/%e/%g (and uppercase variants).
  * flags: bit 0='-', 1='+', 2=' ', 3='#', 4='0'.

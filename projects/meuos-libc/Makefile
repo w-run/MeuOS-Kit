@@ -192,7 +192,7 @@ STDIO_OBJS     := $(BUILD)/stdio/file.o $(BUILD)/stdio/char_io.o \
                   $(BUILD)/stdio/fp_fmt.o $(BUILD)/stdio/memory_stream.o \
                   $(BUILD)/stdio/file_misc.o $(BUILD)/stdio/truncate.o \
                   $(BUILD)/stdio/popen.o $(BUILD)/stdio/getline.o \
-                  $(BUILD)/stdio/sync.o
+                  $(BUILD)/stdio/sync.o $(BUILD)/stdio/wprint.o
 SYSCALL_OBJS   := $(addprefix $(BUILD)/syscall/, \
                   read.o write.o open.o close.o fork.o execve.o exit.o \
                   mmap.o munmap.o mprotect.o brk.o stat.o fstat.o lstat.o lseek.o \
@@ -461,6 +461,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/wchar_fp_gate test/wchar_fp_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/wcsftime_gate test/wcsftime_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/wchar_lit_gate test/wchar_lit_gate.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/wprintf_gate test/wprintf_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/wctype_gate test/wctype_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/auxv test/auxv.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/uio test/uio.c
@@ -553,6 +554,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	/tmp/meuos-libc-check/wchar_fp_gate
 	/tmp/meuos-libc-check/wcsftime_gate
 	/tmp/meuos-libc-check/wchar_lit_gate
+	/tmp/meuos-libc-check/wprintf_gate
 	/tmp/meuos-libc-check/wctype_gate
 	/tmp/meuos-libc-check/auxv
 	/tmp/meuos-libc-check/uio
