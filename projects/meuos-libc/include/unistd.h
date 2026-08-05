@@ -89,6 +89,7 @@ int fchdir(int);
 void sync(void);
 int fsync(int);
 int fdatasync(int);
+int nice(int);
 long pathconf(const char *, int);
 long fpathconf(int, int);
 long sysconf(int);

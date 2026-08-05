@@ -76,6 +76,9 @@ __syscall_number(long number)
 	case 162: return 36;   /* sync */
 	case 74:  return 118;  /* fsync */
 	case 75:  return 148;  /* fdatasync */
+	/* 调度优先级（i386 独立号）。 */
+	case 140: return 96;   /* getpriority */
+	case 141: return 97;   /* setpriority */
 	default: return number;
 	}
 #elif defined(__arm__)
@@ -174,6 +177,9 @@ __syscall_number(long number)
 	case 162: return 36;   /* sync */
 	case 74:  return 118;  /* fsync */
 	case 75:  return 148;  /* fdatasync */
+	/* 调度优先级（与 i386 相同）。 */
+	case 140: return 96;   /* getpriority */
+	case 141: return 97;   /* setpriority */
 	default: return number;
 	}
 #elif defined(__aarch64__) || defined(__riscv) || defined(__loongarch64)
@@ -260,6 +266,10 @@ __syscall_number(long number)
 	case 162: return 81;   /* sync */
 	case 74:  return 82;   /* fsync */
 	case 75:  return 83;   /* fdatasync */
+	/* 调度优先级：asm-generic 与 x86_64 内部号相反。
+	 * 内部 getpriority=140 → 原生 141；内部 setpriority=141 → 原生 140。 */
+	case 140: return 141;  /* getpriority */
+	case 141: return 140;  /* setpriority */
 	default: return number;
 	}
 #else
