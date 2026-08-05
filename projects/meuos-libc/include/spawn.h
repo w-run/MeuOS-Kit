@@ -3,10 +3,17 @@
 
 #include <sys/types.h>
 #include <sched.h>
+#include <signal.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* posix_spawnattr flags (POSIX.1-2008). */
+#define POSIX_SPAWN_RESETIDS   0x01 /* reset uid/gid to effective */
+#define POSIX_SPAWN_SETPGROUP  0x02 /* set the pgroup (__pgrp) */
+#define POSIX_SPAWN_SETSIGDEF  0x04 /* reset sigs in __sd to default */
+#define POSIX_SPAWN_SETSIGMASK 0x08 /* set sigmask to __ss */
 
 typedef struct {
 	short __flags;
