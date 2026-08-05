@@ -1,0 +1,10 @@
+prefix=@PREFIX@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: meuos-glibc-compat
+Description: MeuOS opt-in glibc-compatibility surface (__GLIBC__ probing + compat archive)
+Version: 0.1.0
+Libs: -l:libc-meuos-compat.a -lgcc-meuos
+Cflags: -D__MEUOS_GLIBC_COMPAT__

@@ -51,9 +51,15 @@ $(COMPAT_LIB): $(OBJS)
 	$(AR) rcs $@ $^
 
 install: $(COMPAT_LIB)
-	@mkdir -p $(DESTDIR)$(PREFIX)/lib $(DESTDIR)$(PREFIX)/include
+	@mkdir -p $(DESTDIR)$(PREFIX)/lib $(DESTDIR)$(PREFIX)/include \
+		$(DESTDIR)$(PREFIX)/lib/pkgconfig
 	cp -r include/. $(DESTDIR)$(PREFIX)/include/
 	cp $(COMPAT_LIB) $(DESTDIR)$(PREFIX)/lib/libc-meuos-compat.a
+	# Pkg-config for the opt-in glibc-compat surface: Cflags injects
+	# -D__MEUOS_GLIBC_COMPAT__ so core <features.h> arms __GLIBC__ (2.34),
+	# and Libs pulls the compat archive (GNU extensions) + soft helpers.
+	sed 's|@PREFIX@|$(PREFIX)|g' meuos-glibc-compat.pc.in \
+		> $(DESTDIR)$(PREFIX)/lib/pkgconfig/meuos-glibc-compat.pc
 
 check: $(COMPAT_LIB)
 	@$(MAKE) -C ../.. install DESTDIR=$(abspath $(SYSROOT)) PREFIX=/usr
@@ -61,6 +67,13 @@ check: $(COMPAT_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib --static \
 		-o $(BUILD)/test-compat ../../test/compat.c -l:libc-meuos-compat.a -l:libc-meuos.a
 	$(BUILD)/test-compat
+	# glibc-compat opt-in: -D__MEUOS_GLIBC_COMPAT__ mirrors what
+	# meuos-glibc-compat.pc injects; both the visible __GLIBC__ and the GNU
+	# view must hold under it.
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib --static \
+		-D__MEUOS_GLIBC_COMPAT__ -o $(BUILD)/test-glibc-compat \
+		../../test/glibc_compat.c -l:libc-meuos.a
+	$(BUILD)/test-glibc-compat
 
 clean:
 	rm -rf $(BUILD)
