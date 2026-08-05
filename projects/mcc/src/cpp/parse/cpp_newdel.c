@@ -1328,6 +1328,79 @@ cpp_exc_helper_call(const char *name, struct type *ret,
 	return call;
 }
 
+/* Build a `T*` slice-view pointer for the class catch parameter of type
+ * `ctype`, re-aiming the runtime-carried object at the base sub-object that
+ * actually matched the catch.  The libc carries the full thrown object (the
+ * registered derived type D); catch(Base) matches that D via the typecode
+ * skew used by cpp_is_derived, so the Base sub-object sits at a non-zero
+ * offset in D (mcc-side slice; independent of libc's offset argument).  A
+ * local `__exc_slice` offset is selected by branching on
+ * _meuos_exc_caught_type() over every registered type derived from ctype
+ * (0 when the catch type itself matched / the base is at offset 0), then we
+ * build `(T*)((char*)_meuos_exc_caught_obj() + __exc_slice)`.  All the
+ * statements (decl + the if/else emitters) are emitted into `f` first; the
+ * returned expression is the final slice pointer. */
+static struct expr *
+exc_slice_ptr(struct func *f, struct type *ctype)
+{
+	extern struct block *mkblock(char *);
+	extern void funclabel(struct func *, struct block *);
+	extern struct value *funcbranch(struct func *, struct expr *,
+	    struct block *, struct block *);
+	extern void funcjmp(struct func *, struct block *);
+	extern void funcinit(struct func *, struct decl *, struct init *, bool);
+	struct expr *ct, *se, *co, *cvs;
+	struct decl *sd;
+	int i;
+
+	/* local unsigned long long __exc_slice = 0; */
+	sd = mkdecl("__exc_slice", DECLOBJECT,
+	    &typeulong, QUALNONE, LINKNONE);
+	sd->u.obj.storage = SDAUTO;
+	funcinit(f, sd, NULL, false);
+	se = mkexpr(EXPRIDENT, &typeulong, NULL);
+	se->lvalue = true;
+	se->u.ident.decl = sd;
+	ct = NULL;
+	for (i = 0; i < exc_tc_n; i++) {
+		struct block *bsy, *bsn;
+		unsigned long long soff;
+		if (exc_tc_regs[i].t == ctype)
+			continue;
+		if (!cpp_is_derived(exc_tc_regs[i].t, ctype))
+			continue;
+		soff = exc_base_slice_offset(exc_tc_regs[i].t, ctype);
+		if (soff == (unsigned long long)-1)
+			continue;
+		if (!ct)
+			ct = cpp_exc_helper_call("_meuos_exc_caught_type",
+			    &typeint, NULL, NULL);
+		bsy = mkblock("exc_slice_y");
+		bsn = mkblock("exc_slice_n");
+		funcbranch(f,
+		    mkbinaryexpr(&tok.loc, TEQL, ct,
+		        mkconstexpr(&typeint, exc_tc_regs[i].code)),
+		    bsy, bsn);
+		funclabel(f, bsy);
+		funcexpr(f, mkassignexpr(se,
+		    mkconstexpr(&typeulong, soff)));
+		funcjmp(f, bsn);
+		funclabel(f, bsn);
+	}
+	co = cpp_exc_helper_call("_meuos_exc_caught_obj",
+	    mkpointertype(&typevoid, QUALCONST), NULL, NULL);
+	/* (T*)((char*)co + __exc_slice) */
+	cvs = mkexpr(EXPRBINARY,
+	    mkpointertype(&typechar, QUALNONE), NULL);
+	cvs->op = TADD;
+	cvs->u.binary.l = mkexpr(EXPRCAST,
+	    mkpointertype(&typechar, QUALNONE), co);
+	cvs->u.binary.r = se;
+	cvs = mkexpr(EXPRCAST,
+	    mkpointertype(ctype, QUALNONE), cvs);
+	return cvs;
+}
+
 /* C++ `try { ... } catch (T e) { ... }` — lowered onto the libc
  * setjmp/longjmp exception runtime (meuos_exc.h): declare a local
  * `_meuos_exc_frame`, setjmp into it, register with try_begin, branch on
@@ -1600,12 +1673,9 @@ for (;;) {
 						 * type actually matched, defaulting to 0 (the
 						 * catch type itself, or an unambiguous base at
 						 * offset 0). */
-						struct expr *ep, *co, *cvs;
-						struct expr *isobj, *ct;
+						struct expr *ep, *cvs;
+						struct expr *isobj;
 						struct block *bp1, *bp0, *bpjoin;
-						struct decl *sd;
-						struct expr *se;
-						int i;
 						ep = mkexpr(EXPRIDENT,
 						    mkpointertype(ctype, QUALNONE),
 						    NULL);
@@ -1619,63 +1689,11 @@ for (;;) {
 						bpjoin = mkblock("exc_ref_join");
 						funcbranch(f, isobj, bp1, bp0);
 						funclabel(f, bp1);
-						/* unsigned long long __exc_slice = 0; then
-						 * if (_meuos_exc_caught_type()==tc(D_i))
-						 *   __exc_slice = base_offset_in(D_i, ctype);
-						 * for every registered derived type D_i that a
-						 * match could have come from. */
-						sd = mkdecl("__exc_slice", DECLOBJECT,
-						    &typeulong, QUALNONE, LINKNONE);
-						sd->u.obj.storage = SDAUTO;
-						funcinit(f, sd, NULL, false);
-						se = mkexpr(EXPRIDENT, &typeulong, NULL);
-						se->lvalue = true;
-						se->u.ident.decl = sd;
-						ct = NULL;
-						for (i = 0; i < exc_tc_n; i++) {
-							struct block *bsy, *bsn;
-							unsigned long long soff;
-							struct expr *cny;
-							if (exc_tc_regs[i].t == ctype)
-								continue;
-							if (!cpp_is_derived(exc_tc_regs[i].t,
-							                     ctype))
-								continue;
-							soff = exc_base_slice_offset(
-							    exc_tc_regs[i].t, ctype);
-							if (soff == (unsigned long long)-1)
-								continue;
-							if (!ct)
-								ct = cpp_exc_helper_call(
-								    "_meuos_exc_caught_type",
-								    &typeint, NULL, NULL);
-							bsy = mkblock("exc_slc_y");
-							bsn = mkblock("exc_slc_n");
-							funcbranch(f,
-							    mkbinaryexpr(&tok.loc, TEQL, ct,
-							        mkconstexpr(&typeint,
-							            exc_tc_regs[i].code)),
-							    bsy, bsn);
-							funclabel(f, bsy);
-							cny = mkassignexpr(se,
-							    mkconstexpr(&typeulong, soff));
-							funcexpr(f, cny);
-							funcjmp(f, bsn);
-							funclabel(f, bsn);
-						}
-						co = cpp_exc_helper_call(
-						    "_meuos_exc_caught_obj",
-						    mkpointertype(&typevoid, QUALCONST),
-						    NULL, NULL);
-						/* (T*)((char*)co + __exc_slice) */
-						cvs = mkexpr(EXPRBINARY,
-						    mkpointertype(&typechar, QUALNONE), NULL);
-						cvs->op = TADD;
-						cvs->u.binary.l = mkexpr(EXPRCAST,
-						    mkpointertype(&typechar, QUALNONE), co);
-						cvs->u.binary.r = se;
-						cvs = mkexpr(EXPRCAST,
-						    mkpointertype(ctype, QUALNONE), cvs);
+						/* T *e = slice-view pointer into the carried object
+						 * (mcc-side base-subobject slice: selects __exc_slice
+						 * per matching derived type, then
+						 * (T*)((char*)caught_obj + __exc_slice)). */
+						cvs = exc_slice_ptr(f, ctype);
 						funcexpr(f, mkassignexpr(ep, cvs));
 						funcjmp(f, bpjoin);
 						funclabel(f, bp0);
@@ -1704,7 +1722,7 @@ for (;;) {
 						 * (dtor+free) via _meuos_exc_caught_free.  For
 						 * byte-copyable classes struct assignment copies;
 						 * user copy ctors are a later increment (4b). */
-						struct expr *ep, *co, *cvs, *deref;
+						struct expr *ep, *cvs, *deref;
 						struct expr *isobj;
 						struct block *bp1, *bp0, *bpjoin;
 						ep = mkexpr(EXPRIDENT, ctype, NULL);
@@ -1717,10 +1735,12 @@ for (;;) {
 						bpjoin = mkblock("exc_param_join");
 						funcbranch(f, isobj, bp1, bp0);
 						funclabel(f, bp1);
-						co = cpp_exc_helper_call("_meuos_exc_caught_obj",
-						    mkpointertype(&typevoid, QUALCONST), NULL, NULL);
-						cvs = exprconvert(co,
-						    mkpointertype(ctype, QUALCONST));
+						/* copy the catch parameter from the slice-view of the
+						 * carried object: *(T*)((char*)caught_obj + __exc_slice).
+						 * The slice re-aims at the matching base sub-object so a
+						 * catch(Base) by value copies Base's bytes, not the head of
+						 * the derived object (same slice logic as the by-ref path). */
+						cvs = exc_slice_ptr(f, ctype);
 						deref = mkunaryexpr(TMUL, cvs);
 						funcexpr(f, mkassignexpr(ep, deref));
 						funcjmp(f, bpjoin);

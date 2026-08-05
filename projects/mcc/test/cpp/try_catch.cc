@@ -183,5 +183,24 @@ main(void)
         }
     }
 
+    /* stage-4c: catch-by-VALUE base-subobject slicing.  A by-value catch of
+     * the 2nd base (ExcSecond, offset sizeof(ExcFirst)) must copy the Base
+     * sub-object bytes, not the head of the derived object — same slice
+     * re-aim as the by-ref path, on the copy param.  (region through 21-22) */
+    {
+        try {
+            throw ExcBoth();
+        } catch (ExcSecond e) {
+            if (e.sb != 200) return 21;   /* copied B view at offset 4 */
+        }
+        /* exact-type by-value copy of the derived object */
+        try {
+            throw ExcBoth();
+        } catch (ExcBoth e) {
+            if (e.sb != 200) return 22;
+            if (e.d != 300) return 23;
+        }
+    }
+
     return 0;
 }
