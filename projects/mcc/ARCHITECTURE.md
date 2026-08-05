@@ -283,7 +283,7 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
 | C.2.8 类模板 | ✅ | `Foo<T>` 类型上下文实例化（642574b） |
 | C.2.8 成员模板 | ✅ | 类内模板方法 + 类模板实例内的成员模板 `obj.get<int>()`（c93d5f7） |
 | auto/decltype | ✅ | auto 变量声明（局部/全局）+ C++14 auto 返回类型推导，支持模板结果/链式/成员模板（160e2a2） |
-| 变参模板/包展开 | ✅ | `typename... Args` 包参数 + `f(args...)` 转发 + `sizeof...(Args)` + 空包（df0c489） |
+| 变参模板/包展开 | ✅ | `typename... Args` 包参数 + `f(args...)` 转发 + `sizeof...(Args)` + 空包（df0c489；2eaa662a 修 pack deduce：显式实参/调用实参落入 pack 的计数，`count<int,double>()` 现正确返回 2） |
 | lambda（匿名类降级） | ✅ | 闭包合成文件作用域 `__lambdaN` 类，值捕获=成员+合成构造、体=operator()、`obj(args)` 降级（877beed） |
 | constexpr 求值器 | ✅ | constexpr 函数体 token 缓冲回放 + 编译期折叠、constexpr 变量常量初值捕获、static_assert 编译期求值（3ac233b；阶段 1 + 阶段 2 的 static_assert 部分） |
 | 移动语义（右值引用） | ✅ | `T&&` + 引用折叠 + lvalue/rvalue 值类别重载（4491a27） |
@@ -299,14 +299,18 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
 
 ### m++ 已知限制（截至 2026-08-02）
 
-- **模板**：显式模板实参 `conv<int>(x)`（`<` 被当作比较符）、模板与重载共存、
+- **模板**：显式模板实参 `conv<int>(x)` 中 `<` 偶尔被当比较符（有歧义场景）、模板与重载共存、
   非类型模板参数；类模板成员函数体急切实例化（C++ 语义为按需惰性）、
-  类模板作函数返回值触发既有聚合返回拷贝限制；变参模板无折叠表达式（C++17）、
-  无包嵌套、无类成员变参模板、无递归终止展开策略。
+  类模板作函数返回值触发既有聚合返回拷贝限制；变参模板无 C++17 折叠表达式外的
+  递归自我转发选择：`sum_all(1,2,3,4)` 调用点在**重载选择**阶段未把变参重载
+  `(T, Ts...)` 排为可吸收多于定长重载 `(T)` 实参的候选取向，且嵌套实例化时
+  pack 参数(`rest_0`)值绑定错位——两层都属「跨层状态/语义一致性」深根，
+  **登记 mcc 一致性专项**（含 i386 rr_i64 i64 slot-half 统一）；无包嵌套、
+  无类成员变参模板。`sizeof...(Ts)` 多元素计数与 `count<>()` 空包已修（2eaa662a）。
 - **继承**：虚继承。纯虚 `= 0` 已支持（纯虚成员/析构声明解析 + vtable 槽位留 0，派生覆写正常分派）；抽象类（含未覆写纯虚）实例化报错已支持（对象声明/`new T`/`new T[]`）；类外析构定义 `B::~B(){}` 已支持（纯虚析构完整对象生命周期可用）；多态 `delete` 基类指针已支持（虚析构经 vtable 分派跑派生析构 `~D` 再 `~B`，非虚析构仍静态决议，`delete[]` 数组仍走静态逐元素析构）。
 - **auto/decltype**：仅 `auto x = expr`（局部/全局）与 C++14 `auto f()` 返回类型推导；未做 `auto&` 引用折叠、decltype 独立推导（160e2a2 落地范围）。
 - **lambda**：值捕获与引用捕获均已支持——显式 `[&x]` / 默认 `[&]` 引用捕获（能读到活动变量更新）、默认按值 `[=]`、混捕 `[=,&y]`/`[&,z]`/`[x,&y]`、init-capture `[n=expr]`、泛型 lambda（c14c7a2 起支持引用/init 捕获）；跨函数传递捕获仍为限制。
-- **constexpr**：仅整型常量折叠（阶段 1）+ static_assert（阶段 2 部分）；未做数组维度/非类型模板实参的编译期求值、constexpr 对象含成员访问（需 mini 内存模型）、类静态 constexpr 成员在常量表达式中的折叠（3ac233b 落地范围）。
+- **constexpr**：整型常量折叠 + static_assert + 数组维度编译期求值 `int a[f()]` + constexpr 变量/函数初值 + static/constexpr 成员 init 已支持（3ac233b 等）。非类型模板实参取 **函数调用** `arrsize<sq(3)>()` 已支持（9c40acec：NTTP 实参可为 constexpr 函数调用 `arrsize<sq(3)>/nine()/sq(sq(2))/sq(2)+1`、constexpr 变量、字面量）。**constexpr 成员函数调用折叠** `constexpr S s={..}; constexpr int r=s.m(2)` 已支持（ca410f20：成员 isconstexpr 标定 + 两阶段 body 注册进常量求值器 + `&obj` this 首参跳过 + 对象成员按名绑进回放 scope）。（变参递归 self-forwarding gap 见模板行/一致性专项。）
 - **其它**：函数指针声明参数里的类名未识别（独立问题）。
 - **MIR 路径遗留**（非 m++ 专属）：自举 mcc 编译「聚合参数+varargs+栈传参」组合在
   declspecs 写 NULL（Bug B 待调）；atomic_concurrent/thread_local 多架构 TLS 既有问题。

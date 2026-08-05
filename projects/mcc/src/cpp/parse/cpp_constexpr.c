@@ -1174,7 +1174,25 @@ cpp_constexpr_eval(struct expr *call)
 	if (!fn)
 		return NULL;
 
-	for (a = call->u.call.args; a; a = a->next, ++nargs) {
+	/* A member-function call `s.f(x)` reaches this evaluator with the
+	 * object address prepended as a hidden `this` first argument (`&s`).
+	 * Detect it, extract the object whose members the body reads, and skip
+	 * that argument when matching the explicit parameter list. */
+	struct decl *this_obj = NULL;
+	{
+		struct expr *a0 = call->u.call.args;
+		if (a0 && a0->kind == EXPRUNARY && a0->op == TBAND &&
+		    a0->base && a0->base->kind == EXPRIDENT) {
+			struct decl *o = a0->base->u.ident.decl;
+			if (o && o->kind == DECLOBJECT && o->type &&
+			    (o->type->kind == TYPESTRUCT ||
+			     o->type->kind == TYPEUNION))
+				this_obj = o;
+		}
+	}
+	for (a = call->u.call.args; a; a = a->next) {
+		if (this_obj && a == call->u.call.args)
+			continue;   /* skip the hidden `this` argument */
 		/* use the interpreter's non-mutating evaluator so arguments
 		 * referencing bound parameters fold in C as well as C++ mode
 		 * (eval() only folds DECLOBJECT constval under g_lang == 1) */
@@ -1182,9 +1200,14 @@ cpp_constexpr_eval(struct expr *call)
 		unsigned long long av;
 		if (nargs >= 16 || !cpp_cexpr_value(a, &temp, &av))
 			return NULL;
-		args[nargs] = av;
+		args[nargs++] = av;
 	}
-	if (nargs != fn->nparams)
+	/* For a member call, the evaluator recorded fn->nparams including the
+	 * hidden `this` parameter (the buffered member type carries it); the
+	 * explicit arguments we collected (after skipping the call's `&obj`)
+	 * must match only the remaining parameters. */
+	int pbase = this_obj ? 1 : 0;
+	if (nargs != fn->nparams - pbase)
 		return NULL;
 	if (g_cpp_cexpr_depth >= 64)
 		error_code(E_DECL, &tok.loc, "constexpr evaluation recursion too deep");
@@ -1192,7 +1215,7 @@ cpp_constexpr_eval(struct expr *call)
 	/* bind the parameters as integer constants and fold the body's
 	 * return expression */
 	tmp = mkscope(&filescope);
-	for (i = 0; i < fn->nparams; ++i) {
+	for (i = pbase; i < fn->nparams; ++i) {
 		/* bind parameters as mutable objects (function parameters are
 		 * modifiable lvalues in C++; ++/-- and = on them must parse) */
 		struct decl *pd = mkdecl(fn->params[i], DECLOBJECT,
@@ -1200,8 +1223,29 @@ cpp_constexpr_eval(struct expr *call)
 		    LINKNONE);
 		pd->u.obj.storage = SDAUTO;
 		pd->u.obj.has_constval = true;
-		pd->u.obj.constval = args[i];
+		pd->u.obj.constval = args[i - pbase];
 		scopeputdecl(tmp, pd);
+	}
+	/* Bind the member variables of the object so a member-function body can
+	 * fold `this` member accesses (`return a + x;` reading member `a`).
+	 * Each named non-bitfield member of the object's type is re-declared
+	 * with the object's recorded constant value. */
+	if (this_obj) {
+		struct member *m;
+		for (m = this_obj->type->u.structunion.members; m; m = m->next) {
+			unsigned long long mv;
+			struct decl *md;
+			if (!m->name || m->bits.before || m->bits.after)
+				continue;
+			if (!cpp_cexpr_member_value(this_obj, m->offset, &mv))
+				continue;
+			md = mkdecl(m->name, DECLOBJECT,
+			    m->type ? m->type : &typeint, QUALNONE, LINKNONE);
+			md->u.obj.storage = SDAUTO;
+			md->u.obj.has_constval = true;
+			md->u.obj.constval = mv;
+			scopeputdecl(tmp, md);
+		}
 	}
 	/* re-bind the template parameters of a constexpr *template* function so
 	 * type usages (e.g. `sizeof(T)`) resolve during constant evaluation.

@@ -592,7 +592,7 @@ riscv64_encode_insn(const struct mt_target *target,
 	if (strcmp(mnemonic, "srai") == 0 && nops == 3) {
 		emit32(out->bytes, i_shift(0x13, (unsigned)ops[0].reg, 5,
 		                          (unsigned)ops[1].reg,
-		                          (unsigned)ops[2].imm & 0x3F, 0x20));
+		                          (unsigned)ops[2].imm & 0x3F, 0x10));
 		return 0;
 	}
 

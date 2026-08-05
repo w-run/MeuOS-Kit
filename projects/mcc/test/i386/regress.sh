@@ -66,4 +66,14 @@ grep -Eq 'shl[[:space:]]+%cl' "$shasm"
 grep -Eq 'sar[[:space:]]+\$31' "$shasm"
 printf '%s\n' 'i386 i64-shift compile gate passed'
 
+# i386 cdecl call-argument placement: a 2-int-arg call must store its args
+# at the bottom of the reserved block ((%esp) and 4(%esp)) so they are read
+# back at [ebp+8]/[ebp+12].  mabi_selcall previously wrote them at
+# [esp+8]/[esp+12] (start cursor at the 16-aligned reservation), so the
+# callee read uninitialized stack and rr_call returned 0 instead of 42.
+# Assert both bottom slots are used and the high (buggy) slots are not the
+# only stores.
+"$mcc" --target=i386-linux -S -o "$asm" "$root/test/i386/callargs.c"
+grep -Eq 'movl[[:space:]]+.*\(%esp\)' "$asm"   # arg[0] at [esp+0]
+grep -Eq 'movl[[:space:]]+.*4\(%esp\)' "$asm"  # arg[1] at [esp+4]
 printf '%s\n' 'i386 integer ABI and ELF32 object regression checks passed'

@@ -218,6 +218,16 @@ flush_pending_methods(void)
 		tokpush(&cur, 1);
 		tokpush(pm->toks, pm->ntoks);
 		next(); /* position tok at the first replayed token ('{') */
+		/* a constexpr member's body must also be registered with the
+		 * constant evaluator so a member call `constexpr S s; s.f(2)`
+		 * can be folded: cpp_buffer_constexpr_body records the body in
+		 * g_cpp_cexpr_fns and replays it (leaving tok on '{') so the
+		 * normal cpp_parse_method_body still parses the runtime form. */
+		if (pm->d && pm->d->kind == DECLFUNC &&
+		    pm->d->u.func.isconstexpr) {
+			extern void cpp_buffer_constexpr_body(struct decl *);
+			cpp_buffer_constexpr_body(pm->d);
+		}
 		cpp_parse_method_body(pm);
 	}
 }
@@ -470,6 +480,22 @@ cpp_define_method(struct scope *s, struct type *funct, const char *mname,
 		}
 	}
 	d->value = mkglobal(d);
+
+	/* `constexpr` / `consteval` member functions: the qualifier is carried
+	 * on the function type (mtype->qual), but the DECLFUNC was created
+	 * with QUALNONE.  Mirror decl()'s handling so the constexpr evaluator
+	 * (cpp_constexpr_eval, which checks u.func.isconstexpr) can fold a
+	 * member call `constexpr S s; s.f(2)`. */
+	{
+		extern int g_cpp_func_consteval;
+		if (d->kind == DECLFUNC &&
+		    (mtype->qual & QUALCONSTEXPR || g_cpp_func_consteval))
+			d->u.func.isconstexpr = true;
+		if (g_cpp_func_consteval && d->kind == DECLFUNC)
+			d->u.func.isconsteval = true;
+		if (g_cpp_func_consteval)
+			g_cpp_func_consteval = 0;
+	}
 
 	/* a ctor init list (`: Base(v)`) also means a function definition; the
 	 * buffered body (from the ':' through the closing '}') is parsed by

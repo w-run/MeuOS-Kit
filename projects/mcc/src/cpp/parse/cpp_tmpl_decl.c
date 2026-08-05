@@ -1315,6 +1315,7 @@ param_done:
 				par->params = tmpl->params;
 				par->patargs = ppat;
 				par->npatargs = npat;
+				par->match_depth = 0;
 				/* body = tokens AFTER the class-id closing '>' */
 				{
 					size_t bodystart = 0, fd = 0, q;

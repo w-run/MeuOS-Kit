@@ -227,7 +227,7 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 		 * where P_hi is the auipc instruction address.  Without this,
 		 * the LO12 operand is wrong whenever the auipc position's low
 		 * 12 bits differ from the target symbol's. */
-		if (type == 24 || type == 25) {
+		if (type == 24 || type == 25 || type == 27 || type == 28) {
 			struct mt_elf64_symbol lo_sym;
 			const char *lo_name;
 			uint64_t lo_sym_value = 0;
@@ -237,17 +237,20 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 			uint64_t hi_sym = 0;
 			int64_t hi_addend = 0;
 			int found = 0;
+			int hi_pcrel = 1;        /* partner is PCREL (use P) vs absolute */
 			unsigned char *q;
-			/* The LO12 relocation's symbol is a local label (.L0)
-			 * placed on the paired auipc instruction; its value is the
-			 * auipc's offset within the source section.  Find the
-			 * R_RISCV_PCREL_HI20 (23) relocation at that same offset. */
+			/* riscv64 LO12 (_I/S) pairs with a preceding high relocation at
+			 * the auipc/lu12i position.  That partner is either
+			 *   R_RISCV_PCREL_HI20 (23)   — PC-relative global access, or
+			 *   R_RISCV_HI20 (26)         — absolute (jump table / function
+			 *                               data pointer taken with lu12i),
+			 * both referred by the LOCAL label or the real target symbol.
+			 * Find the partner: same symbol (real-target convention) or the
+			 * auipc/lu12i offset (local-label convention). */
 			if (get_symbol_by_index(ctx, object, symbol_index, &lo_sym,
 			                        &lo_name) == 0)
 				lo_sym_value = lo_sym.value;
 			p_off = lo_sym_value;
-			/* Scan the same relocation section for a PCREL_HI20 (23)
-			 * whose offset matches the auipc instruction. */
 			for (n = 0; n < reloc_section->size / reloc_section->entry_size; ++n) {
 				uint64_t roff, rinfo, rtype, rsym;
 				int64_t raddend;
@@ -274,9 +277,12 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 					rsym = rinfo >> 32;
 					raddend = (int64_t)read64(q + 16);
 				}
-				if (rtype == 23 && roff == p_off) {
+				if ((rtype == 23 || rtype == 26) &&
+				    (rsym == symbol_index ||
+				     roff == p_off || roff == offset - 4)) {
 					hi_sym = rsym;
 					hi_addend = raddend;
+					hi_pcrel = (rtype == 23);
 					found = 1;
 					break;
 				}
@@ -286,8 +292,11 @@ write_relocation(struct ld_context *ctx, struct ld_object *object,
 			if (symbol_value(ctx, object, hi_sym, &value, &name) != 0)
 				return -1;
 			/* lo12 = (S_hi + A_hi - P_hi) & 0xFFF, where P_hi is the
-			 * resolved address of the .L0 label (the auipc position). */
-			resolved_value = value + (uint64_t)hi_addend - p_hi;
+			 * resolved address of the .L0 label (the auipc position).
+			 * For an absolute partner (R_RISCV_HI20, lu12i) there is no
+			 * PC component: lo12 = (S_hi + A_hi) & 0xFFF. */
+			resolved_value = value + (uint64_t)hi_addend -
+			                  (hi_pcrel ? p_hi : 0);
 		}
 		if (riscv64_apply_reloc(type, target->data + target_offset,
 		                         resolved_value, addend, place) == 0)

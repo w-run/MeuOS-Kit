@@ -29,7 +29,7 @@ here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 # it looks fixed and should be un-flagged).  Un-flagged programs must PASS.
 # The xfail set is per-teambook of real cross-arch mcc/mt defects surfaced
 # by this matrix that are being chased by the owning worker.
-progs_xfail="rr_i64:i386 rr_fp:loongarch64 rr_call:i386 rr_i64:riscv64 rr_i64:loongarch64 rr_struct:loongarch64 rr_call:loongarch64 rr_global:loongarch64 rr_array:loongarch64 rr_ptr:loongarch64 rr_global:riscv64"
+progs_xfail="rr_i64:i386 rr_fp:loongarch64"
 progs="rr_arith:42 rr_i64:42 rr_struct:42 rr_call:42 rr_global:42 rr_array:42 rr_ptr:42 rr_fp:42"
 
 is_xfail() {
@@ -63,7 +63,15 @@ for entry in $progs; do
 		fi
 		echo "  [$arch] $p: FAIL (ld)"; fail=1; continue; }
 	rc=0
-	"$qemu" "$work/$p.elf" || rc=$?
+	# A per-program timeout (default 10s) so a mis-behaving program
+	# doesn't hang the whole matrix.  Exit 124 on timeout → treated as
+	# a tracked failure by the xfail logic below.
+	rt_timeout="${MT_RT_TIMEOUT:-10}"
+	if command -v timeout >/dev/null 2>&1; then
+		timeout "$rt_timeout" "$qemu" "$work/$p.elf" || rc=$?
+	else
+		"$qemu" "$work/$p.elf" || rc=$?
+	fi
 	if [ "$rc" = "$want" ]; then
 		if [ "$known" = 1 ]; then
 			echo "  [$arch] $p: NOTE (xfail now passes — unflag?)"

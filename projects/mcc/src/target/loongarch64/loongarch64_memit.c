@@ -155,7 +155,14 @@ mv_to_scratch(FILE *f, MVal *v, const char *rn)
 		if (v->tls)
 			emit_tls_addr(f, v->sym ? v->sym : "0", v->isext, rn);
 		else
-			fprintf(f, "\tpcaddu12i\t%s, %%pc_hi20(%s)\n"
+			/* Address via `pcalau12i %pc_hi20 + addi.d %pc_lo12`.
+			 * mt/ld resolves PCALA_HI20(71) as a *page-relative* value
+			 * ((S+A)>>12 - (P>>12)) and PCALA_LO12(72) as the *absolute*
+			 * low 12 of S+A; pcalau12i's page-masked base makes this pair
+			 * reconstruct the true absolute address.  A `pcaddu12i` (full
+			 * PC, not page-masked) produced a wrong address (rr_global
+			 * returned 0, rr_call deadlocked). */
+			fprintf(f, "\tpcalau12i\t%s, %%pc_hi20(%s)\n"
 			            "\taddi.d\t%s, %s, %%pc_lo12(%s)\n",
 			        rn, v->sym ? v->sym : "0", rn, rn, v->sym ? v->sym : "0");
 		break;
@@ -306,7 +313,7 @@ emit_addr_to_scratch(FILE *f, MAddr a, const char *rn)
 	MVal *base = a.base;
 	if (a.offcon) {
 		const char *sym = a.offcon->u.addr.sym;
-		fprintf(f, "\tpcaddu12i\t%s, %%pc_hi20(%s)\n", rn, sym);
+		fprintf(f, "\tpcalau12i\t%s, %%pc_hi20(%s)\n", rn, sym);
 		fprintf(f, "\taddi.d\t%s, %s, %%pc_lo12(%s)\n", rn, rn, sym);
 		if (a.off)
 			emit_offset(f, rn, rn, a.off);
@@ -331,7 +338,7 @@ emit_addr_to_scratch(FILE *f, MAddr a, const char *rn)
 		if (base->tls)
 			emit_tls_addr(f, sym, base->isext, rn);
 		else {
-			fprintf(f, "\tpcaddu12i\t%s, %%pc_hi20(%s)\n", rn, sym);
+			fprintf(f, "\tpcalau12i\t%s, %%pc_hi20(%s)\n", rn, sym);
 			fprintf(f, "\taddi.d\t%s, %s, %%pc_lo12(%s)\n", rn, rn, sym);
 		}
 		if (a.off)
@@ -742,7 +749,7 @@ emit_ins(FILE *f, MInsM *in)
 	case MMOP_CALL: {
 		if (s0 && s0->kind == MV_GLOBAL) {
 			const char *sym = s0->sym ? s0->sym : "0";
-			fprintf(f, "\tpcaddu12i\t$t0, %%pc_hi20(%s)\n", sym);
+			fprintf(f, "\tpcalau12i\t$t0, %%pc_hi20(%s)\n", sym);
 			fprintf(f, "\taddi.d\t$t0, $t0, %%pc_lo12(%s)\n", sym);
 			fputs("\tjirl\t$ra, $t0, 0\n", f);
 		} else if (s0) {

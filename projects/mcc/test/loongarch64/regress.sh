@@ -8,7 +8,8 @@ vla=${TMPDIR:-/tmp}/mcc-la64-vla.$$.s
 abi=${TMPDIR:-/tmp}/mcc-la64-abi.$$.s
 tls=${TMPDIR:-/tmp}/mcc-la64-tls.$$.s
 loc=${TMPDIR:-/tmp}/mcc-la64-localvar.$$.s
-trap 'rm -f "$asm" "$varargs" "$vla" "$abi" "$tls" "$loc" "${asm}.large.c" "${asm}.large"' EXIT HUP INT TERM
+glob=${TMPDIR:-/tmp}/mcc-la64-globaladdr.$$.s
+trap 'rm -f "$asm" "$varargs" "$vla" "$abi" "$tls" "$loc" "$glob" "${asm}.large.c" "${asm}.large"' EXIT HUP INT TERM
 
 "$mcc" --target=loongarch64-linux -S -o "$asm" "$root/test/loongarch64/regress.c"
 "$mcc" --target=loongarch64-linux -S -o "$varargs" "$root/test/loongarch64/varargs.c"
@@ -68,5 +69,17 @@ grep -Eq '\$fp' "$loc"
 # (a0 = fp-relative address), not a reg that the prologue never set
 grep -Eq 'addi[.]d[[:space:]]+\$fp' "$loc"
 grep -Eq 'or[[:space:]]+\$a0' "$loc"
+
+# Global/function-address gate: the address sequence must use `pcalau12i`
+# (page-masked PC base) paired with `%pc_hi20`, NOT `pcaddu12i` (full PC).
+# mt/ld's PCALA_HI20(71) is page-relative and PCALA_LO12(72) adds the
+# absolute low 12; pcalau12i's page masking makes the pair reconstruct the
+# true address, while pcaddu12i produced wrong addresses (rr_global return 0,
+# rr_call deadlock).  Assert the mnemonic on both a global var and a
+# function call target.
+"$mcc" --target=loongarch64-linux -S -o "$glob" "$root/test/loongarch64/global_addr.c"
+grep -Eq 'pcalau12i[[:space:]].*pc_hi20\(g\)' "$glob"
+grep -Eq 'pcalau12i[[:space:]].*pc_hi20\(add2\)' "$glob"
+! grep -Eq 'pcaddu12i' "$glob"
 
 printf '%s\n' 'LoongArch64 regression checks passed'

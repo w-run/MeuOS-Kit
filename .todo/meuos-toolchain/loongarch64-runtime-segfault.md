@@ -59,3 +59,10 @@ main:
 rr_array/rr_ptr 同模式（局部数组/指针基址 bb0 在尾部死代码）。hello.c（`return 42` 无局部访问）不受影响故过。
 
 已用 mt/as + GNU loongarch64 as 逐字节验证**各指令/分支编码正确**、mt/ld 链接正确 → **非 mt/as/ld，是 mcc 后端**：loongarch64 emit 时 entry 缺 `b .Lmain.bb0`（或 block 排序错，bb0 应前置/入口应跳它）。待 mcc-worker 修 loongarch64 后端 CFG/entry 跳转。
+
+## 2026-08-05 CFG 闭环（mcc d142cbee）+ 剩 pcaddu12i LO12 约定
+
+- mcc d142cbee 修 CFG entry（入口跳 `.L<fn>.bb0`）→ rr_struct/array/ptr/i64 **segfault 全移除转 PASS**。
+- 剩 rr_call/global（as→现在能汇编，pcaddu12i 支持加入但函数地址 LO12 约定未全对，运行时 timeout/segfault）+ rr_fp（exit0）。
+- mt 侧（我）：加 **pcaddu12i** encode（1RI20 opcode 0x1C）；apply.c **PCALA_HI20(71) 保留 opcode 高字节**（原硬写 0x1A 会破坏 pcaddu12i）。
+- **重要**：PCALA_LO12(72) 保持 **绝对 S+A** 约定（Subtract-P 会让所有 loongarch 程序 startup segfault — 已验证回滚）。pcaddu12i 函数地址需要**另一种约定**（la/pcalau12i 用绝对，pcaddu12i 大模型可能真需 PC-相对）——**需区分，待专项**。

@@ -346,8 +346,30 @@ emitdata(struct decl *d, struct init *init)
 		case EXPRSTRING: {
 			size_t w = cur->expr->type->base->size;
 			size_t slen, actual;
-			if (w != 1)
-				die("mcc: wide string initializer not yet supported");
+			if (w != 1) {
+				/* Wide string literal (u8/u/U/L): the lexer already encoded
+				 * the characters as wchar_t elements in u.string.data.
+				 * Emit each element as integer data of width w (DH for
+				 * 2-byte wchar_t, DW for 4-byte), then zero-fill any span
+				 * beyond the literal's element bytes. */
+				size_t n = cur->expr->u.string.size;  /* elements incl null */
+				unsigned char *p = cur->expr->u.string.data;
+				for (size_t i = 0; i < n; i++) {
+					unsigned long long elem = 0;
+					memcpy(&elem, p + i * w, w);
+					emitintegerdata(&dat, w, elem);
+					emitdat(&dat, stdout);
+				}
+				slen = cur->end - cur->start;
+				actual = n * w;
+				if (actual < slen) {
+					dat.isstr = 0;
+					dat.type = DZ;
+					dat.u.num = slen - actual;
+					emitdat(&dat, stdout);
+				}
+				break;
+			}
 			slen = cur->end - cur->start;
 			actual = cur->expr->u.string.size < slen
 				? cur->expr->u.string.size : slen;
