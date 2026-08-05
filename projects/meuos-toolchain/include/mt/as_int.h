@@ -39,6 +39,8 @@ struct as_fixup {
 	unsigned width;
 	int64_t addend;
 	char *symbol;
+	char *symbol2;   /* second operand of a symbol-difference fixup
+	                    * (e.g. .4byte symA - symB); NULL for normal fixups */
 };
 
 struct as_operand {
@@ -116,6 +118,10 @@ int as_append_bytes(struct as_file *as, struct as_section *section,
 int as_add_fixup(struct as_file *as, struct as_section *section,
                  size_t offset, unsigned width, unsigned type,
                  int64_t addend, const char *symbol);
+int as_add_fixup_diff(struct as_file *as, struct as_section *section,
+                      size_t offset, unsigned width, unsigned type,
+                      int64_t addend, const char *symbol,
+                      const char *symbol2);
 int as_emit_le(struct as_file *as, struct as_section *section,
                uint64_t value, unsigned width);
 int as_emit_u8(struct as_file *as, struct as_section *section,

@@ -122,8 +122,10 @@ free_as(struct as_file *as)
 	}
 	for (i = 0; i < as->symbol_count; ++i)
 		free(as->symbols[i].name);
-	for (i = 0; i < as->fixup_count; ++i)
+	for (i = 0; i < as->fixup_count; ++i) {
 		free(as->fixups[i].symbol);
+		free(as->fixups[i].symbol2);
+	}
 	for (i = 0; i < as->dwarf_file_count; ++i)
 		free(as->dwarf_files[i].name);
 	for (i = 0; i < as->cfi_fde_count; ++i) {
@@ -346,6 +348,43 @@ as_add_fixup(struct as_file *as, struct as_section *section, size_t offset,
 	as->fixups[as->fixup_count].addend = addend;
 	as->fixups[as->fixup_count].symbol = mt_strdup(symbol);
 	if (!as->fixups[as->fixup_count].symbol)
+		return as_error(as, "out of memory");
+	{
+		struct as_symbol *referenced = get_symbol(as, symbol);
+		if (!referenced)
+			return -1;
+		if (!referenced->defined && symbol[0] != '.')
+			referenced->bind = MT_STB_GLOBAL;
+	}
+	++as->fixup_count;
+	return 0;
+}
+
+int
+as_add_fixup_diff(struct as_file *as, struct as_section *section, size_t offset,
+                unsigned width, unsigned type, int64_t addend,
+                const char *symbol, const char *symbol2)
+{
+	struct as_fixup *fixups;
+	if (as->fixup_count == as->fixup_capacity) {
+		size_t capacity = as->fixup_capacity ? as->fixup_capacity * 2 : 32;
+		fixups = (struct as_fixup *)mt_realloc(
+		    as->fixups, capacity * sizeof(*fixups));
+		if (!fixups)
+			return as_error(as, "out of memory");
+		as->fixups = fixups;
+		as->fixup_capacity = capacity;
+	}
+	as->fixups[as->fixup_count].section = (int)(section - as->sections);
+	as->fixups[as->fixup_count].offset = offset;
+	as->fixups[as->fixup_count].width = width;
+	as->fixups[as->fixup_count].type = type;
+	as->fixups[as->fixup_count].addend = addend;
+	as->fixups[as->fixup_count].symbol = mt_strdup(symbol);
+	as->fixups[as->fixup_count].symbol2 =
+	    symbol2 ? mt_strdup(symbol2) : NULL;
+	if (!as->fixups[as->fixup_count].symbol ||
+	    (symbol2 && !as->fixups[as->fixup_count].symbol2))
 		return as_error(as, "out of memory");
 	{
 		struct as_symbol *referenced = get_symbol(as, symbol);
