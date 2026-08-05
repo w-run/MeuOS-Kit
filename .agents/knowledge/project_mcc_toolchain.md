@@ -175,3 +175,17 @@ PIC EBX 零临时分配 → 仍作 GOT base。mt 侧 i386 GOT 重定位留待 P1
 - **与 -j 组合**：`-O binary -j .data` 只输出 .data（keep 决策复用），fold 逻辑按 keep+alloc 节区收集。
 - **纪律**：三种格式输出一致性靠"逐节区折叠 + gap 不补（ihex/srec）或补 0（binary）"——ihex/srec 不发 gap 的零记录（GNU 语义），否则体积爆炸（4KB gap 铺成几百行零记录）。
 
+
+## mt 门禁 SKIP/FAIL 语义 + qemu 掩码（2026-08-05，大喵"门禁不盖问题"指令）
+
+- **掩码 bug**：`check-qemu-aarch64/riscv64/loongarch64/arm` 曾把**任何非零 pipeline rc 映射为 "⚠️ SKIP (partial failure)" 且 continue（rc=0）** → 真实跨架构断裂（mcc -S/as/ld/错误 ELF 架构/错 exit）被当 SKIP 隐藏，`make check` 仍 PASS。fix 101d5fc 已合 7f53ef9。
+- **门禁语义铁律**：
+  1. **仅** 环境缺失（qemu binary 不存在、sysroot 目录不存在）→ SKIP 且 `exit 0`（真环境限制）。
+  2. **其余任何 failure** → 传播非零 rc，make 报 FAIL 停（不 try-catch、不吞）。
+  3. benchmark 脚本（test/*.sh）返回精确 0/1，target recipe 必须让它冒泡（Recipe 最后一个命令 rc 传播），不能 `rc=?; if ...` 把失败重写为 SKIP。
+- **宏统一**：多架构同构 target 用 make `define RUN_QEMU_ARCH` 宏 + `$(call)` 参数化，避免 6 处手抄漂移（`.PHONY`、check 依赖列表都要含）。
+- **as 门禁健壮化（check-as-arm-neg / test/as_arm_neg.sh 教训）**：
+  - `readelf -S` 取节区偏移字段是第 6 列（NOT $5，$5 是 sh_addr）；awk 模式用 `$3==".text"` 精确匹配避免误配其它区。
+  - 指令字大小写敏感比较 → `tr a-f A-F` 统一大写。
+  - 脚本 `cd $tmproot` 后，传入的相对路径参数（as/readelf）会失联 → 开头把参数 abs-olutize；对 PATH 命令用 `command -v` 解析。
+- **教训根因**：门禁是否"真实"取决于它能否把内部 stage 失败语义无损传到 make exit code。任何把"被测对象失败"改写为"环境缺失"的映射都是掩码，必须禁。
