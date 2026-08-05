@@ -1,7 +1,7 @@
 # arm mt/as FAIL：as 无法组装 hello.c 的 arm 汇编
 
-> 状态：🔄 开放（2026-08-05 qemu_c_hello.sh set -e 修复后首次真实暴露）
-> 关联：commit f5af14b；qemu_c_hello.sh 的 arm 分支在 `mt/as assembly` 阶段失败
+> 状态：✅ 已闭环（2026-08-05）
+> 关联：修复 commit 546e5af（mt/as arm fp 别名 + 伪指令 no-op）+ a25cf3c（mcc arm_mabi.c MV_CONST），合入 main c72597e
 
 ## 现象
 

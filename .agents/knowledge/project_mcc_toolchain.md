@@ -146,3 +146,20 @@ PIC EBX 零临时分配 → 仍作 GOT base。mt 侧 i386 GOT 重定位留待 P1
   2. **memit 的 i32 MOV 依赖 %eax 作 scratch 中转**，若目标寄存器也是保管关键值的返回寄存器需注意写入顺序。
   3. **负常量 vs 非负常量的镜像陷阱**：前端把 `-1` 折叠成 `neg(1)`（i32）绕过 i64 路径，导致"负的看起来对"掩盖"非负错"。改动返回/常量后端时，正负都要测。
 - commit：`b6fb898`（mcc/i386），合入 main `58af57a`；mt 侧门禁 taker `check-qemu-i386` PASS (exit=42)。
+
+## arm mcc 产物 mt/as 组装失败：双层缺陷（2026-08-05 闭环）
+
+> 教训来源：mt 验证线 check-qemu-arm 在 `mt/as assembly` 阶段失败。根因**双层**：mt/as arm 前端缺口 + mcc arm 后端同型 bug（与 i386 b6fb898 一致）。
+
+- **层 1（mt/as，meuos-toolchain）**：mcc arm 后端用 `fp`（=r11，AAPCS 帧指针）别名 + 出 `.syntax unified`/`.arch`/`.fpu` 使能伪指令：
+  - `reg_num()`（arm/encode.c）知 r0-r15/sp/lr/pc，**缺 `fp`** → 所有含 `fp` 的栈帧指令报 unsupported；
+  - `parse_directive`（as_parse.c）不认 `.syntax` 等 → 第 1 行即报错。
+- **层 2（mcc，arm_mabi.c）**：`mabi_selret` i64 返回支分**无条件从 `[r11+s0->slot]` 读**，未处理 MV_CONST——与 i386 `i386_mabi.c` 完全同源（`return 42` 读未初始化帧）。`-1` 又因 frontend neg(1) i32 绕开。
+- **修复**：
+  1. mt/as：`reg_num` 加 `fp→11`；`parse_directive` no-op `.syntax/.arch/.fpu/.cpu/.object_arch/.eabi_attribute`（纯指令风格，不产数据）。
+  2. mcc arm：i64 返回、MV_CONST 时拆低/高 32 位 `mout(MMOP_MOV, MT_I32, r1/r0, const)`；实值保留 slot load。arm 中转 r10/r12（非返回寄存器），无需 i386 的顺序讲究。
+- **关键纪律**：
+  1. **`fp` 是 AAPCS 帧指针别名（r11）**，任何 arm 汇编器/反汇编器都必须支持；缺它则一切带栈帧的指令全炸。
+  2. **mabi/isell 的 slot 假设不适用 MV_CONST** 是**跨架构类 bug**（i386/arm 同型）——排查:谓"从 slot 加载返回值/参数"路径都要问源是否可能 MV_CONST。
+  3. **负立即数**：mt/as arm 的 `add/mov #-N` 尚不支持（报 unsupported），mcc 统一语法会生成 `add #-1`（GNU as 接受）。这是 arm mt/as 前端**仍开放**的完善点（varargs 回归仍在负立即数处卡）。
+- commit：mt/as `546e5af` + mcc arm `a25cf3c`，合入 main `c72597e`；`check-qemu-arm` PASS (exit=42)。
