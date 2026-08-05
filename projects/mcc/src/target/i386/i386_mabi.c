@@ -237,6 +237,7 @@ mabi_selcall(MFnM *fm, MOut *o, MInsM *args, int n, MInsM *call)
 		 * after the args.  For now, add its size. */
 		stk += 4;
 	}
+	int argbytes = stk;   /* unaligned outgoing-argument bytes */
 	stk = (stk + 15) & ~15;   /* 16-align the stack */
 
 	/* Reserve stack space for the outgoing arguments */
@@ -247,8 +248,13 @@ mabi_selcall(MFnM *fm, MOut *o, MInsM *args, int n, MInsM *call)
 	/* Push arguments right-to-left (cdecl convention).
 	 * On the stack, the rightmost argument is at the lowest address
 	 * (the last push).  We write to [esp + soff] in order, so arg[0]
-	 * goes to the highest address, arg[n-1] goes to the lowest. */
-	int soff = stk;   /* start at the highest offset */
+	 * goes to the lowest address, arg[n-1] goes to the highest.
+	 * soff starts at argbytes (NOT the 16-aligned stk): the alignment
+	 * padding sits above the args, so arg[0] lands at [esp+0], which is
+	 * what the callee reads as [ebp+8].  (Starting soff at stk placed the
+	 * args 8 bytes too high: [ebp+16] instead of [ebp+8] -> rr_call
+	 * read uninitialized stack.) */
+	int soff = argbytes;   /* args occupy the bottom of the reserved block */
 
 	/* Aggregate return: sret pointer goes first (at the lowest address,
 	 * i.e. rightmost in cdecl — it's the last thing pushed, so it's
