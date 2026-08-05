@@ -496,6 +496,8 @@ extern bool warn_as_error;
 /* Diagnostic output mode (p9-ui): --error-json emits diagnostics as
  * structured JSON lines for tooling; --explain adds a fix-hint suffix. */
 extern int g_error_json;
+extern bool g_error_seen; /* set when a real error was emitted (vs g_error_count,
+                           * which can be perturbed by the adjacent setjmp buffer) */
 extern int g_dwarf_level; /* -g level: 0 = no debug info, 1+ = DWARF level */
 
 /* DWARF debug-info collection + emission (src/emit/dwarf.c). */

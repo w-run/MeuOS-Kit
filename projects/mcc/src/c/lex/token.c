@@ -270,7 +270,18 @@ errcode_str(enum errcode code)
  * the first error. */
 int g_error_count;
 int g_error_limit = 10;
+/* True once a real error was emitted through error_common's structured path.
+ * Unlike g_error_count (which sits adjacent to g_err_recovery's jmp_buf and
+ * can be perturbed by setjmp()'s __sigjmp_save on -O), this flag is only set
+ * when an actual diagnostic was produced, so success exits 0. */
+bool g_error_seen;
+/* setjmp's __sigjmp_save on some libc builds writes past the nominal jmp_buf
+ * into neighbouring globals; the isolation pads on each side absorb that so
+ * the adjacent diagnostic counters/flags are not perturbed (which otherwise
+ * made a successful json/sarif compile exit non-zero). */
+char g_err_recovery_pad[512];
 jmp_buf g_err_recovery;
+char g_err_recovery_pad2[512];
 int g_err_recovery_set;
 
 /* Skip to a safe resynchronization point after a collected error: the
@@ -500,6 +511,7 @@ error_common(enum errcode code, const struct location *loc, size_t width,
 			    loc ? loc->col + (width ? width - 1 : 0) : 0,
 			    msg);
 		}
+		g_error_seen = true;
 		if (++g_error_count >= g_error_limit)
 			exit(1);
 		if (g_err_recovery_set)

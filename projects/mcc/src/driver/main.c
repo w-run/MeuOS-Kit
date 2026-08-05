@@ -974,8 +974,9 @@ mcc_main(int argc, char *argv[])
 				g_err_recovery_set = 0;
 			}
 		}
-		if ((g_error_json || g_diag_fmt == DIAG_SARIF) && g_error_count > 0)
+		if ((g_error_json || g_diag_fmt == DIAG_SARIF) && g_error_seen) {
 			exit(1); /* errors were collected: fail even if under the limit */
+		}
 		emittentativedefns();
 
 		/* Emit ELF footer (sections, etc.). */
