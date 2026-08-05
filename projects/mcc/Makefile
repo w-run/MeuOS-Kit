@@ -367,6 +367,22 @@ check-cpp-neg: $(MPP_BIN)
 
 check-cpp: check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg
 
+# Focused regression for the recently closed clusters (new/delete,
+# braced-init, destructor chains, virtual / pure-virtual dispatch): each
+# semantic domain in test/cpp/focus_regress.sh is a PASS/FAIL group.
+check-cpp-focus: $(MPP_BIN)
+	sh test/cpp/focus_regress.sh --mpp $(abspath $(MPP_BIN))
+
+# Optional m++ vs g++ semantic parity (skips when g++ is unavailable, or a
+# test the other compiler does not accept), test/cpp/gcc_compare.sh.
+check-cpp-gcc: $(MPP_BIN)
+	sh test/cpp/gcc_compare.sh --mpp $(abspath $(MPP_BIN))
+
+# x86_64 static runtime regression (test/x86_64/runtime.sh): runs static
+# binaries exercising the global-array address path on the build host.
+check-x86_64-runtime: $(BIN)
+	sh test/x86_64/runtime.sh $(abspath $(BIN)) $(MEUOS_SYSROOT)
+
 # mcc/m++ -O 优化级别语义分级回归（test/olevel/run.sh）：
 # -O0..-O3/-Os/-Oz/-Og 运行时正确性 + 级别差异（if 转换/强度削减/
 # 帧指针）+ 非法级别（-O9 钳制、-Ox 拒绝）。
@@ -379,7 +395,7 @@ check-olevel: $(BIN)
 check-i18n: $(BIN) $(MPP_BIN)
 	@sh test/i18n/run.sh ./$(BIN) ./$(MPP_BIN)
 
-.PHONY: all clean check check-all check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-c23-neg check-c-mir check-driver check-diag-warning check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg check-cpp check-olevel check-i18n
+.PHONY: all clean check check-all check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-c23-neg check-c-mir check-driver check-diag-warning check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg check-cpp check-cpp-focus check-cpp-gcc check-x86_64-runtime check-olevel check-i18n
 
 # chibicc community functional test suite (C11/C23 conformance).
 # Runs test/community/chibicc/run.sh against the MeuOS sysroot.

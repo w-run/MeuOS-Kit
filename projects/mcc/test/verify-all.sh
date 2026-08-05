@@ -182,6 +182,18 @@ run "make check-sysroot-static" make check-sysroot-static
 # 8. C 功能回归 × MIR/LIR 双路径矩阵（mir_matrix.sh：MIR=1 与 MIR=0 均编译运行且 stdout 一致）
 run "make check-c-mir" make check-c-mir
 
+# 9. 本轮已闭合的 new/delete、braced-init、析构、虚/纯虚机制聚焦回归 batch
+#    （test/cpp/focus_regress.sh：按语义域拆细，逐域 PASS/FAIL 可定位）
+run "make check-cpp-focus" make check-cpp-focus
+
+# 10. m++ vs g++ 语义对照 batch（test/cpp/gcc_compare.sh；g++ 缺失时自 SKIP，
+#     双编译器都接受的测试要求 exit code 一致）
+run "make check-cpp-gcc" make check-cpp-gcc
+
+# 11. x86_64 静态 runtime 回归（test/x86_64/runtime.sh：静态 exe 数组地址
+#     路径 + 算术；缺 sysroot 时自 SKIP，本机 x86_64 具备时真正执行）
+run "make check-x86_64-runtime" make check-x86_64-runtime
+
 # 汇总
 echo "======================================"
 echo "汇总: PASS=$PASS FAIL=$FAIL SKIP=$SKIP"
