@@ -336,9 +336,12 @@ emit_addr_str(FILE *f, MAddr a, char *buf, size_t bufsz)
 		}
 		base_s = "%ecx";
 	} else if (base) {
-		/* mreg_name returns bare name ("ebp"); AT&T syntax needs %ebp */
+		/* mreg_name returns bare name ("ebp"); AT&T syntax needs %ebp.
+		 * It also returns "?" when the register index is out of range
+		 * (e.g. a spilled temp that the first branch missed).  Fall
+		 * back to loading into %ecx. */
 		const char *rn = mreg_name(g_mt, base->reg);
-		if (!rn || rn[0] == '\0') {
+		if (!rn || rn[0] == '\0' || rn[0] == '?') {
 			mv_to_scratch(f, base, "ecx");
 			base_s = "%ecx";
 		} else {
