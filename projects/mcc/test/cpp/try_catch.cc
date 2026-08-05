@@ -162,5 +162,26 @@ main(void)
         }
     }
 
+    /* stage-4b: const-qualified reference catch.  `const` on a catch type is
+     * C++-ignored for matching; we must parse catch(const T&) and bind the
+     * same T-view.  Combine with the multi-inheritance slice to cover both:
+     * catch(const ExcSecond&) of a throw(ExcBoth) must read the second base
+     * member (return code 18/19 keep stage-4b distinct). */
+    {
+        int r = 0;
+        try {
+            throw ExcBoth();
+        } catch (const ExcSecond &e) {
+            r = ((*e).sb == 200) ? 0 : 18;
+        }
+        /* const on a mutable base (first base at offset 0, not sliced) */
+        if (r) return 19;
+        try {
+            throw ExcBoth();
+        } catch (const ExcBoth &e) {
+            if ((*e).d != 300) return 20;
+        }
+    }
+
     return 0;
 }

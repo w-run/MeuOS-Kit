@@ -1461,8 +1461,20 @@ for (;;) {
 				bnext = NULL;
 				break;
 			} else {
-				const char *ts = tokenstr(tok.kind);
+				const char *ts;
 				struct type *tt;
+				/* Skip leading const/volatile on the catch type:
+				 * catch(const T) / catch(const T&)  binds the same
+				 * parameter as the unqualified form — C++ ignores the
+				 * top-level cv-qualifier when matching the catch type,
+				 * and our T&→T* downgrade makes const transparent to
+				 * the pointer cast in the binding.  `const`/`volatile`
+				 * are C keywords (TCONST/TVOLATILE, below TIDENT), so
+				 * check tok.kind directly — cpp_tok_kind() maps these
+				 * to CPP_TNONE. */
+				while (tok.kind == TCONST || tok.kind == TVOLATILE)
+					next();
+				ts = tokenstr(tok.kind);
 				if (strcmp(ts, "int") == 0)
 					ctype = &typeint;
 				else if (strcmp(ts, "char") == 0)
