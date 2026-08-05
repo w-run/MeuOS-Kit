@@ -77,6 +77,7 @@ int fchdir(int);
 long pathconf(const char *, int);
 long fpathconf(int, int);
 long sysconf(int);
+size_t confstr(int, char *, size_t);
 
 /* pathconf name values */
 #define _PC_LINK_MAX 0
@@ -88,6 +89,10 @@ long sysconf(int);
 #define _PC_CHOWN_RESTRICTED 6
 #define _PC_NO_TRUNC 7
 #define _PC_VDISABLE 8
+
+/* confstr name values */
+#define _CS_PATH 1
+#define _CS_GNU_LIBC_VERSION 2
 
 /* sysconf name values */
 #define _SC_ARG_MAX 0
