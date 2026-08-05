@@ -29,7 +29,7 @@ glob_append(struct glob_t *g, const char *path)
 static int
 glob_do(const char *pattern, struct glob_t *g, int flags)
 {
-	const char *slash = strchr(pattern, '/');
+	const char *slash = strrchr(pattern, '/');
 	if (!slash) {
 		/* No slash: simple filename pattern */
 		DIR *d = opendir(".");
