@@ -1563,15 +1563,15 @@ i386_encode_insn(const struct mt_target *target,
 skip_jcc:
 
 	/* ---- SHIFT / ROTATE (shl/sal/shr/sar/rol/ror) ---- */
-	if ((strcmp(base, "shl") == 0 || strcmp(base, "sal") == 0 ||
-	     strcmp(base, "shr") == 0 || strcmp(base, "sar") == 0 ||
+	if ((strncmp(base, "shl", 3) == 0 || strncmp(base, "sal", 3) == 0 ||
+	     strncmp(base, "shr", 3) == 0 || strncmp(base, "sar", 3) == 0 ||
 	     strcmp(base, "rol") == 0 || strcmp(base, "ror") == 0) && nops == 2) {
 		int ext;
-		if (strcmp(base, "shl") == 0 || strcmp(base, "sal") == 0)
+		if (strncmp(base, "shl", 3) == 0 || strncmp(base, "sal", 3) == 0)
 			ext = 4;
-		else if (strcmp(base, "shr") == 0)
+		else if (strncmp(base, "shr", 3) == 0)
 			ext = 5;
-		else if (strcmp(base, "sar") == 0)
+		else if (strncmp(base, "sar", 3) == 0)
 			ext = 7;
 		else if (strcmp(base, "rol") == 0)
 			ext = 0;
@@ -1589,9 +1589,11 @@ skip_jcc:
 			out->size = (size_t)(p - out->bytes);
 			goto done;
 		}
-		if (ops[0].kind == OP_REG && ops[0].reg == 1 && ops[0].width == 1 &&
+		if (ops[0].kind == OP_REG && ops[0].reg == 1 &&
+		    (ops[0].width == 1 || ops[0].width == 4) &&
 		    ops[1].kind == OP_REG) {
-			/* shl %cl, reg — 0xD3 /ext */
+			/* shl %cl, reg — 0xD3 /ext (count lives in CL; accept a
+			 * full ECX count operand too, since mcc may emit %ecx). */
 			emit8(p, 0xD3);
 			emit8(p + 1, modrm(3, ext, ops[1].reg));
 			p += 2;
