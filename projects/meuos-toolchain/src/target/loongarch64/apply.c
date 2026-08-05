@@ -148,11 +148,7 @@ la64_apply_reloc(unsigned reloc_type, unsigned char *place,
 	 * Used with ADD/load/store immediate:
 	 *   insn[21:10] = (S+A) & 0xFFF  (12-bit signed immediate) */
 	case 72: /* R_LARCH_PCALA_LO12 */
-		/* PC-relative: lo12 = (S + A - P) & 0xFFF, so that
-		 *   pcalau12i (hi) + addi.d (lo) reaches S+A from P.
-		 * (Absolute S+A here would be wrong whenever the target's low
-		 * 12 bits differ from the auipc/lu12i position's.) */
-		delta = (int64_t)(S + (uint64_t)A) - (int64_t)P;
+		delta = (int64_t)(S + (uint64_t)A);
 		set_bits(place, 21, 10, (uint32_t)(delta & 0xFFF) << 10);
 		return 0;
 
