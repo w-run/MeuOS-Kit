@@ -78,7 +78,11 @@ if [ ! -x "$qemu" ]; then
 	exit "$fail"
 fi
 
-"$qemu" "$work/hello.elf"; rc=$?
+# The test program is designed to exit 42 (nonzero). Under `set -e` a bare
+# invocation would terminate the shell before we can capture/compare rc, so
+# capture it via `|| rc=$?` (the right-hand side is exempt from set -e).
+rc=0
+"$qemu" "$work/hello.elf" || rc=$?
 if [ "$rc" = "42" ]; then
 	echo "  PASS (exit=$rc)"
 else
