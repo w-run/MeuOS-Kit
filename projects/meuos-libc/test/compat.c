@@ -5,6 +5,8 @@
 #include <obstack.h>
 #include <argp.h>
 #include <string2.h>
+#include <libgen.h>
+#include <program-invocation.h>
 
 /* --- getline / getdelim --- */
 static int
@@ -196,8 +198,40 @@ test_argp(void)
 	return 0;
 }
 
+/* --- program_invocation (glibc convention globals) --- */
+static int
+test_program_invocation(int argc, char **argv)
+{
+	char *shortname;
+
+	/* Core startup must have populated both from argv[0]. */
+	if (argc < 1 || !argv[0])
+		return 1;
+	if (!program_invocation_name) {
+		puts("FAIL program_invocation_name is NULL");
+		return 2;
+	}
+	if (program_invocation_name != argv[0]) {
+		printf("FAIL program_invocation_name=%s argv[0]=%s\n",
+		       program_invocation_name, argv[0]);
+		return 3;
+	}
+	if (!program_invocation_short_name) {
+		puts("FAIL program_invocation_short_name is NULL");
+		return 4;
+	}
+	/* short_name must equal the basename of argv[0]. */
+	shortname = basename(argv[0]);
+	if (strcmp(program_invocation_short_name, shortname) != 0) {
+		printf("FAIL short_name=%s basename=%s\n",
+		       program_invocation_short_name, shortname);
+		return 5;
+	}
+	return 0;
+}
+
 int
-main(void)
+main(int argc, char **argv)
 {
 	int r;
 
@@ -213,6 +247,8 @@ main(void)
 		printf("FAIL funopen: %d\n", r);
 	else if ((r = test_argp()))
 		printf("FAIL argp: %d\n", r);
+	else if ((r = test_program_invocation(argc, argv)))
+		printf("FAIL program_invocation: %d\n", r);
 	else
 		printf("compat ok\n");
 	return r;

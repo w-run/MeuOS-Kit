@@ -22,6 +22,31 @@ extern char **environ;
  * error(3) (compat) and other consumers depend on it. */
 const char *__progname = "?";
 
+/* GNU/glibc-convention program-invocation globals.  Although glibc exposes
+ * these as compat/glibc-isms, they must be filled at libc startup, and this
+ * crt has no .init_array for an opt-in compat archive to hook into (nor does
+ * the toolchain fold an undefined-weak store reliably), so core defines and
+ * populates them here.  The compat layer still owns the public declaration
+ * header (program-invocation.h) for programs that opt in. */
+char *program_invocation_name = "?";
+char *program_invocation_short_name = "?";
+
+/* Last pathname component of s; the string is not copied — it aliases
+ * inside argv[0]. */
+static char *
+base_name(char *s)
+{
+	char *base = s;
+
+	if (!s)
+		return NULL;
+	for (; *s; ++s) {
+		if (*s == '/')
+			base = s + 1;
+	}
+	return base;
+}
+
 /* Cached base of the kernel auxv array (pairs of unsigned long). */
 static const unsigned long *__auxv_cache;
 
@@ -43,8 +68,11 @@ void
 __meuos_startup(int argc, char **argv, char **envp)
 {
 	(void)argc;
-	if (argv && argv[0])
+	if (argv && argv[0]) {
 		__progname = argv[0];
+		program_invocation_name = argv[0];
+		program_invocation_short_name = base_name(argv[0]);
+	}
 	if (!__auxv_cache)
 		__auxv_cache = find_auxv(envp);
 }
