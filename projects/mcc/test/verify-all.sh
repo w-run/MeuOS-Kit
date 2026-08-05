@@ -194,6 +194,14 @@ run "make check-cpp-gcc" make check-cpp-gcc
 #     路径 + 算术；缺 sysroot 时自 SKIP，本机 x86_64 具备时真正执行）
 run "make check-x86_64-runtime" make check-x86_64-runtime
 
+# 12. riscv64 / loongarch64 静态 runtime 回归（test/<arch>/runtime.sh：静态
+#     交叉 exe + user-mode qemu；缺交叉 sysroot 或 user-mode qemu 时自 SKIP）。
+#     loongarch64 编译路径已验证通过；riscv64 全局数组 emit 有 pcrel 链接
+#     bug（见 runtime_arr.c 注释），本 batch 用局部数组源，全局数组 ABI 由
+#     x86_64/loongarch64 runtime 覆盖。
+run "make check-riscv64-runtime" make check-riscv64-runtime
+run "make check-loongarch64-runtime" make check-loongarch64-runtime
+
 # 汇总
 echo "======================================"
 echo "汇总: PASS=$PASS FAIL=$FAIL SKIP=$SKIP"

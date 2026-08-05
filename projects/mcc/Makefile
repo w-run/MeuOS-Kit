@@ -383,6 +383,18 @@ check-cpp-gcc: $(MPP_BIN)
 check-x86_64-runtime: $(BIN)
 	sh test/x86_64/runtime.sh $(abspath $(BIN)) $(MEUOS_SYSROOT)
 
+# riscv64 static runtime regression (test/riscv64/runtime.sh): compile+run a
+# riscv64 static binary under user-mode qemu; skips when the sysroot or
+# qemu-riscv64 is absent.
+check-riscv64-runtime: $(BIN)
+	sh test/riscv64/runtime.sh $(abspath $(BIN)) $(MEUOS_SYSROOT)
+
+# loongarch64 static runtime regression (test/loongarch64/runtime.sh):
+# compile+run a loongarch64 static binary under user-mode qemu; skips when
+# the sysroot or qemu-loongarch64 is absent.
+check-loongarch64-runtime: $(BIN)
+	sh test/loongarch64/runtime.sh $(abspath $(BIN)) $(MEUOS_SYSROOT)
+
 # mcc/m++ -O 优化级别语义分级回归（test/olevel/run.sh）：
 # -O0..-O3/-Os/-Oz/-Og 运行时正确性 + 级别差异（if 转换/强度削减/
 # 帧指针）+ 非法级别（-O9 钳制、-Ox 拒绝）。
@@ -395,7 +407,7 @@ check-olevel: $(BIN)
 check-i18n: $(BIN) $(MPP_BIN)
 	@sh test/i18n/run.sh ./$(BIN) ./$(MPP_BIN)
 
-.PHONY: all clean check check-all check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-c23-neg check-c-mir check-driver check-diag-warning check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg check-cpp check-cpp-focus check-cpp-gcc check-x86_64-runtime check-olevel check-i18n
+.PHONY: all clean check check-all check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-c23-neg check-c-mir check-driver check-diag-warning check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg check-cpp check-cpp-focus check-cpp-gcc check-x86_64-runtime check-riscv64-runtime check-loongarch64-runtime check-olevel check-i18n
 
 # chibicc community functional test suite (C11/C23 conformance).
 # Runs test/community/chibicc/run.sh against the MeuOS sysroot.
