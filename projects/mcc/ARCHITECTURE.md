@@ -305,8 +305,13 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
   递归自我转发选择：`sum_all(1,2,3,4)` 调用点在**重载选择**阶段未把变参重载
   `(T, Ts...)` 排为可吸收多于定长重载 `(T)` 实参的候选取向，且嵌套实例化时
   pack 参数(`rest_0`)值绑定错位——两层都属「跨层状态/语义一致性」深根，
-  **登记 mcc 一致性专项**（含 i386 rr_i64 i64 slot-half 统一）；无包嵌套、
+  **登记 mcc 一致性专项**；无包嵌套、
   无类成员变参模板。`sizeof...(Ts)` 多元素计数与 `count<>()` 空包已修（2eaa662a）。
+- **i386 i64 stack-param 缺陷**（独立于常量槽位，登记 mcc 一致性专项）：i386 上
+  `long long` 形参（cdecl 栈传参，位于 `8(%ebp)`）读成 `-1(%ebp)`/`3(%ebp)`——根因是
+  `mabi_selpar` 在 lowering 期把 `dst->slot`（此时为 `-1` 未分配 sentinel）直接写进 LOAD
+  目标 `lov->slot`，regalloc 之后不会再给该 param 一个真实 slot（常量化路径相同缺陷已修，
+  见下）。`i386 test/i386/i64const.c` 刻意规避该路径，仅覆盖常量槽位回归。
 - **继承**：虚继承。纯虚 `= 0` 已支持（纯虚成员/析构声明解析 + vtable 槽位留 0，派生覆写正常分派）；抽象类（含未覆写纯虚）实例化报错已支持（对象声明/`new T`/`new T[]`）；类外析构定义 `B::~B(){}` 已支持（纯虚析构完整对象生命周期可用）；多态 `delete` 基类指针已支持（虚析构经 vtable 分派跑派生析构 `~D` 再 `~B`，非虚析构仍静态决议，`delete[]` 数组仍走静态逐元素析构）。
 - **auto/decltype**：仅 `auto x = expr`（局部/全局）与 C++14 `auto f()` 返回类型推导；未做 `auto&` 引用折叠、decltype 独立推导（160e2a2 落地范围）。
 - **lambda**：值捕获与引用捕获均已支持——显式 `[&x]` / 默认 `[&]` 引用捕获（能读到活动变量更新）、默认按值 `[=]`、混捕 `[=,&y]`/`[&,z]`/`[x,&y]`、init-capture `[n=expr]`、泛型 lambda（c14c7a2 起支持引用/init 捕获）；跨函数传递捕获仍为限制。
@@ -341,6 +346,8 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
 | mir-01 | V | MIR msimp 有符号 div/rem 误削减 | ✅ closed（93ab4b4 夹带 + Test 3b/3c/3d + 4c24bfe） |
 | mir-02 | J | slotmerge 自举破坏（长期禁用 97c8541；二期见 worker-slot2） | 🚫 长期禁用 |
 | mir-03 | I | slotmerge 崩溃（并入 J） | 🚫 禁用 |
+| x86-i64slot | — | i386 i64 常量槽位 lo/hi 约定不一致（物化端不 base 化 `g_slot_base` + `-1` sentinel 直用致 `-1(%ebp)`/`3(%ebp)`，`(1LL<<40)>>32` 读垃圾）→ rr_i64 | ✅ closed（6008c405；i386_memit 引入 i64_base/i64_dst_base 统一 base 约定 + 预留 scratch 半对；i386 test/i386/i64const.c 回归 + rt_matrix i386 8/8） |
+| x86-i64param | — | i386 i64 栈传参读 `-1(%ebp)`/`3(%ebp)`（mabi_selpar 用 lowering 期未分配 `dst->slot` 直赋 LOAD 目标） | 🔶 open（登记一致性专项；i64const 规避，constants 常量化路径同缺陷已一并修） |
 | cpp-10 | — | 局部类（函数体内 `struct`）+ `new` 段错误：ctor 体即时代码生成污染全局 `curfunc` + 局部类 `t->scope` 未设（野指针） | ✅ closed（三处：mktype 初始化 `t->scope=NULL` + tagspec 普通 struct 设 `t->scope=s` + cpp_parse_method_body 恢复 `curfunc`；local_class_new.cc 回归） |
 | x86-00 | va_list | MIR 后端 va_list 溢出 | ✅ closed（222a28d） |
 | cpp-00 | A | size-0 类值传参（历史名，已被 cpp-0e 替代） | 🚫 废弃 |
