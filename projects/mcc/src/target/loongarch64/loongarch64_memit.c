@@ -28,6 +28,58 @@ static int g_alloca_cur;   /* frame-relative cursor for static allocas */
 static const char *g_fname;
 static int g_slot_base;    /* -16: ra+fp save area above the slots */
 
+/* ---- float constant pool (per emitted function) -------------------------- */
+
+/* Floating-point constants cannot be materialized as integer immediates on
+ * loongarch64 (a double bit pattern is 64 bits; li.d can only encode a
+ * 32-bit immediate).  They are stashed into .rodata and loaded with
+ * fld.s/fld.d from a PC-relative address — the same scheme x86_64 uses.
+ * The pool is reset once per emitted function. */
+static MConst **fp_pool;
+static uint32_t nfp, cfp;
+
+static uint32_t
+fp_label(MConst *c)
+{
+	for (uint32_t i = 0; i < nfp; i++) {
+		MConst *x = fp_pool[i];
+		if (x->type != c->type)
+			continue;
+		/* Compare the IEEE bit pattern (memcmp), not the value: -0.0 == +0.0
+		 * numerically but they differ in the sign bit and must stay distinct
+		 * constants (mir_util.c con_pool_find does the same). */
+		size_t sz = x->type == MT_F32 ? sizeof(float) : sizeof(double);
+		if (memcmp(&x->u, &c->u, sz) == 0)
+			return i;
+	}
+	if (nfp == cfp) {
+		cfp = cfp ? cfp * 2 : 8;
+		fp_pool = realloc(fp_pool, cfp * sizeof *fp_pool);
+	}
+	fp_pool[nfp++] = c;
+	return nfp - 1;
+}
+
+/* Emit the per-function .rodata constant pool (if any) after the function. */
+static void
+fp_pool_emit(FILE *f)
+{
+	if (!nfp)
+		return;
+	fputs(".section .rodata\n", f);
+	for (uint32_t i = 0; i < nfp; i++) {
+		MConst *c = fp_pool[i];
+		fprintf(f, ".L%s.lc%u:\n", g_fname ? g_fname : "f", i);
+		if (c->type == MT_F32) {
+			union { float s; uint32_t u; } x = { .s = c->u.s };
+			fprintf(f, "\t.long %u\n", x.u);
+		} else {
+			union { double d; uint64_t u; } x = { .d = c->u.d };
+			fprintf(f, "\t.quad %llu\n", (unsigned long long)x.u);
+		}
+	}
+}
+
 /* ---- width helpers ------------------------------------------------------ */
 
 static int
@@ -234,10 +286,19 @@ fmv_to_scratch(FILE *f, MVal *v, const char *rn)
 	switch (v->kind) {
 	case MV_CONST: {
 		if (v->con->kind == MC_FLT) {
-			uint32_t bits;
-			memcpy(&bits, &v->con->u.s, 4);
-			fprintf(f, "\tli.d\t$t0, 0x%x\n", bits);
-			fprintf(f, "\tmovgr2fr.w\t%s, $t0\n", rn);
+			/* FP constants live in .rodata.  Materialize the PC-relative
+			 * pool address in $t0, then load the value with fld.{s,d}.
+			 * A double bit pattern is 64 bits; building it as an integer
+			 * immediate is not expressible with li.d (32-bit only) and
+			 * reading u.s loses the upper half, so go through memory —
+			 * the same scheme as the x86_64 MIR backend. */
+			uint32_t idx = fp_label(v->con);
+			const char *sx = v->con->type == MT_F32 ? "s" : "d";
+			fprintf(f, "\tpcalau12i\t$t0, %%pc_hi20(.L%s.lc%u)\n",
+			        g_fname ? g_fname : "f", idx);
+			fprintf(f, "\taddi.d\t$t0, $t0, %%pc_lo12(.L%s.lc%u)\n",
+			        g_fname ? g_fname : "f", idx);
+			fprintf(f, "\tfld.%s\t%s, $t0, 0\n", sx, rn);
 		} else {
 			uint64_t bits;
 			memcpy(&bits, &v->con->u.d, 8);
@@ -842,6 +903,7 @@ mfnm_emit_loongarch64(MFnM *fm, FILE *f)
 	g_fm = fm;
 	g_fname = fm->name ? fm->name : "?";
 	g_slot_base = -16;      /* ra (8) + fp (8) save area above the slots */
+	nfp = 0;                /* fresh float constant pool per function */
 
 	fm->dynalloc = false;
 	for (MBlkM *b = fm->link; !fm->dynalloc && b; b = b->link)
@@ -903,4 +965,6 @@ mfnm_emit_loongarch64(MFnM *fm, FILE *f)
 
 	for (MBlkM *b = fm->link; b; b = b->link)
 		emit_block(f, b);
+
+	fp_pool_emit(f);
 }

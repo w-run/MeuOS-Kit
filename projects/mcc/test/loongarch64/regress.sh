@@ -9,7 +9,8 @@ abi=${TMPDIR:-/tmp}/mcc-la64-abi.$$.s
 tls=${TMPDIR:-/tmp}/mcc-la64-tls.$$.s
 loc=${TMPDIR:-/tmp}/mcc-la64-localvar.$$.s
 glob=${TMPDIR:-/tmp}/mcc-la64-globaladdr.$$.s
-trap 'rm -f "$asm" "$varargs" "$vla" "$abi" "$tls" "$loc" "$glob" "${asm}.large.c" "${asm}.large"' EXIT HUP INT TERM
+fpc=${TMPDIR:-/tmp}/mcc-la64-fpconst.$$.s
+trap 'rm -f "$asm" "$varargs" "$vla" "$abi" "$tls" "$loc" "$glob" "$fpc" "${asm}.large.c" "${asm}.large"' EXIT HUP INT TERM
 
 "$mcc" --target=loongarch64-linux -S -o "$asm" "$root/test/loongarch64/regress.c"
 "$mcc" --target=loongarch64-linux -S -o "$varargs" "$root/test/loongarch64/varargs.c"
@@ -81,5 +82,28 @@ grep -Eq 'or[[:space:]]+\$a0' "$loc"
 grep -Eq 'pcalau12i[[:space:]].*pc_hi20\(g\)' "$glob"
 grep -Eq 'pcalau12i[[:space:]].*pc_hi20\(add2\)' "$glob"
 ! grep -Eq 'pcaddu12i' "$glob"
+
+# FP-constant gate: floating-point constants must be stashed in .rodata and
+# loaded with fld.s/fld.d.  They cannot be materialized as integer
+# immediates — a double bit pattern is 64 bits and li.d only encodes 32 —
+# and reading just the low half turned 1.5/28.0 into integer 0 (rr_fp
+# returned 0 instead of 42).  Assert the pool and the loads, per function.
+"$mcc" --target=loongarch64-linux -S -o "$fpc" "$root/test/loongarch64/fpconst.c"
+grep -Eq '^\.section[[:space:]]+\.rodata' "$fpc"
+# double 1.5 and 28.0 keep their full IEEE patterns as distinct pool entries
+grep -Eq '^\.Ldmul\.lc0:' "$fpc"
+grep -Eq '^\.Ldmul\.lc1:' "$fpc"
+grep -Eq '[[:space:]]\.quad[[:space:]]+4609434218613702656' "$fpc"
+grep -Eq '[[:space:]]\.quad[[:space:]]+4628574517030027264' "$fpc"
+grep -Eq 'fld\.d[[:space:]]+\$f[0-9]+, \$t0, 0' "$fpc"
+# float 2.5f/4.0f use the 4-byte pool form and fld.s
+grep -Eq '^\.Lfmul\.lc0:' "$fpc"
+grep -Eq '[[:space:]]\.long[[:space:]]+1075838976' "$fpc"
+grep -Eq '[[:space:]]\.long[[:space:]]+1082130432' "$fpc"
+grep -Eq 'fld\.s[[:space:]]+\$f[0-9]+, \$t0, 0' "$fpc"
+# the pool address is PC-relative (pcalau12i/%pc_lo12), and no FP constant
+# is routed through the integer scratch (the old movgr2fr materialization)
+grep -Eq 'pcalau12i[[:space:]].*%pc_hi20\(\.Ldmul\.lc0\)' "$fpc"
+! grep -Eq 'movgr2fr' "$fpc"
 
 printf '%s\n' 'LoongArch64 regression checks passed'
