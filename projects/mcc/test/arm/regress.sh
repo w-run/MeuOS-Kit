@@ -52,6 +52,21 @@ if ! grep -Eq 'sub[[:space:]]+r12, r12, #32' "$shtmp" ||
 fi
 printf '%s\n' 'arm i64-shift compile gate passed'
 
+# const-argument call gate: `add(20,22)` must materialize each literal as
+# an immediate (movw #0x14 / #0x16) into r0/r1 before `bl add`.  The pre-fix
+# arm MMOP_MOV treated i32 dest + i64-typed const as an i64 slot move, so no
+# immediate was loaded and the call read garbage.  RR_call (expect 42) hit it.
+cctmp=${TMPDIR:-/tmp}/mcc-arm-constcall.$$.s
+trap 'rm -f "$asmtmp" "$shtmp" "$cctmp"' EXIT HUP INT TERM
+"$mcc" --target=arm -S -o "$cctmp" "$root/test/arm/constcall.c"
+if ! grep -Eq 'movw[[:space:]]+r10, #0x14' "$cctmp" ||
+   ! grep -Eq 'movw[[:space:]]+r10, #0x16' "$cctmp" ||
+   grep -qE 'ldr[[:space:]]+r10, \[fp, #-3' "$cctmp"; then
+	printf '%s\n' 'arm const-arg call: FAIL (constants not materialized as immediates)' >&2
+	exit 1
+fi
+printf '%s\n' 'arm const-arg call compile gate passed'
+
 if [ ! -f "$sysroot/usr/lib/libc-meuos.a" ]; then
 	printf '%s\n' "arm runtime: sysroot not found at $sysroot, skipping"
 	exit 0
