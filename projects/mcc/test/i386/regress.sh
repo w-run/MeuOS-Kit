@@ -156,3 +156,34 @@ if ! grep -Eq 'movzbl[[:space:]]+%al, %eax' "$bnasm" && \
 	exit 1
 fi
 printf '%s\n' 'i386 byte-narrowing return compile gate passed'
+
+# signed-byte constant-fold gate (defect #22b): a local `signed char x = -56;
+# return x;` folds to `sext (i32) (i8)200`; the i386 MOVSX emit must
+# sign-extend from the operand's source width (movsbl %al,%eax), not use the
+# widened destination dtype (which would drop the extension and return the
+# unsigned low byte 200 instead of -56).  Assert the asm contains a movsbl
+# (the sign extension) and does NOT return the bare $200 from sb_neg56.
+sbfasm=${TMPDIR:-/tmp}/mcc-i386-sbfold.$$.s
+"$mcc" --target=i386-linux -O2 -S -o "$sbfasm" "$root/test/i386/signed_byte_fold.c"
+if ! grep -Eq 'movsbl[[:space:]]+%al, %eax' "$sbfasm"; then
+	printf '%s\n' 'i386 signed-byte fold: FAIL (no movsbl for folded sext (i8)200)' >&2
+	exit 1
+fi
+# The folded constant must be sign-extended: sb_neg56 must emit `movl $200`
+# followed by a `movsbl` before its `ret` (the unfixed bug emitted $200 and
+# returned it directly with no movsbl in between).
+if awk '
+  /sb_neg56:/{f=1}
+  f&&/movl[[:space:]]+\$200,[[:space:]]+%eax/{saw200=1}
+  f&&/movsbl/{saw200=0}            # extension present: clears the bare-$200 flag
+  f&&/ret/{
+    if(saw200) bad=1;             # $200 reached ret with no movsbl in between
+    f=0
+  }
+  END{exit bad?1:0}' "$sbfasm"; then
+	:
+else
+	printf '%s\n' 'i386 signed-byte fold: FAIL (sb_neg56 returns bare $200, sign extension lost)' >&2
+	exit 1
+fi
+printf '%s\n' 'i386 signed-byte constant-fold compile gate passed'

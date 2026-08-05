@@ -829,7 +829,13 @@ emit_ins(FILE *f, MInsM *in)
 			return;
 		}
 		mv_to_scratch(f, s0, "eax");
-		switch (in->dtype) {
+		/* Source width comes from the operand's type, not the
+		 * destination dtype (which is always the widened i32/i64):
+		 * `sext i8->i32` must sign-extend from the low byte, but
+		 * in->dtype is MT_I32 here, so using it would drop the
+		 * sign extension (e.g. (signed char)-56 loaded as 200). */
+		MType st = s0 ? s0->type : in->dtype;
+		switch (st) {
 		case MT_I8:  fputs("\tmovsbl\t%al, %eax\n", f); break;
 		case MT_I16: fputs("\tmovswl\t%ax, %eax\n", f); break;
 		default:     break;
