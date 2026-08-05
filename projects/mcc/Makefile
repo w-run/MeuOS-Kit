@@ -348,9 +348,19 @@ check-cpp-virtual: $(MPP_BIN)
 # the host specs, keeping them runnable in any environment.  virtual.cc
 # needs the meuos sysroot and is exercised by check-cpp-virtual instead.
 check-cpp-func: $(MPP_BIN)
-	@for t in $$(ls test/cpp/*.cc | grep -v '\.neg\.cc' | grep -v '/virtual\.cc' | grep -v '/try_catch\.cc'); do \
+	@for t in $$(ls test/cpp/*.cc | grep -v '\.neg\.cc' | grep -v '/virtual\.cc'); do \
 		out=/tmp/mpp-$$(basename $$t .cc); \
-		./$(MPP_BIN) --specs=host -o $$out $$t || exit $$?; \
+		inc=; \
+		case "$$t" in \
+		  */try_catch\.cc) \
+		    if [ -f ../meuos-libc/include/meuos_exc.h ]; then \
+		      inc="-I../meuos-libc/include"; \
+		    else \
+		      echo "SKIP try_catch (meuos_exc.h not in ../meuos-libc/include)"; \
+		      continue; \
+		    fi ;; \
+		esac; \
+		./$(MPP_BIN) --specs=host $$inc -o $$out $$t || exit $$?; \
 		$$out || exit $$?; \
 		if [ "$$(basename $$t)" = "global_dtor.cc" ]; then \
 			$$out | grep -q "^dtor 3$$" || { echo "FAIL: global_dtor order"; exit 1; }; \

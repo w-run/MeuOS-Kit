@@ -15,12 +15,10 @@
  *
  * Each check returns a distinct exit code; run via `check-cpp-func`.
  *
- * NOTE: this file is currently excluded from check-cpp-func's wildcard
- * (Makefile greps out /try_catch\.cc) because it depends on <meuos_exc.h>
- * and the setjmp/longjmp exception runtime, which land on the libc side
- * (libc-worker's tmp/libc-work, not yet merged to main).  Once the libc
- * exception foundation is merged, drop the filter and add
- * `-I../meuos-libc/include` so this joins the gate.
+ * check-cpp-func compiles it with `-I../meuos-libc/include` so <meuos_exc.h>
+ * (the libc exception runtime header) resolves when it is present in the
+ * libc project; if the header is absent the target is skipped rather than
+ * failing the gate.
  */
 #include <meuos_exc.h>
 
