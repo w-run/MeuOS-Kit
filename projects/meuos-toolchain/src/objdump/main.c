@@ -17,12 +17,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* glibc's PRIx64 expands to "lx" (expects `unsigned long`), but in this
- * environment uint64_t is `unsigned long long`, so gcc14 -Werror=format
- * rejects it.  Force the correct length modifier for the local typedef. */
-#undef PRIx64
-#define PRIx64 "llx"
-
 #define MT_OBJDUMP_VERSION "0.2.0"
 
 enum od_format {
