@@ -48,4 +48,22 @@ fi
 LC_ALL=C readelf -h "$obj" | grep -Eq 'Class:[[:space:]]+ELF32'
 LC_ALL=C readelf -h "$obj" | grep -Eq 'Machine:[[:space:]]+Intel 80386'
 
+# i64-shift gate: register shifts must take the count in %cl (never %ecx,
+# which is not a valid shift-count encoding) and use plain shl/shr/sar (mt/as
+# rejects the GNU shll/shrl/sarl aliases).  Assert emitted mnemonics; the
+# assembly is also compiled to an object below so the host assembler would
+# reject any invalid count register.
+shasm=${TMPDIR:-/tmp}/mcc-i386-i64shift.$$.s
+trap 'rm -f "$asm" "$obj" "$shasm"' EXIT HUP INT TERM
+"$mcc" --target=i386-linux -S -o "$shasm" "$root/test/i386/i64shift.c"
+if grep -Eq 'sh[lrs][[:space:]]+%ecx' "$shasm" ||
+   grep -Eq "sh[lr]{1,2}[[:space:]]+%ecx" "$shasm" ||
+   grep -Eq 'shll[[:space:]]+|shrl[[:space:]]+|sarl[[:space:]]' "$shasm"; then
+	printf '%s\n' 'i386 i64-shift: FAIL (shift count must be %cl, mnemonic must be plain shl/shr/sar)' >&2
+	exit 1
+fi
+grep -Eq 'shl[[:space:]]+%cl' "$shasm"
+grep -Eq 'sar[[:space:]]+\$31' "$shasm"
+printf '%s\n' 'i386 i64-shift compile gate passed'
+
 printf '%s\n' 'i386 integer ABI and ELF32 object regression checks passed'
