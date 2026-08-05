@@ -29,8 +29,8 @@ here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 # it looks fixed and should be un-flagged).  Un-flagged programs must PASS.
 # The xfail set is per-teambook of real cross-arch mcc/mt defects surfaced
 # by this matrix that are being chased by the owning worker.
-progs_xfail=""
-progs="rr_arith:42 rr_i64:42 rr_struct:42 rr_call:42 rr_global:42 rr_array:42 rr_ptr:42 rr_fp:42"
+progs_xfail="rr_i64param:aarch64"
+progs="rr_arith:42 rr_i64:42 rr_struct:42 rr_call:42 rr_global:42 rr_array:42 rr_ptr:42 rr_fp:42 rr_i64param:42"
 
 is_xfail() {
 	p=$1; a=$2
