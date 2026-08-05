@@ -289,6 +289,56 @@ primaryexpr(struct scope *s)
 			extern struct expr *cpp_requires_expr(struct scope *);
 			if (g_lang == 1 && cpp_tok_kind() == CPP_TREQUIRES)
 				return cpp_requires_expr(s);
+			/* C++ cast operators: `static_cast<T>(e)`, `dynamic_cast<T>(e)`,
+			 * `const_cast<T>(e)`, `reinterpret_cast<T>(e)`.  The lexer
+			 * tokenises these as dedicated C++ tokens; parse the
+			 * `<TypeName>` template-style type and the parenthesised
+			 * operand, then lower as a cast (like a C-style cast). */
+			if (g_lang == 1) {
+				extern enum cpp_tokenkind cpp_tok_kind(void);
+				extern struct expr *unaryexpr(struct scope *);
+				enum cpp_tokenkind ck = cpp_tok_kind();
+				if (ck == CPP_TSTATIC_CAST || ck == CPP_TDYNAMIC_CAST ||
+				    ck == CPP_TCONST_CAST || ck == CPP_TREINTERPRET_CAST) {
+					struct type *cast_t;
+					struct expr *operand;
+					enum typequal cast_q = QUALNONE;
+
+					next();   /* consume the cast keyword */
+					expect(TLESS, "after cast operator to start type");
+					cast_t = typename(s, &cast_q, NULL);
+					if (!cast_t)
+						error_code(E_SYNTAX, &tok.loc,
+						    "invalid type in cast operator");
+					expect(TGREATER, "to close cast type");
+					expect(TLPAREN, "before cast operand");
+					operand = expr(s);
+					expect(TRPAREN, "after cast operand");
+
+					/* A cast to a reference type must yield an lvalue of
+					 * the referent type (references bind by address in a
+					 * reference declaration, and the bound operand is the
+					 * referent lvalue — e.g. `int& r = *p` binds an `int`
+					 * lvalue, not a pointer).  Re-label the operand to
+					 * the referent type, dropping const for const_cast. */
+					if (cast_t->isref) {
+						e = operand;
+						e->type = cast_t->base ? cast_t->base : cast_t;
+						e->qual = cast_q;
+						e->lvalue = true;
+						break;
+					}
+					/* dynamic_cast of a pointer/reference is lowered to a
+					 * static cast (upcast/cross-cast are correct; a
+					 * downcast assumes the user guarantees validity —
+					 * RTTI is not implemented, matching the self-hosted
+					 * toolchain's tcc-style pragmatic choice). */
+					e = mkexpr(EXPRCAST, cast_t, operand);
+					e->qual = cast_q;
+					e->lvalue = cast_t->isref;
+					break;
+				}
+			}
 			/* C++ temporary-object construction: `Vec(expr)`.  A class
 			 * tag followed by '(' is a constructor call (the tag can't be
 			 * a function name). */
