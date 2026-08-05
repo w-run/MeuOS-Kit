@@ -4,13 +4,14 @@
  * Covers scalar braced-init (`new int{42}` value-initialises the heap
  * scalar), aggregate braced-init (`new Pt{3,4}` positionally assigns the
  * data members), braced-init through a user constructor
- * (`new Point{3,4}` overload-resolves the ctor), and scalar-array
+ * (`new Point{3,4}` overload-resolves the ctor), scalar-array
  * braced-init (`new int[3]{1,2,3}` assigns each element, value-initializing
- * any element beyond the list -> 0).
+ * any element beyond the list -> 0), and class-array braced-init
+ * (`new Pt[2]{{1,2},{3,4}}` constructs each element from its nested
+ * sub-list, with elements beyond a short list value-initialized).
  *
- * Array braced-init on a class element type (`new Pt[3]{...}`) is a known
- * TODO (m++ emits a clear "not implemented yet" diagnostic), so it is not
- * exercised here.
+ * Class-array elements that are a single expression (`new Pt[2]{Pt(1,2)}`)
+ * are not yet covered (the nested-sub-list form is the supported case).
  *
  * Each check returns a distinct exit code; run via `check-cpp-func`.
  */
@@ -60,6 +61,24 @@ main(void)
     int *c = new int[4]{};
     if (c[0] != 0 || c[1] != 0 || c[2] != 0 || c[3] != 0) return 7;
     delete[] c;
+
+    /* aggregate class-array braced-init: each element filled from its
+     * nested sub-list */
+    Pt *pa = new Pt[2]{{1, 2}, {3, 4}};
+    if (pa[0].x != 1 || pa[0].y != 2 || pa[1].x != 3 || pa[1].y != 4) return 8;
+    delete[] pa;
+
+    /* user-ctor class-array braced-init: each element constructed from its
+     * nested sub-list through the ctor */
+    Point *ps = new Point[2]{{5, 6}, {7, 8}};
+    if (ps[0].x != 5 || ps[0].y != 6 || ps[1].x != 7 || ps[1].y != 8) return 9;
+    delete[] ps;
+
+    /* class-array braced-init with a list shorter than n: the remaining
+     * elements are value-initialized (default-constructed) */
+    Pt *sc = new Pt[3]{{1, 2}};
+    if (sc[0].x != 1 || sc[0].y != 2) return 10;
+    delete[] sc;
 
     return 0;
 }

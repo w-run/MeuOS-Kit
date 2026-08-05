@@ -197,7 +197,11 @@ cpp_parse_new_expr(struct scope *s)
 		 * value-initialized (scalar -> 0). (Moved out of "not implemented".) */
 		if (tok.kind == TLBRACE) {
 			bracked = true; /* even an empty list `new T[n]{}` needs fill */
-			args = cpp_braced_args_collect(s);
+			if (!(t->kind == TYPESTRUCT || t->kind == TYPEUNION))
+				/* scalar array: collect the flat list here; a class array's
+				 * brace elements are per-element nested `{...}` sub-lists,
+				 * handled (and consumed) in the class-array branch below */
+				args = cpp_braced_args_collect(s);
 		}
 		if (!curfunc)
 			error_code(E_DECL, &tok.loc, "'new' outside of a function body is not supported");
@@ -263,7 +267,7 @@ cpp_parse_new_expr(struct scope *s)
 					    t->u.structunion.tag ? t->u.structunion.tag : "?");
 				bool needs_elem = cpp_has_ctor(t, t->u.structunion.tag) ||
 				                  t->u.structunion.poly;
-				if (needs_elem && !args) {
+				if (needs_elem && !args && !bracked) {
 					struct decl *iv;
 					struct expr *ie, *lt, *ptr, *inc;
 					struct block *bloop, *bbody, *bdone;
@@ -327,15 +331,131 @@ cpp_parse_new_expr(struct scope *s)
 					funcjmp(curfunc, bloop);
 					funclabel(curfunc, bdone);
 				} else if (bracked) {
-				/* `new T[n]{list}` on a class array: per-element
-				 * construction from the braced list (with value-init
-				 * fill beyond the list) is not implemented yet; emit a
-				 * clear diagnostic rather than miscompiling. */
-				error_code(E_OVERLOAD, &tok.loc,
-				    "class-array 'new %s[]{%s}' braced init is not implemented yet",
-				    t->u.structunion.tag,
-				    "list");
-			}
+					/* `new T[n]{...}` class-array braced init: the outer
+					 * `{` is still the current token (scalar arrays
+					 * consumed it above; we left it for per-element
+					 * handling).  Each brace element is either a nested
+					 * `{...}` sub-list (the element's member/ctor args)
+					 * or a single value expression; elements beyond the
+					 * list are value-initialized (default ctor for a class,
+					 * zero for scalars). */
+					struct expr *a;
+					struct block *bload2, *bdone2;
+					int k = 0;
+					next(); /* consume outer '{' */
+					for (;;) {
+						struct expr *elem_args = NULL, **ea = &elem_args;
+						struct expr *elem_val = NULL;
+						if (tok.kind == TRBRACE)
+							break;
+						if (k > 0)
+							expect(TCOMMA, "or '}' in new array initializer");
+						/* collect this element's initializer */
+						if (tok.kind == TLBRACE) {
+							/* nested `{1,2}`: element args */
+							next(); /* consume '{' */
+							for (;;) {
+								if (tok.kind == TRBRACE)
+									break;
+								if (elem_args)
+									expect(TCOMMA, "or '}' in braced element");
+								*ea = assignexpr(s);
+								ea = &(*ea)->next;
+							}
+							next(); /* consume '}' */
+						} else {
+							elem_val = assignexpr(s); /* single value */
+						}
+						/* ptr = tmp + k*sizeof(T) */
+						{
+							struct expr *pe = mkexpr(EXPRBINARY, pt, NULL);
+							pe->op = TADD;
+							pe->u.binary.l = ident;
+							pe->u.binary.r = mkbinaryexpr(&tok.loc, TMUL,
+							    mkconstexpr(&typeulong, (unsigned long long)k),
+							    mkconstexpr(&typeulong, t->size));
+							if (elem_val)
+								*ea = elem_val; /* value element: single arg */
+							if (cpp_has_ctor(t, t->u.structunion.tag)) {
+								struct expr *ce = cpp_ctor_expr(t, pe, elem_args);
+								if (!ce)
+									error_code(E_OVERLOAD, &tok.loc,
+									    "no matching constructor for braced array element '%s'",
+									    t->u.structunion.tag);
+								funcexpr(curfunc, ce);
+							} else {
+								/* aggregate: positionally assign members */
+								struct member *m;
+								for (m = t->u.structunion.members, a = elem_args;
+								     m && a; m = m->next, a = a->next) {
+									struct expr *base, *dst;
+									if (m->name && m->name[0] == '~')
+										continue;
+									if (m->type && m->type->kind == TYPEFUNC)
+										continue;
+									base = mkbinaryexpr(&tok.loc, TADD,
+									    exprconvert(pe, &typeulong),
+									    mkconstexpr(&typeulong, m->offset));
+									base->type = mkpointertype(m->type, QUALNONE);
+									dst = mkunaryexpr(TMUL, base);
+									dst->type = m->type;
+									dst->lvalue = true;
+									funcexpr(curfunc, mkassignexpr(dst, a));
+								}
+								if (t->u.structunion.poly)
+									cpp_init_vptrs(curfunc, t, pe);
+							}
+						}
+						++k;
+					}
+					next(); /* consume outer '}' */
+					/* value-init the remaining [k, n) elements (default
+					 * ctor for a class, zero for scalars): reuse the same
+					 * per-element construct loop as the un-braced path by
+					 * letting the k value-constructed elements stand in.  A
+					 * short list means the trailing heap slots hold the
+					 * default-constructed value; for classes with a user
+					 * ctor this mirrors `new T[n]`. */
+					{
+						struct decl *iv;
+						struct expr *ie, *pe, *lt, *inc;
+						struct block *bloop3, *bbody3;
+						extern struct type typeint;
+						iv = mkdecl("__nw_j", DECLOBJECT, &typeint, QUALNONE, LINKNONE);
+						iv->u.obj.storage = SDAUTO;
+						funcinit(curfunc, iv, NULL, false);
+						ie = mkexpr(EXPRIDENT, &typeint, NULL);
+						ie->lvalue = true;
+						ie->u.ident.decl = iv;
+						funcexpr(curfunc, mkassignexpr(ie, mkconstexpr(&typeint, k)));
+						bload2 = mkblock("loop3");
+						bbody3 = mkblock("body3");
+						bdone2 = mkblock("done3");
+						funclabel(curfunc, bload2);
+						lt = mkbinaryexpr(&tok.loc, TLESS, ie,
+						    mkexpr(EXPRCAST, &typeint, ne));
+						funcbranch(curfunc, lt, bbody3, bdone2);
+						funclabel(curfunc, bbody3);
+						pe = mkexpr(EXPRBINARY, pt, NULL);
+						pe->op = TADD;
+						pe->u.binary.l = ident;
+						pe->u.binary.r = mkbinaryexpr(&tok.loc, TMUL,
+						    mkexpr(EXPRCAST, &typeulong, ie),
+						    mkconstexpr(&typeulong, t->size));
+						if (cpp_has_ctor(t, t->u.structunion.tag)) {
+							struct expr *ce2 = cpp_ctor_expr(t, pe, NULL);
+							if (ce2)
+								funcexpr(curfunc, ce2);
+						} else if (t->u.structunion.poly) {
+							cpp_init_vptrs(curfunc, t, pe);
+						}
+						inc = mkbinaryexpr(&tok.loc, TADD, ie,
+						    mkconstexpr(&typeint, 1));
+						funcexpr(curfunc, mkassignexpr(ie, inc));
+						funcjmp(curfunc, bload2);
+						funclabel(curfunc, bdone2);
+					}
+				}
 		} else if (bracked) {
 			/* `new T[n]{list}` scalar array braced-init: assign each
 			 * brace element to the corresponding element of the heap
