@@ -67,7 +67,7 @@ int
 build_rela_dyn(struct ld_context *ctx)
 {
 	size_t i;
-	if ((!ctx->shared && !ctx->pie) || ctx->got.count == 0)
+	if ((!ctx->shared && !ctx->pie) || (ctx->got.count == 0 && ctx->rela_capacity_entries == 0))
 		return 0;
 	int rg = find_group(ctx, ".rela.dyn");
 	int rpg = find_group(ctx, ".rela.plt");
@@ -160,6 +160,84 @@ build_rela_dyn(struct ld_context *ctx)
 				uint64_t info = ((uint64_t)sym_idx << 32) | MT_R_X86_64_GLOB_DAT;
 				if (rela_dyn_add(ctx, got_entry, info, 0) != 0)
 					return -1;
+			}
+		}
+	}
+	/* Generate RELATIVE entries for data-section absolute relocations
+	 * (R_X86_64_64/32/32S) in PIE/shared mode.  These are needed so the
+	 * dynamic loader can adjust the absolute address by the load base.
+	 * Without them, data-section pointer initializers (e.g.
+	 * `int *p = &bss_var[4]`) carry stale addresses → SIGSEGV. */
+	if (ctx->shared || ctx->pie) {
+		for (i = 0; i < ctx->objects.count; ++i) {
+			struct ld_object *object = &ctx->objects.items[i];
+			if (object->is_shared) continue;
+			for (uint16_t si = 0; si < object_section_count(object); ++si) {
+				struct mt_elf64_section sec;
+				if (object_get_section(object, si, &sec) != 0) continue;
+				if (sec.type != MT_SHT_RELA && sec.type != MT_SHT_REL) continue;
+				if (sec.entry_size == 0 || sec.size % sec.entry_size != 0) continue;
+				/* Skip if the relocation targets a discarded section */
+				if (sec.info >= object_section_count(object)) continue;
+				int target_group = object->maps[sec.info].group;
+				if (target_group < 0) continue;
+				uint64_t target_addr = ctx->groups[target_group].address;
+				for (uint64_t ri = 0; ri < sec.size / sec.entry_size; ++ri) {
+					const unsigned char *p = object->data + sec.offset + ri * sec.entry_size;
+					uint64_t r_offset;
+					uint64_t sym_idx;
+					int type;
+					int64_t addend;
+					if (object->elf_class == 1) {
+						r_offset = read32(p + 0);
+						uint32_t info32 = read32(p + 4);
+						type = (int)(info32 & 0xff);
+						sym_idx = info32 >> 8;
+						addend = (sec.type == MT_SHT_RELA) ? (int32_t)read32(p + 8) : 0;
+					} else {
+						r_offset = read64(p + 0);
+						uint64_t info64 = read64(p + 8);
+						type = (int)(info64 & 0xffffffffu);
+						sym_idx = info64 >> 32;
+						addend = (int64_t)read64(p + 16);
+					}
+					if (type != LD_R_X86_64_64 &&
+					    type != LD_R_X86_64_32 &&
+					    type != LD_R_X86_64_32S)
+						continue;
+					struct mt_elf64_symbol sym;
+					const char *sym_name;
+					struct ld_global *g;
+					if (get_symbol_by_index(ctx, object, sym_idx, &sym, &sym_name) != 0)
+						continue;
+					g = find_global(ctx, sym_name);
+					if (!g || !g->defined || g->group < 0) continue;
+					/* Skip TLS symbols (handled separately). */
+					const char *gname = ctx->groups[g->group].name;
+					if (gname && (strcmp(gname, ".tdata") == 0 ||
+					              strcmp(gname, ".tbss") == 0))
+						continue;
+					/* Compute the address of the location being relocated. */
+					uint64_t reloc_offset = object->maps[sec.info].offset;
+					uint64_t place = target_addr + reloc_offset + r_offset;
+					uint64_t sym_value = ctx->groups[g->group].address + g->offset;
+					/* The RELATIVE entry's addend must match the value that
+					 * apply_relocations wrote into the data slot, which is
+					 * (sym_value + addend) for R_X86_64_64/32/32S.  At
+					 * runtime, ld.so computes: slot = base + addend. */
+					uint64_t info;
+					if (strcmp(ctx->target->name, "arm") == 0)
+						info = (uint64_t)MT_R_ARM_RELATIVE;
+					else if (ctx->target->elf_class == MT_ELFCLASS32)
+						info = (uint64_t)MT_R_X86_64_RELATIVE;
+					else
+						info = (0ULL << 32) | MT_R_X86_64_RELATIVE;
+					/* The addend is the full linked address of the target
+					 * symbol (the value that the relocation patched in).
+					 * At runtime, ld.so will compute: slot = base + addend. */
+					if (rela_dyn_add(ctx, place, info, (int64_t)sym_value + addend) != 0)
+						return -1;
+				}
 			}
 		}
 	}
@@ -519,6 +597,61 @@ build_dynamic_tables(struct ld_context *ctx)
 			n_regular_rela++;
 		}
 	}
+
+	/* Count data-section RELATIVE entries needed for PIE/shared mode.
+	 * In PIE mode, every R_X86_64_64/32/32S relocation that targets a
+	 * defined symbol in this link needs a RELATIVE entry so the dynamic
+	 * loader can adjust the absolute address by the load base at runtime.
+	 * Without this, data-section pointer initializers (e.g.
+	 * `int *p = &bss_var[4]`) carry stale addresses → SIGSEGV. */
+	size_t data_rela_count = 0;
+	if (ctx->shared || ctx->pie) {
+		for (i = 0; i < ctx->objects.count; ++i) {
+			struct ld_object *object = &ctx->objects.items[i];
+			if (object->is_shared) continue;
+			for (uint16_t si = 0; si < object_section_count(object); ++si) {
+				struct mt_elf64_section sec;
+				if (object_get_section(object, si, &sec) != 0) continue;
+				if (sec.type != MT_SHT_RELA && sec.type != MT_SHT_REL) continue;
+				if (sec.entry_size == 0 || sec.size % sec.entry_size != 0) continue;
+				for (uint64_t ri = 0; ri < sec.size / sec.entry_size; ++ri) {
+					const unsigned char *p = object->data + sec.offset + ri * sec.entry_size;
+					uint64_t info64;
+					int type;
+					uint64_t sym_idx;
+					struct mt_elf64_symbol sym;
+					const char *sym_name;
+					struct ld_global *g;
+					if (object->elf_class == 1) {
+						uint32_t info32 = read32(p + 4);
+						type = (int)(info32 & 0xff);
+						sym_idx = info32 >> 8;
+					} else {
+						info64 = read64(p + 8);
+						type = (int)(info64 & 0xffffffffu);
+						sym_idx = info64 >> 32;
+					}
+					/* Only count absolute data relocations targeting
+					 * defined symbols in this link. */
+					if (type != LD_R_X86_64_64 &&
+					    type != LD_R_X86_64_32 &&
+					    type != LD_R_X86_64_32S)
+						continue;
+					if (get_symbol_by_index(ctx, object, sym_idx, &sym, &sym_name) != 0)
+						continue;
+					g = find_global(ctx, sym_name);
+					if (!g || !g->defined || g->group < 0) continue;
+					/* Skip TLS symbols (handled separately). */
+					const char *gname = ctx->groups[g->group].name;
+					if (gname && (strcmp(gname, ".tdata") == 0 ||
+					              strcmp(gname, ".tbss") == 0))
+						continue;
+					data_rela_count++;
+				}
+			}
+		}
+	}
+	n_regular_rela += data_rela_count;
 
 	/* Pre-create .rela.dyn group for non-PLT dynamic relocations (must exist
 	 * before layout_output assigns addresses).  Content is filled by
