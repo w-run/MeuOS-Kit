@@ -164,6 +164,31 @@ declaratortypes(struct scope *s, struct list *result, char **name, int *align, s
 		allowedattr = -1;
 		break;
 	default:
+		if (tok.kind == TBNOT) {
+			/* Out-of-line destructor definition `~Class():` — the class
+			 * qualifier was recorded by declspecs (`Class::~`).  Assume the
+			 * class of the qualifier and mangle `~Class` to `Class_dtor`.
+			 * The trailing `()` is absorbed by the function declarator. */
+			extern const char *cpp_take_qual_class(void);
+			const char *qcls = cpp_take_qual_class();
+			next(); /* consume '~' */
+			if (qcls && tok.kind >= TIDENT &&
+			    strcmp(tokenstr(tok.kind), qcls) == 0) {
+				char *mname = xmalloc(strlen(qcls) + 6);
+				sprintf(mname, "%s_dtor", qcls);
+				*name = mname;
+				/* re-record the qualifier: decl() takes it again to
+				 * route the definition to the member-function path */
+				extern void cpp_set_qual_class(const char *);
+				cpp_set_qual_class(qcls);
+				next(); /* consume the class name */
+			} else {
+				error_code(E_SYNTAX, &tok.loc,
+				    "expected the class name after '::~'");
+			}
+			allowedattr = align ? ATTRALIGNED : (ATTRFALLTHROUGH | ATTRNODISCARD | ATTRMAYBEUNUSED | ATTRDEPRECATED);
+			break;
+		}
 		if (tok.kind >= TIDENT) {
 			if (!name)
 				error_code(E_SYNTAX, &tok.loc, "identifier not allowed in abstract declarator");

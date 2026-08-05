@@ -469,6 +469,17 @@ declspecs(struct scope *s, enum storageclass *sc, enum funcspec *fs, int *align)
 					struct token ccolon = tok;
 					struct type *it;
 					next();
+					if (tok.kind == TBNOT) {
+						/* `Class::~Class` — an out-of-line class destructor
+						 * definition.  `Class ::` were consumed; keep the
+						 * token at `~Class` and record the class qualifier,
+						 * returning the unit `void` type so decl() routes
+						 * the `~Class(){}` through the function-definition
+						 * (declarator -> `Class_dtor`) path. */
+						extern void cpp_set_qual_class(const char *);
+						cpp_set_qual_class(tokenstr(saved.kind));
+						return (struct qualtype){&typevoid, QUALNONE, NULL};
+					}
 					if (tok.kind < TIDENT)
 						error_code(E_SYNTAX, &tok.loc, "expected type name after '::'");
 					it = scopegettag(s, tokenstr(tok.kind), 1);
