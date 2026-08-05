@@ -100,3 +100,23 @@ printf '%s\n' 'i386 i64 constant-slot compile gate passed'
 grep -Eq 'movl[[:space:]]+.*\(%esp\)' "$asm"   # arg[0] at [esp+0]
 grep -Eq 'movl[[:space:]]+.*4\(%esp\)' "$asm"  # arg[1] at [esp+4]
 printf '%s\n' 'i386 integer ABI and ELF32 object regression checks passed'
+
+# i64 stack-param reception gate (x86-i64param): a `long long` parameter
+# arrives at [ebp+8]/[ebp+12] (and +16/+20 for a second).  mabi_selpar must
+# load these into the parameter's real frame slots.  Before the fix it
+# hard-wired the LOAD destinations to dst->slot (== -1 until regalloc), so
+# the reception read `movl -1(%ebp)/3(%ebp)/-5(%ebp)` garbage.  Assert the
+# incoming halves are read from the real arg offsets and that no bogus
+# 1(%ebp)/3(%ebp)/-1(%ebp) frame reads appear.
+pasm=${TMPDIR:-/tmp}/mcc-i386-i64param.$$.s
+trap 'rm -f "$asm" "$obj" "$shasm" "$casm" "$pasm"' EXIT HUP INT TERM
+"$mcc" --target=i386-linux -S -o "$pasm" "$root/test/i386/i64param.c"
+# both i64 params: low half at [ebp+8] (first) and [ebp+16] (second)
+grep -Eq 'movl[[:space:]]+8\(%ebp\),[[:space:]]+%eax' "$pasm"
+grep -Eq 'movl[[:space:]]+16\(%ebp\),[[:space:]]+%eax' "$pasm"
+# no bogus unbased/bogus frame reads from the old dst->slot=-1 sentinel
+if grep -Eq 'movl[[:space:]]+(1|3|5)\(%ebp\),[[:space:]]+%e[a-z][a-z]' "$pasm"; then
+	printf '%s\n' 'i386 i64 stack-param: FAIL (bogus -1/3/5(%ebp) frame read)' >&2
+	exit 1
+fi
+printf '%s\n' 'i386 i64 stack-param compile gate passed'

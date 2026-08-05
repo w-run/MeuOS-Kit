@@ -181,20 +181,16 @@ mabi_selpar(MFnM *fm, MOut *o, MInsM *parms, int n, uint32_t *vafa)
 
 		/* Scalar parameter */
 		if (p->dtype == MT_I64) {
-			/* i64: 8-byte stack slot, loaded into spill slot */
-			int lo = dst->slot;
-			mout_addr(o, MMOP_LOAD, MT_I32,
-			          tmp(fm, MT_I32, "i64lo"),
+			/* i64 param: 8 bytes at [ebp+off]/[ebp+off+4].  A single
+			 * MMOP_LOAD (MT_I64) into dst lets the emitter's emit_load
+			 * write both halves into dst's frame slot via i64_dst_base.
+			 * The MIR regalloc forces i64 values on 32-bit targets to a
+			 * stack slot (regalloc: kl_in_reg==0 => phislot), so dst has
+			 * a real slot by the time the emitter runs; we must NOT
+			 * pre-split into i32 temps and hard-wire dst->slot (which is
+			 * -1 until regalloc), or the halves read garbage (x86-i64param). */
+			mout_addr(o, MMOP_LOAD, MT_I64, dst,
 			          maddr(reg(fm, I386MREG_EBP), 0, 1, off), 0);
-			MVal *lov = o->ins[o->nins - 1].dst;
-			lov->slot = lo;
-			lov->reg = -1;
-			mout_addr(o, MMOP_LOAD, MT_I32,
-			          tmp(fm, MT_I32, "i64hi"),
-			          maddr(reg(fm, I386MREG_EBP), 0, 1, off + 4), 0);
-			MVal *hiv = o->ins[o->nins - 1].dst;
-			hiv->slot = lo + 4;
-			hiv->reg = -1;
 			off += 8;
 		} else {
 			mout_addr(o, MMOP_LOAD, p->dtype, dst,
@@ -288,18 +284,14 @@ mabi_selcall(MFnM *fm, MOut *o, MInsM *args, int n, MInsM *call)
 			mout_blit(fm, o, dstp, a->src[0], a->td->size);
 		} else if (a->dtype == MT_I64) {
 			soff -= 8;
-			/* i64: 8-byte value in a spill slot */
-			int slot = a->src[0]->slot;
-			mout_addr(o, MMOP_LOAD, MT_I32, reg(fm, I386MREG_EAX),
-			          maddr(reg(fm, I386MREG_EBP), 0, 1, slot), 0);
-			mout_addr(o, MMOP_STORE, MT_I32, 0,
+			/* i64: 8-byte value stored at [esp+soff]/[esp+soff+4].
+			 * A single MMOP_STORE (MT_I64) lets the emitter's emit_store
+			 * materialise the source (constant, register, or slot-resident
+			 * value) via i64_base, so the caller pushes the real halves
+			 * rather than reading a possibly-unset src[0]->slot. */
+			mout_addr(o, MMOP_STORE, MT_I64, 0,
 			          maddr(reg(fm, I386MREG_ESP), 0, 1, soff),
-			          reg(fm, I386MREG_EAX));
-			mout_addr(o, MMOP_LOAD, MT_I32, reg(fm, I386MREG_EDX),
-			          maddr(reg(fm, I386MREG_EBP), 0, 1, slot + 4), 0);
-			mout_addr(o, MMOP_STORE, MT_I32, 0,
-			          maddr(reg(fm, I386MREG_ESP), 0, 1, soff + 4),
-			          reg(fm, I386MREG_EDX));
+			          a->src[0]);
 		} else {
 			soff -= 4;
 			mout_addr(o, MMOP_STORE, a->dtype, 0,
@@ -370,19 +362,18 @@ mabi_selret(MFnM *fm, MOut *o, MInsM *term)
 		return;
 	}
 	bool isf = s0->type == MT_F32 || s0->type == MT_F64;
+	bool ret64 = false;
 	if (s0->type == MT_I64) {
 		/* i64 return: EAX (low 32) + EDX (high 32). */
 		if (s0->kind == MV_CONST && s0->con) {
 			/* Immediate constant return (e.g. `return 42`): load the
 			 * low/high 32-bit halves directly as cdecl i32 immediates.
-			 * A bare `ret (i64)42` has no stack slot; reading s0->slot
-			 * here would emit `movl <garbage>(%ebp), %eax` and return
-			 * whatever garbage sits on the uninitialized frame. */
+			 * A constant has no stack slot, so loading off s0->slot would
+			 * read garbage.  Load the high half into EDX first, then the
+			 * low half into EAX (memit's i32 const->mov materializes the
+			 * immediate through the %eax scratch, so loading the low half
+			 * last keeps the return value in EAX intact). */
 			int64_t cv = s0->con->u.i;
-			/* Load the high half into EDX first, then the low half
-			 * into EAX: memit's i32 const->mov materializes the
-			 * immediate through the %eax scratch register, so loading
-			 * the low half last keeps the return value (EAX) intact. */
 			mout(o, MMOP_MOV, MT_I32, reg(fm, I386MREG_EDX),
 			     mval_const(fm->host, MT_I32,
 			                imm(fm, MT_I32, (int32_t)(cv >> 32))), 0);
@@ -390,18 +381,21 @@ mabi_selret(MFnM *fm, MOut *o, MInsM *term)
 			     mval_const(fm->host, MT_I32,
 			                imm(fm, MT_I32, (int32_t)cv)), 0);
 		} else {
-			/* Slot-resident value: load from the return-value slot. */
-			mout_addr(o, MMOP_LOAD, MT_I32, reg(fm, I386MREG_EAX),
-			          maddr(reg(fm, I386MREG_EBP), 0, 1, s0->slot), 0);
-			mout_addr(o, MMOP_LOAD, MT_I32, reg(fm, I386MREG_EDX),
-			          maddr(reg(fm, I386MREG_EBP), 0, 1, s0->slot + 4), 0);
+			/* Slot/register-resident value: leave s0 in term so the
+			 * emitter's MMOP_RET loads both halves via i64_base
+			 * (uniformly handling a constant, register-resident, or
+			 * slot-resident value).  Loading EAX/EDX off s0->slot here is
+			 * wrong for values whose slot is still -1 (x86-i64param). */
+			term->src[0] = s0;
+			ret64 = true;
 		}
 	} else {
 		MVal *rreg = isf ? reg(fm, I386MREG_XMM0) : reg(fm, I386MREG_EAX);
 		mout(o, MMOP_MOV, s0->type, rreg, s0, 0);
 	}
 	term->op = MMOP_RET;
-	term->src[0] = 0;
+	if (!ret64)
+		term->src[0] = 0;
 	term->td = 0;
 }
 
@@ -441,17 +435,12 @@ mabi_vaarg(MFnM *fm, MOut *o, MInsM *in)
 
 	/* Load the argument value */
 	if (dt == MT_I64) {
-		/* i64: two 32-bit loads */
-		mout_addr(o, MMOP_LOAD, MT_I32, tmp(fm, MT_I32, "va"),
-		          maddr(cur, 0, 1, 0), 0);
-		MVal *lov = o->ins[o->nins - 1].dst;
-		lov->slot = dst->slot;
-		lov->reg = -1;
-		mout_addr(o, MMOP_LOAD, MT_I32, tmp(fm, MT_I32, "va"),
-		          maddr(cur, 0, 1, 4), 0);
-		MVal *hiv = o->ins[o->nins - 1].dst;
-		hiv->slot = dst->slot + 4;
-		hiv->reg = -1;
+		/* i64: a single MT_I64 load from [cur] into dst.  The emitter's
+		 * emit_load writes both halves into dst's frame slot via
+		 * i64_dst_base (dst is phislot-forced to a slot), rather than
+		 * hard-wiring dst->slot (= -1 until regalloc) like the old
+		 * two-i32-load split. */
+		mout_addr(o, MMOP_LOAD, MT_I64, dst, maddr(cur, 0, 1, 0), 0);
 	} else {
 		mout_addr(o, MMOP_LOAD, dt, dst, maddr(cur, 0, 1, 0), 0);
 	}
