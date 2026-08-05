@@ -266,6 +266,39 @@ i64_store_pair(FILE *f, MVal *d)
 	fprintf(f, "\tmovl\t%%edx, %d(%%ebp)\n", off + 4);
 }
 
+/* Store one 32-bit half (sloreg = "%eax"/"%edx"/"%ecx") into the lo or hi
+ * half of an i64 destination's frame slot. */
+static void
+i64_store_half(FILE *f, MVal *d, bool hi, const char *sloreg)
+{
+	int off;
+
+	if (!d)
+		return;
+	off = i64_dst_base(d);
+	if (off == I64_NO_SLOT) {
+		/* register-resident dest: only the low half fits a register */
+		if (!hi)
+			scratch_to_dst(f, d, sloreg);
+		return;
+	}
+	fprintf(f, "\tmovl\t%s, %d(%%ebp)\n", sloreg, off + (hi ? 4 : 0));
+}
+
+/* Store a scratch GPR to the lo half of an i64 destination. */
+static void
+scratch_to_dst_i64_lo(FILE *f, MVal *d, const char *rn)
+{
+	i64_store_half(f, d, false, rn);
+}
+
+/* Store a scratch GPR to the hi half of an i64 destination. */
+static void
+scratch_to_dst_i64_hi(FILE *f, MVal *d, const char *rn)
+{
+	i64_store_half(f, d, true, rn);
+}
+
 /* ---- load/store addressing ---------------------------------------------- */
 
 /* Emit the address in MAddr into %ecx as a memory operand string. */
@@ -984,15 +1017,21 @@ emit_ins(FILE *f, MInsM *in)
 	}
 	case MMOP_NEG:
 		if (in->dtype == MT_I64) {
-			/* i64 negation: low = 0 - low (sets CF), high = 0 - high - CF */
-			int sslot = s0->slot;
-			int dslot = d ? d->slot : 0;
-			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot);
+			/* i64 negation: low = 0 - low (sets CF), high = 0 - high - CF.
+			 * Use i64_base/i64_store_pair so the slot addresses carry
+			 * g_slot_base and match what producers write (raw d->slot here
+			 * drifted by the push-area size). */
+			int sbase = i64_base(f, s0, 0);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sbase);
 			fputs("\tnegl\t%eax\n", f);
-			if (d) fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot);
-			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot + 4);
+			fputs("\tmovl\t%eax, %edx\n", f);   /* stash lo result */
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sbase + 4);
 			fputs("\tsbbl\t$0, %eax\n", f);
-			if (d) fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot + 4);
+			fputs("\tmovl\t%eax, %ecx\n", f);   /* hi result in ecx; the
+			                                      * sbbl consumed the CF from
+			                                      * the negl above */
+			scratch_to_dst_i64_lo(f, d, "edx");
+			scratch_to_dst_i64_hi(f, d, "ecx");
 			return;
 		}
 		mv_to_scratch(f, s0, "eax");
@@ -1002,14 +1041,13 @@ emit_ins(FILE *f, MInsM *in)
 	case MMOP_NOT:
 		if (in->dtype == MT_I64) {
 			/* i64 bitwise NOT: NOT both halves */
-			int sslot = s0->slot;
-			int dslot = d ? d->slot : 0;
-			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot);
+			int sbase = i64_base(f, s0, 0);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sbase);
 			fputs("\tnotl\t%eax\n", f);
-			if (d) fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot);
-			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot + 4);
+			scratch_to_dst_i64_lo(f, d, "eax");
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sbase + 4);
 			fputs("\tnotl\t%eax\n", f);
-			if (d) fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot + 4);
+			scratch_to_dst_i64_hi(f, d, "eax");
 			return;
 		}
 		mv_to_scratch(f, s0, "eax");
@@ -1220,10 +1258,21 @@ emit_ins(FILE *f, MInsM *in)
 			if (d->type == MT_F32 || d->type == MT_F64) {
 				fstore_scratch(f, d);
 			} else if (d->type == MT_I64) {
-				/* i64 return: EDX:EAX -> store both halves to slot */
-				int dslot = d->slot;
-				fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dslot);
-				fprintf(f, "\tmovl\t%%edx, %d(%%ebp)\n", dslot + 4);
+				/* i64 return: EDX:EAX -> store both halves to the value's
+				 * frame slot.  Use i64_dst_base so the offset matches what
+				 * every consumer reads via i64_base (slot + g_slot_base);
+				 * writing to the raw d->slot here leaves consumers reading
+				 * slot+g_slot_base — off by the push-area size (i64 call
+				 * result compare skew, defect #16). */
+				int dbase = i64_dst_base(d);
+				if (dbase != I64_NO_SLOT) {
+					fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", dbase);
+					fprintf(f, "\tmovl\t%%edx, %d(%%ebp)\n", dbase + 4);
+				} else {
+					/* register-resident dest: only the low word fits a
+					 * single register (i64 with a stray non-slot dest) */
+					scratch_to_dst(f, d, "eax");
+				}
 			} else {
 				scratch_to_dst(f, d, "eax");
 			}
