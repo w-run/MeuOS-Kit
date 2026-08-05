@@ -632,6 +632,11 @@ i386_encode_insn(const struct mt_target *target,
 	/* For byte instructions, the operand might have 'b' suffix */
 	const char *base = mnemonic;
 	char base_buf[64];
+	/* shl/sal end in 'l' but that 'l' is intrinsic (single shift mnemonic),
+	 * NOT a width suffix — stripping it would turn `shl %cl,%eax` into an
+	 * unknown "sh" base. */
+	if (strcmp(mnemonic, "shl") == 0 || strcmp(mnemonic, "sal") == 0)
+		suffix = '\0';
 	if (suffix) {
 		size_t i;
 		for (i = 0; i < mlen - 1 && i < sizeof(base_buf) - 1; ++i)

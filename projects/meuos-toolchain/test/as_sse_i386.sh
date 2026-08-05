@@ -39,4 +39,21 @@ bytes=$(od -An -tx1 -v s.o | tr -d ' \n' | tr 'a-f' 'A-F')
 echo "$bytes" | grep -q 'F20F10' || { echo "FAIL: movsd (load) missing"; exit 1; }
 echo "$bytes" | grep -q 'F20F59' || { echo "FAIL: mulsd missing"; exit 1; }
 echo "$bytes" | grep -q 'F20F2C' || { echo "FAIL: cvttsd2si missing"; exit 1; }
-echo "mt/as i386 SSE2 (movsd/mulsd/cvttsd2si): all checks PASS"
+
+# Register-count shift (mcc emits bare `shl %cl,%eax`): the trailing 'l'
+# in `shl`/`sal` is intrinsic, NOT a width suffix — regression guard.
+cat > sh.s <<'EOF'
+.text
+.globl g
+g:
+	shl %cl, %eax
+	shr %cl, %ebx
+	sar %cl, %edx
+	ret
+EOF
+"$AS" --target=i386 -o sh.o sh.s 2>/dev/null || {
+	echo "FAIL: i386 shl %cl rejected"; exit 1; }
+sbytes=$(od -An -tx1 -v sh.o | tr -d ' \n' | tr 'a-f' 'A-F')
+echo "$sbytes" | grep -q 'D3E0' || { echo "FAIL: shl %cl,%eax (d3 e0) missing"; exit 1; }
+echo "$sbytes" | grep -q 'D3EB' || { echo "FAIL: shr %cl,%ebx (d3 eb) missing"; exit 1; }
+echo "mt/as i386 SSE2 + shl/shr/sar %cl: all checks PASS"
