@@ -51,3 +51,13 @@ rr_global 的 `g++/return g` 三处 `auipc %pcrel_hi(g); addi %pcrel_lo(.LrvpcN)
   2. HI20 配对逻辑对「.L0 标签 offset vs auipc/HI20 reloc offset」需正确匹配（当前对 libc 某些对象失败）。
 
 **注意**：reloc.c 还原为 24/25（保持现状稳定）；此专项需 mt/ld ELF relocation 解析层仔细修（type 归一 + HI20 配对），属真深面。
+
+## 更深发现（2026-08-05 迭代，配对需跨两种约定 + 可能跨 reloc section）
+
+扩 type 27/28 + HI20 配对后，逐对象暴露**第二种 LO12 名约**：
+- **约定 (a)**：LO12 symbol = 局部标签 `.L0`/`.LrvpcN`（value=auipc offset）→ 配对按 `roff == p_off`（auipc offset）。
+- **约定 (b)**：LO12 symbol = **真实目标符号**（如 libc exit.o 的 `handlers`），其 value=8 ≠ auipc offset，且需配对的 HI20 可能在**不同 reloc section**（LO12 in one section, HI20 in another）→ 当前只扫 `reloc_section` 单个 section + 按 offset 无法找到。
+
+且 `rsym == symbol_index`（同符号 index）也没命中 `handlers`（HI20 与 LO12 的 symbol index 可能不同，或用 local vs global）。
+
+**结论**：riscv64 PC-relative 在 mt/ld 需**两约定 + 跨 reloc section** 的 HI20 配对重构，才可能正确解析所有全局/函数引用。这是 mt/ld relocation 层的**中大型重构**，非小补丁；需专项迭代（逐对象 + GNU 对照）。mt/as emit type 27 是 GNU 正确行为，不背锅。
