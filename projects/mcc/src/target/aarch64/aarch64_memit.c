@@ -731,14 +731,14 @@ emit_ins(FILE *f, MInsM *in)
 			fprintf(f, "\t%s\t%s, .L%s.bb%u\n",
 			        in->cc == MCC_NE ? "cbnz" : "cbz", ra,
 			        g_fname, in->blk->s1 ? in->blk->s1->id : 0);
-			return;
+			goto jcc_fall_s2;
 		}
 		if (a && a->kind == MV_CONST && a->con->u.i == 0) {
 			ra = branch_src(f, b, "x9");
 			fprintf(f, "\t%s\t%s, .L%s.bb%u\n",
 			        in->cc == MCC_NE ? "cbz" : "cbnz", ra,
 			        g_fname, in->blk->s1 ? in->blk->s1->id : 0);
-			return;
+			goto jcc_fall_s2;
 		}
 		/* generic register compare: cmp + b.cc */
 		{
@@ -752,6 +752,17 @@ emit_ins(FILE *f, MInsM *in)
 			fprintf(f, "\tb.%s\t.L%s.bb%u\n", a64_cc_suffix(in->cc),
 			        g_fname, in->blk->s1 ? in->blk->s1->id : 0);
 		}
+	jcc_fall_s2:
+		/* Blocks are emitted in fm->link order, which need not make the
+		 * s2 (fallthrough) successor physically adjacent; without an
+		 * explicit branch here a JCC whose condition is false would fall
+		 * through into whatever block happens to be next, corrupting
+		 * control flow.  This is what hung the rr_i64param matrix program
+		 * on aarch64 (multi-check main fell through a failed JCC back into
+		 * the entry dispatch block -> infinite loop, exit=124).  Mirror
+		 * x86_64: always branch the fallthrough explicitly. */
+		fprintf(f, "\tb\t.L%s.bb%u\n", g_fname,
+		        in->blk->s2 ? in->blk->s2->id : 0);
 		return;
 	}
 	case MMOP_CALL: {
