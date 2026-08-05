@@ -7,6 +7,12 @@
 typedef uint16_t in_port_t;
 typedef uint32_t in_addr_t;
 
+/* Host <-> network byte order. */
+uint32_t htonl(uint32_t);
+uint32_t ntohl(uint32_t);
+uint16_t htons(uint16_t);
+uint16_t ntohs(uint16_t);
+
 struct in_addr {
 	in_addr_t s_addr;
 };

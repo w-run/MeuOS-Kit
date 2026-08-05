@@ -201,6 +201,9 @@ SUPPORT_OBJS   := $(BUILD)/ctype/ctype.o $(BUILD)/signal/signal.o \
 SUPPORT_OBJS   += $(BUILD)/errno/errno.o
 # startup.c — entry contract (__progname, getauxval); called from crt1.S.
 SUPPORT_OBJS   += $(BUILD)/startup.o
+# P2 gap batch: config strings, signal strings, passwd/group, byte order.
+SUPPORT_OBJS   += $(BUILD)/confstr.o $(BUILD)/pwd.o $(BUILD)/grp.o
+SUPPORT_OBJS   += $(BUILD)/signal/strsignal.o $(BUILD)/socket/byteorder.o
 SUPPORT_OBJS   += $(BUILD)/netdb/gethost.o $(BUILD)/netdb/getserv.o \
                   $(BUILD)/netdb/getproto.o $(BUILD)/netdb/getnet.o \
                   $(BUILD)/netdb/getaddrinfo.o \
@@ -321,6 +324,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/kernel-interfaces test/kernel_interfaces.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/auxv test/auxv.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/uio test/uio.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/p2 test/p2.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/socket test/socket.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) --nostdlib --static -o /tmp/meuos-libc-check/libgcc test/libgcc.c -l:libgcc-meuos.a -l:libc-meuos.a
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/threads test/threads.c
@@ -363,6 +367,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	/tmp/meuos-libc-check/kernel-interfaces
 	/tmp/meuos-libc-check/auxv
 	/tmp/meuos-libc-check/uio
+	/tmp/meuos-libc-check/p2
 	/tmp/meuos-libc-check/libgcc
 	/tmp/meuos-libc-check/socket
 	/tmp/meuos-libc-check/threads

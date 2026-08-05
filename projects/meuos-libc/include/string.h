@@ -27,6 +27,7 @@ char *strdup(const char *);
 char *strndup(const char *, size_t);
 char *strerror(int);
 int strerror_r(int, char *, size_t);
+char *strsignal(int);
 char *strtok(char *restrict, const char *restrict);
 char *strtok_r(char *restrict, const char *restrict, char **restrict);
 size_t strspn(const char *, const char *);
