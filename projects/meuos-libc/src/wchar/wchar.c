@@ -206,3 +206,80 @@ wint_t ungetwc(wint_t wc, FILE *f) {
 int fwide(FILE *f, int mode) {
 	(void)f; (void)mode; return 0; /* byte-oriented by default */
 }
+
+/* ----------------------------------------------------------------------
+ * wctype / iswctype / wctrans / towctrans  (C11 7.29.2.2 / 7.29.6.4)
+ *
+ * The C locale is single-byte ASCII-only, so the class descriptors are
+ * simply the corresponding <ctype.h> predicate bits, and the mapping
+ * descriptors are 0 (tolower) or 1 (toupper).  Property names follow
+ * C11 7.29.2.2.1; unknown names yield a descriptor of 0 (iswctype treats
+ * 0 as "no class" -> always false, as required).
+ * -------------------------------------------------------------------- */
+
+#include <wctype.h>
+
+/* Class descriptor encoding: bit per <ctype.h> predicate.  Keep in sync
+ * with the mask values used by iswctype below. */
+#define WC_ALPHA  0x01
+#define WC_UPPER  0x02
+#define WC_LOWER  0x04
+#define WC_DIGIT  0x08
+#define WC_XDIGIT 0x10
+#define WC_SPACE  0x20
+#define WC_PRINT  0x40
+#define WC_GRAPH  0x80
+#define WC_PUNCT  0x100
+#define WC_CNTRL  0x200
+#define WC_ALNUM  (WC_ALPHA | WC_DIGIT)
+#define WC_BLANK  0x400
+
+wctype_t wctype(const char *property) {
+	if (!property) return 0;
+	/* C11 7.29.2.2.1: the following names are recognised. */
+	if (!strcmp(property, "alnum"))  return WC_ALNUM;
+	if (!strcmp(property, "alpha"))  return WC_ALPHA;
+	if (!strcmp(property, "blank"))  return WC_BLANK;
+	if (!strcmp(property, "cntrl"))  return WC_CNTRL;
+	if (!strcmp(property, "digit"))  return WC_DIGIT;
+	if (!strcmp(property, "graph"))  return WC_GRAPH;
+	if (!strcmp(property, "lower"))  return WC_LOWER;
+	if (!strcmp(property, "print"))  return WC_PRINT;
+	if (!strcmp(property, "punct"))  return WC_PUNCT;
+	if (!strcmp(property, "space"))  return WC_SPACE;
+	if (!strcmp(property, "upper"))  return WC_UPPER;
+	if (!strcmp(property, "xdigit")) return WC_XDIGIT;
+	return 0; /* unknown property */
+}
+
+int iswctype(wint_t wc, wctype_t desc) {
+	if (!desc) return 0;
+	if (wc < 0 || wc > 255) return 0; /* C locale: only ASCII */
+	int c = (int)wc;
+	if (desc & WC_ALPHA  && !isalpha(c)) return 0;
+	if (desc & WC_UPPER  && !isupper(c)) return 0;
+	if (desc & WC_LOWER  && !islower(c)) return 0;
+	if (desc & WC_DIGIT  && !isdigit(c)) return 0;
+	if (desc & WC_XDIGIT && !isxdigit(c)) return 0;
+	if (desc & WC_SPACE  && !isspace(c)) return 0;
+	if (desc & WC_PRINT  && !isprint(c)) return 0;
+	if (desc & WC_GRAPH  && !isgraph(c)) return 0;
+	if (desc & WC_PUNCT  && !ispunct(c)) return 0;
+	if (desc & WC_CNTRL  && !iscntrl(c)) return 0;
+	if (desc & WC_BLANK  && c != ' ' && c != '\t') return 0;
+	return 1;
+}
+
+wctrans_t wctrans(const char *property) {
+	if (!property) return 0;
+	if (!strcmp(property, "tolower")) return 0;
+	if (!strcmp(property, "toupper")) return 1;
+	return 0; /* unknown mapping */
+}
+
+wint_t towctrans(wint_t wc, wctrans_t desc) {
+	if (desc == 1) return towupper(wc);
+	if (desc == 0) return towlower(wc);
+	return wc; /* unknown -> unchanged */
+}
+

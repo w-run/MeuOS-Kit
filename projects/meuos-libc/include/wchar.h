@@ -26,20 +26,8 @@ wchar_t *wcspbrk(const wchar_t *, const wchar_t *);
 wchar_t *wcsstr(const wchar_t *, const wchar_t *);
 size_t wcslen(const wchar_t *);
 
-/* Wide character classification */
-int iswalnum(wint_t);
-int iswalpha(wint_t);
-int iswcntrl(wint_t);
-int iswdigit(wint_t);
-int iswgraph(wint_t);
-int iswlower(wint_t);
-int iswprint(wint_t);
-int iswpunct(wint_t);
-int iswspace(wint_t);
-int iswupper(wint_t);
-int iswxdigit(wint_t);
-wint_t towlower(wint_t);
-wint_t towupper(wint_t);
+/* Wide character classification and mapping (C11 7.29.2 / 7.29.6.4) */
+#include <wctype.h>
 
 /* Conversion */
 size_t mbrtowc(wchar_t *, const char *, size_t, void *);
