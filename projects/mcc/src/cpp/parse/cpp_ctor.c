@@ -388,8 +388,15 @@ cpp_parse_init_list(struct func *f, struct scope *fs)
 		{
 			/* one or more comma-separated argument expressions (parsed
 			 * with condexpr so the ',' between init items is not eaten);
-			 * an empty argument list (`Base()`) is valid too */
+			 * an empty argument list (`Base()`) is valid too.
+			 *
+			 * The enclosing ctor's func (`f`) is not yet `curfunc` here
+			 * (the body hasn't been parsed), but the argument expressions
+			 * may contain `new` (e.g. `: p(new int(v))`), which needs an
+			 * active func to emit its allocation/ctor instructions. */
+			struct func *saved_curfunc = curfunc;
 			struct expr *head = NULL, **ae = &head;
+			curfunc = f;
 			for (;;) {
 				struct expr *a;
 				if (tok.kind == TRPAREN)
@@ -401,6 +408,7 @@ cpp_parse_init_list(struct func *f, struct scope *fs)
 					break;
 				next(); /* consume ',' between args */
 			}
+			curfunc = saved_curfunc;
 			it->args = head;
 		}
 		expect(TRPAREN, "')' after initializer arguments");
