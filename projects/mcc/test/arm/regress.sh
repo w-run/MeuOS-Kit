@@ -20,6 +20,23 @@ kitroot=$(CDPATH= cd -- "$(dirname -- "$root")/.." && pwd)
 sysroot=${2:-"$kitroot/sysroot/arm"}
 qemu=${3:-"$kitroot/env/qemu/qemu-arm-static"}
 
+# Non-negative int constant returns must become immediate moves
+# (movw #imm), NOT a load from [fp+slot].  A bare `ret (i64)const` has
+# no stack slot (MV_CONST); the pre-fix arm mabi_selret emitted
+# `add r12,r12,#-1; ldr r10,[r12]` reading uninitialized frame memory
+# (and #-1 that mt/as arm_imm_encode cannot encode).  Compile-level
+# gate: runs even when the sysroot/qemu runtime deps are absent.
+asmtmp=${TMPDIR:-/tmp}/mcc-arm-retconst.$$.s
+trap 'rm -f "$asmtmp"' EXIT HUP INT TERM
+"$mcc" --target=arm -S -o "$asmtmp" "$root/test/arm/retconst.c"
+grep -q 'movw[[:space:]]\+r10, #0x2a' "$asmtmp"
+grep -q 'movw[[:space:]]\+r10, #0x3e8' "$asmtmp"
+if grep -Eq 'ldr[[:space:]]+.*\[fp' "$asmtmp"; then
+	printf '%s\n' 'arm constant return: FAIL (slot load of immediate constant)' >&2
+	exit 1
+fi
+printf '%s\n' 'arm constant-return compile gate passed'
+
 if [ ! -f "$sysroot/usr/lib/libc-meuos.a" ]; then
 	printf '%s\n' "arm runtime: sysroot not found at $sysroot, skipping"
 	exit 0
