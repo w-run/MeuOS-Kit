@@ -251,8 +251,6 @@ struct ld_context {
 	 * the adjacent .dynamic section in the output file. */
 	size_t rela_count;         /* number of RELA entries written so far */
 	size_t rela_capacity_entries; /* reserved slot count in .rela.dyn */
-	size_t rela_plt_count;         /* number of JUMP_SLOT entries in .rela.plt */
-	size_t rela_plt_capacity_entries; /* reserved slot count in .rela.plt */
 	/* Linker options (copied from struct mt_ld_options) */
 	const char *output;     /* output file path */
 	const char *entry;      /* entry symbol (default "_start") */
@@ -287,8 +285,6 @@ int ensure_dynamic_section(struct ld_context *ctx);
 int ensure_pie_section(struct ld_context *ctx);
 int build_rela_dyn(struct ld_context *ctx);
 int rela_dyn_add(struct ld_context *ctx, uint64_t offset, uint64_t info,
-                 int64_t addend);
-int rela_plt_add(struct ld_context *ctx, uint64_t offset, uint64_t info,
                  int64_t addend);
 
 /* GOT / symbol-value helpers defined in link.c (symbol/got domain). */
