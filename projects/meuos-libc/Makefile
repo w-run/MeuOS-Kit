@@ -436,6 +436,38 @@ check-native-linker:
 	rm -rf /tmp/meuos-libc-native-linker; \
 	echo "PASS: native linker check"
 
+# Cross-line integration gate: build a real POSIX program (mini-bc) with the
+# HOST compiler (gcc, not mcc) against this meuos-libc sysroot, to prove the
+# "gcc + meuos-libc end-to-end" goal and guard it against regressions.  This
+# is deliberately a host-C AND host-gcc path (distinct from the mcc main
+# build).  SKIPs (exit 0) when no host gcc or sysroot is available.
+check-integration:
+	@SYSROOT_I="$(abspath $(SYSROOT))/usr"; \
+	if ! command -v gcc >/dev/null 2>&1; then \
+		echo "check-integration: SKIP (no host gcc)"; exit 0; fi; \
+	if ! test -f "$$SYSROOT_I/lib/libc-meuos.a" || ! test -f "$$SYSROOT_I/lib/libgcc-meuos.a" \
+	   || ! test -f "$$SYSROOT_I/lib/crt1.o"; then \
+		echo "check-integration: SKIP (sysroot not installed; run make install)"; exit 0; fi; \
+	echo "SYSROOT=$$SYSROOT_I"; \
+	rm -rf /tmp/meuos-libc-check-integration; mkdir -p /tmp/meuos-libc-check-integration; \
+	echo "check-integration: host gcc + meuos-libc -> mini-bc"; \
+	if ! gcc -O2 -nostdlib -nostdinc -isystem "$$SYSROOT_I/include" -L"$$SYSROOT_I/lib" \
+	      -o /tmp/meuos-libc-check-integration/mini-bc test/mini-bc.c \
+	      "$$SYSROOT_I/lib/crt1.o" -lc-meuos -lgcc-meuos \
+	      > /tmp/meuos-libc-check-integration/build.log 2>&1; then \
+		cat /tmp/meuos-libc-check-integration/build.log >&2; \
+		echo "FAIL: gcc could not build mini-bc (see log)" >&2; exit 1; fi; \
+	out=$$(printf '1+2*3\n(1+2)*3\n100/7\nquit\n' | /tmp/meuos-libc-check-integration/mini-bc); \
+	status=$$?; \
+	echo "$$out"; \
+	if [ $$status -ne 0 ]; then echo "FAIL: mini-bc exit $$status" >&2; exit 1; fi; \
+	exp="$$(printf '7\n9\n14.285714285714\n')"; \
+	if [ "$$out" != "$$exp" ]; then \
+		echo "FAIL: mini-bc output mismatch" >&2; \
+		echo "--- got ---"; echo "$$out"; echo "--- want ---"; echo "$$exp"; exit 1; fi; \
+	rm -rf /tmp/meuos-libc-check-integration; \
+	echo "PASS: integration (gcc + meuos-libc, mini-bc)"
+
 check-mcc:
 	$(MAKE) BUILD=build/mcc CC=$(MCC) check
 
@@ -483,11 +515,11 @@ check-arm-bootstrap:
 
 # 一步式：build + install + 全套检查（包括 atomic/tls/threads/stdio/process）
 # 默认 host 是 x86_64，跨架构检查通过 check-aarch64-bootstrap / check-i386-bootstrap。
-check-all: check check-aarch64-bootstrap check-i386-bootstrap check-riscv64-bootstrap check-loongarch64-bootstrap check-arm-bootstrap
+check-all: check check-integration check-aarch64-bootstrap check-i386-bootstrap check-riscv64-bootstrap check-loongarch64-bootstrap check-arm-bootstrap
 
 clean:
 	rm -rf build
 	@$(MAKE) -C src/compat clean 2>/dev/null || true
 
-.PHONY: all compat install check check-native-linker check-mcc check-i386-bootstrap \
+.PHONY: all compat install check check-integration check-native-linker check-mcc check-i386-bootstrap \
         check-aarch64-bootstrap check-riscv64-bootstrap check-loongarch64-bootstrap check-arm-bootstrap check-all clean
