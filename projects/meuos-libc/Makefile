@@ -447,6 +447,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/timebreak_gate test/timebreak_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/syscfg_gate test/syscfg_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/signal_gate test/signal_gate.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/stdio_file_gate test/stdio_file_gate.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/auxv test/auxv.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/uio test/uio.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/p2 test/p2.c
@@ -524,6 +525,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	/tmp/meuos-libc-check/timebreak_gate
 	/tmp/meuos-libc-check/syscfg_gate
 	/tmp/meuos-libc-check/signal_gate
+	/tmp/meuos-libc-check/stdio_file_gate
 	/tmp/meuos-libc-check/auxv
 	/tmp/meuos-libc-check/uio
 	/tmp/meuos-libc-check/p2
