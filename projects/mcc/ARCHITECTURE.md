@@ -303,13 +303,14 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
   非类型模板参数；类模板成员函数体急切实例化（C++ 语义为按需惰性）、
   类模板作函数返回值触发既有聚合返回拷贝限制；变参模板无 C++17 折叠表达式外的
   递归自我转发选择：`sum_all(1,2,3,4)` 调用点在**重载选择**阶段未把变参重载
-  `(T, Ts...)` 排为可吸收多于定长重载 `(T)` 实参的候选取向（deduce 已修，
-  但 call-arity ranking 未做——登记后置）；无包嵌套、无类成员变参模板。
-  `sizeof...(Ts)` 多元素计数与 `count<>()` 空包已修（2eaa662a）。
+  `(T, Ts...)` 排为可吸收多于定长重载 `(T)` 实参的候选取向，且嵌套实例化时
+  pack 参数(`rest_0`)值绑定错位——两层都属「跨层状态/语义一致性」深根，
+  **登记 mcc 一致性专项**（含 i386 rr_i64 i64 slot-half 统一）；无包嵌套、
+  无类成员变参模板。`sizeof...(Ts)` 多元素计数与 `count<>()` 空包已修（2eaa662a）。
 - **继承**：虚继承。纯虚 `= 0` 已支持（纯虚成员/析构声明解析 + vtable 槽位留 0，派生覆写正常分派）；抽象类（含未覆写纯虚）实例化报错已支持（对象声明/`new T`/`new T[]`）；类外析构定义 `B::~B(){}` 已支持（纯虚析构完整对象生命周期可用）；多态 `delete` 基类指针已支持（虚析构经 vtable 分派跑派生析构 `~D` 再 `~B`，非虚析构仍静态决议，`delete[]` 数组仍走静态逐元素析构）。
 - **auto/decltype**：仅 `auto x = expr`（局部/全局）与 C++14 `auto f()` 返回类型推导；未做 `auto&` 引用折叠、decltype 独立推导（160e2a2 落地范围）。
 - **lambda**：值捕获与引用捕获均已支持——显式 `[&x]` / 默认 `[&]` 引用捕获（能读到活动变量更新）、默认按值 `[=]`、混捕 `[=,&y]`/`[&,z]`/`[x,&y]`、init-capture `[n=expr]`、泛型 lambda（c14c7a2 起支持引用/init 捕获）；跨函数传递捕获仍为限制。
-- **constexpr**：整型常量折叠 + static_assert + 数组维度编译期求值 `int a[f()]` + constexpr 变量/函数初值 + static/constexpr 成员 init 已支持（3ac233b 等）。非类型模板实参取 **函数调用** `arrsize<sq(3)>()` 已支持（9c40acec：NTTP 实参可为 constexpr 函数调用 `arrsize<sq(3)>/nine()/sq(sq(2))/sq(2)+1`、constexpr 变量、字面量）。**深缺口（m++ 深面专项登记，剩 1）**：constexpr **成员函数调用**折叠 `constexpr S s={..}; constexpr int f=s.m()`——constexpr 对象成员**访问**折叠已有（g_cexp_obj_members），成员**函数调用**的 this/成员绑定进 consteval 求值器未实现（对应"需 mini 内存模型"）。（变参递归 self-forwarding gap 见模板行。）
+- **constexpr**：整型常量折叠 + static_assert + 数组维度编译期求值 `int a[f()]` + constexpr 变量/函数初值 + static/constexpr 成员 init 已支持（3ac233b 等）。非类型模板实参取 **函数调用** `arrsize<sq(3)>()` 已支持（9c40acec：NTTP 实参可为 constexpr 函数调用 `arrsize<sq(3)>/nine()/sq(sq(2))/sq(2)+1`、constexpr 变量、字面量）。**constexpr 成员函数调用折叠** `constexpr S s={..}; constexpr int r=s.m(2)` 已支持（ca410f20：成员 isconstexpr 标定 + 两阶段 body 注册进常量求值器 + `&obj` this 首参跳过 + 对象成员按名绑进回放 scope）。（变参递归 self-forwarding gap 见模板行/一致性专项。）
 - **其它**：函数指针声明参数里的类名未识别（独立问题）。
 - **MIR 路径遗留**（非 m++ 专属）：自举 mcc 编译「聚合参数+varargs+栈传参」组合在
   declspecs 写 NULL（Bug B 待调）；atomic_concurrent/thread_local 多架构 TLS 既有问题。
