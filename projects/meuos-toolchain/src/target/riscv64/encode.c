@@ -1412,30 +1412,50 @@ branch_fallthrough:
 			       i_type(0x13, rd, 0, rd, (int32_t)(int16_t)lo12));
 			return 0;
 		}
-		/* Full 64-bit: build from the most-significant 11-bit gridchunk
-		 * down via `slli rd,rd,11` + `addi rd,rd,chunk`.  Using 11-bit
-		 * unsigned chunks keeps every addi positive within its 12-bit
-		 * signed range, so no sign-extension ever corrupts already-built
-		 * high bits. */
+		/* Full 64-bit constant (e.g. FP bit-pattern loads).  out->bytes is
+		 * only 16 bytes / 4 instructions, so emit the shift form using a
+		 * 20-bit chunk:
+		 *   chunk <= 0x7FF            -> addiw rd,x0,chunk; slli rd,shift
+		 *   0x800 <= chunk < 2^20      -> lui+addiw(rd); slli rd,shift
+		 * (low 12 bits are kept < 0x800 so the signed addi/addiw cannot
+		 * corrupt the lui'd high bits).  Anything else is rejected rather
+		 * than overflow the fixed 4-instruction buffer. */
 		{
 			uint64_t u = (uint64_t)imm;
-			int top = 63;
-			while (top > 0 && !((u >> top) & 1)) top--;
-			int b = (top / 11) * 11;
-			int n = 0;
-			unsigned c = (unsigned)((u >> b) & 0x7FF);
-			emit32(out->bytes, i_type(0x13, rd, 0, 0, (int32_t)c));
-			n = 1;
-			for (b -= 11; b >= 0; b -= 11) {
-				c = (unsigned)((u >> b) & 0x7FF);
-				emit32(out->bytes + (uint32_t)n * 4,
-				       i_shift(0x13, rd, 1, rd, 11, 0)); /* slli rd,rd,11 */
-				n++;
-				emit32(out->bytes + (uint32_t)n * 4,
-				       i_type(0x13, rd, 0, rd, (int32_t)c)); /* addi rd,rd,c */
-				n++;
+			int shift = 0;
+			while (shift < 63 && (u & 1) == 0) { u >>= 1; shift++; }
+			u &= 0xFFFFF;   /* 20-bit chunk */
+			if (u <= 0x7FF) {
+				emit32(out->bytes, i_type(0x13, rd, 0, 0, (int32_t)u)); /* addi */
+				if (shift) {
+					emit32(out->bytes + 4, i_shift(0x13, rd, 1, rd, (unsigned)shift, 0));
+					out->size = 8;
+				}
+				return 0;
 			}
-			out->size = (uint32_t)n * 4;
+			{
+				uint32_t hi = u >> 12;
+				uint32_t lo = u & 0xFFF;
+				if (lo >= 0x800) return -1;   /* would sign-extend-corrupt */
+				if (hi == 0) {
+					/* chunk < 0x1000 but > 0x7ff — just addiw */
+					emit32(out->bytes, i_type(0x1B, rd, 0, 0, (int32_t)lo));
+					if (shift) {
+						emit32(out->bytes + 4, i_shift(0x13, rd, 1, rd, (unsigned)shift, 0));
+						out->size = 8;
+					}
+					return 0;
+				}
+				emit32(out->bytes, u_type(0x37, rd, hi));          /* lui rd, hi */
+				emit32(out->bytes + 4, i_type(0x1B, rd, 0, rd, (int32_t)lo)); /* addiw */
+				if (shift) {
+					emit32(out->bytes + 8, i_shift(0x13, rd, 1, rd, (unsigned)shift, 0));
+					out->size = 12;
+				} else {
+					out->size = 8;
+				}
+				return 0;
+			}
 		}
 		return 0;
 	}
