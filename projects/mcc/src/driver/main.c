@@ -40,6 +40,10 @@ extern uint64_t detect_cpu_features(const char *arch);
  * VFS-based include file reading (msys_fopen fallback). */
 struct msys *msys_sysroot_handle;
 const char *msys_sysroot_path;
+/* The effective sysroot resolved by the driver: command-line --sysroot wins,
+ * else MEUOS_SYSROOT env.  Consumed by host_toolchain.c (link-time decisions
+ * such as whether to auto-link libgcc-meuos.a under --specs=meuos). */
+const char *driver_sysroot;
 
 /* Global IR backend state (declared extern in ir.h).
  * Per-arch Target objects are declared extern in driver_internal.h. */
@@ -648,6 +652,7 @@ mcc_main(int argc, char *argv[])
 		meuos_specs = true;
 	if (meuos_specs && !sysroot)
 		fprintf(stderr, "%s: --specs=meuos requires --sysroot or MEUOS_SYSROOT\n", argv0), exit(2);
+	driver_sysroot = sysroot; /* record effective sysroot for host toolchain */
 	/* MeuOS specs select the project CRT and libc, not a mixture with the
 	 * host C runtime.  The host compiler is still used only as assembler and
 	 * linker during bootstrap. */

@@ -109,13 +109,18 @@ sysrootpath(const char *root, const char *suffix)
 	return path;
 }
 
+/* The driver records the effective sysroot (command-line --sysroot wins,
+ * else MEUOS_SYSROOT env); consume it here so link-time decisions align with
+ * the sysroot that actually feeds -L/--sysroot to the linker. */
+extern const char *driver_sysroot;
+
 /* Whether the active MeuOS sysroot provisions libgcc-meuos.a (libgcc-ABI soft
  * helpers: __divdi3/__udivdi3/__ctzdi2/...).  Old sysroots that predate the
  * archive skip the link flag so --specs=meuos still works there. */
 static bool
 sysroot_has_libgcc(void)
 {
-	const char *r = getenv("MEUOS_SYSROOT");
+	const char *r = driver_sysroot ? driver_sysroot : getenv("MEUOS_SYSROOT");
 	char p[1024];
 	if (!r || !*r)
 		return false;
