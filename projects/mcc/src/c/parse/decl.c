@@ -603,6 +603,14 @@ decl(struct scope *s, struct func *f)
 				extern void cpp_record_global_ctor(struct decl *,
 				    struct expr *);
 				if (g_lang == 1) {
+					extern bool cpp_is_abstract(struct type *);
+					/* a class with a non-overridden pure virtual member
+					 * is abstract: it cannot be instantiated */
+					if (d->type && (d->type->kind == TYPESTRUCT || d->type->kind == TYPEUNION) &&
+					    cpp_is_abstract(d->type))
+						error_code(E_DECL, &tok.loc,
+						    "cannot instantiate abstract class '%s'",
+						    d->type->u.structunion.tag ? d->type->u.structunion.tag : "?");
 					if (ctor_call && !f && d->u.obj.storage == SDSTATIC)
 						/* global object with ctor args: defer to
 						 * __mxx_global_var_init */

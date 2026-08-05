@@ -256,6 +256,11 @@ cpp_parse_new_expr(struct scope *s)
 			 * install each element's vptr for a polymorphic class with
 			 * no user ctor (virtual dispatch needs it) */
 			if (t->kind == TYPESTRUCT || t->kind == TYPEUNION) {
+				extern bool cpp_is_abstract(struct type *);
+				if (cpp_is_abstract(t))
+					error_code(E_DECL, &tok.loc,
+					    "cannot instantiate abstract class '%s'",
+					    t->u.structunion.tag ? t->u.structunion.tag : "?");
 				bool needs_elem = cpp_has_ctor(t, t->u.structunion.tag) ||
 				                  t->u.structunion.poly;
 				if (needs_elem && !args) {
@@ -470,6 +475,11 @@ cpp_parse_new_expr(struct scope *s)
 	    cpp_malloc_expr(mkconstexpr(&typeulong, t->size))));
 
 	if (t->kind == TYPESTRUCT || t->kind == TYPEUNION) {
+		extern bool cpp_is_abstract(struct type *);
+		if (cpp_is_abstract(t))
+			error_code(E_DECL, &tok.loc,
+			    "cannot instantiate abstract class '%s'",
+			    t->u.structunion.tag ? t->u.structunion.tag : "?");
 		if (cpp_has_ctor(t, t->u.structunion.tag)) {
 			struct expr *thisp = mkexpr(EXPRIDENT, pt, NULL);
 			thisp->qual = QUALNONE; thisp->lvalue = true;

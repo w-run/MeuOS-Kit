@@ -112,6 +112,28 @@ cpp_find_final(struct type *d, const char *key, struct type **owner,
 	return false;
 }
 
+/* A class is abstract (cannot be instantiated) when it has a pure virtual
+ * member (`= 0`) that is not overridden by a concrete implementation.  A
+ * derived class that fills every inherited pure-virtual slot is concrete. */
+bool
+cpp_is_abstract(struct type *t)
+{
+	struct member *m, *impl;
+	char k[256];
+
+	if (!t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
+		return false;
+	for (m = t->u.structunion.members; m; m = m->next) {
+		if (m->is_virtual && m->name) {
+			cpp_vkey(m->name, m->type, m->is_const, k, sizeof k);
+			impl = NULL;
+			if (cpp_find_final(t, k, NULL, &impl) && impl && impl->is_pure)
+				return true;
+		}
+	}
+	return false;
+}
+
 /* Class that declares the member function `name` of `t` (the defining
  * base for inherited methods), or NULL. */
 struct type *
@@ -437,11 +459,12 @@ emit_vtable_one(struct type *most, struct type *owner)
 	for (vs = owner->u.structunion.vslots; vs; vs = vs->next) {
 		struct type *impl_owner = NULL;
 		struct member *impl = NULL;
-		if (cpp_find_final(most, vs->key, &impl_owner, &impl)) {
+		if (cpp_find_final(most, vs->key, &impl_owner, &impl) && !impl->is_pure) {
 			char mangled[256];
 			cpp_slot_mangled(impl_owner, impl, mangled, sizeof mangled);
 			printf("    .quad %s\n", mangled);
 		} else {
+			/* a pure virtual (`= 0`) has a null vtable slot */
 			printf("    .quad 0\n");
 		}
 	}

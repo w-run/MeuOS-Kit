@@ -82,6 +82,8 @@ struct structbuilder {
 	bool member_const;
 	/* current member is a C++ explicit constructor/conversion */
 	bool member_explicit;
+	/* current member is a C++ pure virtual (`virtual ... = 0`) */
+	bool member_pure;
 	/* current member has C++20 [[no_unique_address]] attribute */
 	bool member_no_unique_address;
 };

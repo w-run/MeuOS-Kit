@@ -108,6 +108,8 @@ struct member {
 	bool is_mutable;
 	/* C++ virtual member function: dispatched via the object's vtable. */
 	bool is_virtual;
+	/* C++ pure virtual member (`= 0`): its vtable slot stays null. */
+	bool is_pure;
 	/* C++ const member function (trailing `const` qualifier). */
 	bool is_const;
 	/* C++ explicit constructor/conversion (C++11 `explicit`, C++20

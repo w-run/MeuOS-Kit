@@ -123,6 +123,9 @@ struct cpp_vslot {
 
 /* Is the named member of `t` a virtual function? */
 bool cpp_is_virtual(struct type *t, const char *name);
+/* A class with a non-overridden pure virtual member cannot be
+ * instantiated (it is abstract). */
+bool cpp_is_abstract(struct type *t);
 /* Slot index of virtual member `m` in its declaring class's vtable. */
 int cpp_vslot_index(struct type *t, struct member *m);
 /* Class that declares the member function `name` of `t` (defining base

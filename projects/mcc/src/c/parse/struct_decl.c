@@ -60,6 +60,7 @@ addmember(struct structbuilder *b, struct qualtype mt, char *name, int align, un
 				mf->access = b->access;
 				mf->is_mutable = false;
 				mf->is_virtual = b->member_virtual;
+				mf->is_pure = b->member_pure;
 				mf->is_const = b->member_const;
 				mf->is_explicit = b->member_explicit;
 				mf->vslot = -1;
@@ -100,6 +101,7 @@ addmember(struct structbuilder *b, struct qualtype mt, char *name, int align, un
 		m->access = b->access;
 		m->is_mutable = b->member_mutable;
 		m->is_virtual = b->member_virtual;
+		m->is_pure = b->member_pure;
 		m->is_const = b->member_const;
 		m->is_no_unique_address = b->member_no_unique_address;
 		m->vslot = -1;
@@ -214,6 +216,7 @@ structdecl(struct scope *s, struct structbuilder *b)
 	b->member_mutable = false;
 	b->member_virtual = false;
 	b->member_const = false;
+	b->member_pure = false;
 	/* C++ `mutable` storage: writable via const this. */
 	extern int g_lang;
 	if (g_lang == 1 && cpp_tok_kind() == CPP_TMUTABLE) {
@@ -263,6 +266,24 @@ structdecl(struct scope *s, struct structbuilder *b)
 			ct->u.func.params = NULL;
 			ct->u.func.nparam = 0;
 			expect(TRPAREN, "after destructor parameters");
+			/* C++ pure virtual destructor: `virtual ~B() = 0;`.  Accept
+			 * the `= 0` pure-virtual specifier; a pure dtor still
+			 * requires an out-of-line definition (`B::~B(){}`), which
+			 * the destructor-chain lowering resolves. */
+			{
+				extern int g_lang;
+				if (g_lang == 1 && tok.kind == TASSIGN) {
+					unsigned long long pv;
+					extern unsigned long long intconstexpr(struct scope *, bool);
+					next(); /* consume '=' */
+					pv = intconstexpr(s, false);
+					if (pv != 0)
+						error_code(E_SYNTAX, &tok.loc,
+						    "argument of pure virtual must be 0");
+					b->member_virtual = true;
+					b->member_pure = true;
+				}
+			}
 			marker = xmalloc(strlen(tag) + 2);
 			sprintf(marker, "~%s", tag);
 			mt.type = ct;
@@ -521,6 +542,23 @@ structdecl(struct scope *s, struct structbuilder *b)
 						else
 							g_cpp_method_final = true;
 						next();
+					}
+				}
+				/* C++ pure-virtual specifier: `virtual void f() = 0;`.
+				 * Accept and consume it (a pure virtual is still a virtual
+				 * with a null vtable slot until overridden). */
+				{
+					extern int g_lang;
+					if (g_lang == 1 && tok.kind == TASSIGN) {
+						unsigned long long pv;
+						extern unsigned long long intconstexpr(struct scope *, bool);
+						next(); /* consume '=' */
+						pv = intconstexpr(s, false);
+						if (pv != 0)
+							error_code(E_SYNTAX, &tok.loc,
+							    "argument of pure virtual must be 0");
+						b->member_virtual = true;
+						b->member_pure = true;
 					}
 				}
 				bool is_static = (sc & SCSTATIC) != 0;
