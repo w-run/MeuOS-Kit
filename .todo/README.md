@@ -44,6 +44,9 @@
 | [mt-as-local-label](meuos-toolchain/mt-as-local-label.md) | 🔄 | mt/as 局部数字标签 `1f/2b` forward/backward 跳转目标解析错（`jne 1f` 跳错位置；手写 asm 受影响，mcc 产物用命名标签不受影响） |
 | [pie-bss-relative](meuos-toolchain/pie-bss-relative.md) | 🔄 | PIE 动态链接里 libc 静态 .bss 全局（thread_controls/guard）缺 R_X86_64_RELATIVE → 线程控制崩(SIGSEGV)；非 DTV/TLS，独立缺陷，静态 exe 正常 |
 | [mt-ld-pie-jmprel](meuos-toolchain/mt-ld-pie-jmprel.md) | 🔄 | mt/ld 构建的 PIE 主程序 JUMP_SLOT 入 .rela.dyn(DT_RELA) 非 .rela.plt(DT_JMPREL) → rtld_dlopen GOT 槽=0 崩；独立缺陷，host-ld 链可绕过，不阻塞方案 a |
+| [i386-qemu-runtime-fail](meuos-toolchain/i386-qemu-runtime-fail.md) | 🔄 | i386 QEMU runtime 返回 0 非 42（mcc→as→ld PASS 运行期错），set -e 修复后暴露；疑 i386 crt1/返回路径 |
+| [arm-as-assemble-fail](meuos-toolchain/arm-as-assemble-fail.md) | 🔄 | arm mt/as 无法组装 hello.c 的 arm 汇编（mcc PASS，as 阶段 fail），set -e 修复后暴露；mt/as arm 前端缺口 |
+| [objcopy-o-format-gap](meuos-toolchain/objcopy-o-format-gap.md) | 🔄 | mt/objcopy 缺 `-O <format>`（ihex/srec/binary 输出），仅 ELF 节区操作，功能空白非缺陷 |
 
 ### meuos-utils
 
