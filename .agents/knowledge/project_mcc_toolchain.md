@@ -163,3 +163,15 @@ PIC EBX 零临时分配 → 仍作 GOT base。mt 侧 i386 GOT 重定位留待 P1
   2. **mabi/isell 的 slot 假设不适用 MV_CONST** 是**跨架构类 bug**（i386/arm 同型）——排查:谓"从 slot 加载返回值/参数"路径都要问源是否可能 MV_CONST。
   3. **负立即数**：mt/as arm 的 `add/mov #-N` 尚不支持（报 unsupported），mcc 统一语法会生成 `add #-1`（GNU as 接受）。这是 arm mt/as 前端**仍开放**的完善点（varargs 回归仍在负立即数处卡）。
 - commit：mt/as `546e5af` + mcc arm `a25cf3c`，合入 main `c72597e`；`check-qemu-arm` PASS (exit=42)。
+
+## mt/objcopy -O 输出格式（2026-08-05 闭环）
+
+- **实现**：`objcopy -O binary/ihex/srec`，将 loadable 节区（SHF_ALLOC 非 NOBITS）按地址折叠输出。commit 5b621b3 合 a28187b。
+- **对齐 GNU 的关键**：
+  1. **binary**：从最低可加载地址铺到最高结束、gap 补 0（文件大小 = 末节区结束 - 首节区基址）。
+  2. **ihex**：data 记录 type 00 + 节区地址>0xFFFF 时发 type 04 扩展地址（段切换）；EXEC 发 type 05 起始地址；EOF type 01。
+  3. **srec**：按地址幅度选 S1(16)/S2(24)/S3(32) 数据记录，S5 计数 + S9/S8/S7 终止（地址宽度对应）。
+- **踩坑**：ihex **type 04 校验和最容易错**——初版只算 data 部分，漏了 len(02)+addr(0000)+type(04) 前缀字节，与 GNU 的 BA 差。校验和必须对整行（含前缀）取 `~sum+1 & 0xff`。
+- **与 -j 组合**：`-O binary -j .data` 只输出 .data（keep 决策复用），fold 逻辑按 keep+alloc 节区收集。
+- **纪律**：三种格式输出一致性靠"逐节区折叠 + gap 不补（ihex/srec）或补 0（binary）"——ihex/srec 不发 gap 的零记录（GNU 语义），否则体积爆炸（4KB gap 铺成几百行零记录）。
+

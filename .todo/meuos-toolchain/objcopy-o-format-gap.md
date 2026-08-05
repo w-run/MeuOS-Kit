@@ -1,7 +1,8 @@
 # mt/objcopy 缺 `-O <format>` 输出格式转换
 
-> 状态：🔄 开放（2026-08-05 真实操作验证报告中发现）
-> 关联：mt 工具链真实进度验证（9 工具全通，此为功能空白非缺陷）
+> 状态：✅ 已闭环（2026-08-05）
+> 关联：commit 5b621b3（-O binary/ihex/srec，合入 main a28187b），ihex 校验和修，与 GNU 逐字节对齐
+> 跟进验证见 `.agents/knowledge/project_mcc_toolchain.md`（-O 折叠 + GNU 对齐经验）
 
 ## 现象
 

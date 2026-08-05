@@ -46,7 +46,7 @@
 | [mt-ld-pie-jmprel](meuos-toolchain/mt-ld-pie-jmprel.md) | 🔄 | mt/ld 构建的 PIE 主程序 JUMP_SLOT 入 .rela.dyn(DT_RELA) 非 .rela.plt(DT_JMPREL) → rtld_dlopen GOT 槽=0 崩；独立缺陷，host-ld 链可绕过，不阻塞方案 a |
 | [i386-qemu-runtime-fail](meuos-toolchain/i386-qemu-runtime-fail.md) | ✅ | i386 QEMU runtime 返回 0 非 42——根因 mabi_selret i64 返回未处理 MV_CONST（return 42 读未初始化栈），已修 b6fb898/58af57a |
 | [arm-as-assemble-fail](meuos-toolchain/arm-as-assemble-fail.md) | ✅ | arm mt/as 无法组装 mcc arm 产物——双层：mt/as 缺 fp 别名+伪指令 no-op + mcc arm_mabi.c MV_CONST，已修 546e5af/a25cf3c 合入 c72597e |
-| [objcopy-o-format-gap](meuos-toolchain/objcopy-o-format-gap.md) | 🔄 | mt/objcopy 缺 `-O <format>`（ihex/srec/binary 输出），仅 ELF 节区操作，功能空白非缺陷 |
+| [objcopy-o-format-gap](meuos-toolchain/objcopy-o-format-gap.md) | ✅ | mt/objcopy `-O binary/ihex/srec` 已实现（5b621b3/合 a28187b），与 GNU 对齐 |
 
 ### meuos-utils
 
