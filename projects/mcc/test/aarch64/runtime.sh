@@ -22,6 +22,22 @@ if [ ! -f "$sysroot/usr/lib/libc-meuos.a" ]; then
 	exit 0
 fi
 
+# JCC fallthrough compile gate (defect: i64 param matrix hang, exit=124):
+# every JCC must be followed by an explicit branch to the s2 successor,
+# not a blind fallthrough to whatever block is physically next.  Assert the
+# cbnz/cbz is immediately followed by a `b .L<fn>.bb<k>`.
+work0=${TMPDIR:-/tmp}/mcc-aarch64-jcc.$$
+trap 'rm -rf "$work" "$share"/rt-* "$work0" 2>/dev/null || true' EXIT HUP INT TERM
+mkdir -p "$work0"
+"$mcc" --target=aarch64 --specs=meuos --sysroot="$sysroot" \
+	-S -o "$work0/jcc.s" "$root/test/aarch64/jccfall.c"
+if ! awk '/cbnz|cbz/{getline; if ($0 !~ /^[[:space:]]*b[[:space:]]/) bad=1}
+           END{exit bad}' "$work0/jcc.s"; then
+	printf '%s\n' 'aarch64 JCC fallthrough: FAIL (cbnz/cbz not followed by explicit branch)' >&2
+	exit 1
+fi
+printf '%s\n' "aarch64 JCC fallthrough compile gate passed"
+
 if ! "$qvm" status 2>/dev/null | grep -q '^  aarch64 .* RUNNING'; then
 	printf '%s\n' "aarch64 runtime: aarch64 VM not running (start with: $qvm boot aarch64), skipping"
 	exit 0
