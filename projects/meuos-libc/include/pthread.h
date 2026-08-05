@@ -1,6 +1,7 @@
 #ifndef MEUOS_PTHREAD_H
 #define MEUOS_PTHREAD_H
 
+#include <features.h>
 #include <stddef.h>
 #include <threads.h>
 

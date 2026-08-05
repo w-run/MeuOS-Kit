@@ -1,6 +1,7 @@
 #ifndef MEUOS_THREADS_H
 #define MEUOS_THREADS_H
 
+#include <features.h>
 #include <time.h>
 
 typedef int (*thrd_start_t)(void *);

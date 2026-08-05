@@ -1,6 +1,7 @@
 #ifndef MEUOS_EXC_H
 #define MEUOS_EXC_H
 
+#include <features.h>
 #include <setjmp.h>
 #include <stdint.h>
 #include <stddef.h>
