@@ -132,3 +132,17 @@ PIC EBX 零临时分配 → 仍作 GOT base。mt 侧 i386 GOT 重定位留待 P1
 
 > **本轮并行进展延伸**（TLS 静态 GD 运行期闭环、m++ C++ P1 5 项、P0.1 动态 libc、mt/ld .dynamic 新阻塞、静态数组 segfault、关键教训）见 [project_mcc_toolchain_roundup.md](project_mcc_toolchain_roundup.md)。
 
+
+## i386 返回非负整常量错值（2026-08-05 闭环）
+
+> 教训来源：mt 验证线 check-qemu-i386 hello.c 返回 0 非 42。根因在 **mcc i386 后端**，非 mt。
+
+- **根因**：`i386_mabi.c` `mabi_selret` 的 i64 返回分支无条件从 `[ebp + s0->slot]` 读返回值，未处理 `MV_CONST` 立即数。
+  - `return 42` → MIR `ret $c0`（`(i64)42` 常量，无 slot）→ `s0->slot` 未定义 → `movl <垃圾>(%ebp), %eax` 读未初始化栈 → 返回 0。
+  - `return -1` **侥幸**被前端整成 `neg(1)` i32（走 else 分支 MOV）而绕开 i64 分支，掩盖了 bug。
+- **修复**：i64 返回、`s0->kind==MV_CONST` 时拆低/高 32 位 i32 立即数 `MMOP_MOV` 到 **EDX（高半）再 EAX（低半）**；实值保留原 slot LOAD。EAX 后写关键——memit 的 i32 const→mov 经 `%eax` 中转清 eax，先 EDX 后 EAX 让返回低半最后落到 EAX。
+- **关键纪律**：
+  1. **mabi/isell 里 slot 假设不适用于常量**——凡"从 slot 加载"路径都要问：源可能是 MV_CONST 吗？常量无 slot。
+  2. **memit 的 i32 MOV 依赖 %eax 作 scratch 中转**，若目标寄存器也是保管关键值的返回寄存器需注意写入顺序。
+  3. **负常量 vs 非负常量的镜像陷阱**：前端把 `-1` 折叠成 `neg(1)`（i32）绕过 i64 路径，导致"负的看起来对"掩盖"非负错"。改动返回/常量后端时，正负都要测。
+- commit：`b6fb898`（mcc/i386），合入 main `58af57a`；mt 侧门禁 taker `check-qemu-i386` PASS (exit=42)。

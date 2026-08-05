@@ -1,7 +1,7 @@
 # i386 QEMU runtime FAIL：产物返回 0 非 42
 
-> 状态：🔄 开放（2026-08-05 qemu_c_hello.sh set -e 修复后首次真实暴露）
-> 关联：commit f5af14b（修复 set -e 使脚本能正确报错后才暴露，非该修复引入）
+> 状态：✅ 已闭环（2026-08-05）
+> 关联：跟进验证见 `.agents/knowledge/` i386 返回常量闭环；修复 commit b6fb898，合入 main 58af57a
 
 ## 现象
 
