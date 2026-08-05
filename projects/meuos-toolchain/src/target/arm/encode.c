@@ -380,7 +380,16 @@ int arm_encode_insn(const struct mt_target *target,
 				if (ops[1][0] == '#') {
 					int imm = 0; sscanf(ops[1]+1, "%i", &imm);
 					uint32_t op2;
-					if (arm_imm_encode(imm, &op2) < 0) return -1;
+					if (arm_imm_encode(imm, &op2) < 0) {
+						/* mov rd,#-N → mvn rd,#(N-1) (mvn inverts). */
+						if (opc != 13) return -1;   /* mvn imm complement only from mov */
+						if (arm_imm_encode(~(uint32_t)imm, &op2) < 0)
+							return -1;
+						emit32(out->bytes,
+						       cond | sbit | 0x3A00000 | 0x600000
+						       | (rd<<12) | op2);
+						return 0;
+					}
 					emit32(out->bytes, cond | sbit | 0x3A00000 | (opc==15?0x600000:0) | (rd<<12) | op2);
 					return 0;
 				}
@@ -396,8 +405,15 @@ int arm_encode_insn(const struct mt_target *target,
 				if (ops[1][0] == '#') {
 					int imm = 0; sscanf(ops[1]+1, "%i", &imm);
 					uint32_t op2;
-					if (arm_imm_encode(imm, &op2) < 0) return -1;
-					emit32(out->bytes, cond | sbit | 0x3500000 | (opc<<21) | (rn<<16) | op2);
+					int opc_e = opc;
+					/* cmp #-N → cmn #N, cmn #-N → cmp #N */
+					if (arm_imm_encode(imm, &op2) < 0) {
+						int pair = opc == 10 ? 11 : (opc == 11 ? 10 : -1);
+						if (pair < 0) return -1;
+						if (arm_imm_encode(-imm, &op2) < 0) return -1;
+						opc_e = pair;
+					}
+					emit32(out->bytes, cond | sbit | 0x3500000 | (opc_e<<21) | (rn<<16) | op2);
 					return 0;
 				}
 				int rm; if (reg_num(ops[1], &rm) < 0) return -1;
@@ -433,11 +449,31 @@ int arm_encode_insn(const struct mt_target *target,
 						       | (1<<25) | (rn<<16) | (rd<<12));
 						return 0;
 					}
-					/* Immediate: rd, rn, #imm */
+					/* Immediate: rd, rn, #imm
+					 * Negative-immediate normalization: an ARM immediate
+					 * cannot hold many values (incl. negatives like #-1),
+					 * but the complement form often can.  add #-N → sub #N,
+					 * etc.  This is what GNU as does for
+					 * `add rn, rn, #-1` etc. (mcc emits such for address
+					 * arithmetic). */
 					int imm = 0; sscanf(ops[2]+1, "%i", &imm);
 					uint32_t op2;
-					if (arm_imm_encode(imm, &op2) < 0) return -1;
-					emit32(out->bytes, cond | sbit | 0x2000000 | (opc<<21) | (1<<25) | (rn<<16) | (rd<<12) | op2);
+					int opc_e = opc;
+					if (arm_imm_encode(imm, &op2) < 0) {
+						int pair = -1;
+						switch (opc) {
+						case 4: pair = 2; break;   /* add ↔ sub */
+						case 2: pair = 4; break;
+						case 5: pair = 6; break;   /* adc ↔ sbc */
+						case 6: pair = 5; break;
+						case 10: pair = 11; break;  /* cmp ↔ cmn */
+						case 11: pair = 10; break;
+						}
+						if (pair < 0) return -1;
+						if (arm_imm_encode(-imm, &op2) < 0) return -1;
+						opc_e = pair;
+					}
+					emit32(out->bytes, cond | sbit | 0x2000000 | (opc_e<<21) | (1<<25) | (rn<<16) | (rd<<12) | op2);
 					return 0;
 				}
 
