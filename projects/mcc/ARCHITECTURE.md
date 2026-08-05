@@ -304,7 +304,7 @@ See `../../AGENTS.md` §3 for the canonical status. Quick reference:
   无包嵌套、无类成员变参模板、无递归终止展开策略。
 - **继承**：虚继承；纯虚函数（`= 0` 槽位留 0）；虚析构。
 - **auto/decltype**：仅 `auto x = expr`（局部/全局）与 C++14 `auto f()` 返回类型推导；未做 `auto&` 引用折叠、decltype 独立推导（160e2a2 落地范围）。
-- **lambda**：仅值捕获（无 `[&x]` 引用捕获、`[=]`/`[&]` 默认捕获、init-capture、泛型 lambda、跨函数传递捕获），引用捕获明确报错（877beed 落地范围）。
+- **lambda**：值捕获与引用捕获均已支持——显式 `[&x]` / 默认 `[&]` 引用捕获（能读到活动变量更新）、默认按值 `[=]`、混捕 `[=,&y]`/`[&,z]`/`[x,&y]`、init-capture `[n=expr]`、泛型 lambda（c14c7a2 起支持引用/init 捕获）；跨函数传递捕获仍为限制。
 - **constexpr**：仅整型常量折叠（阶段 1）+ static_assert（阶段 2 部分）；未做数组维度/非类型模板实参的编译期求值、constexpr 对象含成员访问（需 mini 内存模型）、类静态 constexpr 成员在常量表达式中的折叠（3ac233b 落地范围）。
 - **其它**：函数指针声明参数里的类名未识别（独立问题）。
 - **MIR 路径遗留**（非 m++ 专属）：自举 mcc 编译「聚合参数+varargs+栈传参」组合在
