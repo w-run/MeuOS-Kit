@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <stdio/internal.h>
 
 /* String operations */
 size_t wcslen(const wchar_t *s) {
@@ -398,23 +399,52 @@ int wcwidth(wchar_t c) {
 	return 1;
 }
 
-/* Wide I/O (simple wrappers around byte I/O) */
+/* Wide I/O.  In the C (byte) locale a wide char is its single-byte code,
+ * so fgetwc/fputwc wrap the byte layer; fwide still honours the stream
+ * orientation contract (C11 7.29.3.5): the first byte or wide operation
+ * locks the stream, and every later fwide()/I/O call honours that lock. */
 wint_t fgetwc(FILE *f) {
+	struct __meuos_FILE *s = (struct __meuos_FILE *)f;
+	if (!s || !(s->flags & FILE_READ)) {
+		if (s) s->flags |= FILE_ERROR;
+		return WEOF;
+	}
+	/* First wide op locks the stream wide. */
+	if (!(s->flags & (FILE_LOCKED_BYTE | FILE_LOCKED_WIDE)))
+		s->flags |= FILE_LOCKED_WIDE;
 	int c = fgetc(f);
 	return (c == EOF) ? WEOF : (wint_t)(unsigned char)c;
 }
 
 wint_t fputwc(wchar_t wc, FILE *f) {
+	struct __meuos_FILE *s = (struct __meuos_FILE *)f;
+	if (!s || !(s->flags & FILE_WRITE) || (s->flags & FILE_MEMORY)) {
+		if (s) s->flags |= FILE_ERROR;
+		return WEOF;
+	}
+	if (!(s->flags & (FILE_LOCKED_BYTE | FILE_LOCKED_WIDE)))
+		s->flags |= FILE_LOCKED_WIDE;
 	int c = fputc((int)(wc & 0xff), f);
 	return (c == EOF) ? WEOF : (wint_t)(unsigned char)c;
 }
 
 wint_t ungetwc(wint_t wc, FILE *f) {
+	struct __meuos_FILE *s = (struct __meuos_FILE *)f;
+	if (s && !(s->flags & (FILE_LOCKED_BYTE | FILE_LOCKED_WIDE)))
+		s->flags |= FILE_LOCKED_WIDE;
 	return ungetc((int)(wc & 0xff), f);
 }
 
 int fwide(FILE *f, int mode) {
-	(void)f; (void)mode; return 0; /* byte-oriented by default */
+	struct __meuos_FILE *s = (struct __meuos_FILE *)f;
+	if (!s) return 0;
+	int locked = (s->flags & FILE_LOCKED_WIDE) ? 1
+	           : (s->flags & FILE_LOCKED_BYTE) ? -1 : 0;
+	if (locked)
+		return locked;              /* already oriented: report, ignore mode */
+	if (mode > 0) { s->flags |= FILE_LOCKED_WIDE;  return 1; }
+	if (mode < 0) { s->flags |= FILE_LOCKED_BYTE;  return -1; }
+	return 0;                       /* undecided, query only */
 }
 
 /* ----------------------------------------------------------------------

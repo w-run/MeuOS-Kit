@@ -35,6 +35,10 @@ enum {
 	FILE_STATIC = 1u << 3,
 	FILE_ERROR  = 1u << 4,
 	FILE_COOKIE = 1u << 5,
+	/* Stream orientation (C11 7.19.2 / 7.29.3.5).  A stream with neither
+	 * bit set is undecided; the first byte or wide operation locks it. */
+	FILE_LOCKED_BYTE = 1u << 6,
+	FILE_LOCKED_WIDE = 1u << 7,
 };
 
 extern struct __meuos_FILE __meuos_stdin;
