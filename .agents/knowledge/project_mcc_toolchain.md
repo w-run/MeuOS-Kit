@@ -196,7 +196,7 @@ PIC EBX 零临时分配 → 仍作 GOT base。mt 侧 i386 GOT 重定位留待 P1
 
 1. **aarch64 `movz/movk #imm, lsl #N` 忽略 lsl**（fixed 7ebfe1b4）：`movk x9,#0x3ff8,lsl#48` 的 `lsl#48`（单 operand token）被 #imm 分支丢→x9=0x3ff8 非 0x3ff8000000000000 → FP 位模式错。修：从尾随 `lsl #N` token 解析 shift。
 2. **arm 寄存器可变移位被 #imm 吞并**（fixed ce0d0b70）：`lsl/lsr r10,r10,r12` 被 `nops>=3` 无条件进 #imm 分支，sscanf("r12")→0→错编立即数移位（`lsr r10,r10,#32`）。修：#imm 分支要求 ops[2][0]=='#'，寄存器走 MOV rd,rm,SHIFT rs。
-3. **riscv64 `li` 64 位立即数截断**（待修）：`li t0,0x3ff8000000000000` 只 lui+addi（32 位），高 32 归零→`lui t0,0`→FP 错。RV64 需 lui+addiw+slli 等长序列。
+3. **riscv64 `li` 64 位立即数截断**（fixed 644f590b）：`li t0,0x3ff8000000000000` 只 lui+addi（32 位），高 32 归零→FP 错。修：紧凑 shift-form（chunk≤0x7ff 用 addiw+slli；否则 lui+addiw+slli，低 12 位<0x800 防符号污染）；注意 out->bytes 仅 16B/4 指令，超则拒绝不溢出。
 
 **判定方法**（判断「mcc 错 vs mt/as 错」）：
 - mcc -S 产物语义对 + 宿主 gcc 同程序返回预期 → 排除 mcc。
