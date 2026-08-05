@@ -25,9 +25,13 @@ const char *__progname = "?";
 /* GNU/glibc-convention program-invocation globals.  Although glibc exposes
  * these as compat/glibc-isms, they must be filled at libc startup, and this
  * crt has no .init_array for an opt-in compat archive to hook into (nor does
- * the toolchain fold an undefined-weak store reliably), so core defines and
- * populates them here.  The compat layer still owns the public declaration
- * header (program-invocation.h) for programs that opt in. */
+ * the toolchain fold an undefined-weak store reliably — it emits a pcrel
+ * load from address 0 -> SIGSEGV; and GAS `.set` aliases are not linkable
+ * across archives), so core defines and populates them here.  This mirrors
+ * musl, which also carries these argv[0]-driven startup globals in the main
+ * libc rather than a GNU-only compat archive.  The compat layer still owns
+ * the public declaration header (program-invocation.h) for opt-in programs.
+ * core does NO __GLIBC__ masking.  See ARCHITECTURE.md §5 entry contract. */
 char *program_invocation_name = "?";
 char *program_invocation_short_name = "?";
 
