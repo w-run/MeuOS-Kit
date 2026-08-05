@@ -1170,6 +1170,270 @@ dump_hexdump(const unsigned char *bytes, size_t size,
 
 /* ---- DWARF debug-section dump (-w --debug-dump) ---------------------- */
 
+/* Read a DWARF LE uleb128 at *pp; advances *pp. */
+static uint64_t
+read_uleb(const unsigned char **pp, const unsigned char *end)
+{
+	const unsigned char *p = *pp;
+	uint64_t val = 0;
+	unsigned shift = 0;
+	unsigned char b;
+
+	if (p >= end)
+		return 0;
+	do {
+		b = *p++;
+		if (p > end)
+			break;
+		val |= (uint64_t)(b & 0x7f) << shift;
+		shift += 7;
+	} while (b & 0x80);
+	*pp = p;
+	return val;
+}
+
+/* Read a DWARF LE sleb128 at *pp; advances *pp. */
+static int64_t
+read_sleb(const unsigned char **pp, const unsigned char *end)
+{
+	const unsigned char *p = *pp;
+	uint64_t val = 0;
+	unsigned shift = 0;
+	unsigned char b;
+
+	if (p >= end)
+		return 0;
+	do {
+		b = *p++;
+		if (p > end)
+			break;
+		val |= (uint64_t)(b & 0x7f) << shift;
+		shift += 7;
+	} while (b & 0x80);
+	if (shift < 64 && (b & 0x40))
+		val |= (uint64_t)-1 << shift;
+	*pp = p;
+	return (int64_t)val;
+}
+
+/* Decode a DWARF v4 .debug_line line-number program and print the
+ * resulting (address, line) table plus file names.  Follows the DWARF4
+ * 6.2.2 line-number program header and 6.2.5.1 standard opcodes. */
+static void
+dump_debug_line(const unsigned char *data, size_t dsize)
+{
+	const unsigned char *p = data;
+	uint64_t unit_length, header_length;
+	uint16_t version;
+	uint8_t min_ilen, max_ops, default_is_stmt,
+	        line_range, opcode_base;
+	int8_t line_base;
+	const unsigned char *prog, *prog_end, *q;
+	int64_t line;
+	uint64_t addr = 0, file = 1, col = 0, isa = 0;
+	int is_stmt;
+	unsigned opcodes[255];
+	unsigned i, op;
+
+	if (dsize < 14)
+		return;
+	unit_length = (uint32_t)p[0] | (uint32_t)p[1] << 8 |
+	              (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+	p += 4;
+	if (unit_length >= 0xfffffff0u || (uint64_t)unit_length > (uint64_t)dsize - 4) {
+		/* DWARF32 unit_length == 0xffffffff means DWARF64; not
+		 * supported here yet. */
+		return;
+	}
+	version = (uint16_t)p[0] | (uint16_t)p[1] << 8;
+	p += 2;
+	if (version < 3 || version > 5)
+		return;    /* only decode DWARF v3/v4/v5 header layout */
+	header_length = (uint32_t)p[0] | (uint32_t)p[1] << 8 |
+	                (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+	p += 4;
+	min_ilen = *p++;
+	if (version >= 4) {
+		max_ops = *p++;
+		if (max_ops == 0)
+			return;
+	} else {
+		max_ops = 1;
+	}
+	default_is_stmt = *p++;
+	line_base = *p++;
+	line_range = *p++;
+	opcode_base = *p++;
+	if (opcode_base == 0)
+		return;
+	for (i = 0; i + 1 < opcode_base; ++i)
+		opcodes[i] = *p++;
+	prog = p;
+	prog_end = data + 4 + unit_length;
+	if (prog > prog_end)
+		return;
+
+	printf("\nThe .debug_line section:\n");
+
+	/* include_directories (empty in our output) */
+	q = prog;
+	while (q < prog_end && *q != 0) {
+		while (q < prog_end && *q != 0)
+			++q;
+		if (q < prog_end)
+			++q;
+	}
+	if (q < prog_end)
+		++q;   /* skip the terminating 0 */
+
+	/* file_names */
+	printf("\nFile name                Line number    Starting address\n");
+	{
+		int idx = 1;
+		unsigned char *fname = NULL;
+		size_t flen = 0;
+		while (q < prog_end && *q != 0) {
+			const unsigned char *s = q;
+			size_t n = 0;
+			while (q < prog_end && *q != 0) {
+				++q; ++n;
+			}
+			if (q < prog_end)
+				++q;   /* skip null */
+			/* directory index */
+			read_uleb(&q, prog_end);
+			/* mtime */
+			read_uleb(&q, prog_end);
+			/* length */
+			read_uleb(&q, prog_end);
+			if (n + 1 > flen) {
+				fname = realloc(fname, n + 1);
+				flen = n + 1;
+			}
+			if (fname && n > 0) {
+				memcpy(fname, s, n);
+				fname[n] = '\0';
+				printf("%-25s%4d\n", fname, idx);
+			}
+			++idx;
+		}
+		free(fname);
+	}
+
+	/* line-number program starts after the header_length field, which is
+	 * measured from the byte following the header_length field (i.e.
+	 * offset 4+2+4 = 10 from the start of .debug_line). */
+	prog = data + 10 + header_length;
+	if (prog > prog_end)
+		prog = prog_end;
+	printf("\nAddress            Line   Column File   ISA  Discriminator Op\n");
+	line = default_is_stmt ? 1 : 0;
+	is_stmt = default_is_stmt;
+	while (prog < prog_end) {
+		unsigned char b = *prog++;
+		if (b == 0) {
+			/* extended opcode: 0x00, uleb length (incl. subopcode),
+			 * subopcode, then length-1 bytes of arguments. */
+			const unsigned char *op_start = prog - 1;
+			unsigned exlen = (unsigned)read_uleb(&prog, prog_end);
+			unsigned char subop;
+			unsigned k;
+
+			if (exlen == 0 || prog >= prog_end)
+				break;
+			subop = *prog++;
+			if (subop == 1) {  /* DW_LNE_end_sequence */
+				printf("0x%08llx %8lld\n",
+				       (unsigned long long)addr,
+				       (long long)line);
+				line = default_is_stmt ? 1 : 0;
+				addr = 0;
+				is_stmt = default_is_stmt;
+			} else if (subop == 2 && exlen >= 2) {  /* set_address */
+				uint64_t a = 0;
+				int addr_size = (int)exlen - 1;
+				if (addr_size > 8) addr_size = 8;
+				for (k = 0; k < (unsigned)addr_size; ++k)
+					a |= (uint64_t)*prog++ << (8 * k);
+				addr = a;
+			} else if (subop == 3) {  /* define_file */
+				while (prog < prog_end && *prog)
+					++prog;
+				if (prog < prog_end) ++prog;
+				read_uleb(&prog, prog_end);
+				read_uleb(&prog, prog_end);
+				read_uleb(&prog, prog_end);
+			}
+			/* skip to end of the extended opcode */
+			prog = op_start + 1 + exlen;
+			if (prog > prog_end)
+				prog = prog_end;
+			continue;
+		} else if (b < opcode_base) {
+			switch (b) {
+			case 1: /* DW_LNS_copy */
+				printf("0x%08llx %8lld %3llu %2llu %3llu\n",
+				       (unsigned long long)addr,
+				       (long long)line, (unsigned long long)col,
+				       (unsigned long long)file,
+				       (unsigned long long)isa);
+				/* (basic_block / prologue_end / epilogue_begin state
+				 * reset after the row is emitted; not printed) */
+				(void)is_stmt;
+				break;			case 2: /* DW_LNS_advance_pc */
+				addr += read_uleb(&prog, prog_end) * min_ilen;
+				break;
+			case 3: /* DW_LNS_advance_line */
+				line += read_sleb(&prog, prog_end);
+				break;
+			case 4: /* DW_LNS_set_file */
+				file = read_uleb(&prog, prog_end);
+				break;
+			case 5: /* DW_LNS_set_column */
+				col = read_uleb(&prog, prog_end);
+				break;
+			case 6: /* DW_LNS_negate_stmt */
+				is_stmt = !is_stmt;
+				break;
+			case 7: /* DW_LNS_set_basic_block */
+				/* state consumed by the next row; not printed */
+				break;
+			case 8: /* DW_LNS_const_add_pc */
+				addr += ((255 - opcode_base) / line_range) * min_ilen;
+				break;
+			case 9: /* DW_LNS_fixed_advance_pc */
+				if (prog + 2 <= prog_end) {
+					addr += (unsigned)prog[0] | (unsigned)prog[1] << 8;
+					prog += 2;
+				}
+				break;
+			case 10: /* DW_LNS_set_prologue_end */
+			case 11: /* DW_LNS_set_epilogue_begin */
+				/* row flags; not printed */
+				break;
+			case 12: /* DW_LNS_set_isa */
+				isa = read_uleb(&prog, prog_end);
+				break;
+			default:
+				for (op = 0; op < opcodes[b - 1] && prog < prog_end; ++op)
+					read_uleb(&prog, prog_end);
+				break;
+			}
+		} else {
+			/* special opcode */
+			unsigned adj = b - opcode_base;
+			addr += (adj / line_range) * min_ilen;
+			line += line_base + (adj % line_range);
+			printf("0x%08llx %8lld %3llu %2llu %3llu\n",
+			       (unsigned long long)addr,
+			       (long long)line, (unsigned long long)col,
+			       (unsigned long long)file, (unsigned long long)isa);
+			(void)is_stmt;
+		}
+	}
+	printf("\n");
+}
+
 /* Initial DWARF support: dump every .debug_* section's contents (name,
  * address, raw hex bytes).  This is deliberately a raw dump rather than a
  * DIE/line-program decode — it gives a faithful view of the debug data an
@@ -1202,6 +1466,10 @@ dump_debug(const unsigned char *bytes, size_t size,
 		    strncmp(name, ".zdebug_", 8) != 0 &&
 		    strcmp(name, ".stab") != 0)
 			continue;
+		if (strcmp(name, ".debug_line") == 0) {
+			dump_debug_line(bytes + sec.offset, sec.size);
+			continue;
+		}
 		dump_hexdump_section(bytes, size, &sec, name,
 		                     section_has_relocations(bytes, size, view, i));
 	}
