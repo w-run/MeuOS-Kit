@@ -137,3 +137,22 @@ if ! awk '/^[[:space:]]*sete[[:space:]]+%al/{getline; if ($0 ~ /^[[:space:]]*mov
 	exit 1
 fi
 printf '%s\n' 'i386 i64 compare truth-value compile gate passed'
+
+# byte/half-narrowing return gate (defect #22a): an i8/i16 -> i32 source
+# in MMOP_MOVZX fell through into the MMOP_LEA case and emitted the
+# address-0 `leal 0,%eax`, zeroing eax and clobbering the narrowed return
+# value.  Assert the asm contains no `leal 0,` (the buggy placeholder) and
+# at least one movzbl/movzwl (the correct narrow + zero-extend).
+bnasm=${TMPDIR:-/tmp}/mcc-i386-byteret.$$.s
+trap 'rm -f "$asm" "$obj" "$shasm" "$casm" "$pasm" "$eqasm" "$bnasm"' EXIT HUP INT TERM
+"$mcc" --target=i386-linux -S -o "$bnasm" "$root/test/i386/byte_return.c"
+if grep -Eq 'leal[[:space:]]+0,' "$bnasm"; then
+	printf '%s\n' 'i386 byte-narrowing return: FAIL (leal 0,%eax clobbers narrowed value)' >&2
+	exit 1
+fi
+if ! grep -Eq 'movzbl[[:space:]]+%al, %eax' "$bnasm" && \
+   ! grep -Eq 'movzwl[[:space:]]+%ax, %eax' "$bnasm"; then
+	printf '%s\n' 'i386 byte-narrowing return: FAIL (no movzbl/movzwl for i8/i16 narrow)' >&2
+	exit 1
+fi
+printf '%s\n' 'i386 byte-narrowing return compile gate passed'
