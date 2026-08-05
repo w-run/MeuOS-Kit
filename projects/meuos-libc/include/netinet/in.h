@@ -3,9 +3,18 @@
 
 #include <sys/types.h>
 #include <stdint.h>
+#include <features.h>
 
 typedef uint16_t in_port_t;
 typedef uint32_t in_addr_t;
+
+/* Host <-> network byte order. */
+__BEGIN_DECLS
+uint32_t htonl(uint32_t);
+uint32_t ntohl(uint32_t);
+uint16_t htons(uint16_t);
+uint16_t ntohs(uint16_t);
+__END_DECLS
 
 struct in_addr {
 	in_addr_t s_addr;
