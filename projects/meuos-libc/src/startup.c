@@ -28,8 +28,10 @@ extern char **environ;
 /* __progname: BSD/glibc convention, the executable name as invoked.
  * crt sets it from argv[0]; defaults to "?" so standalone use (or a crt
  * without startup support) still yields a sane value.  syslog(3),
- * error(3) (compat) and other consumers depend on it. */
+ * error(3) (compat) and other consumers depend on it.
+ * __progname_full holds the full argv[0] (glibc also provides this). */
 const char *__progname = "?";
+const char *__progname_full = "?";
 
 /* GNU/glibc-convention program-invocation globals.  Although glibc exposes
  * these as compat/glibc-isms, they must be filled at libc startup, and this
@@ -83,6 +85,7 @@ __meuos_startup(int argc, char **argv, char **envp)
 	(void)argc;
 	if (argv && argv[0]) {
 		__progname = argv[0];
+		__progname_full = argv[0];
 		program_invocation_name = argv[0];
 		program_invocation_short_name = base_name(argv[0]);
 	}

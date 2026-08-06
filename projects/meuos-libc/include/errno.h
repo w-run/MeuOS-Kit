@@ -5,6 +5,14 @@
 
 __BEGIN_DECLS
 int *__errno_location(void);
+
+/* GNU/glibc-convention program-invocation globals.  Populated by the
+ * libc startup (startup.c) from argv[0] before main().  Declared here
+ * (glibc convention — they live in <errno.h>) so that programs compiling
+ * against this sysroot can reference them without opting into the compat
+ * layer. */
+extern char *program_invocation_name;
+extern char *program_invocation_short_name;
 __END_DECLS
 #define errno (*__errno_location())
 

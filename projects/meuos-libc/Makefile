@@ -296,6 +296,9 @@ PIC_OBJS += $(PIC_BUILD)/internal/environ.o
 
 all: $(ATOMIC_LIB) $(LIBC_LIB) $(CRT1_OBJ) $(CRTI_OBJ) $(CRTN_OBJ) $(BUILD_SO) $(LIBGCC_LIB) compat
 
+# Standalone libgcc-meuos.a target.
+libgcc: $(LIBGCC_LIB)
+
 # Atomic shim: assembly only.
 $(ATOMIC_OBJ): src/arch/$(ARCH)/atomic.S
 	@mkdir -p $(dir $@)
@@ -452,6 +455,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/ctype test/ctype.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/p0-ctype-tables test/p0_ctype_tables.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/p0-c23 test/p0_c23.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/p0-progname test/p0_progname.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/assert test/assert.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/c11-headers test/c11_headers.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/syscall-fs test/syscall_fs.c
@@ -561,6 +565,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	/tmp/meuos-libc-check/ctype
 	/tmp/meuos-libc-check/p0-ctype-tables
 	/tmp/meuos-libc-check/p0-c23
+	/tmp/meuos-libc-check/p0-progname
 	/tmp/meuos-libc-check/assert
 	/tmp/meuos-libc-check/c11-headers
 	/tmp/meuos-libc-check/syscall-fs
@@ -625,7 +630,8 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	@# ... but the libgcc archive must provide them.
 	@for s in __divdi3 __udivdi3 __moddi3 __umoddi3 __muldi3 __clzdi2 __ctzdi2 \
 	          __popcountdi2 __clzsi2 __ctzsi2 __bswapsi2 __bswapdi2 __floatsidf \
-	          __floatdidf __floatdisf __fixdfdi; do \
+	          __floatunsidf __floatdidf __floatdisf __fixsfdi __fixdfdi \
+	          __udivti3 __multi3; do \
 		if nm $(LIBGCC_LIB) 2>/dev/null | grep -Eq " [Tt] $$s$$"; then :; else \
 			echo "FAIL: libgcc-meuos.a missing helper $$s" >&2; exit 1; fi; \
 	done

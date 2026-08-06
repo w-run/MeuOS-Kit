@@ -32,6 +32,12 @@ extern FILE *stdout;
 extern FILE *stderr;
 
 __BEGIN_DECLS
+/* program_invocation_name / program_invocation_short_name — GNU/glibc
+ * convention, populated from argv[0] by libc startup.  Declared both here
+ * and in <errno.h> for compatibility. */
+extern char *program_invocation_name;
+extern char *program_invocation_short_name;
+
 int putchar(int);
 int getchar(void);
 int getc(FILE *);
