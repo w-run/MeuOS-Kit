@@ -677,8 +677,6 @@ mcc_main(int argc, char *argv[])
 	 * host C runtime.  The host compiler is still used only as assembler and
 	 * linker during bootstrap. */
 	if (meuos_specs) {
-		extern int g_meuos_specs;
-		g_meuos_specs = 1;
 		nostdlib = true;
 		/* MeuOS libc ships only static archives; the specs mode must produce
 		 * fully static executables unless --shared or --pie was explicitly

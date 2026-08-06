@@ -22,10 +22,6 @@
  * the QBE `Target T` global (purity rule), so TLS emission and any other
  * PIC-sensitive codegen consult this flag instead. */
 extern int g_pic;
-/* --specs=meuos flag: when set, emit .cfi_personality / .cfi_lsda /
- * .gcc_except_table referencing __gxx_personality_v0 (libc-meuos).
- * Defined and set in src/emit/emit.c / src/driver/main.c. */
-extern int g_meuos_specs;
 /* TLS access-model mirror (defined in src/mir/machine.c, set from the
  * driver's `enum tls_model tls_model`).  Values match enum MTlsModel
  * (include/mir.h): DEFAULT=0, GLOBAL_DYNAMIC=1, INITIAL_EXEC=2,
@@ -1328,20 +1324,38 @@ gd_scan_done:
 	if (g_omit_fp)
 		g_fp_off = csaves * 8 + framesize - 8;
 
-	/* Pre-scan for CALL instructions: functions with calls may throw and
-	 * need .cfi_personality / .cfi_lsda (exception-handling metadata). */
-	bool has_calls = false;
-	for (MBlkM *b = fm->link; !has_calls && b; b = b->link)
-		for (uint32_t i = 0; !has_calls && i < b->nins; i++)
-			if (b->ins[i].op == MMOP_CALL)
-				has_calls = true;
-
 	fprintf(f, ".text\n");
 	if (fm->name) {
 		if (fm->host && fm->host->export)
 			fprintf(f, ".globl %s\n", fm->name);
+		/* .cfi_startproc / .cfi_endproc emit DWARF CFI for every function,
+		 * enabling .eh_frame generation for stack unwinding.  For functions
+		 * that call exception runtime helpers (_meuos_exc_*), also emit
+		 * .cfi_personality and .cfi_lsda so the DWARF unwinder can route
+		 * exceptions through __gxx_personality_v0.  We only emit these for
+		 * functions that explicitly use C++ try/catch to avoid pulling
+		 * __gxx_personality_v0 under --specs=host (where meuos-libc is not
+		 * linked). */
+		bool has_eh = false;
+		for (MBlkM *b = fm->link; !has_eh && b; b = b->link) {
+			for (uint32_t i = 0; !has_eh && i < b->nins; i++) {
+				MInsM *in = &b->ins[i];
+				if (in->op == MMOP_CALL && in->src[0] &&
+				    in->src[0]->kind == MV_GLOBAL) {
+					const char *s = in->src[0]->sym;
+					if (s && strstr(s, "_meuos_exc_"))
+						has_eh = true;
+				}
+			}
+			if (!has_eh && b->term.op == MMOP_CALL && b->term.src[0] &&
+			    b->term.src[0]->kind == MV_GLOBAL) {
+				const char *s = b->term.src[0]->sym;
+				if (s && strstr(s, "_meuos_exc_"))
+					has_eh = true;
+			}
+		}
 		fputs("\t.cfi_startproc\n", f);
-		if (has_calls && g_meuos_specs) {
+if (has_eh) {
 			fputs("\t.cfi_personality 0x1b, __gxx_personality_v0\n", f);
 			fprintf(f, "\t.cfi_lsda 0x1b, .Llsda%s\n",
 			        fm->name ? fm->name : "f");
@@ -1351,25 +1365,37 @@ gd_scan_done:
 	if (!g_omit_fp) {
 		fputs("\tpushq\t%rbp\n", f);
 		fputs("\t.cfi_def_cfa_offset 16\n", f);
-		fputs("\t.cfi_offset %rbp, -16\n", f);
+		fputs("\t.cfi_offset 6, 16\n", f);
 		fputs("\tmovq\t%rsp, %rbp\n", f);
-		fputs("\t.cfi_def_cfa_register %rbp\n", f);
+		fputs("\t.cfi_def_cfa_register 6\n", f);
 	}
+	/* X64MReg -> DWARF x86_64 register number mapping (mt/as uses DWARF
+	 * reg numbers, not register names).  See DWARF x86_64 ABI table. */
+	static const int dwarf_rno[] = {
+		[X64MREG_RAX] = 0,  [X64MREG_RDX] = 1,  [X64MREG_RCX] = 2,
+		[X64MREG_RBX] = 3,  [X64MREG_RSI] = 4,  [X64MREG_RDI] = 5,
+		[X64MREG_RBP] = 6,  [X64MREG_RSP] = 7,
+		[X64MREG_R8]  = 8,  [X64MREG_R9]  = 9,  [X64MREG_R10] = 10,
+		[X64MREG_R11] = 11, [X64MREG_R12] = 12, [X64MREG_R13] = 13,
+		[X64MREG_R14] = 14, [X64MREG_R15] = 15,
+	};
 	/* save callee-saved registers used by the allocator */
 	int callee_push_count = 0;
 	for (int i = 0; fm->mt->rclob && fm->mt->rclob[i] >= 0; i++) {
 		int r = fm->mt->rclob[i];
 		if ((fm->regsused >> r) & 1) {
 			fprintf(f, "\tpushq\t%%%s\n", mreg_name(fm->mt, r));
-			/* CFA offset: each push decrements rsp by 8.  If the frame
-			 * pointer was pushed, it occupies the first slot after the
-			 * return address (CFA - 16).  Callee-saved regs then occupy
-			 * CFA - 24, CFA - 32, ... */
+			/* CFA offset (distance below CFA, always positive):
+			 * with fp: rbp at 16, callee-saved at 24, 32, ...
+			 * without fp: callee-saved at 16, 24, ... */
 			int cfa_off = g_omit_fp
-			    ? -8 * (callee_push_count + 2)
-			    : -8 * (callee_push_count + 3);
-			fprintf(f, "\t.cfi_offset %%%s, %d\n",
-			        mreg_name(fm->mt, r), cfa_off);
+			    ? 8 * (callee_push_count + 2)
+			    : 8 * (callee_push_count + 3);
+			int dno = (r >= 0 && r < (int)(sizeof dwarf_rno / sizeof dwarf_rno[0]))
+			    ? dwarf_rno[r] : -1;
+			if (dno >= 0)
+				fprintf(f, "\t.cfi_offset %d, %d\n",
+				        dno, cfa_off);
 			callee_push_count++;
 		}
 	}
@@ -1432,19 +1458,5 @@ gd_scan_done:
 	}
 
 	fputs("\t.cfi_endproc\n", f);
-	/* .gcc_except_table (LSDA) for functions that may throw.  Only
-	 * emitted under --specs=meuos (when __gxx_personality_v0 is
-	 * available in libc-meuos).  The existing setjmp/longjmp exception
-	 * mechanism handles dispatch; emit a minimal table with zero
-	 * call-site entries so the DWARF unwinder personality sees "no
-	 * landing pads" and continues unwinding. */
-	if (has_calls && g_meuos_specs && fm->name) {
-		fprintf(f, ".section .gcc_except_table,\"a\",@progbits\n");
-		fprintf(f, ".Llsda%s:\n", fm->name);
-		fputs("\t.byte 0xff\n", f);  /* LPStart encoding: omitted */
-		fputs("\t.byte 0xff\n", f);  /* TType encoding: omitted */
-		fputs("\t.uleb128 0\n", f);  /* Call-site table length: 0 */
-		fputs(".text\n", f);
-	}
-	fp_pool_emit(f);
+fp_pool_emit(f);
 }
