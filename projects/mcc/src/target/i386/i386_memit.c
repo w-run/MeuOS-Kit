@@ -1252,10 +1252,14 @@ emit_ins(FILE *f, MInsM *in)
 		fprintf(f, "\tcvtsi2%s\t%%eax, %%xmm0\n", is32 ? "ss" : "sd");
 		fprintf(f, "\tjmp\t.Lu2fe%u\n", id);
 		fprintf(f, ".Lu2f%u:\n", id);
-		/* push %eax, then convert via memory */
-		fputs("\tpushl\t%eax\n", f);
-		fputs("\tfildl\t(%esp)\n", f);
-		fputs("\taddl\t$4, %esp\n", f);
+		/* Zero-extend u32 to 64 bits on stack, fildq loads it as
+		 * a signed 64-bit value in [0, 2^32-1] — the exact unsigned
+		 * value.  Matches the LIR Ouwtof approach (i386_emit.c). */
+		fputs("\tsubl\t$8, %esp\n", f);
+		fputs("\tmovl\t%eax, (%esp)\n", f);
+		fputs("\tmovl\t$0, 4(%esp)\n", f);
+		fputs("\tfildq\t(%esp)\n", f);
+		fputs("\taddl\t$8, %esp\n", f);
 		if (is32)
 			fputs("\tfstps\t-4(%esp)\n\tmovss\t-4(%esp), %xmm0\n", f);
 		else
