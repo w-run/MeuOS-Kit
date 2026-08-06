@@ -22,6 +22,10 @@
  * the QBE `Target T` global (purity rule), so TLS emission and any other
  * PIC-sensitive codegen consult this flag instead. */
 extern int g_pic;
+/* --specs=meuos flag: when set, emit .cfi_personality / .cfi_lsda /
+ * .gcc_except_table referencing __gxx_personality_v0 (libc-meuos).
+ * Defined and set in src/emit/emit.c / src/driver/main.c. */
+extern int g_meuos_specs;
 /* TLS access-model mirror (defined in src/mir/machine.c, set from the
  * driver's `enum tls_model tls_model`).  Values match enum MTlsModel
  * (include/mir.h): DEFAULT=0, GLOBAL_DYNAMIC=1, INITIAL_EXEC=2,
@@ -1337,7 +1341,7 @@ gd_scan_done:
 		if (fm->host && fm->host->export)
 			fprintf(f, ".globl %s\n", fm->name);
 		fputs("\t.cfi_startproc\n", f);
-		if (has_calls) {
+		if (has_calls && g_meuos_specs) {
 			fputs("\t.cfi_personality 0x1b, __gxx_personality_v0\n", f);
 			fprintf(f, "\t.cfi_lsda 0x1b, .Llsda%s\n",
 			        fm->name ? fm->name : "f");
@@ -1428,12 +1432,13 @@ gd_scan_done:
 	}
 
 	fputs("\t.cfi_endproc\n", f);
-	/* .gcc_except_table (LSDA) for functions that may throw.  The
-	 * existing setjmp/longjmp exception mechanism handles dispatch;
-	 * emit a minimal table with zero call-site entries so the DWARF
-	 * unwinder personality sees "no landing pads" and continues
-	 * unwinding. */
-	if (has_calls && fm->name) {
+	/* .gcc_except_table (LSDA) for functions that may throw.  Only
+	 * emitted under --specs=meuos (when __gxx_personality_v0 is
+	 * available in libc-meuos).  The existing setjmp/longjmp exception
+	 * mechanism handles dispatch; emit a minimal table with zero
+	 * call-site entries so the DWARF unwinder personality sees "no
+	 * landing pads" and continues unwinding. */
+	if (has_calls && g_meuos_specs && fm->name) {
 		fprintf(f, ".section .gcc_except_table,\"a\",@progbits\n");
 		fprintf(f, ".Llsda%s:\n", fm->name);
 		fputs("\t.byte 0xff\n", f);  /* LPStart encoding: omitted */
