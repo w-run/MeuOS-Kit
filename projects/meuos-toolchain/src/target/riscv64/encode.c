@@ -142,17 +142,14 @@ struct rv_op {
 };
 
 static int
-parse_operands(const char *text, struct rv_op ops[4], int *nops)
+parse_operands(char *buf, size_t bufsz, struct rv_op ops[4], int *nops)
 {
-	char buf[256];
+	(void)bufsz;
 	char *tok;
 
 	*nops = 0;
-	if (!text || !*text)
+	if (!buf || !*buf)
 		return 0;
-
-	strncpy(buf, text, sizeof(buf) - 1);
-	buf[sizeof(buf) - 1] = '\0';
 
 	tok = strtok(buf, ",");
 	while (tok && *nops < 5) {
@@ -395,13 +392,27 @@ riscv64_encode_insn(const struct mt_target *target,
 	struct rv_op ops[5];
 	int nops = 0;
 	size_t mlen;
+	char operand_buf[256];
 
 	(void)target;
 	memset(out, 0, sizeof(*out));
 	out->fixed = 1;
 	out->size = 4;
 
-	parse_operands(operands, ops, &nops);
+	/* Copy operands into a local buffer so that strtok'd symbol pointers
+	 * remain valid throughout encode time (parse_operands uses strtok on
+	 * this buffer; without the copy, pointers into a stack-local buffer
+	 * inside parse_operands dangle after it returns). */
+	if (operands) {
+		size_t olen = strlen(operands);
+		if (olen >= sizeof(operand_buf))
+			return -1;
+		memcpy(operand_buf, operands, olen + 1);
+	} else {
+		operand_buf[0] = '\0';
+	}
+
+	parse_operands(operand_buf, sizeof(operand_buf), ops, &nops);
 	mlen = strlen(mnemonic);
 
 /* Macro to set fixup from the first operand's symbol */
