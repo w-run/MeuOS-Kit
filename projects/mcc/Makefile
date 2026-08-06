@@ -355,7 +355,7 @@ check-cpp-func: $(MPP_BIN)
 		out=/tmp/mpp-$$(basename $$t .cc); \
 		inc=; specsf="--specs=host"; \
 		case "$$t" in \
-		  */try_catch\.cc) \
+		  */try_catch\.cc|*/exc_base_slice\.cc) \
 		    specsf="--specs=meuos"; \
 		    src=/workspace/MeuOS-Kit/projects/sysroot; \
 		    if [ "$${MEUOS_SYSROOT:-}" != "$$src" ] && \
@@ -367,11 +367,11 @@ check-cpp-func: $(MPP_BIN)
 		      libcd=$$(cd ../.. && pwd)/projects/meuos-libc; \
 		    fi; \
 		    if [ ! -f "$$libcd/include/meuos_exc.h" ]; then \
-		      echo "SKIP try_catch (meuos_exc.h not found)"; \
+		      echo "SKIP $$(basename $$t) (meuos_exc.h not found)"; \
 		      continue; \
 		    fi; \
 		    if ! nm "$$src/usr/lib/libc-meuos.a" 2>/dev/null | grep -q _meuos_exc_throw; then \
-		      echo "SKIP try_catch (no sysroot libc with _meuos_exc_throw)"; \
+		      echo "SKIP $$(basename $$t) (no sysroot libc with _meuos_exc_throw)"; \
 		      continue; \
 		    fi; \
 		    inc="-I$$libcd/include"; \
