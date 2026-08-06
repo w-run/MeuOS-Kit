@@ -445,9 +445,16 @@ mabi_vaarg(MFnM *fm, MOut *o, MInsM *in)
 		mout_addr(o, MMOP_LOAD, dt, dst, maddr(cur, 0, 1, 0), 0);
 	}
 
-	/* Advance the va_list pointer */
+	/* Advance the va_list pointer (must use mval_const, not mout_cst,
+	 * because the i386 emitter reads src[0]/src[1], not cst, for ADD) */
 	MVal *adv = tmp(fm, MT_PTR, "va");
-	mout_cst(o, MMOP_ADD, MT_PTR, adv, cur, imm(fm, MT_I64, slotsize));
+	{
+		/* i386 is ILP32; the pointer type is 32-bit, so the advance
+		 * constant must also be 32-bit (MT_I32), not MT_I64. */
+		MVal *sizv = mval_const(fm->host, MT_I32,
+		                       imm(fm, MT_I32, slotsize));
+		mout(o, MMOP_ADD, MT_PTR, adv, cur, sizv);
+	}
 	mout_addr(o, MMOP_STORE, MT_PTR, 0, maddr(ap, 0, 1, 0), adv);
 }
 
