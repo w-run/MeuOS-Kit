@@ -1,8 +1,8 @@
 # loongarch64 运行时崩溃/汇编缺口（矩阵门禁发现）
 
-> 状态：🔄 开放（2026-08-05 runtime 矩阵门禁发现）
+> 状态：🔄 开放 — pcaddu12i LO12 重定位闭环（2026-08-06），待 mcc 用 `%pcaddu_lo12` 验证
 > 关联：mt/objcopy 矩阵 `test/rt_matrix.sh`；loongarch64 专项（本阶段收束，下一阶段深挖）
-> 分支参考：fix/mt-work（矩阵部分已合 main）
+> 分支参考：fix/mt-work（矩阵部分已合 main）；tmp/loong64-pcaddu-reloc（pcaddu12i 重定位修）
 
 ## 现象（loongarch64 runtime 矩阵）
 
@@ -65,4 +65,5 @@ rr_array/rr_ptr 同模式（局部数组/指针基址 bb0 在尾部死代码）�
 - mcc d142cbee 修 CFG entry（入口跳 `.L<fn>.bb0`）→ rr_struct/array/ptr/i64 **segfault 全移除转 PASS**。
 - 剩 rr_call/global（as→现在能汇编，pcaddu12i 支持加入但函数地址 LO12 约定未全对，运行时 timeout/segfault）+ rr_fp（exit0）。
 - mt 侧（我）：加 **pcaddu12i** encode（1RI20 opcode 0x1C）；apply.c **PCALA_HI20(71) 保留 opcode 高字节**（原硬写 0x1A 会破坏 pcaddu12i）。
-- **重要**：PCALA_LO12(72) 保持 **绝对 S+A** 约定（Subtract-P 会让所有 loongarch 程序 startup segfault — 已验证回滚）。pcaddu12i 函数地址需要**另一种约定**（la/pcalau12i 用绝对，pcaddu12i 大模型可能真需 PC-相对）——**需区分，待专项**。
+- **2026-08-06 闭环**：在 mt/as + mt/ld 中新增 `R_LARCH_PCADDU12I_LO12` (99)，汇编 modifier `%pcaddu_lo12`（PC-相对 LO12: (S+A-P)&0xFFF）；apply.c PCALA_HI20(71) 按 opcode 区分 pcalau12i(0x1A, 页差) vs pcaddu12i(0x1C, 全差）。
+- **待 mcc 侧**：mcc loongarch64 后端发射函数地址时，需将 addi.d 的 `%pc_lo12` 改为 `%pcaddu_lo12`（新 modifier），以便 mt/as 使用正确公式。

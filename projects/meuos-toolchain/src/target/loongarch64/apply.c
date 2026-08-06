@@ -83,13 +83,16 @@ la64_apply_reloc(unsigned reloc_type, unsigned char *place,
 		write64(place, S + (uint64_t)A);
 		return 0;
 
-	/* ==== PC-relative 32-bit: R_LARCH_32_PCREL (99) ====
-	 * S + A - P, 32-bit.  Used in .eh_frame for FDE PC-relative
-	 * references (DW_EH_PE_pcrel | DW_EH_PE_sdata4).
-	 * Standard GAS/LLVM output for loongarch64 .eh_frame. */
-	case 99: /* R_LARCH_32_PCREL */
+	/* ==== pcaddu12i LO12: R_LARCH_PCADDU12I_LO12 (99) ====
+	 * (S+A-P) & 0xFFF — PC-relative low 12 bits.
+	 * Used with `pcaddu12i rd, %pc_hi20(sym)` (opcode 0x1C) as the
+	 * paired `addi.d rd, rd, %pcaddu_lo12(sym)`.  Unlike PCALA_LO12
+	 * (type 72, which uses absolute low bits for pcalau12i), this one
+	 * computes the full PC-relative delta and takes the low 12 bits.
+	 * The assembler modifier is %pcaddu_lo12. */
+	case 99: /* R_LARCH_PCADDU12I_LO12 */
 		delta = (int64_t)(S + (uint64_t)A - P);
-		write32(place, (uint32_t)(uint64_t)(int64_t)delta);
+		set_bits(place, 21, 10, (uint32_t)(delta & 0xFFF) << 10);
 		return 0;
 
 	/* ==== PC-relative branch: R_LARCH_B16 (64) ====
@@ -135,8 +138,18 @@ la64_apply_reloc(unsigned reloc_type, unsigned char *place,
 		{
 			uint32_t rd = read32(place) & 0x1F;
 			uint32_t op = read32(place) & 0xFE000000;   /* keep opcode high byte */
-			int64_t hi20 = (int64_t)(((S + (uint64_t)A) >> 12) - (P >> 12));
-			if ((S + (uint64_t)A) & 0x800)
+			int64_t delta;
+			int64_t hi20;
+			/* pcalau12i (op=0x1A): page-relative formula.
+			 * pcaddu12i (op=0x1C): full PC-relative formula. */
+			if (op == 0x1C000000) {
+				delta = (int64_t)(S + (uint64_t)A - P);
+				hi20 = delta >> 12;
+			} else {
+				hi20 = (int64_t)(((S + (uint64_t)A) >> 12) - (P >> 12));
+				delta = (int64_t)(S + (uint64_t)A);
+			}
+			if (delta & 0x800)
 				hi20++;
 			write32(place, op | rd |
 			        ((uint32_t)(hi20 & 0xFFFFF) << 5));

@@ -2,7 +2,13 @@
  *
  * Values verified against /usr/include/elf.h (binutils 2.41).
  * NOTE: R_LARCH_B16/B21/B26 live at 64-66 (not 6-8) because LA64 uses
- * relocation type space differently from other architectures. */
+ * relocation type space differently from other architectures.
+ *
+ * RLA_PCADDU12I_LO12 (99) is a custom-defined type (not in the psABI) for
+ * the LO12 of `pcaddu12i + addi.d` pairs.  The standard psABI type 72
+ * uses `(S+A) & 0xFFF` (paired with page-based pcalau12i), but pcaddu12i
+ * needs `(S+A-P) & 0xFFF` (full PC-relative).  Type 99 repurposes the
+ * number slot originally occupied by R_LARCH_32_PCREL (unused here). */
 #include <stdint.h>
 
 #define R_LARCH_NONE        0
@@ -51,6 +57,9 @@
 #define R_LARCH_TLS_GD_PC_HI20 97
 #define R_LARCH_TLS_GD_HI20    98
 
+/* pcaddu12i LO12: (S+A-P) & 0xFFF  (custom: not in psABI, replaces unused 99) */
+#define R_LARCH_PCADDU12I_LO12 99
+
 /* Marker / relaxation */
 #define R_LARCH_RELAX     100
 #define R_LARCH_DELETE    101
@@ -82,6 +91,7 @@ la64_reloc_name(unsigned type)
 	case R_LARCH_TLS_LE64_HI12: return "R_LARCH_TLS_LE64_HI12";
 	case R_LARCH_TLS_GD_PC_HI20: return "R_LARCH_TLS_GD_PC_HI20";
 	case R_LARCH_TLS_GD_HI20: return "R_LARCH_TLS_GD_HI20";
+	case R_LARCH_PCADDU12I_LO12: return "R_LARCH_PCADDU12I_LO12";
 	case R_LARCH_RELAX:   return "R_LARCH_RELAX";
 	case R_LARCH_DELETE:  return "R_LARCH_DELETE";
 	case R_LARCH_ALIGN:   return "R_LARCH_ALIGN";
