@@ -456,7 +456,14 @@ eh_frame:
 				dwarf_string(as, eh, augbuf); /* augmentation (dynamic) */
 				dwarf_uleb128(as, eh, as->target->dwarf_code_align);
 				dwarf_sleb128(as, eh, as->target->dwarf_data_align);
-				dwarf_u8(as, eh, as->target->dwarf_ra_reg);
+				/* RA register: per-FDE override if set, otherwise target default */
+				{
+					int ra = as->target->dwarf_ra_reg;
+					if (template_fde >= 0 && as->cfi_fde_return_column &&
+					    as->cfi_fde_return_column[template_fde] != 0)
+						ra = as->cfi_fde_return_column[template_fde];
+					dwarf_u8(as, eh, (unsigned char)ra);
+				}
 				/* augmentation data length (written after we know the size) */
 				{   uint32_t aug_data_len_pos = (uint32_t)eh->size;
 					dwarf_uleb128(as, eh, 0); /* placeholder */
