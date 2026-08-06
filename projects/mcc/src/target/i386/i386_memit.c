@@ -29,6 +29,9 @@ static int g_alloca_cur;
 static const char *g_fname;
 static int g_slot_base;    /* -(pushbytes): push area above slots */
 
+/* forward declarations */
+static const char *i386_fp_cc_suffix(MCC cc);
+
 /* ---- width helpers ------------------------------------------------------ */
 
 static int
@@ -526,9 +529,32 @@ emit_setccr_fp(FILE *f, MInsM *in)
 		fputs("\tucomiss\t%xmm1, %xmm0\n", f);
 	else
 		fputs("\tucomisd\t%xmm1, %xmm0\n", f);
-	fprintf(f, "\tset%s\t%%al\n", i386_cc_suffix(cc));
+	/* ucomi* sets unsigned flags (CF=0 for above, CF=1 for below),
+	 * while integer CMP sets signed flags (SF/OF).  FP comparisons
+	 * must use unsigned suffixes: a/ae/b/be instead of g/ge/l/le. */
+	fprintf(f, "\tset%s\t%%al\n", i386_fp_cc_suffix(cc));
 	fputs("\tmovzbl\t%al, %eax\n", f);
 	scratch_to_dst(f, in->dst, "eax");
+}
+
+/* ---- FP condition suffix (ucomi* sets unsigned CF flags) ----------------- */
+
+static const char *
+i386_fp_cc_suffix(MCC cc)
+{
+	switch (cc) {
+	case MCC_EQ:  return "e";
+	case MCC_NE:  return "ne";
+	case MCC_GE:  return "ae";   /* above or equal (unsigned ge) */
+	case MCC_LT:  return "b";    /* below (unsigned lt) */
+	case MCC_GT:  return "a";    /* above (unsigned gt) */
+	case MCC_LE:  return "be";   /* below or equal (unsigned le) */
+	case MCC_CS:  return "b";
+	case MCC_CC:  return "ae";
+	case MCC_HI:  return "a";
+	case MCC_LS:  return "be";
+	default:      return "e";
+	}
 }
 
 /* ---- condition suffix ---------------------------------------------------- */
