@@ -1,2 +1,5 @@
-baseline at 2026-08-06T04:39:22Z commit=e8d8b0f7
-self-host baseline at 2026-08-06T04:42:18Z commit=e8d8b0f7: PASS (mcc compiles mcc + hello)
+baseline at 2026-08-06T04:47:25Z commit=ac075521
+verify-all: PASS=25 FAIL=0 SKIP=0
+self-host: PASS (mcc compiles mcc + hello)
+mt check: PASS (DWARF gate included)
+mcc check: exit=0

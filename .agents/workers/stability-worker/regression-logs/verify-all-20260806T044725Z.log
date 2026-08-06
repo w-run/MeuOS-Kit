@@ -1,0 +1,1670 @@
+== mcc/m++ 一键验收 (root=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc) ==
+sysroot: 未找到 libc-meuos.a (C 回归走 --specs=host 回退)
+
+==== make check ====
+exit=0
+PASS  make check
+
+==== make check-mir ====
+cc -O2 -g -std=gnu11 -Iinclude -I../meuos-sysroot/include -I../meuos-toolchain/include -Wno-all -DMCC_DEFAULT_TARGET=\"x86_64\" -Iinclude -o build/mir_test src/mir/build.c src/mir/combine.c src/mir/copy.c src/mir/gvn.c src/mir/ifconv.c src/mir/machine.c src/mir/mem2reg.c src/mir/mir_util.c src/mir/passes.c src/mir/print.c src/mir/regalloc.c src/mir/ssa.c src/target/x86_64/x86_64_mabi.c src/target/riscv64/riscv64_mabi.c src/target/loongarch64/loongarch64_mabi.c src/target/aarch64/aarch64_mabi.c src/target/arm/arm_mabi.c src/target/i386/i386_mabi.c test/mir/mir_test.c
+./build/mir_test
+mssa_check: ssa_phi: value defined by both ins and phi
+function types (optlevel 2, nblk 0)
+types:
+  !t0 = struct Point (size 16 align 8){ x @0 (i32), y @4 (f64) }
+values:
+  !t0 (agg) 'Point'
+function test_add (optlevel 2, nblk 1)
+values:
+  %v0 (i32) 'a'
+  %v1 (i32) 'b'
+  %v2 (i32) 'r'
+
+block entry (id 0) preds[0]{-}
+  %v0 = par (i32)
+  %v1 = par (i32)
+  %v2 = add (i32) %v0, %v1
+  term ret %v2
+function extra (optlevel 2, nblk 1)
+values:
+  $c0 (i32) 'c'
+  %v1 (i32) 'v'
+
+block entry (id 0) preds[0]{-}
+  %v1 = extra (i32) $c0 extra=0x12345678
+  term (none)
+mir_test: all checks passed
+cc -O2 -g -std=gnu11 -Iinclude -I../meuos-sysroot/include -I../meuos-toolchain/include -Wno-all -DMCC_DEFAULT_TARGET=\"x86_64\" -Iinclude -o build/mir_pass_test src/mir/build.c src/mir/combine.c src/mir/copy.c src/mir/gvn.c src/mir/ifconv.c src/mir/machine.c src/mir/mem2reg.c src/mir/mir_util.c src/mir/passes.c src/mir/print.c src/mir/regalloc.c src/mir/ssa.c src/target/x86_64/x86_64_mabi.c src/target/riscv64/riscv64_mabi.c src/target/loongarch64/loongarch64_mabi.c src/target/aarch64/aarch64_mabi.c src/target/arm/arm_mabi.c src/target/i386/i386_mabi.c test/mir/pass_test.c
+./build/mir_pass_test
+pass_test: all checks passed
+cc -O2 -g -std=gnu11 -Iinclude -I../meuos-sysroot/include -I../meuos-toolchain/include -Wno-all -DMCC_DEFAULT_TARGET=\"x86_64\" -Iinclude -o build/machine_test \
+	test/mir/machine_test.c src/mir/build.c src/mir/mir_util.c \
+	src/mir/machine.c src/mir/print.c src/target/x86_64/x86_64_mabi.c src/target/riscv64/riscv64_mabi.c src/target/loongarch64/loongarch64_mabi.c src/target/aarch64/aarch64_mabi.c src/target/arm/arm_mabi.c src/target/i386/i386_mabi.c
+./build/machine_test
+machine_test: 86 passed, 0 failed
+cc -O2 -g -std=gnu11 -Iinclude -I../meuos-sysroot/include -I../meuos-toolchain/include -Wno-all -DMCC_DEFAULT_TARGET=\"x86_64\" -Iinclude -o build/mabi_test \
+	test/mir/mabi_test.c src/mir/build.c src/mir/mir_util.c \
+	src/mir/machine.c src/mir/print.c src/target/x86_64/x86_64_mabi.c src/target/riscv64/riscv64_mabi.c src/target/loongarch64/loongarch64_mabi.c src/target/aarch64/aarch64_mabi.c src/target/arm/arm_mabi.c src/target/i386/i386_mabi.c
+./build/mabi_test
+run typclass
+run argsclass
+run scalar
+run aggret
+run aggarg
+mabi_test: 45 passed, 0 failed
+cc -O2 -g -std=gnu11 -Iinclude -I../meuos-sysroot/include -I../meuos-toolchain/include -Wno-all -DMCC_DEFAULT_TARGET=\"x86_64\" -Iinclude -o build/regalloc_test src/mir/build.c src/mir/combine.c src/mir/copy.c src/mir/gvn.c src/mir/ifconv.c src/mir/machine.c src/mir/mem2reg.c src/mir/mir_util.c src/mir/passes.c src/mir/print.c src/mir/regalloc.c src/mir/ssa.c src/target/x86_64/x86_64_mabi.c src/target/riscv64/riscv64_mabi.c src/target/loongarch64/loongarch64_mabi.c src/target/aarch64/aarch64_mabi.c src/target/arm/arm_mabi.c src/target/i386/i386_mabi.c test/mir/regalloc_test.c
+./build/regalloc_test
+regalloc_test: 45 passed, 0 failed
+PASS  make check-mir
+
+==== make check-cpp (lex/func/neg, 跳过 virtual) ====
+cc -O2 -g -std=gnu11 -Iinclude -I../meuos-sysroot/include -I../meuos-toolchain/include -Wno-all -DMCC_DEFAULT_TARGET=\"x86_64\" -Iinclude -o build/cpp_lex_test src/cpp/lex/cpp_scan.c test/cpp/lex_test.c
+./build/cpp_lex_test
+cpp_lex_test: all checks passed
+cc -O2 -g -std=gnu11 -Iinclude -I../meuos-sysroot/include -I../meuos-toolchain/include -Wno-all -DMCC_DEFAULT_TARGET=\"x86_64\" -MMD -MP -c -o build/src/driver/mpp_main.o src/driver/mpp_main.c
+cc -O2 -g -std=gnu11 -Iinclude -I../meuos-sysroot/include -I../meuos-toolchain/include -Wno-all -DMCC_DEFAULT_TARGET=\"x86_64\"  -o m++ \
+    build/src/c/irgen/branch.o build/src/c/irgen/convert.o build/src/c/irgen/emit.o build/src/c/irgen/emittype.o build/src/c/irgen/expr.o build/src/c/irgen/func.o build/src/c/irgen/funcmem.o build/src/c/irgen/func_to_mir.o build/src/c/irgen/inst.o build/src/c/irgen/switch.o build/src/c/irgen/value.o build/src/c/lex/pp.o build/src/c/lex/pp_expr.o build/src/c/lex/scan.o build/src/c/lex/token.o build/src/c/parse/attr.o build/src/c/parse/declarator.o build/src/c/parse/decl.o build/src/c/parse/expr_binary.o build/src/c/parse/expr.o build/src/c/parse/expr_generic.o build/src/c/parse/expr_literal.o build/src/c/parse/expr_postfix.o build/src/c/parse/expr_primary.o build/src/c/parse/expr_stmt_expr.o build/src/c/parse/expr_unary.o build/src/c/parse/specs.o build/src/c/parse/stmt.o build/src/c/parse/struct_decl.o build/src/c/parse/tree.o build/src/cpp/lex/cpp_scan.o build/src/cpp/parse/cpp_classtmpl.o build/src/cpp/parse/cpp_constexpr.o build/src/cpp/parse/cpp_ctor.o build/src/cpp/parse/cpp_expr_op.o build/src/cpp/parse/cpp_fold.o build/src/cpp/parse/cpp_freeop.o build/src/cpp/parse/cpp_gcctor.o build/src/cpp/parse/cpp_lambda.o build/src/cpp/parse/cpp_mangle.o build/src/cpp/parse/cpp_memberlook.o build/src/cpp/parse/cpp_method.o build/src/cpp/parse/cpp_newdel.o build/src/cpp/parse/cpp_parse.o build/src/cpp/parse/cpp_requires.o build/src/cpp/parse/cpp_tmpl_alias.o build/src/cpp/parse/cpp_tmpl_decl.o build/src/cpp/parse/cpp_tmpl_inst.o build/src/cpp/parse/cpp_tmpl_member.o build/src/cpp/parse/cpp_vtable.o build/src/c/sema/eval.o build/src/c/sema/init.o build/src/c/sema/map.o build/src/c/sema/scope.o build/src/c/sema/targ.o build/src/c/sema/type.o build/src/driver/arg_compat.o build/src/driver/cpu_detect.o build/src/driver/host_toolchain.o build/src/driver/main.o build/src/driver/msys.o build/src/driver/target_select.o build/src/driver/triple.o build/src/driver/usage.o \
+    build/src/driver/mpp_main.o build/libmcc.a  -L../meuos-sysroot/build -lmsys
+PASS
+PASS
+PASS
+constexpr_body: all passed
+B+
+D+
+done
+D-
+B-
+ctor_init_list_boundary: passed
+Base(v)
+Member(v)
+Base(v)
+Base(v)
+Member(v)
+ctor_init_list: passed
+deducing_this: all passed
+defect_h: passed
+defect_h_this_arrow: passed
+A::f=1 B::f=2 C::f=3
+defect_h_threehop: passed
+PASS
+main
+dtor 3
+dtor 2
+dtor 1
+if_consteval: all passed
+PASS
+move_semantics: passed
+new_delete_boundary: passed
+cpp-0f cast delete: passed
+new_delete: passed
+sizeof(Empty)=1
+sizeof(S)=4
+&s=0x7ffe28409f08 &s.x=0x7ffe28409f08 &s.e=0x7ffe28409f08
+offset e=0
+ns_limits: all 4 items passed
+~D~B
+chain: ~D~B
+qualified_member: passed
+qualified_threehop: passed
+PASS
+PASS
+spaceship_switch: passed
+struct_multinher: passed
+PASS  make check-cpp (lex/func/neg, 跳过 virtual)
+
+==== make check-cpp-func/neg (MCC_MIR_BACKEND=1) ====
+PASS
+PASS
+PASS
+constexpr_body: all passed
+B+
+D+
+done
+D-
+B-
+ctor_init_list_boundary: passed
+Base(v)
+Member(v)
+Base(v)
+Base(v)
+Member(v)
+ctor_init_list: passed
+deducing_this: all passed
+defect_h: passed
+defect_h_this_arrow: passed
+A::f=1 B::f=2 C::f=3
+defect_h_threehop: passed
+PASS
+main
+dtor 3
+dtor 2
+dtor 1
+if_consteval: all passed
+PASS
+move_semantics: passed
+new_delete_boundary: passed
+cpp-0f cast delete: passed
+new_delete: passed
+sizeof(Empty)=1
+sizeof(S)=4
+&s=0x7ffdd586d588 &s.x=0x7ffdd586d588 &s.e=0x7ffdd586d588
+offset e=0
+ns_limits: all 4 items passed
+~D~B
+chain: ~D~B
+qualified_member: passed
+qualified_threehop: passed
+PASS
+PASS
+spaceship_switch: passed
+struct_multinher: passed
+PASS  make check-cpp-func/neg (MCC_MIR_BACKEND=1)
+
+==== make check-cpp-func/neg (MCC_MIR_BACKEND=0) ====
+PASS
+PASS
+PASS
+constexpr_body: all passed
+B+
+D+
+done
+D-
+B-
+ctor_init_list_boundary: passed
+Base(v)
+Member(v)
+Base(v)
+Base(v)
+Member(v)
+ctor_init_list: passed
+deducing_this: all passed
+defect_h: passed
+defect_h_this_arrow: passed
+A::f=1 B::f=2 C::f=3
+defect_h_threehop: passed
+PASS
+main
+dtor 3
+dtor 2
+dtor 1
+if_consteval: all passed
+PASS
+move_semantics: passed
+new_delete_boundary: passed
+cpp-0f cast delete: passed
+new_delete: passed
+sizeof(Empty)=1
+sizeof(S)=4
+&s=0x7fff9eb56508 &s.x=0x7fff9eb56508 &s.e=0x7fff9eb56508
+offset e=0
+ns_limits: all 4 items passed
+~D~B
+chain: ~D~B
+qualified_member: passed
+qualified_threehop: passed
+PASS
+PASS
+spaceship_switch: passed
+struct_multinher: passed
+PASS  make check-cpp-func/neg (MCC_MIR_BACKEND=0)
+
+==== check-c99 (--specs=host 回退) ====
+PASS
+PASS
+PASS
+PASS
+PASS
+PASS
+PASS
+PASS
+PASS
+PASS hex float
+PASS
+PASS
+PASS
+PASS
+PASS
+PASS
+PASS
+PASS
+PASS
+PASS  check-c99 (--specs=host 回退)
+
+==== check-c11 (--specs=host 回退) ====
+PASS
+PASS
+PASS
+PASS
+PASS
+PASS
+PASS
+PASS
+PASS
+PASS
+PASS
+PASS
+PASS
+PASS
+PASS 6: void
+PASS
+PASS
+PASS
+PASS
+PASS
+PASS
+PASS  check-c11 (--specs=host 回退)
+
+==== check-c23 (--specs=host 回退) ====
+PASS
+nodiscard: yes
+deprecated: yes
+fallthrough: yes
+maybe_unused: yes
+noreturn: yes
+PASS
+a 1 2
+b 3
+no args
+one 1
+two 2 3
+fwd
+fwd 9
+test/c23/warning_directive.c:3:2: #warning directive: "this is a test warning"
+PASS  check-c23 (--specs=host 回退)
+
+==== check-abi (--specs=host 回退) ====
+PASS  check-abi (--specs=host 回退)
+
+==== make check-driver ====
+sh test/driver/sysroot.sh ./mcc
+Driver sysroot/specs checks passed
+sh test/driver/feature-regress.sh ./mcc
+shared/TLS/floating-comparison regression checks passed
+sh test/driver/cli-args.sh ./m++ ./mcc
+cli-args: all checks passed
+PASS  make check-driver
+
+==== make check-mt-integration ====
+mt integration: PASS
+PASS  make check-mt-integration
+
+==== make check-dwarf ====
+sh test/dwarf/line.sh ./mcc
+dwarf line: add -> OK
+dwarf line: sub -> OK
+dwarf line: main -> OK
+dwarf .debug_line regression gate passed
+PASS  make check-dwarf
+
+==== make check-i386 ====
+sh test/i386/regress.sh ./mcc
+i386 i64-shift compile gate passed
+i386 i64 constant-slot compile gate passed
+i386 integer ABI and ELF32 object regression checks passed
+i386 i64 stack-param compile gate passed
+i386 i64 compare truth-value compile gate passed
+i386 byte-narrowing return compile gate passed
+i386 signed-byte constant-fold compile gate passed
+i386 i64 NEG/NOT half-store compile gate passed
+i386 i64 memory-load high-half address compile gate passed
+i386 i64 memory-store high-half address compile gate passed
+i386 i64 multiply compile gate passed
+PASS  make check-i386
+
+==== make check-loongarch64 ====
+sh test/loongarch64/regress.sh ./mcc
+LoongArch64 FP-constant .rodata gate passed
+LoongArch64 regression checks passed
+PASS  make check-loongarch64
+
+==== make check-targets ====
+sh test/targets/regress.sh ./mcc
+aarch64/riscv64 integer ABI regression checks passed
+PASS  make check-targets
+
+==== make check-arm ====
+sh test/arm/regress.sh ./mcc
+arm constant-return compile gate passed
+arm i64-shift compile gate passed
+arm const-arg call compile gate passed
+arm i64 sext/zext compile gate passed
+arm runtime: sysroot not found at /workspace/MeuOS-Kit/.agents/worktrees/regression-v2/sysroot/arm, skipping
+PASS  make check-arm
+
+==== make check-i386-runtime ====
+sh test/i386/runtime.sh ./mcc
+i386 runtime: sysroot not found at /workspace/MeuOS-Kit/.agents/worktrees/regression-v2/sysroot/i386, skipping
+PASS  make check-i386-runtime
+
+==== make check-aarch64-runtime ====
+sh test/aarch64/runtime.sh ./mcc
+aarch64 runtime: sysroot not found at /workspace/MeuOS-Kit/.agents/worktrees/regression-v2/sysroot/aarch64, skipping
+PASS  make check-aarch64-runtime
+
+==== make check-sysroot-static ====
+make[1]: Entering directory '/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc'
+cc -c -o build/x86_64/arch/x86_64/atomic.o src/arch/x86_64/atomic.S
+ar rcs build/x86_64/libatomic-meuos.a build/x86_64/arch/x86_64/atomic.o
+cc -Iinclude -Isrc -c -o build/x86_64/string/memory.o src/string/memory.c
+cc -Iinclude -Isrc -c -o build/x86_64/string/duplicate.o src/string/duplicate.c
+cc -Iinclude -Isrc -c -o build/x86_64/string/error.o src/string/error.c
+cc -Iinclude -Isrc -c -o build/x86_64/string/token.o src/string/token.c
+cc -Iinclude -Isrc -c -o build/x86_64/string/compare.o src/string/compare.c
+cc -Iinclude -Isrc -c -o build/x86_64/string/dirname.o src/string/dirname.c
+cc -Iinclude -Isrc -c -o build/x86_64/stdlib/malloc.o src/stdlib/malloc.c
+In file included from src/stdlib/malloc.c:5:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/stdlib/convert.o src/stdlib/convert.c
+cc -Iinclude -Isrc -c -o build/x86_64/stdlib/env.o src/stdlib/env.c
+cc -Iinclude -Isrc -c -o build/x86_64/stdlib/exit.o src/stdlib/exit.c
+In file included from src/stdlib/exit.c:3:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/stdlib/process.o src/stdlib/process.c
+In file included from include/fcntl.h:6,
+                 from src/stdlib/process.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/stdlib/search.o src/stdlib/search.c
+cc -Iinclude -Isrc -c -o build/x86_64/stdlib/math.o src/stdlib/math.c
+cc -Iinclude -Isrc -c -o build/x86_64/stdlib/strfmon.o src/stdlib/strfmon.c
+cc -Iinclude -Isrc -c -o build/x86_64/stdlib/realpath.o src/stdlib/realpath.c
+In file included from src/stdlib/realpath.c:13:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/process/spawn.o src/process/spawn.c
+In file included from src/process/spawn.c:14:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/process/wordexp.o src/process/wordexp.c
+In file included from src/process/wordexp.c:15:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/process/getopt.o src/process/getopt.c
+In file included from src/process/getopt.c:15:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/process/rlimit.o src/process/rlimit.c
+cc -Iinclude -Isrc -c -o build/x86_64/process/prioritize.o src/process/prioritize.c
+cc -Iinclude -Isrc -c -o build/x86_64/process/group.o src/process/group.c
+In file included from src/process/group.c:12:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/stdio/file.o src/stdio/file.c
+In file included from include/fcntl.h:6,
+                 from src/stdio/file.c:9:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/stdio/char_io.o src/stdio/char_io.c
+In file included from include/fcntl.h:6,
+                 from src/stdio/char_io.c:9:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/stdio/block_io.o src/stdio/block_io.c
+cc -Iinclude -Isrc -c -o build/x86_64/stdio/position.o src/stdio/position.c
+In file included from src/stdio/position.c:12:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/stdio/fmt_out.o src/stdio/fmt_out.c
+In file included from src/stdio/fmt_out.c:15:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/stdio/fmt_in.o src/stdio/fmt_in.c
+In file included from src/stdio/fmt_in.c:14:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/stdio/fp_fmt.o src/stdio/fp_fmt.c
+cc -Iinclude -Isrc -c -o build/x86_64/stdio/memory_stream.o src/stdio/memory_stream.c
+cc -Iinclude -Isrc -c -o build/x86_64/stdio/file_misc.o src/stdio/file_misc.c
+In file included from include/fcntl.h:6,
+                 from src/stdio/file_misc.c:8:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/stdio/truncate.o src/stdio/truncate.c
+In file included from src/stdio/truncate.c:11:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/stdio/popen.o src/stdio/popen.c
+In file included from include/fcntl.h:6,
+                 from src/stdio/popen.c:8:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/stdio/getline.o src/stdio/getline.c
+cc -Iinclude -Isrc -c -o build/x86_64/stdio/sync.o src/stdio/sync.c
+In file included from src/stdio/sync.c:10:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/stdio/wprint.o src/stdio/wprint.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/read.o src/syscall/read.c
+In file included from src/syscall/read.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/write.o src/syscall/write.c
+In file included from src/syscall/write.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/open.o src/syscall/open.c
+In file included from include/fcntl.h:6,
+                 from src/syscall/open.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/close.o src/syscall/close.c
+In file included from src/syscall/close.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/fork.o src/syscall/fork.c
+In file included from src/syscall/fork.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/execve.o src/syscall/execve.c
+In file included from src/syscall/execve.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/exit.o src/syscall/exit.c
+In file included from src/syscall/exit.c:1:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/mmap.o src/syscall/mmap.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/munmap.o src/syscall/munmap.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/mprotect.o src/syscall/mprotect.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/brk.o src/syscall/brk.c
+In file included from src/syscall/brk.c:3:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/stat.o src/syscall/stat.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/fstat.o src/syscall/fstat.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/lstat.o src/syscall/lstat.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/lseek.o src/syscall/lseek.c
+In file included from src/syscall/lseek.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/getpid.o src/syscall/getpid.c
+In file included from src/syscall/getpid.c:1:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/gettid.o src/syscall/gettid.c
+In file included from src/syscall/gettid.c:1:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/getppid.o src/syscall/getppid.c
+In file included from src/syscall/getppid.c:1:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/getcwd.o src/syscall/getcwd.c
+In file included from src/syscall/getcwd.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/chdir.o src/syscall/chdir.c
+In file included from src/syscall/chdir.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/getrusage.o src/syscall/getrusage.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/dup.o src/syscall/dup.c
+In file included from src/syscall/dup.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/dup2.o src/syscall/dup2.c
+In file included from src/syscall/dup2.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/pipe.o src/syscall/pipe.c
+In file included from src/syscall/pipe.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/waitpid.o src/syscall/waitpid.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/wait.o src/syscall/wait.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/wait4.o src/syscall/wait4.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/nanosleep.o src/syscall/nanosleep.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/clock_gettime.o src/syscall/clock_gettime.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/getdents64.o src/syscall/getdents64.c
+In file included from src/syscall/getdents64.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/socketcall.o src/syscall/socketcall.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/chmod.o src/syscall/chmod.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/fchmod.o src/syscall/fchmod.c
+In file included from src/syscall/fchmod.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/access.o src/syscall/access.c
+In file included from src/syscall/access.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/sched_yield.o src/syscall/sched_yield.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/select.o src/syscall/select.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/fchown.o src/syscall/fchown.c
+In file included from src/syscall/fchown.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/chown.o src/syscall/chown.c
+In file included from src/syscall/chown.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/getuid.o src/syscall/getuid.c
+In file included from src/syscall/getuid.c:1:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/getgid.o src/syscall/getgid.c
+In file included from src/syscall/getgid.c:1:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/geteuid.o src/syscall/geteuid.c
+In file included from src/syscall/geteuid.c:1:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/getegid.o src/syscall/getegid.c
+In file included from src/syscall/getegid.c:1:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/uid.o src/syscall/uid.c
+In file included from src/syscall/uid.c:11:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/umask.o src/syscall/umask.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/isatty.o src/syscall/isatty.c
+In file included from src/syscall/isatty.c:1:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/fchdir.o src/syscall/fchdir.c
+In file included from src/syscall/fchdir.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/symlink.o src/syscall/symlink.c
+In file included from src/syscall/symlink.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/link.o src/syscall/link.c
+In file included from src/syscall/link.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/readlink.o src/syscall/readlink.c
+In file included from src/syscall/readlink.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/unlink.o src/syscall/unlink.c
+In file included from src/syscall/unlink.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/mkdir.o src/syscall/mkdir.c
+In file included from src/syscall/mkdir.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/rmdir.o src/syscall/rmdir.c
+In file included from src/syscall/rmdir.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/rename.o src/syscall/rename.c
+In file included from src/syscall/rename.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/mkstemp.o src/syscall/mkstemp.c
+In file included from include/fcntl.h:6,
+                 from src/syscall/mkstemp.c:1:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/mkstemps.o src/syscall/mkstemps.c
+In file included from include/fcntl.h:6,
+                 from src/syscall/mkstemps.c:1:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/time.o src/syscall/time.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/times.o src/syscall/times.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/utime.o src/syscall/utime.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/gettimeofday.o src/syscall/gettimeofday.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/sysconf.o src/syscall/sysconf.c
+In file included from src/syscall/sysconf.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/flock.o src/syscall/flock.c
+In file included from include/fcntl.h:6,
+                 from include/sys/file.h:4,
+                 from src/syscall/flock.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/fcntl.o src/syscall/fcntl.c
+In file included from include/fcntl.h:6,
+                 from src/syscall/fcntl.c:3:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/uname.o src/syscall/uname.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/time_stubs.o src/syscall/time_stubs.c
+In file included from src/syscall/time_stubs.c:3:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/ioctl.o src/syscall/ioctl.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/pread.o src/syscall/pread.c
+In file included from src/syscall/pread.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/pwrite.o src/syscall/pwrite.c
+In file included from src/syscall/pwrite.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/readv.o src/syscall/readv.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/writev.o src/syscall/writev.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/preadv.o src/syscall/preadv.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/pwritev.o src/syscall/pwritev.c
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/openat.o src/syscall/openat.c
+In file included from include/fcntl.h:6,
+                 from src/syscall/openat.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/pipe2.o src/syscall/pipe2.c
+In file included from src/syscall/pipe2.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/dup3.o src/syscall/dup3.c
+In file included from src/syscall/dup3.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/syscall/arch_prctl.o src/syscall/arch_prctl.c
+cc -Iinclude -Isrc -c -o build/x86_64/thread/state.o src/thread/state.c
+In file included from src/thread/state.c:11:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/thread/c11_threads.o src/thread/c11_threads.c
+In file included from src/thread/c11_threads.c:17:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/thread/tss.o src/thread/tss.c
+In file included from src/thread/tss.c:10:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/thread/mutex.o src/thread/mutex.c
+In file included from src/thread/mutex.c:11:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/thread/condvar.o src/thread/condvar.c
+In file included from src/thread/condvar.c:12:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/thread/call_once.o src/thread/call_once.c
+cc -Iinclude -Isrc -c -o build/x86_64/thread/pthread.o src/thread/pthread.c
+cc -Iinclude -Isrc -c -o build/x86_64/ctype/ctype.o src/ctype/ctype.c
+cc -Iinclude -Isrc -c -o build/x86_64/signal/signal.o src/signal/signal.c
+In file included from src/signal/signal.c:4:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/signal/pause.o src/signal/pause.c
+In file included from src/signal/pause.c:11:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/dirent/dirent.o src/dirent/dirent.c
+In file included from src/dirent/dirent.c:5:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/dirent/nftw.o src/dirent/nftw.c
+cc -Iinclude -Isrc -c -o build/x86_64/locale/locale.o src/locale/locale.c
+cc -Iinclude -Isrc -c -o build/x86_64/glob/fnmatch.o src/glob/fnmatch.c
+cc -Iinclude -Isrc -c -o build/x86_64/glob/glob.o src/glob/glob.c
+cc -Iinclude -Isrc -c -o build/x86_64/syslog/syslog.o src/syslog/syslog.c
+In file included from src/syslog/syslog.c:8:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/socket/socket.o src/socket/socket.c
+cc -Iinclude -Isrc -c -o build/x86_64/socket/inet.o src/socket/inet.c
+cc -Iinclude -Isrc -c -o build/x86_64/regex/regex.o src/regex/regex.c
+cc -Iinclude -Isrc -c -o build/x86_64/complex/complex.o src/complex/complex.c
+cc -Iinclude -Isrc -c -o build/x86_64/wchar/wchar.o src/wchar/wchar.c
+cc -Iinclude -Isrc -c -o build/x86_64/errno/errno.o src/errno/errno.c
+cc -Iinclude -Isrc -c -o build/x86_64/meuos_exc.o src/meuos_exc.c
+cc -Iinclude -Isrc -c -o build/x86_64/startup.o src/startup.c
+cc -Iinclude -Isrc -c -o build/x86_64/confstr.o src/confstr.c
+In file included from src/confstr.c:3:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/pwd.o src/pwd.c
+cc -Iinclude -Isrc -c -o build/x86_64/grp.o src/grp.c
+cc -Iinclude -Isrc -c -o build/x86_64/signal/strsignal.o src/signal/strsignal.c
+cc -Iinclude -Isrc -c -o build/x86_64/socket/byteorder.o src/socket/byteorder.c
+cc -Iinclude -Isrc -c -o build/x86_64/netdb/gethost.o src/netdb/gethost.c
+cc -Iinclude -Isrc -c -o build/x86_64/netdb/getserv.o src/netdb/getserv.c
+cc -Iinclude -Isrc -c -o build/x86_64/netdb/getproto.o src/netdb/getproto.c
+cc -Iinclude -Isrc -c -o build/x86_64/netdb/getnet.o src/netdb/getnet.c
+cc -Iinclude -Isrc -c -o build/x86_64/netdb/getaddrinfo.o src/netdb/getaddrinfo.c
+cc -Iinclude -Isrc -c -o build/x86_64/netdb/herror.o src/netdb/herror.c
+cc -Iinclude -Isrc -c -o build/x86_64/netdb/h_errno.o src/netdb/h_errno.c
+cc -c -o build/x86_64/internal/arch/x86_64/syscall.o src/internal/arch/x86_64/syscall.S
+cc -Iinclude -Isrc -c -o build/x86_64/arch/x86_64/tls.o src/arch/x86_64/tls.c
+cc -c -o build/x86_64/arch/x86_64/setjmp.o src/arch/x86_64/setjmp.S
+cc -c -o build/x86_64/arch/x86_64/sigreturn.o src/arch/x86_64/sigreturn.S
+cc -c -o build/x86_64/arch/x86_64/thread_clone.o src/arch/x86_64/thread_clone.S
+cc -Iinclude -Isrc -c -o build/x86_64/thread/__tls_get_addr.o src/thread/__tls_get_addr.c
+cc -Iinclude -Isrc -c -o build/x86_64/dlfcn.o src/dlfcn.c
+In file included from include/fcntl.h:6,
+                 from src/dlfcn.c:8:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/termios/termios.o src/termios/termios.c
+cc -Iinclude -Isrc -c -o build/x86_64/time/time.o src/time/time.c
+cc -Iinclude -Isrc -c -o build/x86_64/time/strptime.o src/time/strptime.c
+cc -Iinclude -Isrc -c -o build/x86_64/time/sleep.o src/time/sleep.c
+In file included from src/time/sleep.c:10:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/time/itimer.o src/time/itimer.c
+cc -Iinclude -Isrc -c -o build/x86_64/time/alarm.o src/time/alarm.c
+In file included from src/time/alarm.c:15:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -Iinclude -Isrc -c -o build/x86_64/time/wcsftime.o src/time/wcsftime.c
+ar rcs build/x86_64/libc-meuos.a build/x86_64/string/memory.o build/x86_64/string/duplicate.o build/x86_64/string/error.o build/x86_64/string/token.o build/x86_64/string/compare.o build/x86_64/string/dirname.o build/x86_64/stdlib/malloc.o build/x86_64/stdlib/convert.o build/x86_64/stdlib/env.o build/x86_64/stdlib/exit.o build/x86_64/stdlib/process.o build/x86_64/stdlib/search.o build/x86_64/stdlib/math.o build/x86_64/stdlib/strfmon.o build/x86_64/stdlib/realpath.o build/x86_64/process/spawn.o build/x86_64/process/wordexp.o build/x86_64/process/getopt.o build/x86_64/process/rlimit.o build/x86_64/process/prioritize.o build/x86_64/process/group.o build/x86_64/stdio/file.o build/x86_64/stdio/char_io.o build/x86_64/stdio/block_io.o build/x86_64/stdio/position.o build/x86_64/stdio/fmt_out.o build/x86_64/stdio/fmt_in.o build/x86_64/stdio/fp_fmt.o build/x86_64/stdio/memory_stream.o build/x86_64/stdio/file_misc.o build/x86_64/stdio/truncate.o build/x86_64/stdio/popen.o build/x86_64/stdio/getline.o build/x86_64/stdio/sync.o build/x86_64/stdio/wprint.o build/x86_64/syscall/read.o build/x86_64/syscall/write.o build/x86_64/syscall/open.o build/x86_64/syscall/close.o build/x86_64/syscall/fork.o build/x86_64/syscall/execve.o build/x86_64/syscall/exit.o build/x86_64/syscall/mmap.o build/x86_64/syscall/munmap.o build/x86_64/syscall/mprotect.o build/x86_64/syscall/brk.o build/x86_64/syscall/stat.o build/x86_64/syscall/fstat.o build/x86_64/syscall/lstat.o build/x86_64/syscall/lseek.o build/x86_64/syscall/getpid.o build/x86_64/syscall/gettid.o build/x86_64/syscall/getppid.o build/x86_64/syscall/getcwd.o build/x86_64/syscall/chdir.o build/x86_64/syscall/getrusage.o build/x86_64/syscall/dup.o build/x86_64/syscall/dup2.o build/x86_64/syscall/pipe.o build/x86_64/syscall/waitpid.o build/x86_64/syscall/wait.o build/x86_64/syscall/wait4.o build/x86_64/syscall/nanosleep.o build/x86_64/syscall/clock_gettime.o build/x86_64/syscall/getdents64.o build/x86_64/syscall/socketcall.o build/x86_64/syscall/chmod.o build/x86_64/syscall/fchmod.o build/x86_64/syscall/access.o build/x86_64/syscall/sched_yield.o build/x86_64/syscall/select.o build/x86_64/syscall/fchown.o build/x86_64/syscall/chown.o build/x86_64/syscall/getuid.o build/x86_64/syscall/getgid.o build/x86_64/syscall/geteuid.o build/x86_64/syscall/getegid.o build/x86_64/syscall/uid.o build/x86_64/syscall/umask.o build/x86_64/syscall/isatty.o build/x86_64/syscall/fchdir.o build/x86_64/syscall/symlink.o build/x86_64/syscall/link.o build/x86_64/syscall/readlink.o build/x86_64/syscall/unlink.o build/x86_64/syscall/mkdir.o build/x86_64/syscall/rmdir.o build/x86_64/syscall/rename.o build/x86_64/syscall/mkstemp.o build/x86_64/syscall/mkstemps.o build/x86_64/syscall/time.o build/x86_64/syscall/times.o build/x86_64/syscall/utime.o build/x86_64/syscall/gettimeofday.o build/x86_64/syscall/sysconf.o build/x86_64/syscall/flock.o build/x86_64/syscall/fcntl.o build/x86_64/syscall/uname.o build/x86_64/syscall/time_stubs.o build/x86_64/syscall/ioctl.o build/x86_64/syscall/pread.o build/x86_64/syscall/pwrite.o build/x86_64/syscall/readv.o build/x86_64/syscall/writev.o build/x86_64/syscall/preadv.o build/x86_64/syscall/pwritev.o build/x86_64/syscall/openat.o build/x86_64/syscall/pipe2.o build/x86_64/syscall/dup3.o build/x86_64/syscall/arch_prctl.o build/x86_64/thread/state.o build/x86_64/thread/c11_threads.o build/x86_64/thread/tss.o build/x86_64/thread/mutex.o build/x86_64/thread/condvar.o build/x86_64/thread/call_once.o build/x86_64/thread/pthread.o build/x86_64/ctype/ctype.o build/x86_64/signal/signal.o build/x86_64/signal/pause.o build/x86_64/dirent/dirent.o build/x86_64/dirent/nftw.o build/x86_64/locale/locale.o build/x86_64/glob/fnmatch.o build/x86_64/glob/glob.o build/x86_64/syslog/syslog.o build/x86_64/socket/socket.o build/x86_64/socket/inet.o build/x86_64/regex/regex.o build/x86_64/complex/complex.o build/x86_64/wchar/wchar.o build/x86_64/errno/errno.o build/x86_64/meuos_exc.o build/x86_64/startup.o build/x86_64/confstr.o build/x86_64/pwd.o build/x86_64/grp.o build/x86_64/signal/strsignal.o build/x86_64/socket/byteorder.o build/x86_64/netdb/gethost.o build/x86_64/netdb/getserv.o build/x86_64/netdb/getproto.o build/x86_64/netdb/getnet.o build/x86_64/netdb/getaddrinfo.o build/x86_64/netdb/herror.o build/x86_64/netdb/h_errno.o build/x86_64/internal/arch/x86_64/syscall.o build/x86_64/arch/x86_64/tls.o build/x86_64/arch/x86_64/setjmp.o build/x86_64/arch/x86_64/sigreturn.o build/x86_64/arch/x86_64/thread_clone.o build/x86_64/thread/__tls_get_addr.o build/x86_64/arch/x86_64/atomic.o build/x86_64/dlfcn.o build/x86_64/termios/termios.o build/x86_64/time/time.o build/x86_64/time/strptime.o build/x86_64/time/sleep.o build/x86_64/time/itimer.o build/x86_64/time/alarm.o build/x86_64/time/wcsftime.o
+cc -c -o build/x86_64/crt1.o crt/x86_64/crt1.S
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/string/memory.o src/string/memory.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/string/duplicate.o src/string/duplicate.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/string/error.o src/string/error.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/string/token.o src/string/token.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/string/compare.o src/string/compare.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/string/dirname.o src/string/dirname.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/stdlib/malloc.o src/stdlib/malloc.c
+In file included from src/stdlib/malloc.c:5:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/stdlib/convert.o src/stdlib/convert.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/stdlib/env.o src/stdlib/env.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/stdlib/exit.o src/stdlib/exit.c
+In file included from src/stdlib/exit.c:3:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/stdlib/process.o src/stdlib/process.c
+In file included from include/fcntl.h:6,
+                 from src/stdlib/process.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/stdlib/search.o src/stdlib/search.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/stdlib/math.o src/stdlib/math.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/stdlib/strfmon.o src/stdlib/strfmon.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/stdlib/realpath.o src/stdlib/realpath.c
+In file included from src/stdlib/realpath.c:13:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/process/spawn.o src/process/spawn.c
+In file included from src/process/spawn.c:14:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/process/wordexp.o src/process/wordexp.c
+In file included from src/process/wordexp.c:15:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/process/getopt.o src/process/getopt.c
+In file included from src/process/getopt.c:15:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/process/rlimit.o src/process/rlimit.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/process/prioritize.o src/process/prioritize.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/process/group.o src/process/group.c
+In file included from src/process/group.c:12:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/stdio/file.o src/stdio/file.c
+In file included from include/fcntl.h:6,
+                 from src/stdio/file.c:9:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/stdio/char_io.o src/stdio/char_io.c
+In file included from include/fcntl.h:6,
+                 from src/stdio/char_io.c:9:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/stdio/block_io.o src/stdio/block_io.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/stdio/position.o src/stdio/position.c
+In file included from src/stdio/position.c:12:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/stdio/fmt_out.o src/stdio/fmt_out.c
+In file included from src/stdio/fmt_out.c:15:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/stdio/fmt_in.o src/stdio/fmt_in.c
+In file included from src/stdio/fmt_in.c:14:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/stdio/fp_fmt.o src/stdio/fp_fmt.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/stdio/memory_stream.o src/stdio/memory_stream.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/stdio/file_misc.o src/stdio/file_misc.c
+In file included from include/fcntl.h:6,
+                 from src/stdio/file_misc.c:8:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/stdio/truncate.o src/stdio/truncate.c
+In file included from src/stdio/truncate.c:11:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/stdio/popen.o src/stdio/popen.c
+In file included from include/fcntl.h:6,
+                 from src/stdio/popen.c:8:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/stdio/getline.o src/stdio/getline.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/stdio/sync.o src/stdio/sync.c
+In file included from src/stdio/sync.c:10:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/stdio/wprint.o src/stdio/wprint.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/read.o src/syscall/read.c
+In file included from src/syscall/read.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/write.o src/syscall/write.c
+In file included from src/syscall/write.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/open.o src/syscall/open.c
+In file included from include/fcntl.h:6,
+                 from src/syscall/open.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/close.o src/syscall/close.c
+In file included from src/syscall/close.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/fork.o src/syscall/fork.c
+In file included from src/syscall/fork.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/execve.o src/syscall/execve.c
+In file included from src/syscall/execve.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/exit.o src/syscall/exit.c
+In file included from src/syscall/exit.c:1:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/mmap.o src/syscall/mmap.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/munmap.o src/syscall/munmap.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/mprotect.o src/syscall/mprotect.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/brk.o src/syscall/brk.c
+In file included from src/syscall/brk.c:3:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/stat.o src/syscall/stat.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/fstat.o src/syscall/fstat.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/lstat.o src/syscall/lstat.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/lseek.o src/syscall/lseek.c
+In file included from src/syscall/lseek.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/getpid.o src/syscall/getpid.c
+In file included from src/syscall/getpid.c:1:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/gettid.o src/syscall/gettid.c
+In file included from src/syscall/gettid.c:1:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/getppid.o src/syscall/getppid.c
+In file included from src/syscall/getppid.c:1:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/getcwd.o src/syscall/getcwd.c
+In file included from src/syscall/getcwd.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/chdir.o src/syscall/chdir.c
+In file included from src/syscall/chdir.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/getrusage.o src/syscall/getrusage.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/dup.o src/syscall/dup.c
+In file included from src/syscall/dup.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/dup2.o src/syscall/dup2.c
+In file included from src/syscall/dup2.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/pipe.o src/syscall/pipe.c
+In file included from src/syscall/pipe.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/waitpid.o src/syscall/waitpid.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/wait.o src/syscall/wait.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/wait4.o src/syscall/wait4.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/nanosleep.o src/syscall/nanosleep.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/clock_gettime.o src/syscall/clock_gettime.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/getdents64.o src/syscall/getdents64.c
+In file included from src/syscall/getdents64.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/chmod.o src/syscall/chmod.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/fchmod.o src/syscall/fchmod.c
+In file included from src/syscall/fchmod.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/access.o src/syscall/access.c
+In file included from src/syscall/access.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/sched_yield.o src/syscall/sched_yield.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/select.o src/syscall/select.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/fchown.o src/syscall/fchown.c
+In file included from src/syscall/fchown.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/chown.o src/syscall/chown.c
+In file included from src/syscall/chown.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/getuid.o src/syscall/getuid.c
+In file included from src/syscall/getuid.c:1:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/getgid.o src/syscall/getgid.c
+In file included from src/syscall/getgid.c:1:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/geteuid.o src/syscall/geteuid.c
+In file included from src/syscall/geteuid.c:1:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/getegid.o src/syscall/getegid.c
+In file included from src/syscall/getegid.c:1:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/uid.o src/syscall/uid.c
+In file included from src/syscall/uid.c:11:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/umask.o src/syscall/umask.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/isatty.o src/syscall/isatty.c
+In file included from src/syscall/isatty.c:1:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/fchdir.o src/syscall/fchdir.c
+In file included from src/syscall/fchdir.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/symlink.o src/syscall/symlink.c
+In file included from src/syscall/symlink.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/link.o src/syscall/link.c
+In file included from src/syscall/link.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/readlink.o src/syscall/readlink.c
+In file included from src/syscall/readlink.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/unlink.o src/syscall/unlink.c
+In file included from src/syscall/unlink.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/mkdir.o src/syscall/mkdir.c
+In file included from src/syscall/mkdir.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/rmdir.o src/syscall/rmdir.c
+In file included from src/syscall/rmdir.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/rename.o src/syscall/rename.c
+In file included from src/syscall/rename.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/mkstemp.o src/syscall/mkstemp.c
+In file included from include/fcntl.h:6,
+                 from src/syscall/mkstemp.c:1:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/mkstemps.o src/syscall/mkstemps.c
+In file included from include/fcntl.h:6,
+                 from src/syscall/mkstemps.c:1:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/time.o src/syscall/time.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/times.o src/syscall/times.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/utime.o src/syscall/utime.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/gettimeofday.o src/syscall/gettimeofday.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/sysconf.o src/syscall/sysconf.c
+In file included from src/syscall/sysconf.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/flock.o src/syscall/flock.c
+In file included from include/fcntl.h:6,
+                 from include/sys/file.h:4,
+                 from src/syscall/flock.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/fcntl.o src/syscall/fcntl.c
+In file included from include/fcntl.h:6,
+                 from src/syscall/fcntl.c:3:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/uname.o src/syscall/uname.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/time_stubs.o src/syscall/time_stubs.c
+In file included from src/syscall/time_stubs.c:3:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/ioctl.o src/syscall/ioctl.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/pread.o src/syscall/pread.c
+In file included from src/syscall/pread.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/pwrite.o src/syscall/pwrite.c
+In file included from src/syscall/pwrite.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/readv.o src/syscall/readv.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/writev.o src/syscall/writev.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/preadv.o src/syscall/preadv.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/pwritev.o src/syscall/pwritev.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/openat.o src/syscall/openat.c
+In file included from include/fcntl.h:6,
+                 from src/syscall/openat.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/pipe2.o src/syscall/pipe2.c
+In file included from src/syscall/pipe2.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/dup3.o src/syscall/dup3.c
+In file included from src/syscall/dup3.c:2:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syscall/arch_prctl.o src/syscall/arch_prctl.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/thread/state.o src/thread/state.c
+In file included from src/thread/state.c:11:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/thread/c11_threads.o src/thread/c11_threads.c
+In file included from src/thread/c11_threads.c:17:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/thread/tss.o src/thread/tss.c
+In file included from src/thread/tss.c:10:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/thread/mutex.o src/thread/mutex.c
+In file included from src/thread/mutex.c:11:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/thread/condvar.o src/thread/condvar.c
+In file included from src/thread/condvar.c:12:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/thread/call_once.o src/thread/call_once.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/thread/pthread.o src/thread/pthread.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/ctype/ctype.o src/ctype/ctype.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/signal/signal.o src/signal/signal.c
+In file included from src/signal/signal.c:4:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/signal/pause.o src/signal/pause.c
+In file included from src/signal/pause.c:11:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/dirent/dirent.o src/dirent/dirent.c
+In file included from src/dirent/dirent.c:5:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/dirent/nftw.o src/dirent/nftw.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/locale/locale.o src/locale/locale.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/glob/fnmatch.o src/glob/fnmatch.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/glob/glob.o src/glob/glob.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/syslog/syslog.o src/syslog/syslog.c
+In file included from src/syslog/syslog.c:8:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/socket/socket.o src/socket/socket.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/socket/inet.o src/socket/inet.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/regex/regex.o src/regex/regex.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/complex/complex.o src/complex/complex.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/wchar/wchar.o src/wchar/wchar.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/errno/errno.o src/errno/errno.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/meuos_exc.o src/meuos_exc.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/startup.o src/startup.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/confstr.o src/confstr.c
+In file included from src/confstr.c:3:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/pwd.o src/pwd.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/grp.o src/grp.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/signal/strsignal.o src/signal/strsignal.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/socket/byteorder.o src/socket/byteorder.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/netdb/gethost.o src/netdb/gethost.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/netdb/getserv.o src/netdb/getserv.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/netdb/getproto.o src/netdb/getproto.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/netdb/getnet.o src/netdb/getnet.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/netdb/getaddrinfo.o src/netdb/getaddrinfo.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/netdb/herror.o src/netdb/herror.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/netdb/h_errno.o src/netdb/h_errno.c
+cc -c -o build/x86_64/pic/internal/arch/x86_64/syscall.o src/internal/arch/x86_64/syscall.S
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/arch/x86_64/tls.o src/arch/x86_64/tls.c
+cc -c -o build/x86_64/pic/arch/x86_64/setjmp.o src/arch/x86_64/setjmp.S
+cc -c -o build/x86_64/pic/arch/x86_64/sigreturn.o src/arch/x86_64/sigreturn.S
+cc -c -o build/x86_64/pic/arch/x86_64/thread_clone.o src/arch/x86_64/thread_clone.S
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/thread/__tls_get_addr.o src/thread/__tls_get_addr.c
+cc -c -o build/x86_64/pic/arch/x86_64/atomic.o src/arch/x86_64/atomic.S
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/dlfcn.o src/dlfcn.c
+In file included from include/fcntl.h:6,
+                 from src/dlfcn.c:8:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/termios/termios.o src/termios/termios.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/time/time.o src/time/time.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/time/strptime.o src/time/strptime.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/time/sleep.o src/time/sleep.c
+In file included from src/time/sleep.c:10:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/time/itimer.o src/time/itimer.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/time/alarm.o src/time/alarm.c
+In file included from src/time/alarm.c:15:
+include/unistd.h:19:7: warning: conflicting types for built-in function ‘fork’; expected ‘int(void)’ [-Wbuiltin-declaration-mismatch]
+   19 | pid_t fork(void);
+      |       ^~~~
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/time/wcsftime.o src/time/wcsftime.c
+cc -fPIC -Iinclude -Isrc -c -o build/x86_64/pic/internal/environ.o src/internal/environ.c
+../meuos-toolchain/build/bin/ld -shared -soname libc-meuos.so.1 -o build/x86_64/libc-meuos.so build/x86_64/pic/string/memory.o build/x86_64/pic/string/duplicate.o build/x86_64/pic/string/error.o build/x86_64/pic/string/token.o build/x86_64/pic/string/compare.o build/x86_64/pic/string/dirname.o build/x86_64/pic/stdlib/malloc.o build/x86_64/pic/stdlib/convert.o build/x86_64/pic/stdlib/env.o build/x86_64/pic/stdlib/exit.o build/x86_64/pic/stdlib/process.o build/x86_64/pic/stdlib/search.o build/x86_64/pic/stdlib/math.o build/x86_64/pic/stdlib/strfmon.o build/x86_64/pic/stdlib/realpath.o build/x86_64/pic/process/spawn.o build/x86_64/pic/process/wordexp.o build/x86_64/pic/process/getopt.o build/x86_64/pic/process/rlimit.o build/x86_64/pic/process/prioritize.o build/x86_64/pic/process/group.o build/x86_64/pic/stdio/file.o build/x86_64/pic/stdio/char_io.o build/x86_64/pic/stdio/block_io.o build/x86_64/pic/stdio/position.o build/x86_64/pic/stdio/fmt_out.o build/x86_64/pic/stdio/fmt_in.o build/x86_64/pic/stdio/fp_fmt.o build/x86_64/pic/stdio/memory_stream.o build/x86_64/pic/stdio/file_misc.o build/x86_64/pic/stdio/truncate.o build/x86_64/pic/stdio/popen.o build/x86_64/pic/stdio/getline.o build/x86_64/pic/stdio/sync.o build/x86_64/pic/stdio/wprint.o build/x86_64/pic/syscall/read.o build/x86_64/pic/syscall/write.o build/x86_64/pic/syscall/open.o build/x86_64/pic/syscall/close.o build/x86_64/pic/syscall/fork.o build/x86_64/pic/syscall/execve.o build/x86_64/pic/syscall/exit.o build/x86_64/pic/syscall/mmap.o build/x86_64/pic/syscall/munmap.o build/x86_64/pic/syscall/mprotect.o build/x86_64/pic/syscall/brk.o build/x86_64/pic/syscall/stat.o build/x86_64/pic/syscall/fstat.o build/x86_64/pic/syscall/lstat.o build/x86_64/pic/syscall/lseek.o build/x86_64/pic/syscall/getpid.o build/x86_64/pic/syscall/gettid.o build/x86_64/pic/syscall/getppid.o build/x86_64/pic/syscall/getcwd.o build/x86_64/pic/syscall/chdir.o build/x86_64/pic/syscall/getrusage.o build/x86_64/pic/syscall/dup.o build/x86_64/pic/syscall/dup2.o build/x86_64/pic/syscall/pipe.o build/x86_64/pic/syscall/waitpid.o build/x86_64/pic/syscall/wait.o build/x86_64/pic/syscall/wait4.o build/x86_64/pic/syscall/nanosleep.o build/x86_64/pic/syscall/clock_gettime.o build/x86_64/pic/syscall/getdents64.o build/x86_64/pic/syscall/chmod.o build/x86_64/pic/syscall/fchmod.o build/x86_64/pic/syscall/access.o build/x86_64/pic/syscall/sched_yield.o build/x86_64/pic/syscall/select.o build/x86_64/pic/syscall/fchown.o build/x86_64/pic/syscall/chown.o build/x86_64/pic/syscall/getuid.o build/x86_64/pic/syscall/getgid.o build/x86_64/pic/syscall/geteuid.o build/x86_64/pic/syscall/getegid.o build/x86_64/pic/syscall/uid.o build/x86_64/pic/syscall/umask.o build/x86_64/pic/syscall/isatty.o build/x86_64/pic/syscall/fchdir.o build/x86_64/pic/syscall/symlink.o build/x86_64/pic/syscall/link.o build/x86_64/pic/syscall/readlink.o build/x86_64/pic/syscall/unlink.o build/x86_64/pic/syscall/mkdir.o build/x86_64/pic/syscall/rmdir.o build/x86_64/pic/syscall/rename.o build/x86_64/pic/syscall/mkstemp.o build/x86_64/pic/syscall/mkstemps.o build/x86_64/pic/syscall/time.o build/x86_64/pic/syscall/times.o build/x86_64/pic/syscall/utime.o build/x86_64/pic/syscall/gettimeofday.o build/x86_64/pic/syscall/sysconf.o build/x86_64/pic/syscall/flock.o build/x86_64/pic/syscall/fcntl.o build/x86_64/pic/syscall/uname.o build/x86_64/pic/syscall/time_stubs.o build/x86_64/pic/syscall/ioctl.o build/x86_64/pic/syscall/pread.o build/x86_64/pic/syscall/pwrite.o build/x86_64/pic/syscall/readv.o build/x86_64/pic/syscall/writev.o build/x86_64/pic/syscall/preadv.o build/x86_64/pic/syscall/pwritev.o build/x86_64/pic/syscall/openat.o build/x86_64/pic/syscall/pipe2.o build/x86_64/pic/syscall/dup3.o build/x86_64/pic/syscall/arch_prctl.o build/x86_64/pic/thread/state.o build/x86_64/pic/thread/c11_threads.o build/x86_64/pic/thread/tss.o build/x86_64/pic/thread/mutex.o build/x86_64/pic/thread/condvar.o build/x86_64/pic/thread/call_once.o build/x86_64/pic/thread/pthread.o build/x86_64/pic/ctype/ctype.o build/x86_64/pic/signal/signal.o build/x86_64/pic/signal/pause.o build/x86_64/pic/dirent/dirent.o build/x86_64/pic/dirent/nftw.o build/x86_64/pic/locale/locale.o build/x86_64/pic/glob/fnmatch.o build/x86_64/pic/glob/glob.o build/x86_64/pic/syslog/syslog.o build/x86_64/pic/socket/socket.o build/x86_64/pic/socket/inet.o build/x86_64/pic/regex/regex.o build/x86_64/pic/complex/complex.o build/x86_64/pic/wchar/wchar.o build/x86_64/pic/errno/errno.o build/x86_64/pic/meuos_exc.o build/x86_64/pic/startup.o build/x86_64/pic/confstr.o build/x86_64/pic/pwd.o build/x86_64/pic/grp.o build/x86_64/pic/signal/strsignal.o build/x86_64/pic/socket/byteorder.o build/x86_64/pic/netdb/gethost.o build/x86_64/pic/netdb/getserv.o build/x86_64/pic/netdb/getproto.o build/x86_64/pic/netdb/getnet.o build/x86_64/pic/netdb/getaddrinfo.o build/x86_64/pic/netdb/herror.o build/x86_64/pic/netdb/h_errno.o build/x86_64/pic/internal/arch/x86_64/syscall.o build/x86_64/pic/arch/x86_64/tls.o build/x86_64/pic/arch/x86_64/setjmp.o build/x86_64/pic/arch/x86_64/sigreturn.o build/x86_64/pic/arch/x86_64/thread_clone.o build/x86_64/pic/thread/__tls_get_addr.o build/x86_64/pic/arch/x86_64/atomic.o build/x86_64/pic/dlfcn.o build/x86_64/pic/termios/termios.o build/x86_64/pic/time/time.o build/x86_64/pic/time/strptime.o build/x86_64/pic/time/sleep.o build/x86_64/pic/time/itimer.o build/x86_64/pic/time/alarm.o build/x86_64/pic/time/wcsftime.o build/x86_64/pic/internal/environ.o
+cc -Iinclude -Isrc -c -o build/x86_64/libgcc_meuos/bit.o src/libgcc_meuos/bit.c
+cc -Iinclude -Isrc -c -o build/x86_64/libgcc_meuos/conv.o src/libgcc_meuos/conv.c
+cc -Iinclude -Isrc -c -o build/x86_64/libgcc_meuos/div.o src/libgcc_meuos/div.c
+cc -Iinclude -Isrc -c -o build/x86_64/libgcc_meuos/mul.o src/libgcc_meuos/mul.c
+ar rcs build/x86_64/libgcc-meuos.a build/x86_64/libgcc_meuos/bit.o build/x86_64/libgcc_meuos/conv.o build/x86_64/libgcc_meuos/div.o build/x86_64/libgcc_meuos/mul.o
+cp -r include/. /workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot/usr/include/
+cp build/x86_64/libc-meuos.a    /workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot/usr/lib/libc-meuos.a
+cp build/x86_64/libatomic-meuos.a  /workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot/usr/lib/libatomic-meuos.a
+cp build/x86_64/crt1.o    /workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot/usr/lib/crt1.o
+cp build/x86_64/libgcc-meuos.a  /workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot/usr/lib/libgcc-meuos.a
+make[2]: Entering directory '/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/src/compat'
+cc -Iinclude -I../../include -c -o build/argp.o src/argp.c
+cc -Iinclude -I../../include -c -o build/asprintf.o src/asprintf.c
+cc -Iinclude -I../../include -c -o build/error.o src/error.c
+cc -Iinclude -I../../include -c -o build/malloc-hooks.o src/malloc-hooks.c
+cc -Iinclude -I../../include -c -o build/obstack.o src/obstack.c
+ar rcs build/libc-meuos-compat.a build/argp.o build/asprintf.o build/error.o build/malloc-hooks.o build/obstack.o
+cp -r include/. /workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot/usr/include/
+cp build/libc-meuos-compat.a /workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot/usr/lib/libc-meuos-compat.a
+make[2]: Leaving directory '/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/src/compat'
+make[1]: Leaving directory '/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc'
+make[1]: Entering directory '/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot'
+make[1]: Nothing to be done for 'all'.
+make[1]: Leaving directory '/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot'
+make[1]: Entering directory '/tmp/mcc-sysroot-static.G9yeYS/mcc'
+rm -rf build mcc
+make[1]: Leaving directory '/tmp/mcc-sysroot-static.G9yeYS/mcc'
+make[1]: Entering directory '/tmp/mcc-sysroot-static.G9yeYS/mcc'
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/irgen/branch.o src/c/irgen/branch.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/irgen/convert.o src/c/irgen/convert.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/irgen/emit.o src/c/irgen/emit.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/irgen/emittype.o src/c/irgen/emittype.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/irgen/expr.o src/c/irgen/expr.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/irgen/func.o src/c/irgen/func.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/irgen/funcmem.o src/c/irgen/funcmem.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/irgen/func_to_mir.o src/c/irgen/func_to_mir.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/irgen/inst.o src/c/irgen/inst.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/irgen/switch.o src/c/irgen/switch.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/irgen/value.o src/c/irgen/value.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/lex/pp.o src/c/lex/pp.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/lex/pp_expr.o src/c/lex/pp_expr.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/lex/scan.o src/c/lex/scan.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/lex/token.o src/c/lex/token.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/parse/attr.o src/c/parse/attr.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/parse/declarator.o src/c/parse/declarator.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/parse/decl.o src/c/parse/decl.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/parse/expr_binary.o src/c/parse/expr_binary.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/parse/expr.o src/c/parse/expr.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/parse/expr_generic.o src/c/parse/expr_generic.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/parse/expr_literal.o src/c/parse/expr_literal.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/parse/expr_postfix.o src/c/parse/expr_postfix.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/parse/expr_primary.o src/c/parse/expr_primary.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/parse/expr_stmt_expr.o src/c/parse/expr_stmt_expr.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/parse/expr_unary.o src/c/parse/expr_unary.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/parse/specs.o src/c/parse/specs.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/parse/stmt.o src/c/parse/stmt.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/parse/struct_decl.o src/c/parse/struct_decl.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/parse/tree.o src/c/parse/tree.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/cpp/lex/cpp_scan.o src/cpp/lex/cpp_scan.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/cpp/parse/cpp_classtmpl.o src/cpp/parse/cpp_classtmpl.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/cpp/parse/cpp_constexpr.o src/cpp/parse/cpp_constexpr.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/cpp/parse/cpp_ctor.o src/cpp/parse/cpp_ctor.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/cpp/parse/cpp_expr_op.o src/cpp/parse/cpp_expr_op.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/cpp/parse/cpp_fold.o src/cpp/parse/cpp_fold.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/cpp/parse/cpp_freeop.o src/cpp/parse/cpp_freeop.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/cpp/parse/cpp_gcctor.o src/cpp/parse/cpp_gcctor.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/cpp/parse/cpp_lambda.o src/cpp/parse/cpp_lambda.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/cpp/parse/cpp_mangle.o src/cpp/parse/cpp_mangle.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/cpp/parse/cpp_memberlook.o src/cpp/parse/cpp_memberlook.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/cpp/parse/cpp_method.o src/cpp/parse/cpp_method.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/cpp/parse/cpp_newdel.o src/cpp/parse/cpp_newdel.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/cpp/parse/cpp_parse.o src/cpp/parse/cpp_parse.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/cpp/parse/cpp_requires.o src/cpp/parse/cpp_requires.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/cpp/parse/cpp_tmpl_alias.o src/cpp/parse/cpp_tmpl_alias.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/cpp/parse/cpp_tmpl_decl.o src/cpp/parse/cpp_tmpl_decl.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/cpp/parse/cpp_tmpl_inst.o src/cpp/parse/cpp_tmpl_inst.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/cpp/parse/cpp_tmpl_member.o src/cpp/parse/cpp_tmpl_member.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/cpp/parse/cpp_vtable.o src/cpp/parse/cpp_vtable.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/sema/eval.o src/c/sema/eval.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/sema/init.o src/c/sema/init.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/sema/map.o src/c/sema/map.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/sema/scope.o src/c/sema/scope.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/sema/targ.o src/c/sema/targ.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/c/sema/type.o src/c/sema/type.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/driver/arg_compat.o src/driver/arg_compat.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/driver/c_main.o src/driver/c_main.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/driver/cpu_detect.o src/driver/cpu_detect.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/driver/host_toolchain.o src/driver/host_toolchain.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/driver/main.o src/driver/main.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/driver/msys.o src/driver/msys.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/driver/target_select.o src/driver/target_select.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/driver/triple.o src/driver/triple.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/driver/usage.o src/driver/usage.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/abi/abi.o src/abi/abi.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/emit/dwarf.o src/emit/dwarf.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/emit/emit.o src/emit/emit.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/ir/ir_util.o src/ir/ir_util.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/ir/optab.o src/ir/optab.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/ir/passes.o src/ir/passes.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/ir/printfn.o src/ir/printfn.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/mir/build.o src/mir/build.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/mir/combine.o src/mir/combine.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/mir/copy.o src/mir/copy.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/mir/gvn.o src/mir/gvn.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/mir/ifconv.o src/mir/ifconv.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/mir/machine.o src/mir/machine.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/mir/mem2reg.o src/mir/mem2reg.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/mir/mir_util.o src/mir/mir_util.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/mir/passes.o src/mir/passes.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/mir/print.o src/mir/print.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/mir/regalloc.o src/mir/regalloc.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/mir/ssa.o src/mir/ssa.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/opt/alias.o src/opt/alias.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/opt/cfg.o src/opt/cfg.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/opt/copy.o src/opt/copy.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/opt/fold.o src/opt/fold.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/opt/gcm.o src/opt/gcm.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/opt/gvn.o src/opt/gvn.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/opt/ifopt.o src/opt/ifopt.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/opt/live.o src/opt/live.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/opt/load.o src/opt/load.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/opt/mem.o src/opt/mem.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/opt/postra.o src/opt/postra.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/opt/rega.o src/opt/rega.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/opt/simpl.o src/opt/simpl.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/opt/slotmerge.o src/opt/slotmerge.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/opt/spill.o src/opt/spill.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/opt/ssa.o src/opt/ssa.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/aarch64/aarch64_abi.o src/target/aarch64/aarch64_abi.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/aarch64/aarch64_emit.o src/target/aarch64/aarch64_emit.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/aarch64/aarch64_isel.o src/target/aarch64/aarch64_isel.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/aarch64/aarch64_mabi.o src/target/aarch64/aarch64_mabi.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/aarch64/aarch64_mbe.o src/target/aarch64/aarch64_mbe.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/aarch64/aarch64_memit.o src/target/aarch64/aarch64_memit.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/aarch64/aarch64_targ.o src/target/aarch64/aarch64_targ.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/arm/arm_abi.o src/target/arm/arm_abi.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/arm/arm_emit.o src/target/arm/arm_emit.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/arm/arm_isel.o src/target/arm/arm_isel.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/arm/arm_mabi.o src/target/arm/arm_mabi.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/arm/arm_mbe.o src/target/arm/arm_mbe.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/arm/arm_memit.o src/target/arm/arm_memit.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/arm/arm_targ.o src/target/arm/arm_targ.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/i386/i386_emit.o src/target/i386/i386_emit.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/i386/i386_isel.o src/target/i386/i386_isel.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/i386/i386_mabi.o src/target/i386/i386_mabi.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/i386/i386_mbe.o src/target/i386/i386_mbe.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/i386/i386_memit.o src/target/i386/i386_memit.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/i386/i386_sysv.o src/target/i386/i386_sysv.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/i386/i386_targ.o src/target/i386/i386_targ.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/loongarch64/loongarch64_abi.o src/target/loongarch64/loongarch64_abi.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/loongarch64/loongarch64_emit.o src/target/loongarch64/loongarch64_emit.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/loongarch64/loongarch64_isel.o src/target/loongarch64/loongarch64_isel.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/loongarch64/loongarch64_mabi.o src/target/loongarch64/loongarch64_mabi.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/loongarch64/loongarch64_mbe.o src/target/loongarch64/loongarch64_mbe.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/loongarch64/loongarch64_memit.o src/target/loongarch64/loongarch64_memit.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/loongarch64/loongarch64_targ.o src/target/loongarch64/loongarch64_targ.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/riscv64/riscv64_abi.o src/target/riscv64/riscv64_abi.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/riscv64/riscv64_emit.o src/target/riscv64/riscv64_emit.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/riscv64/riscv64_isel.o src/target/riscv64/riscv64_isel.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/riscv64/riscv64_mabi.o src/target/riscv64/riscv64_mabi.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/riscv64/riscv64_mbe.o src/target/riscv64/riscv64_mbe.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/riscv64/riscv64_memit.o src/target/riscv64/riscv64_memit.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/riscv64/riscv64_targ.o src/target/riscv64/riscv64_targ.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/x86_64/x86_64_emit.o src/target/x86_64/x86_64_emit.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/x86_64/x86_64_isel.o src/target/x86_64/x86_64_isel.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/x86_64/x86_64_mabi.o src/target/x86_64/x86_64_mabi.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/x86_64/x86_64_mbe.o src/target/x86_64/x86_64_mbe.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/x86_64/x86_64_memit.o src/target/x86_64/x86_64_memit.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/x86_64/x86_64_sysv.o src/target/x86_64/x86_64_sysv.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/target/x86_64/x86_64_targ.o src/target/x86_64/x86_64_targ.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/util/i18n.o src/util/i18n.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/util/utf.o src/util/utf.c
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static -MMD -MP -c -o build/src/util/util.o src/util/util.c
+ar rcs build/libmcc.a build/src/abi/abi.o build/src/emit/dwarf.o build/src/emit/emit.o build/src/ir/ir_util.o build/src/ir/optab.o build/src/ir/passes.o build/src/ir/printfn.o build/src/mir/build.o build/src/mir/combine.o build/src/mir/copy.o build/src/mir/gvn.o build/src/mir/ifconv.o build/src/mir/machine.o build/src/mir/mem2reg.o build/src/mir/mir_util.o build/src/mir/passes.o build/src/mir/print.o build/src/mir/regalloc.o build/src/mir/ssa.o build/src/opt/alias.o build/src/opt/cfg.o build/src/opt/copy.o build/src/opt/fold.o build/src/opt/gcm.o build/src/opt/gvn.o build/src/opt/ifopt.o build/src/opt/live.o build/src/opt/load.o build/src/opt/mem.o build/src/opt/postra.o build/src/opt/rega.o build/src/opt/simpl.o build/src/opt/slotmerge.o build/src/opt/spill.o build/src/opt/ssa.o build/src/target/aarch64/aarch64_abi.o build/src/target/aarch64/aarch64_emit.o build/src/target/aarch64/aarch64_isel.o build/src/target/aarch64/aarch64_mabi.o build/src/target/aarch64/aarch64_mbe.o build/src/target/aarch64/aarch64_memit.o build/src/target/aarch64/aarch64_targ.o build/src/target/arm/arm_abi.o build/src/target/arm/arm_emit.o build/src/target/arm/arm_isel.o build/src/target/arm/arm_mabi.o build/src/target/arm/arm_mbe.o build/src/target/arm/arm_memit.o build/src/target/arm/arm_targ.o build/src/target/i386/i386_emit.o build/src/target/i386/i386_isel.o build/src/target/i386/i386_mabi.o build/src/target/i386/i386_mbe.o build/src/target/i386/i386_memit.o build/src/target/i386/i386_sysv.o build/src/target/i386/i386_targ.o build/src/target/loongarch64/loongarch64_abi.o build/src/target/loongarch64/loongarch64_emit.o build/src/target/loongarch64/loongarch64_isel.o build/src/target/loongarch64/loongarch64_mabi.o build/src/target/loongarch64/loongarch64_mbe.o build/src/target/loongarch64/loongarch64_memit.o build/src/target/loongarch64/loongarch64_targ.o build/src/target/riscv64/riscv64_abi.o build/src/target/riscv64/riscv64_emit.o build/src/target/riscv64/riscv64_isel.o build/src/target/riscv64/riscv64_mabi.o build/src/target/riscv64/riscv64_mbe.o build/src/target/riscv64/riscv64_memit.o build/src/target/riscv64/riscv64_targ.o build/src/target/x86_64/x86_64_emit.o build/src/target/x86_64/x86_64_isel.o build/src/target/x86_64/x86_64_mabi.o build/src/target/x86_64/x86_64_mbe.o build/src/target/x86_64/x86_64_memit.o build/src/target/x86_64/x86_64_sysv.o build/src/target/x86_64/x86_64_targ.o build/src/util/i18n.o build/src/util/utf.o build/src/util/util.o
+/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc -O2 -g -std=gnu11 -Iinclude -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-libc/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/include -I/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-toolchain/include -Wno-all --sysroot=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/sysroot --nostdlib --static  -o mcc build/src/c/irgen/branch.o build/src/c/irgen/convert.o build/src/c/irgen/emit.o build/src/c/irgen/emittype.o build/src/c/irgen/expr.o build/src/c/irgen/func.o build/src/c/irgen/funcmem.o build/src/c/irgen/func_to_mir.o build/src/c/irgen/inst.o build/src/c/irgen/switch.o build/src/c/irgen/value.o build/src/c/lex/pp.o build/src/c/lex/pp_expr.o build/src/c/lex/scan.o build/src/c/lex/token.o build/src/c/parse/attr.o build/src/c/parse/declarator.o build/src/c/parse/decl.o build/src/c/parse/expr_binary.o build/src/c/parse/expr.o build/src/c/parse/expr_generic.o build/src/c/parse/expr_literal.o build/src/c/parse/expr_postfix.o build/src/c/parse/expr_primary.o build/src/c/parse/expr_stmt_expr.o build/src/c/parse/expr_unary.o build/src/c/parse/specs.o build/src/c/parse/stmt.o build/src/c/parse/struct_decl.o build/src/c/parse/tree.o build/src/cpp/lex/cpp_scan.o build/src/cpp/parse/cpp_classtmpl.o build/src/cpp/parse/cpp_constexpr.o build/src/cpp/parse/cpp_ctor.o build/src/cpp/parse/cpp_expr_op.o build/src/cpp/parse/cpp_fold.o build/src/cpp/parse/cpp_freeop.o build/src/cpp/parse/cpp_gcctor.o build/src/cpp/parse/cpp_lambda.o build/src/cpp/parse/cpp_mangle.o build/src/cpp/parse/cpp_memberlook.o build/src/cpp/parse/cpp_method.o build/src/cpp/parse/cpp_newdel.o build/src/cpp/parse/cpp_parse.o build/src/cpp/parse/cpp_requires.o build/src/cpp/parse/cpp_tmpl_alias.o build/src/cpp/parse/cpp_tmpl_decl.o build/src/cpp/parse/cpp_tmpl_inst.o build/src/cpp/parse/cpp_tmpl_member.o build/src/cpp/parse/cpp_vtable.o build/src/c/sema/eval.o build/src/c/sema/init.o build/src/c/sema/map.o build/src/c/sema/scope.o build/src/c/sema/targ.o build/src/c/sema/type.o build/src/driver/arg_compat.o build/src/driver/c_main.o build/src/driver/cpu_detect.o build/src/driver/host_toolchain.o build/src/driver/main.o build/src/driver/msys.o build/src/driver/target_select.o build/src/driver/triple.o build/src/driver/usage.o build/libmcc.a -L/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/meuos-sysroot/build -lmsys -ldl -L../meuos-sysroot/build -lmsys
+make[1]: Leaving directory '/tmp/mcc-sysroot-static.G9yeYS/mcc'
+mcc (MeuOS C Compiler) 0.1.0
+PASS  make check-sysroot-static
+
+==== make check-c-mir ====
+ok  c99/bitfield_emit (MIR 路径)
+ok  c99/bitfield_ops (MIR 路径)
+ok  c99/bool (MIR 路径)
+ok  c99/complex (MIR 路径)
+ok  c99/compound_lit (MIR 路径)
+ok  c99/conv_fold (MIR 路径)
+ok  c99/decimal_overflow (MIR 路径)
+ok  c99/desig_init (MIR 路径)
+ok  c99/elifdef (MIR 路径)
+ok  c99/extern (MIR 路径)
+ok  c99/flex_array_member (MIR 路径)
+ok  c99/float (MIR 路径)
+ok  c99/float_expr (MIR 路径)
+ok  c99/for_decl (MIR 路径)
+ok  c99/hex_float (MIR 路径)
+ok  c99/inline (MIR 路径)
+ok  c99/large_array_init (MIR 路径)
+ok  c99/long_long (MIR 路径)
+ok  c99/narrow_cast (MIR 路径)
+ok  c99/offsetof (MIR 路径)
+ok  c99/pragma_operator (MIR 路径)
+ok  c99/restrict (MIR 路径)
+ok  c99/signed_div_pow2 (MIR 路径)
+ok  c99/static_global_array (MIR 路径)
+ok  c99/stdint (MIR 路径)
+ok  c99/varargs (MIR 路径)
+ok  c99/varargs_overflow (MIR 路径)
+ok  c99/vla (MIR 路径)
+ok  c99/wchar_escape (MIR 路径)
+ok  c99/wide_string_dedup (MIR 路径)
+ok  c11/aggregate_arg (MIR 路径)
+ok  c11/aggregate_ret_small (MIR 路径)
+ok  c11/aggregate_return (MIR 路径)
+ok  c11/alignas (MIR 路径)
+ok  c11/alignof (MIR 路径)
+ok  c11/anon_struct (MIR 路径)
+ok  c11/atomic_basic (MIR 路径)
+ok  c11/atomic_concurrent (MIR 路径)
+ok  c11/atomic_typename (MIR 路径)
+ok  c11/complex (MIR 路径)
+ok  c11/compound_lit (MIR 路径)
+ok  c11/desig_init (MIR 路径)
+ok  c11/generic (MIR 路径)
+ok  c11/macro_paste (MIR 路径)
+ok  c11/noreturn (MIR 路径)
+ok  c11/real_imag (MIR 路径)
+ok  c11/static_assert (MIR 路径)
+ok  c11/stmt_expr (MIR 路径)
+ok  c11/thread_local (MIR 路径)
+ok  c11/tls_basic (MIR 路径)
+ok  c11/type_same (MIR 路径)
+ok  c11/u8_string (MIR 路径)
+ok  c11/varargs (MIR 路径)
+ok  c11/vla_boundary (MIR 路径)
+ok  c11/vla (MIR 路径)
+ok  c11/wide_literal (MIR 路径)
+ok  c23/asm_pragma (MIR 路径)
+ok  c23/attributes (MIR 路径)
+ok  c23/attributes_full (MIR 路径)
+ok  c23/attr_nodiscard_dep (MIR 路径)
+ok  c23/auto (MIR 路径)
+ok  c23/bin_literal (MIR 路径)
+ok  c23/bitint_full (MIR 路径)
+ok  c23/bool_true_false (MIR 路径)
+ok  c23/constexpr (MIR 路径)
+ok  c23/constexpr_func (MIR 路径)
+ok  c23/constexpr_named (MIR 路径)
+ok  c23/constexpr_recursion (MIR 路径)
+ok  c23/constexpr_static_assert (MIR 路径)
+ok  c23/decimal (MIR 路径)
+ok  c23/digit_sep_edge (MIR 路径)
+ok  c23/elifdef_boundary (MIR 路径)
+ok  c23/elifdef (MIR 路径)
+ok  c23/embed (MIR 路径)
+ok  c23/embed_limit2 (MIR 路径)
+ok  c23/embed_params (MIR 路径)
+ok  c23/embed_prefix (MIR 路径)
+ok  c23/empty_init (MIR 路径)
+ok  c23/enum_fixed (MIR 路径)
+ok  c23/float_suffix (MIR 路径)
+ok  c23/has_c_attribute (MIR 路径)
+ok  c23/has_include (MIR 路径)
+ok  c23/labeled_break (MIR 路径)
+ok  c23/line_basic (MIR 路径)
+ok  c23/macro_redefine (MIR 路径)
+ok  c23/nullptr_cmp (MIR 路径)
+ok  c23/nullptr_full (MIR 路径)
+ok  c23/nullptr_t (MIR 路径)
+ok  c23/nullptr_t_truth (MIR 路径)
+ok  c23/real_imag2 (MIR 路径)
+ok  c23/typeof (MIR 路径)
+ok  c23/va_opt_boundary (MIR 路径)
+ok  c23/va_opt (MIR 路径)
+ok  c23/va_opt_nested2 (MIR 路径)
+ok  c23/warning_directive (MIR 路径)
+mir_matrix: fail=0
+PASS  make check-c-mir
+
+==== make check-cpp-focus ====
+sh test/cpp/focus_regress.sh --mpp /workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/m++
+== m++ focus regress (new/delete, braced, dtor, virtual) ==
+new_delete: passed
+new_delete_boundary: passed
+  OK  new/delete
+  OK  braced-init
+B+
+D+
+done
+D-
+B-
+main
+dtor 3
+dtor 2
+dtor 1
+  OK  dtor
+~D~B
+chain: ~D~B
+  OK  virtual
+
+focus regress: ALL OK
+PASS  make check-cpp-focus
+
+==== make check-cpp-gcc ====
+sh test/cpp/gcc_compare.sh --mpp /workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/m++
+  OK  virtual_delete (m++=0 g++=0)
+  OK  out_of_line_dtor (m++=0 g++=0)
+  OK  ctor_dtor_order (m++=0 g++=0)
+gcc_compare: OK
+PASS  make check-cpp-gcc
+
+==== make check-x86_64-runtime ====
+sh test/x86_64/runtime.sh /workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc /workspace/MeuOS-Kit/sysroot
+  x86_64 runtime: runtime_arr
+x86_64 runtime: all pass
+PASS  make check-x86_64-runtime
+
+==== make check-riscv64-runtime ====
+sh test/riscv64/runtime.sh /workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc
+  riscv64 runtime: runtime_arr
+riscv64 runtime: all pass
+PASS  make check-riscv64-runtime
+
+==== make check-loongarch64-runtime ====
+sh test/loongarch64/runtime.sh /workspace/MeuOS-Kit/.agents/worktrees/regression-v2/projects/mcc/mcc
+  loongarch64 runtime: runtime_arr
+loongarch64 runtime: all pass
+PASS  make check-loongarch64-runtime
+
+======================================
+汇总: PASS=25 FAIL=0 SKIP=0
+  PASS  make check
+  PASS  make check-mir
+  PASS  make check-cpp (lex/func/neg, 跳过 virtual)
+  PASS  make check-cpp-func/neg (MCC_MIR_BACKEND=1)
+  PASS  make check-cpp-func/neg (MCC_MIR_BACKEND=0)
+  PASS  check-c99 (--specs=host 回退)
+  PASS  check-c11 (--specs=host 回退)
+  PASS  check-c23 (--specs=host 回退)
+  PASS  check-abi (--specs=host 回退)
+  PASS  make check-driver
+  PASS  make check-mt-integration
+  PASS  make check-dwarf
+  PASS  make check-i386
+  PASS  make check-loongarch64
+  PASS  make check-targets
+  PASS  make check-arm
+  PASS  make check-i386-runtime
+  PASS  make check-aarch64-runtime
+  PASS  make check-sysroot-static
+  PASS  make check-c-mir
+  PASS  make check-cpp-focus
+  PASS  make check-cpp-gcc
+  PASS  make check-x86_64-runtime
+  PASS  make check-riscv64-runtime
+  PASS  make check-loongarch64-runtime
+
+全部通过
