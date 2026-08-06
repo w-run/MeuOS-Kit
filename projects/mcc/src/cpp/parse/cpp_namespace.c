@@ -1,10 +1,8 @@
 /* cpp_namespace.c - m++ (C++) namespace declarations.
  *
- * Extracted from cpp_parse.c (split into per-domain submodules).
- * C++ namespace declarations (`namespace NAME { ... }`), inline
- * namespace (C++11), nested namespace lookup, the qualified class name
- * state for out-of-line method definitions, and the visible-namespace
- * registry used by `using namespace NAME;` directives.
+ * Stage C.1.3: C++ namespace declarations (`namespace NAME { ... }`),
+ * inline namespace (C++11), nested namespace lookup, and the qualified
+ * class name state for out-of-line method definitions.
  */
 #include <stdio.h>
 #include <stdlib.h>
