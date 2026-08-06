@@ -346,6 +346,11 @@ bool cpp_tmpl_alias_lookup(const char *name);
 struct type *cpp_tmpl_alias_instantiate(struct scope *s, const char *name);
 void cpp_template_alias(struct cpp_template *tmpl);
 
+/* Constexpr interpreter recursion depth (defined in cpp_constexpr.c); used
+ * by both the constexpr evaluator (cpp_constexpr.c) and the if-consteval
+ * / if-constexpr dispatcher (cpp_constexpr_ctrl.c). */
+extern int g_cpp_cexpr_depth;
+
 /* Per-class exception thunk record (defined in cpp_newdel_thunk.c);
  * both the throw site (cpp_newdel_exc.c) and the thunk emitter
  * (cpp_newdel_thunk.c) walk the linked list, so the struct is exposed
