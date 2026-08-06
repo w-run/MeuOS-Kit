@@ -77,6 +77,15 @@ struct mt_target {
 	uint16_t ehdr_size;     /* sizeof(ElfNN_Ehdr): 64 for ELF64, 52…   */
 	uint16_t shdr_size;     /* sizeof(ElfNN_Shdr): 64 for ELF64, 40…   */
 	uint64_t features;      /* ISA feature bitmask (0 = baseline only) */
+	/* DWARF .eh_frame parameters (CIE/FDE generation).
+	 * These fields are populated per-architecture so that the assembler
+	 * emits correct CIE and FDE entries without hardcoded x86_64 values. */
+	uint8_t  dwarf_ra_reg;       /* CIE return-address register number */
+	uint8_t  dwarf_code_align;   /* CIE code alignment factor (ULEB128, >=1) */
+	int8_t   dwarf_data_align;   /* CIE data alignment factor (SLEB128, negative) */
+	uint8_t  dwarf_fde_encoding; /* FDE address encoding (DW_EH_PE_*) */
+	unsigned dwarf_fde_reloc;    /* relocation type for FDE initial_loc */
+
 	/* Instruction encoder: parse mnemonic + operands, fill mt_insn.
 	 * Returns 0 on success, -1 on unsupported instruction.  When an
 	 * operand references a symbol, the encoder sets mt_insn.fixup_*

@@ -199,7 +199,7 @@ SYSCALL_OBJS   := $(addprefix $(BUILD)/syscall/, \
                   getpid.o gettid.o getppid.o getcwd.o chdir.o \
                   getrusage.o \
                   dup.o dup2.o pipe.o waitpid.o wait.o wait4.o nanosleep.o \
-                  clock_gettime.o getdents64.o socketcall.o chmod.o fchmod.o \
+                  clock_gettime.o clock_getres.o getdents64.o socketcall.o chmod.o fchmod.o \
                   access.o sched_yield.o select.o \
                   fchown.o chown.o getuid.o getgid.o geteuid.o getegid.o \
                   uid.o \
@@ -235,6 +235,8 @@ SUPPORT_OBJS   := $(BUILD)/ctype/ctype.o $(BUILD)/signal/signal.o $(BUILD)/signa
 SUPPORT_OBJS   += $(BUILD)/errno/errno.o
 # Exception runtime (setjmp/longjmp base): _meuos_exc_throw + try helpers.
 SUPPORT_OBJS   += $(BUILD)/meuos_exc.o
+# C++ ABI (Itanium): __cxa_* + __gxx_personality_v0
+SUPPORT_OBJS   += $(BUILD)/cxxabi/cxxabi.o
 # startup.c — entry contract (__progname, getauxval); called from crt1.S.
 SUPPORT_OBJS   += $(BUILD)/startup.o
 # P2 gap batch: config strings, signal strings, passwd/group, byte order.
@@ -246,6 +248,16 @@ SUPPORT_OBJS   += $(BUILD)/netdb/gethost.o $(BUILD)/netdb/getserv.o \
                   $(BUILD)/netdb/herror.o $(BUILD)/netdb/h_errno.o
 SYSCALL_GATE_OBJ := $(BUILD)/internal/arch/$(ARCH)/syscall.o
 CRT1_OBJ := $(BUILD)/crt1.o
+# crti.o / crtn.o — gcc/clang sysroot CRT prologue/epilogue.  The .init/.fini
+# section sequence is opened in crti.S (push rbp / mov rbp,rsp) and closed
+# in crtn.S (pop rbp / ret); ld assembles them into a single function-like
+# blob that GCC's `-init _init -fini _fini` machinery invokes at program
+# startup.  mcc's own crt1.S does NOT link them (its __libc_start_main walks
+# .init_array/.fini_array directly); the weak _init/_fini declarations in
+# startup.c guarantee an archive pull of just crti.S into a foreign-crt link
+# does not bring along undefined references.
+CRTI_OBJ := $(BUILD)/crti.o
+CRTN_OBJ := $(BUILD)/crtn.o
 # dlfcn.c is a hardcoded ELF64/x86_64 loader (EM_X86_64=62, ELF64 structs);
 # it has no meaning on 32-bit targets, where mcc's i386 backend also lacks
 # the Kl extub support it needs, so exclude it there.
@@ -284,7 +296,10 @@ PIC_OBJS += $(PIC_BUILD)/internal/environ.o
 # Build rules
 # ============================================================
 
-all: $(ATOMIC_LIB) $(LIBC_LIB) $(CRT1_OBJ) $(BUILD_SO) $(LIBGCC_LIB) compat
+all: $(ATOMIC_LIB) $(LIBC_LIB) $(CRT1_OBJ) $(CRTI_OBJ) $(CRTN_OBJ) $(BUILD_SO) $(LIBGCC_LIB) compat
+
+# Standalone libgcc-meuos.a target.
+libgcc: $(LIBGCC_LIB)
 
 # Atomic shim: assembly only.
 $(ATOMIC_OBJ): src/arch/$(ARCH)/atomic.S
@@ -301,6 +316,15 @@ $(SYSCALL_GATE_OBJ): src/internal/arch/$(ARCH)/syscall.S
 
 # crt1.o: per-arch entry stub.
 $(CRT1_OBJ): crt/$(ARCH)/crt1.S
+	@mkdir -p $(dir $@)
+	$(AS) -c -o $@ $<
+
+# crti.o / crtn.o: per-arch gcc/clang sysroot CRT prologue/epilogue.
+$(CRTI_OBJ): crt/$(ARCH)/crti.S
+	@mkdir -p $(dir $@)
+	$(AS) -c -o $@ $<
+
+$(CRTN_OBJ): crt/$(ARCH)/crtn.S
 	@mkdir -p $(dir $@)
 	$(AS) -c -o $@ $<
 
@@ -385,7 +409,7 @@ compat:
 # That happened on 2026-08-06: 64 glibc-devel headers were clobbered and
 # meuos-toolchain stopped building from clean.  Always pass DESTDIR; set
 # ALLOW_HOST_INSTALL=1 only if you really do mean to install into the host.
-install: $(ATOMIC_LIB) $(LIBC_LIB) $(CRT1_OBJ) $(BUILD_SO) $(LIBGCC_LIB)
+install: $(ATOMIC_LIB) $(LIBC_LIB) $(CRT1_OBJ) $(CRTI_OBJ) $(CRTN_OBJ) $(BUILD_SO) $(LIBGCC_LIB)
 	@if [ -z "$(DESTDIR)" ] && [ "$(ALLOW_HOST_INSTALL)" != "1" ]; then \
 		case "$(PREFIX)" in \
 		/usr|/usr/|/usr/local|/usr/local/|/) \
@@ -405,6 +429,8 @@ install: $(ATOMIC_LIB) $(LIBC_LIB) $(CRT1_OBJ) $(BUILD_SO) $(LIBGCC_LIB)
 	fi
 	cp $(ATOMIC_LIB)  $(DESTDIR)$(PREFIX)/lib/libatomic-meuos.a
 	cp $(CRT1_OBJ)    $(DESTDIR)$(PREFIX)/lib/crt1.o
+	cp $(CRTI_OBJ)    $(DESTDIR)$(PREFIX)/lib/crti.o
+	cp $(CRTN_OBJ)    $(DESTDIR)$(PREFIX)/lib/crtn.o
 	cp $(LIBGCC_LIB)  $(DESTDIR)$(PREFIX)/lib/libgcc-meuos.a
 	@$(MAKE) -C src/compat install DESTDIR=$(DESTDIR) PREFIX=$(PREFIX) ARCH=$(ARCH)
 
@@ -429,6 +455,9 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/time test/time.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/libgen test/libgen.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/ctype test/ctype.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/p0-ctype-tables test/p0_ctype_tables.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/p0-c23 test/p0_c23.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/p0-progname test/p0_progname.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/assert test/assert.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/c11-headers test/c11_headers.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/syscall-fs test/syscall_fs.c
@@ -536,6 +565,9 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	/tmp/meuos-libc-check/time
 	/tmp/meuos-libc-check/libgen
 	/tmp/meuos-libc-check/ctype
+	/tmp/meuos-libc-check/p0-ctype-tables
+	/tmp/meuos-libc-check/p0-c23
+	/tmp/meuos-libc-check/p0-progname
 	/tmp/meuos-libc-check/assert
 	/tmp/meuos-libc-check/c11-headers
 	/tmp/meuos-libc-check/syscall-fs
@@ -600,7 +632,8 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	@# ... but the libgcc archive must provide them.
 	@for s in __divdi3 __udivdi3 __moddi3 __umoddi3 __muldi3 __clzdi2 __ctzdi2 \
 	          __popcountdi2 __clzsi2 __ctzsi2 __bswapsi2 __bswapdi2 __floatsidf \
-	          __floatdidf __floatdisf __fixdfdi; do \
+	          __floatunsidf __floatdidf __floatdisf __fixsfdi __fixdfdi \
+	          __udivti3 __multi3; do \
 		if nm $(LIBGCC_LIB) 2>/dev/null | grep -Eq " [Tt] $$s$$"; then :; else \
 			echo "FAIL: libgcc-meuos.a missing helper $$s" >&2; exit 1; fi; \
 	done
@@ -682,6 +715,33 @@ check-integration:
 	if [ "$$out" != "$$exp" ]; then \
 		echo "FAIL: mini-bc output mismatch" >&2; \
 		echo "--- got ---"; echo "$$out"; echo "--- want ---"; echo "$$exp"; exit 1; fi; \
+	# P0 crti/crtn CRT prologue/epilogue contract gate (gcc + sysroot). \
+	# p0_crti.c uses __attribute__((constructor)) / ((destructor)); \
+	# gcc lowers those to .init_array / .fini_array entries, which only \
+	# resolve against a sysroot shipping crti.o + crt1.o + crtn.o.  This \
+	# is the gate that proves meuos-libc can serve as a vendor-libc \
+	# replacement for gcc/clang (the original P0.5 acceptance criterion). \
+	if [ ! -f "$$SYSROOT_I/lib/crti.o" ] || [ ! -f "$$SYSROOT_I/lib/crtn.o" ]; then \
+		echo "check-integration: SKIP p0-crtn (crti/crtn not installed; run make install)"; \
+	else \
+		if ! gcc -O2 -nostdlib -nostdinc -isystem "$$SYSROOT_I/include" \
+		      -L "$$SYSROOT_I/lib" \
+		      -o /tmp/meuos-libc-check-integration/p0-crti test/p0_crti.c \
+		      "$$SYSROOT_I/lib/crti.o" \
+		      "$$SYSROOT_I/lib/crt1.o" \
+		      "$$SYSROOT_I/lib/crtn.o" \
+		      "$$SYSROOT_I/lib/libc-meuos.a" \
+		      "$$SYSROOT_I/lib/libgcc-meuos.a" \
+		      > /tmp/meuos-libc-check-integration/p0-crti.log 2>&1; then \
+			cat /tmp/meuos-libc-check-integration/p0-crti.log >&2; \
+			echo "FAIL: gcc could not link p0_crti.c against crti/crtn" >&2; exit 1; \
+		fi; \
+		crtrace=$$(/tmp/meuos-libc-check-integration/p0-crti); \
+		if [ "$$crtrace" != "CMD" ]; then \
+			echo "FAIL: p0-crti trace $$crtrace (want CMD)" >&2; exit 1; \
+		fi; \
+		echo "PASS: crti/crtn (gcc + meuos-libc, p0_crti -> $$crtrace)"; \
+	fi; \
 	rm -rf /tmp/meuos-libc-check-integration; \
 	echo "PASS: integration (gcc + meuos-libc, mini-bc)"
 

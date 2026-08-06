@@ -103,6 +103,17 @@ struct as_file {
 	size_t cfi_prog_size, cfi_prog_capacity;
 	uint64_t cfi_func_start;
 
+	/* Personality routine (per-CIE, set by .cfi_personality) */
+	int cfi_personality_set;
+	uint8_t cfi_personality_encoding;
+	char *cfi_personality_symbol;
+
+	/* LSDA info (per-CIE encoding, per-FDE pointer) */
+	int cfi_lsda_set;
+	uint8_t cfi_lsda_encoding;
+	char *cfi_lsda_current;   /* LSDA symbol for current FDE */
+	char **cfi_lsda_pointers;  /* per-FDE LSDA symbol names */
+
 	/* Completed FDE list */
 	uint64_t *cfi_func_offsets;
 	uint64_t *cfi_func_end;
@@ -110,6 +121,26 @@ struct as_file {
 	unsigned char **cfi_fde_progs;
 	size_t *cfi_fde_sizes;
 	size_t cfi_fde_count, cfi_fde_capacity;
+
+	/* Multi-CIE support: per-FDE personality tracking */
+	int *cfi_fde_personality_set;
+	uint8_t *cfi_fde_personality_encoding;
+	char **cfi_fde_personality_symbol;
+	int *cfi_fde_signal_frame;
+
+	/* .cfi_signal_frame: mark current CIE as signal frame */
+	int cfi_signal_frame;
+
+	/* .cfi_sections: select output section (0=.eh_frame, 1=.debug_frame) */
+	int cfi_section_type;
+
+	/* .cfi_return_column: override return address register per FDE (0 = use target default) */
+	int cfi_return_column;
+	int *cfi_fde_return_column;
+
+	/* .cfi_cfa_offset: current CFA offset tracking for .cfi_adjust_cfa_offset */
+	int64_t cfi_cfa_offset;
+	int cfi_cfa_offset_valid;
 };
 
 /* Functions shared between assemble.c and arch backends */

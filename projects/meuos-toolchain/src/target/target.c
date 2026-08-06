@@ -24,17 +24,39 @@ extern int arm_encode_insn(const struct mt_target *target,
                              const char *mnemonic, const char *operands,
                              struct mt_insn *out);
 
+/* DWARF .eh_frame FDE relocation types (PC-relative 32-bit for each arch).
+ * Defined here (rather than polluting the header) to keep the target
+ * table readable.  These are the relocation types used for a 4-byte
+ * PC-relative fixup in the .eh_frame FDE initial_loc field.
+ * 0x1b = DW_EH_PE_pcrel | DW_EH_PE_sdata4 */
+#define DW_FDE_RELOC_X86_64     2   /* R_X86_64_PC32 */
+#define DW_FDE_RELOC_I386       2   /* R_386_PC32 */
+#define DW_FDE_RELOC_AARCH64    261 /* R_AARCH64_PREL32 */
+#define DW_FDE_RELOC_RISCV64    53  /* R_RISCV_32_PCREL */
+#define DW_FDE_RELOC_LOONGARCH  1   /* R_LARCH_32 (no standard 32-bit PCREL) */
+#define DW_FDE_RELOC_ARM        3   /* R_ARM_REL32 */
+
 static const struct mt_target targets[] = {
-	{"x86_64",      MT_EM_X86_64,     2, 1, 0,                64, 64, 0, x86_64_encode_insn},
-	{"aarch64",     MT_EM_AARCH64,    2, 1, 0,                64, 64, 0, aarch64_encode_insn},
-	{"riscv64",     MT_EM_RISCV,      2, 1, 0,                64, 64, 0, riscv64_encode_insn},
-	{"loongarch64", MT_EM_LOONGARCH,  2, 1, 0,                 64, 64, 0, la64_encode_insn},
-	{"arm",       MT_EM_ARM,        1, 1, 0x05000000,        52, 40, 0, arm_encode_insn},
-	{"i386",        MT_EM_386,        1, 1, 0,                52, 40, 0, i386_encode_insn},
+	/* name, emachine, class, endian, e_flags, ehdr, shdr, features,
+	 * dwarf_ra, dwarf_calign, dwarf_dalign, dwarf_fde_enc, dwarf_fde_reloc,
+	 * encode_insn */
+	{"x86_64",      MT_EM_X86_64,     2, 1, 0,                64, 64, 0,
+	 16, 1, -8, 0x1b, DW_FDE_RELOC_X86_64,    x86_64_encode_insn},
+	{"aarch64",     MT_EM_AARCH64,    2, 1, 0,                64, 64, 0,
+	 30, 4, -8, 0x1b, DW_FDE_RELOC_AARCH64,   aarch64_encode_insn},
+	{"riscv64",     MT_EM_RISCV,      2, 1, 0,                64, 64, 0,
+	 1,  2, -8, 0x1b, DW_FDE_RELOC_RISCV64,   riscv64_encode_insn},
+	{"loongarch64", MT_EM_LOONGARCH,  2, 1, 0,                 64, 64, 0,
+	 3,  4, -8, 0x1b, DW_FDE_RELOC_LOONGARCH, la64_encode_insn},
+	{"arm",       MT_EM_ARM,        1, 1, 0x05000000,        52, 40, 0,
+	 14, 4, -4, 0x1b, DW_FDE_RELOC_ARM,       arm_encode_insn},
+	{"i386",        MT_EM_386,        1, 1, 0,                52, 40, 0,
+	 8,  1, -4, 0x1b, DW_FDE_RELOC_I386,      i386_encode_insn},
 };
 
 const struct mt_target mt_target_x86_64 = {
-	"x86_64", MT_EM_X86_64, 2, 1, 0, 64, 64, MT_FEATURE_SSE2, x86_64_encode_insn,
+	"x86_64", MT_EM_X86_64, 2, 1, 0, 64, 64, MT_FEATURE_SSE2,
+	16, 1, -8, 0x1b, DW_FDE_RELOC_X86_64, x86_64_encode_insn,
 };
 
 const struct mt_target *

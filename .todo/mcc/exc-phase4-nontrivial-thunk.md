@@ -1,6 +1,6 @@
 # 异常阶段4 增强：非 trivial 类 copy/dtor thunk 合成
 
-> 状态：🔄 后置待排（2026-08-05 异常4 第2段 catch 侧完成 + 4b 定档后登记）
+> 状态：✅ 已闭环（2026-08-07 mpp-exc-p4-worker，commit 1b1d9976 + 55797045）
 > 关联：`exc-phase4-object-payload.md`、`_meuos_exc_throw_obj(int,size,align,copy,dtor,offset,obj)`
 
 ## 缺口

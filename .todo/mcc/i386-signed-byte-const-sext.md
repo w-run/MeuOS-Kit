@@ -1,6 +1,6 @@
 # i386 有符号 byte 本地常量折叠丢失符号（#22b，字节/短类型窄化族）
 
-**状态**：🔶 open（登记 2026-08-06；#22a 修复验证时新发现，独立于 leal-0/MOVZX 缺陷）
+**状态**：✅ 已闭环（2026-08-07 mcc-backend-campaign 验证，commit 3477e6a1）<br>MOVSX 源宽度从 in->dtype 改为 s0->type，signed char -56 正确符号扩展
 
 ## 症状
 i386 上 `int f(void){ signed char x = -56; return x; }`（本地 signed char 常量）返回 **200** 而非 **-56**。

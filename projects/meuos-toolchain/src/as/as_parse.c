@@ -632,6 +632,21 @@ parse_directive(struct as_file *as, char *directive, char *rest)
 		as->dwarf_loc_count++;
 		return 0;
 	}
+	/* DWARF .cfi_sections — select output section */
+	if (strcmp(directive, ".cfi_sections") == 0) {
+		/* .cfi_sections .debug_frame  or  .cfi_sections .eh_frame */
+		char *p = trim(rest);
+		if (*p == '\0')
+			return as_error(as, ".cfi_sections requires an argument");
+		if (strcmp(p, ".debug_frame") == 0) {
+			as->cfi_section_type = 1;
+		} else if (strcmp(p, ".eh_frame") == 0) {
+			as->cfi_section_type = 0;
+		} else {
+			return as_error(as, "unsupported .cfi_sections section: %s", p);
+		}
+		return 0;
+	}
 	/* DWARF CFI directives */
 	if (strcmp(directive, ".cfi_startproc") == 0) {
 		if (as->cfi_active)
@@ -639,6 +654,7 @@ parse_directive(struct as_file *as, char *directive, char *rest)
 		as->cfi_active = 1;
 		as->cfi_prog_size = 0;
 		as->cfi_func_start = as->sections[as->current].size;
+		as->cfi_cfa_offset_valid = 0;
 		return 0;
 	}
 	if (strcmp(directive, ".cfi_endproc") == 0) {
@@ -652,8 +668,17 @@ parse_directive(struct as_file *as, char *directive, char *rest)
 			char **nl = (char **)mt_realloc(as->cfi_func_labels, cap * sizeof(*nl));
 			unsigned char **np = (unsigned char **)mt_realloc(as->cfi_fde_progs, cap * sizeof(*np));
 			size_t *ns = (size_t *)mt_realloc(as->cfi_fde_sizes, cap * sizeof(*ns));
-			if (!no || !ne || !nl || !np || !ns) {
-				free(no); free(ne); free(nl); free(np); free(ns);
+			char **ll = (char **)mt_realloc(as->cfi_lsda_pointers, cap * sizeof(*ll));
+			int *npfde = (int *)mt_realloc(as->cfi_fde_personality_set, cap * sizeof(*npfde));
+			uint8_t *npfe = (uint8_t *)mt_realloc(as->cfi_fde_personality_encoding, cap * sizeof(*npfe));
+			char **npfs = (char **)mt_realloc(as->cfi_fde_personality_symbol, cap * sizeof(*npfs));
+			int *npsf = (int *)mt_realloc(as->cfi_fde_signal_frame, cap * sizeof(*npsf));
+			int *nrc = (int *)mt_realloc(as->cfi_fde_return_column, cap * sizeof(*nrc));
+			if (!no || !ne || !nl || !np || !ns || !ll ||
+			    !npfde || !npfe || !npfs || !npsf || !nrc) {
+				free(no); free(ne); free(nl); free(np); free(ns); free(ll);
+				free(npfde); free(npfe); free(npfs); free(npsf);
+				free(nrc);
 				return as_error(as, "out of memory");
 			}
 			as->cfi_func_offsets = no;
@@ -661,6 +686,12 @@ parse_directive(struct as_file *as, char *directive, char *rest)
 			as->cfi_func_labels = nl;
 			as->cfi_fde_progs = np;
 			as->cfi_fde_sizes = ns;
+			as->cfi_lsda_pointers = ll;
+			as->cfi_fde_personality_set = npfde;
+			as->cfi_fde_personality_encoding = npfe;
+			as->cfi_fde_personality_symbol = npfs;
+			as->cfi_fde_signal_frame = npsf;
+			as->cfi_fde_return_column = nrc;
 			as->cfi_fde_capacity = cap;
 		}
 		as->cfi_func_offsets[as->cfi_fde_count] = as->cfi_func_start;
@@ -680,6 +711,31 @@ parse_directive(struct as_file *as, char *directive, char *rest)
 			if (!as->cfi_func_labels[as->cfi_fde_count])
 				return as_error(as, "out of memory");
 		}
+		/* Save LSDA pointer for this FDE */
+		if (as->cfi_lsda_current) {
+			as->cfi_lsda_pointers[as->cfi_fde_count] = as->cfi_lsda_current;
+			as->cfi_lsda_current = NULL;
+		} else {
+			as->cfi_lsda_pointers[as->cfi_fde_count] = mt_strdup("");
+			if (!as->cfi_lsda_pointers[as->cfi_fde_count])
+				return as_error(as, "out of memory");
+		}
+		/* Save personality and signal_frame for this FDE */
+		as->cfi_fde_personality_set[as->cfi_fde_count] = as->cfi_personality_set;
+		as->cfi_fde_personality_encoding[as->cfi_fde_count] = as->cfi_personality_encoding;
+		as->cfi_fde_personality_symbol[as->cfi_fde_count] =
+			as->cfi_personality_symbol ? mt_strdup(as->cfi_personality_symbol) : NULL;
+		as->cfi_fde_signal_frame[as->cfi_fde_count] = as->cfi_signal_frame;
+		as->cfi_fde_return_column[as->cfi_fde_count] = as->cfi_return_column;
+		/* Reset CIE-level state for next FDE */
+		as->cfi_signal_frame = 0;
+		as->cfi_return_column = 0;
+		as->cfi_personality_set = 0;
+		if (as->cfi_personality_symbol) {
+			free(as->cfi_personality_symbol);
+			as->cfi_personality_symbol = NULL;
+		}
+		as->cfi_lsda_set = 0;
 		as->cfi_fde_progs[as->cfi_fde_count] = (unsigned char *)mt_malloc(as->cfi_prog_size ? as->cfi_prog_size : 1);
 		if (!as->cfi_fde_progs[as->cfi_fde_count])
 			return as_error(as, "out of memory");
@@ -721,6 +777,8 @@ parse_directive(struct as_file *as, char *directive, char *rest)
 			item = next_csv(&cursor);
 			if (parse_integer(item, &off) != 0) return as_error(as, "bad cfi off");
 			CFI_B(0x0c); CFI_ULEB(reg); CFI_ULEB(off);
+			as->cfi_cfa_offset = off;
+			as->cfi_cfa_offset_valid = 1;
 		} else if (strcmp(directive, ".cfi_offset") == 0) {
 			char *item = next_csv(&cursor);
 			if (parse_integer(item, &reg) != 0) return as_error(as, "bad cfi reg");
@@ -737,6 +795,8 @@ parse_directive(struct as_file *as, char *directive, char *rest)
 			char *item = next_csv(&cursor);
 			if (parse_integer(item, &off) != 0) return as_error(as, "bad cfi off");
 			CFI_B(0x0e); CFI_ULEB(off);
+			as->cfi_cfa_offset = off;
+			as->cfi_cfa_offset_valid = 1;
 		} else if (strcmp(directive, ".cfi_register") == 0) {
 			char *item = next_csv(&cursor);
 			if (parse_integer(item, &r1) != 0) return as_error(as, "bad cfi reg1");
@@ -759,6 +819,120 @@ parse_directive(struct as_file *as, char *directive, char *rest)
 			CFI_B(0x80 | (unsigned)(reg & 0x3f));
 			if (reg >= 64) CFI_ULEB(reg);
 			CFI_ULEB((uint64_t)(off < 0 ? 0 : off));
+		} else if (strcmp(directive, ".cfi_restore") == 0) {
+			char *item = next_csv(&cursor);
+			if (parse_integer(item, &reg) != 0) return as_error(as, "bad cfi reg");
+			if (reg < 64) {
+				CFI_B(0xc0 | (unsigned char)(reg & 0x3f));
+			} else {
+				CFI_B(0x0d); /* DW_CFA_restore_extended */
+				CFI_ULEB(reg);
+			}
+		} else if (strcmp(directive, ".cfi_advance_loc") == 0) {
+			char *item = next_csv(&cursor);
+			if (parse_integer(item, &off) != 0) return as_error(as, "bad cfi delta");
+			if (off >= 0 && off < 64) {
+				CFI_B(0x40 | (unsigned char)(off & 0x3f));
+			} else {
+				CFI_B(0x02); /* DW_CFA_advance_loc1 */
+				CFI_B((unsigned char)(off & 0xff));
+			}
+		} else if (strcmp(directive, ".cfi_personality") == 0) {
+			/* .cfi_personality ENC, SYM */
+			char *item = next_csv(&cursor);
+			int64_t enc;
+			if (parse_integer(item, &enc) != 0 || enc < 0 || enc > 0xff)
+				return as_error(as, "bad cfi personality encoding");
+			item = next_csv(&cursor);
+			if (!item || !*item)
+				return as_error(as, "missing symbol in .cfi_personality");
+			as->cfi_personality_set = 1;
+			as->cfi_personality_encoding = (uint8_t)enc;
+			if (as->cfi_personality_symbol)
+				free(as->cfi_personality_symbol);
+			as->cfi_personality_symbol = mt_strdup(trim(item));
+			if (!as->cfi_personality_symbol)
+				return as_error(as, "out of memory");
+		} else if (strcmp(directive, ".cfi_lsda") == 0) {
+			/* .cfi_lsda ENC, SYM */
+			char *item = next_csv(&cursor);
+			int64_t enc;
+			if (parse_integer(item, &enc) != 0 || enc < 0 || enc > 0xff)
+				return as_error(as, "bad cfi lsda encoding");
+			item = next_csv(&cursor);
+			if (!item || !*item)
+				return as_error(as, "missing symbol in .cfi_lsda");
+			as->cfi_lsda_set = 1;
+			as->cfi_lsda_encoding = (uint8_t)enc;
+			if (as->cfi_lsda_current)
+				free(as->cfi_lsda_current);
+			as->cfi_lsda_current = mt_strdup(trim(item));
+			if (!as->cfi_lsda_current)
+				return as_error(as, "out of memory");
+		} else if (strcmp(directive, ".cfi_signal_frame") == 0) {
+			/* .cfi_signal_frame — mark CIE as signal frame */
+			as->cfi_signal_frame = 1;
+		} else if (strcmp(directive, ".cfi_window_save") == 0) {
+			/* DW_CFA_GNU_window_save (0x2d) — SPARC window save */
+			CFI_B(0x2d);
+		} else if (strcmp(directive, ".cfi_return_column") == 0) {
+			/* .cfi_return_column REG — set return address register column */
+			char *item = next_csv(&cursor);
+			if (parse_integer(item, &reg) != 0) return as_error(as, "bad cfi return column");
+			as->cfi_return_column = (int)reg;
+		} else if (strcmp(directive, ".cfi_escape") == 0) {
+			/* .cfi_escape BYTES... — raw DW_CFA byte sequence (comma-separated) */
+			do {
+				char *item = next_csv(&cursor);
+				if (!*item) break;
+				if (parse_integer(item, &value) != 0 || value < 0 || value > 255)
+					return as_error(as, "bad cfi_escape byte");
+				CFI_B((unsigned char)(value & 0xff));
+			} while (*cursor);
+		} else if (strcmp(directive, ".cfi_adjust_cfa_offset") == 0) {
+			/* .cfi_adjust_cfa_offset OFF — adjust CFA offset by delta */
+			char *item = next_csv(&cursor);
+			if (parse_integer(item, &off) != 0) return as_error(as, "bad cfi adjust cfa offset");
+			if (!as->cfi_cfa_offset_valid)
+				return as_error(as, ".cfi_adjust_cfa_offset requires preceding .cfi_def_cfa");
+			as->cfi_cfa_offset += off;
+			CFI_B(0x0e); /* DW_CFA_def_cfa_offset */
+			CFI_ULEB((uint64_t)as->cfi_cfa_offset);
+		} else if (strcmp(directive, ".cfi_val_offset") == 0) {
+			/* .cfi_val_offset REG, OFF — DW_CFA_val_offset (0x14) */
+			char *item = next_csv(&cursor);
+			if (parse_integer(item, &reg) != 0) return as_error(as, "bad cfi val_offset reg");
+			item = next_csv(&cursor);
+			if (parse_integer(item, &off) != 0) return as_error(as, "bad cfi val_offset off");
+			CFI_B(0x14);
+			CFI_ULEB(reg);
+			CFI_ULEB(off);
+		} else if (strcmp(directive, ".cfi_val_expression") == 0) {
+			/* .cfi_val_expression REG, EXPR — DW_CFA_val_expression (0x0f) */
+			char *item = next_csv(&cursor);
+			if (parse_integer(item, &reg) != 0) return as_error(as, "bad cfi val_expression reg");
+			item = trim(cursor);
+			if (!*item)
+				return as_error(as, "missing expression in .cfi_val_expression");
+			/* Parse the expression as a comma-separated list of bytes */
+			/* First, we need to emit the expression into a temp buffer to know its length */
+			unsigned char expr_buf[256];
+			size_t expr_len = 0;
+			char *ec = item;
+			do {
+				char *eitem = next_csv(&ec);
+				if (!*eitem) break;
+				int64_t ev;
+				if (parse_integer(eitem, &ev) != 0 || ev < 0 || ev > 255)
+					return as_error(as, "bad cfi_val_expression byte");
+				if (expr_len >= sizeof(expr_buf))
+					return as_error(as, "cfi_val_expression too long");
+				expr_buf[expr_len++] = (unsigned char)(ev & 0xff);
+			} while (*ec);
+			CFI_B(0x0f); /* DW_CFA_val_expression */
+			CFI_ULEB(reg);
+			CFI_ULEB(expr_len);
+			{ size_t ei; for (ei = 0; ei < expr_len; ei++) CFI_B(expr_buf[ei]); }
 		} else {
 			return as_error(as, "unsupported CFI directive: %s", directive);
 		}

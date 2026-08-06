@@ -199,4 +199,14 @@ bool cpp_struct_binding(struct func *f, struct scope *s,
  * Returns true when the member is defined afterwards. */
 bool cpp_ensure_method_defined(struct decl *fd);
 
+/* C++ exception payload thunks (exc-phase4-nontrivial-thunk.md):
+ * for non-trivial class-typed throws, the front-end synthesises a pair
+ * of helper functions (`__meuos_exc_ms_copy_T` / `__meuos_exc_ms_dtor_T`)
+ * that wrap the user copy ctor / dtor for the libc runtime.  The decls
+ * are pre-registered at first reference so the throw site can take their
+ * addresses; the bodies are emitted at end of TU. */
+void cpp_synthesize_exc_copy_thunk(struct type *t);
+void cpp_synthesize_exc_dtor_thunk(struct type *t);
+void cpp_emit_exc_thunks(void);
+
 #endif /* MCC_CPP_H */

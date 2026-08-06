@@ -42,12 +42,20 @@ _start:
 	/* r0 = TLS base pointer; install into c13/TPIDRURO via mcr. */
 	bl __meuos_set_tls
 
-	/* __libc_start_main(main, argc, argv, NULL, NULL, NULL, stack_end).
+	/* __libc_start_main(main, argc, argv, init, fini, rtld_fini, stack_end).
+	 *
+	 * init = __libc_csu_init: walks .preinit_array, calls _init(),
+	 * then walks .init_array so compat archives have a named entry
+	 * point to hook into startup.
+	 * fini = __libc_csu_fini: walks .fini_array in reverse and calls
+	 * _fini(), registered with atexit so it runs on the exit() path.
+	 * rtld_fini = NULL: we are statically linked, no dynamic loader.
+	 *
 	 * r0-r3 take main/argc/argv/init; fini, rtld_fini and stack_end go on
 	 * the stack at [sp+0], [sp+4] and [sp+8].  A register list pushes in
 	 * ascending register order, so name the slots r5 < r6 < r7 < r8 to get
 	 * fini, rtld_fini, stack_end and a pad that keeps SP 8-byte aligned. */
-	mov r5, #0		/* fini      -> [sp+0] */
+	ldr r5, =__libc_csu_fini		/* fini      -> [sp+0] */
 	mov r6, #0		/* rtld_fini -> [sp+4] */
 	mov r7, r4		/* stack_end -> [sp+8] */
 	mov r8, #0		/* pad, keeps SP 8-byte aligned */
@@ -56,7 +64,7 @@ _start:
 	ldr r0, =main		/* main */
 	ldr r1, [r4]		/* argc */
 	add r2, r4, #4		/* argv */
-	mov r3, #0		/* init */
+	ldr r3, =__libc_csu_init
 	bl __libc_start_main
 	bkpt #0			/* unreachable: it exit()s */
 

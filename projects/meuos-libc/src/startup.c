@@ -28,8 +28,10 @@ extern char **environ;
 /* __progname: BSD/glibc convention, the executable name as invoked.
  * crt sets it from argv[0]; defaults to "?" so standalone use (or a crt
  * without startup support) still yields a sane value.  syslog(3),
- * error(3) (compat) and other consumers depend on it. */
+ * error(3) (compat) and other consumers depend on it.
+ * __progname_full holds the full argv[0] (glibc also provides this). */
 const char *__progname = "?";
+const char *__progname_full = "?";
 
 /* GNU/glibc-convention program-invocation globals.  Although glibc exposes
  * these as compat/glibc-isms, they must be filled at libc startup, and this
@@ -83,6 +85,7 @@ __meuos_startup(int argc, char **argv, char **envp)
 	(void)argc;
 	if (argv && argv[0]) {
 		__progname = argv[0];
+		__progname_full = argv[0];
 		program_invocation_name = argv[0];
 		program_invocation_short_name = base_name(argv[0]);
 	}
@@ -156,12 +159,44 @@ run_fini(void)
 		_fini();
 }
 
+/* __libc_csu_init: GNU signature, walks the .preinit_array, calls _init(),
+ * then walks the .init_array.  This is the init function passed by the
+ * Kit's own crt1.S so that compat archives can rely on having a named
+ * entry point to hook into startup.
+ *
+ * The signature mirrors glibc's __libc_csu_init so gcc/clang programs that
+ * link against this libc with their own crt1 (or a foreign one) find the
+ * symbol they expect. */
+void
+__libc_csu_init(int argc, char **argv, char **envp)
+{
+	(void)argc;
+	(void)argv;
+	(void)envp;
+	run_array(__preinit_array_start, __preinit_array_end);
+	if (_init)
+		_init();
+	run_array(__init_array_start, __init_array_end);
+}
+
+/* __libc_csu_fini: GNU signature, walks .fini_array in reverse and calls
+ * _fini().  Registered by the Kit's crt1 with __libc_start_main's fini
+ * slot so it runs via atexit on the exit() path. */
+void
+__libc_csu_fini(void)
+{
+	run_array_reverse(__fini_array_start, __fini_array_end);
+	if (_fini)
+		_fini();
+}
+
 /* The libc startup wrapper.  Each crt1.S computes argc/argv/envp and calls
  * this; it never returns.  `init` and `fini` are the legacy GNU slots
- * (__libc_csu_init / __libc_csu_fini); the Kit's own crt1 passes NULL and
- * lets the array walk below do the work, but a foreign crt1 -- or gcc/clang
- * linking against this libc with its own startup files -- may pass them, so
- * they are honoured when non-NULL. */
+ * (__libc_csu_init / __libc_csu_fini); the Kit's own crt1 now passes the
+ * addresses of __libc_csu_init / __libc_csu_fini so that compat archives
+ * can reference __libc_csu_init as a startup hook.  A foreign crt1 -- or
+ * gcc/clang linking against this libc with its own startup files -- may
+ * pass NULL for either; the inline fallback honours that. */
 _Noreturn void
 __libc_start_main(int (*main_fn)(int, char **, char **), int argc, char **argv,
                   void (*init)(int, char **, char **), void (*fini)(void),
@@ -179,15 +214,21 @@ __libc_start_main(int (*main_fn)(int, char **, char **), int argc, char **argv,
 		atexit(rtld_fini);
 	if (fini)
 		atexit(fini);
-	atexit(run_fini);
+	else
+		atexit(run_fini);
 
-	/* .preinit_array precedes every other constructor by definition. */
-	run_array(__preinit_array_start, __preinit_array_end);
-	if (_init)
-		_init();
+	/* .preinit_array precedes every other constructor by definition.
+	 * When init is non-NULL (Kit's own crt1 passes __libc_csu_init) it
+	 * handles the whole sequence; when NULL we fall back to the inline
+	 * walk so foreign crt1 files still get constructors. */
 	if (init)
 		init(argc, argv, envp);
-	run_array(__init_array_start, __init_array_end);
+	else {
+		run_array(__preinit_array_start, __preinit_array_end);
+		if (_init)
+			_init();
+		run_array(__init_array_start, __init_array_end);
+	}
 
 	exit(main_fn(argc, argv, envp));
 }

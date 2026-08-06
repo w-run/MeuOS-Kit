@@ -5,6 +5,11 @@
 #include <errno.h>
 #include <limits.h>
 #include <stdint.h>
+
+/* EOVERFLOW is not in POSIX.1-2008; provide fallback for strict mode builds. */
+#ifndef EOVERFLOW
+#define EOVERFLOW 75
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

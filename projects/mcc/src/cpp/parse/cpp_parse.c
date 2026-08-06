@@ -46,10 +46,6 @@ bool g_cpp_member_tmpl;
  * each function body by the decl / method-body parsers. */
 struct type *g_cpp_auto_ret_type;
 struct func *g_cpp_auto_ret_func;
-/* C++ `extern "C"` linkage context: non-zero when the current declaration
- * is inside an `extern "C"` block or is preceded by `extern "C"`.  Used by
- * getlinkage() in decl.c to assign LINKC instead of LINKEXTERN. */
-bool g_cpp_extern_c;
 /* postfixexpr nesting depth (set by expr_postfix.c); a pending member
  * call records the depth it was created at so nested argument expressions
  * (which run their own postfixexpr) don't clear it prematurely. */
@@ -157,13 +153,6 @@ void cpp_define_method(struct scope *s, struct type *funct,
  * and the implicit `this` parameter is available in scope. */
 struct cpp_method_ctx g_cpp_method;
 
-/* Pending qualified-class name from a `Class::method` declarator; consumed
- * by decl()'s DECLFUNC path to route out-of-line method definitions. */
-static const char *g_cpp_qual_class;
-/* Namespace the qualified class lives in (`ns::Class::method`), or NULL
- * for a plain file-scope `Class::method`. */
-static struct scope *g_cpp_qual_ns;
-
 static void emit_base_ctors_for(struct func *f, struct type *classt,
                                 struct expr *thisp);
 static void emit_base_dtors_for(struct func *f, struct type *classt,
@@ -239,79 +228,10 @@ cpp_ctor_clear_active(void)
 	g_cpp_ctor_active = false;
 }
 bool cpp_class_decl(struct scope *s);
-static void cpp_namespace_decl(struct scope *s);
-
-/* Namespaces made visible by `using namespace NAME;` directives and by
- * `inline namespace` blocks.  Lookups that fail in the current scope
- * consult these before giving up. */
-static struct scope *g_cpp_visible_ns[16];
-static int g_cpp_nvisible_ns;
-static void cpp_add_visible_ns(struct scope *ns);
-
-static bool cpp_is_namespace_decl(void);
 static void cpp_inherit_ctor(struct scope *s, struct type *derived,
                              struct structbuilder *b);
 static void cpp_synth_inherited_ctor(struct scope *s, struct type *derived,
     struct structbuilder *b, struct type *base, struct type *bctor);
-
-void
-cpp_set_qual_class(const char *tag)
-{
-	g_cpp_qual_class = tag;
-}
-
-const char *
-cpp_take_qual_class(void)
-{
-	const char *tag = g_cpp_qual_class;
-	g_cpp_qual_class = NULL;
-	return tag;
-}
-
-void
-cpp_set_qual_ns(struct scope *ns)
-{
-	g_cpp_qual_ns = ns;
-}
-
-struct scope *
-cpp_take_qual_ns(void)
-{
-	struct scope *ns = g_cpp_qual_ns;
-	g_cpp_qual_ns = NULL;
-	return ns;
-}
-
-/* Qualified assembly prefix for a declaration inside namespace(s):
- * `Outer_Inner` for a name declared in `namespace Outer { namespace Inner
- * { ... } }`, `Geo` for a single-level `namespace Geo`.  Returns NULL if
- * `s` is the file scope (no enclosing namespace).  The caller uses this
- * to give namespace-scope objects/functions a distinct symbol name so a
- * namespace variable does not collide with a same-named global. */
-const char *
-cpp_ns_asm_prefix(struct scope *s, char *buf, size_t bufsz)
-{
-	const char *names[16];
-	int n = 0, i;
-
-	(void)bufsz;
-	for (; s && s->name; s = s->parent) {
-		if (n >= (int)countof(names))
-			break;
-		names[n++] = s->name;
-	}
-	if (!n)
-		return NULL;
-	buf[0] = '\0';
-	/* names[] is innermost-first; walk it backwards to build
-	 * Outer_Inner (outermost first). */
-	for (i = n - 1; i >= 0; i--) {
-		if (i != n - 1)
-			strcat(buf, "_");
-		strcat(buf, names[i]);
-	}
-	return buf;
-}
 
 /* Build the expression for the implicit `this` pointer of the method
  * body currently being parsed (NULL outside a method body).  In a
@@ -542,7 +462,7 @@ cpp_classify_token(struct token t)
  * declaration to cpp_class_decl (base lists and C++ bodies are handled
  * there; the plain C parser rejects the `:`) or fall through to the C
  * struct/union path when the tag is used as a plain type (`struct S s;`). */
-static bool
+bool
 cpp_struct_needs_class_decl(void)
 {
 	struct token kw, tag, colon, pending;
@@ -981,331 +901,6 @@ cpp_synth_inherited_ctor(struct scope *s, struct type *derived,
 	free(toks);
 }
 
-/* Parse a C++ `namespace NAME { ... }` block.  Inner declarations are
- * registered in a fresh scope named NAME; the namespace itself is
- * registered in the enclosing scope as a DECLNAMESPACE so `NAME::symbol`
- * can be resolved (single-level for now).  The namespace scope outlives
- * parsing (never delscope'd) so qualified lookups keep working. */
-/* Is the current token the start of a namespace declaration, possibly
- * prefixed by the C++11 `inline` keyword (`inline namespace NAME {`)?
- * Peeks one token ahead for the `inline` case and restores the stream. */
-static bool
-cpp_is_namespace_decl(void)
-{
-	enum cpp_tokenkind k = cpp_tok_kind();
-
-	if (k == CPP_TNAMESPACE)
-		return true;
-	if (k == CPP_TINLINE) {
-		struct token save = tok;
-		struct token peek;
-		struct token *tp;
-		next();
-		peek = tok;
-		tok = save;
-		/* tokpush stores the token pointer, so the peeked token must
-		 * outlive this frame (heap copy, like struct_decl's '&' restore) */
-		tp = xmalloc(sizeof *tp);
-		*tp = peek;
-		tokpush(tp, 1);
-		return cpp_classify_token(peek) == CPP_TNAMESPACE;
-	}
-	return false;
-}
-
-static void
-cpp_namespace_decl(struct scope *s)
-{
-	struct scope *ns;
-	struct decl *nd;
-	const char *name;
-	bool is_inline = false;
-
-	if (cpp_tok_kind() == CPP_TINLINE) {
-		is_inline = true;
-		next(); /* consume 'inline' */
-	}
-	next(); /* consume 'namespace' */
-	if (tok.kind < TIDENT)
-		error_code(E_SYNTAX, &tok.loc, "expected namespace name");
-	name = tokenstr(tok.kind);
-	next();
-	expect(TLBRACE, "after namespace name");
-
-	ns = mkscope(s);
-	ns->name = name;
-	nd = mkdecl((char *)name, DECLNAMESPACE, NULL, QUALNONE, LINKNONE);
-	nd->u.ns = ns;
-	scopeputdecl(s, nd);
-
-	/* inline namespace (C++11): its members are visible in the enclosing
-	 * scope, like a `using namespace` directive — but only when the
-	 * enclosing scope is itself visible to name lookup (the file scope
-	 * or a namespace already brought in by a using-directive), so a
-	 * plain `namespace A { inline namespace B { ... } }` does not leak
-	 * B's members into the file scope. */
-	if (is_inline) {
-		extern struct scope filescope;
-		bool parent_visible = s == &filescope;
-		int i;
-		for (i = 0; !parent_visible && i < g_cpp_nvisible_ns; i++)
-			if (g_cpp_visible_ns[i] == s)
-				parent_visible = true;
-		if (parent_visible)
-			cpp_add_visible_ns(ns);
-	}
-
-	while (tok.kind != TRBRACE && tok.kind != TEOF) {
-		enum cpp_tokenkind k = cpp_tok_kind();
-		if (cpp_is_namespace_decl()) {
-			cpp_namespace_decl(ns);
-			continue;
-		}
-		if (k == CPP_TCLASS || k == CPP_TSTRUCT || k == CPP_TUNION) {
-			if (k == CPP_TCLASS || cpp_struct_needs_class_decl())
-				cpp_class_decl(ns);
-			else
-				decl(ns, NULL);
-			continue;
-		}
-		if (tok.kind == TSEMICOLON) {
-			next();
-			continue;
-		}
-		if (!decl(ns, NULL))
-			error_code(E_SYNTAX, &tok.loc, "expected declaration in namespace body");
-	}
-	next(); /* consume '}' */
-	/* deliberately keep ns alive for later NAME::name lookups */
-}
-
-static void
-cpp_add_visible_ns(struct scope *ns)
-{
-	if (g_cpp_nvisible_ns >= (int)countof(g_cpp_visible_ns))
-		return;
-	g_cpp_visible_ns[g_cpp_nvisible_ns++] = ns;
-}
-
-/* Resolve `name` in the visible (`using namespace`) namespaces. */
-struct decl *
-cpp_lookup_visible(struct scope *s, const char *name)
-{
-	int i;
-
-	(void)s;
-	for (i = 0; i < g_cpp_nvisible_ns; i++) {
-		struct decl *d = scopegetdecl(g_cpp_visible_ns[i], name, 1);
-		if (d)
-			return d;
-	}
-	return NULL;
-}
-
-/* `using namespace NAME;`, `using NAME::member;`, or a C++11 alias
- * declaration `using Name = Type;`.  Non-static so the shared C
- * declaration parser can dispatch block-scope `using` (and thus for/if
- * init-statement alias declarations, P2360) to the C++ frontend. */
-void
-cpp_using_decl(struct scope *s)
-{
-	next(); /* consume 'using' */
-	/* C++20 `using enum E;` — bring all enumerators of E into
-	 * the current scope.  `enum` is a C keyword (TENUM), so the
-	 * C++ lexer token is used directly. */
-	if (tok.kind == TENUM) {
-		const char *etag;
-		struct type *et;
-		size_t i;
-		next(); /* consume 'enum' */
-		if (tok.kind < TIDENT)
-			error_code(E_SYNTAX, &tok.loc, "expected enum name after 'using enum'");
-		etag = tokenstr(tok.kind);
-		et = scopegettag(s, etag, 1);
-		if (!et || et->kind != TYPEENUM)
-			error_code(E_CTYPE, &tok.loc, "'%s' is not an enum type", etag);
-		next(); /* consume enum name */
-		expect(TSEMICOLON, "after using enum declaration");
-		if (et->incomplete)
-			error_code(E_INCOMPLETE, &tok.loc, "cannot use incomplete enum type '%s'", etag);
-		/* Bring all enumerators (DECLCONST decls) of this enum type
-		 * into the current scope.  Walk the scope chain looking for
-		 * DECLCONST decls whose type matches the enum.  Since the map
-		 * is a hash table, we iterate over the current scope's decl
-		 * map directly. */
-		for (i = 0; i < s->decls.cap; i++) {
-			if (s->decls.keys[i].str) {
-				struct decl *d = s->decls.vals[i].p;
-				if (d && d->kind == DECLCONST && d->type == et) {
-					/* Re-insert into the same scope (already
-					 * visible, but ensures lookup works). */
-					scopeputdecl(s, d);
-				}
-			}
-		}
-		return;
-	}
-	if (cpp_tok_kind() == CPP_TNAMESPACE) {
-		struct decl *nsd;
-		next(); /* consume 'namespace' */
-		if (tok.kind < TIDENT)
-			error_code(E_SYNTAX, &tok.loc, "expected namespace name after 'using namespace'");
-		nsd = scopegetdecl(s, tokenstr(tok.kind), 1);
-		if (!nsd || nsd->kind != DECLNAMESPACE)
-			error_code(E_CTYPE, &tok.loc, "'%s' is not a namespace", tokenstr(tok.kind));
-		cpp_add_visible_ns(nsd->u.ns);
-		next();
-		expect(TSEMICOLON, "after using directive");
-		return;
-	}
-	/* using NAME::member; or using Name = Type; */
-	{
-		struct decl *nsd;
-		const char *nm;
-		if (tok.kind < TIDENT)
-			error_code(E_SYNTAX, &tok.loc, "expected namespace name in using declaration");
-		nm = tokenstr(tok.kind);
-		nsd = scopegetdecl(s, nm, 1);
-		next();
-		if (tok.kind == TASSIGN) {
-			/* C++11 alias declaration: `using Name = Type;` */
-			struct type *at;
-			next(); /* consume '=' */
-			at = typename(s, NULL, NULL);
-			if (!at)
-				error_code(E_SYNTAX, &tok.loc, "expected type name in alias declaration");
-			expect(TSEMICOLON, "after alias declaration");
-			scopeputdecl(s, mkdecl((char *)nm, DECLTYPE, at, QUALNONE, LINKNONE));
-			return;
-		}
-		expect(TCOLONCOLON, "after namespace name in using declaration");
-		if (tok.kind < TIDENT)
-			error_code(E_SYNTAX, &tok.loc, "expected member name after '::'");
-		if (!nsd || nsd->kind != DECLNAMESPACE)
-			error_code(E_CTYPE, &tok.loc, "'%s' is not a namespace", nsd ? nsd->name : "?");
-		{
-			struct decl *md = scopegetdecl(nsd->u.ns, tokenstr(tok.kind), 1);
-			if (!md)
-				error_code(E_CTYPE, &tok.loc, "no member named '%s' in namespace '%s'",
-				      tokenstr(tok.kind), nsd->name);
-			scopeputdecl(s, md);
-		}
-		next();
-		expect(TSEMICOLON, "after using declaration");
-	}
-}
-
-/* C++20 module declaration: `module ModuleName;` or `module :private;`.
- * Only syntax parsing — no semantic module loading. */
-void
-cpp_module_decl(struct scope *s)
-{
-	next(); /* consume 'module' */
-
-	if (tok.kind == TCOLON) {
-		/* `module :private;` — private module fragment */
-		next(); /* consume ':' */
-		if (cpp_tok_kind() != CPP_TPRIVATE)
-			error_code(E_SYNTAX, &tok.loc, "expected 'private' after 'module :'");
-		next(); /* consume 'private' */
-		expect(TSEMICOLON, "after module :private");
-		return;
-	}
-
-	/* Parse module name: identifier (. identifier)* */
-	if (tok.kind >= TIDENT) {
-		for (;;) {
-			next(); /* consume identifier */
-			if (tok.kind == TPERIOD) {
-				next(); /* consume '.' */
-				if (tok.kind < TIDENT)
-					error_code(E_SYNTAX, &tok.loc, "expected identifier after '.' in module name");
-			} else {
-				break;
-			}
-		}
-	}
-	expect(TSEMICOLON, "after module declaration");
-}
-
-/* C++20 import declaration: `import ModuleName;` or `import "header";`.
- * Only syntax parsing — no semantic module loading. */
-void
-cpp_import_decl(struct scope *s)
-{
-	next(); /* consume 'import' */
-
-	/* C++23 header import: `import "header";` */
-	if (tok.kind == TSTRINGLIT) {
-		next(); /* consume string literal */
-		expect(TSEMICOLON, "after header import");
-		return;
-	}
-
-	/* Parse module name: identifier (. identifier)* */
-	if (tok.kind >= TIDENT) {
-		for (;;) {
-			next(); /* consume identifier */
-			if (tok.kind == TPERIOD) {
-				next(); /* consume '.' */
-				if (tok.kind < TIDENT)
-					error_code(E_SYNTAX, &tok.loc, "expected identifier after '.' in module name");
-			} else {
-				break;
-			}
-		}
-	}
-	expect(TSEMICOLON, "after import declaration");
-}
-
-/* C++20 export declaration: `export module ...`, `export import ...`,
- * `export { ... }`, `export declaration`, or `export template ...`.
- * Only syntax parsing — no semantic export tracking. */
-void
-cpp_export_decl(struct scope *s)
-{
-	next(); /* consume 'export' */
-
-	enum cpp_tokenkind k = cpp_tok_kind();
-	if (k == CPP_TMODULE) {
-		/* `export module ModuleName;` — module interface declaration */
-		cpp_module_decl(s);
-	} else if (k == CPP_TIMPORT) {
-		/* `export import ModuleName;` — re-export an imported module */
-		cpp_import_decl(s);
-	} else if (tok.kind == TLBRACE) {
-		/* `export { ... }` — export block */
-		next(); /* consume '{' */
-		while (tok.kind != TRBRACE && tok.kind != TEOF) {
-			enum cpp_tokenkind k2 = cpp_tok_kind();
-			if (k2 == CPP_TEXPORT)
-				cpp_export_decl(s);
-			else if (k2 == CPP_TIMPORT)
-				cpp_import_decl(s);
-			else if (k2 == CPP_TMODULE)
-				cpp_module_decl(s);
-			else if (k2 == CPP_TUSING)
-				cpp_using_decl(s);
-			else if (k2 == CPP_TTEMPLATE)
-				cpp_template_decl(s, NULL);
-			else if (k2 == CPP_TCLASS || k2 == CPP_TSTRUCT || k2 == CPP_TUNION)
-				cpp_class_decl(s);
-			else if (cpp_is_namespace_decl())
-				cpp_namespace_decl(s);
-			else
-				decl(s, NULL);
-		}
-		if (tok.kind == TRBRACE)
-			next(); /* consume '}' */
-	} else if (k == CPP_TTEMPLATE) {
-		/* `export template <...> ...` */
-		cpp_template_decl(s, NULL);
-	} else {
-		/* `export declaration` — parse the declaration normally */
-		decl(s, NULL);
-	}
-}
-
 /* Parse a C++ translation unit: top-level declaration loop.
  * C++ grammar is layered over the C parser; `class` declarations with
  * access control are handled here (cpp_class_decl), and C-compatible
@@ -1315,7 +910,6 @@ cpp_parse_translation_unit(void)
 {
 	extern struct scope filescope;
 	extern void emittentativedefns(void);
-	extern int g_lang;
 
 	while (tok.kind != TEOF) {
 		/* Multi-error collection (--error-json): arm a recovery jump
@@ -1374,72 +968,10 @@ cpp_parse_translation_unit(void)
 			continue;
 		}
 
-	/* C++ `extern "C"` linkage specification: `extern "C" { ... }` block
-	 * form or `extern "C" int f();` single-declaration form.  Intercept
-	 * before the C parser's decl() sees `extern` as a storage class.
-	 *
-	 * Peek-ahead: save the extern token, consume the next token, check
-	 * for "C".  If it IS extern "C" handle it; if not, use the same
-	 * pushback pattern as `consume()` in pp.c (copy the peeked token
-	 * to a local, restore the original, then ctxpush the copy). */
-	if (tok.kind == TEXTERN && g_lang == 1) {
-		struct token save = tok;
-		struct token peek;
-		next();
-		peek = tok;
-		/* The C lexer stores string literal content INCLUDING the
-		 * surrounding quotes in tok.lit, so we compare against "\"C\""
-		 * (the literal text `"C"` with quote characters). */
-		if (peek.kind == TSTRINGLIT && peek.lit &&
-		    peek.lit[0] == '"' && peek.lit[1] == 'C' && peek.lit[2] == '"' && peek.lit[3] == '\0') {
-			/* extern "C": consume the "C" token (tok currently points to
-			 * it because next() advanced past extern). */
-			next(); /* consume "C" string literal */
-			char *saved = g_cpp_extern_c ? strdup("nested") : NULL;
-			if (tok.kind == TLBRACE) {
-				/* `extern "C" { ... }` — parse all declarations inside
-				 * the block with C linkage, then restore. */
-				next(); /* consume '{' */
-				g_cpp_extern_c = true;
-				while (tok.kind != TRBRACE && tok.kind != TEOF) {
-					enum cpp_tokenkind k2 = cpp_tok_kind();
-					if (k2 == CPP_TCLASS || k2 == CPP_TSTRUCT ||
-					    k2 == CPP_TUNION) {
-						if (k2 == CPP_TCLASS || cpp_struct_needs_class_decl())
-							cpp_class_decl(&filescope);
-						else
-							decl(&filescope, NULL);
-					} else if (cpp_is_namespace_decl()) {
-						cpp_namespace_decl(&filescope);
-					} else if (k2 == CPP_TUSING) {
-						cpp_using_decl(&filescope);
-					} else if (k2 == CPP_TTEMPLATE) {
-						cpp_template_decl(&filescope, NULL);
-					} else {
-						decl(&filescope, NULL);
-					}
-				}
-				if (tok.kind == TRBRACE)
-					next(); /* consume '}' */
-				g_cpp_extern_c = saved ? true : false;
-				if (saved)
-					free(saved);
-			} else {
-				/* `extern "C" int f();` — single declaration with C linkage.
-				 * Set the flag, parse the declaration, then restore. */
-				g_cpp_extern_c = true;
-				decl(&filescope, NULL);
-				g_cpp_extern_c = saved ? true : false;
-				if (saved)
-					free(saved);
-			}
-			g_err_recovery_set = 0;
-			continue;
-		}
-		/* not `extern "C"` — restore the extern token and push the
-		 * peeked token back so the normal C parser sees `extern int ...`. */
-		tok = save;
-		tokpush(&peek, 1);
+	/* C++ `extern "C"` linkage specification: handled by cpp_linkage.c */
+	if (cpp_linkage_spec()) {
+		g_err_recovery_set = 0;
+		continue;
 	}
 
 	/* C++20 abbreviated function templates: `void f(Integral auto x)`
@@ -1463,6 +995,7 @@ cpp_parse_translation_unit(void)
 	emittentativedefns();
 	cpp_emit_global_ctors();
 	cpp_emit_vtables();
+	cpp_emit_exc_thunks();
 }
 
 

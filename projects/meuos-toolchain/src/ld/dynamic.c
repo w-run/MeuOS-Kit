@@ -36,17 +36,43 @@ rela_dyn_add(struct ld_context *ctx, uint64_t offset, uint64_t info, int64_t add
 	return 0;
 }
 
+/* Add a JUMP_SLOT relocation entry to .rela.plt.  Separate from .rela.dyn
+ * so that the dynamic loader can process DT_JMPREL (PLT relocations) before
+ * DT_RELA (regular GOT/data relocations) if needed. */
+int
+rela_plt_add(struct ld_context *ctx, uint64_t offset, uint64_t info, int64_t addend)
+{
+	int rg = find_group(ctx, ".rela.plt");
+	int elf64 = (ctx->target->elf_class == MT_ELFCLASS64);
+	size_t entry_size = elf64 ? 24 : 12;
+	if (rg < 0) return -1;
+	if (ctx->rela_plt_count >= ctx->rela_plt_capacity_entries)
+		return ld_error(ctx, "internal: .rela.plt overflow");
+	unsigned char *dst = ctx->groups[rg].data +
+	                     ctx->rela_plt_count * entry_size;
+	if (elf64) {
+		write64(dst, offset);
+		write64(dst + 8, info);
+		write64(dst + 16, (uint64_t)addend);
+	} else {
+		write32(dst, (uint32_t)offset);
+		write32(dst + 4, (uint32_t)info);
+		write32(dst + 8, (uint32_t)addend);
+	}
+	ctx->rela_plt_count++;
+	return 0;
+}
+
 int
 build_rela_dyn(struct ld_context *ctx)
 {
 	size_t i;
-	if ((!ctx->shared && !ctx->pie) || ctx->got.count == 0)
+	if ((!ctx->shared && !ctx->pie) || (ctx->got.count == 0 && ctx->rela_capacity_entries == 0))
 		return 0;
-	/* .rela.dyn was pre-created and its buffer pre-reserved in
-	 * build_dynamic_tables; we fill it in place here. */
 	int rg = find_group(ctx, ".rela.dyn");
-	if (rg < 0) return 0; /* no GOT entries, nothing to relocate */
+	int rpg = find_group(ctx, ".rela.plt");
 	ctx->rela_count = 0;
+	ctx->rela_plt_count = 0;
 	uint64_t got_addr = ctx->groups[ctx->got.group].address;
 	for (i = 0; i < ctx->got.count; ++i) {
 		uint64_t got_entry = got_addr + ctx->got.items[i].offset;
@@ -79,7 +105,8 @@ build_rela_dyn(struct ld_context *ctx)
 		if (ctx->got.items[i].reloc_type == MT_R_X86_64_JUMP_SLOT) {
 			/* Undefined symbol import: emit JUMP_SLOT dynamic
 			 * relocation so ld.so looks up the symbol by name
-			 * and fills the GOT slot. */
+			 * and fills the GOT slot.  These go into .rela.plt
+			 * (DT_JMPREL) rather than .rela.dyn. */
 			uint32_t sym_idx = 0;
 			for (size_t j = 0; j < ctx->dynsym_count; ++j) {
 				if (strcmp(ctx->dynsym_entries[j].global->name,
@@ -95,7 +122,7 @@ build_rela_dyn(struct ld_context *ctx)
 				info = (sym_idx << 8) | MT_R_386_JUMP_SLOT;
 			else
 				info = ((uint64_t)sym_idx << 32) | MT_R_X86_64_JUMP_SLOT;
-			if (rela_dyn_add(ctx, got_entry, info, 0) != 0)
+			if (rela_plt_add(ctx, got_entry, info, 0) != 0)
 				return -1;
 		} else {
 			/* The GOT entry references a symbol.  If it is defined in
@@ -136,26 +163,128 @@ build_rela_dyn(struct ld_context *ctx)
 			}
 		}
 	}
+	/* Generate RELATIVE entries for data-section absolute relocations
+	 * (R_X86_64_64/32/32S) in PIE/shared mode.  These are needed so the
+	 * dynamic loader can adjust the absolute address by the load base.
+	 * Without them, data-section pointer initializers (e.g.
+	 * `int *p = &bss_var[4]`) carry stale addresses → SIGSEGV. */
+	if (ctx->shared || ctx->pie) {
+		for (i = 0; i < ctx->objects.count; ++i) {
+			struct ld_object *object = &ctx->objects.items[i];
+			if (object->is_shared) continue;
+			for (uint16_t si = 0; si < object_section_count(object); ++si) {
+				struct mt_elf64_section sec;
+				if (object_get_section(object, si, &sec) != 0) continue;
+				if (sec.type != MT_SHT_RELA && sec.type != MT_SHT_REL) continue;
+				if (sec.entry_size == 0 || sec.size % sec.entry_size != 0) continue;
+				/* Skip if the relocation targets a discarded section */
+				if (sec.info >= object_section_count(object)) continue;
+				int target_group = object->maps[sec.info].group;
+				if (target_group < 0) continue;
+				uint64_t target_addr = ctx->groups[target_group].address;
+				for (uint64_t ri = 0; ri < sec.size / sec.entry_size; ++ri) {
+					const unsigned char *p = object->data + sec.offset + ri * sec.entry_size;
+					uint64_t r_offset;
+					uint64_t sym_idx;
+					int type;
+					int64_t addend;
+					if (object->elf_class == 1) {
+						r_offset = read32(p + 0);
+						uint32_t info32 = read32(p + 4);
+						type = (int)(info32 & 0xff);
+						sym_idx = info32 >> 8;
+						addend = (sec.type == MT_SHT_RELA) ? (int32_t)read32(p + 8) : 0;
+					} else {
+						r_offset = read64(p + 0);
+						uint64_t info64 = read64(p + 8);
+						type = (int)(info64 & 0xffffffffu);
+						sym_idx = info64 >> 32;
+						addend = (int64_t)read64(p + 16);
+					}
+					if (type != LD_R_X86_64_64 &&
+					    type != LD_R_X86_64_32 &&
+					    type != LD_R_X86_64_32S)
+						continue;
+					struct mt_elf64_symbol sym;
+					const char *sym_name;
+					struct ld_global *g;
+					if (get_symbol_by_index(ctx, object, sym_idx, &sym, &sym_name) != 0)
+						continue;
+					g = find_global(ctx, sym_name);
+					if (!g || !g->defined || g->group < 0) continue;
+					/* Skip TLS symbols (handled separately). */
+					const char *gname = ctx->groups[g->group].name;
+					if (gname && (strcmp(gname, ".tdata") == 0 ||
+					              strcmp(gname, ".tbss") == 0))
+						continue;
+					/* Compute the address of the location being relocated. */
+					uint64_t reloc_offset = object->maps[sec.info].offset;
+					uint64_t place = target_addr + reloc_offset + r_offset;
+					uint64_t sym_value = ctx->groups[g->group].address + g->offset;
+					/* The RELATIVE entry's addend must match the value that
+					 * apply_relocations wrote into the data slot, which is
+					 * (sym_value + addend) for R_X86_64_64/32/32S.  At
+					 * runtime, ld.so computes: slot = base + addend. */
+					uint64_t info;
+					if (strcmp(ctx->target->name, "arm") == 0)
+						info = (uint64_t)MT_R_ARM_RELATIVE;
+					else if (ctx->target->elf_class == MT_ELFCLASS32)
+						info = (uint64_t)MT_R_X86_64_RELATIVE;
+					else
+						info = (0ULL << 32) | MT_R_X86_64_RELATIVE;
+					/* The addend is the full linked address of the target
+					 * symbol (the value that the relocation patched in).
+					 * At runtime, ld.so will compute: slot = base + addend. */
+					if (rela_dyn_add(ctx, place, info, (int64_t)sym_value + addend) != 0)
+						return -1;
+				}
+			}
+		}
+	}
 	/* Shrink .rela.dyn to the actual number of entries written (a skipped
 	 * undefined-symbol RELATIVE may leave the reserved buffer under-filled),
 	 * then fix up DT_RELASZ, which fill_dynamic_addresses could only
 	 * approximate before the entry list was finalised. */
-	int rela64 = (ctx->target->elf_class == MT_ELFCLASS64);
-	size_t rsz = ctx->rela_count * (rela64 ? 24 : 12);
-	ctx->groups[rg].size = rsz;
-	int dgn = find_group(ctx, ".dynamic");
-	if (dgn >= 0) {
-		struct ld_group *dyn = &ctx->groups[dgn];
-		size_t ndyn = dyn->size / (rela64 ? 16 : 8);
-		for (size_t di = 0; di < ndyn; ++di) {
-			uint64_t tag = rela64 ? read64(dyn->data + di * 16)
-			                   : read32(dyn->data + di * 8);
-			if (tag == MT_DT_RELASZ) {
-				if (rela64)
-					write64(dyn->data + di * 16 + 8, rsz);
-				else
-					write32(dyn->data + di * 8 + 4, (uint32_t)rsz);
-				break;
+	if (rg >= 0) {
+		int rela64 = (ctx->target->elf_class == MT_ELFCLASS64);
+		size_t rsz = ctx->rela_count * (rela64 ? 24 : 12);
+		ctx->groups[rg].size = rsz;
+		int dgn = find_group(ctx, ".dynamic");
+		if (dgn >= 0) {
+			struct ld_group *dyn = &ctx->groups[dgn];
+			size_t ndyn = dyn->size / (rela64 ? 16 : 8);
+			for (size_t di = 0; di < ndyn; ++di) {
+				uint64_t tag = rela64 ? read64(dyn->data + di * 16)
+				                   : read32(dyn->data + di * 8);
+				if (tag == MT_DT_RELASZ) {
+					if (rela64)
+						write64(dyn->data + di * 16 + 8, rsz);
+					else
+						write32(dyn->data + di * 8 + 4, (uint32_t)rsz);
+					break;
+				}
+			}
+		}
+	}
+	/* Similarly shrink .rela.plt and fix up DT_PLTRELSZ. */
+	if (rpg >= 0) {
+		int rela64 = (ctx->target->elf_class == MT_ELFCLASS64);
+		size_t rsz = ctx->rela_plt_count * (rela64 ? 24 : 12);
+		ctx->groups[rpg].size = rsz;
+		int dgn = find_group(ctx, ".dynamic");
+		if (dgn >= 0) {
+			struct ld_group *dyn = &ctx->groups[dgn];
+			size_t ndyn = dyn->size / (rela64 ? 16 : 8);
+			for (size_t di = 0; di < ndyn; ++di) {
+				uint64_t tag = rela64 ? read64(dyn->data + di * 16)
+				                   : read32(dyn->data + di * 8);
+				if (tag == MT_DT_PLTRELSZ) {
+					if (rela64)
+						write64(dyn->data + di * 16 + 8, rsz);
+					else
+						write32(dyn->data + di * 8 + 4, (uint32_t)rsz);
+					break;
+				}
 			}
 		}
 	}
@@ -455,10 +584,79 @@ build_dynamic_tables(struct ld_context *ctx)
 	/* ---- .dynamic (placeholder with correct size, filled in pass 2) ---- */
 	size_t ntags = 5; /* SYMTAB, SYMENT, STRTAB, STRSZ, HASH */
 	if (ctx->soname) ntags++;
-	/* Pre-create .rela.dyn group for dynamic relocations (must exist before
-	 * layout_output assigns addresses).  Content is filled by build_rela_dyn()
-	 * after layout. */
-	int have_rela = ((ctx->shared || ctx->pie) && ctx->got.count > 0);
+
+	/* Count JUMP_SLOT entries separately — they go into .rela.plt. */
+	size_t n_jumpslots = 0;
+	size_t n_regular_rela = 0;
+	for (i = 0; i < ctx->got.count; ++i) {
+		if (ctx->got.items[i].reloc_type == MT_R_X86_64_JUMP_SLOT) {
+			n_jumpslots++;
+		} else if (ctx->got.items[i].tls) {
+			n_regular_rela += (ctx->got.items[i].slots >= 2) ? 2 : 1;
+		} else {
+			n_regular_rela++;
+		}
+	}
+
+	/* Count data-section RELATIVE entries needed for PIE/shared mode.
+	 * In PIE mode, every R_X86_64_64/32/32S relocation that targets a
+	 * defined symbol in this link needs a RELATIVE entry so the dynamic
+	 * loader can adjust the absolute address by the load base at runtime.
+	 * Without this, data-section pointer initializers (e.g.
+	 * `int *p = &bss_var[4]`) carry stale addresses → SIGSEGV. */
+	size_t data_rela_count = 0;
+	if (ctx->shared || ctx->pie) {
+		for (i = 0; i < ctx->objects.count; ++i) {
+			struct ld_object *object = &ctx->objects.items[i];
+			if (object->is_shared) continue;
+			for (uint16_t si = 0; si < object_section_count(object); ++si) {
+				struct mt_elf64_section sec;
+				if (object_get_section(object, si, &sec) != 0) continue;
+				if (sec.type != MT_SHT_RELA && sec.type != MT_SHT_REL) continue;
+				if (sec.entry_size == 0 || sec.size % sec.entry_size != 0) continue;
+				for (uint64_t ri = 0; ri < sec.size / sec.entry_size; ++ri) {
+					const unsigned char *p = object->data + sec.offset + ri * sec.entry_size;
+					uint64_t info64;
+					int type;
+					uint64_t sym_idx;
+					struct mt_elf64_symbol sym;
+					const char *sym_name;
+					struct ld_global *g;
+					if (object->elf_class == 1) {
+						uint32_t info32 = read32(p + 4);
+						type = (int)(info32 & 0xff);
+						sym_idx = info32 >> 8;
+					} else {
+						info64 = read64(p + 8);
+						type = (int)(info64 & 0xffffffffu);
+						sym_idx = info64 >> 32;
+					}
+					/* Only count absolute data relocations targeting
+					 * defined symbols in this link. */
+					if (type != LD_R_X86_64_64 &&
+					    type != LD_R_X86_64_32 &&
+					    type != LD_R_X86_64_32S)
+						continue;
+					if (get_symbol_by_index(ctx, object, sym_idx, &sym, &sym_name) != 0)
+						continue;
+					g = find_global(ctx, sym_name);
+					if (!g || !g->defined || g->group < 0) continue;
+					/* Skip TLS symbols (handled separately). */
+					const char *gname = ctx->groups[g->group].name;
+					if (gname && (strcmp(gname, ".tdata") == 0 ||
+					              strcmp(gname, ".tbss") == 0))
+						continue;
+					data_rela_count++;
+				}
+			}
+		}
+	}
+	n_regular_rela += data_rela_count;
+
+	/* Pre-create .rela.dyn group for non-PLT dynamic relocations (must exist
+	 * before layout_output assigns addresses).  Content is filled by
+	 * build_rela_dyn() after layout. */
+	int have_rela = ((ctx->shared || ctx->pie) && n_regular_rela > 0);
 	if (have_rela) {
 		ntags += 3; /* DT_RELA, DT_RELASZ, DT_RELAENT */
 		int rg = get_group(ctx, ".rela.dyn", MT_SHT_RELA,
@@ -466,29 +664,39 @@ build_dynamic_tables(struct ld_context *ctx)
 		if (rg < 0)
 			return ld_error(ctx, "out of memory");
 		ctx->groups[rg].rank = 1; /* same rank as .rodata/dynstr/dynsym */
-		/* Pre-reserve the exact .rela.dyn byte size (layout assigns the
-		 * section's file offset from this size).  Failing to reserve it
-		 * leaves the section size 0 at layout time, so build_rela_dyn's
-		 * later growth would overflow the section and clobber the
-		 * adjacent .dynamic section in the written file.  Count one slot
-		 * per produced RELA, mirroring build_rela_dyn() exactly. */
-		size_t relaslots = 0;
-		for (i = 0; i < ctx->got.count; ++i) {
-			if (ctx->got.items[i].tls) {
-				/* GD/LD: DTPMOD + DTPOFF pair; IE: single TPOFF */
-				relaslots += (ctx->got.items[i].slots >= 2) ? 2 : 1;
-			} else {
-				/* JUMP_SLOT import or RELATIVE defined symbol: 1 each */
-				relaslots += 1;
-			}
-		}
-		ctx->rela_capacity_entries = relaslots;
+		ctx->rela_capacity_entries = n_regular_rela;
 		size_t rela_es = elf64 ? 24 : 12;
 		uint64_t rdyn_off;
 		if (append_group_data(ctx, &ctx->groups[rg], NULL,
-		                      relaslots * rela_es, 8, &rdyn_off) != 0)
+		                      n_regular_rela * rela_es, 8, &rdyn_off) != 0)
 			return -1;
 		ctx->rela_count = 0;
+	} else {
+		ctx->rela_capacity_entries = 0;
+		ctx->rela_count = 0;
+	}
+
+	/* Pre-create .rela.plt group for JUMP_SLOT relocations (DT_JMPREL).
+	 * These are separate so the dynamic loader can process PLT relocations
+	 * via DT_JMPREL rather than mixing them into .rela.dyn. */
+	int have_rela_plt = ((ctx->shared || ctx->pie) && n_jumpslots > 0);
+	if (have_rela_plt) {
+		ntags += 3; /* DT_JMPREL, DT_PLTRELSZ, DT_PLTREL */
+		int rpg = get_group(ctx, ".rela.plt", MT_SHT_RELA,
+		                    LD_SHF_ALLOC, 8);
+		if (rpg < 0)
+			return ld_error(ctx, "out of memory");
+		ctx->groups[rpg].rank = 1; /* same rank as .rela.dyn */
+		ctx->rela_plt_capacity_entries = n_jumpslots;
+		size_t rela_es = elf64 ? 24 : 12;
+		uint64_t rplt_off;
+		if (append_group_data(ctx, &ctx->groups[rpg], NULL,
+		                      n_jumpslots * rela_es, 8, &rplt_off) != 0)
+			return -1;
+		ctx->rela_plt_count = 0;
+	} else {
+		ctx->rela_plt_capacity_entries = 0;
+		ctx->rela_plt_count = 0;
 	}
 
 	/* ---- .plt stubs (one per JUMP_SLOT GOT entry) ----
@@ -757,15 +965,12 @@ fill_dynamic_addresses(struct ld_context *ctx)
 		}
 	}
 
-	/* DT_RELA / DT_RELASZ / DT_RELAENT (for shared libraries with GOT) */
+	/* DT_RELA / DT_RELASZ / DT_RELAENT (for non-JUMP_SLOT dynamic relocs) */
 	int dg_rela = find_group(ctx, ".rela.dyn");
 	if (dg_rela >= 0) {
 		struct ld_group *grela = &ctx->groups[dg_rela];
-		/* Compute RELASZ from GOT entries (each GOT entry = 1 RELA entry).
-		 * The .rela.dyn data is filled by build_rela_dyn() AFTER this
-		 * function runs, so we compute the expected size here. */
 		uint64_t rela_entsize = elf64 ? 24 : 12;
-		uint64_t rela_sz = ctx->got.count * rela_entsize;
+		uint64_t rela_sz = ctx->rela_capacity_entries * rela_entsize;
 		/* DT_RELA: address of .rela.dyn */
 		if (elf64) {
 			write64(dp + k * 16 + 0, MT_DT_RELA);
@@ -775,7 +980,7 @@ fill_dynamic_addresses(struct ld_context *ctx)
 			write32(dp + k * 8 + 4, (uint32_t)grela->address);
 		}
 		++k;
-		/* DT_RELASZ: size of .rela.dyn (computed from GOT entry count) */
+		/* DT_RELASZ: size of .rela.dyn */
 		if (elf64) {
 			write64(dp + k * 16 + 0, MT_DT_RELASZ);
 			write64(dp + k * 16 + 8, rela_sz);
@@ -791,6 +996,41 @@ fill_dynamic_addresses(struct ld_context *ctx)
 		} else {
 			write32(dp + k * 8 + 0, MT_DT_RELAENT);
 			write32(dp + k * 8 + 4, (uint32_t)rela_entsize);
+		}
+		++k;
+	}
+
+	/* DT_JMPREL / DT_PLTRELSZ / DT_PLTREL (for JUMP_SLOT PLT relocations) */
+	int dg_rplt = find_group(ctx, ".rela.plt");
+	if (dg_rplt >= 0) {
+		struct ld_group *grplt = &ctx->groups[dg_rplt];
+		uint64_t rela_entsize = elf64 ? 24 : 12;
+		uint64_t pltrel_sz = ctx->rela_plt_capacity_entries * rela_entsize;
+		/* DT_JMPREL: address of .rela.plt */
+		if (elf64) {
+			write64(dp + k * 16 + 0, MT_DT_JMPREL);
+			write64(dp + k * 16 + 8, grplt->address);
+		} else {
+			write32(dp + k * 8 + 0, MT_DT_JMPREL);
+			write32(dp + k * 8 + 4, (uint32_t)grplt->address);
+		}
+		++k;
+		/* DT_PLTRELSZ: size of .rela.plt */
+		if (elf64) {
+			write64(dp + k * 16 + 0, MT_DT_PLTRELSZ);
+			write64(dp + k * 16 + 8, pltrel_sz);
+		} else {
+			write32(dp + k * 8 + 0, MT_DT_PLTRELSZ);
+			write32(dp + k * 8 + 4, (uint32_t)pltrel_sz);
+		}
+		++k;
+		/* DT_PLTREL: indicates the type of PLT relocations (DT_RELA) */
+		if (elf64) {
+			write64(dp + k * 16 + 0, MT_DT_PLTREL);
+			write64(dp + k * 16 + 8, MT_DT_RELA);
+		} else {
+			write32(dp + k * 8 + 0, MT_DT_PLTREL);
+			write32(dp + k * 8 + 4, MT_DT_RELA);
 		}
 		++k;
 	}

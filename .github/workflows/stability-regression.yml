@@ -1,0 +1,161 @@
+# MeuOS Kit — Stability regression (verify-all + self-host + DWARF)
+#
+# Periodic regression gate to catch regressions in mcc + meuos-toolchain
+# before they accumulate. Runs two complementary gates on independent
+# schedules:
+#
+#   verify-all (every 4h) — full 24/25-test gate
+#                            (projects/mcc/test/verify-all.sh)
+#   self-host  (every 12h) — mcc compiles mcc, runs hello (check-sysroot-static)
+#                            plus mt DWARF gate (already in make -C toolchain check)
+#
+# Results uploaded as artifacts (logs). On failure, an issue can be filed
+# via workflow_dispatch trigger.
+#
+# Why: agents commit many small changes; verify-all + self-host are too
+# slow to gate every PR. Schedule catches drift between PRs.
+
+name: Stability Regression
+
+on:
+  schedule:
+    # verify-all every 4 hours (UTC)
+    - cron: '0 */4 * * *'
+    # self-host every 12 hours, offset 30min to avoid overlap
+    - cron: '30 */12 * * *'
+  workflow_dispatch:           # manual trigger with override
+    inputs:
+      mode:
+        description: 'Gate to run: verify-all | self-host | all'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - verify-all
+          - self-host
+          - all
+
+concurrency:
+  group: stability-regression
+  cancel-in-progress: false    # serial, avoid log races
+
+permissions:
+  contents: read
+
+jobs:
+  verify-all:
+    if: ${{ github.event_name == 'schedule' && github.event.schedule == '0 */4 * * *' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential qemu-user 2>/dev/null || true
+
+      - name: Build meuos-sysroot
+        run: make -C projects/meuos-sysroot
+
+      - name: Build meuos-toolchain (mt/as, mt/ld, readelf, nm, …)
+        env:
+          MEUOS_SYSROOT: ${{ github.workspace }}/sysroot
+        run: make -C projects/meuos-toolchain
+
+      - name: Build mcc (C compiler)
+        env:
+          MEUOS_SYSROOT: ${{ github.workspace }}/sysroot
+        run: make -C projects/mcc
+
+      - name: Run verify-all (24-test gate)
+        id: gate
+        env:
+          MEUOS_SYSROOT: ${{ github.workspace }}/sysroot
+        run: |
+          set -o pipefail
+          sh projects/mcc/test/verify-all.sh 2>&1 | tee verify-all.log
+          EXIT=${PIPESTATUS[0]}
+          echo "exit=$EXIT" >> "$GITHUB_OUTPUT"
+        continue-on-error: true
+
+      - name: Upload verify-all log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-all-log
+          path: verify-all.log
+
+      - name: Report status
+        run: |
+          if [ "${{ steps.gate.outputs.exit }}" = "0" ]; then
+            echo "::notice::verify-all PASS"
+          else
+            echo "::error::verify-all FAIL (exit=${{ steps.gate.outputs.exit }})"
+            exit "${{ steps.gate.outputs.exit }}"
+          fi
+
+  self-host:
+    if: ${{ github.event_name == 'schedule' && github.event.schedule == '30 */12 * * *' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential qemu-user 2>/dev/null || true
+
+      - name: Build meuos-sysroot
+        run: make -C projects/meuos-sysroot
+
+      - name: Build meuos-toolchain
+        env:
+          MEUOS_SYSROOT: ${{ github.workspace }}/sysroot
+        run: make -C projects/meuos-toolchain
+
+      - name: Build mcc
+        env:
+          MEUOS_SYSROOT: ${{ github.workspace }}/sysroot
+        run: make -C projects/mcc
+
+      - name: Run mt DWARF gate (readelf + objdump --line-numbers)
+        env:
+          MEUOS_SYSROOT: ${{ github.workspace }}/sysroot
+        run: |
+          make -C projects/meuos-toolchain check 2>&1 | tee mt-check.log
+        continue-on-error: true
+
+      - name: Run mcc self-host (check-sysroot-static)
+        id: selfhost
+        env:
+          MEUOS_SYSROOT: ${{ github.workspace }}/sysroot
+        run: |
+          set -o pipefail
+          make -C projects/mcc check-sysroot-static 2>&1 | tee self-host.log
+          EXIT=${PIPESTATUS[0]}
+          echo "exit=$EXIT" >> "$GITHUB_OUTPUT"
+        continue-on-error: true
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: self-host-log
+          path: |
+            mt-check.log
+            self-host.log
+
+      - name: Report status
+        run: |
+          if [ "${{ steps.selfhost.outputs.exit }}" = "0" ]; then
+            echo "::notice::self-host PASS"
+          else
+            echo "::error::self-host FAIL (exit=${{ steps.selfhost.outputs.exit }})"
+            exit "${{ steps.selfhost.outputs.exit }}"
+          fi

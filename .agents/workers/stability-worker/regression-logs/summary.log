@@ -1,0 +1,2 @@
+[20260806T044725Z] verify-all PASS 汇总: PASS=25 FAIL=0 SKIP=0  log=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/.agents/workers/stability-worker/regression-logs/verify-all-20260806T044725Z.log
+[20260806T044725Z] self-host PASS  log=/workspace/MeuOS-Kit/.agents/worktrees/regression-v2/.agents/workers/stability-worker/regression-logs/self-host-20260806T044725Z.log
