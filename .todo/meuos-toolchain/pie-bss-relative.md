@@ -1,6 +1,8 @@
 # PIE 动态链接里 libc .bss 全局缺 R_X86_64_RELATIVE（线程控制崩）
 
-> 状态：🔄 开放（2026-08-04/05 exec-integration-lite P0.3 阶段 C 验证中发现）
+> 状态：✅ 已闭环（2026-08-07 toolchain-pie-worker 回归门验证通过）
+> 闭环 commit：`ed78880f`（mcc-dev）
+> 回归门：`ld_pie_e2e.sh`（check-ld-pie）
 > 关联 commit：无（独立于 DTV/TLS 的既有/新缺陷）
 
 ## 现象
