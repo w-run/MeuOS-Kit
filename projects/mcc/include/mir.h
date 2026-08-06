@@ -398,6 +398,9 @@ uint32_t mgvn(MFn *fn);
 uint32_t mloadfwd(MFn *fn);
 uint32_t mmem2reg(MFn *fn);
 uint32_t mcombine(MFn *fn);
+uint32_t mfold(MFn *fn);
+uint32_t msdiv_pow2(MFn *fn);
+uint32_t mdce(MFn *fn);
 void mref_replace(MFn *fn, MVal *old, MRef nr);
 
 /* arena helpers (mir_util.c) */
@@ -664,6 +667,11 @@ void mfnm_term(MFnM *fm, MBlkM *b, MMOP op, MVal *s0, MBlkM *s1, MBlkM *s2,
 
 void mfnm_dump(MFnM *fm, FILE *out);
 void mfnm_free(MFnM *fm);
+
+/* Global flags defined in mfold.c, read by passes.c and emitters. */
+extern int g_opt_size;
+extern int g_fast_math;
+extern int g_mir_fold_aggressive;
 
 /* ---- Register allocation (P4) -------------------------------------------- */
 
