@@ -686,9 +686,38 @@ ldr_mem:
 			rn_str[i] = '\0';
 			if (reg_num(rn_str, &rn) < 0) return -1;
 			int32_t signed_off = 0;
+			int rm = -1;   /* register-offset form: ldr rd, [rn, rm] */
 			if (*mem == ',' || *mem == '#') {
 				while (*mem && (*mem == ',' || *mem == ' ' || *mem == '#')) mem++;
-				sscanf(mem, "%i", &signed_off);
+				/* peek at the remainder: a leading register name means
+				 * the register-offset form (`ldr rd, [rn, rm]`); a digit
+				 * or sign means an immediate. */
+				if (mem[0] == 'r' || mem[0] == 'd' ||
+				    (mem[0] >= 'a' && mem[0] <= 'w' &&
+				     (mem[1] >= '0' && mem[1] <= '9'))) {
+					char rm_str[16]; int j = 0;
+					while (*mem && *mem != ']' && *mem != ',' && j < 15)
+						rm_str[j++] = *mem++;
+					rm_str[j] = '\0';
+					if (reg_num(rm_str, &rm) < 0) return -1;
+				} else {
+					sscanf(mem, "%i", &signed_off);
+				}
+			}
+			if (rm >= 0) {
+				/* Register-offset form: ldr/str rd, [rn, rm] (no shift).
+				 * Encoding: 1110 010P U1 0 1 Rn Rd 0000 0000 Rm where
+				 * P=1 (offset, post-indexed when W=1 — we keep P=1, W=0
+				 * for the plain pre-indexed form used by mcc) and
+				 * U controls up/down.  The pre-fix code ignored Rm
+				 * entirely, encoding ldr rd, [rn] and reading the wrong
+				 * address — see projects/mcc/test/arm/varargs.c (the
+				 * reg_save_area pointer + i64 SETCCR together blew up
+				 * the cmp path on a stack underflow). */
+				uint32_t base = 0xE5900000 |
+				                ((uint32_t)is_load << 20);
+				emit32(out->bytes, base | (rn<<16) | (rd<<12) | rm);
+				return 0;
 			}
 			int U = (signed_off >= 0) ? 1 : 0;
 			uint32_t off = (uint32_t)(signed_off >= 0 ? signed_off : -signed_off);

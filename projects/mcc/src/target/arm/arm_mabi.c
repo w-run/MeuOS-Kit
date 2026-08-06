@@ -510,11 +510,17 @@ mabi_vastart(MFnM *fm, MOut *o, MVal *ap, uint32_t vafa)
 	int sp = vafa >> 12;                /* first stack arg offset from fp */
 
 	/* gp_offset = gp (bytes consumed in reg_save_area) */
-	mout_cst(o, MMOP_STORE, MT_I32, 0, 0, imm(fm, MT_I32, gp));
-	o->ins[o->nins - 1].addr = maddr(ap, 0, 1, 0);
+	{
+		MVal *gpc = mval_const(fm->host, MT_I32,
+		                       imm(fm, MT_I32, gp));
+		mout_addr(o, MMOP_STORE, MT_I32, 0, maddr(ap, 0, 1, 0), gpc);
+	}
 	/* fp_offset = 0 (no FP register save area) */
-	mout_cst(o, MMOP_STORE, MT_I32, 0, 0, imm(fm, MT_I32, 0));
-	o->ins[o->nins - 1].addr = maddr(ap, 0, 1, 4);
+	{
+		MVal *fpv = mval_const(fm->host, MT_I32,
+		                       imm(fm, MT_I32, 0));
+		mout_addr(o, MMOP_STORE, MT_I32, 0, maddr(ap, 0, 1, 4), fpv);
+	}
 	/* overflow_arg_area = fp + sp */
 	MVal *oa = tmp(fm, MT_PTR, "abi");
 	mout_addr(o, MMOP_LEA, MT_PTR, oa, maddr(fp, 0, 1, sp), 0);
@@ -531,16 +537,24 @@ mabi_vaarg(MFnM *fm, MOut *o, MInsM *in)
 	MVal *ap = in->src[0];
 	MVal *dst = in->dst;
 	/* On ARM, variadic float args are passed as integers (AAPCS rule),
-	 * so we always use gp_offset (offset 0) and advance by 4 bytes. */
+	 * so we always use gp_offset (offset 0).  The advance per argument is
+	 * 4 for 32-bit types and 8 for 64-bit types (register pair / stack
+	 * double-word).  Hardcoding 4 across all types breaks double and
+	 * long long — the gp_offset does not advance far enough and the
+	 * overflow_arg_area under-reads. */
 	int ooff = 0;          /* gp_offset field offset in va_list */
-	int oinc = 4;          /* per-argument advance */
+	int oinc = (in->dtype == MT_I64 || in->dtype == MT_F64) ? 8 : 4;
 	int limit = 16;        /* reg_save_area size: 4 × 4 = 16 bytes */
 
 	/* offset = gp_offset */
 	MVal *off = tmp(fm, MT_I32, "va");
 	mout_addr(o, MMOP_LOAD, MT_I32, off, maddr(ap, 0, 1, ooff), 0);
 	/* in_reg = offset < limit (unsigned) */
-	mout_cst(o, MMOP_CMP, MT_I32, 0, off, imm(fm, MT_I32, limit));
+	{
+		MVal *limv = mval_const(fm->host, MT_I32,
+		                       imm(fm, MT_I32, limit));
+		mout(o, MMOP_CMP, MT_I32, 0, off, limv);
+	}
 	MVal *inr = tmp(fm, MT_I32, "va");
 	MInsM *sc = mout(o, MMOP_SETCC, MT_I32, inr, 0, 0);
 	sc->cc = MCC_CC;
@@ -569,15 +583,28 @@ mabi_vaarg(MFnM *fm, MOut *o, MInsM *in)
 	mout_addr(o, MMOP_LOAD, in->dtype, dst, maddr(addr, 0, 1, 0), 0);
 
 	/* advance: reg path bumps gp_offset by oinc */
-	MVal *incr = tmp(fm, MT_I32, "va");
-	mout_cst(o, MMOP_AND, MT_I32, incr, mask, imm(fm, MT_I32, oinc));
-	MVal *nof = tmp(fm, MT_I32, "va");
-	mout(o, MMOP_ADD, MT_I32, nof, off, incr);
-	mout_addr(o, MMOP_STORE, MT_I32, 0, maddr(ap, 0, 1, ooff), nof);
-	/* overflow path: advance overflow_arg_area by 4 */
+	{
+		MVal *incv = mval_const(fm->host, MT_I32,
+		                       imm(fm, MT_I32, oinc));
+		MVal *incr = tmp(fm, MT_I32, "va");
+		mout(o, MMOP_AND, MT_I32, incr, mask, incv);
+		MVal *nof = tmp(fm, MT_I32, "va");
+		mout(o, MMOP_ADD, MT_I32, nof, off, incr);
+		mout_addr(o, MMOP_STORE, MT_I32, 0, maddr(ap, 0, 1, ooff), nof);
+	}
+	/* overflow path: advance overflow_arg_area by 8 always.
+	 * ARM AAPCS vararg caller (selcall) reserves 8 bytes per stack
+	 * argument (soff += 8) for all types, so the overflow area
+	 * pointer must advance by 8 regardless of the argument type.
+	 * Using argument size (oinc=4 for int) would under-advance
+	 * and misread the next argument. */
 	MVal *nstk = tmp(fm, MT_I32, "va");
 	mout(o, MMOP_NOT, MT_I32, nstk, mask, 0);
-	mout_cst(o, MMOP_AND, MT_I32, nstk, nstk, imm(fm, MT_I32, 4));
+	{
+		MVal *oiv = mval_const(fm->host, MT_I32,
+		                       imm(fm, MT_I32, 8));
+		mout(o, MMOP_AND, MT_I32, nstk, nstk, oiv);
+	}
 	MVal *nsp = tmp(fm, MT_PTR, "va");
 	mout(o, MMOP_ADD, MT_PTR, nsp, stkp, nstk);
 	mout_addr(o, MMOP_STORE, MT_PTR, 0, maddr(ap, 0, 1, 8), nsp);
