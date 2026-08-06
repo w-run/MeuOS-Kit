@@ -165,7 +165,7 @@ build/%.o: %.c
 
 -include $(DEPS)
 
-check: check-as-x86_64 check-as-tls-x86_64 check-as-sse-x86_64 check-as-libc-x86_64 check-as-sse-i386 check-as-cdq-i386 check-as-leal-i386 check-as-dwarf check-as-dwarf-eh check-as-arm-neg check-ld-x86_64 check-ld-cref check-ar-bsd check-ld-libpath check-ranlib check-libelf check-nm check-readelf check-readelf-dwarf check-strip check-objcopy check-objdump check-objdump-dwarf check-rtld $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(STRIP_BIN) $(OBJCOPY_BIN) $(OBJDUMP_BIN) $(ELF_PROBE) $(TEST_ARCHIVE)
+check: check-as-x86_64 check-as-tls-x86_64 check-as-sse-x86_64 check-as-libc-x86_64 check-as-sse-i386 check-as-cdq-i386 check-as-leal-i386 check-as-dwarf check-as-dwarf-eh check-as-arm-neg check-ld-x86_64 check-ld-cref check-ar-bsd check-ld-libpath check-ranlib check-libelf check-nm check-readelf check-readelf-dwarf check-strip check-objcopy check-objdump check-objdump-dwarf check-rtld check-ld-pie $(AR_BIN) $(AS_BIN) $(LD_BIN) $(RANLIB_BIN) $(NM_BIN) $(READELF_BIN) $(STRIP_BIN) $(OBJCOPY_BIN) $(OBJDUMP_BIN) $(ELF_PROBE) $(TEST_ARCHIVE)
 	@set -eu; \
 	test "$$($(AR_BIN) --version)" = "meuos-toolchain ar 0.2.0 (x86_64 bootstrap)"; \
 	test "$$($(AR_BIN) t $(TEST_ARCHIVE))" = hello.o; \
@@ -378,6 +378,9 @@ check-ld-libpath: $(AS_BIN) $(LD_BIN) $(MCC)
 
 check-rtld: $(AS_BIN) $(LD_BIN) $(RTLD_BIN)
 	sh test/rtld_e2e.sh "$(abspath $(AS_BIN))" "$(abspath $(LD_BIN))" "$(abspath $(RTLD_BIN))"
+
+check-ld-pie: $(AS_BIN) $(LD_BIN) $(READELF_BIN) $(RTLD_BIN)
+	sh test/ld_pie_e2e.sh "$(abspath $(AS_BIN))" "$(abspath $(LD_BIN))" "$(abspath $(READELF_BIN))" "$(abspath $(RTLD_BIN))"
 
 check-rtld-dtv: $(RTLD_BIN)
 	sh test/rtld_dtv.sh "$(abspath ../..)"
