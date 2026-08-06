@@ -235,6 +235,8 @@ SUPPORT_OBJS   := $(BUILD)/ctype/ctype.o $(BUILD)/signal/signal.o $(BUILD)/signa
 SUPPORT_OBJS   += $(BUILD)/errno/errno.o
 # Exception runtime (setjmp/longjmp base): _meuos_exc_throw + try helpers.
 SUPPORT_OBJS   += $(BUILD)/meuos_exc.o
+# C++ ABI (Itanium): __cxa_* + __gxx_personality_v0
+SUPPORT_OBJS   += $(BUILD)/cxxabi/cxxabi.o
 # startup.c — entry contract (__progname, getauxval); called from crt1.S.
 SUPPORT_OBJS   += $(BUILD)/startup.o
 # P2 gap batch: config strings, signal strings, passwd/group, byte order.
