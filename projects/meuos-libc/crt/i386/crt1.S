@@ -24,13 +24,20 @@ _start:
 	pushl %ecx
 	call __meuos_tls_init
 	addl $4, %esp
-	/* __libc_start_main(main, argc, argv, NULL, NULL, NULL, stack_end) */
+	/* __libc_start_main(main, argc, argv, init, fini, rtld_fini, stack_end)
+	 *
+	 * init = __libc_csu_init: walks .preinit_array, calls _init(),
+	 * then walks .init_array so compat archives have a named entry
+	 * point to hook into startup.
+	 * fini = __libc_csu_fini: walks .fini_array in reverse and calls
+	 * _fini(), registered with atexit so it runs on the exit() path.
+	 * rtld_fini = NULL: we are statically linked, no dynamic loader. */
 	movl (%esi), %eax       /* argc */
 	leal 4(%esi), %ebx      /* argv */
 	pushl %esi              /* stack_end */
 	pushl $0                /* rtld_fini */
-	pushl $0                /* fini */
-	pushl $0                /* init */
+	pushl $__libc_csu_fini
+	pushl $__libc_csu_init
 	pushl %ebx              /* argv */
 	pushl %eax              /* argc */
 	pushl $main
