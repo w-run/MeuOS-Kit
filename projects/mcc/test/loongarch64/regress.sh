@@ -9,7 +9,8 @@ abi=${TMPDIR:-/tmp}/mcc-la64-abi.$$.s
 tls=${TMPDIR:-/tmp}/mcc-la64-tls.$$.s
 loc=${TMPDIR:-/tmp}/mcc-la64-localvar.$$.s
 glob=${TMPDIR:-/tmp}/mcc-la64-globaladdr.$$.s
-trap 'rm -f "$asm" "$varargs" "$vla" "$abi" "$tls" "$loc" "$glob" "${asm}.large.c" "${asm}.large"' EXIT HUP INT TERM
+pie=${TMPDIR:-/tmp}/mcc-la64-pie.$$.s
+trap 'rm -f "$asm" "$varargs" "$vla" "$abi" "$tls" "$loc" "$glob" "$pie" "${asm}.large.c" "${asm}.large"' EXIT HUP INT TERM
 
 "$mcc" --target=loongarch64-linux -S -o "$asm" "$root/test/loongarch64/regress.c"
 "$mcc" --target=loongarch64-linux -S -o "$varargs" "$root/test/loongarch64/varargs.c"
@@ -82,6 +83,15 @@ grep -Eq 'pcalau12i[[:space:]].*pc_hi20\(g\)' "$glob"
 grep -Eq 'pcalau12i[[:space:]].*pc_hi20\(add2\)' "$glob"
 ! grep -Eq 'pcaddu12i' "$glob"
 
+# PIE (position-independent executable) gate: compiling with -fPIE must
+# produce PC-relative addressing for global variables and function calls.
+# Assert pcalau12i + %pc_hi20 / %pc_lo12 sequences for both data and
+# function symbols.
+"$mcc" --target=loongarch64-linux -fPIE -S -o "$pie" "$root/test/loongarch64/pie.c"
+grep -Eq 'pcalau12i[[:space:]].*pc_hi20\(global_var\)' "$pie"
+grep -Eq 'pcalau12i[[:space:]].*pc_hi20\(get_global\)' "$pie"
+! grep -Eq 'pcaddu12i' "$pie"
+
 # FP-constant .rodata gate (rr_fp): LoongArch has no 64-bit FP immediate, so
 # every float/double constant must be stashed in .rodata and loaded with
 # fld.s/fld.d via its pcalau12i-computed address.  The pre-fix emitter
@@ -90,7 +100,7 @@ grep -Eq 'pcalau12i[[:space:]].*pc_hi20\(add2\)' "$glob"
 # the .rodata stash (.quad/.long), the fld load, and the pcalau12i address
 # sequence; and forbid the old broken movgr2fr-from-constant materialisation.
 fpc=${TMPDIR:-/tmp}/mcc-la64-fpconst.$$.s
-trap 'rm -f "$asm" "$varargs" "$vla" "$abi" "$tls" "$loc" "$glob" "$fpc" "${asm}.large.c" "${asm}.large"' EXIT HUP INT TERM
+trap 'rm -f "$asm" "$varargs" "$vla" "$abi" "$tls" "$loc" "$glob" "$pie" "$fpc" "${asm}.large.c" "${asm}.large"' EXIT HUP INT TERM
 "$mcc" --target=loongarch64-linux -S -o "$fpc" "$root/test/loongarch64/fp_const.c"
 grep -Eq '^[.]section[[:space:]]+[.]rodata' "$fpc"
 # 1.5 (double) = 4609434218613702656 ; 2.25f (float) = 1073741824
