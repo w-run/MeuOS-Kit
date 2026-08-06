@@ -21,6 +21,10 @@ static _Thread_local unsigned long long exc_value;
 static _Thread_local void *exc_objbuf;     /* raw malloc'd buffer (for free) */
 static _Thread_local const void *exc_obj;  /* aligned object pointer */
 static _Thread_local void (*exc_objdtor)(void *);
+/* Base-subobject offset for catch(Base&) capturing a thrown Derived: the
+ * stored offset lets _meuos_exc_caught_obj() return obj+offset without
+ * copying.  0 means "the full object" (no slicing needed). */
+static _Thread_local int exc_obj_off;
 
 void
 _meuos_exc_try_begin(_meuos_exc_frame *frame)
@@ -81,7 +85,10 @@ _meuos_exc_throw_obj(int typecode, size_t size, size_t align,
 	uintptr_t base, aligned;
 	void *slot;
 
-	(void)offset; /* base-subobject slicing is a later increment (0 for now) */
+	/* Persist the base-subobject offset so _meuos_exc_caught_obj() can
+	 * return the base subobject pointer when the throw type is a derived
+	 * class captured as a base reference. */
+	exc_obj_off = offset;
 
 	/* Heap-allocate an aligned buffer to carry the object through the
 	 * longjmp (stack objects cannot survive unwind).  malloc already returns
@@ -125,7 +132,9 @@ _meuos_exc_throw_obj(int typecode, size_t size, size_t align,
 const void *
 _meuos_exc_caught_obj(void)
 {
-	return exc_obj;
+	if (!exc_obj)
+		return NULL;
+	return (const void *)((const char *)exc_obj + exc_obj_off);
 }
 
 int
@@ -145,4 +154,5 @@ _meuos_exc_caught_free(void)
 	exc_objbuf = NULL;
 	exc_obj = NULL;
 	exc_objdtor = NULL;
+	exc_obj_off = 0;
 }
