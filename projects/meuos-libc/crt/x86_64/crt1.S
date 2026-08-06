@@ -23,12 +23,19 @@ _start:
 	andq $-16, %rsp
 	movq %rdx, %rdi			/* envp */
 	call __meuos_tls_init
-	/* __libc_start_main(main, argc, argv, NULL, NULL, NULL, stack_end) */
+	/* __libc_start_main(main, argc, argv, init, fini, rtld_fini, stack_end)
+	 *
+	 * init = __libc_csu_init: walks .preinit_array, calls _init(),
+	 * then walks .init_array so compat archives have a named entry
+	 * point to hook into startup.
+	 * fini = __libc_csu_fini: walks .fini_array in reverse and calls
+	 * _fini(), registered with atexit so it runs on the exit() path.
+	 * rtld_fini = NULL: we are statically linked, no dynamic loader. */
 	movq $main, %rdi
 	movq (%r12), %rsi		/* argc */
 	leaq 8(%r12), %rdx		/* argv */
-	xorl %ecx, %ecx			/* init  = NULL */
-	xorl %r8d, %r8d			/* fini  = NULL */
+	leaq __libc_csu_init(%rip), %rcx /* init */
+	leaq __libc_csu_fini(%rip), %r8  /* fini */
 	xorl %r9d, %r9d			/* rtld_fini = NULL */
 	/* The 7th argument goes on the stack.  SysV x86_64 wants %rsp 16-byte
 	 * aligned at the call instruction, i.e. 8 mod 16 once the return

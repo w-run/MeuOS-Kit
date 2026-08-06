@@ -32,14 +32,23 @@ _start:
 	and sp, x19, #-16
 	mov x0, x3		/* envp for __meuos_tls_init */
 	bl __meuos_tls_init
-	/* __libc_start_main(main, argc, argv, NULL, NULL, NULL, stack_end) */
+	/* __libc_start_main(main, argc, argv, init, fini, rtld_fini, stack_end)
+	 *
+	 * init = __libc_csu_init: walks .preinit_array, calls _init(),
+	 * then walks .init_array so compat archives have a named entry
+	 * point to hook into startup.
+	 * fini = __libc_csu_fini: walks .fini_array in reverse and calls
+	 * _fini(), registered with atexit so it runs on the exit() path.
+	 * rtld_fini = NULL: we are statically linked, no dynamic loader. */
 	adrp x0, main
 	add x0, x0, :lo12:main
 	ldr x1, [x19]		/* argc */
 	add x2, x19, #8		/* argv */
-	mov x3, #0		/* init */
-	mov x4, #0		/* fini */
-	mov x5, #0		/* rtld_fini */
+	adrp x3, __libc_csu_init
+	add x3, x3, :lo12:__libc_csu_init
+	adrp x4, __libc_csu_fini
+	add x4, x4, :lo12:__libc_csu_fini
+	mov x5, #0		/* rtld_fini = NULL */
 	mov x6, x19		/* stack_end */
 	bl __libc_start_main
 	brk #0			/* unreachable: it exit()s */
