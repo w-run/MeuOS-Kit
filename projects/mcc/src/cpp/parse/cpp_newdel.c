@@ -1706,6 +1706,13 @@ exc_slice_ptr(struct func *f, struct type *ctype)
 	se = mkexpr(EXPRIDENT, &typeulong, NULL);
 	se->lvalue = true;
 	se->u.ident.decl = sd;
+	/* funcinit() with hasinit=false only allocates storage; auto objects
+	 * are uninitialised in C.  Without this zero store, the variable
+	 * carries stack garbage on the trivial case (no derived types match
+	 * the catch type, so the for-loop never writes __exc_slice), and
+	 * the slice pointer ends up at an arbitrary address — segfault on
+	 * any trivial class throw/catch pair. */
+	funcexpr(f, mkassignexpr(se, mkconstexpr(&typeulong, 0)));
 	ct = NULL;
 	for (i = 0; i < exc_tc_n; i++) {
 		struct block *bsy, *bsn;
