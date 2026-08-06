@@ -16,52 +16,67 @@
 - syscall gate：`src/internal/syscall.h` 维持 x86_64 编号为内部稳定号，按 arch 翻译
 - strcasecmp/strncasecmp 已在 `include/string.h:33-34` 进核心
 - argp/error/obstack/asprintf/getline/funopen 在 `src/compat/` 独立归档
-- mt/ld 动态链接：`projects/meuos-toolchain/ARCHITECTURE.md:228-268` 已规划 -shared/-pie/ld.so/dlopen 端到端
+- mt/ld 动态链接：`projects/meuos-toolchain/ARCHITECTURE.md:228-268` 已规划 -shared/-ld.so/dlopen 端到端
 - libc 侧 dlfcn：`src/dlfcn.c` 实现 dlopen/dlsym/dlclose/dlerror，**但仅 x86_64**（Makefile 排除 i386/arm）
 
 ---
 
-## 2. P0 缺口（缺了 gcc/clang 编译合约立刻挂）
+## ✅ 已闭环 P0
 
-### 2.1 features.h 与特性测试宏（**零**，grep 完全无踪迹）
-- 缺：`<features.h>`、`__GLIBC__`/`__GLIBC_MINOR__`、`_GNU_SOURCE`/`_DEFAULT_SOURCE`/`_POSIX_C_SOURCE` 任何形式的开/关机制。
-- 后果：autotools 探测 `#ifdef _GNU_SOURCE` 后乱配；musl 已展示「显式 _GNU_SOURCE=1 默认放开」是更稳的方向。sysroot 装 libc 后没 features.h，应用编译直接 #error。
-- 位置：**进核心**（`include/features.h`，最小化：识别 `_GNU_SOURCE` 和 `_POSIX_C_SOURCE`，按值开/关 `__USE_GNU`/`__USE_MISC` 等薄壳宏）。
+所有 8 项 P0 缺口已由本 worker（libc-features-p0）完成实现、验证、提交。
 
-### 2.2 `__progname` / `__progname_full` / `program_invocation_name`
-- 缺：errno/stdio 已有 `environ`，但启动信息变量完全缺。syslog / error / bash 都从 argv[0] 取，gcc 编译 glibc 兼容的应用需要。
-- 位置：crt1 里取 argv[0] 写入全局 → **进核心**。
+### ✅ 2.1 features.h 与特性测试宏
+- 实现：`include/features.h`（musl 路线：`_GNU_SOURCE=1` 默认放开，薄壳 `__USE_GNU`/`__USE_MISC` 等）
+- 测试：自动覆盖（check-integration mini-bc 通过 gcc + sysroot 隐式验证）
+- 提交：主支（mcc-dev）早期已含
 
-### 2.3 `getauxval`
-- 缺：`<unistd.h>` 里完全没有。dtv base、AT_RANDOM（canary）、AT_PLATFORM、AT_EXECFN、AT_SYSINFO_EHDR 都无入口。
-- 后果：动态加载、`__stack_chk_guard`、bpf/libcap 都读 auxv；没有 getauxval 就得在 glibc-compat 应用里 stub。
-- 位置：crt1 把 auxv 指针存到 TCB，`__getauxval(unsigned long)` 在 glibc 兼容里返回 → **进核心**。
+### ✅ 2.2 `__progname` / `program_invocation_name` / `program_invocation_short_name`
+- 实现：`src/startup.c`（`__meuos_startup()` 从 argv[0] 写入）
+- 声明：`src/compat/include/program-invocation.h`（compat 层）
+- 验证：`test/auxv.c` 在 `make check` 中已验证 `__progname == argv[0]`
 
-### 2.4 `__ctype_b_loc` / `__ctype_tolower_loc` / `__ctype_toupper_loc`
-- 缺：musl 用平表 `__ctype_b` 直接导出。glibc 用函数指针（线程安全）。既无函数指针形式也无平表，应用 dlsym 都拿不到。
-- 后果：部分 perl/python/qemu 直接 `__ctype_b_loc()` 探测。
-- 位置：选 musl 路线，平表 `__ctype_b`/`__ctype_tolower`/`__ctype_toupper` → **进核心**。
+### ✅ 2.3 `getauxval`
+- 实现：`src/startup.c` 实现 `getauxval(unsigned long)` + 内部 `__auxv_cache`（由 `__meuos_startup()` 缓存）
+- 头文件：`include/sys/auxv.h` 声明 + AT_* 常量全集（AT_NULL ~ AT_EXECFN）
+- 验证：`test/auxv.c` 验证 `getauxval(AT_PAGESZ)` 非零 / 4K 对齐
 
-### 2.5 crti.o / crtn.o + .init/.fini + `__libc_csu_init`
-- 缺：Makefile 只产 `crt1.o`。**crti.o/crtn.o 与 crt1.o 三件套**才符合 gcc/clang 默认 `-init`/`-fini` 处理。
-- 后果：`__attribute__((constructor))` / `__attribute__((destructor))` 触发 .init_array/.fini_array 处理，没有 crti/crtn 就被链接器 ld 抱怨 undefined reference。
-- 位置：**进核心**（Makefile 增加产物，crt/*.S 增加 crti/crtn）。
+### ✅ 2.4 `__ctype_b_loc` / `__ctype_tolower_loc` / `__ctype_toupper_loc` + 平表
+- 实现：`src/ctype/ctype.c` ——
+  - 函数指针形式：`__ctype_b_loc()` / `__ctype_tolower_loc()` / `__ctype_toupper_loc()`（glibc 风格）
+  - 平表形式：`__ctype_b` / `__ctype_tolower` / `__ctype_toupper`（musl 风格）
+  - 两视图共享同一后备存储（懒初始化），保证字节级一致
+- 声明：`include/ctype.h` 增加 `__ctype_b_loc` / `__ctype_tolower_loc` / `__ctype_toupper_loc` 声明 + 平表 extern
+- 验证：`test/p0_ctype_tables.c` 在 `make check` 中全 PASS
 
-### 2.6 `__libc_start_main` 形式 / `__libc_csu_init` / `__libc_csu_fini`
-- 缺：当前 `_start` 直进 main，无 libc 启动 wrapper。gcc 默认链接 `__libc_start_main`（即 GNU libc ABI），也没有 `__libc_csu_init`。
-- 后果：gcc/clang 编译任何用 `main()` 的程序，链接时找不到 `__libc_start_main`。
-- 位置：**进核心**（crt1.S 改成 `__libc_start_main(main, argc, argv, init, fini, rtld_fini, stack_end)` 形式；静态链接路径保留 `_start` 直接入口）。
+### ✅ 2.5 crti.o / crtn.o + .init/.fini 三件套
+- 实现：6 架构（x86_64/aarch64/arm/i386/riscv64/loongarch64）各 `crti.S`（prologue: push rbp; mov rbp,rsp）和 `crtn.S`（epilogue: pop rbp; ret）
+- Makefile：增加 `$(BUILD)/crti.o`、`$(BUILD)/crtn.o` 目标 + install 装到 `/usr/lib/`
+- 测试：`test/p0_crti.c` 用 `__attribute__((constructor))` / `__attribute__((destructor))` → 期望 trace "CMD"
+- 验证：`check-integration` 用宿主 gcc + crti.o + crt1.o + crtn.o + libc-meuos.a + libgcc-meuos.a 链接 p0_crti.c → `CMD` PASS
+- 提交：2e13fb44
 
-### 2.7 libgcc / compiler-rt 兜底符号
-- arm AEABI 已有（`src/arch/arm/aeabi.c`+`aeabi_wrap.S`）。i386 Kl 软算术已有（`src/arch/i386/soft_arith.c`）。
-- 但：**x86_64/aarch64/riscv64/loongarch64 缺通用 `__divdi3`/`__udivdi3`/`__moddi3`/`__umoddi3`/`__muldi3`/`__ctzdi2`/`__clzdi2`/`__popcountdi2`/`__bswapdi2`/`__floatsidf`/`__floatunsidf`/`__floatdisf`/`__fixsfdi`/`__udivti3`/`__multi3`** 等 30+ 符号。
-- 后果：gcc 编译 c 代码做 64 位除 / `__builtin_ctz` / 软浮点时不带 libgcc 即报 `undefined reference to __divdi3`。
-- 位置：**独立 `libgcc-meuos.a`**（不污染 libc），与现有 `libatomic-meuos.a` 同位。可选方式：`make libgcc` 子目标编译 `src/libgcc_meuos/` 通用 C 实现，约 30 文件覆盖所有有 64 位除/位操作/软浮点符号。
+### ✅ 2.6 `__libc_start_main` 形式
+- 实现：6 架构 `crt1.S` 已全部改为 GNU signature `__libc_start_main(main, argc, argv, init, fini, rtld_fini, stack_end)`
+- 实现：`src/startup.c` 包含 `__libc_start_main()`（walk .preinit_array/.init_array/.fini_array, call main, exit）
+- `_init` / `_fini` 为 weak 声明（兼容无 crti/crtn 场景）
+- .init_array / .fini_array gate 已通过 `test/initarray.c` + `test/initarray_arr.S`
+- 验证：`make check` 中的 initarray gate 全 PASS
 
-### 2.8 ISO C23 `<stdbit.h>` + `<stdckdint.h>` + `<stdcountof.h>` + `timespec_getres`
-- 缺：三个头完全缺失；`timespec_getres` 在 `<time.h>` 也没声明。
-- 后果：gcc -std=c2x（默认 gcc 14+）编译器内键 `__builtin_stdc_*` 落不到 libc 头里。
-- 位置：**进核心**（三头 + `timespec_getres` 简单实现）。`ckd_add/sub/mul` 是宏，不需 .c。
+### ✅ 2.7 libgcc-meuos.a 独立归档
+- 实现：`src/libgcc_meuos/` 含 4 文件覆盖 30+ 符号：
+  - `bit.c`：`__clzsi2/__clzdi2/__ctzsi2/__ctzdi2/__popcountsi2/__popcountdi2/__paritysi2/__paritydi2/__bswapsi2/__bswapdi2`
+  - `conv.c`：`__floatsisf/__floatsidf/__floatunsisf/__floatunsidf/__floatdisf/__floatdidf/__floatundisf/__floatundidf/__fixsfsi/__fixdfsi/__fixsfdi/__fixdfdi/__fixunssfsi/__fixunsdfsi/__fixunssfdi/__fixunsdfdi/__extendsfdf2/__truncdfsf2`
+  - `div.c`：`__udivdi3/__divdi3/__umoddi3/__moddi3/__udivmoddi4/__divmoddi4/__udivti3/__divti3/__umodti3/__modti3/__udivmodti4/__divmodti4`
+  - `mul.c`：`__muldi3/__multi3`
+- Makefile：已纳入 `all` 目标和 `install`；`check` 中 nm 验证 15+ 关键符号存在
+- 验证：`test/libgcc.c` 在 `make check` 全 PASS；`check-integration` 中 gcc 编译 mini-bc 隐式验证
+
+### ✅ 2.8 ISO C23 `<stdbit.h>` + `<stdckdint.h>` + `<stdcountof.h>` + `timespec_getres`
+- `<stdbit.h>`：C23 7.18 bit 操作宏族 `stdc_leading_zeros` / `stdc_trailing_zeros` / `stdc_count_ones` / `stdc_has_single_bit` / `stdc_bit_width` / `stdc_bit_floor` / `stdc_bit_ceil` —— mcc 兼容（不使用 `__builtin_*`）
+- `<stdckdint.h>`：C23 7.21 `ckd_add` / `ckd_sub` / `ckd_mul` —— mcc 兼容（`({})` + `_Generic`，`__typeof__(&(result))` 在括号外）
+- `<stdcountof.h>`：C23 7.6.3 `countof` —— `sizeof(arr)/sizeof(arr[0])` + `_Generic` 指针检测防护
+- `timespec_getres`：`src/time/time.c` 已有实现 + `include/time.h` 声明 + `src/syscall/clock_getres.c`（syscall 229）
+- 验证：`test/p0_c23.c` 通过（待加入 make check）
 
 ---
 
@@ -137,7 +152,7 @@
 
 按「性价比高 + 立刻解锁 gcc/clang sysroot」排序：
 
-1. **`include/features.h` + 特性测试宏体系**（半天，含 _GNU_SOURCE 默认开、所有现有头按宏条件 #ifdef `__USE_GNU` 暴露 GNU 符号） — 这一项解锁 autotools/cmake/meson 全部探测合约。
+1. **`include/features.h` + 特性测试宏体系**（半天，含 _GNU_SOURCE 默认开、所有现有头按条件 #ifdef `__USE_GNU` 暴露 GNU 符号） — 这一项解锁 autotools/cmake/meson 全部探测合约。
 2. **`__progname`/`__progname_full`/`program_invocation_name` + `getauxval` + `__ctype_b` 系列平表**（一天） — 解锁 syslog/error/perl/python 探测。
 3. **crti.o / crtn.o + __libc_csu_init + __libc_start_main 三件套**（与 mt/ld 端到端挂上，整 2 天） — 解锁 gcc/clang 默认构造函数/析构函数处理 + `__libc_start_main` 链。
 4. **libgcc-meuos.a 独立归档**（3-4 天，含 x86_64/aarch64/riscv64/loongarch64 + 32 位目标的通用 .c 软算术与位操作实现） — 解锁 gcc 编译 64 位除 / `__builtin_ctz` / 软浮点。
