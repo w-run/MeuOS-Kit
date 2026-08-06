@@ -242,3 +242,16 @@ clock(void)
 		return (clock_t)-1;
 	return usage.tms_utime + usage.tms_stime;
 }
+
+int
+timespec_getres(struct timespec *ts, int base)
+{
+	if (!ts)
+		return -1;
+	switch (base) {
+	case TIME_UTC:
+		return clock_getres(CLOCK_REALTIME, ts) < 0 ? -1 : 0;
+	default:
+		return -1;
+	}
+}

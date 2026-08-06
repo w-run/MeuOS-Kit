@@ -199,7 +199,7 @@ SYSCALL_OBJS   := $(addprefix $(BUILD)/syscall/, \
                   getpid.o gettid.o getppid.o getcwd.o chdir.o \
                   getrusage.o \
                   dup.o dup2.o pipe.o waitpid.o wait.o wait4.o nanosleep.o \
-                  clock_gettime.o getdents64.o socketcall.o chmod.o fchmod.o \
+                  clock_gettime.o clock_getres.o getdents64.o socketcall.o chmod.o fchmod.o \
                   access.o sched_yield.o select.o \
                   fchown.o chown.o getuid.o getgid.o geteuid.o getegid.o \
                   uid.o \
@@ -450,6 +450,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/time test/time.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/libgen test/libgen.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/ctype test/ctype.c
+	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/p0-ctype-tables test/p0_ctype_tables.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/assert test/assert.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/c11-headers test/c11_headers.c
 	$(MCC) --specs=meuos --sysroot=$(abspath $(SYSROOT)) -o /tmp/meuos-libc-check/syscall-fs test/syscall_fs.c
@@ -557,6 +558,7 @@ check: $(ATOMIC_LIB) $(LIBGCC_LIB)
 	/tmp/meuos-libc-check/time
 	/tmp/meuos-libc-check/libgen
 	/tmp/meuos-libc-check/ctype
+	/tmp/meuos-libc-check/p0-ctype-tables
 	/tmp/meuos-libc-check/assert
 	/tmp/meuos-libc-check/c11-headers
 	/tmp/meuos-libc-check/syscall-fs
