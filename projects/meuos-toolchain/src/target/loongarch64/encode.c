@@ -10,7 +10,8 @@
  *            $f0-$f31 (also $fa0-$fa7, $ft0-$ft15, $fs0-$fs15)
  *
  * Relocation markers (mcc / GNU-as compatible):
- *   %pc_hi20(sym) %pc_lo12(sym)         PC-relative medium/large code model
+ *   %pc_hi20(sym) %pc_lo12(sym)          PC-relative medium/large code model
+ *   %pcaddu_lo12(sym)                    pcaddu12i LO12: (S+A-P)&0xFFF
  *   %got_pc_hi20(sym) %got_pc_lo12(sym) GOT-relative
  *   %ie_pc_hi20(sym) %ie_pc_lo12(sym)   TLS initial-exec
  *   %gd_pc_hi20(sym)                    TLS general-dynamic
@@ -41,6 +42,9 @@
 #define RLA_TLS_LE_LO12    84
 #define RLA_TLS_LE64_LO20  85
 #define RLA_TLS_LE64_HI12  86
+
+/* pcaddu12i LO12: (S+A-P) & 0xFFF (custom, replaces unused 99 slot) */
+#define RLA_PCADDU12I_LO12 99
 
 /* ---- Local helpers ---- */
 
@@ -165,6 +169,7 @@ parse_fcc(const char *name)
 enum {
 	RELK_PLAIN = 0,
 	RELK_PC_HI20, RELK_PC_LO12,
+	RELK_PCADDU_LO12,
 	RELK_GOT_PC_HI20, RELK_GOT_PC_LO12,
 	RELK_IE_PC_HI20, RELK_IE_PC_LO12,
 	RELK_GD_PC_HI20,
@@ -194,6 +199,7 @@ reloc_kind_of(const char *tok)
 	 * to RELK_PLAIN (wrong relocation type, e.g. PCALA_LO12 for TLS). */
 	if      (!strncmp(tok, "%pc_hi20(",      9)) return RELK_PC_HI20;
 	else if (!strncmp(tok, "%pc_lo12(",      9)) return RELK_PC_LO12;
+	else if (!strncmp(tok, "%pcaddu_lo12(", 13)) return RELK_PCADDU_LO12;
 	else if (!strncmp(tok, "%got_pc_hi20(", 13)) return RELK_GOT_PC_HI20;
 	else if (!strncmp(tok, "%got_pc_lo12(", 13)) return RELK_GOT_PC_LO12;
 	else if (!strncmp(tok, "%ie_pc_hi20(",  13)) return RELK_IE_PC_HI20;
@@ -384,6 +390,7 @@ relkind_to_type(int rk)
 	switch (rk) {
 	case RELK_PC_HI20:    return RLA_PCALA_HI20;
 	case RELK_PC_LO12:    return RLA_PCALA_LO12;
+	case RELK_PCADDU_LO12: return RLA_PCADDU12I_LO12;
 	case RELK_GOT_PC_HI20:return RLA_GOT_PC_HI20;
 	case RELK_GOT_PC_LO12:return RLA_GOT_PC_LO12;
 	case RELK_IE_PC_HI20: return RLA_TLS_IE_PC_HI20;
@@ -858,8 +865,10 @@ branch2:
 
 	/* === pcaddu12i rd, %pc_hi20(sym) ===
 	 * PC-relative high 20 (large code model): rd = PC + signext(imm20)<<12.
-	 * Pairs with `addi.d rd, rd, %pc_lo12(sym)`.  Same 1RI20 imm20 field as
-	 * pcalau12i but opcode 0x1C.  R_LARCH_PCALA_HI20 patches the field. */
+	 * Pairs with `addi.d rd, rd, %pcaddu_lo12(sym)`.  Same 1RI20 imm20 field as
+	 * pcalau12i but opcode 0x1C.  R_LARCH_PCALA_HI20 patches the field;
+	 * apply.c distinguishes pcalau12i (0x1A, page formula) from pcaddu12i
+	 * (0x1C, delta>>12 formula) by the opcode high byte. */
 	if (strcmp(mnemonic, "pcaddu12i") == 0 && nops == 2 &&
 	    ops[0].kind == 1 && ops[1].kind == 4) {
 		unsigned rd = (unsigned)ops[0].reg;
