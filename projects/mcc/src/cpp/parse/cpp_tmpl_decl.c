@@ -1,14 +1,12 @@
 /* cpp_tmpl_decl.c - m++ (C++) function/class template declaration.
  *
- * Stage C.3.2: split from the original cpp_tmpl_decl.c.  Now contains
- * only cpp_template_decl (the template header + body dispatcher) and
- * tmpl_param_is_nttp.  Lookup helpers moved to cpp_tmpl_lookup.c;
- * specialization parsers moved to cpp_tmpl_spec.c.
+ * Stage C.3.2: split; now contains only cpp_template_decl (the template
+ * header + body dispatcher) and tmpl_param_is_nttp.  Lookup helpers
+ * moved to cpp_tmpl_lookup.c; specialization parsers to cpp_tmpl_spec.c.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
 #include "util.h"
 #include "mcc.h"
 #include "cpp.h"
@@ -19,7 +17,6 @@
 /* Cross-file: specialization parsers (defined in cpp_tmpl_spec.c). */
 extern void cpp_class_specialization(struct scope *s);
 extern void cpp_function_specialization(struct scope *s);
-
 cpp_template_decl(struct scope *s, struct type *owner)
 {
 	struct cpp_template *tmpl;

@@ -1,26 +1,29 @@
 /* cpp_tmpl_spec.c - m++ (C++) template specialization parsers.
  *
- * Stage C.3.2: split from cpp_tmpl_decl.c.  Class template partial
- * specialization and function template explicit specialization.
+ * Stage C.3.2: split from cpp_tmpl_decl.c.  Class-template partial
+ * specialization and function-template explicit specialization.
  *
- * Cross-file entry points (both called from cpp_template_decl in
- * cpp_tmpl_decl.c, made non-static):
+ * Cross-file entry points (called from cpp_template_decl in
+ * cpp_tmpl_decl.c; made non-static):
  *   cpp_class_specialization
  *   cpp_function_specialization
- *   cpp_spec_type_of  (internal helpers)
+ *   cpp_spec_type_of  (internal helpers, static)
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
 #include "util.h"
 #include "mcc.h"
 #include "cpp.h"
-static struct type *
 #include "cpp_internal.h"
 #include "../../c/parse/decl_internal.h"
 #include "../../c/parse/expr_internal.h"
-
+/* Resolve a specialization explicit-template-argument token name to the
+ * concrete type it names (`int` -> &typeint, `long` -> &typelong, a user
+ * tag via scopegettag).  Returns NULL when the name is not a recognizable
+ * type.  Used by cpp_function_specialization to build the specialization's
+ * mangled instantiation key. */
+struct type *
 cpp_spec_type_of(struct scope *s, const char *nm)
 {
 	if (strcmp(nm, "int") == 0)     return &typeint;
@@ -448,4 +451,3 @@ cpp_function_specialization(struct scope *s)
  * use with concrete type arguments.  `owner` is the enclosing class for
  * a member template (`template<...> T get() {...}` inside a class body),
  * or NULL for a file-scope function/class template. */
-void

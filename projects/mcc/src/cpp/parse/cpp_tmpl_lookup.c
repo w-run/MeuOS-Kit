@@ -1,4 +1,4 @@
-/* cpp_tmpl_lookup.c - m++ (C++) template lookup and abbreviation helpers.
+/* cpp_tmpl_lookup.c - m++ (C++) template lookup and abbr helpers.
  *
  * Stage C.3.2: split from cpp_tmpl_decl.c.  Template name lookup,
  * sizeof... pack query, and abbreviated function template lowering.
@@ -12,15 +12,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
 #include "util.h"
 #include "mcc.h"
 #include "cpp.h"
-int
 #include "cpp_internal.h"
 #include "../../c/parse/decl_internal.h"
 #include "../../c/parse/expr_internal.h"
-
+int
+cpp_sizeof_pack(void)
 {
 	return g_cpp_pack_depth > 0 ? g_cpp_pack_stack[g_cpp_pack_depth - 1] : 0;
 }
@@ -301,10 +300,3 @@ not_abbrev:
 /* Dummy function-pointer type + decl for the template-call placeholder
  * expression (satisfies the TLPAREN "called object" checks until the real
  * instantiation replaces it). */
-
-/* Resolve a specialization explicit-template-argument token name to the
- * concrete type it names (`int` -> &typeint, `long` -> &typelong, a user
- * tag via scopegettag).  Returns NULL when the name is not a recognizable
- * type.  Used by cpp_function_specialization to build the specialization's
- * mangled instantiation key. */
-static struct type *
