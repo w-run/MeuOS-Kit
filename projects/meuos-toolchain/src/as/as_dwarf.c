@@ -43,15 +43,166 @@ dwarf_u32(struct as_file *as, struct as_section *sec, uint32_t v)
 }
 
 static int
+dwarf_u64(struct as_file *as, struct as_section *sec, uint64_t v)
+{
+	unsigned char buf[8];
+	buf[0] = (unsigned char)v;
+	buf[1] = (unsigned char)(v >> 8);
+	buf[2] = (unsigned char)(v >> 16);
+	buf[3] = (unsigned char)(v >> 24);
+	buf[4] = (unsigned char)(v >> 32);
+	buf[5] = (unsigned char)(v >> 40);
+	buf[6] = (unsigned char)(v >> 48);
+	buf[7] = (unsigned char)(v >> 56);
+	return as_append_bytes(as, sec, buf, 8);
+}
+
+static int
 dwarf_u8(struct as_file *as, struct as_section *sec, unsigned char v)
 {
 	return as_append_bytes(as, sec, &v, 1);
 }
 
 static int
+dwarf_sleb128(struct as_file *as, struct as_section *sec, int64_t value)
+{
+	unsigned char b;
+	int more = 1;
+	while (more) {
+		b = (unsigned char)(value & 0x7f);
+		value >>= 7;
+		if ((value == 0 && !(b & 0x40)) || (value == -1 && (b & 0x40)))
+			more = 0;
+		else
+			b |= 0x80;
+		if (as_append_bytes(as, sec, &b, 1) != 0)
+			return -1;
+	}
+	return 0;
+}
+
+static int
 dwarf_string(struct as_file *as, struct as_section *sec, const char *s)
 {
 	return as_append_bytes(as, sec, s, strlen(s) + 1);
+}
+
+/* DW_EH_PE constants (repeated from ld/elfout.c for standalone use
+ * in the assembler; these are not exposed in the public header). */
+#define DW_EH_PE_absptr  0x00
+#define DW_EH_PE_udata4  0x03
+#define DW_EH_PE_sdata4  0x0b
+#define DW_EH_PE_pcrel   0x10
+
+/* Return the byte width of a DW_EH_PE value encoding (ignoring
+ * application mode bits like pcrel/textrel/datarel). */
+static int
+dwarf_eh_pe_width(uint8_t enc)
+{
+	switch (enc & 0x0f) {
+	case 0x00: return 0; /* DW_EH_PE_absptr: native pointer width handled below */
+	case 0x01: return 0; /* uleb128 */
+	case 0x02: return 2; /* udata2 */
+	case 0x03: return 4; /* udata4 */
+	case 0x04: return 8; /* udata8 */
+	case 0x09: return 0; /* sleb128 */
+	case 0x0a: return 2; /* sdata2 */
+	case 0x0b: return 4; /* sdata4 */
+	case 0x0c: return 8; /* sdata8 */
+	default:   return 0;
+	}
+}
+
+/* Emit a value using the given DW_EH_PE encoding (offset only, no
+ * application-mode fixup like pcrel).  Returns the number of bytes
+ * written, or -1 on error. */
+static int
+dwarf_eh_emit_value(struct as_file *as, struct as_section *sec,
+                    uint64_t val, uint8_t enc)
+{
+	uint8_t fmt = enc & 0x0f;
+	switch (fmt) {
+	case 0x00: /* absptr — native pointer width */
+		if (as->target && as->target->elf_class == 2)
+			return dwarf_u64(as, sec, val);
+		return dwarf_u32(as, sec, (uint32_t)val);
+	case 0x03: /* udata4 */
+		return dwarf_u32(as, sec, (uint32_t)val);
+	case 0x0b: /* sdata4 */
+		return dwarf_u32(as, sec, (uint32_t)(int32_t)(int64_t)val);
+	case 0x04: /* udata8 */
+	case 0x0c: /* sdata8 */
+		return dwarf_u64(as, sec, val);
+	case 0x02: /* udata2 */
+	case 0x0a: /* sdata2 */
+	{
+		unsigned char buf[2];
+		buf[0] = (unsigned char)val;
+		buf[1] = (unsigned char)(val >> 8);
+		return as_append_bytes(as, sec, buf, 2);
+	}
+	default:
+		return as_error(as, "unsupported DW_EH_PE encoding 0x%02x", enc);
+	}
+}
+
+/* Build the CIE augmentation string from the current state. */
+static const char *
+cie_augmentation(struct as_file *as, char *buf, size_t bufsz)
+{
+	size_t pos = 0;
+	(void)bufsz;
+	buf[pos++] = 'z';
+	buf[pos++] = 'R';
+	if (as->cfi_personality_set)
+		buf[pos++] = 'P';
+	if (as->cfi_lsda_set)
+		buf[pos++] = 'L';
+	buf[pos] = '\0';
+	return buf;
+}
+
+/* Emit echo of augmentation data for a CIE.
+ * Returns the number of bytes written (before the DW_CFA_nop padding). */
+static int
+emit_cie_augmentation_data(struct as_file *as, struct as_section *eh,
+                            const char *aug)
+{
+	size_t start = eh->size;
+	(void)aug;
+
+	/* Augmentation data layout matches augmentation string order:
+	 * "zR"  → [R encoding byte]
+	 * "zRP" → [P encoding, personality pointer... , R encoding byte]
+	 * "zRL" → [L encoding byte, R encoding byte]
+	 * "zRPL" → [P encoding, personality pointer... , L encoding byte, R encoding byte] */
+
+	if (as->cfi_personality_set) {
+		dwarf_u8(as, eh, as->cfi_personality_encoding);
+		/* Personality pointer: emit 0 placeholder + fixup */
+		if (as->cfi_personality_symbol) {
+			size_t pers_pos = eh->size;
+			int pers_width = dwarf_eh_pe_width(as->cfi_personality_encoding);
+			if (pers_width == 0)
+				pers_width = (as->target && as->target->elf_class == 2) ? 8 : 4;
+			/* Emit zero bytes for the pointer */
+			unsigned char zero = 0;
+			int j;
+			for (j = 0; j < pers_width; j++)
+				as_append_bytes(as, eh, &zero, 1);
+			/* Add fixup for the personality symbol */
+			unsigned reloc_type = (pers_width == 8) ?
+				MT_R_X86_64_64 : MT_R_X86_64_32;
+			as_add_fixup(as, eh, (size_t)pers_pos, (unsigned)pers_width,
+			             reloc_type, 0, as->cfi_personality_symbol);
+		}
+	}
+	if (as->cfi_lsda_set) {
+		dwarf_u8(as, eh, as->cfi_lsda_encoding);
+	}
+	/* FDE encoding (always present with "zR") */
+	dwarf_u8(as, eh, as->target->dwarf_fde_encoding);
+	return (int)(eh->size - start);
 }
 
 int
@@ -62,6 +213,7 @@ emit_dwarf(struct as_file *as)
 	struct as_section *dl;
 	struct as_section *eh;
 	uint64_t prev_offset, prev_line, header_length, total_length;
+	char augbuf[8];
 
 	/* ---- .debug_line ---- */
 	if (as->dwarf_loc_count == 0)
@@ -179,18 +331,51 @@ eh_frame:
 	{   uint32_t cie_offset = (uint32_t)eh->size;
 		uint32_t cie_len_pos = (uint32_t)eh->size;
 		unsigned char pad = 0;
+		int fde_addr_width;  /* byte width of FDE address fields */
+		int cie_align;
+
+		cie_augmentation(as, augbuf, sizeof(augbuf));
+
+		/* Determine FDE address field width from the encoding */
+		{
+			uint8_t enc = as->target->dwarf_fde_encoding;
+			int w = dwarf_eh_pe_width(enc);
+			if (w > 0)
+				fde_addr_width = w;
+			else if (as->target && as->target->elf_class == 2)
+				fde_addr_width = 8;
+			else
+				fde_addr_width = 4;
+		}
+		/* CIE alignment: 4 bytes for 32-bit, 8 bytes for 64-bit targets */
+		cie_align = (as->target && as->target->elf_class == 2) ? 8 : 4;
 
 		dwarf_u32(as, eh, 0);  /* placeholder length */
 		dwarf_u32(as, eh, 0);  /* CIE id */
 		dwarf_u8(as, eh, 1);   /* version */
-		dwarf_string(as, eh, "zR"); /* augmentation */
-		dwarf_uleb128(as, eh, 1);   /* code alignment */
-		dwarf_uleb128(as, eh, 1);   /* data alignment */
-		dwarf_u8(as, eh, 16);       /* return address reg (x86_64) */
-		dwarf_uleb128(as, eh, 1);   /* augmentation data length */
-		dwarf_u8(as, eh, 0x00);     /* FDE encoding: absolute */
-		dwarf_u8(as, eh, 0x00);     /* DW_CFA_nop */
-		while (eh->size % 4 != 0)
+		dwarf_string(as, eh, augbuf); /* augmentation (dynamic) */
+		dwarf_uleb128(as, eh, as->target->dwarf_code_align); /* code alignment */
+		dwarf_sleb128(as, eh, as->target->dwarf_data_align); /* data alignment */
+		dwarf_u8(as, eh, as->target->dwarf_ra_reg);          /* return address reg */
+		/* augmentation data length (written after we know the size) */
+		{   uint32_t aug_data_len_pos = (uint32_t)eh->size;
+			dwarf_uleb128(as, eh, 0); /* placeholder */
+			uint32_t aug_start = (uint32_t)eh->size;
+			emit_cie_augmentation_data(as, eh, augbuf);
+			uint32_t aug_len = (uint32_t)(eh->size - aug_start);
+			/* Patch augmentation data length */
+			{   uint64_t tmp = aug_len;
+				size_t patch_pos = aug_data_len_pos;
+				do {
+					unsigned char b = tmp & 0x7f;
+					tmp >>= 7;
+					if (tmp) b |= 0x80;
+					eh->data[patch_pos++] = b;
+				} while (tmp);
+			}
+		}
+		/* Pad to CIE alignment */
+		while (eh->size % (size_t)cie_align != 0)
 			as_append_bytes(as, eh, &pad, 1);
 		{ uint32_t cie_len = (uint32_t)(eh->size - cie_len_pos - 4);
 			eh->data[cie_len_pos] = (unsigned char)cie_len;
@@ -207,14 +392,37 @@ eh_frame:
 
 			dwarf_u32(as, eh, 0); /* FDE length placeholder */
 			dwarf_u32(as, eh, (uint32_t)((uint64_t)cie_offset)); /* CIE pointer */
+			/* FDE initial_location (encoded per target) */
 			fde_initial_loc_pos = eh->size;
-			dwarf_u32(as, eh, (uint32_t)as->cfi_func_offsets[i]);
+			dwarf_eh_emit_value(as, eh, as->cfi_func_offsets[i],
+			                    as->target->dwarf_fde_encoding);
+			/* FDE address_range (function size) */
 			func_size = as->cfi_func_end[i] - as->cfi_func_offsets[i];
-			dwarf_u32(as, eh, (uint32_t)func_size);
+			dwarf_eh_emit_value(as, eh, func_size, DW_EH_PE_udata4);
+			/* LSDA pointer (if set) */
+			if (as->cfi_lsda_set && as->cfi_lsda_pointers &&
+			    as->cfi_lsda_pointers[i] && as->cfi_lsda_pointers[i][0] != '\0') {
+				size_t lsda_pos = eh->size;
+				unsigned lsda_width = (unsigned)dwarf_eh_pe_width(as->cfi_lsda_encoding);
+				if (lsda_width == 0)
+					lsda_width = (as->target && as->target->elf_class == 2) ? 8 : 4;
+				/* Emit zero bytes */
+				unsigned j;
+				for (j = 0; j < lsda_width; j++)
+					as_append_bytes(as, eh, &pad, 1);
+				/* Add fixup for the LSDA symbol */
+				unsigned lsda_reloc = (lsda_width == 8) ?
+					MT_R_X86_64_64 : MT_R_X86_64_32;
+				as_add_fixup(as, eh, (size_t)lsda_pos, lsda_width,
+				             lsda_reloc, 0, as->cfi_lsda_pointers[i]);
+			}
+			/* FDE CFI program */
 			if (as->cfi_fde_sizes[i] > 0)
 				as_append_bytes(as, eh, as->cfi_fde_progs[i], as->cfi_fde_sizes[i]);
+			/* Terminator */
 			dwarf_u8(as, eh, 0x00);
-			while (eh->size % 4 != 0)
+			/* FDE alignment: same as CIE */
+			while (eh->size % (size_t)cie_align != 0)
 				as_append_bytes(as, eh, &pad, 1);
 			{ uint32_t fde_len = (uint32_t)(eh->size - fde_len_pos - 4);
 				eh->data[fde_len_pos] = (unsigned char)fde_len;
@@ -222,9 +430,11 @@ eh_frame:
 				eh->data[fde_len_pos + 2] = (unsigned char)(fde_len >> 16);
 				eh->data[fde_len_pos + 3] = (unsigned char)(fde_len >> 24);
 			}
+			/* Fixup for FDE initial_loc (PC-relative per target) */
 			if (label && label[0] != '\0')
-				as_add_fixup(as, eh, (size_t)fde_initial_loc_pos, 4,
-				             MT_R_X86_64_32, 0, label);
+				as_add_fixup(as, eh, (size_t)fde_initial_loc_pos,
+				             (unsigned)fde_addr_width,
+				             as->target->dwarf_fde_reloc, 0, label);
 		}
 		/* terminator: length = 0 */
 		dwarf_u32(as, eh, 0);

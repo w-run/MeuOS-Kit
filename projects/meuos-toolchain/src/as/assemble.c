@@ -131,6 +131,7 @@ free_as(struct as_file *as)
 	for (i = 0; i < as->cfi_fde_count; ++i) {
 		free(as->cfi_func_labels[i]);
 		free(as->cfi_fde_progs[i]);
+		free(as->cfi_lsda_pointers[i]);
 	}
 	free(as->sections);
 	free(as->symbols);
@@ -143,6 +144,9 @@ free_as(struct as_file *as)
 	free(as->cfi_func_labels);
 	free(as->cfi_fde_progs);
 	free(as->cfi_fde_sizes);
+	free(as->cfi_lsda_pointers);
+	free(as->cfi_personality_symbol);
+	free(as->cfi_lsda_current);
 	memset(as, 0, sizeof(*as));
 }
 
