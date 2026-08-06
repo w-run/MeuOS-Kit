@@ -103,6 +103,17 @@ struct as_file {
 	size_t cfi_prog_size, cfi_prog_capacity;
 	uint64_t cfi_func_start;
 
+	/* Personality routine (per-CIE, set by .cfi_personality) */
+	int cfi_personality_set;
+	uint8_t cfi_personality_encoding;
+	char *cfi_personality_symbol;
+
+	/* LSDA info (per-CIE encoding, per-FDE pointer) */
+	int cfi_lsda_set;
+	uint8_t cfi_lsda_encoding;
+	char *cfi_lsda_current;   /* LSDA symbol for current FDE */
+	char **cfi_lsda_pointers;  /* per-FDE LSDA symbol names */
+
 	/* Completed FDE list */
 	uint64_t *cfi_func_offsets;
 	uint64_t *cfi_func_end;
