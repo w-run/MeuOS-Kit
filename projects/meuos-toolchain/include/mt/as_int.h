@@ -133,6 +133,14 @@ struct as_file {
 
 	/* .cfi_sections: select output section (0=.eh_frame, 1=.debug_frame) */
 	int cfi_section_type;
+
+	/* .cfi_return_column: override return address register per FDE (0 = use target default) */
+	int cfi_return_column;
+	int *cfi_fde_return_column;
+
+	/* .cfi_cfa_offset: current CFA offset tracking for .cfi_adjust_cfa_offset */
+	int64_t cfi_cfa_offset;
+	int cfi_cfa_offset_valid;
 };
 
 /* Functions shared between assemble.c and arch backends */
