@@ -337,11 +337,17 @@ as_add_fixup(struct as_file *as, struct as_section *section, size_t offset,
 {
 	struct as_fixup *fixups;
 	if (as->fixup_count == as->fixup_capacity) {
-		size_t capacity = as->fixup_capacity ? as->fixup_capacity * 2 : 32;
+		size_t old_capacity = as->fixup_capacity;
+		size_t capacity = old_capacity ? old_capacity * 2 : 32;
 		fixups = (struct as_fixup *)mt_realloc(
 		    as->fixups, capacity * sizeof(*fixups));
 		if (!fixups)
 			return as_error(as, "out of memory");
+		/* Zero-initialize the new entries: realloc does not zero-fill,
+		 * and uninitialized bytes (e.g. symbol2) would be read as
+		 * pointers later in resolve_fixups. */
+		memset(fixups + old_capacity, 0,
+		       (capacity - old_capacity) * sizeof(*fixups));
 		as->fixups = fixups;
 		as->fixup_capacity = capacity;
 	}
@@ -353,6 +359,7 @@ as_add_fixup(struct as_file *as, struct as_section *section, size_t offset,
 	as->fixups[as->fixup_count].symbol = mt_strdup(symbol);
 	if (!as->fixups[as->fixup_count].symbol)
 		return as_error(as, "out of memory");
+	as->fixups[as->fixup_count].symbol2 = NULL;
 	{
 		struct as_symbol *referenced = get_symbol(as, symbol);
 		if (!referenced)
