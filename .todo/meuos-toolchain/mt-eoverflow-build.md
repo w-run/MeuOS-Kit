@@ -1,7 +1,8 @@
 # mt 全量 make EOVERFLOW 未声明（宿主 glibc 严格模式）构建失败
 
 > 状态：✅ 已闭环（2026-08-07 toolchain-pie-worker）
-> 修复 commit：`206c542c`（mcc-dev，archive.c 补 EOVERFLOW fallback）
+> 修复 commit：`206c542c`（mcc-dev，`#ifndef EOVERFLOW` fallback）
+> 回归门：`make check`（严格模式全量构建通过，含既有 check gates）
 
 ## 现象
 
