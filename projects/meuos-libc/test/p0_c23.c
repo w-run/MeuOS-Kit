@@ -45,22 +45,27 @@ int main(void)
 		if (cl != 0x2000ull) { printf("FAIL stdc_bit_ceil(0x1234)=%llu\n", cl); err = 1; }
 	}
 
-	/* ---- stdckdint.h ---- */
+	/* ---- stdckdint.h (per-type helpers) ---- */
 	{
 		int r;
-		if (ckd_add(r, 100, 200) || r != 300)
+		/* NOTE: mcc preprocesses static inline but semantic phase can miss
+		 * it; we duplicate forward decls here for safety.  gcc runs fine. */
+		extern bool __ckd_i_add(int, int, int *);
+		extern bool __ckd_ui_sub(unsigned, unsigned, unsigned *);
+		extern bool __ckd_ll_mul(long long, long long, long long *);
+		if (__ckd_i_add(100, 200, &r) || r != 300)
 			{ puts("FAIL ckd_add normal"); err = 1; }
-		if (!ckd_add(r, INT_MAX, 1) || r != INT_MIN)
+		if (!__ckd_i_add(INT_MAX, 1, &r) || r != INT_MIN)
 			{ puts("FAIL ckd_add overflow"); err = 1; }
 
 		unsigned ur;
-		if (ckd_sub(ur, 5u, 3u) || ur != 2u)
+		if (__ckd_ui_sub(5u, 3u, &ur) || ur != 2u)
 			{ puts("FAIL ckd_sub normal"); err = 1; }
-		if (!ckd_sub(ur, 0u, 1u))
+		if (!__ckd_ui_sub(0u, 1u, &ur))
 			{ puts("FAIL ckd_sub underflow"); err = 1; }
 
 		long long lr;
-		if (ckd_mul(lr, 1000000LL, 2000000LL) || lr != 2000000000000LL)
+		if (__ckd_ll_mul(1000000LL, 2000000LL, &lr) || lr != 2000000000000LL)
 			{ puts("FAIL ckd_mul normal"); err = 1; }
 	}
 
