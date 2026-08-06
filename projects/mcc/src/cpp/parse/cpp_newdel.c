@@ -1124,27 +1124,41 @@ exc_has_trivial_copy(struct type *t)
 static int
 exc_base_offset(struct type *t)
 {
-	/* Offset of the first base sub-object (single inheritance slicing), or
-	 * 0 if the class has no base.  Bases appear as the first members via
-	 * the front-end's base-member lowering (a member whose name matches the
-	 * base tag / sits at offset 0).  Phase-4b refines to the full base chain;
-	 * here we report 0 (no slicing) unless the first member is clearly a
-	 * base placeholder. */
-	struct member *m = t->u.structunion.members;
-	if (m && m->offset == 0 && exc_member_is_base(m))
-		return 0; /* base at offset 0: derived == base address for offset 0 */
+	/* Offset of the first base sub-object within an instance of `t`, or 0
+	 * when `t` has no base (so the throw carries the full object).  Bases
+	 * are inserted by the class-body parser as anonymous members (name ==
+	 * NULL) before any data member (see cpp_parse.c around `addmember`,
+	 * with bases[]); for `struct D : B`, the first member is the Base
+	 * subobject at offset 0; for `struct D : A, B` the first member is
+	 * A at offset 0 (B sits at sizeof(A), reported here for the first
+	 * base only).  The hidden vptr (cpp_insert_vptr) carries the name
+	 * "__vptr", so the anonymous test naturally excludes it. */
+	struct member *m;
+
+	if (!t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
+		return 0;
+	for (m = t->u.structunion.members; m; m = m->next) {
+		if (exc_member_is_base(m))
+			return (int)m->offset;
+	}
 	return 0;
 }
 
-/* A member is a base placeholder if the front-end tags it as such (name
- * matches a known base).  For the first increment we only need to know "has
- * a base at offset 0" — which is 0 either way for single non-empty base at
- * offset 0.  Kept as a stub for phase-4b refinement. */
+/* A member is a base placeholder when the front-end registered it as the
+ * carrier of a base-class sub-object: anonymous (name == NULL) and of a
+ * class type (TYPESTRUCT / TYPEUNION).  Anonymous unions that are NOT a
+ * base do not exist in mcc (the parser only inserts name==NULL members
+ * for the base list), so this check is precise.  The hidden vptr member
+ * inserted by cpp_insert_vptr has name "__vptr" and is excluded by the
+ * anonymous check. */
 static int
 exc_member_is_base(struct member *m)
 {
-	(void)m;
-	return 0;
+	if (!m || !m->type)
+		return 0;
+	if (m->name)
+		return 0;
+	return m->type->kind == TYPESTRUCT || m->type->kind == TYPEUNION;
 }
 
 /* Offset of the `base` sub-object within an instance of class `derived`,
