@@ -346,4 +346,15 @@ bool cpp_tmpl_alias_lookup(const char *name);
 struct type *cpp_tmpl_alias_instantiate(struct scope *s, const char *name);
 void cpp_template_alias(struct cpp_template *tmpl);
 
+/* Per-class exception thunk record (defined in cpp_newdel_thunk.c);
+ * both the throw site (cpp_newdel_exc.c) and the thunk emitter
+ * (cpp_newdel_thunk.c) walk the linked list, so the struct is exposed
+ * here.  All pointer fields: 0-init leaves a benign NULL record. */
+struct cpp_exc_thunk {
+	struct type *t;
+	struct decl *copy_fn;  /* __meuos_exc_ms_copy_T  (DECLFUNC, LINKEXTERN) */
+	struct decl *dtor_fn;  /* __meuos_exc_ms_dtor_T  (DECLFUNC, LINKEXTERN) */
+	struct cpp_exc_thunk *next;
+};
+
 #endif /* MCC_CPP_PARSE_INTERNAL_H */
