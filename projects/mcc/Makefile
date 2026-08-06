@@ -202,6 +202,28 @@ check-c99: $(BIN)
 		esac; \
 	done
 
+# C90 standard feature tests (§6, ISO/IEC 9899:1990).  All tests use
+# -std=c89 to ensure C90 mode.  K&R style and implicit int are not
+# supported by mcc (C99 compiler) and are tested as negative tests.
+check-c90: $(BIN)
+	@export MEUOS_SYSROOT="$(abspath ../sysroot)"; \
+	for t in test/c90/*.c; do \
+		out=/tmp/mcc-c90-$$(basename $$t .c); \
+		./$(BIN) -std=c89 -o $$out $$t || exit $$?; \
+		$$out || exit $$?; \
+	done
+
+# C90 negative tests: test/c90/neg/*.neg.c must be REJECTED by mcc.
+check-c90-neg: $(BIN)
+	@export MEUOS_SYSROOT="$(abspath ../sysroot)"; \
+	for t in test/c90/neg/*.neg.c; do \
+		if ./$(BIN) -std=c89 -o /tmp/mcc-c90-neg-$$(basename $$t .neg.c) $$t 2>/dev/null; then \
+			echo "REGRESSION: $$(basename $$t) compiled (expected rejection)"; exit 1; \
+		else \
+			echo "OK: $$(basename $$t) rejected"; \
+		fi; \
+	done
+
 check-c23: $(BIN)
 	@export MEUOS_SYSROOT="$(abspath ../sysroot)"; \
 	for t in test/c23/*.c; do \
@@ -355,7 +377,7 @@ check-cpp-func: $(MPP_BIN)
 		out=/tmp/mpp-$$(basename $$t .cc); \
 		inc=; specsf="--specs=host"; \
 		case "$$t" in \
-		  */try_catch\.cc|*/exc_base_slice\.cc) \
+		  */try_catch\.cc|*/exc_base_slice\.cc|*/exc_nontrivial\.cc) \
 		    specsf="--specs=meuos"; \
 		    src=/workspace/MeuOS-Kit/projects/sysroot; \
 		    if [ "$${MEUOS_SYSROOT:-}" != "$$src" ] && \
@@ -448,7 +470,7 @@ check-olevel: $(BIN)
 check-i18n: $(BIN) $(MPP_BIN)
 	@sh test/i18n/run.sh ./$(BIN) ./$(MPP_BIN)
 
-.PHONY: all clean check check-all check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c23 check-c23-neg check-c-mir check-driver check-diag-warning check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg check-cpp check-cpp-focus check-cpp-gcc check-x86_64-runtime check-riscv64-runtime check-loongarch64-runtime check-olevel check-i18n check-dwarf
+.PHONY: all clean check check-all check-arm check-loongarch64 check-i386 check-i386-runtime check-i386-qemu check-aarch64-runtime check-targets check-pic-verify check-la64 check-c11-atomic check-c11 check-c99 check-c90 check-c90-neg check-c23 check-c23-neg check-c-mir check-driver check-diag-warning check-mt-integration check-abi check-sysroot-static check-chibicc check-community check-mir-types check-mir-passes check-mir-machine check-mir-abi check-mir check-cpp-lex check-cpp-virtual check-cpp-func check-cpp-neg check-cpp check-cpp-focus check-cpp-gcc check-x86_64-runtime check-riscv64-runtime check-loongarch64-runtime check-olevel check-i18n check-dwarf
 
 # chibicc community functional test suite (C11/C23 conformance).
 # Runs test/community/chibicc/run.sh against the MeuOS sysroot.
