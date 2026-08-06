@@ -121,6 +121,18 @@ struct as_file {
 	unsigned char **cfi_fde_progs;
 	size_t *cfi_fde_sizes;
 	size_t cfi_fde_count, cfi_fde_capacity;
+
+	/* Multi-CIE support: per-FDE personality tracking */
+	int *cfi_fde_personality_set;
+	uint8_t *cfi_fde_personality_encoding;
+	char **cfi_fde_personality_symbol;
+	int *cfi_fde_signal_frame;
+
+	/* .cfi_signal_frame: mark current CIE as signal frame */
+	int cfi_signal_frame;
+
+	/* .cfi_sections: select output section (0=.eh_frame, 1=.debug_frame) */
+	int cfi_section_type;
 };
 
 /* Functions shared between assemble.c and arch backends */
