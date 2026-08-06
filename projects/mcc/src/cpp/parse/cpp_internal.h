@@ -23,6 +23,7 @@ struct expr;
 struct decl;
 struct cpp_template;
 struct location;
+struct init;
 
 /* Member-method parsing context: the enclosing class and implicit
  * `this` parameter while a method body is being parsed.  Shared by the
@@ -346,10 +347,65 @@ bool cpp_tmpl_alias_lookup(const char *name);
 struct type *cpp_tmpl_alias_instantiate(struct scope *s, const char *name);
 void cpp_template_alias(struct cpp_template *tmpl);
 
+/* Skip an unselected `if constexpr` / `if consteval` branch at the token
+ * level (defined in cpp_constexpr_ctrl.c); called from the constexpr
+ * statement interpreter (cpp_constexpr_eval.c) as well. */
+void cpp_skip_branch(void);
+
 /* Constexpr interpreter recursion depth (defined in cpp_constexpr.c); used
- * by both the constexpr evaluator (cpp_constexpr.c) and the if-consteval
+ * by both the constexpr evaluator (cpp_constexpr_eval.c) and the if-consteval
  * / if-constexpr dispatcher (cpp_constexpr_ctrl.c). */
 extern int g_cpp_cexpr_depth;
+
+/* Constexpr aggregate-object mini-memory model (defined in
+ * cpp_constexpr_agg.c): record and query constant member-values of a
+ * constexpr aggregate (struct/union) so a later member access or return
+ * of the object can be folded. */
+void cpp_record_cexpr_member(struct decl *obj, unsigned long long offset,
+                             unsigned long long val);
+void cpp_record_cexpr_aggregate(struct decl *d, struct init *init);
+void cpp_record_cexpr_return(struct expr *call, struct decl *obj);
+bool cpp_cexpr_member_value(struct decl *obj, unsigned long long offset,
+                            unsigned long long *out);
+bool cpp_cexpr_ret_member_value(struct expr *call, unsigned long long offset,
+                                unsigned long long *out);
+bool cpp_copy_cexpr_return(struct expr *call, struct decl *dst);
+
+/* A constexpr function whose body is buffered so a constant-context call
+ * (`constexpr int v = sq(5);`, static_assert) can be folded by replaying
+ * `{ return <expr> ; }` with the argument values bound.  Struct defined
+ * here so both the body-buffering module (cpp_constexpr.c) and the
+ * evaluator (cpp_constexpr_eval.c) can traverse the linked list. */
+struct cpp_cexpr_fn {
+	struct decl *fd;
+	char **params;
+	struct type **ptypes;
+	int nparams;
+	struct token *toks;
+	size_t ntoks;
+	const char **tmpl_params;
+	struct type **tmpl_types;
+	unsigned long long *tmpl_vals;
+	bool *tmpl_isval;
+	int ntmpl;
+	struct cpp_cexpr_fn *next;
+};
+extern struct cpp_cexpr_fn *g_cpp_cexpr_fns;
+
+/* Constexpr function body buffering (defined in cpp_constexpr.c): record
+ * a constexpr function's `{ ... }` body for compile-time evaluation.
+ * Called from decl.c and cpp_method.c. */
+void cpp_buffer_constexpr_body(struct decl *d);
+
+/* C23 constexpr-function-definition guard (defined in cpp_constexpr.c):
+ * non-zero while a C23 constexpr body is being parsed in decl().  The
+ * call-expression parser consults it to reject non-constexpr calls. */
+extern int g_cexpr_body;
+
+/* Constexpr function call evaluation (defined in cpp_constexpr_eval.c):
+ * fold a constexpr function call to an integer constant; returns NULL
+ * when the body is not constant-evaluable. */
+struct expr *cpp_constexpr_eval(struct expr *call);
 
 /* Per-class exception thunk record (defined in cpp_newdel_thunk.c);
  * both the throw site (cpp_newdel_exc.c) and the thunk emitter
