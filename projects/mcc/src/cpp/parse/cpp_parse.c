@@ -46,10 +46,6 @@ bool g_cpp_member_tmpl;
  * each function body by the decl / method-body parsers. */
 struct type *g_cpp_auto_ret_type;
 struct func *g_cpp_auto_ret_func;
-/* C++ `extern "C"` linkage context: non-zero when the current declaration
- * is inside an `extern "C"` block or is preceded by `extern "C"`.  Used by
- * getlinkage() in decl.c to assign LINKC instead of LINKEXTERN. */
-bool g_cpp_extern_c;
 /* postfixexpr nesting depth (set by expr_postfix.c); a pending member
  * call records the depth it was created at so nested argument expressions
  * (which run their own postfixexpr) don't clear it prematurely. */
@@ -914,7 +910,6 @@ cpp_parse_translation_unit(void)
 {
 	extern struct scope filescope;
 	extern void emittentativedefns(void);
-	extern int g_lang;
 
 	while (tok.kind != TEOF) {
 		/* Multi-error collection (--error-json): arm a recovery jump
@@ -973,72 +968,10 @@ cpp_parse_translation_unit(void)
 			continue;
 		}
 
-	/* C++ `extern "C"` linkage specification: `extern "C" { ... }` block
-	 * form or `extern "C" int f();` single-declaration form.  Intercept
-	 * before the C parser's decl() sees `extern` as a storage class.
-	 *
-	 * Peek-ahead: save the extern token, consume the next token, check
-	 * for "C".  If it IS extern "C" handle it; if not, use the same
-	 * pushback pattern as `consume()` in pp.c (copy the peeked token
-	 * to a local, restore the original, then ctxpush the copy). */
-	if (tok.kind == TEXTERN && g_lang == 1) {
-		struct token save = tok;
-		struct token peek;
-		next();
-		peek = tok;
-		/* The C lexer stores string literal content INCLUDING the
-		 * surrounding quotes in tok.lit, so we compare against "\"C\""
-		 * (the literal text `"C"` with quote characters). */
-		if (peek.kind == TSTRINGLIT && peek.lit &&
-		    peek.lit[0] == '"' && peek.lit[1] == 'C' && peek.lit[2] == '"' && peek.lit[3] == '\0') {
-			/* extern "C": consume the "C" token (tok currently points to
-			 * it because next() advanced past extern). */
-			next(); /* consume "C" string literal */
-			char *saved = g_cpp_extern_c ? strdup("nested") : NULL;
-			if (tok.kind == TLBRACE) {
-				/* `extern "C" { ... }` — parse all declarations inside
-				 * the block with C linkage, then restore. */
-				next(); /* consume '{' */
-				g_cpp_extern_c = true;
-				while (tok.kind != TRBRACE && tok.kind != TEOF) {
-					enum cpp_tokenkind k2 = cpp_tok_kind();
-					if (k2 == CPP_TCLASS || k2 == CPP_TSTRUCT ||
-					    k2 == CPP_TUNION) {
-						if (k2 == CPP_TCLASS || cpp_struct_needs_class_decl())
-							cpp_class_decl(&filescope);
-						else
-							decl(&filescope, NULL);
-					} else if (cpp_is_namespace_decl()) {
-						cpp_namespace_decl(&filescope);
-					} else if (k2 == CPP_TUSING) {
-						cpp_using_decl(&filescope);
-					} else if (k2 == CPP_TTEMPLATE) {
-						cpp_template_decl(&filescope, NULL);
-					} else {
-						decl(&filescope, NULL);
-					}
-				}
-				if (tok.kind == TRBRACE)
-					next(); /* consume '}' */
-				g_cpp_extern_c = saved ? true : false;
-				if (saved)
-					free(saved);
-			} else {
-				/* `extern "C" int f();` — single declaration with C linkage.
-				 * Set the flag, parse the declaration, then restore. */
-				g_cpp_extern_c = true;
-				decl(&filescope, NULL);
-				g_cpp_extern_c = saved ? true : false;
-				if (saved)
-					free(saved);
-			}
-			g_err_recovery_set = 0;
-			continue;
-		}
-		/* not `extern "C"` — restore the extern token and push the
-		 * peeked token back so the normal C parser sees `extern int ...`. */
-		tok = save;
-		tokpush(&peek, 1);
+	/* C++ `extern "C"` linkage specification: handled by cpp_linkage.c */
+	if (cpp_linkage_spec()) {
+		g_err_recovery_set = 0;
+		continue;
 	}
 
 	/* C++20 abbreviated function templates: `void f(Integral auto x)`

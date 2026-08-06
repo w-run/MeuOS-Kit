@@ -285,6 +285,19 @@ bool cpp_is_namespace_decl(void);
 void cpp_namespace_decl(struct scope *s);
 void cpp_add_visible_ns(struct scope *ns);
 
+/* `extern "C"` linkage specification (defined in cpp_linkage.c): the
+ * peek-ahead parser for `extern "C" { ... }` block form and the
+ * `extern "C" int f();` single-declaration form.  Returns true if
+ * consumed; false if the token stream did not actually start with
+ * `extern "C"` (the `extern` token has been restored in that case). */
+bool cpp_linkage_spec(void);
+
+/* C++ `extern "C"` linkage context flag (defined in cpp_linkage.c):
+ * true when the current declaration is inside an `extern "C"` block
+ * or preceded by `extern "C"`.  Used by decl.c to assign LINKC
+ * instead of LINKEXTERN. */
+extern bool g_cpp_extern_c;
+
 /* Token-stream builder for the synthesized closure-class definition.
  * Defined in cpp_lambda.c; used by the template-declaration code in
  * cpp_parse.c. */
