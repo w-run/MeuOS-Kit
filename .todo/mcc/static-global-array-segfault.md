@@ -1,7 +1,7 @@
 # 静态 exe + 全局数组运行 segfault（x86_64 R_X86_64_PC32/绝对数组寻址）
 
-> 状态：🔄 开放（2026-08-04 由 exec-toolchain-d5 于方案 B 验证中发现）
-> 关联 commit：无（与 TLS/方案 B 无关的既有缺陷）
+> 状态：✅ 已闭环（2026-08-07）
+> 关联 commit：dfcc0dc7 / 9e65b72d / 9f1cf2be
 
 ## 现象
 
