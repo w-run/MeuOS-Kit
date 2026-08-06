@@ -347,9 +347,38 @@ struct type *cpp_tmpl_alias_instantiate(struct scope *s, const char *name);
 void cpp_template_alias(struct cpp_template *tmpl);
 
 /* Constexpr interpreter recursion depth (defined in cpp_constexpr.c); used
- * by both the constexpr evaluator (cpp_constexpr.c) and the if-consteval
+ * by both the constexpr evaluator (cpp_constexpr_eval.c) and the if-consteval
  * / if-constexpr dispatcher (cpp_constexpr_ctrl.c). */
 extern int g_cpp_cexpr_depth;
+
+/* Constexpr aggregate-object mini-memory model (defined in
+ * cpp_constexpr_agg.c): record and query constant member-values of a
+ * constexpr aggregate (struct/union) so a later member access or return
+ * of the object can be folded. */
+void cpp_record_cexpr_member(struct decl *obj, unsigned long long offset,
+                             unsigned long long val);
+void cpp_record_cexpr_aggregate(struct decl *d, struct init *init);
+void cpp_record_cexpr_return(struct expr *call, struct decl *obj);
+bool cpp_cexpr_member_value(struct decl *obj, unsigned long long offset,
+                            unsigned long long *out);
+bool cpp_cexpr_ret_member_value(struct expr *call, unsigned long long offset,
+                                unsigned long long *out);
+bool cpp_copy_cexpr_return(struct expr *call, struct decl *dst);
+
+/* Constexpr function body buffering (defined in cpp_constexpr.c): record
+ * a constexpr function's `{ ... }` body for compile-time evaluation.
+ * Called from decl.c and cpp_method.c. */
+void cpp_buffer_constexpr_body(struct decl *d);
+
+/* C23 constexpr-function-definition guard (defined in cpp_constexpr.c):
+ * non-zero while a C23 constexpr body is being parsed in decl().  The
+ * call-expression parser consults it to reject non-constexpr calls. */
+extern int g_cexpr_body;
+
+/* Constexpr function call evaluation (defined in cpp_constexpr_eval.c):
+ * fold a constexpr function call to an integer constant; returns NULL
+ * when the body is not constant-evaluable. */
+struct expr *cpp_constexpr_eval(struct expr *call);
 
 /* Per-class exception thunk record (defined in cpp_newdel_thunk.c);
  * both the throw site (cpp_newdel_exc.c) and the thunk emitter
