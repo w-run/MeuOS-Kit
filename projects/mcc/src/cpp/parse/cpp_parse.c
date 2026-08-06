@@ -1463,6 +1463,7 @@ cpp_parse_translation_unit(void)
 	emittentativedefns();
 	cpp_emit_global_ctors();
 	cpp_emit_vtables();
+	cpp_emit_exc_thunks();
 }
 
 
