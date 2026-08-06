@@ -108,11 +108,10 @@ _meuos_exc_throw_obj(int typecode, size_t size, size_t align,
 	else
 		memcpy(slot, obj, size);       /* trivial bitwise copy */
 
-	/* Destroy the source temporary (the throw-expression object).  The
-	 * throw_obj call is _Noreturn, so this is the only destruction. */
-	if (dtor)
-		dtor((void *)obj);
-
+	/* The source temporary (the throw-expression object) is destroyed by the
+	 * caller (compiler-emitted code) after _meuos_exc_throw_obj returns,
+	 * and the heap copy is destroyed by _meuos_exc_caught_free after catch.
+	 * Do NOT call dtor here — doing so would double-destroy the object. */
 	/* Persist payload before unwinding. */
 	exc_typecode = typecode;
 	exc_value = (uintptr_t)slot;
