@@ -641,19 +641,19 @@ mabi_vaarg(MFnM *fm, MOut *o, MInsM *in)
 		mout(o, MMOP_ADD, MT_I32, nof, off, incr);
 		mout_addr(o, MMOP_STORE, MT_I32, 0, maddr(ap, 0, 1, ooff), nof);
 	}
-	/* overflow path: advance overflow_arg_area by oinc.
-	 * The caller (selcall) pushes each argument at its natural
-	 * stack width: 4 bytes for 32-bit args (int/float), 8 bytes
-	 * for 64-bit args (double/long long).  The libc va_arg
-	 * reads each argument from the current overflow pointer and
-	 * advances by the same width.  Hardcoding 8 across all types
-	 * causes int varargs to advance too far — the double that
-	 * follows (at oinc=4 for 32-bit, 8 for 64-bit) is misread. */
+	/* overflow path: advance overflow_arg_area by 8 always.
+	 * ARM AAPCS requires all stack arguments to be 8-byte aligned,
+	 * so the caller (selcall) reserves 8 bytes per overflow arg
+	 * regardless of the argument type.  The overflow arg area
+	 * pointer must therefore advance by 8 for every va_arg —
+	 * using oinc (4 for 32-bit) here would under-advance and
+	 * misread the next argument (e.g. int followed by double:
+	 * advancing by 4 reads garbage at the double's offset). */
 	MVal *nstk = tmp(fm, MT_I32, "va");
 	mout(o, MMOP_NOT, MT_I32, nstk, mask, 0);
 	{
 		MVal *oiv = mval_const(fm->host, MT_I32,
-		                       imm(fm, MT_I32, oinc));
+		                       imm(fm, MT_I32, 8));
 		mout(o, MMOP_AND, MT_I32, nstk, nstk, oiv);
 	}
 	MVal *nsp = tmp(fm, MT_PTR, "va");
