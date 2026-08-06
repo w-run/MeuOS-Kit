@@ -1,7 +1,8 @@
 # mt/as 局部数字标签 forward/backward 解析缺陷
 
-> 状态：🔄 开放（2026-08-04 exec-toolchain-gp 修 mt/ld PIE GOT/PLT 时发现）
-> 关联 commit：无（mt/as 既有缺陷）
+> 状态：✅ 已闭环（2026-08-07 toolchain-pie-worker）
+> 修复 commit：`43c72b5d`（mcc-dev，resolve_numeric_references in assemble.c）
+> 回归门：`test/as_locallabel.sh`（check-as-locallabel）
 
 ## 现象
 

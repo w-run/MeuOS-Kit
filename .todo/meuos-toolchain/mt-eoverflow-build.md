@@ -1,7 +1,8 @@
 # mt 全量 make EOVERFLOW 未声明（宿主 glibc 严格模式）构建失败
 
-> 状态：🔄 开放（2026-08-04 由 exec-toolchain P1c GD TLS 集成验证发现）
-> 关联 commit：无（独立可重现构建缺陷，非 TLS P1 引入；鉴证依据见"判定"）
+> 状态：✅ 已闭环（2026-08-07 toolchain-pie-worker）
+> 修复 commit：`206c542c`（mcc-dev，`#ifndef EOVERFLOW` fallback）
+> 回归门：`make check`（严格模式全量构建通过，含既有 check gates）
 
 ## 现象
 
