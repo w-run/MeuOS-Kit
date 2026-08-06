@@ -1,6 +1,6 @@
 # 大文件分层重构（优化输入 token / 提升缓存命中率）
 
-> 状态：🟡 进行中（2026-08-06 mcc-refactor-worker 接手 tmp/mcc-refactor-split，基线 PASS=22 FAIL=3）
+> 状态：✅ 已闭环（2026-08-07 r7，cpp_newdel·tmpl·constexpr·passes·machine 全部拆分，所有文件 <1300 行）
 > 关联 commit：71a8b016（cpp_newdel.c 已拆）
 > ⚠️ **适用分支**：mcc-dev 主线（44e54c69），worktree `.agents/worktrees/mcc-refactor-split/`，分支 `tmp/mcc-refactor-split`（已 push）
 > **基线 hash**：`/tmp/verify-all-baseline.log` sha256 `6079859722de5d1d747a1e5de8cda9e3e83d3b02c2f6168829a69ccb3bdd18a8`（PASS/FAIL 摘要 hash `27d530a4...`）

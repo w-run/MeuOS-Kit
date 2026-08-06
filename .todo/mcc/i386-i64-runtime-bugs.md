@@ -30,7 +30,7 @@
 - 已全量 `cdq`→`cltd`（MOVSX/除法/i64_base 寄存器物化 fallback 等 site 均已切换）。
 - 本项与 i386 emit 宽度一致性无关，关闭。
 
-## 4. i64 除法/取余 (DIV/REM) 落到 32 位 idivl，i386 SIGFPE  → 🔶 open（跨域：需 libc 软除 helper）
+## 4. i64 除法/取余 (DIV/REM) 落到 32 位 idivl，i386 SIGFPE  → ✅ 已闭环（mcc-backend-campaign，commit c65a2f63，软除 helper 路线 b）
 - 症状：`long long a/b`、`a%b`（i64）编译为对低 32 位单独 `idivl`，高半字未参与 →
   除零或结果错；实测 `q(-100000000000LL,7LL)` 直接 SIGFPE（浮点异常/core dumped）。
 - 根因：i386_memit.c 的 `MMOP_DIV/UDIV/REM/UREM` 在 `dtype==MT_I64` 分支里只处理了
