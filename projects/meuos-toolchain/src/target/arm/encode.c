@@ -706,15 +706,22 @@ ldr_mem:
 			}
 			if (rm >= 0) {
 				/* Register-offset form: ldr/str rd, [rn, rm] (no shift).
-				 * Encoding: 1110 010P U1 0 1 Rn Rd 0000 0000 Rm where
-				 * P=1 (offset, post-indexed when W=1 — we keep P=1, W=0
-				 * for the plain pre-indexed form used by mcc) and
-				 * U controls up/down.  The pre-fix code ignored Rm
-				 * entirely, encoding ldr rd, [rn] and reading the wrong
-				 * address — see projects/mcc/test/arm/varargs.c (the
-				 * reg_save_area pointer + i64 SETCCR together blew up
-				 * the cmp path on a stack underflow). */
-				uint32_t base = 0xE5900000 |
+				 * Encoding: cond 011P UBWL Rn Rd 0000 0000 Rm.
+				 *   I=1 (bit 25): register offset (not immediate)
+				 *   P=1 (bit 24): pre-indexed
+				 *   U=1 (bit 23): up (add offset — code below
+				 *     does NOT set U=0; the offset is always
+				 *     added to the base register)
+				 *   B=0 (bit 22): word transfer
+				 *   W=0 (bit 21): no write-back
+				 *   L=1 (bit 20): load / 0: store
+				 * Base (STR, all flags above): 1110 0 11 1 0 0… = 0xE7800000
+				 * Pre-fix used immediate-offset 0xE5900000 (I=0)
+				 * which mis-decodes Rm as an immediate fragment,
+				 * and ORed (is_load<<20) which was a no-op for
+				 * LDR (bit-20 already 1) but left STR with L=1
+				 * (load) — CPU-read instead of write. */
+				uint32_t base = 0xE7800000 |
 				                ((uint32_t)is_load << 20);
 				emit32(out->bytes, base | (rn<<16) | (rd<<12) | rm);
 				return 0;
