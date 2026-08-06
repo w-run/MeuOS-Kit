@@ -216,9 +216,13 @@ exc_thunk_type(struct type *t, int is_copy)
  * and queue the record for end-of-TU body emission.  Idempotent: a
  * second call for the same `t` returns the existing record.
  *
- * When the class has no user destructor (`exc_has_user_dtor` false) the
- * dtor thunk is NOT created — the dtor field remains NULL and the runtime
- * receives NULL (memcpy-only payload / no destruction needed). */
+ * copy_fn is created only when the class has a user copy constructor
+ * (`exc_has_user_copy_ctor` true); otherwise th->copy_fn stays NULL and
+ * the runtime uses memcpy for the copy.
+ *
+ * dtor_fn is created only when the class has a user destructor
+ * (`exc_has_user_dtor` true); otherwise th->dtor_fn stays NULL and the
+ * runtime skips destruction (memcpy-only payload / no destruction needed). */
 struct cpp_exc_thunk *
 exc_register_thunks(struct type *t)
 {
@@ -236,15 +240,19 @@ exc_register_thunks(struct type *t)
 	for (th = g_cpp_exc_thunks; th; th = th->next)
 		if (th->t == t)
 			return th;
-	snprintf(cname, sizeof cname, "__meuos_exc_ms_copy_%s", tag);
 	th = xmalloc(sizeof *th);
 	th->t = t;
-	pname = xmalloc(strlen(cname) + 1);
-	strcpy(pname, cname);
-	th->copy_fn = mkdecl(pname, DECLFUNC, exc_thunk_type(t, 1),
-	    QUALNONE, LINKEXTERN);
-	th->copy_fn->value = mkglobal(th->copy_fn);
-	scopeputdecl(&filescope, th->copy_fn);
+	th->copy_fn = NULL;
+	th->dtor_fn = NULL;
+	if (exc_has_user_copy_ctor(t)) {
+		snprintf(cname, sizeof cname, "__meuos_exc_ms_copy_%s", tag);
+		pname = xmalloc(strlen(cname) + 1);
+		strcpy(pname, cname);
+		th->copy_fn = mkdecl(pname, DECLFUNC, exc_thunk_type(t, 1),
+		    QUALNONE, LINKEXTERN);
+		th->copy_fn->value = mkglobal(th->copy_fn);
+		scopeputdecl(&filescope, th->copy_fn);
+	}
 	if (exc_has_user_dtor(t)) {
 		snprintf(dname, sizeof dname, "__meuos_exc_ms_dtor_%s", tag);
 		pname = xmalloc(strlen(dname) + 1);
@@ -253,8 +261,6 @@ exc_register_thunks(struct type *t)
 		    QUALNONE, LINKEXTERN);
 		th->dtor_fn->value = mkglobal(th->dtor_fn);
 		scopeputdecl(&filescope, th->dtor_fn);
-	} else {
-		th->dtor_fn = NULL;
 	}
 	th->next = NULL;
 	*g_cpp_exc_thunks_end = th;
@@ -375,7 +381,8 @@ cpp_emit_exc_thunks(void)
 	struct cpp_exc_thunk *th;
 
 	for (th = g_cpp_exc_thunks; th; th = th->next) {
-		exc_emit_copy_thunk(th->t, th);
+		if (th->copy_fn)
+			exc_emit_copy_thunk(th->t, th);
 		if (th->dtor_fn)
 			exc_emit_dtor_thunk(th->t, th);
 	}

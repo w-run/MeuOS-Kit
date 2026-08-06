@@ -307,22 +307,33 @@ cpp_exc_throw_call(struct type *t, struct expr *value)
 			arg->next = mkconstexpr(&typeulong, t->size);
 			arg->next->next = mkconstexpr(&typeulong, t->align);
 			if (!ndecl) {
-				/* Non-trivial payload: only classes with a user copy
-				 * ctor get thunks.  When only a dtor exists (no copy
-				 * ctor) we cannot safely copy the payload, so fall
-				 * back to the zero-slot scheme immediately. */
-				if (exc_has_user_copy_ctor(t)) {
+				/* Non-trivial payload: classes with a user copy ctor
+				 * or user destructor need thunks.  When only a dtor
+				 * exists (no copy ctor), memcpy the payload and use
+				 * the dtor thunk for destruction.  When only a copy
+				 * ctor exists (no dtor), pass the copy thunk and
+				 * NULL dtor (runtime skips destruction, e.g. OnlyCopy
+				 * in the test). */
+				if (exc_has_user_copy_ctor(t) || exc_has_user_dtor(t)) {
 					struct expr *ce, *de;
 					th = exc_register_thunks(t);
 					if (th) {
-						ce = mkexpr(EXPRIDENT, th->copy_fn->type, NULL);
-						ce->u.ident.decl = th->copy_fn;
-						ce = decay(ce);
-						/* dtor: pass the dtor thunk address only when the
-						 * class has a user destructor; NULL tells the runtime
-						 * no destruction is needed (the class is trivially
-						 * destructible even though it has a user copy ctor,
-						 * e.g. OnlyCopy in the test). */
+						/* copy thunk: NULL means memcpy (trivial copy).
+						 * Use the user's copy ctor thunk only when a
+						 * user copy constructor exists. */
+						if (exc_has_user_copy_ctor(t)) {
+							ce = mkexpr(EXPRIDENT, th->copy_fn->type, NULL);
+							ce->u.ident.decl = th->copy_fn;
+							ce = decay(ce);
+						} else {
+							ce = mkconstexpr(
+							    mkpointertype(mktype(TYPEFUNC, 0), QUALNONE),
+							    0);
+						}
+						/* dtor thunk: NULL means no destruction needed.
+						 * Only pass when the class declares a user
+						 * destructor.  Classes with only a copy ctor
+						 * (e.g. OnlyCopy) need no destruction. */
 						if (exc_has_user_dtor(t)) {
 							de = mkexpr(EXPRIDENT, th->dtor_fn->type, NULL);
 							de->u.ident.decl = th->dtor_fn;
