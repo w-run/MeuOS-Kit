@@ -95,6 +95,11 @@ void cpp_emit_global_dtor(struct func *f, struct decl *d);
  * used by the access-control check in the operator lowering. */
 void cpp_friend_decl(struct scope *s, struct type *classt);
 
+/* Is the current token a `struct`/`union` tag declaration with a base-class
+ * list or a body (defined in cpp_parse.c, class section); used by
+ * cpp_namespace.c to dispatch nested struct/union in namespace bodies. */
+bool cpp_struct_needs_class_decl(void);
+
 /* Classify a token into the C++ keyword kind (defined in cpp_parse.c,
  * class section); used by the requires-expression splitting (cpp_requires.c). */
 enum cpp_tokenkind cpp_classify_token(struct token t);
@@ -265,6 +270,20 @@ extern int g_cpp_lambda_count;
  * members, base lists).  Defined in cpp_parse.c; the lambda lowering
  * replays a synthesized closure-class definition through it. */
 bool cpp_class_decl(struct scope *s);
+
+/* Namespace declarations (defined in cpp_namespace.c): the qualified
+ * class name state (for `Class::method` out-of-line definitions), the
+ * qualified assembly prefix (for namespace-scope symbol names), the
+ * is-namespace-decl peek-ahead, the namespace-decl parser, the
+ * visible-namespace registry, and the visible-namespace lookup. */
+void cpp_set_qual_class(const char *tag);
+const char *cpp_take_qual_class(void);
+void cpp_set_qual_ns(struct scope *ns);
+struct scope *cpp_take_qual_ns(void);
+const char *cpp_ns_asm_prefix(struct scope *s, char *buf, size_t bufsz);
+bool cpp_is_namespace_decl(void);
+void cpp_namespace_decl(struct scope *s);
+void cpp_add_visible_ns(struct scope *ns);
 
 /* Token-stream builder for the synthesized closure-class definition.
  * Defined in cpp_lambda.c; used by the template-declaration code in
