@@ -17,7 +17,8 @@
 | [project_mcc_toolchain.md](project_mcc_toolchain.md) | 缺陷 | mcc-toolchain P0 闭环：toolchain 3 门禁 + ARM 正则、mcc MIR 文档清扫、i386 PIC GOT（4 提交）、ld.so P0 实施 in progress |
 | [feedback_aarch64_aapcs.md](feedback_aarch64_aapcs.md) | 缺陷 | aarch64 AAPCS64 三处缺陷闭环：selpar off=0、大帧 stp 超限、spill-slot 基址寻址丢 x29 |
 | [project_mcc_mxx_rebase.md](project_mcc_mxx_rebase.md) | 项目 | mxx-work 残留 rebase 无损清理纪律；lead-doc-mir-baseline 实为 m++/MIR 主线（LIR 桥接移除/mcombine/cpp class/双二进制） |
-| [project_mcc_toolchain_roundup.md](project_mcc_toolchain_roundup.md) | 项目 | 本轮进展：TLS 静态 GD 闭环(方案B ae88aa1)、m++ C++ P1 5 项、P0.1 动态 libc(d224248)、mt/ld .dynamic 新阻塞、静态数组 segfault、教训 |
+| [project_mcc_toolchain_roundup.md](project_mcc_toolchain_roundup.md) | 项目 | 本轮进展：TLS 静态 GD 闭环(方案B ae88aa1)、m++ C++ P1 5 项、P0.1 动态 libc(d224248)、mt/ld .dynamic 新阻塞、静态数组 segfault(已闭环)、教训 |
+| [project_mcc_static_global_array.md](project_mcc_static_global_array.md) | 缺陷 | x86_64 静态全局数组 segfault 闭环：根因 mt/as `imul $imm, %reg` 2-操作数编码缺失(dfcc0dc7)；回归测试(9e65b72d)；verify-all 门禁(9f1cf2be) |
 
 ## 使用约定
 
