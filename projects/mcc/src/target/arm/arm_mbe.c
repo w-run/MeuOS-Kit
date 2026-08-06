@@ -135,6 +135,7 @@ mfnm_backend_arm(MFn *mf)
 		mfnm_addblk(fm, mblk[i]);
 	}
 
+	bool variadic_call = false;   /* MOP_VARARG between ARGs and CALL */
 	for (uint32_t bi = 0; bi < nblk; bi++) {
 		MBlk *mb = order[bi];
 		MBlkM *b = mblk[bi];
@@ -144,6 +145,13 @@ mfnm_backend_arm(MFn *mf)
 			MVal *dst = in->dst;
 
 			switch (in->op) {
+			case MOP_VARARG: {
+				/* Frontend emitted IVARARG before the CALL → the
+				 * following CALL is variadic.  selcall needs this to
+				 * force AAPCS base standard (GPR/stack, no VFP). */
+				variadic_call = true;
+				break;
+			}
 			case MOP_PAR: {
 				MInsM *mi = maddm(fm, b, MMOP_PARM, dst ? dst->type : MT_NONE,
 				                  dst, 0, 0);
@@ -154,8 +162,6 @@ mfnm_backend_arm(MFn *mf)
 				MInsM *mi = maddm(fm, b, MMOP_ARG, in->dtype, 0,
 				                  mval_of_ref(mf, in->src[0]), 0);
 				if (in->src[0].val && in->src[0].val->kind == MV_TYPE) {
-					/* aggregate: src[1] is the source pointer;
-					 * td is the MV_TYPE's MTypeDesc */
 					mi->td = in->src[0].val->td;
 					mi->src[0] = mval_of_ref(mf, in->src[1]);
 				}
@@ -168,6 +174,9 @@ mfnm_backend_arm(MFn *mf)
 				                  mval_of_ref(mf, in->src[0]), 0);
 				if (in->src[1].val && in->src[1].val->kind == MV_TYPE)
 					mi->td = in->src[1].val->td;
+				if (variadic_call)
+					mi->extra = 1;
+				variadic_call = false;
 				break;
 			}
 			case MOP_LOAD: {
