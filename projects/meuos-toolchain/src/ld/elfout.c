@@ -204,12 +204,17 @@ eh_parse_fdes(const unsigned char *data, size_t size,
 			while (*p & 0x80) { caf |= (uint64_t)(*p++ & 0x7f) << shift; shift += 7; }
 			caf |= (uint64_t)(*p++ & 0x7f) << shift;
 
-			/* data alignment factor (SLEB128) */
+/* data alignment factor (SLEB128) */
 			int64_t daf = 0; shift = 0; int b;
 			do { b = *p++; daf |= (int64_t)(b & 0x7f) << shift; shift += 7; }
 			while (b & 0x80);
-			if (shift > 7 && (b & 0x40))
+			/* Sign-extend if the sign bit (bit 6 of the last byte) is set.
+			 * The condition `shift > 7` is correct for multi-byte SLEB128
+			 * but fails for single-byte values (shift == 7) where the
+			 * sign bit is in the same byte as the value. */
+			if (b & 0x40) {
 				daf |= -(1LL << shift);
+			}
 
 			/* return address register */
 			p++; /* version 1: 1 byte */
@@ -350,6 +355,7 @@ write_executable(struct ld_context *ctx, const char *path,
 	uint32_t *name_offsets = NULL;
 	unsigned char *eh_frame_hdr_data = NULL; /* generated eh_frame_hdr content */
 	size_t eh_frame_hdr_size = 0;
+	uint64_t eh_frame_hdr_vma = 0;           /* VMA of .eh_frame_hdr for PT_GNU_EH_FRAME */
 	FILE *file = NULL;
 	uint64_t entry_address;
 	uint64_t rx_end = LD_PAGE;
@@ -533,6 +539,7 @@ write_executable(struct ld_context *ctx, const char *path,
 			sections[eh_idx].align = 4;
 			sections[eh_idx].link = 0;
 			sections[eh_idx].info = 0;
+			eh_frame_hdr_vma = eh_addr;
 			if (strings_add(&shstr, ".eh_frame_hdr",
 			                &name_offsets[eh_idx]) != 0)
 				goto out_strings;
@@ -583,6 +590,7 @@ write_executable(struct ld_context *ctx, const char *path,
 		if (memory_end > rx_end) phnum++; /* second LOAD for RW */
 		if (ctx->tls_size) phnum++;
 	phnum++; /* PT_GNU_STACK */
+		if (ctx->eh_frame_hdr) phnum++; /* PT_GNU_EH_FRAME */
 		if (ctx->shared || ctx->pie) phnum += 2;
 		if (ctx->pie) phnum += 1;
 		if ((ctx->shared || ctx->pie) &&
@@ -611,6 +619,7 @@ write_executable(struct ld_context *ctx, const char *path,
 		if (memory_end > rx_end) phnum++; /* second LOAD for RW */
 		if (ctx->tls_size) phnum++;
 	phnum++; /* PT_GNU_STACK */
+		if (ctx->eh_frame_hdr) phnum++; /* PT_GNU_EH_FRAME */
 		if (ctx->shared || ctx->pie) phnum += 2; /* PT_PHDR + PT_DYNAMIC */
 		if (ctx->pie) phnum += 1;    /* PT_INTERP */
 		if ((ctx->shared || ctx->pie) &&
@@ -727,6 +736,18 @@ write_executable(struct ld_context *ctx, const char *path,
 		if (write_program_header_type(file, MT_PT_GNU_STACK, stack_flags,
 		                               0, 0, 0, 0, 16,
 		                               target->elf_class == 1) != 0)
+			goto out_file;
+	}
+	/* PT_GNU_EH_FRAME: point to .eh_frame_hdr for fast unwind lookup.
+	 * Only emitted when --eh-frame-hdr is active and .eh_frame exists. */
+	if (ctx->eh_frame_hdr && eh_frame_hdr_size > 0) {
+		if (write_program_header_type(file, MT_PT_GNU_EH_FRAME,
+		                             LD_PF_R,
+		                             eh_frame_hdr_vma,
+		                             eh_frame_hdr_vma,
+		                             eh_frame_hdr_size,
+		                             eh_frame_hdr_size, 4,
+		                             target->elf_class == 1) != 0)
 			goto out_file;
 	}
 	/* PT_GNU_RELRO: mark .dynamic and .got as read-only after relocations.
