@@ -632,6 +632,21 @@ parse_directive(struct as_file *as, char *directive, char *rest)
 		as->dwarf_loc_count++;
 		return 0;
 	}
+	/* DWARF .cfi_sections — select output section */
+	if (strcmp(directive, ".cfi_sections") == 0) {
+		/* .cfi_sections .debug_frame  or  .cfi_sections .eh_frame */
+		char *p = trim(rest);
+		if (*p == '\0')
+			return as_error(as, ".cfi_sections requires an argument");
+		if (strcmp(p, ".debug_frame") == 0) {
+			as->cfi_section_type = 1;
+		} else if (strcmp(p, ".eh_frame") == 0) {
+			as->cfi_section_type = 0;
+		} else {
+			return as_error(as, "unsupported .cfi_sections section: %s", p);
+		}
+		return 0;
+	}
 	/* DWARF CFI directives */
 	if (strcmp(directive, ".cfi_startproc") == 0) {
 		if (as->cfi_active)
@@ -653,8 +668,14 @@ parse_directive(struct as_file *as, char *directive, char *rest)
 			unsigned char **np = (unsigned char **)mt_realloc(as->cfi_fde_progs, cap * sizeof(*np));
 			size_t *ns = (size_t *)mt_realloc(as->cfi_fde_sizes, cap * sizeof(*ns));
 			char **ll = (char **)mt_realloc(as->cfi_lsda_pointers, cap * sizeof(*ll));
-			if (!no || !ne || !nl || !np || !ns || !ll) {
+			int *npfde = (int *)mt_realloc(as->cfi_fde_personality_set, cap * sizeof(*npfde));
+			uint8_t *npfe = (uint8_t *)mt_realloc(as->cfi_fde_personality_encoding, cap * sizeof(*npfe));
+			char **npfs = (char **)mt_realloc(as->cfi_fde_personality_symbol, cap * sizeof(*npfs));
+			int *npsf = (int *)mt_realloc(as->cfi_fde_signal_frame, cap * sizeof(*npsf));
+			if (!no || !ne || !nl || !np || !ns || !ll ||
+			    !npfde || !npfe || !npfs || !npsf) {
 				free(no); free(ne); free(nl); free(np); free(ns); free(ll);
+				free(npfde); free(npfe); free(npfs); free(npsf);
 				return as_error(as, "out of memory");
 			}
 			as->cfi_func_offsets = no;
@@ -663,6 +684,10 @@ parse_directive(struct as_file *as, char *directive, char *rest)
 			as->cfi_fde_progs = np;
 			as->cfi_fde_sizes = ns;
 			as->cfi_lsda_pointers = ll;
+			as->cfi_fde_personality_set = npfde;
+			as->cfi_fde_personality_encoding = npfe;
+			as->cfi_fde_personality_symbol = npfs;
+			as->cfi_fde_signal_frame = npsf;
 			as->cfi_fde_capacity = cap;
 		}
 		as->cfi_func_offsets[as->cfi_fde_count] = as->cfi_func_start;
@@ -691,6 +716,20 @@ parse_directive(struct as_file *as, char *directive, char *rest)
 			if (!as->cfi_lsda_pointers[as->cfi_fde_count])
 				return as_error(as, "out of memory");
 		}
+		/* Save personality and signal_frame for this FDE */
+		as->cfi_fde_personality_set[as->cfi_fde_count] = as->cfi_personality_set;
+		as->cfi_fde_personality_encoding[as->cfi_fde_count] = as->cfi_personality_encoding;
+		as->cfi_fde_personality_symbol[as->cfi_fde_count] =
+			as->cfi_personality_symbol ? mt_strdup(as->cfi_personality_symbol) : NULL;
+		as->cfi_fde_signal_frame[as->cfi_fde_count] = as->cfi_signal_frame;
+		/* Reset CIE-level state for next FDE */
+		as->cfi_signal_frame = 0;
+		as->cfi_personality_set = 0;
+		if (as->cfi_personality_symbol) {
+			free(as->cfi_personality_symbol);
+			as->cfi_personality_symbol = NULL;
+		}
+		as->cfi_lsda_set = 0;
 		as->cfi_fde_progs[as->cfi_fde_count] = (unsigned char *)mt_malloc(as->cfi_prog_size ? as->cfi_prog_size : 1);
 		if (!as->cfi_fde_progs[as->cfi_fde_count])
 			return as_error(as, "out of memory");
@@ -820,6 +859,9 @@ parse_directive(struct as_file *as, char *directive, char *rest)
 			as->cfi_lsda_current = mt_strdup(trim(item));
 			if (!as->cfi_lsda_current)
 				return as_error(as, "out of memory");
+		} else if (strcmp(directive, ".cfi_signal_frame") == 0) {
+			/* .cfi_signal_frame — mark CIE as signal frame */
+			as->cfi_signal_frame = 1;
 		} else {
 			return as_error(as, "unsupported CFI directive: %s", directive);
 		}

@@ -146,27 +146,34 @@ dwarf_eh_emit_value(struct as_file *as, struct as_section *sec,
 	}
 }
 
-/* Build the CIE augmentation string from the current state. */
+/* Build the CIE augmentation string from the given FDE's attributes. */
 static const char *
-cie_augmentation(struct as_file *as, char *buf, size_t bufsz)
+cie_augmentation_for_fde(struct as_file *as, int fde_idx,
+                          char *buf, size_t bufsz)
 {
 	size_t pos = 0;
 	(void)bufsz;
 	buf[pos++] = 'z';
 	buf[pos++] = 'R';
-	if (as->cfi_personality_set)
+	if (fde_idx >= 0 && as->cfi_fde_personality_set &&
+	    as->cfi_fde_personality_set[fde_idx])
 		buf[pos++] = 'P';
-	if (as->cfi_lsda_set)
+	if (fde_idx >= 0 && as->cfi_lsda_pointers &&
+	    as->cfi_lsda_pointers[fde_idx] &&
+	    as->cfi_lsda_pointers[fde_idx][0] != '\0')
 		buf[pos++] = 'L';
+	if (fde_idx >= 0 && as->cfi_fde_signal_frame &&
+	    as->cfi_fde_signal_frame[fde_idx])
+		buf[pos++] = 'S';
 	buf[pos] = '\0';
 	return buf;
 }
 
-/* Emit echo of augmentation data for a CIE.
- * Returns the number of bytes written (before the DW_CFA_nop padding). */
+/* Emit augmentation data for a CIE.
+ * fde_idx is the index of the template FDE for this CIE's attributes. */
 static int
 emit_cie_augmentation_data(struct as_file *as, struct as_section *eh,
-                            const char *aug)
+                            const char *aug, int fde_idx)
 {
 	size_t start = eh->size;
 	(void)aug;
@@ -175,14 +182,19 @@ emit_cie_augmentation_data(struct as_file *as, struct as_section *eh,
 	 * "zR"  → [R encoding byte]
 	 * "zRP" → [P encoding, personality pointer... , R encoding byte]
 	 * "zRL" → [L encoding byte, R encoding byte]
-	 * "zRPL" → [P encoding, personality pointer... , L encoding byte, R encoding byte] */
+	 * "zRPL" → [P encoding, personality pointer... , L encoding byte, R encoding byte]
+	 * "zRS" → [R encoding byte]  (signal frame, no extra data)
+	 * "zRPLS" → [P encoding, personality, L encoding, R encoding] */
 
-	if (as->cfi_personality_set) {
-		dwarf_u8(as, eh, as->cfi_personality_encoding);
+	if (fde_idx >= 0 && as->cfi_fde_personality_set &&
+	    as->cfi_fde_personality_set[fde_idx]) {
+		dwarf_u8(as, eh, as->cfi_fde_personality_encoding[fde_idx]);
 		/* Personality pointer: emit 0 placeholder + fixup */
-		if (as->cfi_personality_symbol) {
+		if (as->cfi_fde_personality_symbol &&
+		    as->cfi_fde_personality_symbol[fde_idx]) {
 			size_t pers_pos = eh->size;
-			int pers_width = dwarf_eh_pe_width(as->cfi_personality_encoding);
+			int pers_width = dwarf_eh_pe_width(
+				as->cfi_fde_personality_encoding[fde_idx]);
 			if (pers_width == 0)
 				pers_width = (as->target && as->target->elf_class == 2) ? 8 : 4;
 			/* Emit zero bytes for the pointer */
@@ -194,15 +206,55 @@ emit_cie_augmentation_data(struct as_file *as, struct as_section *eh,
 			unsigned reloc_type = (pers_width == 8) ?
 				MT_R_X86_64_64 : MT_R_X86_64_32;
 			as_add_fixup(as, eh, (size_t)pers_pos, (unsigned)pers_width,
-			             reloc_type, 0, as->cfi_personality_symbol);
+			             reloc_type, 0,
+			             as->cfi_fde_personality_symbol[fde_idx]);
 		}
 	}
-	if (as->cfi_lsda_set) {
+	if (fde_idx >= 0 && as->cfi_lsda_pointers &&
+	    as->cfi_lsda_pointers[fde_idx] &&
+	    as->cfi_lsda_pointers[fde_idx][0] != '\0') {
 		dwarf_u8(as, eh, as->cfi_lsda_encoding);
 	}
 	/* FDE encoding (always present with "zR") */
 	dwarf_u8(as, eh, as->target->dwarf_fde_encoding);
 	return (int)(eh->size - start);
+}
+
+/* Compare two FDEs' CIE-relevant attributes for equality.
+ * Returns 1 if they share the same CIE signature. */
+static int
+fde_cie_equal(struct as_file *as, int a, int b)
+{
+	int pa = (as->cfi_fde_personality_set && as->cfi_fde_personality_set[a]) ? 1 : 0;
+	int pb = (as->cfi_fde_personality_set && as->cfi_fde_personality_set[b]) ? 1 : 0;
+	if (pa != pb) return 0;
+	if (pa) {
+		if (as->cfi_fde_personality_encoding[a] !=
+		    as->cfi_fde_personality_encoding[b])
+			return 0;
+		const char *sa = as->cfi_fde_personality_symbol ?
+			as->cfi_fde_personality_symbol[a] : NULL;
+		const char *sb = as->cfi_fde_personality_symbol ?
+			as->cfi_fde_personality_symbol[b] : NULL;
+		if ((sa && !sb) || (!sa && sb)) return 0;
+		if (sa && sb && strcmp(sa, sb) != 0) return 0;
+	}
+	int la = (as->cfi_lsda_pointers && as->cfi_lsda_pointers[a] &&
+	          as->cfi_lsda_pointers[a][0] != '\0') ? 1 : 0;
+	int lb = (as->cfi_lsda_pointers && as->cfi_lsda_pointers[b] &&
+	          as->cfi_lsda_pointers[b][0] != '\0') ? 1 : 0;
+	if (la != lb) return 0;
+	/* Both have LSDA — their LSDA symbols must match exactly */
+	if (la && lb) {
+		uint8_t lenc = as->cfi_lsda_encoding;
+		(void)lenc; /* Currently single global encoding — FDEs share */
+		if (strcmp(as->cfi_lsda_pointers[a], as->cfi_lsda_pointers[b]) != 0)
+			return 0;
+	}
+	int sa = (as->cfi_fde_signal_frame && as->cfi_fde_signal_frame[a]) ? 1 : 0;
+	int sb = (as->cfi_fde_signal_frame && as->cfi_fde_signal_frame[b]) ? 1 : 0;
+	if (sa != sb) return 0;
+	return 1;
 }
 
 int
@@ -318,126 +370,210 @@ emit_dwarf(struct as_file *as)
 	}
 
 eh_frame:
-	/* ---- .eh_frame ---- */
+	/* ---- .eh_frame / .debug_frame ---- */
 	if (as->cfi_fde_count == 0)
 		return 0;
 
-	sec_idx = get_section(as, ".eh_frame");
-	if (sec_idx < 0)
-		return -1;
-	eh = &as->sections[sec_idx];
+	{
+		const char *frame_sec_name = as->cfi_section_type ? ".debug_frame" : ".eh_frame";
+		uint32_t cie_id_val = as->cfi_section_type ? 0xFFFFFFFFU : 0;
+		int dwarf_version = as->cfi_section_type ? 3 : 1;
 
-	/* ---- CIE ---- */
-	{   uint32_t cie_offset = (uint32_t)eh->size;
-		uint32_t cie_len_pos = (uint32_t)eh->size;
-		unsigned char pad = 0;
-		int fde_addr_width;  /* byte width of FDE address fields */
-		int cie_align;
+		sec_idx = get_section(as, frame_sec_name);
+		if (sec_idx < 0)
+			return -1;
+		eh = &as->sections[sec_idx];
 
-		cie_augmentation(as, augbuf, sizeof(augbuf));
+		/* ---- Multi-CIE: first pass: group FDEs by CIE signature ---- */
+		/* Build cie_for_fde[] array: for each FDE, find or create a CIE index */
+		size_t cie_count = 0;
+		size_t cie_capacity = 0;
+		uint64_t *cie_offsets = NULL; /* offset of each CIE in the output */
+		int *cie_for_fde = NULL;      /* per-FDE CIE index */
 
-		/* Determine FDE address field width from the encoding */
+		cie_for_fde = (int *)mt_malloc(as->cfi_fde_count * sizeof(int));
+		if (!cie_for_fde) return as_error(as, "out of memory");
+
+		for (i = 0; i < as->cfi_fde_count; i++) {
+			/* Find existing CIE with matching signature */
+			size_t c;
+			int found = -1;
+			for (c = 0; c < cie_count; c++) {
+				/* Compare against the first FDE assigned to this CIE */
+				size_t k;
+				for (k = 0; k < i; k++) {
+					if (cie_for_fde[k] == (int)c) {
+						if (fde_cie_equal(as, (int)i, (int)k))
+							found = (int)c;
+						break;
+					}
+				}
+				if (found >= 0) break;
+			}
+			if (found < 0) {
+				/* Create new CIE */
+				if (cie_count == cie_capacity) {
+					size_t cap = cie_capacity ? cie_capacity * 2 : 4;
+					uint64_t *no = (uint64_t *)mt_realloc(cie_offsets, cap * sizeof(*no));
+					if (!no) { free(cie_for_fde); return as_error(as, "out of memory"); }
+					cie_offsets = no;
+					cie_capacity = cap;
+				}
+				found = (int)cie_count;
+				cie_offsets[cie_count] = 0; /* filled after emit */
+				cie_count++;
+			}
+			cie_for_fde[i] = found;
+		}
+
+		/* ---- Emit CIEs ---- */
 		{
-			uint8_t enc = as->target->dwarf_fde_encoding;
-			int w = dwarf_eh_pe_width(enc);
-			if (w > 0)
-				fde_addr_width = w;
-			else if (as->target && as->target->elf_class == 2)
-				fde_addr_width = 8;
-			else
-				fde_addr_width = 4;
-		}
-		/* CIE alignment: 4 bytes for 32-bit, 8 bytes for 64-bit targets */
-		cie_align = (as->target && as->target->elf_class == 2) ? 8 : 4;
+			unsigned char pad = 0;
+			int cie_align;
 
-		dwarf_u32(as, eh, 0);  /* placeholder length */
-		dwarf_u32(as, eh, 0);  /* CIE id */
-		dwarf_u8(as, eh, 1);   /* version */
-		dwarf_string(as, eh, augbuf); /* augmentation (dynamic) */
-		dwarf_uleb128(as, eh, as->target->dwarf_code_align); /* code alignment */
-		dwarf_sleb128(as, eh, as->target->dwarf_data_align); /* data alignment */
-		dwarf_u8(as, eh, as->target->dwarf_ra_reg);          /* return address reg */
-		/* augmentation data length (written after we know the size) */
-		{   uint32_t aug_data_len_pos = (uint32_t)eh->size;
-			dwarf_uleb128(as, eh, 0); /* placeholder */
-			uint32_t aug_start = (uint32_t)eh->size;
-			emit_cie_augmentation_data(as, eh, augbuf);
-			uint32_t aug_len = (uint32_t)(eh->size - aug_start);
-			/* Patch augmentation data length */
-			{   uint64_t tmp = aug_len;
-				size_t patch_pos = aug_data_len_pos;
-				do {
-					unsigned char b = tmp & 0x7f;
-					tmp >>= 7;
-					if (tmp) b |= 0x80;
-					eh->data[patch_pos++] = b;
-				} while (tmp);
-			}
-		}
-		/* Pad to CIE alignment */
-		while (eh->size % (size_t)cie_align != 0)
-			as_append_bytes(as, eh, &pad, 1);
-		{ uint32_t cie_len = (uint32_t)(eh->size - cie_len_pos - 4);
-			eh->data[cie_len_pos] = (unsigned char)cie_len;
-			eh->data[cie_len_pos + 1] = (unsigned char)(cie_len >> 8);
-			eh->data[cie_len_pos + 2] = (unsigned char)(cie_len >> 16);
-			eh->data[cie_len_pos + 3] = (unsigned char)(cie_len >> 24);
-		}
+			/* CIE alignment: 4 bytes for 32-bit, 8 bytes for 64-bit targets */
+			cie_align = (as->target && as->target->elf_class == 2) ? 8 : 4;
 
-		/* ---- FDEs ---- */
-		for (i = 0; i < as->cfi_fde_count; ++i) {
-			uint32_t fde_len_pos = (uint32_t)eh->size;
-			uint64_t fde_initial_loc_pos, func_size;
-			const char *label = as->cfi_func_labels[i];
+			for (size_t ci = 0; ci < cie_count; ci++) {
+				/* Find the first FDE assigned to this CIE to get its attributes */
+				int template_fde = -1;
+				for (size_t fj = 0; fj < as->cfi_fde_count; fj++) {
+					if (cie_for_fde[fj] == (int)ci) {
+						template_fde = (int)fj;
+						break;
+					}
+				}
+				if (template_fde < 0) continue;
 
-			dwarf_u32(as, eh, 0); /* FDE length placeholder */
-			dwarf_u32(as, eh, (uint32_t)((uint64_t)cie_offset)); /* CIE pointer */
-			/* FDE initial_location (encoded per target) */
-			fde_initial_loc_pos = eh->size;
-			dwarf_eh_emit_value(as, eh, as->cfi_func_offsets[i],
-			                    as->target->dwarf_fde_encoding);
-			/* FDE address_range (function size) */
-			func_size = as->cfi_func_end[i] - as->cfi_func_offsets[i];
-			dwarf_eh_emit_value(as, eh, func_size, DW_EH_PE_udata4);
-			/* LSDA pointer (if set) */
-			if (as->cfi_lsda_set && as->cfi_lsda_pointers &&
-			    as->cfi_lsda_pointers[i] && as->cfi_lsda_pointers[i][0] != '\0') {
-				size_t lsda_pos = eh->size;
-				unsigned lsda_width = (unsigned)dwarf_eh_pe_width(as->cfi_lsda_encoding);
-				if (lsda_width == 0)
-					lsda_width = (as->target && as->target->elf_class == 2) ? 8 : 4;
-				/* Emit zero bytes */
-				unsigned j;
-				for (j = 0; j < lsda_width; j++)
+				cie_augmentation_for_fde(as, template_fde, augbuf, sizeof(augbuf));
+				cie_offsets[ci] = eh->size;
+
+				uint32_t cie_len_pos = (uint32_t)eh->size;
+
+				dwarf_u32(as, eh, 0);         /* placeholder length */
+				dwarf_u32(as, eh, cie_id_val); /* CIE id */
+				dwarf_u8(as, eh, (unsigned char)dwarf_version);
+				dwarf_string(as, eh, augbuf); /* augmentation (dynamic) */
+				dwarf_uleb128(as, eh, as->target->dwarf_code_align);
+				dwarf_sleb128(as, eh, as->target->dwarf_data_align);
+				dwarf_u8(as, eh, as->target->dwarf_ra_reg);
+				/* augmentation data length (written after we know the size) */
+				{   uint32_t aug_data_len_pos = (uint32_t)eh->size;
+					dwarf_uleb128(as, eh, 0); /* placeholder */
+					uint32_t aug_start = (uint32_t)eh->size;
+					emit_cie_augmentation_data(as, eh, augbuf, template_fde);
+					uint32_t aug_len = (uint32_t)(eh->size - aug_start);
+					/* Patch augmentation data length */
+					{   uint64_t tmp = aug_len;
+						size_t patch_pos = aug_data_len_pos;
+						do {
+							unsigned char b = tmp & 0x7f;
+							tmp >>= 7;
+							if (tmp) b |= 0x80;
+							eh->data[patch_pos++] = b;
+						} while (tmp);
+					}
+				}
+				/* Pad to CIE alignment */
+				while (eh->size % (size_t)cie_align != 0)
 					as_append_bytes(as, eh, &pad, 1);
-				/* Add fixup for the LSDA symbol */
-				unsigned lsda_reloc = (lsda_width == 8) ?
-					MT_R_X86_64_64 : MT_R_X86_64_32;
-				as_add_fixup(as, eh, (size_t)lsda_pos, lsda_width,
-				             lsda_reloc, 0, as->cfi_lsda_pointers[i]);
+				{ uint32_t cie_len = (uint32_t)(eh->size - cie_len_pos - 4);
+					eh->data[cie_len_pos] = (unsigned char)cie_len;
+					eh->data[cie_len_pos + 1] = (unsigned char)(cie_len >> 8);
+					eh->data[cie_len_pos + 2] = (unsigned char)(cie_len >> 16);
+					eh->data[cie_len_pos + 3] = (unsigned char)(cie_len >> 24);
+				}
 			}
-			/* FDE CFI program */
-			if (as->cfi_fde_sizes[i] > 0)
-				as_append_bytes(as, eh, as->cfi_fde_progs[i], as->cfi_fde_sizes[i]);
-			/* Terminator */
-			dwarf_u8(as, eh, 0x00);
-			/* FDE alignment: same as CIE */
-			while (eh->size % (size_t)cie_align != 0)
-				as_append_bytes(as, eh, &pad, 1);
-			{ uint32_t fde_len = (uint32_t)(eh->size - fde_len_pos - 4);
-				eh->data[fde_len_pos] = (unsigned char)fde_len;
-				eh->data[fde_len_pos + 1] = (unsigned char)(fde_len >> 8);
-				eh->data[fde_len_pos + 2] = (unsigned char)(fde_len >> 16);
-				eh->data[fde_len_pos + 3] = (unsigned char)(fde_len >> 24);
-			}
-			/* Fixup for FDE initial_loc (PC-relative per target) */
-			if (label && label[0] != '\0')
-				as_add_fixup(as, eh, (size_t)fde_initial_loc_pos,
-				             (unsigned)fde_addr_width,
-				             as->target->dwarf_fde_reloc, 0, label);
 		}
-		/* terminator: length = 0 */
-		dwarf_u32(as, eh, 0);
+
+		/* ---- Emit FDEs ---- */
+		{
+			unsigned char pad = 0;
+			int cie_align = (as->target && as->target->elf_class == 2) ? 8 : 4;
+			int fde_addr_width;
+
+			{
+				uint8_t enc = as->target->dwarf_fde_encoding;
+				int w = dwarf_eh_pe_width(enc);
+				if (w > 0)
+					fde_addr_width = w;
+				else if (as->target && as->target->elf_class == 2)
+					fde_addr_width = 8;
+				else
+					fde_addr_width = 4;
+			}
+
+			for (i = 0; i < as->cfi_fde_count; ++i) {
+				uint32_t fde_len_pos = (uint32_t)eh->size;
+				uint64_t fde_initial_loc_pos, func_size;
+				const char *label = as->cfi_func_labels[i];
+				int ci = cie_for_fde[i];
+				uint64_t cie_offset = cie_offsets[ci];
+
+				dwarf_u32(as, eh, 0); /* FDE length placeholder */
+				/* CIE pointer: For .eh_frame, this is the signed offset
+				 * from the current FDE start (where the CIE pointer field
+				 * sits) BACK to the CIE start. For .debug_frame, it's
+				 * the absolute offset of the CIE in the section. */
+				if (as->cfi_section_type) {
+					/* .debug_frame: absolute offset */
+					dwarf_u32(as, eh, (uint32_t)cie_offset);
+				} else {
+					/* .eh_frame: relative offset from this 4-byte field's
+					 * location back to the CIE start */
+					uint32_t rel = (uint32_t)((int64_t)cie_offset - (int64_t)eh->size);
+					dwarf_u32(as, eh, rel);
+				}
+				/* FDE initial_location (encoded per target) */
+				fde_initial_loc_pos = eh->size;
+				dwarf_eh_emit_value(as, eh, as->cfi_func_offsets[i],
+				                    as->target->dwarf_fde_encoding);
+				/* FDE address_range (function size) */
+				func_size = as->cfi_func_end[i] - as->cfi_func_offsets[i];
+				dwarf_eh_emit_value(as, eh, func_size, DW_EH_PE_udata4);
+				/* LSDA pointer (if set for this FDE) */
+				if (as->cfi_lsda_pointers && as->cfi_lsda_pointers[i] &&
+				    as->cfi_lsda_pointers[i][0] != '\0') {
+					size_t lsda_pos = eh->size;
+					unsigned lsda_width = (unsigned)dwarf_eh_pe_width(as->cfi_lsda_encoding);
+					if (lsda_width == 0)
+						lsda_width = (as->target && as->target->elf_class == 2) ? 8 : 4;
+					/* Emit zero bytes */
+					unsigned j;
+					for (j = 0; j < lsda_width; j++)
+						as_append_bytes(as, eh, &pad, 1);
+					/* Add fixup for the LSDA symbol */
+					unsigned lsda_reloc = (lsda_width == 8) ?
+						MT_R_X86_64_64 : MT_R_X86_64_32;
+					as_add_fixup(as, eh, (size_t)lsda_pos, lsda_width,
+					             lsda_reloc, 0, as->cfi_lsda_pointers[i]);
+				}
+				/* FDE CFI program */
+				if (as->cfi_fde_sizes[i] > 0)
+					as_append_bytes(as, eh, as->cfi_fde_progs[i], as->cfi_fde_sizes[i]);
+				/* Terminator */
+				dwarf_u8(as, eh, 0x00);
+				/* FDE alignment: same as CIE */
+				while (eh->size % (size_t)cie_align != 0)
+					as_append_bytes(as, eh, &pad, 1);
+				{ uint32_t fde_len = (uint32_t)(eh->size - fde_len_pos - 4);
+					eh->data[fde_len_pos] = (unsigned char)fde_len;
+					eh->data[fde_len_pos + 1] = (unsigned char)(fde_len >> 8);
+					eh->data[fde_len_pos + 2] = (unsigned char)(fde_len >> 16);
+					eh->data[fde_len_pos + 3] = (unsigned char)(fde_len >> 24);
+				}
+				/* Fixup for FDE initial_loc (PC-relative per target) */
+				if (label && label[0] != '\0')
+					as_add_fixup(as, eh, (size_t)fde_initial_loc_pos,
+					             (unsigned)fde_addr_width,
+					             as->target->dwarf_fde_reloc, 0, label);
+			}
+			/* terminator: length = 0 */
+			dwarf_u32(as, eh, 0);
+		}
+
+		free(cie_for_fde);
+		free(cie_offsets);
 	}
 	return 0;
 }
