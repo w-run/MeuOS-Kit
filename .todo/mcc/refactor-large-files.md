@@ -1,8 +1,13 @@
 # 大文件分层重构（优化输入 token / 提升缓存命中率）
 
-> 状态：🔄 开放（2026-08-04 大喵 token 优化方向 + doc-pm 扫描各组件超大源文件）
-> 关联 commit：无（纯重构，零行为改变）
-> ⚠️ **适用分支**：清单文件基于 **`tmp/lead-doc-mir-baseline`（m++/MIR 主线）** 核实（main 为另一套源结构，不适用）；重构动作须在 lead-doc-mir-baseline 系 worktree 上完成。
+> 状态：🟡 进行中（2026-08-06 mcc-refactor-worker 接手 tmp/mcc-refactor-split，基线 PASS=22 FAIL=3）
+> 关联 commit：71a8b016（cpp_newdel.c 已拆）
+> ⚠️ **适用分支**：mcc-dev 主线（44e54c69），worktree `.agents/worktrees/mcc-refactor-split/`，分支 `tmp/mcc-refactor-split`（已 push）
+> **基线 hash**：`/tmp/verify-all-baseline.log` sha256 `6079859722de5d1d747a1e5de8cda9e3e83d3b02c2f6168829a69ccb3bdd18a8`（PASS/FAIL 摘要 hash `27d530a4...`）
+> **基线 FAIL 3 项（历史缺陷，拆分后必须保持同样 FAIL）**：
+>   - make check-cpp (lex/func/neg, 跳过 virtual) — ctor_init_list_boundary 等
+>   - make check-cpp-func/neg (MCC_MIR_BACKEND=1)
+>   - make check-cpp-func/neg (MCC_MIR_BACKEND=0)
 
 ## 动机
 
