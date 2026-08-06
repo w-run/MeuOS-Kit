@@ -292,6 +292,14 @@ void cpp_add_visible_ns(struct scope *ns);
  * `extern "C"` (the `extern` token has been restored in that case). */
 bool cpp_linkage_spec(void);
 
+/* C++20 module/import/export declarations (defined in cpp_module.c):
+ * module ModuleName; / module :private; / import ModuleName; /
+ * import "header"; / export module ...; / export import ...; /
+ * export { ... }; / export template ...; / export declaration;. */
+void cpp_module_decl(struct scope *s);
+void cpp_import_decl(struct scope *s);
+void cpp_export_decl(struct scope *s);
+
 /* C++ `extern "C"` linkage context flag (defined in cpp_linkage.c):
  * true when the current declaration is inside an `extern "C"` block
  * or preceded by `extern "C"`.  Used by decl.c to assign LINKC
