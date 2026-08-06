@@ -336,7 +336,7 @@ check-mir-machine: $(MIR_SRCS) $(MABI_SRC)
 	@mkdir -p build
 	$(HOST_CC) $(CFLAGS) -Iinclude -o build/machine_test \
 		test/mir/machine_test.c src/mir/build.c src/mir/mir_util.c \
-		src/mir/machine.c src/mir/print.c $(MABI_SRC)
+		src/mir/machine.c src/mir/mtarget.c src/mir/print.c $(MABI_SRC)
 	./build/machine_test
 
 # P2 x86-64 SysV ABI lowering on MIR-native data: eightbyte classification
@@ -345,7 +345,7 @@ check-mir-abi: $(MIR_SRCS) $(MABI_SRC)
 	@mkdir -p build
 	$(HOST_CC) $(CFLAGS) -Iinclude -o build/mabi_test \
 		test/mir/mabi_test.c src/mir/build.c src/mir/mir_util.c \
-		src/mir/machine.c src/mir/print.c $(MABI_SRC)
+		src/mir/machine.c src/mir/mtarget.c src/mir/print.c $(MABI_SRC)
 	./build/mabi_test
 
 # MIR 单元测试套件（LIR 桥接层已移除，check-mir-bridge 已删除）。
