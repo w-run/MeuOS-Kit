@@ -1474,9 +1474,10 @@ mfnm_emit_arm(MFnM *fm, FILE *f)
 			}
 		}
 
-	int framesize = fm->slot + alloca_total(fm) + pushbytes + vpushbytes;
+	int vararg_save = (fm->host && fm->host->vararg) ? 176 : 0;
+	int framesize = fm->slot + alloca_total(fm) + pushbytes + vpushbytes + vararg_save;
 	framesize = (framesize + 7) & ~7;
-	g_alloca_cur = -(fm->slot + pushbytes + vpushbytes);
+	g_alloca_cur = -(fm->slot + pushbytes + vpushbytes + vararg_save);
 
 	fprintf(f, ".syntax unified\n");
 	fprintf(f, ".arch armv7ve\n");
