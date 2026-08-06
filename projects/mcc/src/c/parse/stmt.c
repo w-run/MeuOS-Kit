@@ -528,20 +528,20 @@ cpp_range_for(struct scope *s, struct func *f)
 }
 
 /* ---- C++20 coroutine statements (co_return / co_yield / co_await) -----
+ * Phase 1: co_return is lowered as a direct function return (no promise
+ * protocol yet; the function is marked iscoroutine for future phases).
+ * co_yield and co_await still produce the "not yet supported" diagnostic.
+ *
  * The full lowering requires the promise protocol (promise_type with
  * initial_suspend/final_suspend, await_transform, operator new for the
  * coroutine frame) and a suspend-point state machine, none of which m++
- * implements yet (see docs/cpp20-gaps.md).  This handler parses the
- * statement syntax in full — so plain syntax errors surface normally —
- * flags the enclosing function as a coroutine (func.iscoroutine), and
- * then reports a clear "not supported" diagnostic instead of the generic
- * "undeclared identifier: co_*" that the expression path would emit. */
+ * implements yet beyond the Phase 1 co_return shortcut. */
 static void
 cpp_coroutine_stmt(struct func *f, struct scope *s, enum cpp_tokenkind ck)
 {
 	struct token kw = tok;
-	struct expr *e;
-	struct type *t;
+	struct expr *e = NULL;
+	struct value *v = NULL;
 
 	next(); /* consume co_return / co_yield / co_await */
 
@@ -549,25 +549,50 @@ cpp_coroutine_stmt(struct func *f, struct scope *s, enum cpp_tokenkind ck)
 	 * coroutine so function-level handling can distinguish it. */
 	funcset_iscoroutine(f);
 
-	/* co_return [expr] ; — the expression is optional (equivalent to
-	 * promise.return_void()).  co_yield expr ; and co_await expr ;
-	 * always carry an expression. */
-	if (!(ck == CPP_TCO_RETURN && tok.kind == TSEMICOLON)) {
-		e = expr(s);
-		t = e ? e->type : NULL;
-		if (ck == CPP_TCO_RETURN && t)
-			/* mirror the plain `return` conversion to the declared
-			 * return type (promise.return_value) */
+	/* ---- co_return (Phase 1: lowered as a direct return) ------------ */
+	if (ck == CPP_TCO_RETURN) {
+		if (tok.kind != TSEMICOLON) {
+			/* co_return expr ; */
+			e = expr(s);
+			if (functype(f)->base == &typevoid)
+				error_code(E_STMT, &tok.loc,
+				    "'co_return' with expression in function returning void");
+			/* C++ reference return */
+			if (functype(f)->base->isref) {
+				extern struct expr *mkunaryexpr(enum tokenkind,
+				    struct expr *);
+				if (!e->lvalue)
+					error_code(E_CTYPE, &tok.loc,
+					    "cannot return a non-lvalue as a reference");
+				e = mkunaryexpr(TBAND, e);
+			}
 			e = exprassign(e, functype(f)->base);
+			v = funcexpr(f, e);
+			delexpr(e);
+		}
+		/* C++: run destructors before returning */
+		{
+			extern int g_lang;
+			extern void cpp_emit_scope_dtors(struct func *,
+			    struct scope *);
+			if (g_lang == 1)
+				cpp_emit_scope_dtors(f, s);
+		}
+		funcret(f, v);
+		expect(TSEMICOLON, "after 'co_return' statement");
+		return;
+	}
+
+	/* ---- co_yield / co_await (still unsupported) ------------------- */
+	if (tok.kind != TSEMICOLON) {
+		e = expr(s);
 		delexpr(e);
 	}
-	expect(TSEMICOLON, ck == CPP_TCO_RETURN ? "after 'co_return' statement"
-	    : ck == CPP_TCO_YIELD ? "after 'co_yield' statement"
-	                          : "after 'co_await' statement");
+	expect(TSEMICOLON, ck == CPP_TCO_YIELD ? "after 'co_yield' statement"
+	                                       : "after 'co_await' statement");
 
 	error_code(E_STMT, &kw.loc,
 	    "C++20 coroutines are not yet supported by m++ (co_%s)",
-	    ck == CPP_TCO_RETURN ? "return" :
 	    ck == CPP_TCO_YIELD ? "yield" : "await");
 }
 
@@ -599,7 +624,7 @@ stmt(struct func *f, struct scope *s)
 			if (ck == CPP_TCO_RETURN || ck == CPP_TCO_YIELD ||
 			    ck == CPP_TCO_AWAIT) {
 				cpp_coroutine_stmt(f, s, ck);
-				return; /* unreachable: error_code is noreturn */
+				return; /* co_return returns normally (Phase 1); co_yield/co_await are noreturn */
 			}
 			/* `try { ... } catch (T e) { ... }` — recognised keyword.
 			 * The landingpad/unwind backend that routes a thrown

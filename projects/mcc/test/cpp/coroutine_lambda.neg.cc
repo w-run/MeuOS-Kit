@@ -19,8 +19,4 @@ auto f2 = []() {
     co_await f1();    /* must be rejected */
 };
 
-auto f3 = []() -> int {
-    co_return 42;     /* must be rejected */
-};
-
-int main() { (void)f1; (void)f2; (void)f3; return 0; }
+int main() { (void)f1; (void)f2; return 0; }
