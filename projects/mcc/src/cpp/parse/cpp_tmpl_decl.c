@@ -16,6 +16,8 @@
 
 /* Cross-file: specialization parsers (defined in cpp_tmpl_spec.c). */
 extern void cpp_class_specialization(struct scope *s);
+
+oid
 extern void cpp_function_specialization(struct scope *s);
 cpp_template_decl(struct scope *s, struct type *owner)
 {
