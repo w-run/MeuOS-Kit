@@ -1399,10 +1399,15 @@ if (has_eh) {
 			callee_push_count++;
 		}
 	}
-	if (framesize > 0)
+	if (framesize > 0) {
 		fprintf(f, "\tsubq\t$%d, %%rsp\n", framesize);
-	if (framesize > 0)
+		/* .cfi_adjust_cfa_offset requires a preceding .cfi_def_cfa*.
+		 * With -fomit-frame-pointer the push of %rbp is skipped, so
+		 * no .cfi_def_cfa_offset was emitted — anchor the CFA first. */
+		if (g_omit_fp)
+			fputs("\t.cfi_def_cfa_offset 8\n", f);
 		fprintf(f, "\t.cfi_adjust_cfa_offset %d\n", framesize);
+	}
 	/* blocks are emitted in link order (reversed); jump to the real entry */
 	if (fm->start)
 		fprintf(f, "\tjmp\t.L%s.bb%u\n", fm->name ? fm->name : "f",
