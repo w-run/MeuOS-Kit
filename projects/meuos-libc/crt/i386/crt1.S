@@ -51,5 +51,7 @@ _start:
 .size environ,4
 environ:
 	.long 0
+.globl __environ
+.set __environ, environ
 
 .section .note.GNU-stack,"",@progbits
