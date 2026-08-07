@@ -22,6 +22,9 @@
  * the QBE `Target T` global (purity rule), so TLS emission and any other
  * PIC-sensitive codegen consult this flag instead. */
 extern int g_pic;
+/* 1 when --specs=meuos links libc-meuos (provides __gxx_personality_v0).
+ * DWARF EH personality/lsda references are only emitted in this mode. */
+extern int g_meuos_specs;
 /* TLS access-model mirror (defined in src/mir/machine.c, set from the
  * driver's `enum tls_model tls_model`).  Values match enum MTlsModel
  * (include/mir.h): DEFAULT=0, GLOBAL_DYNAMIC=1, INITIAL_EXEC=2,
@@ -1325,6 +1328,13 @@ gd_scan_done:
 		g_fp_off = csaves * 8 + framesize - 8;
 
 	fprintf(f, ".text\n");
+	/* Exception-handling flag (function-scoped): true when the function
+	 * calls _meuos_exc_* helpers under --specs=meuos.  Emits
+	 * .cfi_personality/.cfi_lsda and the .Llsda<name> label the LSDA
+	 * reference points at.  Gated on g_meuos_specs: under --specs=host
+	 * __gxx_personality_v0 is not linked, so personality/lsda must not
+	 * be emitted (check-cpp-func links with the host libc). */
+	bool has_eh = g_meuos_specs != 0;
 	if (fm->name) {
 		if (fm->host && fm->host->export)
 			fprintf(f, ".globl %s\n", fm->name);
@@ -1336,21 +1346,20 @@ gd_scan_done:
 		 * functions that explicitly use C++ try/catch to avoid pulling
 		 * __gxx_personality_v0 under --specs=host (where meuos-libc is not
 		 * linked). */
-		bool has_eh = false;
 		for (MBlkM *b = fm->link; !has_eh && b; b = b->link) {
 			for (uint32_t i = 0; !has_eh && i < b->nins; i++) {
 				MInsM *in = &b->ins[i];
 				if (in->op == MMOP_CALL && in->src[0] &&
 				    in->src[0]->kind == MV_GLOBAL) {
 					const char *s = in->src[0]->sym;
-					if (s && strstr(s, "_meuos_exc_"))
+					if (s && strstr(s, "_meuos_exc_") && g_meuos_specs)
 						has_eh = true;
 				}
 			}
 			if (!has_eh && b->term.op == MMOP_CALL && b->term.src[0] &&
 			    b->term.src[0]->kind == MV_GLOBAL) {
 				const char *s = b->term.src[0]->sym;
-				if (s && strstr(s, "_meuos_exc_"))
+				if (s && strstr(s, "_meuos_exc_") && g_meuos_specs)
 					has_eh = true;
 			}
 		}
@@ -1463,5 +1472,15 @@ if (has_eh) {
 	}
 
 	fputs("\t.cfi_endproc\n", f);
+	/* The .cfi_lsda above references .Llsda<name>; define the label so
+	 * the personality routine has an LSDA anchor.  A zero-length LSDA
+	 * (header only, no call-site table) tells the unwinder there are
+	 * no landing pads for this function — it continues unwinding. */
+	if (has_eh && fm->name) {
+		fprintf(f, ".Llsda%s:\n", fm->name);
+		fputs("\t.byte 0xff\n", f);  /* LPStart encoding: omitted */
+		fputs("\t.byte 0xff\n", f);  /* TType encoding: omitted */
+		fputs("\t.uleb128 0\n", f);  /* Call-site table length: 0 */
+	}
 fp_pool_emit(f);
 }

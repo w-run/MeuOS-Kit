@@ -2,6 +2,8 @@
 
 int emit_debug;  /* set by -g flag in main.c */
 int g_dwarf_level;  /* -g level: 0 = no debug info, 1+ = DWARF level */
+int g_meuos_specs;  /* 1 when --specs=meuos (emit DWARF EH personality/lsda
+                       referencing __gxx_personality_v0 from libc-meuos) */
 
 enum {
 	SecText,
