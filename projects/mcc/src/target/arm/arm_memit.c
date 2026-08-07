@@ -424,6 +424,27 @@ arm_cc_suffix(MCC cc)
 	}
 }
 
+/* Load one 32-bit half of an i64 operand into a scratch register.
+ * MV_CONST operands materialize the half directly (they have no
+ * slot); register-resident operands read the paired register
+ * (hi = reg+1); slot operands are read from fp+slot. */
+static void
+load_i64_half(FILE *f, MVal *v, int slot, bool hi, const char *rn)
+{
+	if (v && v->kind == MV_CONST && v->con) {
+		int64_t cv = v->con->u.i;
+		load_imm(f, rn, hi ? (int32_t)((uint64_t)cv >> 32) : (int32_t)cv);
+		return;
+	}
+	if (v && (v->kind == MV_REG || (v->kind == MV_TEMP && v->reg >= 0))) {
+		fprintf(f, "\tmov\t%s, %s\n", rn,
+		        mreg_name(g_mt, v->reg + (hi ? 1 : 0)));
+		return;
+	}
+	load_imm(f, rn, slot + (hi ? 4 : 0) + g_slot_base);
+	fprintf(f, "\tldr\t%s, [fp, %s]\n", rn, rn);
+}
+
 /* dst = (src[0] cc src[1]) ? 1 : 0  (cmp + conditional mov). */
 static void
 emit_setccr(FILE *f, MInsM *in)
@@ -432,8 +453,7 @@ emit_setccr(FILE *f, MInsM *in)
 	MVal *b = in->src[1];
 	MCC cc = in->cc;
 
-	if (in->dtype == MT_I64 && a && b &&
-	    (a->type == MT_I64 || b->type == MT_I64)) {
+	if (in->dtype == MT_I64 && a && b) {
 		/* i64 comparison: compare high 32 bits first; if equal, compare
 		 * low 32 bits with unsigned comparison.  Use a global counter
 		 * for unique labels across the whole assembly file. */
@@ -459,37 +479,14 @@ emit_setccr(FILE *f, MInsM *in)
 		default:      lsfx = "eq";  break;
 		}
 
-		/* Load hi halves.  MV_CONST has no slot; materialize
-		 * the high 32 bits directly instead of loading garbage
-		 * from [fp, #slot]. */
-		if (a && a->kind == MV_CONST && a->con)
-			load_imm(f, "r10", (int32_t)(a->con->u.i >> 32));
-		else {
-			load_imm(f, "r10", sa + 4 + g_slot_base);
-			fprintf(f, "\tldr\tr10, [fp, r10]\n");
-		}
-		if (b && b->kind == MV_CONST && b->con)
-			load_imm(f, "r12", (int32_t)(b->con->u.i >> 32));
-		else {
-			load_imm(f, "r12", sb + 4 + g_slot_base);
-			fprintf(f, "\tldr\tr12, [fp, r12]\n");
-		}
+		load_i64_half(f, a, sa, true, "r10");
+		load_i64_half(f, b, sb, true, "r12");
 		fputs("\tcmp\tr10, r12\n", f);
 
 		if (cc == MCC_EQ) {
 			fprintf(f, "\tbne\t.Li64ne%u\n", id);
-			if (a && a->kind == MV_CONST && a->con)
-				load_imm(f, "r10", (int32_t)a->con->u.i);
-			else {
-				load_imm(f, "r10", sa + g_slot_base);
-				fprintf(f, "\tldr\tr10, [fp, r10]\n");
-			}
-			if (b && b->kind == MV_CONST && b->con)
-				load_imm(f, "r12", (int32_t)b->con->u.i);
-			else {
-				load_imm(f, "r12", sb + g_slot_base);
-				fprintf(f, "\tldr\tr12, [fp, r12]\n");
-			}
+			load_i64_half(f, a, sa, false, "r10");
+			load_i64_half(f, b, sb, false, "r12");
 			fputs("\tcmp\tr10, r12\n", f);
 			fputs("\tmoveq\tr10, #1\n", f);
 			fputs("\tmovne\tr10, #0\n", f);
@@ -497,18 +494,8 @@ emit_setccr(FILE *f, MInsM *in)
 			        "\tmov\tr10, #0\n.Li64d%u:\n", id, id, id);
 		} else if (cc == MCC_NE) {
 			fprintf(f, "\tbne\t.Li64t%u\n", id);
-			if (a && a->kind == MV_CONST && a->con)
-				load_imm(f, "r10", (int32_t)a->con->u.i);
-			else {
-				load_imm(f, "r10", sa + g_slot_base);
-				fprintf(f, "\tldr\tr10, [fp, r10]\n");
-			}
-			if (b && b->kind == MV_CONST && b->con)
-				load_imm(f, "r12", (int32_t)b->con->u.i);
-			else {
-				load_imm(f, "r12", sb + g_slot_base);
-				fprintf(f, "\tldr\tr12, [fp, r12]\n");
-			}
+			load_i64_half(f, a, sa, false, "r10");
+			load_i64_half(f, b, sb, false, "r12");
 			fputs("\tcmp\tr10, r12\n", f);
 			fputs("\tmovne\tr10, #1\n", f);
 			fputs("\tmoveq\tr10, #0\n", f);
@@ -516,18 +503,8 @@ emit_setccr(FILE *f, MInsM *in)
 			        "\tmov\tr10, #1\n.Li64d%u:\n", id, id, id);
 		} else {
 			fprintf(f, "\tbne\t.Li64hd%u\n", id);
-			if (a && a->kind == MV_CONST && a->con)
-				load_imm(f, "r10", (int32_t)a->con->u.i);
-			else {
-				load_imm(f, "r10", sa + g_slot_base);
-				fprintf(f, "\tldr\tr10, [fp, r10]\n");
-			}
-			if (b && b->kind == MV_CONST && b->con)
-				load_imm(f, "r12", (int32_t)b->con->u.i);
-			else {
-				load_imm(f, "r12", sb + g_slot_base);
-				fprintf(f, "\tldr\tr12, [fp, r12]\n");
-			}
+			load_i64_half(f, a, sa, false, "r10");
+			load_i64_half(f, b, sb, false, "r12");
 			fputs("\tcmp\tr10, r12\n", f);
 			fprintf(f, "\tmov%s\tr10, #1\n", lsfx);
 			fprintf(f, "\tmov%s\tr10, #0\n", lsfx[0] == 'e' ? "ne" : "eq");
@@ -704,21 +681,12 @@ emit_ins(FILE *f, MInsM *in)
 	switch (op) {
 	case MMOP_MOV:
 		if (in->dtype == MT_I64) {
-			/* i64 on arm: two 32-bit moves via slot.
-			 * Both source and destination are slot-resident
-			 * (kl_in_reg==0 forces spill). */
-			int sslot = s0->slot;
+			/* i64 on arm: two 32-bit moves via slot.  The source may
+			 * be a constant, a register pair (selpar's i64 named
+			 * param), or a slot-resident value; materialize each half
+			 * through the scratch register. */
 			int dslot = d ? d->slot : 0;
-			/* low 32 bits */
-			{
-				int off = sslot + g_slot_base;
-				if (off >= -4095 && off <= 4095)
-					fprintf(f, "\tldr\tr10, [fp, #%d]\n", off);
-				else {
-					load_imm(f, "r12", off);
-					fprintf(f, "\tldr\tr10, [fp, r12]\n");
-				}
-			}
+			mv_to_scratch(f, s0, "r10");      /* low 32 */
 			if (d) {
 				int off = dslot + g_slot_base;
 				if (off >= -4095 && off <= 4095)
@@ -728,16 +696,7 @@ emit_ins(FILE *f, MInsM *in)
 					fprintf(f, "\tstr\tr10, [fp, r12]\n");
 				}
 			}
-			/* high 32 bits */
-			{
-				int off = sslot + 4 + g_slot_base;
-				if (off >= -4095 && off <= 4095)
-					fprintf(f, "\tldr\tr10, [fp, #%d]\n", off);
-				else {
-					load_imm(f, "r12", off);
-					fprintf(f, "\tldr\tr10, [fp, r12]\n");
-				}
-			}
+			load_i64_half(f, s0, s0 ? s0->slot : 0, true, "r10");
 			if (d) {
 				int off = dslot + 4 + g_slot_base;
 				if (off >= -4095 && off <= 4095)
@@ -1448,6 +1407,13 @@ emit_block(FILE *f, MBlkM *b)
 				else
 					fputs("\tvmov\td0, d8\n", f);
 			}
+		} else if (t.src[0] && t.src[0]->type == MT_I64) {
+			/* i64 return: r0 = low 32, r1 = high 32.  mabi_selret
+			 * leaves the value in the term (s0->slot is -1 there);
+			 * regalloc has run by emission, so both halves read from
+			 * the now-valid slot / constant. */
+			mv_to_scratch(f, t.src[0], "r0");
+			load_i64_half(f, t.src[0], t.src[0]->slot, true, "r1");
 		} else if (t.src[0]) {
 			mv_to_scratch(f, t.src[0], "r0");
 		}
@@ -1496,7 +1462,12 @@ mfnm_emit_arm(MFnM *fm, FILE *f)
 		}
 	}
 	int vpushbytes = ((fm->regsused >> ARM_D10) & 1) ? 48 : 0;
-	g_slot_base = -(pushbytes + vpushbytes);
+	/* For vararg functions the register save area (r0-r3, 16 bytes
+	 * at fp-16..fp-1) sits right above the push frame.  The slot
+	 * area must start below it to avoid overwriting the saved GPRs.
+	 * vararg_save (176 bytes) already reserves the space. */
+	int va_save_bytes = (fm->host && fm->host->vararg) ? 16 : 0;
+	g_slot_base = -(pushbytes + vpushbytes + va_save_bytes);
 
 	fm->dynalloc = false;
 	for (MBlkM *b = fm->link; !fm->dynalloc && b; b = b->link)

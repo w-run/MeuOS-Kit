@@ -62,6 +62,7 @@ map_op(MOP op, bool isf)
 	case MOP_VASTART: return MMOP_VASTART;
 	case MOP_VAARG:   return MMOP_VAARG;
 	case MOP_SALLOC:  return MMOP_SALLOC;
+	case MOP_VARARG:  return MMOP_NONE;   /* handled inline */
 	default:       return MMOP_NONE;
 	}
 }
@@ -135,23 +136,19 @@ mfnm_backend_arm(MFn *mf)
 		mfnm_addblk(fm, mblk[i]);
 	}
 
-	bool variadic_call = false;   /* MOP_VARARG between ARGs and CALL */
 	for (uint32_t bi = 0; bi < nblk; bi++) {
 		MBlk *mb = order[bi];
 		MBlkM *b = mblk[bi];
+
+		/* Track MOP_VARARG to signal variadic calls to the ABI
+		 * lowering (arm_mabi.c mabi_selcall reads call->extra). */
+		bool variadic_call = false;
 
 		for (uint32_t k = 0; k < mb->nins; k++) {
 			MIns *in = &mb->ins[k];
 			MVal *dst = in->dst;
 
 			switch (in->op) {
-			case MOP_VARARG: {
-				/* Frontend emitted IVARARG before the CALL → the
-				 * following CALL is variadic.  selcall needs this to
-				 * force AAPCS base standard (GPR/stack, no VFP). */
-				variadic_call = true;
-				break;
-			}
 			case MOP_PAR: {
 				MInsM *mi = maddm(fm, b, MMOP_PARM, dst ? dst->type : MT_NONE,
 				                  dst, 0, 0);
@@ -162,11 +159,16 @@ mfnm_backend_arm(MFn *mf)
 				MInsM *mi = maddm(fm, b, MMOP_ARG, in->dtype, 0,
 				                  mval_of_ref(mf, in->src[0]), 0);
 				if (in->src[0].val && in->src[0].val->kind == MV_TYPE) {
+					/* aggregate: src[1] is the source pointer;
+					 * td is the MV_TYPE's MTypeDesc */
 					mi->td = in->src[0].val->td;
 					mi->src[0] = mval_of_ref(mf, in->src[1]);
 				}
 				break;
 			}
+			case MOP_VARARG:
+				variadic_call = true;
+				break;
 			case MOP_CALL: {
 				if (dst && dst->type == MT_NONE)
 					dst->type = in->dtype;
@@ -174,13 +176,25 @@ mfnm_backend_arm(MFn *mf)
 				                  mval_of_ref(mf, in->src[0]), 0);
 				if (in->src[1].val && in->src[1].val->kind == MV_TYPE)
 					mi->td = in->src[1].val->td;
-				if (variadic_call)
+				if (variadic_call) {
 					mi->extra = 1;
-				variadic_call = false;
+					variadic_call = false;
+				}
 				break;
 			}
 			case MOP_LOAD: {
-				maddm_addr(fm, b, MMOP_LOAD, in->dtype, dst,
+				/* Sub-32 loads must zero-extend: emitting a plain
+				 * MMOP_LOAD makes emit_load use `ldr` (a full 32-bit
+				 * load), which for a byte/char load reads the following
+				 * bytes (e.g. adjacent string literals) and breaks
+				 * `a[0] != 'a'` comparisons.  ldrb/ldrh zero-extend,
+				 * matching x86_64's movzbl/movzwl. */
+				MMOP lop = MMOP_LOAD;
+				if (in->dtype == MT_I8)
+					lop = MMOP_LOAD_Z8;
+				else if (in->dtype == MT_I16)
+					lop = MMOP_LOAD_Z16;
+				maddm_addr(fm, b, lop, in->dtype, dst,
 				           maddr(mval_of_ref(mf, in->src[0]), 0, 1, 0), 0);
 				break;
 			}
