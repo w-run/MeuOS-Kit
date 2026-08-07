@@ -1,6 +1,6 @@
 ---
 name: notify 推送经验
-description: 里程碑推送、icon 必须 https PNG、push.py 对 icon 不编码致 404、正文禁裸斜杠且宜精简
+description: 里程碑推送、icon 必须 https PNG、push.py 对 icon 不编码致 404、正文禁裸斜杠且宜精简、级别不要每次都写紧急
 type: feedback
 ---
 
@@ -24,3 +24,12 @@ notify skill（`/root/.codebuddy/skills/notify/push.py`，Bark 协议 `https://m
 - 大段详情生成 HTML 报告到 `/workspace/static/<group>/<file>.html`，notify 只发短摘要 + `url=https://box.w-run.net/<group>/<file>.html` 跳转。
 
 **已验证可用组合**：`icon=https://box.w-run.net/assets/meuos_icon.png` + `group=meuos-kernel`，正文无裸 `/` 返回 `code:200`。标题/内容 UTF-8 中文正常。
+
+**6. 重要程度级别不要每次都写紧急**
+- 日常进度更新、常规状态汇报 → 普通级别（第 3 字段留空）。
+- 真正里程碑完成、阻塞解除 → 可用 `敏感`。
+- 关键故障、阻断性问题 → 才用 `紧急`。
+- 不重要的中间状态 → 用 `静默`。
+
+**Why**：每次都写「紧急」会丧失区分度，用户手机频繁响铃反而降低对真正紧急事件的注意。
+**How to apply**：根据内容区分度选择级别。多数日常 notify 留空（默认普通），里程碑用 `敏感`，仅阻塞/故障用 `紧急`。
