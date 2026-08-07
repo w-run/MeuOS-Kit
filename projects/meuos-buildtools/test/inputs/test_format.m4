@@ -1,0 +1,1 @@
+format(`hello %s %d', `world', `42')

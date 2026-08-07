@@ -1,0 +1,1 @@
+ifdef(`UNDEF', `yes', `no')
