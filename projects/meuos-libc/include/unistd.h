@@ -80,6 +80,14 @@ int select(int, fd_set *, fd_set *, fd_set *, struct timeval *);
 int fchmod(int, mode_t);
 int fchown(int, uid_t, gid_t);
 int chown(const char *, uid_t, gid_t);
+int faccessat(int, const char *, int, int);
+int linkat(int, const char *, int, const char *, int);
+int symlinkat(const char *, int, const char *);
+ssize_t readlinkat(int, const char *, char *, size_t);
+int unlinkat(int, const char *, int);
+int renameat(int, const char *, int, const char *);
+int fchownat(int, const char *, uid_t, gid_t, int);
+
 uid_t getuid(void);
 uid_t geteuid(void);
 gid_t getgid(void);
