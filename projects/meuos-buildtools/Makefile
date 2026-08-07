@@ -112,6 +112,7 @@ check: $(BIN)
 		exit 1; \
 	fi; \
 	sh $(TEST)/m4_basic_test.sh "$(ABSBIN)"
+	sh $(TEST)/flex_basic_test.sh "$(ABSBIN)"
 
 # Static linking target for sysroot
 $(BUILD)/%-static: $(SRC)/%/%.c

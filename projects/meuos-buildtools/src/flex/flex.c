@@ -928,13 +928,35 @@ static void generate_code(FILE *out, LexFile *lf, Dfa *dfa) {
     }
 }
 
+/* ======================== Help text ======================== */
+
+static void print_flex_help(void)
+{
+    printf("Usage: flex [OPTION]... [FILE]...\n");
+    printf("Minimal flex-compatible lexer generator.\n");
+    printf("\n");
+    printf("Options:\n");
+    printf("  --help        display this help and exit\n");
+    printf("\n");
+    printf("Reads .l lexer definitions, generates C code on stdout.\n");
+    printf("If no FILE is given, read standard input.\n");
+}
+
 /* ======================== Main ======================== */
 
 int flex_main(int argc, char **argv) {
     const char *input_path = NULL;
 
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--help") == 0) {
+            print_flex_help();
+            return 0;
+        }
+    }
+
     if (argc > 2) {
         fprintf(stderr, "usage: flex [file.l]\n");
+        fprintf(stderr, "Run 'flex --help' for usage information.\n");
         return 1;
     }
     if (argc == 2) {
