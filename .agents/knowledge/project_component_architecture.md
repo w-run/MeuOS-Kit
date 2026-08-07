@@ -1,17 +1,19 @@
-# 组件架构决策——buildtools 独立，不合并
+# 组件架构通用原则：同一份东西不分散到多处
 
-**事实**：buildtools（m4/bison/flex/gperf）保持独立组件，不与 toolchain 合并，也不与 meow 合并。
+**核心原则**：同一份实现/逻辑只在一个组件中维护，其他组件通过依赖调用，而不是各自维护一份。
 
-**Why:** 权衡利弊后结论：
-- **buildtools vs toolchain**：定位不同——toolchain 处理编译产物（as/ld/ar/...），buildtools 是代码生成器（m4/bison/...）。代码零共享。合并后 toolchain 的 37/37 门禁会被 buildtools 拖成 FAIL，混淆状态。
-- **buildtools vs meow**：meow 是**构建调度器**（代替 make），不依赖 buildtools 自构建；buildtools 是**被构建的工具**。meow 成熟度不应被 buildtools 拖累。
-- **归属**：buildtools 与 meuos-utils/msh 同级（Phase 6/7），非 mcc/toolchain 同级核心组件。
+**Why:** 分散维护导致：
+- 修复 bug 要改多处
+- 升级功能要同步多处
+- 不同副本可能产生行为差异
+- 增加构建负担和代码体积
 
 **How to apply:**
-- data.json 中 buildtools 保持独立组件区块
-- 门禁各算各的账，不合并 check 计数
+- 新功能开发前先判断：这个逻辑应该归属哪个组件？
+- 跨组件需要共享 → 归属组件提供库/CLI 接口，其他组件依赖调用
+- 禁止"先在自己组件里写一份，以后再说"
 
-**追加确认（2026-08-08）**：所有 m4/libm4 全在 buildtools 中统一维护。
-- **meow** 不再内嵌 m4，需要配方宏展开时调 buildtools 的 m4 CLI 或链接 buildtools 的 libm4
-- **buildtools** 统一管理所有 m4 代码：独立 CLI + 可链接的 libm4 库
-- 这样 m4 实现只维护一份，不分散到两个组件
+**实例**：
+- **m4/libm4** → 全归 **buildtools**（meow 不再内嵌 m4，需要时调 buildtools 的 m4 CLI 或链接 libm4）
+- **ELF 处理** → 全归 **meuos-toolchain**（mt/as/ld/ar/... 已统一处理，其他组件不重复实现）
+- 其他一切可能跨组件共享的代码均应遵循此原则
