@@ -55,3 +55,5 @@ _start:
 .size environ,8
 environ:
 	.quad 0
+.globl __environ
+.set __environ, environ

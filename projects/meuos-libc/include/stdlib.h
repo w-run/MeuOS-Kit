@@ -41,6 +41,7 @@ ldiv_t ldiv(long, long);
 void qsort(void *, size_t, size_t, int (*)(const void *, const void *));
 void *bsearch(const void *, const void *, size_t, size_t, int (*)(const void *, const void *));
 extern char **environ;
+extern char **__environ;
 char *getenv(const char *);
 int setenv(const char *, const char *, int);
 int unsetenv(const char *);
