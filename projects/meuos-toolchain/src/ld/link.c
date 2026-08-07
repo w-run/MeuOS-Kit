@@ -613,7 +613,10 @@ dedup_eh_frame_cie(struct ld_context *ctx)
 
 	while (offset + 8 <= size) {
 		uint32_t len = read32(data + offset);
-		if (len == 0) break;
+		if (len == 0) {
+			offset += 4;  /* skip ZERO terminator, keep going */
+			continue;
+		}
 		uint32_t end = offset + 4 + len;
 		if (end > size) break;
 		if (read32(data + offset + 4) == 0) {
@@ -659,7 +662,6 @@ dedup_eh_frame_cie(struct ld_context *ctx)
 			if (!cie_keep[j]) continue;
 			size_t j_off = cies[j].old_offset;
 			size_t j_len = cies[j].length;
-			/* Compare full CIE record: length field + CIE content */
 			if (i_len == j_len &&
 			    memcmp(data + i_off, data + j_off, 4 + i_len) == 0) {
 				dup = 1;
@@ -674,21 +676,24 @@ dedup_eh_frame_cie(struct ld_context *ctx)
 		}
 	}
 
-	/* ---- Measure total FDE payload + null terminator ---- */
+	/* ---- Measure total FDE payload ---- */
 	size_t fde_total = 0;
 	offset = 0;
 	while (offset + 8 <= size) {
 		uint32_t len = read32(data + offset);
-		if (len == 0) break;
+		if (len == 0) {
+			offset += 4;
+			continue;
+		}
 		uint32_t end = offset + 4 + len;
 		if (end > size) break;
 		if (read32(data + offset + 4) != 0)
 			fde_total += 4 + len;
 		offset = end;
 	}
-	int has_null = (offset + 4 <= size && read32(data + offset) == 0);
 
-	size_t new_size = deduped_cie_size + fde_total + (has_null ? 4 : 0);
+	/* Always add a null terminator at the end */
+	size_t new_size = deduped_cie_size + fde_total + 4;
 	unsigned char *new_data = (unsigned char *)ld_malloc(new_size ? new_size : 1);
 	if (!new_data) {
 		free(cies); free(cie_keep); free(cie_new_offset);
@@ -701,49 +706,50 @@ dedup_eh_frame_cie(struct ld_context *ctx)
 	/* Write deduped CIEs */
 	for (size_t i = 0; i < cie_count; i++) {
 		if (!cie_keep[i]) continue;
-		size_t rec_size = 4 + cies[i].length;
-		memcpy(new_data + wp, data + cies[i].old_offset, rec_size);
-		wp += rec_size;
+		memcpy(new_data + wp, data + cies[i].old_offset, 4 + cies[i].length);
+		wp += 4 + cies[i].length;
 	}
 
 	/* Write all FDEs with corrected CIE pointers */
 	offset = 0;
 	while (offset + 8 <= size) {
 		uint32_t len = read32(data + offset);
-		if (len == 0) break;
+		if (len == 0) {
+			offset += 4;
+			continue;
+		}
 		uint32_t end = offset + 4 + len;
 		if (end > size) break;
 		uint32_t id = read32(data + offset + 4);
 		if (id != 0) {
-			/* In .eh_frame, id = (offset + 4) - cie_old_offset */
-			size_t cie_old = offset + 4 - (size_t)id;
-			/* Find CIE index from old offset */
+			/* In .eh_frame, CIE_ptr = (int32_t)id is a signed offset:
+			 *   id = CIE_addr - (FDE_field_addr)
+			 * So: CIE_addr = FDE_field_addr + (int32_t)id */
+			size_t cie_old = offset + 4 + (int32_t)id;
 			size_t ci;
 			for (ci = 0; ci < cie_count; ci++) {
 				if (cies[ci].old_offset == cie_old)
 					break;
 			}
 			if (ci >= cie_count) {
-				/* Shouldn't happen; copy as-is */
+				/* Copy as-is (shouldn't happen) */
 				memcpy(new_data + wp, data + offset, 4 + len);
 				wp += 4 + len;
 			} else {
-				uint32_t new_cie_ptr = (uint32_t)(wp + 4 - cie_new_offset[ci]);
-				memcpy(new_data + wp, data + offset, 4);        /* length */
-				write32(new_data + wp + 4, new_cie_ptr);         /* fixed ptr */
-				/* Copy rest of FDE (initial location, address range, augmentation) */
-				memcpy(new_data + wp + 8, data + offset + 8, len - 4);
+				/* New CIE_ptr = cie_new_offset[ci] - (wp + 4) (signed) */
+				uint32_t new_cie_ptr = (uint32_t)((int32_t)cie_new_offset[ci] - (int32_t)(wp + 4));
+				memcpy(new_data + wp, data + offset, 4);         /* length */
+				write32(new_data + wp + 4, new_cie_ptr);          /* fixed ptr */
+				memcpy(new_data + wp + 8, data + offset + 8, len - 4); /* rest */
 				wp += 4 + len;
 			}
 		}
 		offset = end;
 	}
 
-	/* Preserve null terminator */
-	if (has_null) {
-		memcpy(new_data + wp, data + offset, 4);
-		wp += 4;
-	}
+	/* Write null terminator */
+	write32(new_data + wp, 0);
+	wp += 4;
 
 	/* Replace group data */
 	free(eh->data);
