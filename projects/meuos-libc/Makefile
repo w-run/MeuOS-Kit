@@ -185,7 +185,7 @@ STDLIB_OBJS    := $(BUILD)/stdlib/malloc.o $(BUILD)/stdlib/convert.o \
                   $(BUILD)/stdlib/env.o $(BUILD)/stdlib/exit.o \
                   $(BUILD)/stdlib/process.o $(BUILD)/stdlib/search.o \
                   $(BUILD)/stdlib/math.o $(BUILD)/stdlib/strfmon.o \
-                  $(BUILD)/stdlib/realpath.o $(BUILD)/process/spawn.o $(BUILD)/process/wordexp.o $(BUILD)/process/getopt.o $(BUILD)/process/rlimit.o $(BUILD)/process/prioritize.o $(BUILD)/process/group.o
+                  $(BUILD)/stdlib/realpath.o $(BUILD)/process/spawn.o $(BUILD)/process/wordexp.o $(BUILD)/process/getopt.o $(BUILD)/process/getopt_long.o $(BUILD)/process/rlimit.o $(BUILD)/process/prioritize.o $(BUILD)/process/group.o
 STDIO_OBJS     := $(BUILD)/stdio/file.o $(BUILD)/stdio/char_io.o \
                   $(BUILD)/stdio/block_io.o $(BUILD)/stdio/position.o \
                   $(BUILD)/stdio/fmt_out.o $(BUILD)/stdio/fmt_in.o \
