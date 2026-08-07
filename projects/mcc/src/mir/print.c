@@ -39,7 +39,7 @@ static const char *mop_name(MOP op)
 		[MOP_ALLOCA] = "alloca",
 		[MOP_SEXT] = "sext", [MOP_ZEXT] = "zext",
 		[MOP_TRUNC] = "trunc", [MOP_CAST] = "cast",
-		[MOP_F2I] = "f2i", [MOP_I2F] = "i2f", [MOP_UI2F] = "ui2f",
+		[MOP_F2I] = "f2i", [MOP_UF2I] = "uf2i", [MOP_I2F] = "i2f", [MOP_UI2F] = "ui2f",
 		[MOP_FEXT] = "fext", [MOP_FTRUNC] = "ftrunc",
 		[MOP_JMP] = "jmp", [MOP_JNZ] = "jnz",
 		[MOP_RET] = "ret", [MOP_CALL] = "call",

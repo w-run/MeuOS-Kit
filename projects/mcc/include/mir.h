@@ -219,7 +219,9 @@ typedef enum MOP {
 	/* conversions */
 	MOP_SEXT, MOP_ZEXT, MOP_TRUNC,       /* integer widening/narrowing */
 	MOP_CAST,                              /* pointer/float bit-preserving */
-	MOP_F2I, MOP_I2F,                     /* float<->int with rounding */
+	MOP_F2I,                              /* float -> signed int (trunc) */
+	MOP_UF2I,                             /* float -> unsigned int (trunc) */
+	MOP_I2F,                              /* signed int -> float */
 	MOP_UI2F,                             /* unsigned int -> float */
 	MOP_FEXT, MOP_FTRUNC,                 /* f32<->f64 */
 

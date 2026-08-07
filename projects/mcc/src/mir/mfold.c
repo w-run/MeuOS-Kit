@@ -65,6 +65,24 @@ mfold_const(MConst *res, MOP op, int w, MConst *cl, MConst *cr)
 		           : (double)(uint64_t)cl->u.i;
 		return 0;
 	}
+	if (op == MOP_UF2I && cl && cl->kind == MC_FLT) {
+		/* unsigned float -> int: cast via unsigned intermediate */
+		res->kind = MC_INT;
+		if (w) {
+			res->type = MT_I64;
+			if (cl->type == MT_F32)
+				res->u.i = (uint64_t)(double)cl->u.s;
+			else
+				res->u.i = (uint64_t)cl->u.d;
+		} else {
+			res->type = MT_I32;
+			if (cl->type == MT_F32)
+				res->u.i = (uint32_t)cl->u.s;
+			else
+				res->u.i = (uint32_t)cl->u.d;
+		}
+		return 0;
+	}
 	if (op == MOP_F2I && cl && cl->kind == MC_FLT) {
 		res->kind = MC_INT;
 		if (w) {
@@ -416,8 +434,8 @@ msimp_block(MFn *fn, MBlk *b, const char *is_alloca)
 				MConst *z = mconst_int(fn, cl->type, 0);
 				if (mfold_const(&cr, MOP_NEG, w, cl, z) == 0)
 					folded = true;
-			} else if (in->op == MOP_I2F || in->op == MOP_UI2F ||
-			           in->op == MOP_F2I) {
+} else if (in->op == MOP_I2F || in->op == MOP_UI2F ||
+		           in->op == MOP_F2I || in->op == MOP_UF2I) {
 				MConst *z = mconst_int(fn, MT_I64, 0);
 				if (mfold_const(&cr, in->op, w, cl, z) == 0)
 					folded = true;

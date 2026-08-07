@@ -66,6 +66,70 @@ set_arch_env(void)
 		if (n > 0)
 			recipe_environment[len + n] = '\0';
 	}
+
+	/* Auto-configure cross-compilation variables when --arch differs from host.
+	 * Sets CC, AR, STRIP, LD, READELF, OBJCOPY, OBJDUMP, NM, RANLIB for
+	 * the target architecture using <arch>-linux-gnu-* prefix convention. */
+	const char *host_arch = NULL;
+	{
+		struct utsname uts;
+		if (uname(&uts) == 0) host_arch = uts.machine;
+	}
+	int is_cross = host_arch && strcmp(host_arch, arch) != 0;
+	/* Also treat explicit --arch as cross even for same-arch (e.g. MeuOS sysroot) */
+	if (!is_cross && build_arch && arch) is_cross = 1;
+
+	if (is_cross && arch) {
+		char prefix[64];
+		/* Map arch to canonical cross-toolchain prefix */
+		const char *triple = NULL;
+		if      (strcmp(arch, "x86_64")      == 0) triple = "x86_64-linux-gnu";
+		else if (strcmp(arch, "aarch64")     == 0) triple = "aarch64-linux-gnu";
+		else if (strcmp(arch, "riscv64")     == 0) triple = "riscv64-linux-gnu";
+		else if (strcmp(arch, "loongarch64") == 0) triple = "loongarch64-linux-gnu";
+		else if (strcmp(arch, "i386")        == 0) triple = "i686-linux-gnu";
+		else if (strcmp(arch, "arm")         == 0) triple = "arm-linux-gnueabihf";
+
+		if (triple) {
+			char cross_vars[1024];
+			size_t pos;
+			/* Build cross-toolchain variable strings */
+			char cc_str[128], ar_str[128], strip_str[128], ld_str[128];
+			char readelf_str[128], objcopy_str[128], objdump_str[128];
+			char nm_str[128], ranlib_str[128];
+			snprintf(cc_str, sizeof(cc_str), "%s-gcc", triple);
+			snprintf(ar_str, sizeof(ar_str), "%s-ar", triple);
+			snprintf(strip_str, sizeof(strip_str), "%s-strip", triple);
+			snprintf(ld_str, sizeof(ld_str), "%s-ld", triple);
+			snprintf(readelf_str, sizeof(readelf_str), "%s-readelf", triple);
+			snprintf(objcopy_str, sizeof(objcopy_str), "%s-objcopy", triple);
+			snprintf(objdump_str, sizeof(objdump_str), "%s-objdump", triple);
+			snprintf(nm_str, sizeof(nm_str), "%s-nm", triple);
+			snprintf(ranlib_str, sizeof(ranlib_str), "%s-ranlib", triple);
+
+			pos = snprintf(cross_vars, sizeof(cross_vars),
+			               "export CC='%s'; export AR='%s'; export STRIP='%s'; "
+			               "export LD='%s'; export READELF='%s'; "
+			               "export OBJCOPY='%s'; export OBJDUMP='%s'; "
+			               "export NM='%s'; export RANLIB='%s'; ",
+			               cc_str, ar_str, strip_str,
+			               ld_str, readelf_str, objcopy_str, objdump_str,
+			               nm_str, ranlib_str);
+			setenv("CC", cc_str, 0);
+			setenv("AR", ar_str, 0);
+			setenv("STRIP", strip_str, 0);
+			setenv("LD", ld_str, 0);
+			setenv("READELF", readelf_str, 0);
+			setenv("OBJCOPY", objcopy_str, 0);
+			setenv("OBJDUMP", objdump_str, 0);
+			setenv("NM", nm_str, 0);
+			setenv("RANLIB", ranlib_str, 0);
+
+			size_t env_len = strlen(recipe_environment);
+			if (env_len + pos < sizeof(recipe_environment))
+				memcpy(recipe_environment + env_len, cross_vars, pos + 1);
+		}
+	}
 }
 
 int
