@@ -410,7 +410,7 @@ fload_scratch(FILE *f, MVal *v)
 					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
 					        (uint32_t)bits, g_fp_scratch + 4);
 					fprintf(f, "\tmovsd\t%d(%%ebp), %%xmm0\n",
-					        g_i64_scratch);
+					        g_fp_scratch);
 				}
 			}
 			return;
@@ -507,9 +507,9 @@ emit_setccr_fp(FILE *f, MInsM *in)
 					uint32_t bits;
 					memcpy(&bits, &c->u.s, 4);
 					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
-					        bits, g_i64_scratch);
+					        bits, g_fp_scratch);
 					fprintf(f, "\tmovss\t%d(%%ebp), %%xmm1\n",
-					        g_i64_scratch);
+					        g_fp_scratch);
 				} else {
 					uint64_t bits;
 					memcpy(&bits, &c->u.d, 8);
@@ -518,7 +518,7 @@ emit_setccr_fp(FILE *f, MInsM *in)
 					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
 					        (uint32_t)bits, g_fp_scratch + 4);
 					fprintf(f, "\tmovsd\t%d(%%ebp), %%xmm1\n",
-					        g_i64_scratch);
+					        g_fp_scratch);
 				}
 			}
 		} else if (b->kind == MV_REG || (b->kind == MV_TEMP && b->reg >= 0)) {
