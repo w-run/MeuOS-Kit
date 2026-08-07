@@ -210,7 +210,9 @@ SYSCALL_OBJS   := $(addprefix $(BUILD)/syscall/, \
                   pread.o pwrite.o readv.o writev.o preadv.o pwritev.o \
                   openat.o pipe2.o dup3.o \
                   fstatat.o faccessat.o fchmodat.o mkdirat.o \
-                  linkat.o symlinkat.o readlinkat.o unlinkat.o renameat.o fchownat.o)
+                  linkat.o symlinkat.o readlinkat.o unlinkat.o renameat.o fchownat.o \
+                  clock_settime.o clock_nanosleep.o \
+                  timer_create.o timer_settime.o timer_gettime.o timer_getoverrun.o timer_delete.o)
 # arch_prctl(2) 只存在于 x86_64；i386/aarch64 的 tls.c 都不引用它。
 # 链接器按需从 .a 抽取，未引用时不会进入最终二进制；这里仍按 arch
 # 过滤，避免给非 x86_64 build 列表里塞一条无意义的目标。
