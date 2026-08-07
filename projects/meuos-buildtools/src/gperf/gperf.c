@@ -326,10 +326,41 @@ emit_code(unsigned int table_size, const unsigned int *lookup)
     }
 }
 
+/* ---------- help ---------- */
+static void print_gperf_help(void)
+{
+    printf("Usage: gperf [OPTION]...\n");
+    printf("Minimal GNU gperf-compatible perfect hash function generator.\n");
+    printf("\n");
+    printf("Options:\n");
+    printf("  --help        display this help and exit\n");
+    printf("  --version     display version info and exit\n");
+    printf("\n");
+    printf("Reads keyword list from stdin, generates C code on stdout.\n");
+}
+
+static void print_gperf_version(void)
+{
+    printf("gperf (MeuOS buildtools) 0.1.0\n");
+    printf("Copyright (C) MeuOS Project\n");
+    printf("License: MIT\n");
+}
+
 /* ---------- main ---------- */
 int
-gperf_main(void)
+gperf_main(int argc, char **argv)
 {
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--help") == 0) {
+            print_gperf_help();
+            return 0;
+        }
+        if (strcmp(argv[i], "--version") == 0) {
+            print_gperf_version();
+            return 0;
+        }
+    }
+
     if (parse_input() <= 0) {
         if (kw_count == 0)
             fprintf(stderr, "error: no keywords\n");
