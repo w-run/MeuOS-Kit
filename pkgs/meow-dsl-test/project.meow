@@ -1,0 +1,41 @@
+name: meow-dsl-test
+version: 1.0
+
+# Test 1: deps: [a, b, c] bracket list syntax (new)
+[step-a]
+  phony: true
+  run: printf "a" > /tmp/meow-dsl-step-a.txt
+
+[step-b]
+  phony: true
+  deps: [step-a]
+  run: printf "b" >> /tmp/meow-dsl-step-b.txt
+
+[step-c]
+  phony: true
+  deps: [step-a, step-b]
+  run: printf "c" > /tmp/meow-dsl-step-c.txt
+
+# Test 2: ARCH in list condition (new)
+[native-only]
+  when: ARCH in "x86_64,aarch64"
+  phony: true
+  run: printf "native-arch" > /tmp/meow-dsl-arch.txt
+
+# Test 3: Compound && condition (new)
+[verify-compound]
+  deps: [step-c, native-only]
+  phony: true
+  when: ARCH == "x86_64" && ARCH in "x86_64"
+  run: |
+    test -f /tmp/meow-dsl-step-a.txt
+    test -f /tmp/meow-dsl-step-b.txt
+    test -f /tmp/meow-dsl-step-c.txt
+    test -f /tmp/meow-dsl-arch.txt
+    printf "all-ok" > /tmp/meow-dsl-result.txt
+
+[all]
+  deps: [verify-compound]
+
+[clean]
+  run: rm -f /tmp/meow-dsl-step-a.txt /tmp/meow-dsl-step-b.txt /tmp/meow-dsl-step-c.txt /tmp/meow-dsl-arch.txt /tmp/meow-dsl-result.txt

@@ -95,7 +95,12 @@ target_unlock(int fd)
 	}
 }
 
-/* Evaluate a "when:" condition expression.
+/* Evaluate a "when:" condition expression — supports:
+ *   ARCH == "value"        equality
+ *   ARCH != "value"        inequality
+ *   ARCH in "val1,val2"    value in comma-separated list
+ *   expr1 && expr2         logical AND
+ *   expr1 || expr2         logical OR
  * Returns 1 if condition is met (or no condition), 0 if skipped. */
 static int
 eval_condition(const char *when_expr)
@@ -103,10 +108,35 @@ eval_condition(const char *when_expr)
 	if (!when_expr || !*when_expr)
 		return 1;
 
-	/* Parse: EXPR OP "VALUE" */
+	/* Check for && and || — split into left and right and recurse */
+	const char *or = strstr(when_expr, " || ");
+	if (or) {
+		char left[256];
+		size_t llen = (size_t)(or - when_expr);
+		if (llen >= sizeof(left)) llen = sizeof(left) - 1;
+		memcpy(left, when_expr, llen);
+		left[llen] = '\0';
+		return eval_condition(left) || eval_condition(or + 4);
+	}
+	const char *and = strstr(when_expr, " && ");
+	if (and) {
+		char left[256];
+		size_t llen = (size_t)(and - when_expr);
+		if (llen >= sizeof(left)) llen = sizeof(left) - 1;
+		memcpy(left, when_expr, llen);
+		left[llen] = '\0';
+		return eval_condition(left) && eval_condition(and + 4);
+	}
+
+	/* Parse: EXPR OP "VALUE" — support both "VALUE" and VALUE */
 	char expr[64], op[8], value[128];
-	if (sscanf(when_expr, "%63[^ ] %7[^ ] \"%127[^\"]\"", expr, op, value) < 3)
+	if (sscanf(when_expr, "%63[^ ] %7[^ ] \"%127[^\"]\"", expr, op, value) >= 3) {
+		/* Quoted value parsed successfully */
+	} else if (sscanf(when_expr, "%63[^ ] %7[^ ] %127s", expr, op, value) >= 3) {
+		/* Unquoted value */
+	} else {
 		return 1;  /* unparseable = true (graceful fallback) */
+	}
 
 	const char *actual = NULL;
 	if (strcmp(expr, "ARCH") == 0)
@@ -121,6 +151,22 @@ eval_condition(const char *when_expr)
 		return strcmp(actual, value) == 0;
 	if (strcmp(op, "!=") == 0)
 		return strcmp(actual, value) != 0;
+	if (strcmp(op, "in") == 0) {
+		/* Check if actual is in comma-separated list */
+		char list[256];
+		snprintf(list, sizeof(list), "%s", value);
+		char *p = list;
+		while (*p) {
+			while (*p == ' ' || *p == ',') p++;
+			if (!*p) break;
+			char *start = p;
+			while (*p && *p != ',') p++;
+			char saved = *p; *p = '\0';
+			if (strcmp(actual, start) == 0) { return 1; }
+			*p = saved;
+		}
+		return 0;
+	}
 	return 1;  /* unknown op = true */
 }
 
