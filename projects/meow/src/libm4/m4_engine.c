@@ -16,9 +16,11 @@
 #include <setjmp.h>
 #include <stdarg.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 
 #include "m4_engine.h"
 
@@ -177,6 +179,14 @@ static void builtin_patsubst(int ac, char **av);
 static void builtin_format(int ac, char **av);
 static void builtin___file__(int ac, char **av);
 static void builtin___line__(int ac, char **av);
+static void builtin_changecom(int ac, char **av);
+static void builtin_m4wrap(int ac, char **av);
+static void builtin_syscmd(int ac, char **av);
+static void builtin_esyscmd(int ac, char **av);
+static void builtin_regexp(int ac, char **av);
+static void builtin_dumpdef(int ac, char **av);
+static void builtin_shift(int ac, char **av);
+static void builtin_divnum(int ac, char **av);
 
 static void expand(void);
 
@@ -231,7 +241,10 @@ void pushback_str(const char *s)
 {
     size_t n = strlen(s);
     pb_ensure(n);
-    memcpy(pb_buf + pb_len, s, n);
+    /* Pushback buffer is LIFO (consumed from tail), so store string
+     * in reverse order to ensure correct character sequence on output. */
+    for (size_t i = 0; i < n; i++)
+        pb_buf[pb_len + i] = s[n - 1 - i];
     pb_len += n;
 }
 
@@ -294,7 +307,7 @@ static int next_char(void)
             continue;
         }
         c = (unsigned char)f->text[f->pos++];
-        /* Handle $N substitution */
+        /* Handle $N, $@, $* substitution */
         if (c == '$' && f->nargs >= 0) {
             c = (unsigned char)f->text[f->pos++];
             if (c >= '1' && c <= '9') {
@@ -309,6 +322,42 @@ static int next_char(void)
                     pushback_str(f->name);
                     return next_char();
                 }
+                return next_char();
+            } else if (c == '@') {
+                /* $@ — all args, each quoted, comma-separated */
+                char buf[8192] = {0};
+                size_t pos = 0;
+                for (int i = 0; i < f->nargs; i++) {
+                    if (i > 0) buf[pos++] = ',';
+                    buf[pos++] = qstart_char;
+                    if (f->args[i]) {
+                        size_t slen = strlen(f->args[i]);
+                        if (pos + slen < sizeof(buf) - 2) {
+                            memcpy(buf + pos, f->args[i], slen);
+                            pos += slen;
+                        }
+                    }
+                    buf[pos++] = qend_char;
+                    buf[pos] = '\0';
+                }
+                pushback_str(buf);
+                return next_char();
+            } else if (c == '*') {
+                /* $* — all args, unquoted, comma-separated */
+                char buf[8192] = {0};
+                size_t pos = 0;
+                for (int i = 0; i < f->nargs; i++) {
+                    if (i > 0) buf[pos++] = ',';
+                    if (f->args[i]) {
+                        size_t slen = strlen(f->args[i]);
+                        if (pos + slen < sizeof(buf) - 1) {
+                            memcpy(buf + pos, f->args[i], slen);
+                            pos += slen;
+                        }
+                    }
+                    buf[pos] = '\0';
+                }
+                pushback_str(buf);
                 return next_char();
             } else {
                 if (c != EOF)
@@ -675,6 +724,22 @@ static void dispatch_builtin(const char *name, int ac, char **av)
         builtin___file__(ac, av);
     else if (strcmp(name, "__line__") == 0)
         builtin___line__(ac, av);
+    else if (strcmp(name, "changecom") == 0)
+        builtin_changecom(ac, av);
+    else if (strcmp(name, "m4wrap") == 0)
+        builtin_m4wrap(ac, av);
+    else if (strcmp(name, "syscmd") == 0)
+        builtin_syscmd(ac, av);
+    else if (strcmp(name, "esyscmd") == 0)
+        builtin_esyscmd(ac, av);
+    else if (strcmp(name, "regexp") == 0)
+        builtin_regexp(ac, av);
+    else if (strcmp(name, "dumpdef") == 0)
+        builtin_dumpdef(ac, av);
+    else if (strcmp(name, "shift") == 0)
+        builtin_shift(ac, av);
+    else if (strcmp(name, "divnum") == 0)
+        builtin_divnum(ac, av);
     else {
         fprintf(stderr, "m4: internal: unknown builtin '%s'\n", name);
     }
@@ -1094,6 +1159,7 @@ typedef struct RNode {
     struct RNode *child;
     struct RNode *next;
     int ref_idx;
+    int min_match;   /* minimum matches (0 = *, 1 = +, 0 = ? handled via R_OPT) */
 } RNode;
 
 static void rnode_free(RNode *n)
@@ -1194,7 +1260,15 @@ static const char *rparse(const char *p, RNode **out)
         n->ch = (unsigned char)*p++;
     }
 
-    if (*p == '*') {
+    if (*p == '+') {
+        /* a+ = match one or more: implement as a single node that
+         * tries greedy match (same logic as star but must match >= 1) */
+        RNode *q = rnode_alloc(R_STAR);
+        q->child = n;
+        q->min_match = 1;  /* at least one match required */
+        n = q;
+        p++;
+    } else if (*p == '*') {
         RNode *q = NULL;
         if (*(p+1) == '?') {
             q = rnode_alloc(R_STAR_NG);
@@ -1663,6 +1737,13 @@ static void expand(void)
                     }
                 } else {
                     if (is_dnl) {
+                        /* dnl without () — push back peek chars so
+                         * builtin_dnl can find the \n to consume. */
+                        if (peek_end != EOF) {
+                            peekbuf[npeek++] = (char)peek_end;
+                            peekbuf[npeek] = '\0';
+                            pushback_str(peekbuf);
+                        }
                         builtin_dnl(0, NULL);
                         npeek = 0;
                     } else {
@@ -1747,6 +1828,197 @@ static void expand(void)
 }
 
 /* ================================================================
+ * Builtin: changecom([start[, end]])
+ * ================================================================ */
+
+static int com_start = '#';
+static int com_end = '\n';
+static int com_active = 1;
+
+static void builtin_changecom(int ac, char **av)
+{
+    if (ac < 1) {
+        com_active = 0;  /* disable comments */
+        return;
+    }
+    char *s = strip_quotes(av[0]);
+    if (s && s[0]) {
+        com_start = (unsigned char)s[0];
+        com_active = 1;
+    }
+    free(s);
+    if (ac >= 2) {
+        char *e = strip_quotes(av[1]);
+        if (e && e[0])
+            com_end = (unsigned char)e[0];
+        else
+            com_end = '\n';
+        free(e);
+    }
+}
+
+/* ================================================================
+ * Builtin: m4wrap(...)
+ * ================================================================ */
+
+#define MAX_WRAPS 64
+static char *wrap_queue[MAX_WRAPS];
+static int nwrap;
+
+static void builtin_m4wrap(int ac, char **av)
+{
+    for (int i = 0; i < ac; i++) {
+        if (nwrap < MAX_WRAPS) {
+            wrap_queue[nwrap] = xstrdup(av[i]);
+            nwrap++;
+        }
+    }
+}
+
+/* Execute wrap queue at end of processing */
+static void run_wraps(void)
+{
+    for (int i = 0; i < nwrap; i++) {
+        pushback_str(wrap_queue[i]);
+        free(wrap_queue[i]);
+        wrap_queue[i] = NULL;
+    }
+    nwrap = 0;
+}
+
+/* ================================================================
+ * Builtin: syscmd(command)
+ * ================================================================ */
+
+static void builtin_syscmd(int ac, char **av)
+{
+    if (ac < 1) return;
+    (void)system(av[0]);
+}
+
+/* ================================================================
+ * Builtin: esyscmd(command) — capture stdout
+ * ================================================================ */
+
+static void builtin_esyscmd(int ac, char **av)
+{
+    if (ac < 1) return;
+    FILE *fp = popen(av[0], "r");
+    if (!fp) return;
+    char buf[4096];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf) - 1, fp)) > 0) {
+        buf[n] = '\0';
+        m4_puts(buf);
+    }
+    pclose(fp);
+}
+
+/* ================================================================
+ * Builtin: regexp(string, regexp[, replacement])
+ * ================================================================ */
+
+static void builtin_regexp(int ac, char **av)
+{
+    if (ac < 2) { m4_printf("-1"); return; }
+    const char *str = av[0];
+    const char *pat = av[1];
+    int slen = (int)strlen(str);
+
+    RNode *re = rparse_regex(pat);
+    if (!re) { m4_printf("-1"); return; }
+
+    RMatch m;
+    if (rmatch_find(re, str, slen, 0, &m)) {
+        if (ac >= 3) {
+            /* Replacement string */
+            const char *rep = av[2];
+            for (const char *r = rep; *r; r++) {
+                if (*r == '\\') {
+                    r++;
+                    if (*r == '&') {
+                        m4_printf("%.*s", m.end - m.start, str + m.start);
+                    } else if (*r >= '1' && *r <= '9') {
+                        int idx = *r - '0';
+                        if (idx <= m.ngroups && m.groups[idx - 1].start >= 0) {
+                            int gs = m.groups[idx - 1].start;
+                            int ge = m.groups[idx - 1].end;
+                            m4_printf("%.*s", ge - gs, str + gs);
+                        }
+                    } else if (*r) {
+                        m4_putchar((unsigned char)*r);
+                    }
+                } else {
+                    m4_putchar((unsigned char)*r);
+                }
+            }
+        } else {
+            m4_printf("%.*s", m.end - m.start, str + m.start);
+        }
+    } else {
+        if (ac >= 3) {
+            m4_printf("%s", av[2]);  /* default if no match */
+        } else {
+            m4_printf("-1");
+        }
+    }
+    rnode_free(re);
+}
+
+/* ================================================================
+ * Builtin: dumpdef([name...])
+ * ================================================================ */
+
+static void builtin_dumpdef(int ac, char **av)
+{
+    if (ac < 1) {
+        /* Dump all definitions to stderr */
+        for (int i = 0; i < nmacros; i++) {
+            fprintf(stderr, "%s:\t%s\n",
+                    macros[i].name,
+                    macros[i].bname ? macros[i].bname :
+                    macros[i].value ? macros[i].value : "");
+        }
+    } else {
+        for (int i = 0; i < ac; i++) {
+            char *name = strip_quotes(av[i]);
+            Macro *m = find_macro(name);
+            if (m) {
+                fprintf(stderr, "%s:\t%s\n",
+                        m->name,
+                        m->bname ? m->bname :
+                        m->value ? m->value : "");
+            }
+            free(name);
+        }
+    }
+}
+
+/* ================================================================
+ * Builtin: shift(arg1, ...)
+ * ================================================================ */
+
+static void builtin_shift(int ac, char **av)
+{
+    if (ac < 2) return;
+    for (int i = 1; i < ac; i++) {
+        if (i > 1) m4_putchar(',');
+        m4_printf("%s", av[i] ? av[i] : "");
+    }
+}
+
+/* ================================================================
+ * Builtin: divnum — current diversion number (always 0 for now)
+ * ================================================================ */
+
+static void builtin_divnum(int ac, char **av)
+{
+    (void)ac;
+    (void)av;
+    m4_printf("0");
+}
+
+/* ================================================================
  * Initialize builtins
  * ================================================================ */
 
@@ -1772,6 +2044,14 @@ static void init_builtins(void)
     macro_builtin("substr");
     macro_builtin("translit");
     macro_builtin("undefine");
+    macro_builtin("changecom");
+    macro_builtin("m4wrap");
+    macro_builtin("syscmd");
+    macro_builtin("esyscmd");
+    macro_builtin("regexp");
+    macro_builtin("dumpdef");
+    macro_builtin("shift");
+    macro_builtin("divnum");
 }
 
 /* ================================================================
@@ -1847,6 +2127,9 @@ int m4_process(const char *input, char *output, size_t outsz)
 
     /* Run expansion */
     expand();
+
+    /* Execute m4wrap queue */
+    run_wraps();
 
     return 0;
 }

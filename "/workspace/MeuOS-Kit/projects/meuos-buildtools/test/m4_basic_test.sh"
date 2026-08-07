@@ -1,0 +1,117 @@
+"#!/bin/sh
+# m4_basic_test.sh — Test m4 builtins using input files
+set -eu
+
+buildtools=\"${1:?buildtools path required}\"
+inputs=\"$(dirname \"$0\")/inputs\"
+
+# Use symlink for correct multicall dispatch
+ln -sf \"$buildtools\" /tmp/m4_test_wrapper
+
+m4_cmd() { /tmp/m4_test_wrapper \"$inputs/$1\" 2>/dev/null; }
+
+pass=0
+total=0
+
+# 1: --help
+total=$((total+1)) && /tmp/m4_test_wrapper --help >/dev/null 2>&1 \
+    && echo \"PASS: --help\" && pass=$((pass+1)) \
+    || echo \"FAIL: --help\"
+
+# 2: --version
+total=$((total+1)) && /tmp/m4_test_wrapper --version >/dev/null 2>&1 \
+    && echo \"PASS: --version\" && pass=$((pass+1)) \
+    || echo \"FAIL: --version\"
+
+# 3: define
+total=$((total+1)) && r=$(m4_cmd test_define.m4) \
+    && [ \"$r\" = \"Hello World\" ] \
+    && echo \"PASS: define\" && pass=$((pass+1)) \
+    || echo \"FAIL: define (got: $r)\"
+
+# 4: ifdef defined
+total=$((total+1)) && r=$(m4_cmd test_ifdef.m4) \
+    && [ \"$r\" = \"yes\" ] \
+    && echo \"PASS: ifdef\" && pass=$((pass+1)) \
+    || echo \"FAIL: ifdef (got: $r)\"
+
+# 5: ifdef undefined
+total=$((total+1)) && r=$(m4_cmd test_ifdef_undef.m4) \
+    && [ \"$r\" = \"no\" ] \
+    && echo \"PASS: ifdef undefined\" && pass=$((pass+1)) \
+    || echo \"FAIL: ifdef undefined (got: $r)\"
+
+# 6: ifelse
+total=$((total+1)) && r=$(m4_cmd test_ifelse.m4) \
+    && [ \"$r\" = \"match\" ] \
+    && echo \"PASS: ifelse\" && pass=$((pass+1)) \
+    || echo \"FAIL: ifelse (got: $r)\"
+
+# 7: incr
+total=$((total+1)) && r=$(m4_cmd test_incr.m4) \
+    && [ \"$r\" = \"42\" ] \
+    && echo \"PASS: incr\" && pass=$((pass+1)) \
+    || echo \"FAIL: incr (got: $r)\"
+
+# 8: eval
+total=$((total+1)) && r=$(m4_cmd test_eval.m4) \
+    && [ \"$r\" = \"14\" ] \
+    && echo \"PASS: eval\" && pass=$((pass+1)) \
+    || echo \"FAIL: eval (got: $r)\"
+
+# 9: len
+total=$((total+1)) && r=$(m4_cmd test_len.m4) \
+    && [ \"$r\" = \"5\" ] \
+    && echo \"PASS: len\" && pass=$((pass+1)) \
+    || echo \"FAIL: len (got: $r)\"
+
+# 10: substr
+total=$((total+1)) && r=$(m4_cmd test_substr.m4) \
+    && [ \"$r\" = \"world\" ] \
+    && echo \"PASS: substr\" && pass=$((pass+1)) \
+    || echo \"FAIL: substr (got: $r)\"
+
+# 11: index
+total=$((total+1)) && r=$(m4_cmd test_index.m4) \
+    && [ \"$r\" = \"6\" ] \
+    && echo \"PASS: index\" && pass=$((pass+1)) \
+    || echo \"FAIL: index (got: $r)\"
+
+# 12: translit
+total=$((total+1)) && r=$(m4_cmd test_translit.m4) \
+    && [ \"$r\" = \"heLLo\" ] \
+    && echo \"PASS: translit\" && pass=$((pass+1)) \
+    || echo \"FAIL: translit (got: $r)\"
+
+# 13: regexp
+total=$((total+1)) && r=$(m4_cmd test_regexp.m4) \
+    && [ \"$r\" = \"42\" ] \
+    && echo \"PASS: regexp\" && pass=$((pass+1)) \
+    || echo \"FAIL: regexp (got: $r)\"
+
+# 14: format
+total=$((total+1)) && r=$(m4_cmd test_format.m4) \
+    && [ \"$r\" = \"hello world 42\" ] \
+    && echo \"PASS: format\" && pass=$((pass+1)) \
+    || echo \"FAIL: format (got: $r)\"
+
+# 15: shift
+total=$((total+1)) && r=$(m4_cmd test_shift.m4) \
+    && [ \"$r\" = \"b\" ] \
+    && echo \"PASS: shift\" && pass=$((pass+1)) \
+    || echo \"FAIL: shift (got: $r)\"
+
+# 16: divnum (via stdin)
+total=$((total+1)) && r=$(printf 'divnum' | /tmp/m4_test_wrapper) \
+    && [ \"$r\" = \"0\" ] \
+    && echo \"PASS: divnum\" && pass=$((pass+1)) \
+    || echo \"FAIL: divnum (got: $r)\"
+
+rm -f /tmp/m4_test_wrapper
+echo
+if [ \"$pass\" -eq \"$total\" ]; then
+    echo \"=== ALL $total M4 TESTS PASSED ===\"
+else
+    echo \"=== $pass/$total TESTS PASSED ===\"
+    exit 1
+fi"

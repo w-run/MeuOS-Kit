@@ -110,7 +110,8 @@ check: $(BIN)
 	else \
 		echo "=== $$pass/$$total TESTS PASSED ==="; \
 		exit 1; \
-	fi
+	fi; \
+	sh $(TEST)/m4_basic_test.sh "$(ABSBIN)"
 
 # Static linking target for sysroot
 $(BUILD)/%-static: $(SRC)/%/%.c

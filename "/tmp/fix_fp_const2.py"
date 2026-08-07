@@ -1,0 +1,77 @@
+"path = '/workspace/MeuOS-Kit/projects/mcc/src/target/i386/i386_memit.c'
+with open(path) as f:
+    lines = f.readlines()
+    content = ''.join(lines)
+
+old1 = ('\\t\\t\\t\\t\\t/* push constant onto stack, load via movss */\\n'
+    '\\t\\t\\t\\t\\tfprintf(f, \"\\\\tpushl\\\\t$0x%x\\\\n\", bits);\\n'
+    '\\t\\t\\t\\t\\tfputs(\"\\\\tmovss\\\\t(%esp), %xmm0\\\\n\", f);\\n'
+    '\\t\\t\\t\\t\\tfputs(\"\\\\taddl\\\\t$4, %esp\\\\n\", f);')
+new1 = ('\\t\\t\\t\\t\\t/* write constant via g_i64_scratch (%%ebp-rel, safe from\\n'
+    '\\t\\t\\t\\t\\t * subl-alloc\\'d data below %%esp), load via movss. */\\n'
+    '\\t\\t\\t\\t\\tfprintf(f, \"\\\\tmovl\\\\t$0x%x, %d(%%ebp)\\\\n\", bits, g_i64_scratch);\\n'
+    '\\t\\t\\t\\t\\tfprintf(f, \"\\\\tmovss\\\\t%d(%%ebp), %%xmm0\\\\n\", g_i64_scratch);')
+
+if old1 in content:
+    content = content.replace(old1, new1)
+    print('old1 replaced')
+else:
+    print('old1 NOT FOUND')
+
+old2 = ('\\t\\t\\t\\t\\t/* push 8-byte constant (two 4-byte pushes) */\\n'
+    '\\t\\t\\t\\t\\tfprintf(f, \"\\\\tpushl\\\\t$0x%x\\\\n\",\\n'
+    '\\t\\t\\t\\t\\t        (uint32_t)(bits >> 32));\\n'
+    '\\t\\t\\t\\t\\tfprintf(f, \"\\\\tpushl\\\\t$0x%x\\\\n\",\\n'
+    '\\t\\t\\t\\t\\t        (uint32_t)bits);\\n'
+    '\\t\\t\\t\\t\\tfputs(\"\\\\tmovsd\\\\t(%esp), %xmm0\\\\n\", f);\\n'
+    '\\t\\t\\t\\t\\tfputs(\"\\\\taddl\\\\t$8, %esp\\\\n\", f);')
+new2 = ('\\t\\t\\t\\t\\t/* write double constant via g_i64_scratch (%%ebp-rel) */\\n'
+    '\\t\\t\\t\\t\\tfprintf(f, \"\\\\tmovl\\\\t$0x%x, %d(%%ebp)\\\\n\",\\n'
+    '\\t\\t\\t\\t\\t        (uint32_t)(bits >> 32), g_i64_scratch);\\n'
+    '\\t\\t\\t\\t\\tfprintf(f, \"\\\\tmovl\\\\t$0x%x, %d(%%ebp)\\\\n\",\\n'
+    '\\t\\t\\t\\t\\t        (uint32_t)bits, g_i64_scratch + 4);\\n'
+    '\\t\\t\\t\\t\\tfprintf(f, \"\\\\tmovsd\\\\t%d(%%ebp), %%xmm0\\\\n\", g_i64_scratch);')
+
+if old2 in content:
+    content = content.replace(old2, new2)
+    print('old2 replaced')
+else:
+    print('old2 NOT FOUND')
+
+# emit_setccr_fp float
+old3 = ('\\t\\t\\t\\t\\tfprintf(f, \"\\\\tpushl\\\\t$0x%x\\\\n\", bits);\\n'
+    '\\t\\t\\t\\t\\tfputs(\"\\\\tmovss\\\\t(%esp), %xmm1\\\\n\", f);\\n'
+    '\\t\\t\\t\\t\\tfputs(\"\\\\taddl\\\\t$4, %esp\\\\n\", f);')
+new3 = ('\\t\\t\\t\\t\\tfprintf(f, \"\\\\tmovl\\\\t$0x%x, %d(%%ebp)\\\\n\", bits, g_i64_scratch);\\n'
+    '\\t\\t\\t\\t\\tfprintf(f, \"\\\\tmovss\\\\t%d(%%ebp), %%xmm1\\\\n\", g_i64_scratch);')
+
+if old3 in content:
+    content = content.replace(old3, new3)
+    print('old3 replaced')
+else:
+    print('old3 NOT FOUND')
+
+# emit_setccr_fp double
+old4 = ('\\t\\t\\t\\t\\tfprintf(f, \"\\\\tpushl\\\\t$0x%x\\\\n\",\\n'
+    '\\t\\t\\t\\t\\t        (uint32_t)(bits >> 32));\\n'
+    '\\t\\t\\t\\t\\tfprintf(f, \"\\\\tpushl\\\\t$0x%x\\\\n\",\\n'
+    '\\t\\t\\t\\t\\t        (uint32_t)bits);\\n'
+    '\\t\\t\\t\\t\\tfputs(\"\\\\tmovsd\\\\t(%esp), %xmm1\\\\n\", f);\\n'
+    '\\t\\t\\t\\t\\tfputs(\"\\\\taddl\\\\t$8, %esp\\\\n\", f);')
+new4 = ('\\t\\t\\t\\t\\tfprintf(f, \"\\\\tmovl\\\\t$0x%x, %d(%%ebp)\\\\n\",\\n'
+    '\\t\\t\\t\\t\\t        (uint32_t)(bits >> 32), g_i64_scratch);\\n'
+    '\\t\\t\\t\\t\\tfprintf(f, \"\\\\tmovl\\\\t$0x%x, %d(%%ebp)\\\\n\",\\n'
+    '\\t\\t\\t\\t\\t        (uint32_t)bits, g_i64_scratch + 4);\\n'
+    '\\t\\t\\t\\t\\tfprintf(f, \"\\\\tmovsd\\\\t%d(%%ebp), %%xmm1\\\\n\", g_i64_scratch);')
+
+if old4 in content:
+    content = content.replace(old4, new4)
+    print('old4 replaced')
+else:
+    print('old4 NOT FOUND')
+
+with open(path, 'w') as f:
+    f.write(content)
+
+print('pushl count:', content.count('pushl'))
+print('g_i64_scratch count:', content.count('g_i64_scratch'))"

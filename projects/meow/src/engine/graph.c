@@ -19,9 +19,13 @@
 
 /* Forward declaration of expand_env_vars from parse.c */
 
+/* Forward declarations for static helpers defined below. */
+static const char *expand_path(const char *path);
+
 /* ---- Persistent build state (incremental build) ---- */
 
-/* Build-state directory relative to PKGDIR (set during parse).
+/* Build-state directory relative to PKGDIR.
+ * PKGDIR is set via setenv() in main.c, so getenv() works directly.
  * The path is <PKGDIR>/.meow/buildstate/ — it stores one file per target
  * with the command text and input/output mtime timestamps. */
 static const char *
@@ -68,12 +72,23 @@ save_buildstate(const struct target *target)
 	if (!fp) return;
 	fprintf(fp, "cmd:%08x\n", hash);
 	struct stat st;
+	/* Track inputs: */
 	for (size_t i = 0; i < target->ninputs; i++) {
 		const char *p = expand_path(target->inputs[i]);
 		if (stat(p, &st) == 0)
 			fprintf(fp, "inp:%s:%ld:%ld\n", p, (long)st.st_mtim.tv_sec,
 			        (long)st.st_mtim.tv_nsec);
 	}
+	/* Track deps that resolve to files (not named targets) */
+	for (size_t i = 0; i < target->ndeps; i++) {
+		if (!find_target(target->deps[i])) {
+			const char *p = expand_path(target->deps[i]);
+			if (stat(p, &st) == 0)
+				fprintf(fp, "inp:%s:%ld:%ld\n", p, (long)st.st_mtim.tv_sec,
+				        (long)st.st_mtim.tv_nsec);
+		}
+	}
+	/* Track outputs: */
 	for (size_t i = 0; i < target->noutputs; i++) {
 		const char *p = expand_path(target->outputs[i]);
 		if (stat(p, &st) == 0)
@@ -421,6 +436,8 @@ run_target(struct target *target)
 		return 0;
 	}
 	target->visiting = 1;
+	/* Ensure buildstate directory exists before any dep/build */
+	ensure_buildstate_dir();
 	if (parallel_jobs > 1) {
 		pid_t children[TARGET_DEPS_MAX];
 		struct target *child_targets[TARGET_DEPS_MAX];
@@ -652,9 +669,14 @@ run_target(struct target *target)
 	int lockfd = -1;
 	if (parallel_jobs > 1)
 		lockfd = target_lock(target->name);
+	/* 实时 mtime 检查为主（权威判断），buildstate 为辅助优化。
+	 * 如果 mtime 说需要构建则构建；如果 mtime 说无需构建且 buildstate
+	 * 也匹配，则跳过。 */
 	int do_build = target_out_of_date(target);
 	if (do_build && lockfd >= 0)
-		do_build = target_out_of_date(target);  /* 锁内重新检查 */
+		do_build = target_out_of_date(target);  /* 锁内重检 */
+	if (!do_build && check_buildstate(target))
+		do_build = 0;  /* buildstate 确认 up-to-date */
 	if (do_build) {
 		/* pre: 前置钩子 */
 		if (target->pre_cmd) {
@@ -766,6 +788,8 @@ run_target(struct target *target)
 	if (target->parallel_jobs > 0)
 		parallel_jobs = saved_parallel;
 	if (g_log_fp) { fclose(g_log_fp); g_log_fp = NULL; }
+	/* Save persistent build state for incremental rebuild detection */
+	save_buildstate(target);
 	target->visiting = 0;
 	target->done = 1;
 	return 0;

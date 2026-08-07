@@ -33,11 +33,19 @@ static void print_help(void)
     printf("\n");
     printf("Options:\n");
     printf("  --help        display this help and exit\n");
+    printf("  --version     display version info and exit\n");
     printf("  -D NAME=VAL   define macro NAME as VAL\n");
     printf("  -U NAME       undefine macro NAME\n");
     printf("\n");
     printf("If no FILE is given, or if FILE is '-', read standard input.\n");
     printf("Macro definitions are processed before any input file.\n");
+}
+
+static void print_version(void)
+{
+    printf("m4 (MeuOS buildtools) 0.1.0\n");
+    printf("Copyright (C) MeuOS Project\n");
+    printf("SPDX-License-Identifier: MIT\n");
 }
 
 /* ================================================================
@@ -113,6 +121,11 @@ int m4_main(int argc, char **argv)
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0) {
             print_help();
+            free(files);
+            m4_reset();
+            return 0;
+        } else if (strcmp(argv[i], "--version") == 0) {
+            print_version();
             free(files);
             m4_reset();
             return 0;
