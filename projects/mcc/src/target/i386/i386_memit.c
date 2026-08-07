@@ -28,6 +28,8 @@ static MFnM *g_fm;
 static int g_alloca_cur;
 static const char *g_fname;
 static int g_slot_base;    /* -(pushbytes): push area above slots */
+#define FP_SCRATCH_BYTES 8
+static int g_fp_scratch;   /* %%ebp offset of FP constant scratch (above i64 area) */
 
 /* forward declarations */
 static const char *i386_fp_cc_suffix(MCC cc);
@@ -393,9 +395,9 @@ fload_scratch(FILE *f, MVal *v)
 					 * pushl-based path corrupts alloca'd struct storage
 					 * (the struct.x=1.8 bug). */
 					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
-					        bits, g_i64_scratch);
+					        bits, g_fp_scratch);
 					fprintf(f, "\tmovss\t%d(%%ebp), %%xmm0\n",
-					        g_i64_scratch);
+					        g_fp_scratch);
 				}
 			} else {
 				uint64_t bits;
@@ -404,9 +406,9 @@ fload_scratch(FILE *f, MVal *v)
 					fputs("\txorpd\t%xmm0, %xmm0\n", f);
 				else {
 					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
-					        (uint32_t)(bits >> 32), g_i64_scratch);
+					        (uint32_t)(bits >> 32), g_fp_scratch);
 					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
-					        (uint32_t)bits, g_i64_scratch + 4);
+					        (uint32_t)bits, g_fp_scratch + 4);
 					fprintf(f, "\tmovsd\t%d(%%ebp), %%xmm0\n",
 					        g_i64_scratch);
 				}
@@ -512,9 +514,9 @@ emit_setccr_fp(FILE *f, MInsM *in)
 					uint64_t bits;
 					memcpy(&bits, &c->u.d, 8);
 					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
-					        (uint32_t)(bits >> 32), g_i64_scratch);
+					        (uint32_t)(bits >> 32), g_fp_scratch);
 					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
-					        (uint32_t)bits, g_i64_scratch + 4);
+					        (uint32_t)bits, g_fp_scratch + 4);
 					fprintf(f, "\tmovsd\t%d(%%ebp), %%xmm1\n",
 					        g_i64_scratch);
 				}
@@ -1562,10 +1564,11 @@ mfnm_emit_i386(MFnM *fm, FILE *f)
 	 * slots (see i64_base): normalising a constant or register-resident
 	 * i64 operand needs a real lo/hi pair to read back from. */
 	g_i64_scratch = -(fm->slot + pushbytes + I64_SCRATCH_BYTES);
+	g_fp_scratch = g_i64_scratch - FP_SCRATCH_BYTES;
 
-	int framesize = fm->slot + I64_SCRATCH_BYTES + alloca_total(fm) + pushbytes;
+	int framesize = fm->slot + I64_SCRATCH_BYTES + FP_SCRATCH_BYTES + alloca_total(fm) + pushbytes;
 	framesize = (framesize + 15) & ~15;
-	g_alloca_cur = -(fm->slot + pushbytes + I64_SCRATCH_BYTES);
+	g_alloca_cur = -(fm->slot + pushbytes + I64_SCRATCH_BYTES + FP_SCRATCH_BYTES);
 
 	fprintf(f, ".text\n");
 	if (fm->name) {
