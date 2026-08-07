@@ -38,6 +38,16 @@ size_t wcsspn(const wchar_t *, const wchar_t *);
 wchar_t *wcspbrk(const wchar_t *, const wchar_t *);
 wchar_t *wcsstr(const wchar_t *, const wchar_t *);
 size_t wcslen(const wchar_t *);
+size_t wcsnlen(const wchar_t *, size_t);
+
+/* C locale collation: wcscoll == wcscmp, wcsxfrm copies. */
+int wcscoll(const wchar_t *, const wchar_t *);
+size_t wcsxfrm(wchar_t *restrict, const wchar_t *restrict, size_t);
+
+/* Common GNU/MS extension: case-insensitive comparison. */
+int wcsicmp(const wchar_t *, const wchar_t *);
+int wcsnicmp(const wchar_t *, const wchar_t *, size_t);
+
 wchar_t *wcstok(wchar_t *, const wchar_t *, wchar_t **);
 
 /* Wide numeric conversion (C11 7.29.4.1) */

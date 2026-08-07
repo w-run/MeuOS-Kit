@@ -308,6 +308,39 @@ size_t mbrlen(const char *s, size_t n, mbstate_t *ps) {
 	return mbrtowc(NULL, s, n, ps);
 }
 
+/* C locale collation — ISO 646 rank. */
+int wcscoll(const wchar_t *a, const wchar_t *b) {
+	return wcscmp(a, b);
+}
+
+size_t wcsxfrm(wchar_t *restrict d, const wchar_t *restrict s, size_t n) {
+	size_t len = wcslen(s);
+	if (n == 0) return len;
+	size_t copy = len < n ? len : n - 1;
+	for (size_t i = 0; i < copy; i++)
+		d[i] = s[i];
+	d[copy] = L'\0';
+	return len;
+}
+
+size_t wcsnlen(const wchar_t *s, size_t maxlen) {
+	size_t n = 0;
+	while (n < maxlen && s[n]) n++;
+	return n;
+}
+
+/* Case-insensitive comparison (common extension). */
+int wcsicmp(const wchar_t *a, const wchar_t *b) {
+	while (*a && towlower(*a) == towlower(*b)) { a++; b++; }
+	return (int)(towlower(*a) - towlower(*b));
+}
+
+int wcsnicmp(const wchar_t *a, const wchar_t *b, size_t n) {
+	if (!n) return 0;
+	while (--n && *a && towlower(*a) == towlower(*b)) { a++; b++; }
+	return (int)(towlower(*a) - towlower(*b));
+}
+
 /* wcwidth — printable column width (Unicode 15.0 EA Width + combining).
  *
  * The C locale still honours the established Unicode width contract:
