@@ -432,7 +432,8 @@ emit_setccr(FILE *f, MInsM *in)
 	MVal *b = in->src[1];
 	MCC cc = in->cc;
 
-	if (a && b && (a->type == MT_I64 || b->type == MT_I64)) {
+	if (in->dtype == MT_I64 && a && b &&
+	    (a->type == MT_I64 || b->type == MT_I64)) {
 		/* i64 comparison: compare high 32 bits first; if equal, compare
 		 * low 32 bits with unsigned comparison.  Use a global counter
 		 * for unique labels across the whole assembly file. */
@@ -458,18 +459,37 @@ emit_setccr(FILE *f, MInsM *in)
 		default:      lsfx = "eq";  break;
 		}
 
-		load_imm(f, "r10", sa + 4 + g_slot_base);
-		fprintf(f, "\tldr\tr10, [fp, r10]\n");
-		load_imm(f, "r12", sb + 4 + g_slot_base);
-		fprintf(f, "\tldr\tr12, [fp, r12]\n");
+		/* Load hi halves.  MV_CONST has no slot; materialize
+		 * the high 32 bits directly instead of loading garbage
+		 * from [fp, #slot]. */
+		if (a && a->kind == MV_CONST && a->con)
+			load_imm(f, "r10", (int32_t)(a->con->u.i >> 32));
+		else {
+			load_imm(f, "r10", sa + 4 + g_slot_base);
+			fprintf(f, "\tldr\tr10, [fp, r10]\n");
+		}
+		if (b && b->kind == MV_CONST && b->con)
+			load_imm(f, "r12", (int32_t)(b->con->u.i >> 32));
+		else {
+			load_imm(f, "r12", sb + 4 + g_slot_base);
+			fprintf(f, "\tldr\tr12, [fp, r12]\n");
+		}
 		fputs("\tcmp\tr10, r12\n", f);
 
 		if (cc == MCC_EQ) {
 			fprintf(f, "\tbne\t.Li64ne%u\n", id);
-			load_imm(f, "r10", sa + g_slot_base);
-			fprintf(f, "\tldr\tr10, [fp, r10]\n");
-			load_imm(f, "r12", sb + g_slot_base);
-			fprintf(f, "\tldr\tr12, [fp, r12]\n");
+			if (a && a->kind == MV_CONST && a->con)
+				load_imm(f, "r10", (int32_t)a->con->u.i);
+			else {
+				load_imm(f, "r10", sa + g_slot_base);
+				fprintf(f, "\tldr\tr10, [fp, r10]\n");
+			}
+			if (b && b->kind == MV_CONST && b->con)
+				load_imm(f, "r12", (int32_t)b->con->u.i);
+			else {
+				load_imm(f, "r12", sb + g_slot_base);
+				fprintf(f, "\tldr\tr12, [fp, r12]\n");
+			}
 			fputs("\tcmp\tr10, r12\n", f);
 			fputs("\tmoveq\tr10, #1\n", f);
 			fputs("\tmovne\tr10, #0\n", f);
@@ -477,10 +497,18 @@ emit_setccr(FILE *f, MInsM *in)
 			        "\tmov\tr10, #0\n.Li64d%u:\n", id, id, id);
 		} else if (cc == MCC_NE) {
 			fprintf(f, "\tbne\t.Li64t%u\n", id);
-			load_imm(f, "r10", sa + g_slot_base);
-			fprintf(f, "\tldr\tr10, [fp, r10]\n");
-			load_imm(f, "r12", sb + g_slot_base);
-			fprintf(f, "\tldr\tr12, [fp, r12]\n");
+			if (a && a->kind == MV_CONST && a->con)
+				load_imm(f, "r10", (int32_t)a->con->u.i);
+			else {
+				load_imm(f, "r10", sa + g_slot_base);
+				fprintf(f, "\tldr\tr10, [fp, r10]\n");
+			}
+			if (b && b->kind == MV_CONST && b->con)
+				load_imm(f, "r12", (int32_t)b->con->u.i);
+			else {
+				load_imm(f, "r12", sb + g_slot_base);
+				fprintf(f, "\tldr\tr12, [fp, r12]\n");
+			}
 			fputs("\tcmp\tr10, r12\n", f);
 			fputs("\tmovne\tr10, #1\n", f);
 			fputs("\tmoveq\tr10, #0\n", f);
@@ -488,10 +516,18 @@ emit_setccr(FILE *f, MInsM *in)
 			        "\tmov\tr10, #1\n.Li64d%u:\n", id, id, id);
 		} else {
 			fprintf(f, "\tbne\t.Li64hd%u\n", id);
-			load_imm(f, "r10", sa + g_slot_base);
-			fprintf(f, "\tldr\tr10, [fp, r10]\n");
-			load_imm(f, "r12", sb + g_slot_base);
-			fprintf(f, "\tldr\tr12, [fp, r12]\n");
+			if (a && a->kind == MV_CONST && a->con)
+				load_imm(f, "r10", (int32_t)a->con->u.i);
+			else {
+				load_imm(f, "r10", sa + g_slot_base);
+				fprintf(f, "\tldr\tr10, [fp, r10]\n");
+			}
+			if (b && b->kind == MV_CONST && b->con)
+				load_imm(f, "r12", (int32_t)b->con->u.i);
+			else {
+				load_imm(f, "r12", sb + g_slot_base);
+				fprintf(f, "\tldr\tr12, [fp, r12]\n");
+			}
 			fputs("\tcmp\tr10, r12\n", f);
 			fprintf(f, "\tmov%s\tr10, #1\n", lsfx);
 			fprintf(f, "\tmov%s\tr10, #0\n", lsfx[0] == 'e' ? "ne" : "eq");
