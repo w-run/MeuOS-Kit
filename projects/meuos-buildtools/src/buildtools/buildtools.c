@@ -14,8 +14,9 @@
 #include <stdlib.h>
 
 extern int m4_main(int argc, char **argv);
-extern int gperf_main(void);
+extern int gperf_main(int argc, char **argv);
 extern int flex_main(int argc, char **argv);
+extern int lex_main(int argc, char **argv);
 extern int bison_main(int argc, char **argv);
 extern int yacc_main(int argc, char **argv);
 
@@ -40,9 +41,11 @@ int main(int argc, char **argv)
 	if (strcmp(name, "m4") == 0)
 		return m4_main(argc, argv);
 	if (strcmp(name, "gperf") == 0)
-		return gperf_main();
+		return gperf_main(argc, argv);
 	if (strcmp(name, "flex") == 0)
 		return flex_main(argc, argv);
+	if (strcmp(name, "lex") == 0)
+		return lex_main(argc, argv);
 	if (strcmp(name, "bison") == 0)
 		return bison_main(argc, argv);
 	if (strcmp(name, "yacc") == 0)
@@ -51,6 +54,6 @@ int main(int argc, char **argv)
 	fprintf(stderr, "buildtools: unknown applet '%s'\n", name);
 	fprintf(stderr, "Usage: ln -s buildtools <toolname>\n");
 	fprintf(stderr, "  or:  buildtools <toolname> [args...]\n");
-	fprintf(stderr, "Tools: m4, gperf, flex, bison, yacc\n");
+	fprintf(stderr, "Tools: m4, gperf, flex, lex, bison, yacc\n");
 	return 1;
 }
