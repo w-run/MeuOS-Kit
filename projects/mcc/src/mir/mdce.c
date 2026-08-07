@@ -21,6 +21,7 @@ mdce_block(MFn *fn, MBlk *b)
 		MIns *in = &b->ins[i];
 		bool has_side_effect = (in->op == MOP_STORE || in->op == MOP_CALL ||
 		                        in->op == MOP_ALLOCA || in->op == MOP_VASTART ||
+		                        in->op == MOP_VAARG ||
 		                        in->op == MOP_SALLOC || in->op == MOP_PAR);
 		if (in->dst && in->dst->nuse == 0 && !has_side_effect &&
 		    in->dst->kind == MV_TEMP) {
