@@ -585,6 +585,178 @@ append_group_data(struct ld_context *ctx, struct ld_group *group,
 	return 0;
 }
 
+/* CIE deduplication for .eh_frame.
+ * After all relocations have been applied, scan the .eh_frame section
+ * and merge identical CIEs by comparing their full record content
+ * (including length and CIE-id header).  All FDE CIE pointers are
+ * adjusted to point to the retained (first) instance of each unique CIE.
+ * Returns 0 on success, -1 on failure (ctx error already set). */
+static int
+dedup_eh_frame_cie(struct ld_context *ctx)
+{
+	int ehg = find_group(ctx, ".eh_frame");
+	if (ehg < 0) return 0;
+	struct ld_group *eh = &ctx->groups[ehg];
+	if (eh->size == 0 || eh->type == MT_SHT_NOBITS) return 0;
+
+	const unsigned char *data = eh->data;
+	size_t size = eh->size;
+
+	/* ---- First pass: collect CIE records ---- */
+	struct cie_entry {
+		size_t old_offset;
+		size_t length;  /* content length (excl. 4-byte length field) */
+	};
+	struct cie_entry *cies = NULL;
+	size_t cie_count = 0, cie_cap = 0;
+	size_t offset = 0;
+
+	while (offset + 8 <= size) {
+		uint32_t len = read32(data + offset);
+		if (len == 0) break;
+		uint32_t end = offset + 4 + len;
+		if (end > size) break;
+		if (read32(data + offset + 4) == 0) {
+			/* CIE record */
+			if (cie_count == cie_cap) {
+				size_t cap = cie_cap ? cie_cap * 2 : 16;
+				struct cie_entry *tmp = (struct cie_entry *)
+				    ld_realloc(cies, cap * sizeof(*tmp));
+				if (!tmp) return ld_error(ctx, "out of memory");
+				cies = tmp;
+				cie_cap = cap;
+			}
+			cies[cie_count].old_offset = offset;
+			cies[cie_count].length = len;
+			cie_count++;
+		}
+		offset = end;
+	}
+	if (cie_count <= 1) {
+		free(cies);
+		return 0;  /* nothing to dedup */
+	}
+
+	/* ---- Second pass: identify duplicates ---- */
+	int *cie_keep = (int *)ld_malloc(cie_count * sizeof(int));
+	size_t *cie_new_offset = (size_t *)ld_malloc(cie_count * sizeof(size_t));
+	if (!cie_keep || !cie_new_offset) {
+		free(cies); free(cie_keep); free(cie_new_offset);
+		return ld_error(ctx, "out of memory");
+	}
+	memset(cie_keep, 0, cie_count * sizeof(int));
+
+	size_t deduped_cie_size = 0;
+	cie_keep[0] = 1;
+	cie_new_offset[0] = 0;
+	deduped_cie_size += 4 + cies[0].length;
+
+	for (size_t i = 1; i < cie_count; i++) {
+		int dup = 0;
+		size_t i_off = cies[i].old_offset;
+		size_t i_len = cies[i].length;
+		for (size_t j = 0; j < i; j++) {
+			if (!cie_keep[j]) continue;
+			size_t j_off = cies[j].old_offset;
+			size_t j_len = cies[j].length;
+			/* Compare full CIE record: length field + CIE content */
+			if (i_len == j_len &&
+			    memcmp(data + i_off, data + j_off, 4 + i_len) == 0) {
+				dup = 1;
+				cie_new_offset[i] = cie_new_offset[j];
+				break;
+			}
+		}
+		if (!dup) {
+			cie_keep[i] = 1;
+			cie_new_offset[i] = deduped_cie_size;
+			deduped_cie_size += 4 + i_len;
+		}
+	}
+
+	/* ---- Measure total FDE payload + null terminator ---- */
+	size_t fde_total = 0;
+	offset = 0;
+	while (offset + 8 <= size) {
+		uint32_t len = read32(data + offset);
+		if (len == 0) break;
+		uint32_t end = offset + 4 + len;
+		if (end > size) break;
+		if (read32(data + offset + 4) != 0)
+			fde_total += 4 + len;
+		offset = end;
+	}
+	int has_null = (offset + 4 <= size && read32(data + offset) == 0);
+
+	size_t new_size = deduped_cie_size + fde_total + (has_null ? 4 : 0);
+	unsigned char *new_data = (unsigned char *)ld_malloc(new_size ? new_size : 1);
+	if (!new_data) {
+		free(cies); free(cie_keep); free(cie_new_offset);
+		return ld_error(ctx, "out of memory");
+	}
+
+	/* ---- Third pass: rebuild ---- */
+	size_t wp = 0;
+
+	/* Write deduped CIEs */
+	for (size_t i = 0; i < cie_count; i++) {
+		if (!cie_keep[i]) continue;
+		size_t rec_size = 4 + cies[i].length;
+		memcpy(new_data + wp, data + cies[i].old_offset, rec_size);
+		wp += rec_size;
+	}
+
+	/* Write all FDEs with corrected CIE pointers */
+	offset = 0;
+	while (offset + 8 <= size) {
+		uint32_t len = read32(data + offset);
+		if (len == 0) break;
+		uint32_t end = offset + 4 + len;
+		if (end > size) break;
+		uint32_t id = read32(data + offset + 4);
+		if (id != 0) {
+			/* In .eh_frame, id = (offset + 4) - cie_old_offset */
+			size_t cie_old = offset + 4 - (size_t)id;
+			/* Find CIE index from old offset */
+			size_t ci;
+			for (ci = 0; ci < cie_count; ci++) {
+				if (cies[ci].old_offset == cie_old)
+					break;
+			}
+			if (ci >= cie_count) {
+				/* Shouldn't happen; copy as-is */
+				memcpy(new_data + wp, data + offset, 4 + len);
+				wp += 4 + len;
+			} else {
+				uint32_t new_cie_ptr = (uint32_t)(wp + 4 - cie_new_offset[ci]);
+				memcpy(new_data + wp, data + offset, 4);        /* length */
+				write32(new_data + wp + 4, new_cie_ptr);         /* fixed ptr */
+				/* Copy rest of FDE (initial location, address range, augmentation) */
+				memcpy(new_data + wp + 8, data + offset + 8, len - 4);
+				wp += 4 + len;
+			}
+		}
+		offset = end;
+	}
+
+	/* Preserve null terminator */
+	if (has_null) {
+		memcpy(new_data + wp, data + offset, 4);
+		wp += 4;
+	}
+
+	/* Replace group data */
+	free(eh->data);
+	eh->data = new_data;
+	eh->size = wp;
+	eh->capacity = wp;
+
+	free(cies);
+	free(cie_keep);
+	free(cie_new_offset);
+	return 0;
+}
+
 static int
 collect_sections(struct ld_context *ctx)
 {
@@ -1015,6 +1187,7 @@ mt_ld_link_opts(const struct mt_ld_options *opts,
 	    fill_got(&ctx) != 0 ||
 	    build_rela_dyn(&ctx) != 0 ||
 	    apply_relocations(&ctx) != 0 ||
+	    dedup_eh_frame_cie(&ctx) != 0 ||
 	    write_executable(&ctx, opts ? opts->output : "a.out",
 	                     opts ? opts->entry : "_start",
 	                     ctx.target) != 0)
