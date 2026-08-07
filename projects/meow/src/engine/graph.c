@@ -1,7 +1,10 @@
 /* meow - dependency-graph execution.
  *
  * run_target() is the public entry; target_out_of_date(), file_mtime(),
- * newer(), expand_command() and append_text() are file-local helpers. */
+ * newer(), expand_command() and append_text() are file-local helpers.
+ *
+ * Persistent build state is stored in pkgs/<package>/.meow/buildstate/<target>.state
+ * so that incremental builds are correct across `meow build` invocations. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,10 +13,138 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/file.h>
+#include <dirent.h>
 
 #include "meow.h"
 
 /* Forward declaration of expand_env_vars from parse.c */
+
+/* Forward declarations for static helpers defined below. */
+static const char *expand_path(const char *path);
+
+/* ---- Persistent build state (incremental build) ---- */
+
+/* Build-state directory relative to PKGDIR.
+ * PKGDIR is set via setenv() in main.c, so getenv() works directly.
+ * The path is <PKGDIR>/.meow/buildstate/ — it stores one file per target
+ * with the command text and input/output mtime timestamps. */
+static const char *
+buildstate_dir(void)
+{
+	const char *pkgdir = getenv("PKGDIR");
+	if (!pkgdir) return NULL;
+	static char path[512];
+	snprintf(path, sizeof(path), "%s/.meow/buildstate", pkgdir);
+	return path;
+}
+
+/* Ensure the buildstate directory exists. */
+static int
+ensure_buildstate_dir(void)
+{
+	const char *dir = buildstate_dir();
+	if (!dir) return -1;
+	char cmd[1024];
+	snprintf(cmd, sizeof(cmd), "mkdir -p '%s'", dir);
+	return run(cmd);
+}
+
+/* Write buildstate file for a target after successful build.
+ * Format:
+ *   cmd:HASH\n        (djb2 hash of concatenated command texts)
+ *   inp:<path>:<sec>:<nsec>\n   for each input
+ *   out:<path>:<sec>:<nsec>\n   for each output
+ */
+static void
+save_buildstate(const struct target *target)
+{
+	if (target->phony) return;
+	int hash = 5381;
+	for (size_t i = 0; i < target->ncommands; i++)
+		for (const char *p = target->commands[i]; *p; p++)
+			hash = ((hash << 5) + hash) + (unsigned char)*p;
+
+	const char *dir = buildstate_dir();
+	if (!dir) return;
+	char path[512];
+	snprintf(path, sizeof(path), "%s/%s.state", dir, target->name);
+	FILE *fp = fopen(path, "w");
+	if (!fp) return;
+	fprintf(fp, "cmd:%08x\n", hash);
+	struct stat st;
+	/* Track inputs: */
+	for (size_t i = 0; i < target->ninputs; i++) {
+		const char *p = expand_path(target->inputs[i]);
+		if (stat(p, &st) == 0)
+			fprintf(fp, "inp:%s:%ld:%ld\n", p, (long)st.st_mtim.tv_sec,
+			        (long)st.st_mtim.tv_nsec);
+	}
+	/* Track deps that resolve to files (not named targets) */
+	for (size_t i = 0; i < target->ndeps; i++) {
+		if (!find_target(target->deps[i])) {
+			const char *p = expand_path(target->deps[i]);
+			if (stat(p, &st) == 0)
+				fprintf(fp, "inp:%s:%ld:%ld\n", p, (long)st.st_mtim.tv_sec,
+				        (long)st.st_mtim.tv_nsec);
+		}
+	}
+	/* Track outputs: */
+	for (size_t i = 0; i < target->noutputs; i++) {
+		const char *p = expand_path(target->outputs[i]);
+		if (stat(p, &st) == 0)
+			fprintf(fp, "out:%s:%ld:%ld\n", p, (long)st.st_mtim.tv_sec,
+			        (long)st.st_mtim.tv_nsec);
+	}
+	fclose(fp);
+}
+
+/* Check buildstate — returns 1 if up-to-date (skip build), 0 if out-of-date. */
+static int
+check_buildstate(const struct target *target)
+{
+	if (target->phony || !target->noutputs) return 0;
+
+	/* Compute command hash */
+	int cmd_hash = 5381;
+	for (size_t i = 0; i < target->ncommands; i++)
+		for (const char *p = target->commands[i]; *p; p++)
+			cmd_hash = ((cmd_hash << 5) + cmd_hash) + (unsigned char)*p;
+
+	const char *dir = buildstate_dir();
+	if (!dir) return 0;
+	char path[512];
+	snprintf(path, sizeof(path), "%s/%s.state", dir, target->name);
+	FILE *fp = fopen(path, "r");
+	if (!fp) return 0;  /* no state = out-of-date */
+
+	int stored_hash = 0;
+	if (fscanf(fp, "cmd:%08x\n", &stored_hash) != 1) {
+		fclose(fp); return 0;
+	}
+	if (stored_hash != cmd_hash) {
+		fclose(fp); return 0;  /* recipe changed */
+	}
+
+	/* Verify each input mtime */
+	char line[1024];
+	int ok = 1;
+	while (fgets(line, sizeof(line), fp)) {
+		char tag[8], fpath[512];
+		long sec, nsec;
+		if (sscanf(line, "%7[^:]:%511[^:]:%ld:%ld",
+		           tag, fpath, &sec, &nsec) >= 4) {
+			struct stat st;
+			if (stat(fpath, &st) != 0 ||
+			    (long)st.st_mtim.tv_sec != sec ||
+			    (long)st.st_mtim.tv_nsec != nsec) {
+				ok = 0;
+				break;
+			}
+		}
+	}
+	fclose(fp);
+	return ok;
+}
 
 /* Progress counters (declared extern in meow.h; defined here). */
 int total_commands = 0;
@@ -305,6 +436,8 @@ run_target(struct target *target)
 		return 0;
 	}
 	target->visiting = 1;
+	/* Ensure buildstate directory exists before any dep/build */
+	ensure_buildstate_dir();
 	if (parallel_jobs > 1) {
 		pid_t children[TARGET_DEPS_MAX];
 		struct target *child_targets[TARGET_DEPS_MAX];
@@ -536,9 +669,14 @@ run_target(struct target *target)
 	int lockfd = -1;
 	if (parallel_jobs > 1)
 		lockfd = target_lock(target->name);
+	/* 实时 mtime 检查为主（权威判断），buildstate 为辅助优化。
+	 * 如果 mtime 说需要构建则构建；如果 mtime 说无需构建且 buildstate
+	 * 也匹配，则跳过。 */
 	int do_build = target_out_of_date(target);
 	if (do_build && lockfd >= 0)
-		do_build = target_out_of_date(target);  /* 锁内重新检查 */
+		do_build = target_out_of_date(target);  /* 锁内重检 */
+	if (!do_build && check_buildstate(target))
+		do_build = 0;  /* buildstate 确认 up-to-date */
 	if (do_build) {
 		/* pre: 前置钩子 */
 		if (target->pre_cmd) {
@@ -650,6 +788,8 @@ run_target(struct target *target)
 	if (target->parallel_jobs > 0)
 		parallel_jobs = saved_parallel;
 	if (g_log_fp) { fclose(g_log_fp); g_log_fp = NULL; }
+	/* Save persistent build state for incremental rebuild detection */
+	save_buildstate(target);
 	target->visiting = 0;
 	target->done = 1;
 	return 0;

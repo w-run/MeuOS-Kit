@@ -322,19 +322,27 @@ main(int argc, char **argv)
 			size_t len = strlen(recipe_environment);
 			const char *bld = getenv("BLD_DIR");
 			const char *wrk = getenv("WORK_DIR");
-			snprintf(envbuf, sizeof(envbuf),
-			         "export PKGDIR='%s/pkgs/%s'; "
-			         "export BUILDDIR='%s'; "
-			         "export WORKDIR='%s'; "
-			         "export SRCDIR='%s/pkgs/%s'; ",
-			         pwd, arguments[1],
-			         bld ? bld : pwd,
-			         wrk ? wrk : "/tmp/meow-build",
-			         pwd, arguments[1]);
-			if (len + strlen(envbuf) < sizeof(recipe_environment))
-				memcpy(recipe_environment + len, envbuf,
-				       strlen(envbuf) + 1);
+snprintf(envbuf, sizeof(envbuf),
+		         "export PKGDIR='%s/pkgs/%s'; "
+		         "export BUILDDIR='%s'; "
+		         "export WORKDIR='%s'; "
+		         "export SRCDIR='%s/pkgs/%s'; ",
+		         pwd, arguments[1],
+		         bld ? bld : pwd,
+		         wrk ? wrk : "/tmp/meow-build",
+		         pwd, arguments[1]);
+		if (len + strlen(envbuf) < sizeof(recipe_environment))
+			memcpy(recipe_environment + len, envbuf,
+			       strlen(envbuf) + 1);
+		/* Also setenv() so C code (e.g. buildstate) can find PKGDIR. */
+		{
+			char pkgenv[512];
+			snprintf(pkgenv, sizeof(pkgenv), "%s/pkgs/%s", pwd, arguments[1]);
+			setenv("PKGDIR", pkgenv, 1);
+			if (bld) setenv("BUILDDIR", bld, 1);
+			if (wrk) setenv("WORKDIR", wrk, 1);
 		}
+	}
 	}
 
 	/* Run inline feature detection (probe section) if any probes are
