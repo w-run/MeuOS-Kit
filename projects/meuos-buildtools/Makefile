@@ -17,7 +17,7 @@ BUILD := build
 SRC := src
 TEST := test
 
-MODULES := m4 gperf flex
+MODULES := m4 gperf flex bison yacc
 MODULE_OBJS := $(MODULES:%=$(BUILD)/%.o)
 BIN := $(BUILD)/buildtools
 SYMLINKS := $(MODULES:%=$(BUILD)/%)
@@ -45,6 +45,14 @@ $(BUILD)/gperf.o: $(SRC)/gperf/gperf.c
 	$(HOST_CC) -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -c -o $@ $<
 
 $(BUILD)/flex.o: $(SRC)/flex/flex.c
+	@mkdir -p $(@D)
+	$(HOST_CC) -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -c -o $@ $<
+
+$(BUILD)/bison.o: $(SRC)/bison/bison.c
+	@mkdir -p $(@D)
+	$(HOST_CC) -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -c -o $@ $<
+
+$(BUILD)/yacc.o: $(SRC)/yacc/yacc.c
 	@mkdir -p $(@D)
 	$(HOST_CC) -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -c -o $@ $<
 
