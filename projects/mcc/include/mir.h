@@ -516,6 +516,9 @@ typedef enum MMOP {
 	/* conversions */
 	MMOP_CVTSI2SS, MMOP_CVTSI2SD, MMOP_CVTSS2SD, MMOP_CVTSD2SS,
 	MMOP_CVTTSS2SI, MMOP_CVTTSD2SI,
+	MMOP_CVTTSS2SQ, MMOP_CVTTSD2SQ,       /* f32/f64 -> i64 (trunc) */
+	MMOP_CVTTSS2SI_U, MMOP_CVTTSD2SI_U,   /* f32/f64 -> u32 (trunc) */
+	MMOP_CVTTSS2SQ_U, MMOP_CVTTSD2SQ_U,   /* f32/f64 -> u64 (trunc) */
 	MMOP_CVTSI2SD_U,                       /* unsigned int -> double (64-bit trick) */
 	MMOP_CVTSI2SS_U,                       /* unsigned int -> float */
 	/* memory */
