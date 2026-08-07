@@ -5,6 +5,10 @@
 #include <stddef.h>
 #include <threads.h>
 
+#include <limits.h>
+
+#define PTHREAD_STACK_MIN 16384
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -25,6 +29,7 @@ typedef struct {
 	void *stack;
 	size_t stacksize;
 	int detachstate;
+size_t guardsize;
 } pthread_attr_t;
 typedef struct { int type; } pthread_mutexattr_t;
 typedef struct { int dummy; } pthread_condattr_t;
@@ -88,6 +93,12 @@ int pthread_attr_init(pthread_attr_t *);
 int pthread_attr_destroy(pthread_attr_t *);
 int pthread_attr_setdetachstate(pthread_attr_t *, int);
 int pthread_attr_getdetachstate(const pthread_attr_t *, int *);
+int pthread_attr_setstack(pthread_attr_t *, void *, size_t);
+int pthread_attr_getstack(const pthread_attr_t *, void **, size_t *);
+int pthread_attr_setstacksize(pthread_attr_t *, size_t);
+int pthread_attr_getstacksize(const pthread_attr_t *, size_t *);
+int pthread_attr_setguardsize(pthread_attr_t *, size_t);
+int pthread_attr_getguardsize(const pthread_attr_t *, size_t *);
 
 int pthread_mutex_init(pthread_mutex_t *, const pthread_mutexattr_t *);
 int pthread_mutex_destroy(pthread_mutex_t *);
