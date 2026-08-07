@@ -79,7 +79,8 @@ add_to_runblock(const char *line)
 	runblock_buf[runblock_len] = '\0';
 }
 
-/* 替换字符串中的 %VAR% 为环境变量 */
+/* 替换字符串中的 %VAR% 为环境变量（静态插值）；
+ * ${VAR} 保留原样传递给 shell（shell 层动态展开）。 */
 static void
 interpolate(const char *in, char *out, size_t outsz)
 {
@@ -99,11 +100,19 @@ interpolate(const char *in, char *out, size_t outsz)
 					if (vallen > space) vallen = space;
 					memcpy(out + o, val, vallen);
 					o += vallen;
+				} else {
+					/* 未定义 %VAR% — 原样保留 */
+					size_t remaining = outsz - o - 1;
+					size_t need = (size_t)(end - p + 1);
+					if (need > remaining) need = remaining;
+					memcpy(out + o, p, need);
+					o += need;
 				}
 				p = end + 1;
 				continue;
 			}
 		}
+		/* ${VAR} 保留原样传递给 shell */
 		out[o++] = *p++;
 	}
 	out[o] = '\0';
@@ -370,13 +379,16 @@ parse_meow(char *data)
 			/* ———— 普通 target 节区 ———— */
 
 			/* deps: a, b, c — parse as comma-separated target deps */
+			/* deps: [a, b, c] — bracket list syntax */
 			if (strcmp(key, "deps") == 0 && current_target) {
 				char *p = val;
+				/* Skip opening bracket if present */
+				if (*p == '[') { p++; while (*p == ' ') p++; }
 				while (*p) {
 					while (*p == ' ' || *p == ',') p++;
-					if (!*p) break;
+					if (!*p || *p == ']') break;
 					char *start = p;
-					while (*p && *p != ',') p++;
+					while (*p && *p != ',' && *p != ']') p++;
 					char saved = *p;
 					*p = '\0';
 					char *depname = trim(start);
@@ -384,6 +396,7 @@ parse_meow(char *data)
 						current_target->deps[current_target->ndeps++] =
 							strdup(depname);
 					*p = saved;
+					if (*p == ']') break;
 				}
 			}
 			/* when: condition — 条件表达式 */
@@ -393,33 +406,37 @@ parse_meow(char *data)
 				if (*trimmed)
 					current_target->when = strdup(trimmed);
 			}
-			/* inputs: / outputs: — 增量构建跟踪 */
+			/* inputs: / outputs: — 增量构建跟踪；支持 [a, b] 中括号语法 */
 			else if (strcmp(key, "inputs") == 0 && current_target) {
 				char *p = val;
+				if (*p == '[') { p++; while (*p == ' ') p++; }
 				while (*p) {
 					while (*p == ' ' || *p == ',') p++;
-					if (!*p) break;
+					if (!*p || *p == ']') break;
 					char *start = p;
-					while (*p && *p != ',') p++;
+					while (*p && *p != ',' && *p != ']') p++;
 					char saved = *p; *p = '\0';
 					char *iname = trim(start);
 					if (current_target->ninputs < TARGET_DEPS_MAX)
 						current_target->inputs[current_target->ninputs++] = strdup(iname);
 					*p = saved;
+					if (*p == ']') break;
 				}
 			}
 			else if (strcmp(key, "outputs") == 0 && current_target) {
 				char *p = val;
+				if (*p == '[') { p++; while (*p == ' ') p++; }
 				while (*p) {
 					while (*p == ' ' || *p == ',') p++;
-					if (!*p) break;
+					if (!*p || *p == ']') break;
 					char *start = p;
-					while (*p && *p != ',') p++;
+					while (*p && *p != ',' && *p != ']') p++;
 					char saved = *p; *p = '\0';
 					char *oname = trim(start);
 					if (current_target->noutputs < TARGET_DEPS_MAX)
 						current_target->outputs[current_target->noutputs++] = strdup(oname);
 					*p = saved;
+					if (*p == ']') break;
 				}
 			}
 			/* phony: true — 标记为伪目标 */
@@ -738,8 +755,9 @@ parse_meow(char *data)
 						set_env("SUBARCH", tri.subarch);
 				}
 			}
-			/* key: + 值空 = 多行块开始 */
-			else if (!*val && current_target) {
+			/* key: + 值空 = 多行块开始；值仅为 "|" 或 ">" 也表示多行块 */
+			else if ((!*val || strcmp(val, "|") == 0 || strcmp(val, ">") == 0)
+			         && current_target) {
 				if (strncmp(key, "run", 3) == 0) {
 					/* 解析修饰符 run(!): / run(?): / run(q): —
 					 * 只作用于本条 run 命令（run 级），默认遇错中断 */

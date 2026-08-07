@@ -109,6 +109,12 @@ check: $(BUILD)/meow
 	sh test/pkg_config_integration.sh "$(abspath $(BUILD)/meow)"
 	sh test/macros_test.sh "$(abspath $(BUILD)/meow)"
 	sh test/macros_v3_test.sh "$(abspath $(BUILD)/meow)"
+	@rm -f /tmp/meow-dsl-step-a.txt /tmp/meow-dsl-step-b.txt /tmp/meow-dsl-step-c.txt /tmp/meow-dsl-arch.txt /tmp/meow-dsl-result.txt
+	cd $(REPO_ROOT) && ./projects/meow/$(BUILD)/meow build meow-dsl-test
+	@test -f /tmp/meow-dsl-step-a.txt && test -f /tmp/meow-dsl-step-b.txt && test -f /tmp/meow-dsl-step-c.txt
+	@test "$$(cat /tmp/meow-dsl-arch.txt)" = "native-arch"
+	@test "$$(cat /tmp/meow-dsl-result.txt)" = "all-ok"
+	cd $(REPO_ROOT) && ./projects/meow/$(BUILD)/meow clean meow-dsl-test
 	cd $(REPO_ROOT) && $(MAKE) -C projects/meow clean all
 
 # Verify --arch flag injection by creating a minimal recipe that echoes

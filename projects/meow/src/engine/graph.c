@@ -1,7 +1,10 @@
 /* meow - dependency-graph execution.
  *
  * run_target() is the public entry; target_out_of_date(), file_mtime(),
- * newer(), expand_command() and append_text() are file-local helpers. */
+ * newer(), expand_command() and append_text() are file-local helpers.
+ *
+ * Persistent build state is stored in pkgs/<package>/.meow/buildstate/<target>.state
+ * so that incremental builds are correct across `meow build` invocations. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,10 +13,123 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/file.h>
+#include <dirent.h>
 
 #include "meow.h"
 
 /* Forward declaration of expand_env_vars from parse.c */
+
+/* ---- Persistent build state (incremental build) ---- */
+
+/* Build-state directory relative to PKGDIR (set during parse).
+ * The path is <PKGDIR>/.meow/buildstate/ — it stores one file per target
+ * with the command text and input/output mtime timestamps. */
+static const char *
+buildstate_dir(void)
+{
+	const char *pkgdir = getenv("PKGDIR");
+	if (!pkgdir) return NULL;
+	static char path[512];
+	snprintf(path, sizeof(path), "%s/.meow/buildstate", pkgdir);
+	return path;
+}
+
+/* Ensure the buildstate directory exists. */
+static int
+ensure_buildstate_dir(void)
+{
+	const char *dir = buildstate_dir();
+	if (!dir) return -1;
+	char cmd[1024];
+	snprintf(cmd, sizeof(cmd), "mkdir -p '%s'", dir);
+	return run(cmd);
+}
+
+/* Write buildstate file for a target after successful build.
+ * Format:
+ *   cmd:HASH\n        (djb2 hash of concatenated command texts)
+ *   inp:<path>:<sec>:<nsec>\n   for each input
+ *   out:<path>:<sec>:<nsec>\n   for each output
+ */
+static void
+save_buildstate(const struct target *target)
+{
+	if (target->phony) return;
+	int hash = 5381;
+	for (size_t i = 0; i < target->ncommands; i++)
+		for (const char *p = target->commands[i]; *p; p++)
+			hash = ((hash << 5) + hash) + (unsigned char)*p;
+
+	const char *dir = buildstate_dir();
+	if (!dir) return;
+	char path[512];
+	snprintf(path, sizeof(path), "%s/%s.state", dir, target->name);
+	FILE *fp = fopen(path, "w");
+	if (!fp) return;
+	fprintf(fp, "cmd:%08x\n", hash);
+	struct stat st;
+	for (size_t i = 0; i < target->ninputs; i++) {
+		const char *p = expand_path(target->inputs[i]);
+		if (stat(p, &st) == 0)
+			fprintf(fp, "inp:%s:%ld:%ld\n", p, (long)st.st_mtim.tv_sec,
+			        (long)st.st_mtim.tv_nsec);
+	}
+	for (size_t i = 0; i < target->noutputs; i++) {
+		const char *p = expand_path(target->outputs[i]);
+		if (stat(p, &st) == 0)
+			fprintf(fp, "out:%s:%ld:%ld\n", p, (long)st.st_mtim.tv_sec,
+			        (long)st.st_mtim.tv_nsec);
+	}
+	fclose(fp);
+}
+
+/* Check buildstate — returns 1 if up-to-date (skip build), 0 if out-of-date. */
+static int
+check_buildstate(const struct target *target)
+{
+	if (target->phony || !target->noutputs) return 0;
+
+	/* Compute command hash */
+	int cmd_hash = 5381;
+	for (size_t i = 0; i < target->ncommands; i++)
+		for (const char *p = target->commands[i]; *p; p++)
+			cmd_hash = ((cmd_hash << 5) + cmd_hash) + (unsigned char)*p;
+
+	const char *dir = buildstate_dir();
+	if (!dir) return 0;
+	char path[512];
+	snprintf(path, sizeof(path), "%s/%s.state", dir, target->name);
+	FILE *fp = fopen(path, "r");
+	if (!fp) return 0;  /* no state = out-of-date */
+
+	int stored_hash = 0;
+	if (fscanf(fp, "cmd:%08x\n", &stored_hash) != 1) {
+		fclose(fp); return 0;
+	}
+	if (stored_hash != cmd_hash) {
+		fclose(fp); return 0;  /* recipe changed */
+	}
+
+	/* Verify each input mtime */
+	char line[1024];
+	int ok = 1;
+	while (fgets(line, sizeof(line), fp)) {
+		char tag[8], fpath[512];
+		long sec, nsec;
+		if (sscanf(line, "%7[^:]:%511[^:]:%ld:%ld",
+		           tag, fpath, &sec, &nsec) >= 4) {
+			struct stat st;
+			if (stat(fpath, &st) != 0 ||
+			    (long)st.st_mtim.tv_sec != sec ||
+			    (long)st.st_mtim.tv_nsec != nsec) {
+				ok = 0;
+				break;
+			}
+		}
+	}
+	fclose(fp);
+	return ok;
+}
 
 /* Progress counters (declared extern in meow.h; defined here). */
 int total_commands = 0;
@@ -95,7 +211,12 @@ target_unlock(int fd)
 	}
 }
 
-/* Evaluate a "when:" condition expression.
+/* Evaluate a "when:" condition expression — supports:
+ *   ARCH == "value"        equality
+ *   ARCH != "value"        inequality
+ *   ARCH in "val1,val2"    value in comma-separated list
+ *   expr1 && expr2         logical AND
+ *   expr1 || expr2         logical OR
  * Returns 1 if condition is met (or no condition), 0 if skipped. */
 static int
 eval_condition(const char *when_expr)
@@ -103,10 +224,35 @@ eval_condition(const char *when_expr)
 	if (!when_expr || !*when_expr)
 		return 1;
 
-	/* Parse: EXPR OP "VALUE" */
+	/* Check for && and || — split into left and right and recurse */
+	const char *or = strstr(when_expr, " || ");
+	if (or) {
+		char left[256];
+		size_t llen = (size_t)(or - when_expr);
+		if (llen >= sizeof(left)) llen = sizeof(left) - 1;
+		memcpy(left, when_expr, llen);
+		left[llen] = '\0';
+		return eval_condition(left) || eval_condition(or + 4);
+	}
+	const char *and = strstr(when_expr, " && ");
+	if (and) {
+		char left[256];
+		size_t llen = (size_t)(and - when_expr);
+		if (llen >= sizeof(left)) llen = sizeof(left) - 1;
+		memcpy(left, when_expr, llen);
+		left[llen] = '\0';
+		return eval_condition(left) && eval_condition(and + 4);
+	}
+
+	/* Parse: EXPR OP "VALUE" — support both "VALUE" and VALUE */
 	char expr[64], op[8], value[128];
-	if (sscanf(when_expr, "%63[^ ] %7[^ ] \"%127[^\"]\"", expr, op, value) < 3)
+	if (sscanf(when_expr, "%63[^ ] %7[^ ] \"%127[^\"]\"", expr, op, value) >= 3) {
+		/* Quoted value parsed successfully */
+	} else if (sscanf(when_expr, "%63[^ ] %7[^ ] %127s", expr, op, value) >= 3) {
+		/* Unquoted value */
+	} else {
 		return 1;  /* unparseable = true (graceful fallback) */
+	}
 
 	const char *actual = NULL;
 	if (strcmp(expr, "ARCH") == 0)
@@ -121,6 +267,22 @@ eval_condition(const char *when_expr)
 		return strcmp(actual, value) == 0;
 	if (strcmp(op, "!=") == 0)
 		return strcmp(actual, value) != 0;
+	if (strcmp(op, "in") == 0) {
+		/* Check if actual is in comma-separated list */
+		char list[256];
+		snprintf(list, sizeof(list), "%s", value);
+		char *p = list;
+		while (*p) {
+			while (*p == ' ' || *p == ',') p++;
+			if (!*p) break;
+			char *start = p;
+			while (*p && *p != ',') p++;
+			char saved = *p; *p = '\0';
+			if (strcmp(actual, start) == 0) { return 1; }
+			*p = saved;
+		}
+		return 0;
+	}
 	return 1;  /* unknown op = true */
 }
 
