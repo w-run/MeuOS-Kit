@@ -388,10 +388,14 @@ fload_scratch(FILE *f, MVal *v)
 				if (bits == 0)
 					fputs("\txorps\t%xmm0, %xmm0\n", f);
 				else {
-					/* push constant onto stack, load via movss */
-					fprintf(f, "\tpushl\t$0x%x\n", bits);
-					fputs("\tmovss\t(%esp), %xmm0\n", f);
-					fputs("\taddl\t$4, %esp\n", f);
+					/* write constant via g_i64_scratch (%ebp-rel, safe from
+					 * subl-alloc'd data below %esp), load via movss.
+					 * pushl-based path corrupts alloca'd struct storage
+					 * (the struct.x=1.8 bug). */
+					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
+					        bits, g_i64_scratch);
+					fprintf(f, "\tmovss\t%d(%%ebp), %%xmm0\n",
+					        g_i64_scratch);
 				}
 			} else {
 				uint64_t bits;
@@ -399,13 +403,12 @@ fload_scratch(FILE *f, MVal *v)
 				if (bits == 0)
 					fputs("\txorpd\t%xmm0, %xmm0\n", f);
 				else {
-					/* push 8-byte constant (two 4-byte pushes) */
-					fprintf(f, "\tpushl\t$0x%x\n",
-					        (uint32_t)(bits >> 32));
-					fprintf(f, "\tpushl\t$0x%x\n",
-					        (uint32_t)bits);
-					fputs("\tmovsd\t(%esp), %xmm0\n", f);
-					fputs("\taddl\t$8, %esp\n", f);
+					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
+					        (uint32_t)(bits >> 32), g_i64_scratch);
+					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
+					        (uint32_t)bits, g_i64_scratch + 4);
+					fprintf(f, "\tmovsd\t%d(%%ebp), %%xmm0\n",
+					        g_i64_scratch);
 				}
 			}
 			return;
@@ -501,18 +504,19 @@ emit_setccr_fp(FILE *f, MInsM *in)
 				if (is32) {
 					uint32_t bits;
 					memcpy(&bits, &c->u.s, 4);
-					fprintf(f, "\tpushl\t$0x%x\n", bits);
-					fputs("\tmovss\t(%esp), %xmm1\n", f);
-					fputs("\taddl\t$4, %esp\n", f);
+					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
+					        bits, g_i64_scratch);
+					fprintf(f, "\tmovss\t%d(%%ebp), %%xmm1\n",
+					        g_i64_scratch);
 				} else {
 					uint64_t bits;
 					memcpy(&bits, &c->u.d, 8);
-					fprintf(f, "\tpushl\t$0x%x\n",
-					        (uint32_t)(bits >> 32));
-					fprintf(f, "\tpushl\t$0x%x\n",
-					        (uint32_t)bits);
-					fputs("\tmovsd\t(%esp), %xmm1\n", f);
-					fputs("\taddl\t$8, %esp\n", f);
+					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
+					        (uint32_t)(bits >> 32), g_i64_scratch);
+					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
+					        (uint32_t)bits, g_i64_scratch + 4);
+					fprintf(f, "\tmovsd\t%d(%%ebp), %%xmm1\n",
+					        g_i64_scratch);
 				}
 			}
 		} else if (b->kind == MV_REG || (b->kind == MV_TEMP && b->reg >= 0)) {
