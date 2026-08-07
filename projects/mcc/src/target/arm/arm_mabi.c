@@ -304,8 +304,7 @@ mabi_selcall(MFnM *fm, MOut *o, MInsM *args, int n, MInsM *call)
 			} else {
 				ni++;  /* register: uses one GPR */
 			}
-		} else if (args[i].dtype == MT_I64 ||
-		           (variadic && args[i].dtype == MT_F64)) {
+		} else if (args[i].dtype == MT_I64) {
 			if (ni < 4 && (ni & 1)) ni++;
 			if (ni + 1 < 4)
 				ni += 2;
@@ -315,10 +314,27 @@ mabi_selcall(MFnM *fm, MOut *o, MInsM *args, int n, MInsM *call)
 			bool isf = !variadic &&
 			           (args[i].dtype == MT_F32 ||
 			            args[i].dtype == MT_F64);
-			if (isf ? ns >= 8 : ni >= 4)
-				stk += 8;
-			else
+			bool is64 = args[i].dtype == MT_F64;
+			if (variadic) {
+				/* Variadic FP/I32: AAPCS base standard — stack slots
+				 * use natural width (4 for 32-bit, 8 for 64-bit). */
+				if (is64) {
+					if (ni < 4 && (ni & 1)) ni++;
+					if (ni + 1 < 4)
+						ni += 2;
+					else
+						stk += 8;
+				} else {
+					if (ni >= 4)
+						stk += 4;
+					else
+						ni++;
+				}
+			} else if (isf ? ns >= 8 : ni >= 4) {
+				stk += is64 ? 8 : 4;
+			} else {
 				{ if (isf) ns++; else ni++; }
+			}
 		}
 	}
 	stk = (stk + 7) & ~7;
@@ -366,62 +382,100 @@ mabi_selcall(MFnM *fm, MOut *o, MInsM *args, int n, MInsM *call)
 			continue;
 		}
 		if (a->dtype == MT_I64) {
+			/* I64 value: load two i32 halves.  MV_CONST (literal
+			 * constant like a long long argument) has no slot —
+			 * materialise the halves directly instead of loading
+			 * garbage from [fp,#slot]. */
 			if (ni < 4 && (ni & 1)) ni++;
 			if (ni + 1 < 4) {
-				int slot = a->src[0]->slot;
 				int lo_reg = mt->argreg[0 + ni];
 				int hi_reg = mt->argreg[0 + ni + 1];
 				ni += 2;
-				mout_addr(o, MMOP_LOAD, MT_I32, reg(fm, lo_reg),
-				          maddr(reg(fm, ARM_R11), 0, 1, slot), 0);
-				mout_addr(o, MMOP_LOAD, MT_I32, reg(fm, hi_reg),
-				          maddr(reg(fm, ARM_R11), 0, 1, slot + 4), 0);
+				if (a->src[0]->kind == MV_CONST && a->src[0]->con) {
+					int64_t cv = a->src[0]->con->u.i;
+					mout(o, MMOP_MOV, MT_I32, reg(fm, lo_reg),
+					     mval_const(fm->host, MT_I32,
+					                imm(fm, MT_I32, (int32_t)cv)), 0);
+					mout(o, MMOP_MOV, MT_I32, reg(fm, hi_reg),
+					     mval_const(fm->host, MT_I32,
+					                imm(fm, MT_I32,
+					                    (int32_t)(cv >> 32))), 0);
+				} else {
+					int slot = a->src[0]->slot;
+					mout_addr(o, MMOP_LOAD, MT_I32, reg(fm, lo_reg),
+					          maddr(reg(fm, ARM_R11), 0, 1, slot), 0);
+					mout_addr(o, MMOP_LOAD, MT_I32, reg(fm, hi_reg),
+					          maddr(reg(fm, ARM_R11), 0, 1, slot + 4), 0);
+				}
 			} else {
 				int slot = a->src[0]->slot;
-				mout_addr(o, MMOP_LOAD, MT_I32, tmp(fm, MT_I32, "i64tmp"),
-				          maddr(reg(fm, ARM_R11), 0, 1, slot), 0);
-				MVal *tmpv = o->ins[o->nins - 1].dst;
-				mout_addr(o, MMOP_STORE, MT_I32, 0,
-				          maddr(reg(fm, ARM_SP), 0, 1, soff), tmpv);
-				mout_addr(o, MMOP_LOAD, MT_I32, tmp(fm, MT_I32, "i64tmp"),
-				          maddr(reg(fm, ARM_R11), 0, 1, slot + 4), 0);
-				MVal *tmpv2 = o->ins[o->nins - 1].dst;
-				mout_addr(o, MMOP_STORE, MT_I32, 0,
-				          maddr(reg(fm, ARM_SP), 0, 1, soff + 4), tmpv2);
+				if (a->src[0]->kind == MV_CONST && a->src[0]->con) {
+					int64_t cv = a->src[0]->con->u.i;
+					mout_addr(o, MMOP_STORE, MT_I32, 0,
+					          maddr(reg(fm, ARM_SP), 0, 1, soff),
+					          mval_const(fm->host, MT_I32,
+					                     imm(fm, MT_I32,
+					                         (int32_t)cv)));
+					mout_addr(o, MMOP_STORE, MT_I32, 0,
+					          maddr(reg(fm, ARM_SP), 0, 1, soff + 4),
+					          mval_const(fm->host, MT_I32,
+					                     imm(fm, MT_I32,
+					                         (int32_t)(cv >> 32))));
+				} else {
+					mout_addr(o, MMOP_LOAD, MT_I32, tmp(fm, MT_I32, "i64tmp"),
+					          maddr(reg(fm, ARM_R11), 0, 1, slot), 0);
+					MVal *tmpv = o->ins[o->nins - 1].dst;
+					mout_addr(o, MMOP_STORE, MT_I32, 0,
+					          maddr(reg(fm, ARM_SP), 0, 1, soff), tmpv);
+					mout_addr(o, MMOP_LOAD, MT_I32, tmp(fm, MT_I32, "i64tmp"),
+					          maddr(reg(fm, ARM_R11), 0, 1, slot + 4), 0);
+					MVal *tmpv2 = o->ins[o->nins - 1].dst;
+					mout_addr(o, MMOP_STORE, MT_I32, 0,
+					          maddr(reg(fm, ARM_SP), 0, 1, soff + 4), tmpv2);
+				}
 				soff += 8;
 			}
 			continue;
 		}
 		bool isf = a->dtype == MT_F32 || a->dtype == MT_F64;
 		
-		/* Variadic double: must go through GPR pair or stack
-		 * (base standard), NOT VFP.  Decompose via temporary pad. */
-		if (variadic && a->dtype == MT_F64) {
-			MVal *pad = tmp(fm, MT_PTR, "abi");
-			mout(o, MMOP_ALLOCA8, MT_PTR, pad, 0, 0);
-			mout_addr(o, MMOP_STORE, MT_F64, 0,
-			          maddr(pad, 0, 1, 0), a->src[0]);
-			if (ni < 4 && (ni & 1)) ni++;
-			if (ni + 1 < 4) {
-				mout_addr(o, MMOP_LOAD, MT_I32,
-				          reg(fm, mt->argreg[0 + ni]),
-				          maddr(pad, 0, 1, 0), 0);
-				mout_addr(o, MMOP_LOAD, MT_I32,
-				          reg(fm, mt->argreg[0 + ni + 1]),
-				          maddr(pad, 0, 1, 4), 0);
-				ni += 2;
+		/* Variadic FP (AAPCS base standard): pass via GPRs/stack, NOT VFP.
+		 * Use the SALLOC stack area as a bridge to move VFP→GPR. */
+		if (variadic && isf) {
+			if (a->dtype == MT_F64) {
+				if (ni < 4 && (ni & 1)) ni++;
+				if (ni + 1 < 4) {
+					mout_addr(o, MMOP_STORE, MT_F64, 0,
+					          maddr(reg(fm, ARM_SP), 0, 1, soff),
+					          a->src[0]);
+					int lo = mt->argreg[0 + ni];
+					int hi = mt->argreg[0 + ni + 1];
+					ni += 2;
+					mout_addr(o, MMOP_LOAD, MT_I32, reg(fm, lo),
+					          maddr(reg(fm, ARM_SP), 0, 1, soff), 0);
+					mout_addr(o, MMOP_LOAD, MT_I32, reg(fm, hi),
+					          maddr(reg(fm, ARM_SP), 0, 1, soff + 4), 0);
+				} else {
+					mout_addr(o, MMOP_STORE, MT_F64, 0,
+					          maddr(reg(fm, ARM_SP), 0, 1, soff),
+					          a->src[0]);
+					soff += 8;
+				}
 			} else {
-				MVal *lo = tmp(fm, MT_I32, "abi");
-				MVal *hi = tmp(fm, MT_I32, "abi");
-				mout_addr(o, MMOP_LOAD, MT_I32, lo,
-				          maddr(pad, 0, 1, 0), 0);
-				mout_addr(o, MMOP_LOAD, MT_I32, hi,
-				          maddr(pad, 0, 1, 4), 0);
-				mout_addr(o, MMOP_STORE, MT_I32, 0,
-				          maddr(reg(fm, ARM_SP), 0, 1, soff), lo);
-				mout_addr(o, MMOP_STORE, MT_I32, 0,
-				          maddr(reg(fm, ARM_SP), 0, 1, soff + 4), hi);
-				soff += 8;
+				if (ni < 4) {
+					mout_addr(o, MMOP_STORE, MT_F32, 0,
+					          maddr(reg(fm, ARM_SP), 0, 1, soff),
+					          a->src[0]);
+					mout_addr(o, MMOP_LOAD, MT_I32,
+					          reg(fm, mt->argreg[0 + ni]),
+					          maddr(reg(fm, ARM_SP), 0, 1, soff), 0);
+					ni++;
+				} else {
+					mout_addr(o, MMOP_STORE, MT_F32, 0,
+					          maddr(reg(fm, ARM_SP), 0, 1, soff),
+					          a->src[0]);
+					soff += 4;
+				}
 			}
 			continue;
 		}
@@ -430,6 +484,10 @@ mabi_selcall(MFnM *fm, MOut *o, MInsM *args, int n, MInsM *call)
 				mout_addr(o, MMOP_STORE, a->dtype, 0,
 				          maddr(reg(fm, ARM_SP), 0, 1, soff),
 				          a->src[0]);
+				/* Variadic stack arguments use natural width (4 for
+				 * 32-bit, 8 for 64-bit), matching the callee va_arg
+				 * overflow advance (oinc).  Non-vararg stack args
+				 * also use natural width. */
 				soff += (a->dtype == MT_F64) ? 8 : 4;
 				continue;
 			}
@@ -643,12 +701,9 @@ mabi_vaarg(MFnM *fm, MOut *o, MInsM *in)
 	}
 	/* overflow path: advance overflow_arg_area by oinc.
 	 * The caller (selcall) pushes each argument at its natural
-	 * stack width: 4 bytes for 32-bit args (int/float), 8 bytes
-	 * for 64-bit args (double/long long).  The libc va_arg
-	 * reads each argument from the current overflow pointer and
-	 * advances by the same width.  Hardcoding 8 across all types
-	 * causes int varargs to advance too far — the double that
-	 * follows (at oinc=4 for 32-bit, 8 for 64-bit) is misread. */
+	 * stack width (4 for 32-bit, 8 for 64-bit), so the overflow
+	 * pointer must advance by the same width to read the next
+	 * argument correctly. */
 	MVal *nstk = tmp(fm, MT_I32, "va");
 	mout(o, MMOP_NOT, MT_I32, nstk, mask, 0);
 	{
