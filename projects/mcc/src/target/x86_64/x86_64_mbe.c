@@ -94,7 +94,8 @@ static MMOP
 mir_conv_op(MOP op, bool src64, bool dst64)
 {
 	switch (op) {
-	case MOP_F2I:  return src64 ? MMOP_CVTTSD2SI : MMOP_CVTTSS2SI;
+	case MOP_F2I:
+	case MOP_UF2I: return src64 ? MMOP_CVTTSD2SI : MMOP_CVTTSS2SI;
 	case MOP_I2F:  return dst64 ? MMOP_CVTSI2SD : MMOP_CVTSI2SS;
 	case MOP_UI2F: return dst64 ? MMOP_CVTSI2SD_U : MMOP_CVTSI2SS_U;
 	default:       return MMOP_NONE;
@@ -219,6 +220,7 @@ mfnm_backend_x86_64(MFn *mf)
 				      mval_of_ref(mf, in->src[0]), 0);
 				break;
 			case MOP_F2I:
+			case MOP_UF2I:
 			case MOP_I2F:
 			case MOP_UI2F: {
 				MType st = mref_type(in->src[0]);

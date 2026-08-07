@@ -202,7 +202,7 @@ mfnm_backend_loongarch64(MFn *mf)
 					                           : MMOP_CVTSI2SS)
 					     : (in->op == MOP_UI2F ? MMOP_CVTSI2SD_U
 					                           : MMOP_CVTSI2SD);
-				} else if (in->op == MOP_F2I) {
+				} else if (in->op == MOP_F2I || in->op == MOP_UF2I) {
 					/* fp -> int: source type picks the opcode */
 					MVal *s = mval_of_ref(mf, in->src[0]);
 					mo = (s && s->type == MT_F32) ? MMOP_CVTTSS2SI

@@ -195,13 +195,15 @@ mfnm_backend_arm(MFn *mf)
 					break;
 				}
 				/* int<->fp conversions and fp widening/narrowing */
-				if (in->op == MOP_F2I || in->op == MOP_I2F ||
+				if (in->op == MOP_F2I || in->op == MOP_UF2I ||
+				    in->op == MOP_I2F ||
 				    in->op == MOP_UI2F || in->op == MOP_FEXT ||
 				    in->op == MOP_FTRUNC) {
 					MVal *a0 = mval_of_ref(mf, in->src[0]);
 					MMOP co;
 					switch (in->op) {
 					case MOP_F2I:
+				case MOP_UF2I:
 						co = (a0 && a0->type == MT_F64)
 						         ? MMOP_CVTTSD2SI : MMOP_CVTTSS2SI;
 						break;

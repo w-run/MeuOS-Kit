@@ -186,6 +186,12 @@ scratch_to_dst(FILE *f, MVal *d, const char *rn)
 
 static int g_i64_scratch;  /* %ebp offset of scratch pair 0 (already based) */
 
+/* FP constant scratch slot (8 bytes, below the i64 scratch pair), used so
+ * that FP constant loading does NOT corrupt the alloca stack area by
+ * using pushl/movss/addl which overwrites the live alloca reservation. */
+#define FP_SCRATCH_BYTES 8
+static int g_fp_scratch;
+
 /* Frame offset of a slot-resident value's low half. */
 static int
 i64_slot(const MVal *v)
@@ -385,10 +391,13 @@ fload_scratch(FILE *f, MVal *v)
 				if (bits == 0)
 					fputs("\txorps\t%xmm0, %xmm0\n", f);
 				else {
-					/* push constant onto stack, load via movss */
-					fprintf(f, "\tpushl\t$0x%x\n", bits);
-					fputs("\tmovss\t(%esp), %xmm0\n", f);
-					fputs("\taddl\t$4, %esp\n", f);
+					/* load constant through the dedicated FP scratch slot.
+					 * Before the fix, this used pushl/movss/addl which
+					 * corrupts the alloca reservation when alloca has
+					 * already been called (struct.x=1.0 bug). */
+fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
+				        bits, g_fp_scratch);
+					fprintf(f, "\tmovss\t%d(%%ebp), %%xmm0\n", g_fp_scratch);
 				}
 			} else {
 				uint64_t bits;
@@ -396,13 +405,12 @@ fload_scratch(FILE *f, MVal *v)
 				if (bits == 0)
 					fputs("\txorpd\t%xmm0, %xmm0\n", f);
 				else {
-					/* push 8-byte constant (two 4-byte pushes) */
-					fprintf(f, "\tpushl\t$0x%x\n",
-					        (uint32_t)(bits >> 32));
-					fprintf(f, "\tpushl\t$0x%x\n",
-					        (uint32_t)bits);
-					fputs("\tmovsd\t(%esp), %xmm0\n", f);
-					fputs("\taddl\t$8, %esp\n", f);
+					/* load 8-byte constant through the FP scratch slot */
+					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
+					        (uint32_t)bits, g_fp_scratch);
+					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
+					        (uint32_t)(bits >> 32), g_fp_scratch + 4);
+					fprintf(f, "\tmovsd\t%d(%%ebp), %%xmm0\n", g_fp_scratch);
 				}
 			}
 			return;
@@ -1228,6 +1236,114 @@ emit_ins(FILE *f, MInsM *in)
 		scratch_to_dst(f, d, "eax");
 		return;
 	}
+	case MMOP_CVTTSS2SQ:  /* f32 -> i64 (trunc) */
+	case MMOP_CVTTSD2SQ: {
+		/* f32/f64 -> i64 truncation on i386: SSE cvtts*2si only produces
+		 * 32-bit EAX.  Load fp into x87 via memory and use fisttpq. */
+		bool is64 = (op == MMOP_CVTTSD2SQ);
+		fload_scratch(f, s0);
+		fprintf(f, "\tsubl\t$8, %%esp\n");
+		if (is64)
+			fputs("\tmovsd\t%xmm0, (%esp)\n", f);
+		else
+			fputs("\tmovss\t%xmm0, (%esp)\n", f);
+		if (is64)
+			fputs("\tfldl\t(%esp)\n", f);
+		else
+			fputs("\tflds\t(%esp)\n", f);
+		fputs("\tfisttpq\t(%esp)\n", f);
+		fputs("\tmovl\t(%esp), %eax\n", f);
+		fputs("\tmovl\t4(%esp), %edx\n", f);
+		fputs("\taddl\t$8, %esp\n", f);
+		i64_store_pair(f, d);
+		return;
+	}
+	case MMOP_CVTTSS2SI_U: /* f32 -> u32 (trunc) */
+	case MMOP_CVTTSD2SI_U: {
+		/* f32/f64 -> u32 truncation: x87 fisttpl produces signed result.
+		 * Values >= 2^31 overflow; subtract 2^31, truncate, add 2^31 back. */
+		static uint32_t g_f2u32_id;
+		uint32_t id = g_f2u32_id++;
+		bool is64 = (op == MMOP_CVTTSD2SI_U);
+		fload_scratch(f, s0);
+		fprintf(f, "\tsubl\t$16, %%esp\n");
+		if (is64) {
+			fputs("\tmovsd\t%xmm0, (%esp)\n", f);
+			/* threshold 2^31 as double = 0x41e00000 00000000 */
+			fputs("\tmovl\t$0x00000000, 8(%esp)\n", f);
+			fputs("\tmovl\t$0x41e00000, 12(%esp)\n", f);
+			fputs("\tfldl\t(%esp)\n", f);
+			fputs("\tfcoml\t8(%esp)\n", f);
+		} else {
+			fputs("\tmovss\t%xmm0, (%esp)\n", f);
+			/* threshold 2^31 as float = 0x4f000000 */
+			fputs("\tmovl\t$0x4f000000, 8(%esp)\n", f);
+			fputs("\tflds\t(%esp)\n", f);
+			fputs("\tfcoms\t8(%esp)\n", f);
+		}
+		fputs("\tpushl\t%eax\n\tfnstsw\t%ax\n\tsahf\n\tpopl\t%eax\n", f);
+		fprintf(f, "\tjae\t.Lf2u32ge%u\n", id);
+		/* fp < 2^31: fisttpl (signed truncation works) */
+		fputs("\tfisttpl\t8(%esp)\n", f);
+		fprintf(f, "\tjmp\t.Lf2u32d%u\n", id);
+		fprintf(f, ".Lf2u32ge%u:\n", id);
+		/* fp >= 2^31: subtract 2^31, fisttpl, add 0x80000000.
+		 * st(0) still holds the original fp (fcom didn't pop). */
+		if (is64)
+			fputs("\tfsubl\t8(%esp)\n", f);
+		else
+			fputs("\tfsubs\t8(%esp)\n", f);
+		fputs("\tfisttpl\t8(%esp)\n", f);
+		fputs("\taddl\t$0x80000000, 8(%esp)\n", f);
+		fprintf(f, ".Lf2u32d%u:\n", id);
+		fputs("\tmovl\t8(%esp), %eax\n", f);
+		fputs("\taddl\t$16, %esp\n", f);
+		scratch_to_dst(f, d, "eax");
+		return;
+	}
+	case MMOP_CVTTSS2SQ_U: /* f32 -> u64 (trunc) */
+	case MMOP_CVTTSD2SQ_U: {
+		/* f32/f64 -> u64 truncation: x87 fisttpq produces signed result.
+		 * Values >= 2^63 overflow; subtract 2^63, truncate, add 2^63 back. */
+		static uint32_t g_f2u64_id;
+		uint32_t id = g_f2u64_id++;
+		bool is64 = (op == MMOP_CVTTSD2SQ_U);
+		fload_scratch(f, s0);
+		fprintf(f, "\tsubl\t$16, %%esp\n");
+		if (is64) {
+			fputs("\tmovsd\t%xmm0, (%esp)\n", f);
+			/* threshold 2^63 as double = 0x43e00000 00000000 */
+			fputs("\tmovl\t$0x00000000, 8(%esp)\n", f);
+			fputs("\tmovl\t$0x43e00000, 12(%esp)\n", f);
+			fputs("\tfldl\t(%esp)\n", f);
+			fputs("\tfcoml\t8(%esp)\n", f);
+		} else {
+			fputs("\tmovss\t%xmm0, (%esp)\n", f);
+			/* threshold 2^63 as float = 0x5f000000 */
+			fputs("\tmovl\t$0x5f000000, 8(%esp)\n", f);
+			fputs("\tflds\t(%esp)\n", f);
+			fputs("\tfcoms\t8(%esp)\n", f);
+		}
+		fputs("\tpushl\t%eax\n\tfnstsw\t%ax\n\tsahf\n\tpopl\t%eax\n", f);
+		fprintf(f, "\tjae\t.Lf2u64ge%u\n", id);
+		/* fp < 2^63: fisttpq (signed truncation works) */
+		fputs("\tfisttpq\t8(%esp)\n", f);
+		fprintf(f, "\tjmp\t.Lf2u64d%u\n", id);
+		fprintf(f, ".Lf2u64ge%u:\n", id);
+		/* fp >= 2^63: subtract 2^63, fisttpq, add 0x80000000 to high word */
+		if (is64)
+			fputs("\tfsubl\t8(%esp)\n", f);
+		else
+			fputs("\tfsubs\t8(%esp)\n", f);
+		fputs("\tfisttpq\t8(%esp)\n", f);
+		fputs("\taddl\t$0x80000000, 12(%esp)\n", f);
+		fprintf(f, ".Lf2u64d%u:\n", id);
+		fputs("\tmovl\t8(%esp), %eax\n", f);
+		fputs("\tmovl\t12(%esp), %edx\n", f);
+		fputs("\taddl\t$16, %esp\n", f);
+		i64_store_pair(f, d);
+		return;
+	}
 	case MMOP_CVTSI2SS:   /* i32 -> f32 */
 	case MMOP_CVTSI2SD: {
 		bool is32 = (op == MMOP_CVTSI2SS);
@@ -1526,12 +1642,16 @@ mfnm_emit_i386(MFnM *fm, FILE *f)
 
 	/* Reserve the i64 half-pair scratch below the register-allocated
 	 * slots (see i64_base): normalising a constant or register-resident
-	 * i64 operand needs a real lo/hi pair to read back from. */
-	g_i64_scratch = -(fm->slot + pushbytes + I64_SCRATCH_BYTES);
+	 * i64 operand needs a real lo/hi pair to read back from.
+	 * Below the i64 scratch sits the FP constant scratch (8 bytes)
+	 * so float constant loads do NOT corrupt the alloca area via
+	 * pushl/movss/addl (struct.x=1.0 bug). */
+	g_i64_scratch = -(fm->slot + pushbytes + FP_SCRATCH_BYTES + I64_SCRATCH_BYTES);
+	g_fp_scratch = g_i64_scratch + I64_SCRATCH_BYTES;
 
-	int framesize = fm->slot + I64_SCRATCH_BYTES + alloca_total(fm) + pushbytes;
+	int framesize = fm->slot + FP_SCRATCH_BYTES + I64_SCRATCH_BYTES + alloca_total(fm) + pushbytes;
 	framesize = (framesize + 15) & ~15;
-	g_alloca_cur = -(fm->slot + pushbytes + I64_SCRATCH_BYTES);
+	g_alloca_cur = -(fm->slot + pushbytes + FP_SCRATCH_BYTES + I64_SCRATCH_BYTES);
 
 	fprintf(f, ".text\n");
 	if (fm->name) {

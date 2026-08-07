@@ -186,15 +186,32 @@ mfnm_backend_i386(MFn *mf)
 					break;
 				}
 				/* int<->fp conversions */
-				if (in->op == MOP_F2I || in->op == MOP_I2F ||
+				if (in->op == MOP_F2I || in->op == MOP_UF2I ||
+				    in->op == MOP_I2F ||
 				    in->op == MOP_UI2F || in->op == MOP_FEXT ||
 				    in->op == MOP_FTRUNC) {
 					MVal *a0 = mval_of_ref(mf, in->src[0]);
 					MMOP co;
 					switch (in->op) {
 					case MOP_F2I:
-						co = (a0 && a0->type == MT_F64)
-						         ? MMOP_CVTTSD2SI : MMOP_CVTTSS2SI;
+						if (in->dtype == MT_I64)
+							co = (a0 && a0->type == MT_F64)
+							         ? MMOP_CVTTSD2SQ
+							         : MMOP_CVTTSS2SQ;
+						else
+							co = (a0 && a0->type == MT_F64)
+							         ? MMOP_CVTTSD2SI
+							         : MMOP_CVTTSS2SI;
+						break;
+					case MOP_UF2I:
+						if (in->dtype == MT_I64)
+							co = (a0 && a0->type == MT_F64)
+							         ? MMOP_CVTTSD2SQ_U
+							         : MMOP_CVTTSS2SQ_U;
+						else
+							co = (a0 && a0->type == MT_F64)
+							         ? MMOP_CVTTSD2SI_U
+							         : MMOP_CVTTSS2SI_U;
 						break;
 					case MOP_I2F:
 						co = in->dtype == MT_F64 ? MMOP_CVTSI2SD
