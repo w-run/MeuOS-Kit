@@ -543,8 +543,8 @@ i386_cc_suffix(MCC cc)
 	case MCC_LT:  return "l";
 	case MCC_GT:  return "g";
 	case MCC_LE:  return "le";
-	case MCC_CS:  return "b";    /* below (unsigned lt) */
-	case MCC_CC:  return "ae";   /* above or equal (unsigned ge) */
+	case MCC_CS:  return "ae";   /* carry set  -> unsigned >= / fp >= */
+	case MCC_CC:  return "b";    /* carry clear-> unsigned <  / fp < */
 	case MCC_HI:  return "a";    /* above (unsigned gt) */
 	case MCC_LS:  return "be";   /* below or equal (unsigned le) */
 	default:      return "e";
@@ -1244,18 +1244,79 @@ emit_ins(FILE *f, MInsM *in)
 		static uint32_t g_u2f_id;
 		bool is32 = (op == MMOP_CVTSI2SS_U);
 		uint32_t id = g_u2f_id++;
+
+		if (s0 && s0->type == MT_I64) {
+			/* 64-bit unsigned -> float/double.
+			 * fildq reads the 64-bit value as signed; if the
+			 * high bit is set (value >= 2^63), subtract 2^63
+			 * first, fildq, then add back 2^63.0.
+			 * Matches the LIR Oultof (i386_emit.c).
+			 *
+			 * NOTE: cannot use i64_base() here — it sign-extends
+			 * the low word via cdq, destroying the real high word
+			 * for unsigned values (i64_has_slot rejects values with
+			 * v->reg >= 0, falling back to cdq).  Access the slot
+			 * directly when available. */
+			static uint32_t g_ultof_id;
+			uint32_t lid = g_ultof_id++;
+			int base;
+			if (s0->slot != -1) {
+				base = s0->slot + g_slot_base;
+			} else {
+				base = i64_base(f, s0, 0);
+			}
+
+			/* Check high bit (bit 31 of the high word). */
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", base + 4);
+			fprintf(f, "\ttestl\t%%eax, %%eax\n");
+			fprintf(f, "\tjns\t.Lultof%u\n", lid);
+
+			/* >= 2^63: subtract 2^63, fildq, add back 2^63.0 */
+			fputs("\tsubl\t$8, %esp\n", f);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", base);
+			fputs("\tmovl\t%eax, (%esp)\n", f);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", base + 4);
+			fputs("\tsubl\t$0x80000000, %eax\n", f);
+			fputs("\tmovl\t%eax, 4(%esp)\n", f);
+			fputs("\tfildq\t(%esp)\n", f);
+			/* 2^63.0: fildq(-2^63) then fchs */
+			fputs("\tpushl\t$0x80000000\n\tpushl\t$0\n", f);
+			fputs("\tfildq\t(%esp)\n", f);
+			fputs("\tfchs\n", f);
+			fputs("\tfaddp\n", f);
+			fputs("\taddl\t$16, %esp\n", f);
+			if (is32)
+				fputs("\tfstps\t-4(%esp)\n\tmovss\t-4(%esp), %xmm0\n", f);
+			else
+				fputs("\tfstpl\t-8(%esp)\n\tmovsd\t-8(%esp), %xmm0\n", f);
+			fprintf(f, "\tjmp\t.Lultofe%u\n", lid);
+
+			/* < 2^63: fildq directly. */
+			fprintf(f, ".Lultof%u:\n", lid);
+			fprintf(f, "\tfildq\t%d(%%ebp)\n", base);
+			if (is32)
+				fputs("\tfstps\t-4(%esp)\n\tmovss\t-4(%esp), %xmm0\n", f);
+			else
+				fputs("\tfstpl\t-8(%esp)\n\tmovsd\t-8(%esp), %xmm0\n", f);
+
+			fprintf(f, ".Lultofe%u:\n", lid);
+			fstore_scratch(f, d);
+			return;
+		}
+
 		mv_to_scratch(f, s0, "eax");
-		/* unsigned conversion: test if sign bit is set, handle via
-		 * float conversion trick */
 		fprintf(f, "\ttestl\t%%eax, %%eax\n");
 		fprintf(f, "\tjs\t.Lu2f%u\n", id);
 		fprintf(f, "\tcvtsi2%s\t%%eax, %%xmm0\n", is32 ? "ss" : "sd");
 		fprintf(f, "\tjmp\t.Lu2fe%u\n", id);
 		fprintf(f, ".Lu2f%u:\n", id);
-		/* push %eax, then convert via memory */
-		fputs("\tpushl\t%eax\n", f);
-		fputs("\tfildl\t(%esp)\n", f);
-		fputs("\taddl\t$4, %esp\n", f);
+		/* Zero-extend u32 to 64 bits, fildq loads it as signed
+		 * 64-bit in [0, 2^32-1] — the exact unsigned value. */
+		fputs("\tsubl\t$8, %esp\n", f);
+		fputs("\tmovl\t%eax, (%esp)\n", f);
+		fputs("\tmovl\t$0, 4(%esp)\n", f);
+		fputs("\tfildq\t(%esp)\n", f);
+		fputs("\taddl\t$8, %esp\n", f);
 		if (is32)
 			fputs("\tfstps\t-4(%esp)\n\tmovss\t-4(%esp), %xmm0\n", f);
 		else
