@@ -788,7 +788,7 @@ emit_ins(FILE *f, MInsM *in)
 			fstore_scratch(f, d);
 			return;
 		}
-		if (in->dtype == MT_I64 || (s0 && s0->type == MT_I64)) {
+		if (in->dtype == MT_I64) {
 			/* i64 on i386: two 32-bit moves, normalised through a single
 			 * half-pair base so the source halves are read back from the
 			 * frame address they were actually written to (i64_base).

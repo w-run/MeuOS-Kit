@@ -447,7 +447,8 @@ mabi_vaarg(MFnM *fm, MOut *o, MInsM *in)
 
 	/* Advance the va_list pointer */
 	MVal *adv = tmp(fm, MT_PTR, "va");
-	mout_cst(o, MMOP_ADD, MT_PTR, adv, cur, imm(fm, MT_I64, slotsize));
+	mout(o, MMOP_ADD, MT_PTR, adv, cur,
+	     mval_const(fm->host, MT_I32, imm(fm, MT_I32, slotsize)));
 	mout_addr(o, MMOP_STORE, MT_PTR, 0, maddr(ap, 0, 1, 0), adv);
 }
 
