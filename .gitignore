@@ -40,6 +40,9 @@ env/share/*
 experiments/
 # mcc / qbe intermediate files
 # meow download/build staging
+# Persistent build state (auto-generated, do not commit)
+pkgs/*/.meow/buildstate/
+
 meuos-libc/build/
 meuos-libc-compat/build/
 *.o
