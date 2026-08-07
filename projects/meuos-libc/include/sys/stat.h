@@ -35,7 +35,10 @@ __BEGIN_DECLS
 int stat(const char *, struct stat *);
 int fstat(int, struct stat *);
 int lstat(const char *, struct stat *);
+int fstatat(int, const char *, struct stat *, int);
 int chmod(const char *, mode_t);
+int fchmodat(int, const char *, mode_t, int);
+int mkdirat(int, const char *, mode_t);
 __END_DECLS
 
 #endif

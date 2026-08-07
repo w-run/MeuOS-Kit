@@ -355,6 +355,12 @@ __syscall3(long number, long first, long second, long third)
 }
 
 static inline long
+__syscall5(long number, long first, long second, long third, long fourth, long fifth)
+{
+	return __meuos_syscall6(__syscall_number(number), first, second, third, fourth, fifth, 0);
+}
+
+static inline long
 __syscall4(long number, long first, long second, long third, long fourth)
 {
 	return __meuos_syscall6(__syscall_number(number), first, second, third, fourth, 0, 0);
