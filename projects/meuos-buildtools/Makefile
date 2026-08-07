@@ -16,10 +16,11 @@ DESTDIR ?=
 BUILD := build
 SRC := src
 TEST := test
-
-MODULES := m4 gperf flex bison yacc
-MODULE_OBJS := $(MODULES:%=$(BUILD)/%.o)
 BIN := $(BUILD)/buildtools
+ABSBIN := $(shell pwd)/$(BIN)
+
+MODULES := m4 gperf flex lex bison yacc
+MODULE_OBJS := $(MODULES:%=$(BUILD)/%.o)
 SYMLINKS := $(MODULES:%=$(BUILD)/%)
 
 # m4 engine library (from meow)
@@ -45,6 +46,10 @@ $(BUILD)/gperf.o: $(SRC)/gperf/gperf.c
 	$(HOST_CC) -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -c -o $@ $<
 
 $(BUILD)/flex.o: $(SRC)/flex/flex.c
+	@mkdir -p $(@D)
+	$(HOST_CC) -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -c -o $@ $<
+
+$(BUILD)/lex.o: $(SRC)/lex/lex.c
 	@mkdir -p $(@D)
 	$(HOST_CC) -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror -c -o $@ $<
 
@@ -77,12 +82,35 @@ install: $(BIN)
 	done
 
 check: $(BIN)
-	@for t in $(MODULES); do \
-		echo "Testing $$t..."; \
-		rm -f /tmp/bt-$$t; \
-		ln -s $(BIN) /tmp/bt-$$t; \
-		/tmp/bt-$$t --help 2>/dev/null || true; \
-	done
+	@echo "=== buildtools multicall check ==="
+	@total=0; pass=0; \
+	for t in $(MODULES); do \
+		total=$$((total+1)); \
+		rm -f /tmp/$$t; \
+		ln -s $(ABSBIN) /tmp/$$t; \
+		if /tmp/$$t --help >/dev/null 2>&1; then \
+			echo "  PASS  $$t --help"; \
+			pass=$$((pass+1)); \
+		else \
+			echo "  FAIL  $$t --help"; \
+		fi; \
+	done; \
+	rm -f $(addprefix /tmp/, $(MODULES)); \
+	: "Test explicit subcommand mode"; \
+	total=$$((total+1)); \
+	if $(ABSBIN) m4 --help >/dev/null 2>&1; then \
+		echo "  PASS  buildtools m4 --help (subcommand)"; \
+		pass=$$((pass+1)); \
+	else \
+		echo "  FAIL  buildtools m4 --help (subcommand)"; \
+	fi; \
+	echo; \
+	if [ $$pass -eq $$total ]; then \
+		echo "=== ALL $$total TESTS PASSED ==="; \
+	else \
+		echo "=== $$pass/$$total TESTS PASSED ==="; \
+		exit 1; \
+	fi
 
 # Static linking target for sysroot
 $(BUILD)/%-static: $(SRC)/%/%.c
