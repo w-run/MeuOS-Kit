@@ -28,11 +28,6 @@ static MFnM *g_fm;
 static int g_alloca_cur;
 static const char *g_fname;
 static int g_slot_base;    /* -(pushbytes): push area above slots */
-#define FP_SCRATCH_BYTES 8
-static int g_fp_scratch;   /* %%ebp offset of FP constant scratch (above i64 area) */
-
-/* forward declarations */
-static const char *i386_fp_cc_suffix(MCC cc);
 
 /* ---- width helpers ------------------------------------------------------ */
 
@@ -390,14 +385,10 @@ fload_scratch(FILE *f, MVal *v)
 				if (bits == 0)
 					fputs("\txorps\t%xmm0, %xmm0\n", f);
 				else {
-					/* write constant via g_i64_scratch (%ebp-rel, safe from
-					 * subl-alloc'd data below %esp), load via movss.
-					 * pushl-based path corrupts alloca'd struct storage
-					 * (the struct.x=1.8 bug). */
-					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
-					        bits, g_fp_scratch);
-					fprintf(f, "\tmovss\t%d(%%ebp), %%xmm0\n",
-					        g_fp_scratch);
+					/* push constant onto stack, load via movss */
+					fprintf(f, "\tpushl\t$0x%x\n", bits);
+					fputs("\tmovss\t(%esp), %xmm0\n", f);
+					fputs("\taddl\t$4, %esp\n", f);
 				}
 			} else {
 				uint64_t bits;
@@ -405,12 +396,13 @@ fload_scratch(FILE *f, MVal *v)
 				if (bits == 0)
 					fputs("\txorpd\t%xmm0, %xmm0\n", f);
 				else {
-					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
-					        (uint32_t)(bits >> 32), g_fp_scratch);
-					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
-					        (uint32_t)bits, g_fp_scratch + 4);
-					fprintf(f, "\tmovsd\t%d(%%ebp), %%xmm0\n",
-					        g_fp_scratch);
+					/* push 8-byte constant (two 4-byte pushes) */
+					fprintf(f, "\tpushl\t$0x%x\n",
+					        (uint32_t)(bits >> 32));
+					fprintf(f, "\tpushl\t$0x%x\n",
+					        (uint32_t)bits);
+					fputs("\tmovsd\t(%esp), %xmm0\n", f);
+					fputs("\taddl\t$8, %esp\n", f);
 				}
 			}
 			return;
@@ -506,19 +498,18 @@ emit_setccr_fp(FILE *f, MInsM *in)
 				if (is32) {
 					uint32_t bits;
 					memcpy(&bits, &c->u.s, 4);
-					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
-					        bits, g_fp_scratch);
-					fprintf(f, "\tmovss\t%d(%%ebp), %%xmm1\n",
-					        g_fp_scratch);
+					fprintf(f, "\tpushl\t$0x%x\n", bits);
+					fputs("\tmovss\t(%esp), %xmm1\n", f);
+					fputs("\taddl\t$4, %esp\n", f);
 				} else {
 					uint64_t bits;
 					memcpy(&bits, &c->u.d, 8);
-					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
-					        (uint32_t)(bits >> 32), g_fp_scratch);
-					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
-					        (uint32_t)bits, g_fp_scratch + 4);
-					fprintf(f, "\tmovsd\t%d(%%ebp), %%xmm1\n",
-					        g_fp_scratch);
+					fprintf(f, "\tpushl\t$0x%x\n",
+					        (uint32_t)(bits >> 32));
+					fprintf(f, "\tpushl\t$0x%x\n",
+					        (uint32_t)bits);
+					fputs("\tmovsd\t(%esp), %xmm1\n", f);
+					fputs("\taddl\t$8, %esp\n", f);
 				}
 			}
 		} else if (b->kind == MV_REG || (b->kind == MV_TEMP && b->reg >= 0)) {
@@ -535,32 +526,9 @@ emit_setccr_fp(FILE *f, MInsM *in)
 		fputs("\tucomiss\t%xmm1, %xmm0\n", f);
 	else
 		fputs("\tucomisd\t%xmm1, %xmm0\n", f);
-	/* ucomi* sets unsigned flags (CF=0 for above, CF=1 for below),
-	 * while integer CMP sets signed flags (SF/OF).  FP comparisons
-	 * must use unsigned suffixes: a/ae/b/be instead of g/ge/l/le. */
-	fprintf(f, "\tset%s\t%%al\n", i386_fp_cc_suffix(cc));
+	fprintf(f, "\tset%s\t%%al\n", i386_cc_suffix(cc));
 	fputs("\tmovzbl\t%al, %eax\n", f);
 	scratch_to_dst(f, in->dst, "eax");
-}
-
-/* ---- FP condition suffix (ucomi* sets unsigned CF flags) ----------------- */
-
-static const char *
-i386_fp_cc_suffix(MCC cc)
-{
-	switch (cc) {
-	case MCC_EQ:  return "e";
-	case MCC_NE:  return "ne";
-	case MCC_GE:  return "ae";   /* above or equal (unsigned ge) */
-	case MCC_LT:  return "b";    /* below (unsigned lt) */
-	case MCC_GT:  return "a";    /* above (unsigned gt) */
-	case MCC_LE:  return "be";   /* below or equal (unsigned le) */
-	case MCC_CS:  return "b";
-	case MCC_CC:  return "ae";
-	case MCC_HI:  return "a";
-	case MCC_LS:  return "be";
-	default:      return "e";
-	}
 }
 
 /* ---- condition suffix ---------------------------------------------------- */
@@ -575,8 +543,8 @@ i386_cc_suffix(MCC cc)
 	case MCC_LT:  return "l";
 	case MCC_GT:  return "g";
 	case MCC_LE:  return "le";
-	case MCC_CS:  return "b";    /* below (unsigned lt) */
-	case MCC_CC:  return "ae";   /* above or equal (unsigned ge) */
+	case MCC_CS:  return "ae";   /* carry set  -> unsigned >= / fp >= */
+	case MCC_CC:  return "b";    /* carry clear-> unsigned <  / fp < */
 	case MCC_HI:  return "a";    /* above (unsigned gt) */
 	case MCC_LS:  return "be";   /* below or equal (unsigned le) */
 	default:      return "e";
@@ -1276,17 +1244,74 @@ emit_ins(FILE *f, MInsM *in)
 		static uint32_t g_u2f_id;
 		bool is32 = (op == MMOP_CVTSI2SS_U);
 		uint32_t id = g_u2f_id++;
+
+		if (s0 && s0->type == MT_I64) {
+			/* 64-bit unsigned -> float/double.
+			 * fildq reads the 64-bit value as signed; if the
+			 * high bit is set (value >= 2^63), subtract 2^63
+			 * first, fildq, then add back 2^63.0.
+			 * Matches the LIR Oultof (i386_emit.c).
+			 *
+			 * NOTE: cannot use i64_base() here — it sign-extends
+			 * the low word via cdq, destroying the real high word
+			 * for unsigned values (i64_has_slot rejects values with
+			 * v->reg >= 0, falling back to cdq).  Access the slot
+			 * directly when available. */
+			static uint32_t g_ultof_id;
+			uint32_t lid = g_ultof_id++;
+			int base;
+			if (s0->slot != -1) {
+				base = s0->slot + g_slot_base;
+			} else {
+				base = i64_base(f, s0, 0);
+			}
+
+			/* Check high bit (bit 31 of the high word). */
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", base + 4);
+			fprintf(f, "\ttestl\t%%eax, %%eax\n");
+			fprintf(f, "\tjns\t.Lultof%u\n", lid);
+
+			/* >= 2^63: subtract 2^63, fildq, add back 2^63.0 */
+			fputs("\tsubl\t$8, %esp\n", f);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", base);
+			fputs("\tmovl\t%eax, (%esp)\n", f);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", base + 4);
+			fputs("\tsubl\t$0x80000000, %eax\n", f);
+			fputs("\tmovl\t%eax, 4(%esp)\n", f);
+			fputs("\tfildq\t(%esp)\n", f);
+			/* 2^63.0: fildq(-2^63) then fchs */
+			fputs("\tpushl\t$0x80000000\n\tpushl\t$0\n", f);
+			fputs("\tfildq\t(%esp)\n", f);
+			fputs("\tfchs\n", f);
+			fputs("\tfaddp\n", f);
+			fputs("\taddl\t$16, %esp\n", f);
+			if (is32)
+				fputs("\tfstps\t-4(%esp)\n\tmovss\t-4(%esp), %xmm0\n", f);
+			else
+				fputs("\tfstpl\t-8(%esp)\n\tmovsd\t-8(%esp), %xmm0\n", f);
+			fprintf(f, "\tjmp\t.Lultofe%u\n", lid);
+
+			/* < 2^63: fildq directly. */
+			fprintf(f, ".Lultof%u:\n", lid);
+			fprintf(f, "\tfildq\t%d(%%ebp)\n", base);
+			if (is32)
+				fputs("\tfstps\t-4(%esp)\n\tmovss\t-4(%esp), %xmm0\n", f);
+			else
+				fputs("\tfstpl\t-8(%esp)\n\tmovsd\t-8(%esp), %xmm0\n", f);
+
+			fprintf(f, ".Lultofe%u:\n", lid);
+			fstore_scratch(f, d);
+			return;
+		}
+
 		mv_to_scratch(f, s0, "eax");
-		/* unsigned conversion: test if sign bit is set, handle via
-		 * float conversion trick */
 		fprintf(f, "\ttestl\t%%eax, %%eax\n");
 		fprintf(f, "\tjs\t.Lu2f%u\n", id);
 		fprintf(f, "\tcvtsi2%s\t%%eax, %%xmm0\n", is32 ? "ss" : "sd");
 		fprintf(f, "\tjmp\t.Lu2fe%u\n", id);
 		fprintf(f, ".Lu2f%u:\n", id);
-		/* Zero-extend u32 to 64 bits on stack, fildq loads it as
-		 * a signed 64-bit value in [0, 2^32-1] — the exact unsigned
-		 * value.  Matches the LIR Ouwtof approach (i386_emit.c). */
+		/* Zero-extend u32 to 64 bits, fildq loads it as signed
+		 * 64-bit in [0, 2^32-1] — the exact unsigned value. */
 		fputs("\tsubl\t$8, %esp\n", f);
 		fputs("\tmovl\t%eax, (%esp)\n", f);
 		fputs("\tmovl\t$0, 4(%esp)\n", f);
@@ -1564,11 +1589,10 @@ mfnm_emit_i386(MFnM *fm, FILE *f)
 	 * slots (see i64_base): normalising a constant or register-resident
 	 * i64 operand needs a real lo/hi pair to read back from. */
 	g_i64_scratch = -(fm->slot + pushbytes + I64_SCRATCH_BYTES);
-	g_fp_scratch = g_i64_scratch - FP_SCRATCH_BYTES;
 
-	int framesize = fm->slot + I64_SCRATCH_BYTES + FP_SCRATCH_BYTES + alloca_total(fm) + pushbytes;
+	int framesize = fm->slot + I64_SCRATCH_BYTES + alloca_total(fm) + pushbytes;
 	framesize = (framesize + 15) & ~15;
-	g_alloca_cur = -(fm->slot + pushbytes + I64_SCRATCH_BYTES + FP_SCRATCH_BYTES);
+	g_alloca_cur = -(fm->slot + pushbytes + I64_SCRATCH_BYTES);
 
 	fprintf(f, ".text\n");
 	if (fm->name) {
