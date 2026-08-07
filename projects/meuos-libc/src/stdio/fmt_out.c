@@ -13,7 +13,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <wchar.h>
 #include "internal.h"
+
+/* Wide-char multibyte buffer length (UTF-8 max is 4, we use 16 for safety). */
+#define MEUOS_MB_LEN_MAX 16
 
 int
 __meuos_sink_put(struct __meuos_print_sink *sink, int character)
@@ -182,30 +186,77 @@ __meuos_vformat(struct __meuos_print_sink *sink, const char *format, va_list arg
 			if (__meuos_sink_put(sink, '%') < 0) return -1;
 			break;
 		case 'c': {
-			int ch = va_arg(arguments, int);
-			int pad = width - 1;
-			if (pad < 0) pad = 0;
-			if (!(flags & 1) && __meuos_sink_repeat(sink, ' ', pad) < 0) return -1;
-			if (__meuos_sink_put(sink, ch) < 0) return -1;
-			if ((flags & 1) && __meuos_sink_repeat(sink, ' ', pad) < 0) return -1;
+			if (length == 1) {
+				/* %lc: wide char → multibyte (C11 7.21.6.1) */
+				wint_t wc = va_arg(arguments, wint_t);
+				char mb[MEUOS_MB_LEN_MAX];
+				int mb_len = wcrtomb(mb, (wchar_t)wc, NULL);
+				if (mb_len <= 0) { mb[0] = '?'; mb_len = 1; }
+				int pad = width - mb_len;
+				if (pad < 0) pad = 0;
+				if (!(flags & 1) && __meuos_sink_repeat(sink, ' ', pad) < 0) return -1;
+				for (int i = 0; i < mb_len; i++)
+					if (__meuos_sink_put(sink, (unsigned char)mb[i]) < 0) return -1;
+				if ((flags & 1) && __meuos_sink_repeat(sink, ' ', pad) < 0) return -1;
+			} else {
+				int ch = va_arg(arguments, int);
+				int pad = width - 1;
+				if (pad < 0) pad = 0;
+				if (!(flags & 1) && __meuos_sink_repeat(sink, ' ', pad) < 0) return -1;
+				if (__meuos_sink_put(sink, ch) < 0) return -1;
+				if ((flags & 1) && __meuos_sink_repeat(sink, ' ', pad) < 0) return -1;
 			}
 			break;
+		}
 		case 's': {
-			const char *text = va_arg(arguments, const char *);
-			int text_length;
-			int pad;
-			if (!text) text = "(null)";
-			text_length = (int)strlen(text);
-			if (precision >= 0 && text_length > precision)
-				text_length = precision;
-			pad = width - text_length;
-			if (pad < 0) pad = 0;
-			if (!(flags & 1) && __meuos_sink_repeat(sink, ' ', pad) < 0) return -1;
-			while (text_length--)
-				if (__meuos_sink_put(sink, *text++) < 0) return -1;
-			if ((flags & 1) && __meuos_sink_repeat(sink, ' ', pad) < 0) return -1;
+			if (length == 1) {
+				/* %ls: wide string → multibyte (C11 7.21.6.1) */
+				const wchar_t *wtext = va_arg(arguments, const wchar_t *);
+				if (!wtext) wtext = L"(null)";
+				int wlen;
+				if (precision >= 0) {
+					for (wlen = 0; wlen < precision && wtext[wlen]; wlen++)
+						;
+				} else {
+					wlen = (int)wcslen(wtext);
+				}
+				/* Convert wide chars to multibyte bytes.
+				 * In C locale each wide char maps to one byte. */
+				int text_length = 0;
+				for (int i = 0; i < wlen; i++) {
+					char mb[MEUOS_MB_LEN_MAX];
+					int r = wcrtomb(mb, wtext[i], NULL);
+					if (r > 0) text_length += r;
+					else text_length++; /* encoding error */
+				}
+				int pad = width - text_length;
+				if (pad < 0) pad = 0;
+				if (!(flags & 1) && __meuos_sink_repeat(sink, ' ', pad) < 0) return -1;
+				for (int i = 0; i < wlen; i++) {
+					char mb[MEUOS_MB_LEN_MAX];
+					int r = wcrtomb(mb, wtext[i], NULL);
+					if (r <= 0) { mb[0] = '?'; r = 1; }
+					for (int j = 0; j < r; j++)
+						if (__meuos_sink_put(sink, (unsigned char)mb[j]) < 0) return -1;
+				}
+				if ((flags & 1) && __meuos_sink_repeat(sink, ' ', pad) < 0) return -1;
+			} else {
+				const char *text = va_arg(arguments, const char *);
+				int text_length;
+				int pad;
+				if (!text) text = "(null)";
+				text_length = (int)strlen(text);
+				if (precision >= 0 && text_length > precision)
+					text_length = precision;
+				pad = width - text_length;
+				if (pad < 0) pad = 0;
+				if (!(flags & 1) && __meuos_sink_repeat(sink, ' ', pad) < 0) return -1;
+				while (text_length--)
+					if (__meuos_sink_put(sink, *text++) < 0) return -1;
+				if ((flags & 1) && __meuos_sink_repeat(sink, ' ', pad) < 0) return -1;
 			}
 			break;
+		}
 		case 'd':
 		case 'i': {
 			int zero = (flags & 16) != 0;
