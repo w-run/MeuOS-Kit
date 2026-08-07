@@ -20,7 +20,31 @@
 > - **复杂任务拉团队**：需要跨组件修改或涉及多个文件的任务，使用 TeamCreate 创建团队，按职责分派 Worker。禁止单 Agent 单线程处理大型任务。
 > - **拉取最新状态**：开始任务前运行 `git fetch origin && git log origin/main..main` 确认是否有他人已推送的变更。操作 `.todo/` 等共享文件时注意冲突。
 >
-> **会话恢复流程**（强制要求：新 agent 启动时**必须**按顺序执行以下步骤）：
+> **团队工具使用规约**（强制）：
+>
+> | 工具 | 正确用法 | 禁止 |
+> |------|----------|------|
+> | `TeamCreate` | `{ team_name: "mkit-xxxx", description: "..." }` | 不允许以组件名直接作为队名 |
+> | `Agent` (spawn 队员) | **必须**提供 `name` + `team_name` + `run_in_background`，**不得设置** `subagent_type` | 禁止用 `subagent_type="executor"` 等子代理方式 |
+> | `Agent` 的 `name` | 必须是角色名如 `mcc-worker`、`libc-worker` | 禁止用 `general-purpose` 或缺省 |
+> | `Agent` 的 `model` | 必须显式指定 `model: "lite"` 或 `model: "reasoning"` | 禁止缺省 |
+> | `SendMessage` | 用 `{ type: "message", recipient: "队员名", content: "..." }` 发消息 | 禁止用广播代替一对一私信 |
+> | `SendMessage` shutdown | 用 `{ type: "shutdown_request", recipient: "队员名" }` 优雅关停 | 禁止直接中断或忽略队员消息 |
+> | `TaskCreate` / `TaskUpdate` | 创建任务后通过 `owner` 分派给队员，队员完成后再 `TaskUpdate` 标记 `completed` | 禁止自己创建任务自己完成，应直接做 |
+> | Task 状态流转 | `pending` → 领任务设 `owner` → `in_progress` → `completed` | 禁止跳过 `in_progress` 直接标记完成 |
+>
+> **团队工作流**：
+> 1. `ToolSearch` + `TeamCreate` → 创建团队
+> 2. `TaskCreate` → 创建任务卡片（含范围/验收/依赖）
+> 3. `Agent` spawn 队员（`name` + `team_name` + `model`）→ 队员自动加入团队
+> 4. `TaskUpdate` 分配 `owner` → 队员领任务
+> 5. 队员通过 `SendMessage` 汇报成果或卡点
+> 6. 队员完成任务后 `TaskUpdate` 标记 `completed`
+> 7. 所有队员完成 → 合并分支 → `SendMessage shutdown_request` 关停队员
+> 8. `TeamDelete` 清扫团队
+>
+> **会话恢复流程**（强制要求：新 agent 启动时**必须**按顺序执行以下步骤）：  
+> 0. **团队规约确认** — 读取 AGENTS.md 中「团队工具使用规约」表格，确认 spawn/通信/关停规则。**禁止使用子代理（subagent_type）**。
 > 1. **读取 IMA 知识库规划文档** — 查询 IMA 知识库中的 MeuOS 规划文档（`search_knowledge_base` → `get_knowledge_list`），阅读标题含"规划"/"计划"/"路线图"/"需求"/"设计"的文档。详见 `.agents/reference/knowledge-mgmt.md` §9.4。
 > 2. **子项目上下文加载** — 读目标子项目的 `ARCHITECTURE.md`（结构/模块/状态/路线图）与 `.todo/<project>/`（待办项），了解项目当前进度。
 > 3. **AGENTS.md 规约确认** — 重新确认项目规约（§4 禁止事项、§5 参考索引）和项目状态（`.agents/reference/status.md`）。
