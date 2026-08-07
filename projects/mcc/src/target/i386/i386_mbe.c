@@ -73,16 +73,15 @@ mir_cmp_cc(MOP op)
 	case MOP_CSGT: return MCC_GT;
 	case MOP_CSGE: return MCC_GE;
 	/* unsigned integer (cmp): setb/setbe/seta/setae (CF / CF||ZF / !CF&&!ZF / !CF) */
-	case MOP_CULT: return MCC_CS;   /* setb  (CF=1)  */ 
+	case MOP_CULT: return MCC_CC;   /* setb  (CF=1)  — MCC_CC -> "b" */
 	case MOP_CULE: return MCC_LS;   /* setbe (CF=1||ZF=1) */
 	case MOP_CUGT: return MCC_HI;   /* seta  (CF=0&&ZF=0) */
-	case MOP_CUGE: return MCC_CC;   /* setae (CF=0) */
-	/* float (ucomisd): same unsigned condition codes — ucomisd sets
-	 * CF=1 when xmm0 < xmm1, CF=0 when xmm0 >= xmm1, etc. */
-	case MOP_CFLT: return MCC_CS;   /* setb  (CF=1)  */
+	case MOP_CUGE: return MCC_CS;   /* setae (CF=0) — MCC_CS -> "ae" */
+	/* float (ucomisd): same condition codes and flag semantics */
+	case MOP_CFLT: return MCC_CC;   /* setb  (CF=1) */
 	case MOP_CFLE: return MCC_LS;   /* setbe (CF=1||ZF=1) */
 	case MOP_CFGT: return MCC_HI;   /* seta  (CF=0&&ZF=0) */
-	case MOP_CFGE: return MCC_CC;   /* setae (CF=0) */
+	case MOP_CFGE: return MCC_CS;   /* setae (CF=0) */
 	default:       return MCC_EQ;
 	}
 }
