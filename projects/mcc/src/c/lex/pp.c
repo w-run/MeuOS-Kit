@@ -65,6 +65,12 @@ enum ppflags ppflags;
 
 static struct array ctx;
 static struct array macros;
+/* Maximum nesting depth of macro expansions.  An implementation limit
+ * to prevent runaway recursion from deep macro chains (e.g. _Generic
+ * with many statement-expression branches), which would otherwise cause
+ * unbounded ctx array growth and eventual OOM. */
+#define MAX_MACRO_DEPTH 256
+
 /* number of macros currently undergoing expansion */
 static size_t macrodepth;
 
@@ -1724,6 +1730,9 @@ expand(struct token *t)
 		t->hide = true;
 	if (t->hide)
 		return false;
+	if (macrodepth >= MAX_MACRO_DEPTH)
+		error_code(E_SYNTAX, &t->loc,
+			"macro expansion nested too deeply (%zu levels)", macrodepth + 1);
 	space = t->space;
 	if (m->kind == MACROFUNC) {
 		if (!peekparen())
