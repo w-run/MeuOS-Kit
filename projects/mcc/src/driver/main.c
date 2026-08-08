@@ -517,22 +517,22 @@ mcc_main(int argc, char *argv[])
 	if (strcmp(a, "-target") == 0) { target = ARGVAL(""); continue; }
 	if (strncmp(a, "-target=", 8) == 0) { target = a + 8; continue; }
 	if (strncmp(a, "--specs=", 8) == 0) {
-		if (strcmp(a + 8, "meuos") == 0)
-			meuos_specs = true;
-		else if (strcmp(a + 8, "host") == 0 || strcmp(a + 8, "system") == 0)
+		if (strcmp(a + 8, "host") == 0 || strcmp(a + 8, "system") == 0)
 			meuos_specs_host = true;
+		else if (strcmp(a + 8, "glibc") == 0)
+			meuos_specs_glibc = true;
+		else if (strcmp(a + 8, "musl") == 0)
+			meuos_specs_musl = true;
 		continue;
 	}
 	if (strcmp(a, "--specs") == 0) {
 		char *spec = ARGVAL("");
-		if (strcmp(spec, "meuos") == 0)
-			meuos_specs = true;
-		else if (strcmp(spec, "host") == 0 || strcmp(spec, "system") == 0)
+		if (strcmp(spec, "host") == 0 || strcmp(spec, "system") == 0)
 			meuos_specs_host = true;
-		continue;
-	}
-	if (strcmp(a, "--meuos") == 0) {
-		meuos_specs = true;
+		else if (strcmp(spec, "glibc") == 0)
+			meuos_specs_glibc = true;
+		else if (strcmp(spec, "musl") == 0)
+			meuos_specs_musl = true;
 		continue;
 	}
 	/* p9-ui 诊断输出模式：--error-json 结构化错误，--explain 附加修复建议 */
@@ -666,16 +666,13 @@ mcc_main(int argc, char *argv[])
 	}
 #undef ARGVAL
 
-	/* MeuOS specs must be requested explicitly (--specs=meuos / --meuos).
-	 * The old implicit default when MEUOS_SYSROOT was set polluted ordinary
-	 * compilation and has been removed.  Use --specs=host for host-only mode. */
+	/* MeuOS is the default environment.  With a --sysroot or MEUOS_SYSROOT,
+	 * mcc uses mt/as+mt/ld + libc-meuos.  --specs=host/glibc/musl override
+	 * to a non-MeuOS toolchain.  sysroot may be resolved per-arch below. */
 	if (!sysroot)
 		sysroot = getenv("MEUOS_SYSROOT");
-	/* --specs=meuos must be explicit.  The old implicit default (activate
-	 * MeuOS specs whenever MEUOS_SYSROOT was set) polluted ordinary
-	 * compilation.  User must opt in via --specs=meuos / --meuos. */
-	if (meuos_specs && !sysroot)
-		fprintf(stderr, "%s: --specs=meuos requires --sysroot or MEUOS_SYSROOT\n", argv0), exit(2);
+	if (sysroot && !meuos_specs_host && !meuos_specs_glibc && !meuos_specs_musl)
+		meuos_specs = true;
 	driver_sysroot = sysroot; /* record effective sysroot for host toolchain */
 
 	/* Resolve arch-specific sysroot subdirectory (sysroot/<arch>/) when
