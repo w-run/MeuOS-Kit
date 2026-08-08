@@ -20,14 +20,14 @@
 static inline unsigned
 __stdc_clz32(unsigned x)
 {
-	unsigned n = 32;
+	unsigned n = 0;
 	if (!x) return 32;
-	if (!(x & 0xFFFF0000u)) { n -= 16; x <<= 16; }
-	if (!(x & 0xFF000000u)) { n -= 8;  x <<= 8;  }
-	if (!(x & 0xF0000000u)) { n -= 4;  x <<= 4;  }
-	if (!(x & 0xC0000000u)) { n -= 2;  x <<= 2;  }
-	if (!(x & 0x80000000u)) { n -= 1; }
-	return n - 1;
+	if (!(x & 0xFFFF0000u)) { n += 16; x <<= 16; }
+	if (!(x & 0xFF000000u)) { n += 8;  x <<= 8;  }
+	if (!(x & 0xF0000000u)) { n += 4;  x <<= 4;  }
+	if (!(x & 0xC0000000u)) { n += 2;  x <<= 2;  }
+	if (!(x & 0x80000000u)) { n += 1; }
+	return n;
 }
 
 static inline unsigned
@@ -59,6 +59,30 @@ __stdc_ctz64(unsigned long long x)
 	return 32 + __stdc_ctz32((unsigned)(x >> 32));
 }
 
+/* 窄类型（8/16 位）：以自身位宽计算 clz/ctz，0 特判返回自身位宽。
+ * clz：先左移到 32 位顶端再数前导零（等价于在窄位宽内数）；
+ * ctz：低位不受提升影响，直接数即可。 */
+static inline unsigned
+__stdc_clz8(unsigned char x)
+{
+	return x ? __stdc_clz32((unsigned)x << 24) : 8u;
+}
+static inline unsigned
+__stdc_clz16(unsigned short x)
+{
+	return x ? __stdc_clz32((unsigned)x << 16) : 16u;
+}
+static inline unsigned
+__stdc_ctz8(unsigned char x)
+{
+	return x ? __stdc_ctz32((unsigned)x) : 8u;
+}
+static inline unsigned
+__stdc_ctz16(unsigned short x)
+{
+	return x ? __stdc_ctz32((unsigned)x) : 16u;
+}
+
 static inline unsigned
 __stdc_popcount32(unsigned x)
 {
@@ -81,32 +105,32 @@ __stdc_popcount64(unsigned long long x)
 
 #define stdc_leading_zeros(x) \
 	_Generic((x), \
-		unsigned char:		(unsigned)(__stdc_clz32((unsigned)(x)) - 24u), \
-		unsigned short:		(unsigned)(__stdc_clz32((unsigned)(x)) - 16u), \
+		unsigned char:		(unsigned)__stdc_clz8((unsigned char)(x)), \
+		unsigned short:		(unsigned)__stdc_clz16((unsigned short)(x)), \
 		unsigned int:		(unsigned)__stdc_clz32(x), \
 		unsigned long:		(unsigned)__stdc_clz64(x), \
 		unsigned long long:	(unsigned)__stdc_clz64(x))
 
 #define stdc_leading_ones(x) \
 	_Generic((x), \
-		unsigned char:		(unsigned)(__stdc_clz32((unsigned)~(x)) - 24u), \
-		unsigned short:		(unsigned)(__stdc_clz32((unsigned)~(x)) - 16u), \
+		unsigned char:		(unsigned)__stdc_clz8((unsigned char)~(x)), \
+		unsigned short:		(unsigned)__stdc_clz16((unsigned short)~(x)), \
 		unsigned int:		(unsigned)__stdc_clz32(~(x)), \
 		unsigned long:		(unsigned)__stdc_clz64(~(x)), \
 		unsigned long long:	(unsigned)__stdc_clz64(~(x)))
 
 #define stdc_trailing_zeros(x) \
 	_Generic((x), \
-		unsigned char:		(unsigned)(__stdc_ctz32((unsigned)(x)) - 24u), \
-		unsigned short:		(unsigned)(__stdc_ctz32((unsigned)(x)) - 16u), \
+		unsigned char:		(unsigned)__stdc_ctz8((unsigned char)(x)), \
+		unsigned short:		(unsigned)__stdc_ctz16((unsigned short)(x)), \
 		unsigned int:		(unsigned)__stdc_ctz32(x), \
 		unsigned long:		(unsigned)__stdc_ctz64(x), \
 		unsigned long long:	(unsigned)__stdc_ctz64(x))
 
 #define stdc_trailing_ones(x) \
 	_Generic((x), \
-		unsigned char:		(unsigned)(__stdc_ctz32((unsigned)~(x)) - 24u), \
-		unsigned short:		(unsigned)(__stdc_ctz32((unsigned)~(x)) - 16u), \
+		unsigned char:		(unsigned)__stdc_ctz8((unsigned char)~(x)), \
+		unsigned short:		(unsigned)__stdc_ctz16((unsigned short)~(x)), \
 		unsigned int:		(unsigned)__stdc_ctz32(~(x)), \
 		unsigned long:		(unsigned)__stdc_ctz64(~(x)), \
 		unsigned long long:	(unsigned)__stdc_ctz64(~(x)))
