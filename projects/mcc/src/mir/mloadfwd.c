@@ -84,9 +84,10 @@ mloadfwd(MFn *fn)
 					in->src[0].val = e->val;
 					in->src[0].con = 0;
 					in->src[1].val = 0;
-					in->src[1].con = 0;
-					r++;
-				}
+in->src[1].con = 0;
+				fn->uses_dirty = true;
+				r++;
+			}
 			}
 		}
 		while (map) {
@@ -117,6 +118,7 @@ mloadfwd(MFn *fn)
 			}
 			if (only_stores) {
 				drop[i] = true;
+				fn->uses_dirty = true;
 				r++;
 			}
 		}

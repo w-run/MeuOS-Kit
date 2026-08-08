@@ -333,6 +333,7 @@ struct MFn {
 	bool weak;           /* __attribute__((weak)) — emit .weak instead of .globl */
 	int optlevel;        /* 0=O0, 1=O1, 2=O2 (default), 3=O3 */
 	bool emitted;        /* codegen already run */
+	bool uses_dirty;     /* use chains need rebuild before next use */
 	/* Frontend value-id -> MVal side table (func_to_mir).  Indexed by
 	 * frontend `struct value` ids (VALUE_TEMP; ids start at 1); NULL for
 	 * ids that do not correspond to a MIR value.  Used to map frontend
@@ -393,7 +394,9 @@ enum MIRPass {
 uint32_t run_mir_pass(MFn *fn, enum MIRPass pass);
 void run_mir_passes(MFn *fn, int optlevel);
 int mssa_check(MFn *fn);
-void build_uses(MFn *fn);
+void build_uses(MFn *fn);       /* lazy: no-op if uses_dirty == false */
+void build_uses_force(MFn *fn); /* force rebuild regardless of dirty */
+void mark_uses_dirty(MFn *fn);  /* mark chains dirty for next build_uses */
 uint32_t mcopy(MFn *fn);
 uint32_t mgvn(MFn *fn);
 uint32_t mloadfwd(MFn *fn);

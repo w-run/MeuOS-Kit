@@ -279,6 +279,7 @@ mref_replace(MFn *fn, MVal *old, MRef nr)
 
 	if (!old || old->kind != MV_TEMP)
 		return;
+	fn->uses_dirty = true;
 	for (uint32_t i = 0; i < old->nuse; i++) {
 		MUse *u = &old->use[i];
 		if (u->phi) {

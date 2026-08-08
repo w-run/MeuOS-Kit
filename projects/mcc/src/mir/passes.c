@@ -76,9 +76,25 @@ reset_uses(MFn *fn)
 void
 build_uses(MFn *fn)
 {
+	if (!fn->uses_dirty)
+		return;
+	fn->uses_dirty = false;
 	reset_uses(fn);
 	for (MBlk *b = fn->link; b; b = b->link)
 		build_uses_block(fn, b);
+}
+
+void
+build_uses_force(MFn *fn)
+{
+	fn->uses_dirty = true;
+	build_uses(fn);
+}
+
+void
+mark_uses_dirty(MFn *fn)
+{
+	fn->uses_dirty = true;
 }
 
 /* ---- if-conversion: constant-condition branch simplification (mifconv) ---- */
@@ -114,28 +130,43 @@ mifconv(MFn *fn)
 uint32_t
 run_mir_pass(MFn *fn, enum MIRPass pass)
 {
+	uint32_t n = 0;
 	switch (pass) {
 	case MIR_PASS_USES:
 		build_uses(fn);
 		return 0;
 	case MIR_PASS_FOLD:
-		return mfold(fn);
+		n = mfold(fn);
+		if (n) fn->uses_dirty = true;
+		return n;
 	case MIR_PASS_COPY:
-		return mcopy(fn);
+		n = mcopy(fn);
+		if (n) fn->uses_dirty = true;
+		return n;
 	case MIR_PASS_LOADFWD:
-		return mloadfwd(fn);
+		n = mloadfwd(fn);
+		if (n) fn->uses_dirty = true;
+		return n;
 	case MIR_PASS_MEM2REG:
-		return mmem2reg(fn);
+		n = mmem2reg(fn);
+		if (n) fn->uses_dirty = true;
+		return n;
 	case MIR_PASS_GVN:
-		return mgvn(fn);
+		n = mgvn(fn);
+		if (n) fn->uses_dirty = true;
+		return n;
 	case MIR_PASS_IFCONV:
-		return mifconv(fn);
+		return mifconv(fn);  /* modifies branches, not def/use */
 	case MIR_PASS_DCE:
-		return mdce(fn);
+		n = mdce(fn);
+		if (n) fn->uses_dirty = true;
+		return n;
 	case MIR_PASS_COMBINE:
-		return mcombine(fn);
+		n = mcombine(fn);
+		if (n) fn->uses_dirty = true;
+		return n;
 	case MIR_PASS_SSA:
-		return mssa_check(fn);
+		return mssa_check(fn);  /* readonly */
 	default:
 		return 0;
 	}

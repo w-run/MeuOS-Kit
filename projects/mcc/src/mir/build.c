@@ -17,6 +17,7 @@ MFn *mfn_new(const char *name, int optlevel)
 	fn->optlevel = optlevel;
 	fn->retty = -1;
 	fn->slot = 0;
+	fn->uses_dirty = true;  /* first build_uses must do real work */
 	return fn;
 }
 

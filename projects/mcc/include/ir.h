@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <inttypes.h>
 #include <limits.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -443,6 +444,7 @@ struct Fn {
 	Lnk lnk;
 	int optlevel;   /* 0=O0, 1=O1, 2=O2(default), 3=O3 */
 	int warnlevel;  /* bitmask of WARN_* */
+	bool uses_dirty; /* use chains need rebuild before next filluse */
 };
 
 /* Warning bitmask definitions for fn->warnlevel.

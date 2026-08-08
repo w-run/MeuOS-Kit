@@ -184,6 +184,7 @@ combine_pair(MFn *fn, MIns *def, MIns *use)
 			use->op = MOP_COPY;
 			use->src[0] = MREF_VAL(def->dst);
 			use->src[1] = (MRef){0};
+			fn->uses_dirty = true;
 			return true;
 		}
 	}
@@ -209,6 +210,7 @@ combine_pair(MFn *fn, MIns *def, MIns *use)
 			use->op = MOP_COPY;
 			use->src[0] = MREF_VAL(def->dst);
 			use->src[1] = (MRef){0};
+			fn->uses_dirty = true;
 			return true;
 		}
 	}

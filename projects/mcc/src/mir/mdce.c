@@ -26,6 +26,7 @@ mdce_block(MFn *fn, MBlk *b)
 		if (in->dst && in->dst->nuse == 0 && !has_side_effect &&
 		    in->dst->kind == MV_TEMP) {
 			removed++;
+			fn->uses_dirty = true;
 			continue;
 		}
 		out[nout++] = *in;
