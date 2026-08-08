@@ -118,14 +118,15 @@ tokenget(const void *str, size_t len)
 
 	mapkey(&k, str, len);
 	if (mapput(&tokmap, &k, &i)) {
-		if (len > 8192)
+		if (len > 65536)
 			fatal("token is too long");
 		if (INT_MAX < tokstr.len / sizeof(void *))
 			fatal("too many tokens");
 		if (!pos || end - pos < len + 1) {
-			buf = xmalloc(8192);
+			size_t alloc = len < 8192 ? 8192 : len + 1;
+			buf = xmalloc(alloc);
 			pos = buf;
-			end = buf + 8192;
+			end = buf + alloc;
 		}
 		memcpy(pos, str, len);
 		pos[len] = '\0';
