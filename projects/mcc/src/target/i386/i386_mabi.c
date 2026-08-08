@@ -192,6 +192,16 @@ mabi_selpar(MFnM *fm, MOut *o, MInsM *parms, int n, uint32_t *vafa)
 			mout_addr(o, MMOP_LOAD, MT_I64, dst,
 			          maddr(reg(fm, I386MREG_EBP), 0, 1, off), 0);
 			off += 8;
+		} else if (p->dtype == MT_F64) {
+			/* double param: 8 bytes on the cdecl stack.  Advancing off
+			 * by only 4 would place the next param at ebp+12 instead of
+			 * ebp+16, causing the callee to read the second double's low
+			 * half from the first double's high half (i386-double-off,
+			 * defect introduced when f64 was added to the MIR-native
+			 * path). */
+			mout_addr(o, MMOP_LOAD, MT_F64, dst,
+			          maddr(reg(fm, I386MREG_EBP), 0, 1, off), 0);
+			off += 8;
 		} else {
 			mout_addr(o, MMOP_LOAD, p->dtype, dst,
 			          maddr(reg(fm, I386MREG_EBP), 0, 1, off), 0);
@@ -222,7 +232,7 @@ mabi_selcall(MFnM *fm, MOut *o, MInsM *args, int n, MInsM *call)
 		if (args[i].td)
 			stk += agg_stack_size(args[i].td->size);
 		else
-			stk += args[i].dtype == MT_I64 ? 8 : 4;
+			stk += (args[i].dtype == MT_I64 || args[i].dtype == MT_F64) ? 8 : 4;
 		/* sret pointer: if call has aggregate return, add 4 bytes for
 		 * the hidden sret pointer */
 	}
@@ -290,6 +300,15 @@ mabi_selcall(MFnM *fm, MOut *o, MInsM *args, int n, MInsM *call)
 			 * value) via i64_base, so the caller pushes the real halves
 			 * rather than reading a possibly-unset src[0]->slot. */
 			mout_addr(o, MMOP_STORE, MT_I64, 0,
+			          maddr(reg(fm, I386MREG_ESP), 0, 1, soff),
+			          a->src[0]);
+		} else if (a->dtype == MT_F64) {
+			soff -= 8;
+			/* double (f64): 8 bytes on the cdecl stack.  Advancing soff
+			 * by only 4 would let the next arg's store overlap the double's
+			 * high half (i386-call-double-off), causing the callee to read
+			 * the second double from corrupted stack data. */
+			mout_addr(o, MMOP_STORE, MT_F64, 0,
 			          maddr(reg(fm, I386MREG_ESP), 0, 1, soff),
 			          a->src[0]);
 		} else {

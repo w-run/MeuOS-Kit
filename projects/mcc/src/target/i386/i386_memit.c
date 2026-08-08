@@ -209,9 +209,16 @@ i64_has_slot(const MVal *v)
  * Resolve an i64 operand to a frame offset whose low half is at the
  * returned offset and high half at +4.  Slot-resident temps are used in
  * place; everything else is materialised into scratch pair `nth`.
+ *
+ * When `ext` is non-zero, a register-resident temp is widened via
+ * zero-extension (ext == 1) or sign-extension (ext == 2) instead of
+ * the default cdq (sign-extension).  This is needed because the i64
+ * comparison path in emit_setccr may compare a 32-bit unsigned value
+ * against an i64 constant — cdq would sign-extend 0xFFFFFFFF to
+ * 0xFFFFFFFFFFFFFFFF, making the comparison fail.
  */
 static int
-i64_base(FILE *f, MVal *v, int nth)
+i64_base_ext(FILE *f, MVal *v, int nth, int ext)
 {
 	int off = g_i64_scratch + nth * 8;
 
@@ -230,13 +237,23 @@ i64_base(FILE *f, MVal *v, int nth)
 		return off;
 	}
 	/* register-resident temp or any other kind: only the low word is
-	 * addressable, so sign-extend it into the pair (i64 temps that made
-	 * it into a single register hold a 32-bit-representable value) */
+	 * addressable, so widen it into the pair. */
 	mv_to_scratch(f, v, "eax");
-	fputs("\tcdq\n", f);
+	if (ext == 1)
+		fputs("\txorl\t%edx, %edx\n", f);          /* zero-extend */
+	else if (ext == 2)
+		fputs("\tmovsbl\t%al, %eax\n\tcdq\n", f);   /* sign-extend i8 -> i64 */
+	else
+		fputs("\tcdq\n", f);                         /* sign-extend (default) */
 	fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", off);
 	fprintf(f, "\tmovl\t%%edx, %d(%%ebp)\n", off + 4);
 	return off;
+}
+
+static int
+i64_base(FILE *f, MVal *v, int nth)
+{
+	return i64_base_ext(f, v, nth, 0);
 }
 
 /*
@@ -568,12 +585,46 @@ emit_setccr(FILE *f, MInsM *in)
 	MCC cc = in->cc;
 
 	if (a && b && (a->type == MT_I64 || b->type == MT_I64)) {
-		/* i64 comparison: compare high 32 bits first; if equal, compare
-		 * low 32 bits with unsigned comparison.  Use a global counter
-		 * for unique labels across the whole assembly file. */
+		/* Mixed-width comparison: one operand is MT_I64, the other is
+		 * narrower (e.g. i32).  For EQ/NE the comparison can be done in
+		 * 32 bits (sufficient for equality).  For ordered comparisons,
+		 * the narrower operand must be widened with the correct signedness:
+		 * signed CC (GE/LT/GT/LE) → sign-extend; unsigned CC (CS/CC/HI/LS)
+		 * → zero-extend; otherwise a register-resident 32-bit value like
+		 * 0xFFFFFFFF from an unsigned fp->int conversion would be cdq'd to
+		 * 0xFFFFFFFFFFFFFFFF, mismatching the constant's 0x00000000FFFFFFFF
+		 * (i386-double-uint64-cmp). */
+		if ((a->type != MT_I64 || b->type != MT_I64) &&
+		    (cc == MCC_EQ || cc == MCC_NE)) {
+			/* 32-bit compare suffices */
+			mv_to_scratch(f, a, "eax");
+			mv_to_scratch(f, b, "ecx");
+			fputs("\tcmpl\t%ecx, %eax\n", f);
+			fprintf(f, "\tset%s\t%%al\n", i386_cc_suffix(cc));
+			fputs("\tmovzbl\t%al, %eax\n", f);
+			scratch_to_dst(f, in->dst, "eax");
+			return;
+		}
+		/* Full i64 comparison: compare high 32 bits first; if equal,
+		 * compare low 32 bits.  Use a global counter for unique labels
+		 * across the whole assembly file. */
 		static uint32_t g_i64cc_id;
-		int sa = i64_base(f, a, 0);
-		int sb = i64_base(f, b, 1);
+		int sa, sb;
+		if (a->type != MT_I64 && b->type == MT_I64) {
+			/* a is narrower: widen based on CC signedness */
+			bool usign = (cc == MCC_CS || cc == MCC_CC ||
+			              cc == MCC_HI || cc == MCC_LS);
+			sa = i64_base_ext(f, a, 0, usign ? 1 : 0);
+			sb = i64_base(f, b, 1);
+		} else if (a->type == MT_I64 && b->type != MT_I64) {
+			bool usign = (cc == MCC_CS || cc == MCC_CC ||
+			              cc == MCC_HI || cc == MCC_LS);
+			sa = i64_base(f, a, 0);
+			sb = i64_base_ext(f, b, 1, usign ? 1 : 0);
+		} else {
+			sa = i64_base(f, a, 0);
+			sb = i64_base(f, b, 1);
+		}
 		uint32_t id = g_i64cc_id++;
 		const char *suffix = i386_cc_suffix(cc);
 
