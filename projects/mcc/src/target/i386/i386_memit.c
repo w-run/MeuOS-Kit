@@ -1472,8 +1472,9 @@ emit_ins(FILE *f, MInsM *in)
 				fputs("\tfadds\t(%esp)\n", f);
 				fputs("\taddl\t$4, %esp\n", f);
 			} else {
-				fputs("\tpushl\t$0x00000000\n", f);
+				/* 2^64 = 0x43f00000_00000000; push HIGH dword first */
 				fputs("\tpushl\t$0x43f00000\n", f);
+				fputs("\tpushl\t$0x00000000\n", f);
 				fputs("\tfaddl\t(%esp)\n", f);
 				fputs("\taddl\t$8, %esp\n", f);
 			}
@@ -1502,8 +1503,9 @@ emit_ins(FILE *f, MInsM *in)
 			fputs("\tfadds\t(%esp)\n", f);
 			fputs("\taddl\t$4, %esp\n", f);
 		} else {
-			fputs("\tpushl\t$0x00000000\n", f);
+			/* 2^32 = 0x41f00000_00000000; push HIGH dword first */
 			fputs("\tpushl\t$0x41f00000\n", f);
+			fputs("\tpushl\t$0x00000000\n", f);
 			fputs("\tfaddl\t(%esp)\n", f);
 			fputs("\taddl\t$8, %esp\n", f);
 		}
