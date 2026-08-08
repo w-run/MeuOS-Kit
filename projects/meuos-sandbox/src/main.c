@@ -1,10 +1,13 @@
 #include "mbox/conf.h"
 #include "mbox/ns.h"
+#include "mbox/pty.h"
+#include "mbox/mcp.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <signal.h>
 
 static void usage(const char *prog) {
     fprintf(stderr,
@@ -26,7 +29,8 @@ static void usage(const char *prog) {
         "  --usb              Passthrough USB devices into sandbox\n"
         "\n"
         "Interface options:\n"
-        "  --mcp              Start MCP server on Unix socket (future)\n"
+        "  --mcp              Start MCP server (stdio JSON-RPC lines)\n"
+        "  --mcp-socket=PATH  Start MCP server on Unix socket\n"
         "  --webpty=PORT      Start WebPTY on HTTP port (future)\n"
         "\n"
         "Other options:\n"
@@ -38,8 +42,23 @@ static void usage(const char *prog) {
         , prog);
 }
 
+/* ── Global: PTY muxer and MCP context ─────────────────────────────────── */
+static pty_muxer_t  g_pty;
+static mcp_ctx_t    g_mcp;
+static int          g_mcp_mode    = 0;  /* 0=off, 1=stdio, 2=unix */
+static char         g_mcp_socket[256];
+
+/* Signal handler to clean up PTY on exit */
+static void cleanup(int sig) {
+    (void)sig;
+    pty_close(&g_pty);
+    if (g_mcp_mode == 2 && g_mcp_socket[0])
+        unlink(g_mcp_socket);
+    _exit(128 + sig);
+}
+
 int main(int argc, char *argv[], char *envp[]) {
-    /* Early help check — work without rootfs */
+    /* Early help check */
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             usage(argv[0]);
@@ -50,7 +69,7 @@ int main(int argc, char *argv[], char *envp[]) {
     /* ── defaults ─────────────────────────────────────────────────── */
     mbox_config cfg;
     conf_init(&cfg);
-    strcpy(cfg.arch, "native");     /* default: match host */
+    strcpy(cfg.arch, "native");
     strcpy(cfg.net, "none");
 
     char *cdrom = NULL;
@@ -63,7 +82,6 @@ int main(int argc, char *argv[], char *envp[]) {
     int flag_help = 0;
 
     /* ── arg parsing ──────────────────────────────────────────────── */
-    /* First pass: find rootfs-dir (positional, does not start with --) */
     int rootfs_idx = -1;
     for (int i = 1; i < argc; i++) {
         if (argv[i][0] == '-') continue;
@@ -77,7 +95,6 @@ int main(int argc, char *argv[], char *envp[]) {
     }
     rootfs = argv[rootfs_idx];
 
-    /* Parse options before rootfs */
     for (int i = 1; i < rootfs_idx; i++) {
         const char *a = argv[i];
 
@@ -89,7 +106,11 @@ int main(int argc, char *argv[], char *envp[]) {
         else if (strcmp(a, "--arm") == 0)         strcpy(cfg.arch, "arm");
 
         else if (strncmp(a, "--net=", 6) == 0)    strncpy(cfg.net, a + 6, sizeof(cfg.net) - 1);
-        else if (strcmp(a, "--mcp") == 0)          cfg.mcp_port = 1;
+        else if (strcmp(a, "--mcp") == 0)          g_mcp_mode = 1;
+        else if (strncmp(a, "--mcp-socket=", 11) == 0) {
+            g_mcp_mode = 2;
+            strncpy(g_mcp_socket, a + 11, sizeof(g_mcp_socket) - 1);
+        }
         else if (strncmp(a, "--webpty=", 8) == 0)  cfg.webpty_port = atoi(a + 8);
 
         else if (strncmp(a, "--share-dir=", 11) == 0) {
@@ -106,27 +127,17 @@ int main(int argc, char *argv[], char *envp[]) {
                 }
             }
         }
-        else if (strncmp(a, "--cdrom=", 7) == 0) {
-            cdrom = (char *)(a + 7);
-        }
-        else if (strcmp(a, "--usb") == 0) {
-            usb = 1;
-        }
-        else if (strcmp(a, "--help") == 0 || strcmp(a, "-h") == 0) {
-            flag_help = 1;
-        }
+        else if (strncmp(a, "--cdrom=", 7) == 0)  cdrom = (char *)(a + 7);
+        else if (strcmp(a, "--usb") == 0)          usb = 1;
+        else if (strcmp(a, "--help") == 0 || strcmp(a, "-h") == 0) flag_help = 1;
         else {
             fprintf(stderr, "mbox: unknown option: %s\n", a);
             return 1;
         }
     }
 
-    if (flag_help) {
-        usage(argv[0]);
-        return 0;
-    }
+    if (flag_help) { usage(argv[0]); return 0; }
 
-    /* Collect command args (positional after rootfs) */
     for (int i = rootfs_idx + 1; i < argc && user_argc < 255; i++)
         user_argv[user_argc++] = argv[i];
     user_argv[user_argc] = NULL;
@@ -148,8 +159,8 @@ int main(int argc, char *argv[], char *envp[]) {
             snprintf(cfg.arch, sizeof(cfg.arch), "%s", file_cfg.arch);
         if (cfg.timeout < 0 && file_cfg.timeout >= 0)
             cfg.timeout = file_cfg.timeout;
-        if (cfg.mcp_port == 0 && file_cfg.mcp_port > 0)
-            cfg.mcp_port = file_cfg.mcp_port;
+        if (g_mcp_mode == 0 && file_cfg.mcp_port > 0)
+            g_mcp_mode = 1;
         if (cfg.webpty_port == 0 && file_cfg.webpty_port > 0)
             cfg.webpty_port = file_cfg.webpty_port;
         for (int i = 0; i < file_cfg.env_count && cfg.env_count < MBOX_MAX_ENV; i++) {
@@ -157,7 +168,6 @@ int main(int argc, char *argv[], char *envp[]) {
             strncpy(cfg.env_vals[cfg.env_count], file_cfg.env_vals[i], MBOX_ENV_VAL_LEN - 1);
             cfg.env_count++;
         }
-        (void)cfg.webpty_readonly;
     }
 
     /* ── resolve architecture ─────────────────────────────────────── */
@@ -176,12 +186,10 @@ int main(int argc, char *argv[], char *envp[]) {
     const char *qemu_path = cross ? qemu_find(arch) : NULL;
 
     if (cross && !qemu_path) {
-        fprintf(stderr, "mbox: QEMU user-mode binary for %s not found\n",
-                arch_to_name(arch));
+        fprintf(stderr, "mbox: QEMU for %s not found\n", arch_to_name(arch));
         return 1;
     }
 
-    /* ── build share array ────────────────────────────────────────── */
     mbox_share_t shares[MBOX_MAX_SHARE];
     int nshares = 0;
     for (int i = 0; i < cfg.share_count && i < MBOX_MAX_SHARE; i++) {
@@ -192,7 +200,42 @@ int main(int argc, char *argv[], char *envp[]) {
         nshares++;
     }
 
-    /* ── execute ──────────────────────────────────────────────────── */
+    /* ── If MCP mode, start PTY + MCP instead of normal exec ──────── */
+    if (g_mcp_mode) {
+        /* Install cleanup handler */
+        signal(SIGINT,  cleanup);
+        signal(SIGTERM, cleanup);
+        signal(SIGHUP,  cleanup);
+
+        /* Initialize PTY muxer */
+        pty_init(&g_pty);
+
+        /* Prepend rootfs path to the command for PTY (not chrooted) */
+        char mcp_path[1024];
+        snprintf(mcp_path, sizeof(mcp_path), "%s%s", rootfs, user_argv[0]);
+        user_argv[0] = mcp_path;
+
+        /* Open PTY with the user command */
+        if (pty_open(&g_pty, user_argv, envp) < 0) {
+            fprintf(stderr, "mbox: PTY open failed\n");
+            return 1;
+        }
+
+        /* Initialize MCP context */
+        mcp_init(&g_mcp, &g_pty, rootfs);
+
+        /* Run MCP server */
+        if (g_mcp_mode == 2) {
+            /* Unix socket mode */
+            setenv("MBOX_SOCKET", g_mcp_socket, 1);
+            return mcp_run_unix(&g_mcp, g_mcp_socket);
+        } else {
+            /* stdio mode */
+            return mcp_run_stdio(&g_mcp);
+        }
+    }
+
+    /* ── normal execution ──────────────────────────────────────────── */
     return ns_enter_and_exec(rootfs, arch, cross ? 1 : 0, qemu_path,
                              shares, nshares,
                              cdrom, usb, cfg.net,
