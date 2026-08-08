@@ -28,6 +28,7 @@ static MFnM *g_fm;
 static int g_alloca_cur;
 static const char *g_fname;
 static int g_slot_base;    /* -(pushbytes): push area above slots */
+static int g_callee_save_after;  /* bytes pushed below ebp for callee-saved regs */
 
 /* ---- width helpers ------------------------------------------------------ */
 
@@ -1738,10 +1739,27 @@ emit_block(FILE *f, MBlkM *b)
 		} else if (t.src[0]) {
 			mv_to_scratch(f, t.src[0], "eax");
 		}
-		/* epilogue: restore frame and pop */
+		/* epilogue: restore frame and pop callee-saved regs */
 		fputs("\tmovl\t%ebp, %esp\n", f);
-		if (g_pic)
-			fputs("\tpopl\t%ebx\n", f);
+		/* Skip to the callee-saved area (below saved-ebp). */
+		if (g_callee_save_after)
+			fprintf(f, "\tsubl\t$%d, %%esp\n", g_callee_save_after);
+		/* Pop callee-saved registers in reverse push order.
+		 * Used rclob regs (excluding PIC ebx) then PIC ebx. */
+		{
+			int used[4], nused = 0;
+			for (int i = 0; g_fm->mt->rclob && g_fm->mt->rclob[i] >= 0; i++) {
+				int r = g_fm->mt->rclob[i];
+				if (r == I386MREG_EBX && g_pic)
+					continue;
+				if ((g_fm->regsused >> r) & 1)
+					used[nused++] = r;
+			}
+			if (g_pic)
+				used[nused++] = I386MREG_EBX;
+			for (int i = nused - 1; i >= 0; i--)
+				fprintf(f, "\tpopl\t%%%s\n", mreg_name(g_fm->mt, used[i]));
+		}
 		fputs("\tpopl\t%ebp\n", f);
 		fputs("\tret\n", f);
 		break;
@@ -1759,11 +1777,26 @@ mfnm_emit_i386(MFnM *fm, FILE *f)
 	g_fname = fm->name ? fm->name : "?";
 
 	/* frame: push ebp (4 bytes) above the slot area; PIC additionally
-	 * pushes the callee-saved EBX (GOT base) before setting ebp. */
+	 * pushes the callee-saved EBX (GOT base) before setting ebp.
+	 * Callee-saved registers used by the regalloc (fm->regsused)
+	 * are pushed AFTER mov %esp, %ebp so they sit at [ebp-4],
+	 * [ebp-8], ... below the frame pointer.  pushbytes includes
+	 * saved ebp + PIC ebx + all callee-saves; g_slot_base =
+	 * -pushbytes so all slots sit below the callee-save area. */
 	int pushbytes = 4;
+	int callee_save_after = 0;
+	for (int i = 0; fm->mt->rclob && fm->mt->rclob[i] >= 0; i++) {
+		int r = fm->mt->rclob[i];
+		if (r == I386MREG_EBX && g_pic)
+			continue;
+		if ((fm->regsused >> r) & 1)
+			callee_save_after += 4;
+	}
 	if (g_pic)
-		pushbytes += 4;
+		callee_save_after += 4;
+	pushbytes += callee_save_after;
 	g_slot_base = -pushbytes;
+	g_callee_save_after = callee_save_after;
 
 	fm->dynalloc = false;
 	for (MBlkM *b = fm->link; !fm->dynalloc && b; b = b->link)
@@ -1797,9 +1830,19 @@ mfnm_emit_i386(MFnM *fm, FILE *f)
 		fprintf(f, "%s:\n", fm->name);
 	}
 	fprintf(f, "\tpushl\t%%ebp\n");
+	fprintf(f, "\tmovl\t%%esp, %%ebp\n");
+	/* Callee-saved registers (EBX/ESI/EDI) used by the regalloc
+	 * are pushed below ebp.  They will be restored in reverse
+	 * order in the epilogue. */
 	if (g_pic)
 		fprintf(f, "\tpushl\t%%ebx\n");
-	fprintf(f, "\tmovl\t%%esp, %%ebp\n");
+	for (int i = 0; fm->mt->rclob && fm->mt->rclob[i] >= 0; i++) {
+		int r = fm->mt->rclob[i];
+		if (r == I386MREG_EBX && g_pic)
+			continue;
+		if ((fm->regsused >> r) & 1)
+			fprintf(f, "\tpushl\t%%%s\n", mreg_name(fm->mt, r));
+	}
 	if (framesize > pushbytes)
 		fprintf(f, "\tsubl\t$%d, %%esp\n", framesize - pushbytes);
 
