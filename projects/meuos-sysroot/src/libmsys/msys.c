@@ -26,6 +26,27 @@ typedef struct {
 #define Z_STREAM_END    1
 #define Z_FINISH 4
 
+/* ---- meuos-compress (libmz.a) native codec ---- */
+
+/* Optional native dependency: consumers that link libmz.a register their
+ * mz_decompress_meuos via msys_set_mz_codec().  libmsys itself stays
+ * self-contained (no link-time dependency on the compress engine), so
+ * mcc/mt-ld keep linking fine.  Consumers that do not register the codec
+ * degrade MSYS_F_MZ archives to "cannot decompress" (msys_load/msys_fopen
+ * return NULL). */
+static int (*g_mz_decompress)(const void *in, size_t il, void **r, size_t *rl) = NULL;
+
+void
+msys_set_mz_codec(int (*fn)(const void *in, size_t il, void **r, size_t *rl))
+{
+	g_mz_decompress = fn;
+}
+
+static int msys_flags_compressed(uint32_t flags)
+{
+	return (flags & (MSYS_F_ZLIB | MSYS_F_ZSTD | MSYS_F_MZ)) != 0;
+}
+
 /* ---- helpers for uint48 (6-byte LE) ---- */
 
 static uint64_t read48(const uint8_t *buf)
@@ -1039,6 +1060,21 @@ decompress_zstd(struct msys *m, const void *compressed, size_t csize, size_t *ou
 	return decomp;
 }
 
+/* Decompress meuos-compress data (native libmz.a, registered codec). */
+static void *
+decompress_mz(const void *data, size_t dsize, size_t *out_size)
+{
+	if (!g_mz_decompress)
+		return NULL; /* codec not registered — cannot handle MSYS_F_MZ */
+
+	void *out = NULL;
+	size_t olen = 0;
+	int rc = g_mz_decompress(data, dsize, &out, &olen);
+	if (rc <= 0) return NULL;
+	*out_size = olen;
+	return out;
+}
+
 /* Dispatch to the appropriate decompressor based on flags. */
 static void *
 decompress(struct msys *m, const void *data, size_t dsize, size_t *out_size)
@@ -1047,6 +1083,8 @@ decompress(struct msys *m, const void *data, size_t dsize, size_t *out_size)
 		return decompress_zlib(m, data, dsize, out_size);
 	if (m->hdr->flags & MSYS_F_ZSTD)
 		return decompress_zstd(m, data, dsize, out_size);
+	if (m->hdr->flags & MSYS_F_MZ)
+		return decompress_mz(data, dsize, out_size);
 	return NULL;
 }
 
@@ -1061,16 +1099,54 @@ register_chunk(struct msys *m, void *decomp)
 	return 0;
 }
 
+/* v2: return the uncompressed_size recorded in the index entry for `name`. */
+static uint32_t
+msys_entry_usz_v2(struct msys *m, const char *name)
+{
+	uint32_t target = msys_fnv1a((const unsigned char *)name, strlen(name));
+	uint32_t lo = 0, hi = msys_index_count(m);
+	while (lo < hi) {
+		uint32_t mid = lo + (hi - lo) / 2;
+		unsigned char *e = m->entries[mid];
+		uint32_t eh = read32(e);
+		if (eh < target) { lo = mid + 1; continue; }
+		if (eh > target) { hi = mid; continue; }
+		uint32_t scan = mid;
+		while (scan > lo) {
+			if (read32(m->entries[scan - 1]) != target) break;
+			scan--;
+		}
+		while (scan < msys_index_count(m)) {
+			unsigned char *p = m->entries[scan];
+			if (read32(p) != target) break;
+			size_t nl = entry_nlen(p, 1);
+			if (nl == strlen(name) &&
+			    memcmp(entry_name(p, 1), name, nl) == 0)
+				return read32(p + 14);
+			scan++;
+		}
+		break;
+	}
+	return 0;
+}
+
 FILE *msys_fopen(struct msys *m, const char *path, const char *mode)
 {
 	size_t dsize;
 	const void *data;
+	uint32_t v2_usz = 0;
 
 	if (!m || !path) { errno = EINVAL; return NULL; }
 	data = msys_search(m, path, &dsize);
 	if (!data) return NULL;
 
-	if (m->hdr->flags & (MSYS_F_ZLIB | MSYS_F_ZSTD)) {
+	if (m->format_version == MSYS_FORMAT_V2)
+		v2_usz = msys_entry_usz_v2(m, path);
+
+	/* Decompress only actually-compressed entries (v2: stored size !=
+	 * uncompressed size; raw-stored entries are returned as-is). */
+	if (msys_flags_compressed(m->hdr->flags) &&
+	    (m->format_version != MSYS_FORMAT_V2 || (v2_usz != 0 && dsize != v2_usz))) {
 		size_t usize;
 		void *decomp = decompress(m, data, dsize, &usize);
 		if (!decomp) return NULL;
@@ -1101,6 +1177,7 @@ msys_load_depth(struct msys *m, const char *path, void **buf, size_t *size,
 {
 	size_t dsize;
 	const void *data;
+	uint32_t v2_usz = 0;
 
 	if (!m || !path || !buf) { errno = EINVAL; return -1; }
 	data = msys_search(m, path, &dsize);
@@ -1128,6 +1205,10 @@ msys_load_depth(struct msys *m, const char *path, void **buf, size_t *size,
 				size_t nl = entry_nlen(p, 1);
 				if (nl == strlen(path) &&
 				    memcmp(entry_name(p, 1), path, nl) == 0) {
+					/* v2 entry: uncompressed_size at p+14.  If the stored
+					 * size equals it, the data was kept raw (compression
+					 * had no benefit) and must NOT be decompressed. */
+					v2_usz = read32(p + 14);
 					uint16_t ft = (uint16_t)p[18] | ((uint16_t)p[19] << 8);
 					if (ft == MSYS_FILE_SYMLINK) {
 						/* Read link target and follow it */
@@ -1146,7 +1227,11 @@ msys_load_depth(struct msys *m, const char *path, void **buf, size_t *size,
 	}
 
 load_data:
-	if (m->hdr->flags & (MSYS_F_ZLIB | MSYS_F_ZSTD)) {
+	/* v2: decompress only entries whose stored size differs from the
+	 * uncompressed size (i.e. actually compressed).  Raw-stored entries
+	 * are returned as-is — feeding raw bytes to a decompressor fails. */
+	if (msys_flags_compressed(m->hdr->flags) &&
+	    (m->format_version != MSYS_FORMAT_V2 || (v2_usz != 0 && dsize != v2_usz))) {
 		if (dsize == 0) {
 			/* Empty file — return empty allocation */
 			*buf = malloc(1);

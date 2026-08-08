@@ -631,6 +631,11 @@ static int cmd_info(struct archive *a);
 int main(int argc, char *argv[]) {
 	if (argc < 2) usage();
 
+	/* Register the meuos-compress codec (libmz.a) so MSYS_F_MZ archives
+	 * can be decompressed.  The symbol is provided by the linked libmz.a. */
+	extern int mz_decompress_meuos(const void *in, size_t il, void **r, size_t *rl);
+	msys_set_mz_codec(mz_decompress_meuos);
+
 	/* --help [cmd]: print detailed help for one command or all */
 	if (strcmp(argv[1], "--help") == 0) {
 		cmd_usage(argc > 2 ? argv[2] : NULL);

@@ -22,6 +22,7 @@ extern "C" {
 #define MSYS_F_NONE      0x00    /* no compression */
 #define MSYS_F_ZLIB      0x01    /* zlib deflate (data blocks) */
 #define MSYS_F_ZSTD      0x02    /* zstd compression */
+#define MSYS_F_MZ        0x08    /* meuos-compress (libmz.a) codec */
 #define MSYS_F_INCREMENTAL 0x04  /* incremental mode */
 #define MSYS_F_DEDUP     0x0100  /* v2: content dedup */
 #define MSYS_F_SIGNED    0x0200  /* v2: has signature extension */
@@ -118,6 +119,11 @@ struct msys {
 	unsigned char **entries; /* private: per-entry pointers (variable len) */
 	struct msys_chunk *chunks; /* private: allocated buffers (freed on close) */
 };
+
+/* Register the meuos-compress (libmz.a) decompressor for MSYS_F_MZ data.
+ * Optional: consumers that link libmz.a call this to enable mz-decompressed
+ * archives; libmsys itself has no link-time dependency on the codec. */
+void msys_set_mz_codec(int (*fn)(const void *in, size_t il, void **r, size_t *rl));
 
 /* Get a human-readable error description for the last libmsys error.
  * This returns a thread-local string describing what went wrong, useful

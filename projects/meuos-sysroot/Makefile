@@ -21,6 +21,11 @@ MKMSYS_SRCS := src/mkmsys/main.c
 MKMSYS_OBJS := $(patsubst src/%.c,$(OBJDIR)/%.o,$(MKMSYS_SRCS))
 MKMSYS_BIN  := $(BUILD)/mkmsys
 
+# meuos-compress engine — native codec for MSYS_F_MZ
+MZ_DIR := ../meuos-compress
+MZ_INC := -I$(MZ_DIR)/include
+MZ_LIB := $(MZ_DIR)/build/libmz.a
+
 TEST_SRCS := test/msys_test.c
 TEST_BIN  := $(BUILD)/test-msys
 
@@ -28,9 +33,12 @@ MSYSCTL_SRCS := src/msysctl/main.c
 MSYSCTL_OBJS := $(patsubst src/%.c,$(OBJDIR)/%.o,$(MSYSCTL_SRCS))
 MSYSCTL_BIN  := $(BUILD)/msysctl
 
-.PHONY: all check clean msys msys-compressed check-msys
+.PHONY: all check clean msys msys-compressed msys-mz check-msys
 
 all: $(MSYS_LIB) $(MKMSYS_BIN) $(MSYSCTL_BIN)
+
+$(MZ_LIB):
+	$(MAKE) -C $(MZ_DIR) build/libmz.a
 
 # libmsys.a — shared .msys reader (consumed by mcc, mt/ld)
 $(MSYS_LIB): $(MSYS_OBJS)
@@ -48,28 +56,28 @@ $(MSYS_SO): $(MSYS_OBJS)
 
 so: $(MSYS_SO)
 
-# mkmsys — .msys packer (standalone binary)
-$(MKMSYS_BIN): $(MKMSYS_OBJS) $(MSYS_LIB)
+# mkmsys — .msys packer (standalone binary; links libmz.a for MSYS_F_MZ)
+$(MKMSYS_BIN): $(MKMSYS_OBJS) $(MSYS_LIB) $(MZ_LIB)
 	@mkdir -p $(dir $@)
-	$(HOST_CC) $(CFLAGS) -o $@ $(MKMSYS_OBJS) $(MSYS_LIB) -ldl -lpthread
+	$(HOST_CC) $(CFLAGS) -o $@ $(MKMSYS_OBJS) $(MSYS_LIB) $(MZ_LIB) -ldl -lpthread
 
 $(OBJDIR)/mkmsys/main.o: src/mkmsys/main.c include/mt/msys.h
 	@mkdir -p $(dir $@)
-	$(HOST_CC) $(CFLAGS) -Iinclude -Isrc/libmsys -c -o $@ $<
+	$(HOST_CC) $(CFLAGS) $(MZ_INC) -Iinclude -Isrc/libmsys -c -o $@ $<
 
-# msysctl — unified CLI for .msys archives
-$(MSYSCTL_BIN): $(MSYSCTL_OBJS) $(MSYS_LIB)
+# msysctl — unified CLI for .msys archives (links libmz.a for MSYS_F_MZ reads)
+$(MSYSCTL_BIN): $(MSYSCTL_OBJS) $(MSYS_LIB) $(MZ_LIB)
 	@mkdir -p $(dir $@)
-	$(HOST_CC) $(CFLAGS) -o $@ $(MSYSCTL_OBJS) $(MSYS_LIB)
+	$(HOST_CC) $(CFLAGS) -o $@ $(MSYSCTL_OBJS) $(MSYS_LIB) $(MZ_LIB) -ldl
 
 $(OBJDIR)/msysctl/main.o: src/msysctl/main.c include/mt/msys.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(CFLAGS) -Wno-format-truncation -Iinclude -c -o $@ $<
 
 # test
-$(TEST_BIN): $(TEST_SRCS) $(MSYS_LIB)
+$(TEST_BIN): $(TEST_SRCS) $(MSYS_LIB) $(MZ_LIB)
 	@mkdir -p $(dir $@)
-	$(HOST_CC) $(CFLAGS) -Iinclude -o $@ $< $(MSYS_LIB)
+	$(HOST_CC) $(CFLAGS) -Iinclude -o $@ $< $(MSYS_LIB) $(MZ_LIB) -ldl
 
 check: $(MKMSYS_BIN) $(TEST_BIN)
 	@# 1) Build a .msys from a real sysroot (if available)
@@ -108,6 +116,15 @@ msys-compressed: $(MKMSYS_BIN)
 	[ "$$arch" = "sysroot" ] && arch=x86_64; \
 	echo "Packing $(MSYS_SYSROOT) -> $(MSYS_OUTPUT) (v2, zlib, arch=$$arch)"; \
 	$(MKMSYS_BIN) --format v2 --dedup --compress=zlib --arch "$$arch" -o "$(MSYS_OUTPUT)" "$(MSYS_SYSROOT)"
+
+# msys-mz — Build .msys compressed with the native meuos-compress engine
+msys-mz: $(MKMSYS_BIN)
+	@if [ -z "$(MSYS_SYSROOT)" ]; then \
+		echo "MEUOS_SYSROOT not set — use MSYS_SYSROOT=<dir>"; exit 1; fi
+	@arch=$$(basename "$(MSYS_SYSROOT)" | sed 's/sysroot-//; s/\.msys//'); \
+	[ "$$arch" = "sysroot" ] && arch=x86_64; \
+	echo "Packing $(MSYS_SYSROOT) -> $(MSYS_OUTPUT) (v2, mz, arch=$$arch)"; \
+	$(MKMSYS_BIN) --format v2 --dedup --compress=mz --arch "$$arch" -o "$(MSYS_OUTPUT)" "$(MSYS_SYSROOT)"
 
 # check-msys — Validate .msys is readable (detect existing .msys files)
 check-msys: $(MKMSYS_BIN)

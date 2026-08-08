@@ -14,13 +14,14 @@
  *   --list           List contents of an existing .msys file
  *   --extract        Extract contents of .msys to a directory
  *   --arch <name>    Write @meuos_arch metadata entry
- *   --compress=<t>   Compress data blocks: zlib, zstd (experimental)
+ *   --compress=<t>   Compress data blocks: zlib, zstd, mz
  *   --incremental    Incremental mode: only repack changed files
  *   --help           Show this help message
  *
  * Compression modes:
  *   zlib   - DEFLATE compression via libz (loaded via dlopen)
  *   zstd   - Zstandard compression via libzstd (loaded via dlopen)
+ *   mz     - meuos-compress engine (native libmz.a, adaptive level)
  *
  * Incremental mode:
  *   Reads existing .msys index, compares file mtime, and only repacks
@@ -31,6 +32,7 @@
 #include "mt/msys.h"
 #include "sha256.h"
 #include "ed25519.h"
+#include "mz.h"
 
 #include <dirent.h>
 #include <dlfcn.h>
@@ -285,6 +287,7 @@ static void collector_free(struct collector *c)
 struct compress_funcs {
 	int is_zlib;
 	int is_zstd;
+	int is_mz;
 	unsigned long (*zlib_compressBound)(unsigned long);
 	int (*zlib_deflateInit)(void *, int, const char *, int);
 	int (*zlib_deflate)(void *, int);
@@ -339,6 +342,20 @@ static void *compress_chunk(void *arg)
 				cw->comp_sizes[i] = e->data_size;
 			} else {
 				cw->compressed[i] = out;
+				cw->comp_sizes[i] = csize;
+			}
+		} else if (cw->cf->is_mz) {
+			/* meuos-compress: adaptive level 0 (auto-select) */
+			void *out = NULL;
+			size_t csize = 0;
+			int rc = mz_compress_meuos(e->data, e->data_size, &out, &csize, 0);
+			if (rc <= 0 || !out) { g_parallel_failed = 1; return NULL; }
+			if (csize >= e->data_size) {
+				free(out);
+				cw->compressed[i] = NULL;
+				cw->comp_sizes[i] = e->data_size;
+			} else {
+				cw->compressed[i] = (unsigned char *)out;
 				cw->comp_sizes[i] = csize;
 			}
 		} else {
@@ -502,11 +519,12 @@ static void write_msys(const char *output, struct collector *c, uint32_t flags)
 	/* Phase 1: compute data sizes (compress each block, parallel) */
 	unsigned char **compressed = NULL;
 	size_t *comp_sizes = NULL;
-	if ((flags & (MSYS_F_ZLIB | MSYS_F_ZSTD))) {
+	if ((flags & (MSYS_F_ZLIB | MSYS_F_ZSTD | MSYS_F_MZ))) {
 		struct compress_funcs cf;
 		memset(&cf, 0, sizeof(cf));
 		cf.is_zlib = (flags & MSYS_F_ZLIB) ? 1 : 0;
 		cf.is_zstd = (flags & MSYS_F_ZSTD) ? 1 : 0;
+		cf.is_mz   = (flags & MSYS_F_MZ) ? 1 : 0;
 		cf.zlib_compressBound = zlib_compressBound;
 		cf.zlib_deflateInit = zlib_deflateInit;
 		cf.zlib_deflate = zlib_deflate;
@@ -528,7 +546,7 @@ static void write_msys(const char *output, struct collector *c, uint32_t flags)
 	for (size_t i = 0; i < c->count; i++) {
 		cur = align4(cur);
 		data_offsets[i] = cur;
-		cur += (flags & (MSYS_F_ZLIB | MSYS_F_ZSTD) && compressed[i])
+		cur += (flags & (MSYS_F_ZLIB | MSYS_F_ZSTD | MSYS_F_MZ) && compressed[i])
 			? comp_sizes[i] : c->entries[i].data_size;
 	}
 	uint64_t index_offset = align4(cur);
@@ -550,7 +568,7 @@ static void write_msys(const char *output, struct collector *c, uint32_t flags)
 			fputc(0, fp); pos++;
 		}
 		if (e->data_size == 0) continue;
-		if (flags & (MSYS_F_ZLIB | MSYS_F_ZSTD) && compressed[i]) {
+		if (flags & (MSYS_F_ZLIB | MSYS_F_ZSTD | MSYS_F_MZ) && compressed[i]) {
 			fwrite(compressed[i], 1, comp_sizes[i], fp);
 		} else {
 			fwrite(e->data, 1, e->data_size, fp);
@@ -566,7 +584,7 @@ static void write_msys(const char *output, struct collector *c, uint32_t flags)
 	/* Phase 5: write index entries (sorted by hash, already sorted) */
 	for (size_t i = 0; i < c->count; i++) {
 		struct entry *e = &c->entries[i];
-		uint64_t dsize = (flags & (MSYS_F_ZLIB | MSYS_F_ZSTD) && compressed[i])
+		uint64_t dsize = (flags & (MSYS_F_ZLIB | MSYS_F_ZSTD | MSYS_F_MZ) && compressed[i])
 			? comp_sizes[i] : e->data_size;
 		uint8_t buf[16];
 		wr32(buf,     e->hash);
@@ -771,14 +789,18 @@ static int extract_msys(const char *msys_path, const char *outdir)
 
 		if (dsize > 0) {
 			void *buf = NULL;
-			if (msys_load(m, name, &buf, NULL) < 0) {
+			size_t out_sz = 0;
+			/* msys_enumerate returns a non-NUL-terminated name; pass the
+			 * NUL-terminated copy already built into `path`.  out_sz
+			 * receives the *decompressed* size (dsize is the stored size). */
+			if (msys_load(m, path + odlen + 1, &buf, &out_sz) < 0) {
 				fprintf(stderr, "extract: failed to load '%.*s'\n", (int)nlen, name);
 				free(path);
 				continue;
 			}
 			FILE *fp = fopen(path, "wb");
 			if (!fp) { perror(path); free(buf); free(path); continue; }
-			fwrite(buf, 1, dsize, fp);
+			fwrite(buf, 1, out_sz, fp);
 			fclose(fp);
 			free(buf);
 		} else {
@@ -890,13 +912,15 @@ static void write_msys_v2(const char *output, struct collector *c, uint32_t flag
 	/* Phase 1: compute data sizes (compress each block, parallel) */
 	int is_zlib = (flags & MSYS_F_ZLIB);
 	int is_zstd = (flags & MSYS_F_ZSTD);
+	int is_mz   = (flags & MSYS_F_MZ);
 	unsigned char **compressed = NULL;
 	size_t *comp_sizes = NULL;
-	if (is_zlib || is_zstd) {
+	if (is_zlib || is_zstd || is_mz) {
 		struct compress_funcs cf;
 		memset(&cf, 0, sizeof(cf));
 		cf.is_zlib = is_zlib;
 		cf.is_zstd = is_zstd;
+		cf.is_mz   = is_mz;
 		cf.zlib_compressBound = zlib_compressBound;
 		cf.zlib_deflateInit = zlib_deflateInit;
 		cf.zlib_deflate = zlib_deflate;
@@ -1016,14 +1040,17 @@ static void write_msys_v2(const char *output, struct collector *c, uint32_t flag
 		size_t stream_oh = 0;
 		if (streaming && !(dedup && dedup_map[i] >= 0))
 			stream_oh = 6 + e->name_len;
-		/* If this entry is a dedup of an earlier one, use that offset */
+		/* If this entry is a dedup of an earlier one, use that offset;
+		 * its data is not written again, so it must not consume `cur`.
+		 * (Accumulating it here over-advances every later offset and
+		 * makes the index claim data past the end of the file.) */
 		if (dedup && dedup_map[i] >= 0) {
 			data_offsets[i] = data_offsets[(size_t)dedup_map[i]];
 		} else {
 			data_offsets[i] = cur + stream_oh;
+			cur += stream_oh + ((is_zlib || is_zstd || is_mz) && compressed[i]
+				? comp_sizes[i] : e->data_size);
 		}
-		cur += stream_oh + ((is_zlib || is_zstd) && compressed[i]
-			? comp_sizes[i] : e->data_size);
 	}
 	uint64_t dir_offset_ftell; /* computed after writing data, from actual file pos */
 	uint64_t index_offset;     /* computed after writing data, from actual file pos */
@@ -1055,7 +1082,7 @@ static void write_msys_v2(const char *output, struct collector *c, uint32_t flag
 		if (streaming) {
 			uint8_t ih[4];
 			uint16_t nlen16 = (uint16_t)e->name_len;
-			uint32_t dsize32 = (uint32_t)(((is_zlib || is_zstd) && compressed[i])
+			uint32_t dsize32 = (uint32_t)(((is_zlib || is_zstd || is_mz) && compressed[i])
 				? comp_sizes[i] : e->data_size);
 			wr16(ih, nlen16);
 			fwrite(ih, 1, 2, fp);
@@ -1063,7 +1090,7 @@ static void write_msys_v2(const char *output, struct collector *c, uint32_t flag
 			wr32(ih, dsize32);
 			fwrite(ih, 1, 4, fp);
 		}
-		if ((is_zlib || is_zstd) && compressed[i])
+		if ((is_zlib || is_zstd || is_mz) && compressed[i])
 			fwrite(compressed[i], 1, comp_sizes[i], fp);
 		else
 			fwrite(e->data, 1, e->data_size, fp);
@@ -1095,7 +1122,7 @@ static void write_msys_v2(const char *output, struct collector *c, uint32_t flag
 	}
 	for (size_t i = 0; i < c->count; i++) {
 		struct entry *e = &c->entries[i];
-		uint64_t dsize = ((is_zlib || is_zstd) && compressed[i])
+		uint64_t dsize = ((is_zlib || is_zstd || is_mz) && compressed[i])
 			? comp_sizes[i] : e->data_size;
 		uint8_t buf[32];
 		memset(buf, 0, 32);
@@ -1214,6 +1241,11 @@ static void add_metadata_entry(struct collector *c, const char *key,
 
 int main(int argc, char *argv[])
 {
+	/* Register the meuos-compress codec (libmz.a) so MSYS_F_MZ archives
+	 * can be both written (mz_compress_meuos) and re-read (msys_load
+	 * path via the registered mz_decompress_meuos). */
+	msys_set_mz_codec(mz_decompress_meuos);
+
 	const char *output = NULL;
 	const char *arch = NULL;
 	int list_mode = 0;
@@ -1246,7 +1278,7 @@ int main(int argc, char *argv[])
 	  "  --list-tree        List contents with directory tree structure\n"
 	  "  --extract          Extract contents of .msys to directory\n"
 	  "  --arch <name>      Write @meuos_arch metadata entry\n"
-	  "  --compress=<type>  Compress data blocks: zlib, zstd\n"
+	  "  --compress=<type>  Compress data blocks: zlib, zstd, mz\n"
 	  "  --incremental      Incremental mode: only repack changed files\n"
 	  "  --append           Append mode (incremental + v2): merge new/changed into v2 archive\n"
 	  "  --dedup            Content dedup (v2 only): SHA-256 identical data stored once\n"
@@ -1258,6 +1290,7 @@ int main(int argc, char *argv[])
 	  "Compression types:\n"
 	  "  zlib   DEFLATE compression via libz (loaded via dlopen)\n"
 	  "  zstd   Zstandard compression via libzstd (loaded via dlopen)\n"
+	  "  mz     meuos-compress engine (native libmz.a, adaptive level)\n"
 	  "\n"
 	  "Incremental mode compares file mtime against the existing .msys\n"
 	  "archive and only repacks files that have changed.\n";
@@ -1332,9 +1365,11 @@ int main(int argc, char *argv[])
 			flags |= MSYS_F_ZLIB;
 		} else if (strcmp(compress, "zstd") == 0) {
 			flags |= MSYS_F_ZSTD;
+		} else if (strcmp(compress, "mz") == 0) {
+			flags |= MSYS_F_MZ;
 		} else {
 			fprintf(stderr, "mkmsys: unknown compression type '%s'\n"
-			        "Supported: zlib, zstd\n", compress);
+			        "Supported: zlib, zstd, mz\n", compress);
 			return 1;
 		}
 	}
@@ -1353,7 +1388,7 @@ int main(int argc, char *argv[])
 
 	if (fast_mode) {
 		g_fast_mode = 1;
-		flags &= ~(MSYS_F_ZLIB | MSYS_F_ZSTD | MSYS_F_DEDUP);
+		flags &= ~(MSYS_F_ZLIB | MSYS_F_ZSTD | MSYS_F_MZ | MSYS_F_DEDUP);
 		fprintf(stderr, "mkmsys: fast mode (SHA-256 + compression + dedup skipped)\n");
 	}
 

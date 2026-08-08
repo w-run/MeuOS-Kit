@@ -395,6 +395,28 @@ static int test_compress(void)
 	msys_close(m);
 	PASS("v1 msys --compress=zlib");
 
+	/* mz (meuos-compress native codec).  v2 format: it stores per-entry
+	 * uncompressed_size so entries whose data was stored raw (compression
+	 * had no benefit) are distinguishable from actually-compressed ones;
+	 * v1 has no such field and cannot round-trip mixed raw/compressed
+	 * entries (pre-existing format limitation). */
+	snprintf(msysfile, sizeof(msysfile), "%s/mz.msys", tmpdir);
+	snprintf(cmd, sizeof(cmd), "%s --format v2 --dedup --compress=mz -o %s %s 2>/dev/null", mkmsys, msysfile, tmpdir);
+	if (system(cmd) != 0) { printf("  SKIP: mz compress failed\n"); goto skip_compress; }
+
+	m = msys_open(msysfile);
+	CHECK(m != NULL, "mz msys_open");
+	CHECK((m->hdr->flags & MSYS_F_MZ) != 0, "mz flag set");
+	{
+		void *buf = NULL;
+		size_t out_sz = 0;
+		CHECK(msys_load(m, "hello.txt", &buf, &out_sz) >= 0, "mz load hello.txt");
+		CHECK(out_sz == 14 && memcmp(buf, "Hello, World!\n", 14) == 0, "mz load content");
+		free(buf);
+	}
+	msys_close(m);
+	PASS("msys --compress=mz roundtrip");
+
 skip_compress:;
 	char rm[1024]; snprintf(rm, sizeof(rm), "rm -rf %s", tmpdir); system(rm);
 	return 0;
@@ -405,6 +427,11 @@ skip_compress:;
 /* ================================================================== */
 int main(void)
 {
+	/* Register the meuos-compress codec (libmz.a, linked by the test binary)
+	 * so MSYS_F_MZ archives can be decompressed. */
+	extern int mz_decompress_meuos(const void *in, size_t il, void **r, size_t *rl);
+	msys_set_mz_codec(mz_decompress_meuos);
+
 	int ret = 0;
 	ret += test_v1_basic();
 	ret += test_v2();
