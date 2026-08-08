@@ -70,7 +70,7 @@ allocate_tls(void)
 	memory = (char *)result;
 	thread_pointer = memory + tls_end;
 	memset(memory, 0, tls_allocation_size);
-	memcpy(thread_pointer - tls_memory_size, tls_image, tls_file_size);
+	memcpy(thread_pointer - tls_end, tls_image, tls_file_size);
 	*(void **)thread_pointer = thread_pointer;
 	return thread_pointer;
 }

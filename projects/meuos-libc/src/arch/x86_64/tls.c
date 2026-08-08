@@ -158,9 +158,14 @@ allocate_tls(void)
 	memset(memory, 0, total);
 	tp = memory + tls_end;
 
-	/* Copy the static main module's .tdata into [TP-memsz, TP). */
+	/* Copy the static main module's .tdata into [TP-tls_end, TP).
+	 * Use the aligned block size (tls_end), not raw memsz, because the
+	 * compiler accesses TLS at TP - aligned_size.  When memsz is not a
+	 * multiple of the segment alignment the two differ and memcpy to the
+	 * raw offset lands .tdata past the expected location, producing 0
+	 * reads for initialised TLS variables. */
 	if (tls_memory_size)
-		memcpy(tp - tls_memory_size, tls_image, tls_file_size);
+		memcpy(tp - tls_end, tls_image, tls_file_size);
 
 	/* Publish TCB self + DTV pointer. */
 	*(void **)(tp + MEUOS_TCB_SELF_OFF) = tp;
