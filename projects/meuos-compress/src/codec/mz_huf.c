@@ -92,13 +92,14 @@ calc_lengths(const struct huf_node *nodes, int idx, int depth,
 
 static int
 build_tree(struct huf_node *nodes, int *node_count,
-           const unsigned freqs[MAX_SYMBOLS])
+           const unsigned freqs[MAX_SYMBOLS], int num_syms)
 {
     struct huf_heap heap[512];
     int heap_n = 0;
     int ncount = 0;
+    int ns = (num_syms > 0 && num_syms <= MAX_SYMBOLS) ? num_syms : MAX_SYMBOLS;
 
-    for (int i = 0; i < MAX_SYMBOLS; i++) {
+    for (int i = 0; i < ns; i++) {
         if (freqs[i] > 0) {
             nodes[ncount].sym = i;
             nodes[ncount].freq = freqs[i];
@@ -178,6 +179,77 @@ make_canonical(unsigned *codes, int *code_lens, const int *lengths,
         code++;
         prev_len = len;
     }
+}
+
+/* ---- Public: build canonical Huffman codes from frequencies ----
+ *
+ * Shared by mz_huf.c (whole-buffer codec) and mz_fusion.c (fused
+ * engine).  Given symbol frequencies, produce canonical codes + code
+ * lengths.  Zero-length entries in lens[] mark unused symbols.
+ */
+void
+mz_huf_build_codes(const unsigned freqs[256], int num_syms,
+                   unsigned codes[256], int lens[256])
+{
+    struct huf_node nodes[512];
+    int node_count = 0;
+    int ns = (num_syms > 0 && num_syms <= MAX_SYMBOLS) ? num_syms : MAX_SYMBOLS;
+
+    for (int i = 0; i < MAX_SYMBOLS; i++)
+        lens[i] = 0;
+    for (int i = 0; i < MAX_SYMBOLS; i++)
+        codes[i] = 0;
+
+    if (!build_tree(nodes, &node_count, freqs, ns))
+        return;
+
+    int lengths[MAX_SYMBOLS] = {0};
+    if (node_count == 1 && nodes[0].sym >= 0) {
+        lengths[nodes[0].sym] = 1;
+    } else {
+        calc_lengths(nodes, node_count - 1, 0, lengths);
+    }
+
+    make_canonical(codes, lens, lengths, MAX_CODE_LEN);
+}
+
+/* ---- Public: write/read canonical table (code lens) ----
+ *
+ * Format: [num_syms:2 LE][lens for all 256 symbols: 1B each]
+ * Shared with mz_fusion.c.
+ */
+int
+mz_huf_write_table(unsigned char *out, size_t max_out, const int lens[256])
+{
+    if (!out || !lens) return MZ_ERR_PARAM;
+    size_t need = 2 + MAX_SYMBOLS;
+    if (max_out < need) return MZ_ERR_STREAM;
+
+    out[0] = MAX_SYMBOLS & 0xFF;
+    out[1] = (MAX_SYMBOLS >> 8) & 0xFF;
+    for (int i = 0; i < MAX_SYMBOLS; i++)
+        out[2 + i] = (uint8_t)lens[i];
+    return (int)need;
+}
+
+int
+mz_huf_read_table(const unsigned char *in, size_t inlen, size_t *ip,
+                  int lens[256])
+{
+    if (!in || !ip || !lens) return MZ_ERR_PARAM;
+    if (*ip + 2 > inlen) return MZ_ERR_DATA;
+
+    int num_syms = (int)in[*ip] | ((int)in[*ip + 1] << 8);
+    *ip += 2;
+    if (num_syms != MAX_SYMBOLS) return MZ_ERR_DATA;
+    if (*ip + MAX_SYMBOLS > inlen) return MZ_ERR_DATA;
+
+    for (int i = 0; i < MAX_SYMBOLS; i++) {
+        int cl = (int)in[*ip];
+        lens[i] = (cl >= 0 && cl <= MAX_CODE_LEN) ? cl : 0;
+        (*ip)++;
+    }
+    return MZ_OK;
 }
 
 /* ---- Bitstream writer (MSB first) ---- */
@@ -356,7 +428,7 @@ mz_huf_compress(const unsigned char *in, size_t inlen,
 
     struct huf_node nodes[512];
     int node_count = 0;
-    if (!build_tree(nodes, &node_count, freqs))
+    if (!build_tree(nodes, &node_count, freqs, MAX_SYMBOLS))
         return MZ_ERR_DATA;
 
     int lengths[MAX_SYMBOLS] = {0};

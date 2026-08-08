@@ -8,6 +8,7 @@ BUILD := build
 
 # Sources organized by module subdirectory (filter out CLI sources)
 CODE_SRC := $(sort $(wildcard src/codec/*.c))
+# NOTE: mz_fusion.c is included via CODE_SRC wildcard automatically.
 CONT_SRC := $(filter-out src/container/mz_msys.c src/container/mxa_cli.c src/container/mxz_cli.c src/container/mz_cli.c,$(sort $(wildcard src/container/*.c)))
 CRYPT_SRC := $(sort $(wildcard src/crypt/*.c))
 SRCS := $(CODE_SRC) $(CONT_SRC) $(CRYPT_SRC)
@@ -23,6 +24,7 @@ MZ_BIN := $(BUILD)/mz
 # Test binaries
 TEST_MX := $(BUILD)/test_mz
 TEST_MXA := $(BUILD)/test_mxa
+TEST_FUSION := $(BUILD)/test_fusion
 
 all: $(LIB) $(MZ_BIN)
 
@@ -45,10 +47,11 @@ libmz.so: $(OBJS) $(MSYS_OBJ)
 $(MZ_BIN): src/container/mz_cli.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude -o $@ src/container/mz_cli.c $(LIB)
 
-check: $(TEST_MX) $(TEST_MXA) $(MZ_BIN)
+check: $(TEST_MX) $(TEST_MXA) $(TEST_FUSION) $(MZ_BIN)
 	@echo "=== mz codec tests ==="
 	./$(TEST_MX)
 	./$(TEST_MXA)
+	./$(TEST_FUSION)
 	@echo "=== mz CLI test ==="
 	@$(MZ_BIN) --help >/dev/null 2>&1 && echo "PASS: mz --help"
 	@echo "test content" > $(BUILD)/test_in.txt
@@ -70,6 +73,8 @@ $(TEST_MX): test/test.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude -o $@ test/test.c $(LIB)
 $(TEST_MXA): test/test_mxa.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude -o $@ test/test_mxa.c $(LIB) -ldl
+$(TEST_FUSION): test/test_fusion.c $(LIB)
+	$(CC) $(CFLAGS) -Iinclude -o $@ test/test_fusion.c $(LIB)
 clean:
 	rm -rf $(BUILD)
 

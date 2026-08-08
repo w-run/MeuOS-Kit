@@ -104,6 +104,29 @@ int mz_tans_decompress(const unsigned char *in, size_t inlen,
 int mz_compress_meuos(const void *in, size_t il, void **r, size_t *rl, int lv);
 int mz_decompress_meuos(const void *in, size_t il, void **r, size_t *rl);
 
+/* ===================================================================
+ * Fusion engine — match + entropy coding in a single pass
+ *
+ * The matcher produces structured tokens (literals and matches) that
+ * are entropy-coded directly; no intermediate raw LZ77 byte stream is
+ * produced.  Frequencies are collected during the match phase so the
+ * block tables are built from a single pass over the input.
+ * =================================================================== */
+
+/* Internal Huffman building utilities (shared by mz_huf.c and mz_fusion.c).
+ * num_syms is the number of live symbols (<=256); freq/codes/lens must
+ * have num_syms entries and the remaining slots are left zero/unused. */
+void mz_huf_build_codes(const unsigned freqs[256], int num_syms,
+                        unsigned codes[256], int lens[256]);
+int  mz_huf_write_table(unsigned char *out, size_t max_out,
+                        const int lens[256]);
+int  mz_huf_read_table(const unsigned char *in, size_t inlen, size_t *ip,
+                       int lens[256]);
+
+/* Fusion block codec */
+int mz_fusion_compress(const void *in, size_t il, void **r, size_t *rl, int lv);
+int mz_fusion_decompress(const void *in, size_t il, void **r, size_t *rl);
+
 /* Solid compression */
 struct mz_solid_ctx;
 int mz_solid_start(struct mz_solid_ctx **ctx, int level);
