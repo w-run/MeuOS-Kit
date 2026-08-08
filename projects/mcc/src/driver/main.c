@@ -661,15 +661,14 @@ mcc_main(int argc, char *argv[])
 	}
 #undef ARGVAL
 
-	/* MeuOS is the default configuration when a sysroot is provided by the
-	 * environment.  An explicit --specs=meuos also selects it.  Use --specs=host
-	 * to force host-only mode (no MeuOS sysroot), overriding any MEUOS_SYSROOT. */
+	/* MeuOS specs must be requested explicitly (--specs=meuos / --meuos).
+	 * The old implicit default when MEUOS_SYSROOT was set polluted ordinary
+	 * compilation and has been removed.  Use --specs=host for host-only mode. */
 	if (!sysroot)
 		sysroot = getenv("MEUOS_SYSROOT");
-	/* If MEUOS_SYSROOT is set, MeuOS specs are the implicit default.
-	 * Only --specs=host or --specs=system can override this. */
-	if (sysroot && !meuos_specs_host && !meuos_specs)
-		meuos_specs = true;
+	/* --specs=meuos must be explicit.  The old implicit default (activate
+	 * MeuOS specs whenever MEUOS_SYSROOT was set) polluted ordinary
+	 * compilation.  User must opt in via --specs=meuos / --meuos. */
 	if (meuos_specs && !sysroot)
 		fprintf(stderr, "%s: --specs=meuos requires --sysroot or MEUOS_SYSROOT\n", argv0), exit(2);
 	driver_sysroot = sysroot; /* record effective sysroot for host toolchain */
