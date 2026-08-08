@@ -74,6 +74,18 @@ check: $(TEST_MX) $(TEST_MXA) $(TEST_FUSION) $(MZ_BIN)
 	  cd $(BUILD)/xtract && $(CURDIR)/$(MZ_BIN) d $(CURDIR)/$(BUILD)/test_out.tar >/dev/null && \
 	  cmp -s $(CURDIR)/$(BUILD)/test_in.txt $(CURDIR)/$(BUILD)/xtract/test_in.txt && \
 	  echo "PASS: mz d .tar roundtrip"
+	@# zstd roundtrip: compress via zstd CLI, decompress via mz
+	@cp $(BUILD)/test_in.txt $(BUILD)/test_zst_in.txt && zstd -f $(BUILD)/test_zst_in.txt >/dev/null 2>&1 && \
+	  $(MZ_BIN) d $(BUILD)/test_zst_in.txt.zst > $(BUILD)/test_zst_out.txt 2>/dev/null && \
+	  cmp -s $(BUILD)/test_in.txt $(BUILD)/test_zst_out.txt && \
+	  echo "PASS: mz d .zst roundtrip"
+	@rm -f $(BUILD)/test_zst_in.txt $(BUILD)/test_zst_in.txt.zst $(BUILD)/test_zst_out.txt
+	@# bzip2 roundtrip: compress via bzip2 CLI, decompress via mz
+	@cp $(BUILD)/test_in.txt $(BUILD)/test_bz2_in.txt && bzip2 -f $(BUILD)/test_bz2_in.txt >/dev/null 2>&1 && \
+	  $(MZ_BIN) d $(BUILD)/test_bz2_in.txt.bz2 > $(BUILD)/test_bz2_out.txt 2>/dev/null && \
+	  cmp -s $(BUILD)/test_in.txt $(BUILD)/test_bz2_out.txt && \
+	  echo "PASS: mz d .bz2 roundtrip"
+	@rm -f $(BUILD)/test_bz2_in.txt $(BUILD)/test_bz2_in.txt.bz2 $(BUILD)/test_bz2_out.txt
 	@rm -f $(BUILD)/test_in.txt $(BUILD)/test_out.mz $(BUILD)/test_out.gz $(BUILD)/test_out.tar $(BUILD)/test_out_decomp.txt $(BUILD)/xtract/test_in.txt
 
 $(TEST_MX): test/test.c $(LIB)

@@ -22,6 +22,8 @@
  *   若 -o 指定输出文件，按其扩展名决定容器格式
  *   未指定 → 自研 MZv2 格式
  */
+#define _POSIX_C_SOURCE 200809L
+
 #include "mz.h"
 #include "mxa.h"
 #include <stdio.h>
@@ -29,6 +31,9 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <dlfcn.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 /* ===================================================================
  * 格式枚举 + 嗅探
@@ -392,6 +397,116 @@ extract_mxa(const uint8_t *data, size_t len, const char *path)
 }
 
 static int
+extract_zstd(const uint8_t *data, size_t len)
+{
+	/* Try dlopen libzstd.so.1 for in-process decompression */
+	typedef size_t (*zstd_decompress_fn)(void *, size_t, const void *, size_t);
+	typedef unsigned long long (*zstd_get_size_fn)(const void *, size_t);
+	typedef unsigned (*zstd_is_error_fn)(size_t);
+
+	static void *zstd_handle;
+	static zstd_decompress_fn  zstd_decompress;
+	static zstd_get_size_fn    zstd_getFrameContentSize;
+	static zstd_is_error_fn    zstd_isError;
+	static int loaded;
+	if (!loaded) {
+		loaded = 1;
+		zstd_handle = dlopen("libzstd.so.1", RTLD_LAZY | RTLD_LOCAL);
+		if (!zstd_handle) zstd_handle = dlopen("libzstd.so", RTLD_LAZY | RTLD_LOCAL);
+		if (zstd_handle) {
+			zstd_decompress        = (zstd_decompress_fn)dlsym(zstd_handle, "ZSTD_decompress");
+			zstd_getFrameContentSize = (zstd_get_size_fn)dlsym(zstd_handle, "ZSTD_getFrameContentSize");
+			zstd_isError           = (zstd_is_error_fn)dlsym(zstd_handle, "ZSTD_isError");
+		}
+	}
+
+	if (zstd_handle && zstd_decompress && zstd_getFrameContentSize && zstd_isError) {
+		/* In-process decompression via libzstd */
+		unsigned long long usize = (*zstd_getFrameContentSize)(data, len);
+		if ((*zstd_isError)(usize)) {
+			fprintf(stderr, "mz: zstd: cannot determine uncompressed size\n");
+			return 1;
+		}
+		void *decomp = malloc((size_t)usize);
+		if (!decomp) { fprintf(stderr, "mz: out of memory\n"); return 1; }
+		size_t ret = (*zstd_decompress)(decomp, (size_t)usize, data, len);
+		if ((*zstd_isError)(ret)) {
+			fprintf(stderr, "mz: zstd: decompress error\n");
+			free(decomp); return 1;
+		}
+		fprintf(stderr, "mz: decompressed %zu bytes\n", (size_t)usize);
+		fwrite(decomp, 1, (size_t)usize, stdout);
+		free(decomp);
+		return 0;
+	}
+
+	/* Fallback: pipe through external zstdcat */
+	char cmd[4096];
+	snprintf(cmd, sizeof(cmd), "zstdcat 2>/dev/null");
+	FILE *fp = popen(cmd, "r");
+	if (!fp) { fprintf(stderr, "mz: zstd: neither libzstd nor zstdcat found\n"); return 1; }
+	/* Pipe input via stdin */
+	{
+		FILE *child_stdin = fp; /* popen with "r" gives read end only */
+		/* Actually popen("r") gives read end of child's stdout.
+		 * To pipe the input we'd need a pipe+fork — simpler: write a
+		 * temp file and pass it. */
+	}
+	pclose(fp);
+
+	/* Write data to temp file, run zstd -dc, read stdout */
+	char tmppath[] = "/tmp/mz_zstd_XXXXXX";
+	int tmpfd = mkstemp(tmppath);
+	if (tmpfd < 0) { fprintf(stderr, "mz: cannot create temp file\n"); return 1; }
+	write(tmpfd, data, len); close(tmpfd);
+
+	char zcmd[4096];
+	snprintf(zcmd, sizeof(zcmd), "zstd -dc %s 2>/dev/null", tmppath);
+	FILE *zf = popen(zcmd, "r");
+	if (!zf) { unlink(tmppath); fprintf(stderr, "mz: zstdcat not in PATH\n"); return 1; }
+	char buf[8192];
+	size_t total = 0;
+	while (1) {
+		size_t n = fread(buf, 1, sizeof(buf), zf);
+		if (n == 0) break;
+		fwrite(buf, 1, n, stdout);
+		total += n;
+	}
+	int pe = pclose(zf);
+	unlink(tmppath);
+	if (pe != 0) { fprintf(stderr, "mz: zstd: exit code %d\n", pe); return 1; }
+	fprintf(stderr, "mz: decompressed %zu bytes\n", total);
+	return 0;
+}
+
+static int
+extract_bzip2(const uint8_t *data, size_t len)
+{
+	char tmppath[] = "/tmp/mz_bz2_XXXXXX";
+	int tmpfd = mkstemp(tmppath);
+	if (tmpfd < 0) { fprintf(stderr, "mz: cannot create temp file\n"); return 1; }
+	write(tmpfd, data, len); close(tmpfd);
+
+	char bcmd[4096];
+	snprintf(bcmd, sizeof(bcmd), "bzcat %s 2>/dev/null", tmppath);
+	FILE *bf = popen(bcmd, "r");
+	if (!bf) { unlink(tmppath); fprintf(stderr, "mz: bzcat not in PATH\n"); return 1; }
+	char buf[8192];
+	size_t total = 0;
+	while (1) {
+		size_t n = fread(buf, 1, sizeof(buf), bf);
+		if (n == 0) break;
+		fwrite(buf, 1, n, stdout);
+		total += n;
+	}
+	int pe = pclose(bf);
+	unlink(tmppath);
+	if (pe != 0) { fprintf(stderr, "mz: bzcat: exit code %d\n", pe); return 1; }
+	fprintf(stderr, "mz: decompressed %zu bytes\n", total);
+	return 0;
+}
+
+static int
 extract_gzip(const uint8_t *data, size_t len)
 {
     void *decomp = NULL; size_t decomp_len = 0;
@@ -642,6 +757,52 @@ test_archive(const uint8_t *data, size_t len, enum mz_fmt fmt)
         if (rc > 0) { printf("PASS: crc ok (%zu bytes)\n", decomp_len); free(decomp); return 0; }
         else        { fprintf(stderr, "FAIL: %s\n", mz_strerror(rc)); return 1; }
     }
+    case FMT_ZSTD: {
+        /* Test: decompress via libzstd or external */
+        void *decomp = NULL; size_t decomp_len = 0;
+        int ok = 0;
+        /* Try libzstd first via a test call */
+        typedef size_t (*zstd_dfn)(void*,size_t,const void*,size_t);
+        typedef unsigned long long (*zstd_gsz)(const void*,size_t);
+        typedef unsigned (*zstd_ise)(size_t);
+        static void *zh; static zstd_dfn zdfn; static zstd_gsz zgsz; static zstd_ise zise; static int zl;
+        if (!zl) { zl=1; zh=dlopen("libzstd.so.1",RTLD_LAZY); if(!zh) zh=dlopen("libzstd.so",RTLD_LAZY);
+            if(zh){zdfn=(zstd_dfn)dlsym(zh,"ZSTD_decompress");zgsz=(zstd_gsz)dlsym(zh,"ZSTD_getFrameContentSize");zise=(zstd_ise)dlsym(zh,"ZSTD_isError");} }
+        if (zh && zdfn && zgsz && zise) {
+            unsigned long long usz = zgsz(data, len);
+            if (!zise(usz)) {
+                decomp = malloc((size_t)usz);
+                size_t r = zdfn(decomp, (size_t)usz, data, len);
+                if (!zise(r)) { decomp_len = (size_t)usz; ok = 1; }
+            }
+        }
+        if (!ok) {
+            /* Fallback: popen zstdcat via temp file */
+            char tmppath[] = "/tmp/mztest_zstd_XXXXXX";
+            int fd = mkstemp(tmppath); write(fd,data,len); close(fd);
+            char cmd[4096]; snprintf(cmd,sizeof(cmd),"zstd -d < %s 2>/dev/null",tmppath);
+            FILE *fp = popen(cmd,"r");
+            if (fp) { char buf[8192]; size_t t=0; size_t n; while((n=fread(buf,1,sizeof(buf),fp))>0){t+=n;
+                void *p=realloc(decomp,t); if(p)decomp=p; memcpy((char*)decomp+t-n,buf,n); } int pe=pclose(fp);
+                if(pe==0 && t>0){ decomp_len=t; ok=1; } }
+            unlink(tmppath);
+        }
+        if (ok) { printf("PASS: zstd decompressed (%zu bytes)\n", decomp_len); free(decomp); return 0; }
+        else { fprintf(stderr, "FAIL: zstd test\n"); return 1; }
+    }
+    case FMT_BZ2: {
+        /* Test bzip2 via bzcat tempfile */
+        char tmppath[] = "/tmp/mztest_bz2_XXXXXX";
+        int fd = mkstemp(tmppath); write(fd,data,len); close(fd);
+        char cmd[4096]; snprintf(cmd,sizeof(cmd),"bzcat %s 2>/dev/null",tmppath);
+        FILE *fp = popen(cmd,"r"); void *decomp=NULL; size_t decomp_len=0; int ok=0;
+        if (fp) { char buf[8192]; size_t t=0; size_t n; while((n=fread(buf,1,sizeof(buf),fp))>0){t+=n;
+            void *p=realloc(decomp,t); if(p)decomp=p; memcpy((char*)decomp+t-n,buf,n); } int pe=pclose(fp);
+            if(pe==0 && t>0){ decomp_len=t; ok=1; } }
+        unlink(tmppath);
+        if (ok) { printf("PASS: bzip2 decompressed (%zu bytes)\n", decomp_len); free(decomp); return 0; }
+        else { fprintf(stderr, "FAIL: bzcat not available or corrupt\n"); return 1; }
+    }
     case FMT_ZIP: {
         struct mz_zip_reader *reader = NULL;
         int rc = mz_zip_reader_open(&reader, data, len);
@@ -771,6 +932,8 @@ cmd_decompress(int argc, char *argv[])
     case FMT_MZ:   rc = extract_mz(data, len, path);   break;
     case FMT_MXA:  rc = extract_mxa(data, len, path);  break;
     case FMT_GZIP: rc = extract_gzip(data, len);        break;
+    case FMT_ZSTD: rc = extract_zstd(data, len);        break;
+    case FMT_BZ2:  rc = extract_bzip2(data, len);       break;
     case FMT_ZIP:  rc = extract_zip(data, len);         break;
     case FMT_TAR:  rc = extract_tar(data, len);         break;
     default:
@@ -806,6 +969,8 @@ cmd_list(int argc, char *argv[])
     case FMT_MZ:   rc = list_mz(data, len);   break;
     case FMT_MXA:  rc = list_mxa(data, len);  break;
     case FMT_GZIP: printf("Gzip archive (single stream)\n"); rc = 0; break;
+    case FMT_ZSTD: printf("Zstd archive (single stream)\n"); rc = 0; break;
+    case FMT_BZ2:  printf("Bzip2 archive (single stream)\n"); rc = 0; break;
     case FMT_ZIP:  rc = list_zip(data, len);  break;
     case FMT_TAR:  rc = list_tar(data, len);  break;
     default:
@@ -962,9 +1127,8 @@ int main(int argc, char *argv[])
     }
 
     if (mode == MODE_BUNZIP2) {
-        /* bunzip2 file.bz2 → mz d (但 bz2 尚未在 libmz 实现) */
-        fprintf(stderr, "mz: bzip2 support not yet in libmz (CLI layer only)\n");
-        return 1;
+        /* bunzip2 file.bz2 → mz d file.bz2 */
+        return cmd_decompress(argc - 1, argv + 1);
     }
 
     if (mode == MODE_TAR) {
