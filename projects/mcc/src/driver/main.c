@@ -147,8 +147,9 @@ mcc_main(int argc, char *argv[])
 	bool pponly = false, emit_asm_only = false, compile_only = false;
 	bool verbose = false, nostdinc = false, nostdlib = false, nodefaultlibs = false;
 	bool static_link = false, shared = false, pic = false, pie = false;
-	bool meuos_specs = false, meuos_specs_host = false;
-	char *output = NULL, *target = NULL, *first_input = NULL, *sysroot = NULL;
+	bool meuos_specs = false, meuos_specs_host = false, meuos_specs_glibc = false, meuos_specs_musl = false;
+	char *output = NULL, *target = NULL, *first_input = NULL;
+	const char *sysroot = NULL;
 	struct msys *msys_handle = NULL;
 	int depmode = 0;       /* 0 none, 1 -M, 2 -MM, 3 -MD, 4 -MMD */
 	char *depfile = NULL;
