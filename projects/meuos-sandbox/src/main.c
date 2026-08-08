@@ -2,6 +2,8 @@
 #include "mbox/ns.h"
 #include "mbox/pty.h"
 #include "mbox/mcp.h"
+#include "mbox/http.h"
+#include "mbox/webpty.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -233,6 +235,36 @@ int main(int argc, char *argv[], char *envp[]) {
             /* stdio mode */
             return mcp_run_stdio(&g_mcp);
         }
+    }
+
+    /* ── WebPTY mode ──────────────────────────────────────────────── */
+    if (cfg.webpty_port > 0) {
+        signal(SIGINT,  cleanup);
+        signal(SIGTERM, cleanup);
+        signal(SIGHUP,  cleanup);
+
+        http_server_t http;
+        http_init(&http);
+
+        if (http_listen(&http, cfg.webpty_port) < 0) {
+            fprintf(stderr, "mbox: http listen on %d failed\n", cfg.webpty_port);
+            return 1;
+        }
+
+        pty_init(&g_pty);
+
+        char webpty_path[1024];
+        snprintf(webpty_path, sizeof(webpty_path), "%s%s", rootfs, user_argv[0]);
+        user_argv[0] = webpty_path;
+
+        if (pty_open(&g_pty, user_argv, envp) < 0) {
+            fprintf(stderr, "mbox: PTY open failed\n");
+            return 1;
+        }
+
+        fprintf(stderr, "mbox: WebPTY on http://localhost:%d\n", cfg.webpty_port);
+        webpty_run(&http, &g_pty);
+        return 0;
     }
 
     /* ── normal execution ──────────────────────────────────────────── */
