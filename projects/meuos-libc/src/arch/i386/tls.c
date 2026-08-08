@@ -20,6 +20,7 @@
 #define AT_PHDR 3
 #define AT_PHENT 4
 #define AT_PHNUM 5
+#define PT_PHDR 6
 #define PT_TLS 7
 /* i386 set_thread_area(2) descriptor.  The kernel writes entry_number
  * back when it allocates a GDT slot. */
@@ -100,6 +101,7 @@ __meuos_tls_init(char **environment)
 	struct meuos_auxv32 *auxv;
 	struct meuos_phdr32 *headers = 0;
 	unsigned int entry_size = 0, count = 0, index;
+	unsigned long load_base = 0;
 	void *thread_pointer;
 
 	while (*environment)
@@ -112,13 +114,28 @@ __meuos_tls_init(char **environment)
 	}
 	if (!headers || entry_size != sizeof(*headers))
 		return;
+
+	/* First pass: compute load_base from PT_PHDR so we can fix up
+	 * PT_TLS virtual_address for PIE executables.
+	 *   load_base = AT_PHDR - PT_PHDR.p_vaddr
+	 * For non-PIE (position-dependent) this yields zero; for PIE it
+	 * gives the actual load offset. */
+	for (index = 0; index < count; ++index) {
+		struct meuos_phdr32 *header = (struct meuos_phdr32 *)((char *)headers + index * entry_size);
+		if (header->p_type == PT_PHDR) {
+			load_base = (unsigned long)headers - header->p_vaddr;
+			break;
+		}
+	}
+
 	for (index = 0; index < count; ++index) {
 		struct meuos_phdr32 *header = (struct meuos_phdr32 *)((char *)headers + index * entry_size);
 		if (header->p_type != PT_TLS)
 			continue;
 		if (!header->p_memsz || !header->p_align || (header->p_align & (header->p_align - 1)))
 			return;
-		tls_image = (const void *)(uintptr_t)header->p_vaddr;
+		/* PT_TLS p_vaddr is file-relative; add load_base for PIE. */
+		tls_image = (const void *)(load_base + (uintptr_t)header->p_vaddr);
 		tls_file_size = (size_t)header->p_filesz;
 		tls_memory_size = (size_t)header->p_memsz;
 		tls_alignment = (size_t)header->p_align;
