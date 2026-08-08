@@ -334,8 +334,16 @@ static void print_gperf_help(void)
     printf("\n");
     printf("Options:\n");
     printf("  --help        display this help and exit\n");
+    printf("  --version     display version info and exit\n");
     printf("\n");
     printf("Reads keyword list from stdin, generates C code on stdout.\n");
+}
+
+static void print_gperf_version(void)
+{
+    printf("gperf (MeuOS buildtools) 0.1.0\n");
+    printf("Copyright (C) MeuOS Project\n");
+    printf("License: MIT\n");
 }
 
 /* ---------- main ---------- */
@@ -345,6 +353,10 @@ gperf_main(int argc, char **argv)
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0) {
             print_gperf_help();
+            return 0;
+        }
+        if (strcmp(argv[i], "--version") == 0) {
+            print_gperf_version();
             return 0;
         }
     }
