@@ -1,0 +1,127 @@
+#!/bin/sh
+# mbox-mkrootfs — Build a complete rootfs directory for mbox
+#
+# Usage:
+#   mbox-mkrootfs --output=./rootfs [--arch=x86_64]
+#
+# Copies:
+#   - mcc compiler (dynamically linked, with ld-linux + host libs)
+#   - msh shell (statically linked)
+#   - meuos-toolchain (as/ld/ar/ranlib/nm/objdump/readelf/strip/objcopy)
+#   - meuos-libc archives + crt*.o
+#   - meuos-libc headers
+#   - rootfs-skel (etc/passwd, etc/group)
+#   - Generates mbox.conf at rootfs root
+set -eu
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+KIT_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)"
+
+# Defaults
+ARCH="${ARCH:-x86_64}"
+OUTPUT=""
+BUILD_MCC=0
+BUILD_MSH=0
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --output=*)  OUTPUT="${1#--output=}" ;;
+        --arch=*)    ARCH="${1#--arch=}" ;;
+        --build-mcc) BUILD_MCC=1 ;;
+        --build-msh) BUILD_MSH=1 ;;
+        --help|-h)
+            echo "Usage: mbox-mkrootfs --output=./rootfs [--arch=x86_64]"
+            exit 0 ;;
+        *) echo "mbox-mkrootfs: unknown: $1" >&2; exit 1 ;;
+    esac
+    shift
+done
+
+[ -n "$OUTPUT" ] || { echo "mbox-mkrootfs: --output required" >&2; exit 1; }
+mkdir -p "$OUTPUT"
+
+# Resolve arch-specific sysroot
+SYSROOT="${MEUOS_SYSROOT:-$KIT_DIR/sysroot}"
+SYSROOT_ARCH="$SYSROOT/$ARCH"
+[ -d "$SYSROOT_ARCH/usr/lib" ] || SYSROOT_ARCH="$SYSROOT"
+
+echo "mbox-mkrootfs: building rootfs for $ARCH at $OUTPUT"
+
+# ── 1. rootfs-skel ──────────────────────────────────────────────────────
+if [ -d "$SCRIPT_DIR/rootfs-skel" ]; then
+    cp -a "$SCRIPT_DIR/rootfs-skel/"* "$OUTPUT/" 2>/dev/null || true
+fi
+
+# Ensure standard directories
+for d in bin usr/bin usr/lib usr/include etc dev proc sys tmp root; do
+    mkdir -p "$OUTPUT/$d"
+done
+
+# ── 2. libc archives + crt*.o ────────────────────────────────────────────
+if [ -d "$SYSROOT_ARCH/usr/lib" ]; then
+    for f in crt1.o crti.o crtn.o libc-meuos.a libatomic-meuos.a libgcc-meuos.a libc-meuos-compat.a; do
+        [ -f "$SYSROOT_ARCH/usr/lib/$f" ] && cp "$SYSROOT_ARCH/usr/lib/$f" "$OUTPUT/usr/lib/$f"
+    done
+fi
+
+# ── 3. libc headers ──────────────────────────────────────────────────────
+if [ -d "$SYSROOT_ARCH/usr/include" ]; then
+    cp -a "$SYSROOT_ARCH/usr/include/"* "$OUTPUT/usr/include/" 2>/dev/null || true
+fi
+
+# ── 4. mcc compiler ─────────────────────────────────────────────────────
+MCC_SRC="$KIT_DIR/projects/mcc/mcc"
+if [ -f "$MCC_SRC" ]; then
+    cp "$MCC_SRC" "$OUTPUT/usr/bin/mcc"
+    # If dynamically linked, copy ld-linux + needed libs
+    if file "$MCC_SRC" | grep -q "dynamically linked"; then
+        LD=$(ldd "$MCC_SRC" 2>/dev/null | grep 'ld-linux' | awk '{print $1}')
+        [ -n "$LD" ] && cp "$LD" "$OUTPUT$LD" 2>/dev/null || true
+        # Copy needed shared libs
+        for lib in $(ldd "$MCC_SRC" 2>/dev/null | grep '=> /' | awk '{print $3}'); do
+            libdir="$OUTPUT$(dirname "$lib")"
+            mkdir -p "$libdir"
+            cp "$lib" "$libdir/" 2>/dev/null || true
+        done
+    fi
+fi
+
+# ── 5. msh shell ────────────────────────────────────────────────────────
+MSH_SRC=""
+for p in "$KIT_DIR/env/share/msh" "$KIT_DIR/projects/meuos-shell/build/msh"; do
+    [ -f "$p" ] && MSH_SRC="$p" && break
+done
+if [ -z "$MSH_SRC" ] || [ "$BUILD_MSH" -eq 1 ]; then
+    echo "mbox-mkrootfs: building msh..."
+    make -C "$KIT_DIR/projects/meuos-shell" 2>/dev/null || true
+    MSH_SRC="$KIT_DIR/projects/meuos-shell/build/msh"
+fi
+if [ -f "$MSH_SRC" ]; then
+    cp "$MSH_SRC" "$OUTPUT/bin/sh"
+    cp "$MSH_SRC" "$OUTPUT/usr/bin/msh"
+fi
+
+# ── 6. meuos-toolchain ──────────────────────────────────────────────────
+TOOLCHAIN_DIR="$KIT_DIR/projects/meuos-toolchain/build/bin"
+if [ -d "$TOOLCHAIN_DIR" ]; then
+    for tool in ar as ld nm objcopy objdump ranlib readelf strip; do
+        [ -f "$TOOLCHAIN_DIR/$tool" ] && cp "$TOOLCHAIN_DIR/$tool" "$OUTPUT/usr/bin/mt-$tool"
+    done
+fi
+
+# ── 7. Generate mbox.conf ────────────────────────────────────────────────
+cat > "$OUTPUT/mbox.conf" <<CEOF
+{
+    "arch": "$ARCH",
+    "net": "none",
+    "timeout": 300,
+    "env": {
+        "MEUOS_SYSROOT": "/sysroot",
+        "PATH": "/bin:/usr/bin:/usr/local/bin"
+    }
+}
+CEOF
+
+echo "mbox-mkrootfs: done — $OUTPUT ready for mbox"
+echo "  Size: $(du -sh "$OUTPUT" 2>/dev/null | cut -f1)"
+echo "  To test: mbox --$ARCH $OUTPUT /bin/sh"
