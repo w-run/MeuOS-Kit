@@ -67,6 +67,17 @@ static void wr16(uint8_t *b, uint16_t v) { b[0]=v; b[1]=v>>8; }
 
 static void die(const char *msg) { perror(msg); exit(1); }
 
+/* ---- progress reporting ---- */
+static volatile int g_fast_mode = 0;
+static int g_walk_counter = 0;
+
+static void walk_progress(void)
+{
+	g_walk_counter++;
+	if (g_walk_counter % 1000 == 0)
+		fprintf(stderr, "\rmkmsys: scanning... %d files  ", g_walk_counter);
+}
+
 /* Round up to 4-byte alignment */
 static inline size_t align4(size_t n) { return (n + 3) & ~(size_t)3; }
 
@@ -112,8 +123,11 @@ static void collector_add(struct collector *c, const char *relpath,
 	e->data      = malloc(data_size ? data_size : 1);
 	if (!e->data) die("malloc");
 	if (data_size > 0) memcpy(e->data, data, data_size);
-	/* SHA-256 of data (empty data => SHA-256 of empty input) */
-	sha256(data, data_size, e->content_hash);
+	/* SHA-256: skip in --fast mode */
+	if (g_fast_mode)
+		memset(e->content_hash, 0, 32);
+	else
+		sha256(data, data_size, e->content_hash);
 	e->mtime     = mtime;
 	e->file_type = file_type;
 	e->mode      = mode;
@@ -241,6 +255,7 @@ static void collector_walk(struct collector *c, const char *dir,
 			              file_type, 0, 0, 0);
 		}
 
+		walk_progress();
 		free(abspath);
 		free(relpath);
 	}
@@ -1149,6 +1164,7 @@ int main(int argc, char *argv[])
 	int incremental = 0;
 	int dedup_mode = 0;
 	int streaming_mode = 0;
+	int fast_mode = 0;
 	const char *sign_keyfile = NULL;
 	int format_v2 = 0;
 	const char *compress = NULL;
@@ -1174,6 +1190,7 @@ int main(int argc, char *argv[])
 	  "  --compress=<type>  Compress data blocks: zlib, zstd\n"
 	  "  --incremental      Incremental mode: only repack changed files\n"
 	  "  --dedup            Content dedup (v2 only): SHA-256 identical data stored once\n"
+	  "  --fast             Skip SHA-256 and compression for fastest packing (dev iteration)\n"
 	  "  --sign=<keyfile>   Sign the index with ed25519 secret key (v2 only)\n"
 	  "  --format <v1|v2>   Output format version (default: v1)\n"
 	  "  --help             Show this help message\n"
@@ -1201,6 +1218,8 @@ int main(int argc, char *argv[])
 			incremental = 1; i++;
 		} else if (strcmp(argv[i], "--dedup") == 0) {
 			dedup_mode = 1; i++;
+		} else if (strcmp(argv[i], "--fast") == 0) {
+			fast_mode = 1; i++;
 		} else if (strcmp(argv[i], "--streaming") == 0) {
 			format_v2 = 1; streaming_mode = 1; i++;
 		} else if (strncmp(argv[i], "--sign=", 7) == 0) {
@@ -1270,9 +1289,16 @@ int main(int argc, char *argv[])
 		flags |= MSYS_F_STREAMING;
 	}
 
+	if (fast_mode) {
+		g_fast_mode = 1;
+		fprintf(stderr, "mkmsys: fast mode (SHA-256 + compression skipped)\n");
+	}
+
 	struct collector c;
 	memset(&c, 0, sizeof(c));
+	fprintf(stderr, "mkmsys: scanning...\n");
 	collector_walk(&c, input, "");
+	fprintf(stderr, "\rmkmsys: scanned %zu files\n", c.count);
 
 	if (c.count == 0) {
 		fprintf(stderr, "No files found under %s\n", input);

@@ -1,16 +1,12 @@
 /* msysctl — Unified CLI for .msys archives.
+ * Copyright (C) 2024-2026 MeuOS Project
  *
-#pragma GCC diagnostic ignored "-Wformat-truncation"
  * Usage:
- *   msysctl <cmd> <archive> [args...]                        — single archive
- *   msysctl --overlay a.msys,b.msys <cmd> [args]             — overlay
- *   msysctl hist add <archive> <path> [msg]                  — save version
- *   msysctl hist list <archive> [path]                       — list versions
- *   msysctl hist cat <archive> <path> <rev>                  — show version
- *   msysctl hist diff <archive> <path> <rev1> <rev2>         — diff versions
+ *   msysctl [--overlay a.msys,b.msys] <cmd> <archive> [args...]
+ *   msysctl --help [<cmd>]
+ *   msysctl hist <add|list|cat|diff> <archive> [args...]
  *
- * Commands: cat <path>, ls [dir], find [dir], tree, extract [dir],
- *           info, verify, stat <path>
+ * Run `msysctl --help` for detailed help on all commands.
  */
 
 #include "mt/msys.h"
@@ -28,13 +24,166 @@
 /* Forward declaration for overlay wrapper functions */
 struct archive;
 
-static void die(const char *msg) { perror(msg); exit(1); }
-static void usage(void) {
-	fprintf(stderr, "Usage:\n"
-		"  msysctl [--overlay a.msys,b.msys] <cmd> <archive> [args...]\n"
-		"  msysctl hist <add|list|cat|diff> <archive> [args...]\n"
-		"Commands: cat <path> | ls [dir] | find [dir] | tree |\n"
-		"          extract [dir] | info | verify | stat <path>\n");
+/* ---- Detailed help ---- */
+
+static void cmd_usage(const char *cmd)
+{
+	if (!cmd || strcmp(cmd, "cat") == 0) {
+		printf("msysctl cat <archive> <path>\n"
+		       "  Output the contents of <path> within <archive> to stdout.\n"
+		       "  Examples:\n"
+		       "    msysctl cat sysroot.msys /usr/include/stdio.h\n"
+		       "    msysctl cat sysroot.msys etc/config\n");
+	}
+	if (!cmd || strcmp(cmd, "ls") == 0) {
+		printf("msysctl ls <archive> [dir]\n"
+		       "  List immediate children of [dir] (default: root).\n"
+		       "  Examples:\n"
+		       "    msysctl ls sysroot.msys\n"
+		       "    msysctl ls sysroot.msys /usr/lib\n");
+	}
+	if (!cmd || strcmp(cmd, "find") == 0) {
+		printf("msysctl find <archive> [dir] [-name <pattern>]\n"
+		       "  Recursively list files matching glob <pattern>.\n"
+		       "  Examples:\n"
+		       "    msysctl find sysroot.msys\n"
+		       "    msysctl find sysroot.msys -name '*.h'\n"
+		       "    msysctl find sysroot.msys /usr/include -name 'std*.h'\n");
+	}
+	if (!cmd || strcmp(cmd, "tree") == 0) {
+		printf("msysctl tree <archive>\n"
+		       "  Display the archive contents as a directory tree.\n"
+		       "  Examples:\n"
+		       "    msysctl tree sysroot.msys\n");
+	}
+	if (!cmd || strcmp(cmd, "info") == 0) {
+		printf("msysctl info <archive>\n"
+		       "  Show archive statistics: format, entry count, flags,\n"
+		       "  compression ratio, dedup info, extensions, signature.\n"
+		       "  Examples:\n"
+		       "    msysctl info sysroot.msys\n");
+	}
+	if (!cmd || strcmp(cmd, "verify") == 0) {
+		printf("msysctl verify <archive>\n"
+		       "  Verify SHA-256 content integrity for all entries.\n"
+		       "  Returns 'All OK' if all hashes match.\n"
+		       "  Examples:\n"
+		       "    msysctl verify sysroot.msys\n");
+	}
+	if (!cmd || strcmp(cmd, "stat") == 0) {
+		printf("msysctl stat <archive> <path>\n"
+		       "  Show file metadata: type, size, permissions, uid/gid.\n"
+		       "  Examples:\n"
+		       "    msysctl stat sysroot.msys /usr/lib/crt1.o\n");
+	}
+	if (!cmd || strcmp(cmd, "extract") == 0) {
+		printf("msysctl extract <archive> [dir]\n"
+		       "  Extract all archive entries to [dir] (default: current dir).\n"
+		       "  Examples:\n"
+		       "    msysctl extract sysroot.msys /tmp/sysroot\n");
+	}
+	if (!cmd || strcmp(cmd, "grep") == 0) {
+		printf("msysctl grep <archive> <pattern>\n"
+		       "  Search for literal string <pattern> in all files.\n"
+		       "  Examples:\n"
+		       "    msysctl grep sysroot.msys 'printf'\n");
+	}
+	if (!cmd || strcmp(cmd, "diff") == 0) {
+		printf("msysctl diff <archive> <path> [local-file]\n"
+		       "  Compare archive entry with local file (or just show entry).\n"
+		       "  Examples:\n"
+		       "    msysctl diff sysroot.msys /etc/config\n"
+		       "    msysctl diff sysroot.msys /etc/config ./local-config\n");
+	}
+	if (!cmd || strcmp(cmd, "cmp") == 0) {
+		printf("msysctl cmp <archive> <path> <local-file>\n"
+		       "  Binary comparison of archive entry with local file.\n"
+		       "  Examples:\n"
+		       "    msysctl cmp sysroot.msys /usr/lib/crt1.o ./crt1.o\n");
+	}
+	if (!cmd || strcmp(cmd, "du") == 0) {
+		printf("msysctl du <archive> [dir]\n"
+		       "  Show total disk usage for [dir] (default: root).\n"
+		       "  Examples:\n"
+		       "    msysctl du sysroot.msys\n"
+		       "    msysctl du sysroot.msys /usr/lib\n");
+	}
+	if (!cmd || strcmp(cmd, "head") == 0) {
+		printf("msysctl head <archive> <path> [-n <count>]\n"
+		       "  Output first N lines (default: 10) of a file.\n"
+		       "  Examples:\n"
+		       "    msysctl head sysroot.msys /etc/config\n"
+		       "    msysctl head sysroot.msys /etc/config -n 20\n");
+	}
+	if (!cmd || strcmp(cmd, "tail") == 0) {
+		printf("msysctl tail <archive> <path> [-n <count>]\n"
+		       "  Output last N lines (default: 10) of a file.\n"
+		       "  Examples:\n"
+		       "    msysctl tail sysroot.msys /var/log/syslog\n"
+		       "    msysctl tail sysroot.msys /var/log/syslog -n 50\n");
+	}
+	if (!cmd || strcmp(cmd, "cp") == 0) {
+		printf("msysctl cp <archive> <src> <dst>\n"
+		       "  Copy a file from within the archive to the filesystem.\n"
+		       "  Examples:\n"
+		       "    msysctl cp sysroot.msys /usr/bin/mcc ./mcc\n");
+	}
+	if (!cmd || strcmp(cmd, "wc") == 0) {
+		printf("msysctl wc <archive> <path>\n"
+		       "  Count lines, words, and bytes of a file.\n"
+		       "  Examples:\n"
+		       "    msysctl wc sysroot.msys /etc/config\n");
+	}
+	if (!cmd || strcmp(cmd, "sort") == 0) {
+		printf("msysctl sort <archive> <path>\n"
+		       "  Sort and output lines of a text file.\n"
+		       "  Examples:\n"
+		       "    msysctl sort sysroot.msys /etc/config\n");
+	}
+	if (!cmd || strcmp(cmd, "export") == 0) {
+		printf("msysctl export <archive> [output.tar]\n"
+		       "  Export archive contents to tar format.\n"
+		       "  Examples:\n"
+		       "    msysctl export sysroot.msys out.tar\n");
+	}
+	if (!cmd || strcmp(cmd, "import") == 0) {
+		printf("msysctl import <tarfile> <output.msys>\n"
+		       "  Import a tar archive into .msys format.\n"
+		       "  Examples:\n"
+		       "    msysctl import sysroot.tar sysroot.msys\n");
+	}
+	if (!cmd || strcmp(cmd, "init") == 0) {
+		printf("msysctl init <archive.msys>\n"
+		       "  Create an empty .msys archive.\n"
+		       "  Examples:\n"
+		       "    msysctl init empty.msys\n");
+	}
+	if (!cmd || strcmp(cmd, "env") == 0) {
+		printf("msysctl env <archive.msys>\n"
+		       "  Extract archive to a temp dir and launch a shell.\n"
+		       "  Changes are discarded on exit.\n"
+		       "  Examples:\n"
+		       "    msysctl env sysroot.msys\n");
+	}
+	if (!cmd) {
+		printf("\nGlobal options:\n"
+		       "  --overlay a.msys,b.msys   Layer multiple archives\n"
+		       "  --help [<cmd>]             Show this help, or help for a command\n"
+		       "\nHistory commands:\n"
+		       "  hist add <archive> <path> [msg]     Save a version\n"
+		       "  hist list <archive> [path]          List versions\n"
+		       "  hist cat <archive> <path> <rev>     Show a saved version\n"
+		       "  hist diff <archive> <path> <r1> <r2> Diff two versions\n"
+		       "\nTips:\n"
+		       "  - Use `msysctl --help <cmd>` for details on a specific command\n"
+		       "  - Archive paths can be .msys files or overlay expressions\n"
+		       "  - For fzf interactive browsing: msys-browse.sh <archive>\n");
+	}
+}
+
+static void usage(void)
+{
+	cmd_usage(NULL);
 	exit(1);
 }
 
@@ -212,7 +361,7 @@ static const char *hist_dir(const char *archive) {
 
 static int cmd_hist_add(const char *archive, const char *path, const char *msg) {
 	struct msys *m = msys_open(archive);
-	if (!m) die(archive);
+	if (!m) { fprintf(stderr, "msysctl: cannot open '%s': %s\n", archive, msys_strerror(errno)); return -1; }
 
 	void *data; size_t dsize;
 	if (msys_load(m, path, &data, &dsize) < 0) { perror("load"); msys_close(m); return -1; }
@@ -364,7 +513,7 @@ struct archive {
 	struct msys_overlay *overlay;
 };
 
-/* ── overlay dispatch ── (same as before) */
+/* ── overlay dispatch (with improved error diagnostics) ── */
 static struct archive *open_archive(const char *arg, const char *overlay_arg) {
 	struct archive *a = calloc(1, sizeof(*a));
 	if (!a) { errno = ENOMEM; return NULL; }
@@ -372,16 +521,23 @@ static struct archive *open_archive(const char *arg, const char *overlay_arg) {
 		int count = 1;
 		for (const char *p = overlay_arg; *p; p++) if (*p == ',') count++;
 		const char **paths = malloc((size_t)count * sizeof(char *));
-		if (!paths) { free(a); return NULL; }
+		if (!paths) { free(a); errno = ENOMEM; return NULL; }
 		char *copy = strdup(overlay_arg), *save = copy, *tok; int i = 0;
 		while ((tok = strtok_r(save, ",", &save))) paths[i++] = tok;
 		a->overlay = msys_overlay_open(paths, i);
 		free(copy); free(paths);
-		if (!a->overlay) { free(a); return NULL; }
+		if (!a->overlay) {
+			fprintf(stderr, "msysctl: overlay open failed: %s\n",
+			        msys_strerror(errno));
+			free(a); return NULL;
+		}
 		a->is_overlay = 1;
 	} else {
 		a->single = msys_open(arg);
-		if (!a->single) { free(a); return NULL; }
+		if (!a->single) {
+			fprintf(stderr, "msysctl: cannot open '%s': %s\n", arg, strerror(errno));
+			free(a); return NULL;
+		}
 		a->is_overlay = 0;
 	}
 	return a;
@@ -475,6 +631,12 @@ static int cmd_info(struct archive *a);
 int main(int argc, char *argv[]) {
 	if (argc < 2) usage();
 
+	/* --help [cmd]: print detailed help for one command or all */
+	if (strcmp(argv[1], "--help") == 0) {
+		cmd_usage(argc > 2 ? argv[2] : NULL);
+		return 0;
+	}
+
 	/* hist subcommand */
 	if (strcmp(argv[1], "hist") == 0) {
 		if (argc < 4) { fprintf(stderr, "Usage: msysctl hist <add|list|cat|diff> <archive> [args...]\n"); return 1; }
@@ -547,7 +709,7 @@ int main(int argc, char *argv[]) {
 		const char *arch = argv[2];
 		/* Open and extract to temp dir */
 		struct msys *m = msys_open(arch);
-		if (!m) { perror(arch); return 1; }
+		if (!m) { fprintf(stderr, "msysctl: cannot open '%s': %s\n", arch, msys_strerror(errno)); return 1; }
 		char tmpdir[256];
 		snprintf(tmpdir, sizeof(tmpdir), "/tmp/msys-env-XXXXXX");
 		if (!mkdtemp(tmpdir)) { perror("mkdtemp"); msys_close(m); return 1; }
@@ -587,7 +749,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	struct archive *a = open_archive(archive, overlay_arg);
-	if (!a) die(overlay_arg ? overlay_arg : archive);
+	if (!a) exit(1);
 
 	int ret = 0;
 	if (strcmp(cmd, "cat") == 0) {
@@ -922,7 +1084,13 @@ int main(int argc, char *argv[]) {
 	}
 	else { fprintf(stderr, "Unknown: %s\n", cmd); usage(); }
 
-	if (ret < 0) perror(cmd);
+	if (ret < 0) {
+		const char *detail = msys_strerror(errno);
+		if (detail && *detail)
+			fprintf(stderr, "msysctl: %s: %s\n", cmd, detail);
+		else
+			perror(cmd);
+	}
 	close_archive(a);
 	return ret < 0 ? 1 : 0;
 }

@@ -4,6 +4,7 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -67,6 +68,23 @@ uint32_t msys_fnv1a(const unsigned char *name, size_t len)
 static inline uint32_t msys_index_count(struct msys *m);
 static inline uint64_t msys_index_offset(struct msys *m);
 
+/* Error detail retrieval for public API */
+static __thread char msys_error_detail[256];
+
+const char *msys_strerror(int err)
+{
+	(void)err;
+	return msys_error_detail;
+}
+
+static void msys_seterr(const char *fmt, ...)
+{
+	va_list ap;
+	va_start(ap, fmt);
+	vsnprintf(msys_error_detail, sizeof(msys_error_detail), fmt, ap);
+	va_end(ap);
+}
+
 /* ---- open / close ---- */
 
 struct msys *msys_open(const char *path)
@@ -76,30 +94,50 @@ struct msys *msys_open(const char *path)
 	void *base;
 	struct msys *m;
 
-	if (!path) { errno = EINVAL; return NULL; }
+	if (!path) {
+		errno = EINVAL;
+		msys_seterr("path is NULL");
+		return NULL;
+	}
 
 	fd = open(path, O_RDONLY);
-	if (fd < 0) return NULL;
+	if (fd < 0) {
+		/* open() already sets errno — don't duplicate the message */
+		return NULL;
+	}
 
-	if (fstat(fd, &st) < 0) { close(fd); return NULL; }
+	if (fstat(fd, &st) < 0) {
+		close(fd); return NULL;
+	}
 	if (st.st_size < (off_t)sizeof(struct msys_header)) {
-		close(fd); errno = EINVAL; return NULL;
+		close(fd);
+		errno = EINVAL;
+		msys_seterr("file too small (%lld bytes) for .msys archive",
+		            (long long)st.st_size);
+		return NULL;
 	}
 
 	base = mmap(NULL, (size_t)st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
 	close(fd);
-	if (base == MAP_FAILED) return NULL;
+	if (base == MAP_FAILED) {
+		msys_seterr("mmap of '%s' failed: %s", path, strerror(errno));
+		return NULL;
+	}
 
 	/* Validate magic */
 	if (memcmp(base, MSYS_MAGIC, MSYS_MAGIC_LEN) != 0 &&
 	    memcmp(base, MSYS_MAGIC_V2, MSYS_MAGIC_LEN) != 0) {
 		munmap(base, (size_t)st.st_size);
 		errno = EINVAL;
+		msys_seterr("invalid magic — not a .msys archive");
 		return NULL;
 	}
 
 	m = calloc(1, sizeof(*m));
-	if (!m) { munmap(base, (size_t)st.st_size); return NULL; }
+	if (!m) {
+		msys_seterr("out of memory");
+		munmap(base, (size_t)st.st_size); return NULL;
+	}
 
 	m->base  = base;
 	m->size  = (size_t)st.st_size;
@@ -111,11 +149,11 @@ struct msys *msys_open(const char *path)
 	} else if (memcmp(base, MSYS_MAGIC_V2, MSYS_MAGIC_LEN) == 0) {
 		m->format_version = MSYS_FORMAT_V2;
 		m->hdr_v2 = (struct msys_header_v2 *)base;
-		/* v2 code path — handled below */
 	} else {
 		munmap(base, (size_t)st.st_size);
 		free(m);
 		errno = EINVAL;
+		msys_seterr("'%s': unrecognized format version", path);
 		return NULL;
 	}
 
@@ -131,12 +169,17 @@ struct msys *msys_open(const char *path)
 	}
 
 	/* Validate index offset fits within the mapped region. */
-	if ((m->format_version == MSYS_FORMAT_V1 && index_off < sizeof(struct msys_header)) ||
-	    (m->format_version == MSYS_FORMAT_V2 && index_off < sizeof(struct msys_header_v2)) ||
-	    index_off >= m->size) {
-		munmap(base, m->size); free(m);
-		errno = EINVAL;
-		return NULL;
+	{
+		size_t msize = m->size;
+		if ((m->format_version == MSYS_FORMAT_V1 && index_off < sizeof(struct msys_header)) ||
+		    (m->format_version == MSYS_FORMAT_V2 && index_off < sizeof(struct msys_header_v2)) ||
+		    index_off >= msize) {
+			munmap(base, msize); free(m);
+			errno = EINVAL;
+msys_seterr("index_offset %llu is out of range (file size %zu)",
+		            (unsigned long long)index_off, msize);
+			return NULL;
+		}
 	}
 
 	if (m->format_version == MSYS_FORMAT_V1)
@@ -148,45 +191,78 @@ struct msys *msys_open(const char *path)
 	if (count > 0) {
 		m->entries = calloc(count, sizeof(unsigned char *));
 		if (!m->entries) {
-			munmap(base, m->size); free(m);
+			size_t msize = m->size;
+			msys_seterr("out of memory allocating %u entry pointers", count);
+			munmap(base, msize); free(m);
 			return NULL;
 		}
 		unsigned char *p = (m->format_version == MSYS_FORMAT_V1)
 			? (unsigned char *)m->index
 			: (unsigned char *)m->index_v2;
 		uint64_t avail = m->size - index_off;
+		size_t msize = m->size;
+		uint32_t hash_prev = 0;
+		int hash_order_ok = 1;
+
+		/* Macro to clean up and return on error — captures msize for use after free */
+#define MSYS_OPEN_FAIL(emsg) do { \
+			munmap(base, msize); \
+			if (m->entries) { free(m->entries); m->entries = NULL; } \
+			free(m); \
+			errno = EINVAL; \
+			msys_seterr("'%s': " emsg " (entry %u)", path, i); \
+			return NULL; \
+		} while(0)
+#define MSYS_OPEN_FAIL_IO(emsg, doff_, dsize_) do { \
+			munmap(base, msize); \
+			if (m->entries) { free(m->entries); m->entries = NULL; } \
+			free(m); \
+			errno = EIO; \
+			msys_seterr("'%s': " emsg " (entry %u, offset %llu, size %u)", \
+			            path, i, (unsigned long long)(doff_), (dsize_)); \
+			return NULL; \
+		} while(0)
+
 		for (uint32_t i = 0; i < count; i++) {
 			m->entries[i] = p;
 			if (m->format_version == MSYS_FORMAT_V1) {
-				/* v1: 16 + name_len (uint16 at offset 14) */
-				if (avail < 16) {
-					munmap(base, m->size); free(m->entries); free(m);
-					errno = EINVAL; return NULL;
-				}
+				if (avail < 16) MSYS_OPEN_FAIL("truncated index");
+				uint32_t eh = read32(p);
+				if (i > 0 && eh < hash_prev) hash_order_ok = 0;
+				hash_prev = eh;
 				uint16_t nlen = (uint16_t)p[14] | ((uint16_t)p[15] << 8);
 				uint64_t ent = 16 + (uint64_t)nlen;
-				if (avail < ent) {
-					munmap(base, m->size); free(m->entries); free(m);
-					errno = EINVAL; return NULL;
-				}
+				uint64_t doff = read48(p + 4);
+				uint32_t dsize = read32(p + 10);
+				if (doff + dsize > msize)
+					MSYS_OPEN_FAIL_IO("data exceeds file size", doff, dsize);
+				if (avail < ent) MSYS_OPEN_FAIL("entry overruns available space");
 				p += ent;
 				avail -= ent;
 			} else {
-				/* v2: 32 + name_len (uint8 at offset 30) + optional 32 SHA-256 */
-				if (avail < 32) {
-					munmap(base, m->size); free(m->entries); free(m);
-					errno = EINVAL; return NULL;
-				}
-				uint8_t nlen = p[30]; /* uint8 name_len */
-				uint8_t chp  = p[31]; /* content_hash_present */
+				if (avail < 32) MSYS_OPEN_FAIL("truncated v2 index");
+				uint32_t eh = read32(p);
+				if (i > 0 && eh < hash_prev) hash_order_ok = 0;
+				hash_prev = eh;
+				uint8_t nlen = p[30];
+				uint8_t chp  = p[31];
 				uint64_t ent = 32 + (uint64_t)nlen + (chp ? 32ULL : 0);
-				if (avail < ent) {
-					munmap(base, m->size); free(m->entries); free(m);
-					errno = EINVAL; return NULL;
-				}
+				uint64_t doff = read48(p + 4);
+				uint32_t dsize = read32(p + 10);
+				if (doff + dsize > msize)
+					MSYS_OPEN_FAIL_IO("v2 data exceeds file size", doff, dsize);
+				if (avail < ent) MSYS_OPEN_FAIL("v2 entry overruns available space");
 				p += ent;
 				avail -= ent;
 			}
+		}
+#undef MSYS_OPEN_FAIL
+#undef MSYS_OPEN_FAIL_IO
+		if (!hash_order_ok) {
+			munmap(base, msize); free(m->entries); free(m);
+			errno = EINVAL;
+			msys_seterr("'%s': index entries not sorted by hash (corrupt archive)", path);
+			return NULL;
 		}
 	}
 

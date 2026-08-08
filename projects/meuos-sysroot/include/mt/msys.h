@@ -119,9 +119,16 @@ struct msys {
 	struct msys_chunk *chunks; /* private: allocated buffers (freed on close) */
 };
 
+/* Get a human-readable error description for the last libmsys error.
+ * This returns a thread-local string describing what went wrong, useful
+ * for producing friendly error messages in CLI tools.
+ *   err: the errno value from the failed call (may be used for categorization)
+ *   Returns a pointer to a thread-local string (valid until next libmsys call). */
+const char *msys_strerror(int err);
+
 /* Open a .msys file for reading.
  *   path: path to .msys file
- *   Returns a handle, or NULL on error (errno set). */
+ *   Returns a handle, or NULL on error (errno set, msys_strerror has details). */
 struct msys *msys_open(const char *path);
 
 /* Look up a name in the index by binary search.
