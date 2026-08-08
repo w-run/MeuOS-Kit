@@ -84,6 +84,12 @@ int arch_is_cross(mbox_arch_t arch) {
 
 /* ── QEMU binary locator ───────────────────────────────────────────────── */
 
+/* Search order for QEMU user-mode binary:
+ * 1. MEUOS_ENV/qemu/<name>
+ * 2. PATH
+ * 3. /usr/libexec/qemu/<name> (Fedora/RHEL)
+ * 4. /usr/lib/qemu/<name> (Debian/Ubuntu)
+ */
 const char *qemu_find(mbox_arch_t arch) {
     const char *name = arch_to_qemu_name(arch);
     if (!name) return NULL;
@@ -92,9 +98,11 @@ const char *qemu_find(mbox_arch_t arch) {
     const char *env_qemu_dir = getenv("MEUOS_ENV");
     if (!env_qemu_dir) env_qemu_dir = "/workspace/MeuOS-Kit/env";
 
+    /* 1. MEUOS_ENV/qemu/ */
     snprintf(path, sizeof(path), "%s/qemu/%s", env_qemu_dir, name);
     if (access(path, X_OK) == 0) return path;
 
+    /* 2. PATH */
     const char *syspath = getenv("PATH");
     if (!syspath) syspath = "/usr/local/bin:/usr/bin:/bin";
 
@@ -107,7 +115,62 @@ const char *qemu_find(mbox_arch_t arch) {
         if (access(path, X_OK) == 0) return path;
     }
 
+    /* 3. /usr/libexec/qemu/ (Fedora/RHEL style) */
+    snprintf(path, sizeof(path), "/usr/libexec/qemu/%s", name);
+    if (access(path, X_OK) == 0) return path;
+
+    /* 4. /usr/lib/qemu/ (Debian/Ubuntu style) */
+    snprintf(path, sizeof(path), "/usr/lib/qemu/%s", name);
+    if (access(path, X_OK) == 0) return path;
+
     return NULL;
+}
+
+/* Check availability of all QEMU binaries and return a bitmask.
+ * Bit i corresponds to arch_to_qemu_name() + 1 being available.
+ * Written to env/qemu/ QEMU_LIST for diagnostic use. */
+unsigned int qemu_available_mask(void) {
+    static unsigned int cached_mask = 0;
+    static int cached = 0;
+    if (cached) return cached_mask;
+
+    const mbox_arch_t arches[] = {
+        MBOX_ARCH_X86_64, MBOX_ARCH_AARCH64, MBOX_ARCH_RISCV64,
+        MBOX_ARCH_LOONG64, MBOX_ARCH_I386, MBOX_ARCH_ARM
+    };
+    unsigned int mask = 0;
+    for (size_t i = 0; i < sizeof(arches)/sizeof(arches[0]); i++) {
+        if (qemu_find(arches[i]))
+            mask |= (1u << i);
+    }
+    cached_mask = mask;
+    cached = 1;
+    return mask;
+}
+
+/* Returns human-readable description of QEMU version, or "not found". */
+const char *qemu_version_info(mbox_arch_t arch) {
+    static char info[256];
+    const char *path = qemu_find(arch);
+    if (!path) {
+        snprintf(info, sizeof(info), "%s: not found", arch_to_qemu_name(arch));
+        return info;
+    }
+
+    /* Try reading --version output via popen */
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "%s --version 2>/dev/null | head -1", path);
+    FILE *fp = popen(cmd, "r");
+    if (!fp) {
+        snprintf(info, sizeof(info), "%s: found", path);
+        return info;
+    }
+    if (fgets(info, sizeof(info) - 1, fp))
+        info[strcspn(info, "\n")] = '\0';
+    else
+        snprintf(info, sizeof(info), "%s", path);
+    pclose(fp);
+    return info;
 }
 
 /* ── mount + chroot helper (same-arch namespace isolation) ─────────────── */

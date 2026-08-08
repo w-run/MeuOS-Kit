@@ -30,6 +30,12 @@ int         arch_is_cross(mbox_arch_t arch);
 /* Locate qemu-user binary for a given architecture */
 const char *qemu_find(mbox_arch_t arch);
 
+/* Return bitmask of available QEMU binaries (one bit per arch). */
+unsigned int qemu_available_mask(void);
+
+/* Return human-readable QEMU version info string. */
+const char *qemu_version_info(mbox_arch_t arch);
+
 /*
  * Create namespace, chroot, and exec command.
  * Returns child exit code, or -1 on setup failure.
