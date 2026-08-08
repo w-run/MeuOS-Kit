@@ -6,6 +6,13 @@
  * cdecl frame: pushl %ebp; movl %esp, %ebp; subl $N, %esp.
  * Slots addressed as off(%ebp) with off = v->slot - pushbytes.
  *
+ * Frame layout (ebp-relative, descending):
+ *   [callee-saves]   pushl after mov %esp,%ebp (g_callee_save_after B)
+ *   [slots]          register-allocated temporaries
+ *   [fp scratch]     g_fp_scratch — 8B, IEEE bit pattern for FP constants
+ *   [i64 scratch]    g_i64_scratch — 16B, 2× 8B half-pairs for i64 ops
+ *   [alloca]         dynamic/variable-length arrays
+ *
  * Division: idivl/divl use edx:eax as a register pair — the emitter
  * saves/restores eax/edx around division.  Remainder is in edx after
  * idivl/divl.
@@ -187,11 +194,12 @@ scratch_to_dst(FILE *f, MVal *d, const char *rn)
 
 static int g_i64_scratch;  /* %ebp offset of scratch pair 0 (already based) */
 
-/* FP constant scratch slot (8 bytes, below the i64 scratch pair), used so
- * that FP constant loading does NOT corrupt the alloca stack area by
- * using pushl/movss/addl which overwrites the live alloca reservation. */
+/* FP constant scratch slot (8 bytes, below the i64 scratch pair).  FP
+ * constants are loaded by writing the IEEE bit pattern into this slot
+ * and then reading it via movss/movsd into %xmm0/%xmm1.  This avoids
+ * pushl/movss/addl which would corrupt the live alloca reservation. */
 #define FP_SCRATCH_BYTES 8
-static int g_fp_scratch;
+static int g_fp_scratch;   /* %ebp offset of the FP scratch slot (already based) */
 
 /* Frame offset of a slot-resident value's low half. */
 static int
@@ -409,11 +417,10 @@ fload_scratch(FILE *f, MVal *v)
 				if (bits == 0)
 					fputs("\txorps\t%xmm0, %xmm0\n", f);
 				else {
-					/* load constant through the dedicated FP scratch slot.
-					 * Before the fix, this used pushl/movss/addl which
-					 * corrupts the alloca reservation when alloca has
-					 * already been called (struct.x=1.0 bug). */
-fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
+					/* load f32 constant through the dedicated g_fp_scratch
+					 * slot instead of pushl/movss/addl which corrupts the
+					 * alloca reservation (struct.x=1.0 bug). */
+					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
 				        bits, g_fp_scratch);
 					fprintf(f, "\tmovss\t%d(%%ebp), %%xmm0\n", g_fp_scratch);
 				}
@@ -550,18 +557,19 @@ emit_setccr_fp(FILE *f, MInsM *in)
 				if (is32) {
 					uint32_t bits;
 					memcpy(&bits, &c->u.s, 4);
-					fprintf(f, "\tpushl\t$0x%x\n", bits);
-					fputs("\tmovss\t(%esp), %xmm1\n", f);
-					fputs("\taddl\t$4, %esp\n", f);
+					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
+					        bits, g_fp_scratch);
+					fprintf(f, "\tmovss\t%d(%%ebp), %%xmm1\n",
+					        g_fp_scratch);
 				} else {
 					uint64_t bits;
 					memcpy(&bits, &c->u.d, 8);
-					fprintf(f, "\tpushl\t$0x%x\n",
-					        (uint32_t)(bits >> 32));
-					fprintf(f, "\tpushl\t$0x%x\n",
-					        (uint32_t)bits);
-					fputs("\tmovsd\t(%esp), %xmm1\n", f);
-					fputs("\taddl\t$8, %esp\n", f);
+					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
+					        (uint32_t)bits, g_fp_scratch);
+					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
+					        (uint32_t)(bits >> 32), g_fp_scratch + 4);
+					fprintf(f, "\tmovsd\t%d(%%ebp), %%xmm1\n",
+					        g_fp_scratch);
 				}
 			}
 		} else if (b->kind == MV_REG || (b->kind == MV_TEMP && b->reg >= 0)) {
@@ -1242,17 +1250,16 @@ emit_ins(FILE *f, MInsM *in)
 		}
 		fload_scratch(f, s0);
 		if (op == MMOP_FNEG) {
-			/* XOR sign bit */
+			/* XOR sign bit — load sign mask through g_fp_scratch
+			 * to avoid corrupting the alloca stack area with pushl. */
 			if (is32) {
-				fputs("\tpushl\t$0x80000000\n", f);
-				fputs("\tmovss\t(%esp), %xmm1\n", f);
-				fputs("\taddl\t$4, %esp\n", f);
+				fprintf(f, "\tmovl\t$0x80000000, %d(%%ebp)\n", g_fp_scratch);
+				fprintf(f, "\tmovss\t%d(%%ebp), %%xmm1\n", g_fp_scratch);
 				fputs("\txorps\t%xmm1, %xmm0\n", f);
 			} else {
-				fputs("\tpushl\t$0x80000000\n", f);
-				fputs("\tpushl\t$0x00000000\n", f);
-				fputs("\tmovsd\t(%esp), %xmm1\n", f);
-				fputs("\taddl\t$8, %esp\n", f);
+				fprintf(f, "\tmovl\t$0x00000000, %d(%%ebp)\n", g_fp_scratch);
+				fprintf(f, "\tmovl\t$0x80000000, %d(%%ebp)\n", g_fp_scratch + 4);
+				fprintf(f, "\tmovsd\t%d(%%ebp), %%xmm1\n", g_fp_scratch);
 				fputs("\txorpd\t%xmm1, %xmm0\n", f);
 			}
 		} else if (op == MMOP_FSQRT) {
@@ -1266,18 +1273,19 @@ emit_ins(FILE *f, MInsM *in)
 						if (is32) {
 							uint32_t bits;
 							memcpy(&bits, &c->u.s, 4);
-							fprintf(f, "\tpushl\t$0x%x\n", bits);
-							fputs("\tmovss\t(%esp), %xmm1\n", f);
-							fputs("\taddl\t$4, %esp\n", f);
+							fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
+							        bits, g_fp_scratch);
+							fprintf(f, "\tmovss\t%d(%%ebp), %%xmm1\n",
+							        g_fp_scratch);
 						} else {
 							uint64_t bits;
 							memcpy(&bits, &c->u.d, 8);
-							fprintf(f, "\tpushl\t$0x%x\n",
-							        (uint32_t)(bits >> 32));
-							fprintf(f, "\tpushl\t$0x%x\n",
-							        (uint32_t)bits);
-							fputs("\tmovsd\t(%esp), %xmm1\n", f);
-							fputs("\taddl\t$8, %esp\n", f);
+							fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
+							        (uint32_t)bits, g_fp_scratch);
+							fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
+							        (uint32_t)(bits >> 32), g_fp_scratch + 4);
+							fprintf(f, "\tmovsd\t%d(%%ebp), %%xmm1\n",
+							        g_fp_scratch);
 						}
 					}
 				} else if (s1->kind == MV_REG ||
@@ -1810,12 +1818,18 @@ mfnm_emit_i386(MFnM *fm, FILE *f)
 			}
 		}
 
-	/* Reserve the i64 half-pair scratch below the register-allocated
-	 * slots (see i64_base): normalising a constant or register-resident
-	 * i64 operand needs a real lo/hi pair to read back from.
-	 * Below the i64 scratch sits the FP constant scratch (8 bytes)
-	 * so float constant loads do NOT corrupt the alloca area via
-	 * pushl/movss/addl (struct.x=1.0 bug). */
+	/* Frame layout (top to bottom, lower %ebp addresses):
+	 *
+	 *   [callee-saves]        — pushl after mov %esp,%ebp
+	 *   [slots]               — register-allocated temps (fm->slot bytes)
+	 *   [fp scratch 8B]       — g_fp_scratch: IEEE bit pattern for FP consts
+	 *   [i64 scratch 16B]     — g_i64_scratch: 2× 8-byte half-pairs
+	 *   [alloca]              — g_alloca_cur: local variable-length arrays
+	 *
+	 * Both scratch areas sit BELOW the real slot area so they never
+	 * interfere with register-allocated values.  The FP scratch avoids
+	 * pushl/movss/addl which would corrupt the live alloca reservation
+	 * (struct.x = 1.0 bug). */
 	g_i64_scratch = -(fm->slot + pushbytes + FP_SCRATCH_BYTES + I64_SCRATCH_BYTES);
 	g_fp_scratch = g_i64_scratch + I64_SCRATCH_BYTES;
 
