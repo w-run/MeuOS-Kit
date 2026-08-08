@@ -1,0 +1,179 @@
+#!/bin/sh
+# meuos-sandbox — namespace/QEMU/chroot sandbox for MeuOS cross-arch development
+#
+# "chroot 的简单 + QEMU 的跨架构 + Agent API"
+#
+# Usage:
+#   meuos-sandbox --arch=x86_64 --root=<path> [command...]
+#   meuos-sandbox --arch=aarch64 --root=<path> [command...]
+#
+# Without command: starts /bin/sh interactively inside the sandbox.
+#
+# Phase 1 (current):
+#   - QEMU user-mode execution with -L for transparent sysroot
+#   - Native execution when --arch matches host (skips QEMU)
+#   - binfmt_misc registration (best-effort, needs root write)
+#   - .msys archive mounting (via msysctl extract)
+#
+# Phase 2 (future):
+#   - unshare(CLONE_NEWNS) + chroot for true filesystem isolation
+#   - Agent API (Unix socket for remote execution/debug)
+#
+# Why QEMU user-mode instead of chroot:
+#   - Works without root/namespace privileges
+#   - Same interface for same-arch and cross-arch
+#   - -L flag acts as lightweight chroot (library path isolation)
+#   - No need to register binfmt_misc for explicit invocation
+
+set -eu
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+QEMU_DIR="$SCRIPT_DIR/qemu"
+MSYSCTL_DIR="$SCRIPT_DIR/../projects/meuos-sysroot/src/msysctl"
+
+# ── defaults ──────────────────────────────────────────────────────────────
+ARCH=x86_64
+ROOT="${MEUOS_SYSROOT:-}"
+API_SOCK=""
+FORCE_QEMU=0
+
+# ── arg parsing ───────────────────────────────────────────────────────────
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --arch=*)       ARCH="${1#--arch=}" ;;
+        --root=*)       ROOT="${1#--root=}" ;;
+        --api-socket=*) API_SOCK="${1#--api-socket=}" ;;
+        --force-qemu)   FORCE_QEMU=1 ;;
+        --arch)         ARCH="$2"; shift ;;
+        --root)         ROOT="$2"; shift ;;
+        --api-socket)   API_SOCK="$2"; shift ;;
+        --help|-h)
+            echo "Usage: meuos-sandbox --arch=<arch> --root=<path> [command...]"
+            echo ""
+            echo "  --arch=<arch>     Target architecture (x86_64|aarch64|riscv64|loongarch64|i386|arm)"
+            echo "  --root=<path>     Root filesystem (directory or .msys archive)"
+            echo "  --api-socket=<s>  Unix socket for Agent API (future)"
+            echo "  --force-qemu      Use QEMU even for host-native architecture"
+            echo "  --help, -h        Show this help"
+            echo ""
+            echo "Without command: starts /bin/sh interactively."
+            echo "Environment: MEUOS_SYSROOT as default --root."
+            exit 0
+            ;;
+        --)               shift; break ;;
+        -*)               echo "meuos-sandbox: unknown option: $1" >&2; exit 1 ;;
+        *)                break ;;
+    esac
+    shift
+done
+
+# ── resolve root ──────────────────────────────────────────────────────────
+[ -n "$ROOT" ] || { echo "meuos-sandbox: --root is required (or set MEUOS_SYSROOT)" >&2; exit 1; }
+
+# If given a .msys file, extract via msysctl
+MSYS_CLEANUP=""
+if [ -f "$ROOT" ] && case "$ROOT" in *.msys) true;; *) false;; esac; then
+    MSYS_MNT="$(mktemp -d /tmp/meuos-sandbox-msys-XXXXXX)"
+    MSYS_CLEANUP="$MSYS_MNT"
+    # Locate msysctl
+    MSYSCTL=""
+    for d in "$MSYSCTL_DIR/msysctl" "/usr/local/bin/msysctl" "/usr/bin/msysctl"; do
+        if [ -x "$d" ]; then MSYSCTL="$d"; break; fi
+    done
+    if [ -n "$MSYSCTL" ]; then
+        "$MSYSCTL" extract "$ROOT" "$MSYS_MNT" 2>/dev/null || {
+            echo "meuos-sandbox: msysctl extract failed for $ROOT" >&2
+            rm -rf "$MSYS_MNT"
+            exit 1
+        }
+        ROOT="$MSYS_MNT"
+    else
+        echo "meuos-sandbox: msysctl not found, cannot mount .msys archive" >&2
+        rm -rf "$MSYS_MNT"
+        exit 1
+    fi
+fi
+
+# If ROOT is a multi-arch sysroot top (has arch subdirs + each has bin/),
+# append /<arch> to get the arch-specific root.
+if [ -d "$ROOT/$ARCH" ] && [ -d "$ROOT/$ARCH/bin" ]; then
+    ROOT="$ROOT/$ARCH"
+fi
+
+[ -d "$ROOT" ] || { echo "meuos-sandbox: root not found: $ROOT" >&2; exit 1; }
+
+# ── detect host arch ──────────────────────────────────────────────────────
+HOST_ARCH="$(uname -m)"
+case "$HOST_ARCH" in
+    x86_64)                         HOST_ARCH=x86_64 ;;
+    aarch64|arm64)                  HOST_ARCH=aarch64 ;;
+    riscv64)                        HOST_ARCH=riscv64 ;;
+    loongarch64|loong64)            HOST_ARCH=loongarch64 ;;
+    i386|i486|i586|i686)            HOST_ARCH=i386 ;;
+    armv7l|armv8l|armhf)            HOST_ARCH=arm ;;
+esac
+
+# ── locate QEMU for non-native arch ───────────────────────────────────────
+QEMU_BIN=""
+if [ "$ARCH" != "$HOST_ARCH" ] || [ "$FORCE_QEMU" -eq 1 ]; then
+    _name=""
+    case "$ARCH" in
+        aarch64)     _name="qemu-aarch64-static" ;;
+        riscv64)     _name="qemu-riscv64-static" ;;
+        loongarch64) _name="qemu-loongarch64-static" ;;
+        i386)        _name="qemu-i386-static" ;;
+        arm)         _name="qemu-arm-static" ;;
+        x86_64)      [ "$FORCE_QEMU" -eq 1 ] && _name="qemu-x86_64-static" ;;
+    esac
+    if [ -n "$_name" ]; then
+        for _d in "$QEMU_DIR" /usr/local/bin /usr/bin; do
+            if [ -x "$_d/$_name" ]; then
+                QEMU_BIN="$_d/$_name"
+                break
+            fi
+        done
+        if [ -z "$QEMU_BIN" ]; then
+            echo "meuos-sandbox: QEMU user-mode binary for $ARCH not found (looked: $_name in $QEMU_DIR)" >&2
+            exit 1
+        fi
+    fi
+fi
+
+# ── prepare command ───────────────────────────────────────────────────────
+if [ $# -eq 0 ]; then
+    set -- /bin/sh
+fi
+
+CMD_BIN="$1"
+shift
+
+# Ensure absolute path within sandbox root
+case "$CMD_BIN" in
+    /*) ;;
+    *) CMD_BIN="/$CMD_BIN" ;;
+esac
+
+# ── execute ───────────────────────────────────────────────────────────────
+export QEMU_LD_PREFIX="$ROOT"
+
+cleanup() {
+    [ -n "$MSYS_CLEANUP" ] && rm -rf "$MSYS_CLEANUP"
+}
+trap cleanup EXIT HUP INT TERM
+
+if [ -n "$QEMU_BIN" ]; then
+    # Cross-arch or forced-QEMU: run under QEMU user-mode with -L
+    exec "$QEMU_BIN" \
+        -0 "$(basename "$CMD_BIN")" \
+        -L "$ROOT" \
+        "$ROOT$CMD_BIN" "$@"
+else
+    # Same-arch native: if root is writable, try chroot; else direct exec
+    # Note: in Phase 2 this becomes unshare + mount --bind + chroot
+    if [ "$(id -u)" -eq 0 ]; then
+        exec chroot "$ROOT" "$CMD_BIN" "$@"
+    else
+        # Non-root: direct exec with QEMU_LD_PREFIX for library resolution
+        exec "$ROOT$CMD_BIN" "$@"
+    fi
+fi
