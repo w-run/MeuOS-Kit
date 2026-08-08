@@ -24,6 +24,8 @@
 /* Internal module state (call-before-definition forward declarations). */
 static void emit_base_ctors_for(struct func *f, struct type *classt,
                                 struct expr *thisp);
+static void emit_virtual_base_ctors_for(struct func *f, struct type *classt,
+                                        struct expr *thisp);
 static void emit_base_dtors_for(struct func *f, struct type *classt,
                                 struct expr *thisp);
 static bool has_base(struct type *t);
@@ -131,6 +133,10 @@ cpp_emit_default_ctor(struct func *f, struct decl *d)
 		bool any = false;
 		if (has_base(t)) {
 			emit_base_ctors_for(f, t, obj);
+			any = true;
+		}
+		if (t->u.structunion.has_virtual_base) {
+			emit_virtual_base_ctors_for(f, t, obj);
 			any = true;
 		}
 		if (t->u.structunion.poly) {
@@ -294,6 +300,57 @@ emit_base_ctors_for(struct func *f, struct type *classt, struct expr *thisp)
 	}
 }
 
+/* Emit constructors for every virtual base subobject of `classt`.
+ * Virtual bases are constructed by the most-derived class only;
+ * intermediate classes skip them (emit_base_ctors_for already filters
+ * m->is_virtual_base).  Each virtual base gets `Base_Base(&this + offset)`. */
+static void
+emit_virtual_base_ctors_for(struct func *f, struct type *classt,
+                            struct expr *thisp)
+{
+	extern struct scope filescope;
+	struct cpp_vbase *vb;
+
+	if (!classt || !classt->u.structunion.virtual_bases)
+		return;
+	for (vb = classt->u.structunion.virtual_bases; vb; vb = vb->next) {
+		struct type *bt = vb->type;
+		char mname[256];
+		struct decl *fd;
+		struct expr *fn, *call, *call_this;
+
+		if (!bt->u.structunion.tag)
+			continue;
+		/* build this + offset */
+		if (vb->offset) {
+			call_this = mkbinaryexpr(&tok.loc, TADD,
+			    exprconvert(thisp, &typeulong),
+			    mkconstexpr(&typeulong, vb->offset));
+			call_this->type = mkpointertype(bt, QUALNONE);
+		} else {
+			call_this = thisp;
+		}
+		if (!cpp_has_ctor(bt, bt->u.structunion.tag)) {
+			/* no user ctor: recurse into its (non-virtual) bases */
+			if (has_base(bt))
+				emit_base_ctors_for(f, bt, call_this);
+			continue;
+		}
+		snprintf(mname, sizeof mname, "%s_%s",
+		    bt->u.structunion.tag, bt->u.structunion.tag);
+		fd = scopegetdecl(bt->scope ? bt->scope : &filescope, mname, true);
+		if (!fd || fd->kind != DECLFUNC)
+			continue;
+		fn = mkexpr(EXPRIDENT, fd->type, NULL);
+		fn->u.ident.decl = fd;
+		fn = decay(fn);
+		call = mkexpr(EXPRCALL, &typevoid, fn);
+		call->u.call.args = call_this;
+		call->u.call.nargs = 1;
+		funcexpr(f, call);
+	}
+}
+
 /* Emit implicit base-class construction at the start of a derived-class
  * constructor: `class D : B { D() {...} }` first runs `B_B(&this)` for
  * each direct base with a user default constructor. */
@@ -303,6 +360,8 @@ void
 cpp_emit_base_ctor(struct func *f)
 {
 	emit_base_ctors_for(f, g_cpp_method.class_type, cpp_this_expr());
+	/* virtual bases: constructed by the most-derived class */
+	emit_virtual_base_ctors_for(f, g_cpp_method.class_type, cpp_this_expr());
 	cpp_emit_delegating_ctor(f);
 }
 
