@@ -192,6 +192,14 @@ mabi_selpar(MFnM *fm, MOut *o, MInsM *parms, int n, uint32_t *vafa)
 			mout_addr(o, MMOP_LOAD, MT_I64, dst,
 			          maddr(reg(fm, I386MREG_EBP), 0, 1, off), 0);
 			off += 8;
+		} else if (p->dtype == MT_F64) {
+			/* double param: 8 bytes on the cdecl stack.  A single
+			 * MMOP_LOAD (MT_F64) emits movsd into xmm0 then stores the
+			 * pair; the emitter keeps F64 values in a slot pair, so the
+			 * load must also advance the incoming-arg cursor by 8. */
+			mout_addr(o, MMOP_LOAD, MT_F64, dst,
+			          maddr(reg(fm, I386MREG_EBP), 0, 1, off), 0);
+			off += 8;
 		} else {
 			mout_addr(o, MMOP_LOAD, p->dtype, dst,
 			          maddr(reg(fm, I386MREG_EBP), 0, 1, off), 0);
@@ -215,14 +223,15 @@ mabi_selpar(MFnM *fm, MOut *o, MInsM *parms, int n, uint32_t *vafa)
 static void
 mabi_selcall(MFnM *fm, MOut *o, MInsM *args, int n, MInsM *call)
 {
-	/* Count stack bytes needed (cdecl: all args on stack; i32=4, i64=8,
-	 * aggregates = agg_stack_size(td->size)) */
+	/* Count stack bytes needed (cdecl: all args on stack; i32/f32=4,
+	 * i64/double=8, aggregates = agg_stack_size(td->size)) */
 	int stk = 0;
 	for (int i = 0; i < n; i++) {
 		if (args[i].td)
 			stk += agg_stack_size(args[i].td->size);
 		else
-			stk += args[i].dtype == MT_I64 ? 8 : 4;
+			stk += (args[i].dtype == MT_I64 || args[i].dtype == MT_F64)
+			           ? 8 : 4;
 		/* sret pointer: if call has aggregate return, add 4 bytes for
 		 * the hidden sret pointer */
 	}
@@ -290,6 +299,14 @@ mabi_selcall(MFnM *fm, MOut *o, MInsM *args, int n, MInsM *call)
 			 * value) via i64_base, so the caller pushes the real halves
 			 * rather than reading a possibly-unset src[0]->slot. */
 			mout_addr(o, MMOP_STORE, MT_I64, 0,
+			          maddr(reg(fm, I386MREG_ESP), 0, 1, soff),
+			          a->src[0]);
+		} else if (a->dtype == MT_F64) {
+			/* double: 8 bytes on the cdecl stack.  The MMOP_STORE's
+			 * emit_store emits movsd for an F64 destination, so a single
+			 * store at [esp+soff] pushes the full 8-byte value. */
+			soff -= 8;
+			mout_addr(o, MMOP_STORE, MT_F64, 0,
 			          maddr(reg(fm, I386MREG_ESP), 0, 1, soff),
 			          a->src[0]);
 		} else {
@@ -427,7 +444,10 @@ mabi_vaarg(MFnM *fm, MOut *o, MInsM *in)
 	MVal *ap = in->src[0];
 	MVal *dst = in->dst;
 	MType dt = in->dtype;
-	int slotsize = (dt == MT_I64) ? 8 : 4;
+	/* i386 cdecl: every stack argument occupies at least 4 bytes, and
+	 * 64-bit values (i64 and double) occupy 8.  The advance must use the
+	 * argument's true stack footprint, not the register width. */
+	int slotsize = (dt == MT_I64 || dt == MT_F64) ? 8 : 4;
 
 	/* Load the current va_list value (pointer to next arg) */
 	MVal *cur = tmp(fm, MT_PTR, "va");

@@ -778,11 +778,16 @@ emit_ins(FILE *f, MInsM *in)
 			fstore_scratch(f, d);
 			return;
 		}
-		if (in->dtype == MT_I64 || (s0 && s0->type == MT_I64)) {
+		if (in->dtype == MT_I64) {
 			/* i64 on i386: two 32-bit moves, normalised through a single
 			 * half-pair base so the source halves are read back from the
 			 * frame address they were actually written to (i64_base).
-			 * Move low 32 bits first, then high 32 bits at base+4. */
+			 * Move low 32 bits first, then high 32 bits at base+4.
+			 * Only the destination dtype selects this path: a 32-bit
+			 * destination with an i64-typed constant source (MIR stores
+			 * integer constants as i64) must truncate to the low word —
+			 * the source's type alone must not widen a 32-bit store into
+			 * an 8-byte write that clobbers the neighbouring slot. */
 			int sslot = i64_base(f, s0, 0);
 			int dbase = i64_dst_base(d);
 			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sslot);
