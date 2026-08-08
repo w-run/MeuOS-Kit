@@ -39,6 +39,8 @@ const char *targ_subarch(const char *triplet);
 const char *targ_abi(const char *triplet);
 
 /* host_toolchain.c */
+void mt_init(const char *mcc_binary_path);
+const char *resolve_arch_sysroot(const char *sysroot, const char *target_triple);
 char *sysrootpath(const char *root, const char *suffix);
 void run_host_cc(const char *asm_path, const char *output, bool compile_only,
                  bool verbose, struct array *libdirs, struct array *libs,

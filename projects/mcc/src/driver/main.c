@@ -183,6 +183,11 @@ mcc_main(int argc, char *argv[])
 	argv = arg_normalize(argc, argv);
 	argv0 = progname(argv[0], "mcc");
 
+	/* Initialize auto-discovery of MeuOS toolchain (mt/as, mt/ld) from
+	 * mcc's own binary path, so --specs=meuos works out of the box for
+	 * all target architectures without requiring MT_AS/MT_LD env vars. */
+	mt_init(argv[0]);
+
 	/* i18n 默认语言：LANG/LC_MESSAGES 以 zh* 开头则推断中文，否则英文。
 	 * --lang=en|zh 显式参数在后面解析时覆盖此推断。 */
 	{
@@ -672,6 +677,20 @@ mcc_main(int argc, char *argv[])
 	if (meuos_specs && !sysroot)
 		fprintf(stderr, "%s: --specs=meuos requires --sysroot or MEUOS_SYSROOT\n", argv0), exit(2);
 	driver_sysroot = sysroot; /* record effective sysroot for host toolchain */
+
+	/* Resolve arch-specific sysroot subdirectory (sysroot/<arch>/) when
+	 * the target is a cross-architecture and the top-level sysroot doesn't
+	 * have matching CRT objects there (it only has host-arch CRT/libs).
+	 * This lets --specs=meuos --target=loongarch64 work without requiring
+	 * the caller to set MEUOS_SYSROOT=$sysroot/<arch>. */
+	if (sysroot && target && !msys_is_sysroot(sysroot)) {
+		const char *arch_sysroot = resolve_arch_sysroot(sysroot, target);
+		if (arch_sysroot != sysroot) {
+			driver_sysroot = arch_sysroot;
+			sysroot = arch_sysroot;
+		}
+	}
+
 	/* MeuOS specs select the project CRT and libc, not a mixture with the
 	 * host C runtime.  The host compiler is still used only as assembler and
 	 * linker during bootstrap. */

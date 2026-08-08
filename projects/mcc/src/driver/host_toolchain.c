@@ -25,6 +25,10 @@
 /* Global target feature bitmask set by main.c from -march= parsing. */
 extern uint64_t g_target_features;
 
+/* Forward declarations needed by mt_init() and resolve_arch_sysroot().
+ * Both are defined later in this file. */
+static const char *mt_target_name(const char *target_triple);
+
 /* Derive a -march= value for mt/as from the compiler's resolved feature
  * bitmask, so the assembler enforces the same ISA level that mcc selected
  * (as-isa-gating integration).  Only x86_64 has ISA levels today. */
@@ -114,6 +118,43 @@ sysrootpath(const char *root, const char *suffix)
  * the sysroot that actually feeds -L/--sysroot to the linker. */
 extern const char *driver_sysroot;
 
+/* Resolve the effective sysroot for a given target triple.
+ *
+ * The MeuOS Kit sysroot layout supports two forms:
+ *   1. Top-level: $MEUOS_SYSROOT/usr/lib/  — host arch (default for native)
+ *   2. Arch-specific: $MEUOS_SYSROOT/<arch>/usr/lib/ — cross-compilation
+ *
+ * When (1) is used and the target arch's CRT lives in an arch-specific
+ * subdirectory, this function auto-resolves so the linker finds matching
+ * CRT and libc objects without requiring the caller to update MEUOS_SYSROOT.
+ * Returns a pointer to a static buffer (valid until next call) or the
+ * original pointer when no resolution is needed. */
+const char *
+resolve_arch_sysroot(const char *sysroot, const char *target_triple)
+{
+	static char buf[1024];
+	const char *arch_name;
+	char probe[1024];
+
+	if (!sysroot || !*sysroot || !target_triple || !*target_triple)
+		return sysroot;
+
+	arch_name = mt_target_name(target_triple);
+	if (!arch_name)
+		return sysroot;
+
+	/* Check if $sysroot/<arch>/usr/lib/crt1.o exists — that signals
+	 * a top-level Kit sysroot with per-arch subdirectories. */
+	snprintf(probe, sizeof(probe), "%s/%s/usr/lib/crt1.o", sysroot, arch_name);
+	if (access(probe, R_OK) == 0) {
+		snprintf(buf, sizeof(buf), "%s/%s", sysroot, arch_name);
+		return buf;
+	}
+
+	/* No arch-specific CRT found; return the path as-is. */
+	return sysroot;
+}
+
 /* Whether the active MeuOS sysroot provisions libgcc-meuos.a (libgcc-ABI soft
  * helpers: __divdi3/__udivdi3/__ctzdi2/...).  Old sysroots that predate the
  * archive skip the link flag so --specs=meuos still works there. */
@@ -160,13 +201,72 @@ asm_requires_atomic(const char *asm_path)
 	return false;
 }
 
-/* P3: mt integration.  MT_AS and MT_LD together select the MeuOS
- * toolchain handoff.  Either one alone is treated as not-configured so
- * that partially-set environments fall back to the host cc path. */
+/* Static buffers for auto-discovered MeuOS toolchain (mt/as, mt/ld)
+ * paths.  Populated by mt_init() from mcc's own binary location.
+ * Env vars MT_AS/MT_LD take precedence when both are set. */
+static char mt_as_auto[1024];
+static char mt_ld_auto[1024];
+
+/* Auto-discover mt/as and mt/ld relative to the mcc binary's own
+ * directory.  Called once from main.c after argv parsing.
+ * Env vars MT_AS/MT_LD are authoritative when both are set. */
+void
+mt_init(const char *mcc_binary_path)
+{
+	char real[4096];
+	char *slash;
+
+	if (getenv("MT_AS") && getenv("MT_LD"))
+		return;
+	if (!mcc_binary_path || !*mcc_binary_path)
+		return;
+
+	if (!realpath(mcc_binary_path, real))
+		return;
+	slash = strrchr(real, '/');
+	if (!slash)
+		return;
+	*slash = '\0';  /* real = directory containing mcc */
+
+	/* Kit layout: mcc in projects/mcc/, toolchain in
+	 * projects/meuos-toolchain/build/bin/{as,ld}. */
+	snprintf(mt_as_auto, sizeof(mt_as_auto),
+	         "%s/../meuos-toolchain/build/bin/as", real);
+	snprintf(mt_ld_auto, sizeof(mt_ld_auto),
+	         "%s/../meuos-toolchain/build/bin/ld", real);
+
+	if (access(mt_as_auto, X_OK) != 0 || access(mt_ld_auto, X_OK) != 0) {
+		mt_as_auto[0] = '\0';
+		mt_ld_auto[0] = '\0';
+	}
+}
+
+/* P3: mt integration.  MT_AS and MT_LD (env var or auto-discovered)
+ * together select the MeuOS toolchain handoff.  Either one alone is
+ * treated as not-configured so partially-set environments fall back
+ * to the host cc path. */
 static bool
 mt_mode_enabled(void)
 {
-	return getenv("MT_AS") != NULL && getenv("MT_LD") != NULL;
+	if (getenv("MT_AS") != NULL && getenv("MT_LD") != NULL)
+		return true;
+	return mt_as_auto[0] != '\0' && mt_ld_auto[0] != '\0';
+}
+
+/* Return the resolved mt/as path: env var wins, else auto-discovered. */
+static const char *
+mt_as_resolved(void)
+{
+	const char *e = getenv("MT_AS");
+	return e ? e : mt_as_auto;
+}
+
+/* Return the resolved mt/ld path: env var wins, else auto-discovered. */
+static const char *
+mt_ld_resolved(void)
+{
+	const char *e = getenv("MT_LD");
+	return e ? e : mt_ld_auto;
 }
 
 /* Convert mcc target triplet to the target name expected by mt tools.
@@ -215,7 +315,7 @@ run_mt_as(const char *asm_path, const char *output, bool verbose,
           const char *target_triple)
 {
 	struct array cmd = {0};
-	const char *as = getenv("MT_AS");
+	const char *as = mt_as_resolved();
 	const char *mt_target = mt_target_name(target_triple);
 
 	cmdadd(&cmd, as);
@@ -258,7 +358,7 @@ run_mt_ld(struct array *objects, const char *output, bool verbose,
     const char *asm_path_for_atomic, const char *target_triple)
 {
 	struct array cmd = {0};
-	const char *ld = getenv("MT_LD");
+	const char *ld = mt_ld_resolved();
 	const char *sysroot;
 	const char *mt_target = mt_target_name(target_triple);
 	char **p;
@@ -277,10 +377,13 @@ run_mt_ld(struct array *objects, const char *output, bool verbose,
 	 * ET_EXEC when neither -shared nor -pie is given. */
 	if (pie && !static_link && !shared)
 		arrayaddbuf(&cmd, " -pie", 5);
-	/* MEUOS_SYSROOT is also exposed to mt/ld via --sysroot so the linker
-	 * searches <sysroot>/usr/lib in addition to the explicit -L paths.
-	 * The -L paths from the driver remain authoritative. */
-	sysroot = getenv("MEUOS_SYSROOT");
+	/* MEUOS_SYSROOT (possibly arch-resolved by resolve_arch_sysroot) is
+	 * exposed to mt/ld via --sysroot so the linker searches
+	 * <sysroot>/usr/lib in addition to the explicit -L paths.  The -L
+	 * paths from the driver remain authoritative.  Prefer the driver's
+	 * resolved sysroot over the raw env var so arch-specific paths
+	 * (sysroot/<arch>/) work for cross-compilation. */
+	sysroot = driver_sysroot ? driver_sysroot : getenv("MEUOS_SYSROOT");
 	if (sysroot) {
 		arrayaddbuf(&cmd, " --sysroot=", 11);
 		cmdadd(&cmd, sysroot);
