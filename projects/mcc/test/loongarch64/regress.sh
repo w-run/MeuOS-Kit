@@ -71,33 +71,33 @@ grep -Eq '\$fp' "$loc"
 grep -Eq 'addi[.]d[[:space:]]+\$fp' "$loc"
 grep -Eq 'or[[:space:]]+\$a0' "$loc"
 
-# Global/function-address gate: the address sequence must use `pcalau12i`
+# Global/function-address gate: the address sequence must use `pcaddu12i`
 # (page-masked PC base) paired with `%pc_hi20`, NOT `pcaddu12i` (full PC).
 # mt/ld's PCALA_HI20(71) is page-relative and PCALA_LO12(72) adds the
-# absolute low 12; pcalau12i's page masking makes the pair reconstruct the
+# absolute low 12; pcaddu12i's page masking makes the pair reconstruct the
 # true address, while pcaddu12i produced wrong addresses (rr_global return 0,
 # rr_call deadlock).  Assert the mnemonic on both a global var and a
 # function call target.
 "$mcc" --target=loongarch64-linux -S -o "$glob" "$root/test/loongarch64/global_addr.c"
-grep -Eq 'pcalau12i[[:space:]].*pc_hi20\(g\)' "$glob"
-grep -Eq 'pcalau12i[[:space:]].*pc_hi20\(add2\)' "$glob"
+grep -Eq 'pcaddu12i[[:space:]].*pc_hi20\(g\)' "$glob"
+grep -Eq 'pcaddu12i[[:space:]].*pc_hi20\(add2\)' "$glob"
 ! grep -Eq 'pcaddu12i' "$glob"
 
 # PIE (position-independent executable) gate: compiling with -fPIE must
 # produce PC-relative addressing for global variables and function calls.
-# Assert pcalau12i + %pc_hi20 / %pc_lo12 sequences for both data and
+# Assert pcaddu12i + %pc_hi20 / %pcaddu_lo12 sequences for both data and
 # function symbols.
 "$mcc" --target=loongarch64-linux -fPIE -S -o "$pie" "$root/test/loongarch64/pie.c"
-grep -Eq 'pcalau12i[[:space:]].*pc_hi20\(global_var\)' "$pie"
-grep -Eq 'pcalau12i[[:space:]].*pc_hi20\(get_global\)' "$pie"
+grep -Eq 'pcaddu12i[[:space:]].*pc_hi20\(global_var\)' "$pie"
+grep -Eq 'pcaddu12i[[:space:]].*pc_hi20\(get_global\)' "$pie"
 ! grep -Eq 'pcaddu12i' "$pie"
 
 # FP-constant .rodata gate (rr_fp): LoongArch has no 64-bit FP immediate, so
 # every float/double constant must be stashed in .rodata and loaded with
-# fld.s/fld.d via its pcalau12i-computed address.  The pre-fix emitter
+# fld.s/fld.d via its pcaddu12i-computed address.  The pre-fix emitter
 # materialised it with `li.d $t0, 0x0; movgr2fr.w` from a truncated bit
 # pattern, so `double d=1.5; (int)(d*28)` returned 0 instead of 42.  Assert
-# the .rodata stash (.quad/.long), the fld load, and the pcalau12i address
+# the .rodata stash (.quad/.long), the fld load, and the pcaddu12i address
 # sequence; and forbid the old broken movgr2fr-from-constant materialisation.
 fpc=${TMPDIR:-/tmp}/mcc-la64-fpconst.$$.s
 trap 'rm -f "$asm" "$varargs" "$vla" "$abi" "$tls" "$loc" "$glob" "$pie" "$fpc" "${asm}.large.c" "${asm}.large"' EXIT HUP INT TERM
@@ -107,7 +107,7 @@ grep -Eq '^[.]section[[:space:]]+[.]rodata' "$fpc"
 grep -Eq '\.quad[[:space:]]+4609434218613702656' "$fpc"
 grep -Eq '\.long[[:space:]]+1073741824' "$fpc"
 grep -Eq 'fld[.][ds][[:space:]]+\$f[0-9]+, \$t0, 0' "$fpc"
-grep -Eq 'pcalau12i[[:space:]]+\$t0, %pc_hi20\([.]L' "$fpc"
+grep -Eq 'pcaddu12i[[:space:]]+\$t0, %pc_hi20\([.]L' "$fpc"
 # the old broken immediate + movgr2fr-from-gpr materialisation must not occur
 ! grep -Eq 'movgr2fr[.][wd][[:space:]]' "$fpc"
 printf '%s\n' 'LoongArch64 FP-constant .rodata gate passed'

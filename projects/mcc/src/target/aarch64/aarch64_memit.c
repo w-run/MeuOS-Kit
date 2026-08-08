@@ -708,7 +708,7 @@ emit_ins(FILE *f, MInsM *in)
 			return;
 		}
 		g_alloca_cur -= alloca_size_ins(in);
-		load_imm(f, "x9", g_alloca_cur + g_slot_base);
+		load_imm(f, "x9", g_alloca_cur);
 		fputs("\tadd\tx9, x29, x9\n", f);
 		scratch_to_dst(f, d, "x9");
 		return;

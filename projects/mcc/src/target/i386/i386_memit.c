@@ -1602,7 +1602,7 @@ mfnm_emit_i386(MFnM *fm, FILE *f)
 	if (fm->name) {
 		if (fm->host && fm->host->export)
 			fprintf(f, "%s %s\n",
-			        fm->host->weak ? ".weak " : ".globl ", fm->name);
+			        fm->host->weak ? ".weak" : ".globl", fm->name);
 		fprintf(f, "%s:\n", fm->name);
 	}
 	fprintf(f, "\tpushl\t%%ebp\n");
