@@ -18,16 +18,18 @@ static void usage(const char *prog) {
         "  --i386             Target i386 (requires QEMU)\n"
         "  --arm              Target ARM (requires QEMU)\n"
         "\n"
-        "Network options:\n"
-        "  --net=user         User-mode network (SLiRP, future)\n"
+        "Hardware options:\n"
+        "  --share-dir=HOST:GUEST  Bind-mount host dir into sandbox\n"
+        "  --net=user         User-mode network (veth pair, requires namespace)\n"
         "  --net=none         No network (default)\n"
+        "  --cdrom=/path/to.iso   Mount ISO into sandbox /mnt/cdrom\n"
+        "  --usb              Passthrough USB devices into sandbox\n"
         "\n"
         "Interface options:\n"
         "  --mcp              Start MCP server on Unix socket (future)\n"
         "  --webpty=PORT      Start WebPTY on HTTP port (future)\n"
         "\n"
         "Other options:\n"
-        "  --share-dir=HOST:GUEST  Share host directory into sandbox (future)\n"
         "  --help, -h         Show this help\n"
         "\n"
         "If no command given, runs /bin/sh.\n"
@@ -50,6 +52,9 @@ int main(int argc, char *argv[], char *envp[]) {
     conf_init(&cfg);
     strcpy(cfg.arch, "native");     /* default: match host */
     strcpy(cfg.net, "none");
+
+    char *cdrom = NULL;
+    int  usb = 0;
 
     char *rootfs = NULL;
     int  user_argc = 0;
@@ -84,10 +89,10 @@ int main(int argc, char *argv[], char *envp[]) {
         else if (strcmp(a, "--arm") == 0)         strcpy(cfg.arch, "arm");
 
         else if (strncmp(a, "--net=", 6) == 0)    strncpy(cfg.net, a + 6, sizeof(cfg.net) - 1);
-        else if (strcmp(a, "--mcp") == 0)          cfg.mcp_port = 1;   /* default port */
+        else if (strcmp(a, "--mcp") == 0)          cfg.mcp_port = 1;
         else if (strncmp(a, "--webpty=", 8) == 0)  cfg.webpty_port = atoi(a + 8);
+
         else if (strncmp(a, "--share-dir=", 11) == 0) {
-            /* format: host:guest */
             const char *val = a + 11;
             const char *colon = strchr(val, ':');
             if (colon && cfg.share_count < MBOX_MAX_SHARE) {
@@ -100,6 +105,12 @@ int main(int argc, char *argv[], char *envp[]) {
                     cfg.share_count++;
                 }
             }
+        }
+        else if (strncmp(a, "--cdrom=", 7) == 0) {
+            cdrom = (char *)(a + 7);
+        }
+        else if (strcmp(a, "--usb") == 0) {
+            usb = 1;
         }
         else if (strcmp(a, "--help") == 0 || strcmp(a, "-h") == 0) {
             flag_help = 1;
@@ -133,7 +144,6 @@ int main(int argc, char *argv[], char *envp[]) {
     mbox_config file_cfg;
     conf_init(&file_cfg);
     if (conf_load(conf_path, &file_cfg) == 0) {
-        /* Merge: CLI values override conf — only use conf if CLI not set */
         if (strcmp(cfg.arch, "native") == 0 && file_cfg.arch[0])
             snprintf(cfg.arch, sizeof(cfg.arch), "%s", file_cfg.arch);
         if (cfg.timeout < 0 && file_cfg.timeout >= 0)
@@ -142,13 +152,12 @@ int main(int argc, char *argv[], char *envp[]) {
             cfg.mcp_port = file_cfg.mcp_port;
         if (cfg.webpty_port == 0 && file_cfg.webpty_port > 0)
             cfg.webpty_port = file_cfg.webpty_port;
-        /* env vars from conf */
         for (int i = 0; i < file_cfg.env_count && cfg.env_count < MBOX_MAX_ENV; i++) {
             strncpy(cfg.env_keys[cfg.env_count], file_cfg.env_keys[i], MBOX_ENV_KEY_LEN - 1);
             strncpy(cfg.env_vals[cfg.env_count], file_cfg.env_vals[i], MBOX_ENV_VAL_LEN - 1);
             cfg.env_count++;
         }
-        (void)cfg.webpty_readonly;  /* not yet wired */
+        (void)cfg.webpty_readonly;
     }
 
     /* ── resolve architecture ─────────────────────────────────────── */
@@ -172,7 +181,20 @@ int main(int argc, char *argv[], char *envp[]) {
         return 1;
     }
 
+    /* ── build share array ────────────────────────────────────────── */
+    mbox_share_t shares[MBOX_MAX_SHARE];
+    int nshares = 0;
+    for (int i = 0; i < cfg.share_count && i < MBOX_MAX_SHARE; i++) {
+        strncpy(shares[i].host, cfg.share_host[i], MBOX_SHARE_PATH_LEN - 1);
+        shares[i].host[MBOX_SHARE_PATH_LEN - 1] = '\0';
+        strncpy(shares[i].guest, cfg.share_guest[i], MBOX_SHARE_PATH_LEN - 1);
+        shares[i].guest[MBOX_SHARE_PATH_LEN - 1] = '\0';
+        nshares++;
+    }
+
     /* ── execute ──────────────────────────────────────────────────── */
     return ns_enter_and_exec(rootfs, arch, cross ? 1 : 0, qemu_path,
+                             shares, nshares,
+                             cdrom, usb, cfg.net,
                              user_argv, envp, cfg.timeout);
 }

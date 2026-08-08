@@ -26,6 +26,10 @@ typedef struct {
     char share_host[MBOX_MAX_SHARE][MBOX_SHARE_PATH_LEN];
     char share_guest[MBOX_MAX_SHARE][MBOX_SHARE_PATH_LEN];
     int share_count;
+
+    /* cdrom + usb from conf */
+    char cdrom[MBOX_SHARE_PATH_LEN];
+    int  usb;
 } mbox_config;
 
 void conf_init(mbox_config *cfg);

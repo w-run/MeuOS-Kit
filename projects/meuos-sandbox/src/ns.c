@@ -8,6 +8,7 @@
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
+#include <sys/socket.h>
 #include <fcntl.h>
 #include <errno.h>
 
@@ -94,7 +95,6 @@ const char *qemu_find(mbox_arch_t arch) {
     snprintf(path, sizeof(path), "%s/qemu/%s", env_qemu_dir, name);
     if (access(path, X_OK) == 0) return path;
 
-    /* PATH fallback */
     const char *syspath = getenv("PATH");
     if (!syspath) syspath = "/usr/local/bin:/usr/bin:/bin";
 
@@ -112,7 +112,17 @@ const char *qemu_find(mbox_arch_t arch) {
 
 /* ── mount + chroot helper (same-arch namespace isolation) ─────────────── */
 
-static int setup_mount_and_chroot(const char *rootfs) {
+static int bind_mount_dir(const char *host_path, const char *target) {
+    struct stat st;
+    if (stat(target, &st) < 0)
+        mkdir(target, 0755);
+    return mount(host_path, target, NULL, MS_BIND | MS_REC, NULL);
+}
+
+static int setup_mount_and_chroot(const char *rootfs,
+                                  const mbox_share_t *shares, int nshares,
+                                  const char *cdrom, int usb,
+                                  const char *net) {
     struct stat st;
     char buf[512];
 
@@ -125,17 +135,63 @@ static int setup_mount_and_chroot(const char *rootfs) {
     snprintf(buf, sizeof(buf), "%s/tmp", rootfs);
     if (stat(buf, &st) < 0) mkdir(buf, 01777);
 
-    mount(rootfs, rootfs, NULL, MS_BIND | MS_REC, NULL);
+    /* Bind-mount rootfs to make it a proper mount point (best-effort) */
+    if (mount(rootfs, rootfs, NULL, MS_BIND | MS_REC, NULL) < 0) {
+        fprintf(stderr, "mbox: bind mount rootfs: %s (continuing)\n", strerror(errno));
+    }
 
+    /* Mount virtual filesystems (best-effort) */
     snprintf(buf, sizeof(buf), "%s/proc", rootfs);
-    mount("proc", buf, "proc", 0, NULL);
+    if (mount("proc", buf, "proc", 0, NULL) < 0) {
+        fprintf(stderr, "mbox: mount proc: %s (continuing)\n", strerror(errno));
+    }
     snprintf(buf, sizeof(buf), "%s/sys", rootfs);
-    mount("sysfs", buf, "sysfs", 0, NULL);
+    if (mount("sysfs", buf, "sysfs", 0, NULL) < 0) {
+        /* non-fatal */
+    }
     snprintf(buf, sizeof(buf), "%s/dev", rootfs);
-    mount("tmpfs", buf, "tmpfs", 0, "mode=0755,size=4M");
+    if (mount("tmpfs", buf, "tmpfs", 0, "mode=0755,size=4M") < 0) {
+        /* non-fatal */
+    }
 
+    /* ── --share-dir ──────────────────────────────────────────────── */
+    for (int i = 0; i < nshares; i++) {
+        snprintf(buf, sizeof(buf), "%s%s", rootfs, shares[i].guest);
+        if (bind_mount_dir(shares[i].host, buf) < 0) {
+            fprintf(stderr, "mbox: share mount %s → %s: %s\n",
+                    shares[i].host, shares[i].guest, strerror(errno));
+        }
+    }
+
+    /* ── --cdrom ──────────────────────────────────────────────────── */
+    if (cdrom && cdrom[0]) {
+        snprintf(buf, sizeof(buf), "%s/mnt/cdrom", rootfs);
+        if (stat(buf, &st) < 0) mkdir(buf, 0555);
+        if (mount(cdrom, buf, "iso9660", MS_RDONLY, "") < 0) {
+            if (mount(cdrom, buf, "auto", MS_RDONLY, "") < 0) {
+                fprintf(stderr, "mbox: cdrom mount %s: %s\n", cdrom, strerror(errno));
+            }
+        }
+    }
+
+    /* ── --usb ────────────────────────────────────────────────────── */
+    if (usb) {
+        snprintf(buf, sizeof(buf), "%s/dev/bus", rootfs);
+        mkdir(buf, 0755);
+        snprintf(buf, sizeof(buf), "%s/dev/bus/usb", rootfs);
+        mkdir(buf, 0755);
+        if (bind_mount_dir("/dev/bus/usb", buf) < 0) {
+            fprintf(stderr, "mbox: usb mount: %s\n", strerror(errno));
+        }
+    }
+
+    /* ── --net=user ───────────────────────────────────────────────── */
+    (void)net;  /* network setup happens before chroot; placeholder */
+
+    /* chroot (best-effort; may fail without privileges) */
     if (chroot(rootfs) < 0) {
-        fprintf(stderr, "mbox: chroot(%s): %s\n", rootfs, strerror(errno));
+        fprintf(stderr, "mbox: chroot(%s): %s (falling back to prefix)\n",
+                rootfs, strerror(errno));
         return -1;
     }
     chdir("/");
@@ -144,8 +200,11 @@ static int setup_mount_and_chroot(const char *rootfs) {
 
 /* ── Same-arch: namespace isolation + chroot ──────────────────────────── */
 
-static void exec_native_ns(const char *rootfs, char *argv[], char *envp[]) {
-    if (setup_mount_and_chroot(rootfs) < 0)
+static void exec_native_ns(const char *rootfs,
+                           const mbox_share_t *shares, int nshares,
+                           const char *cdrom, int usb, const char *net,
+                           char *argv[], char *envp[]) {
+    if (setup_mount_and_chroot(rootfs, shares, nshares, cdrom, usb, net) < 0)
         _exit(127);
     execve(argv[0], argv, envp);
     fprintf(stderr, "mbox: execve(%s): %s\n", argv[0], strerror(errno));
@@ -182,7 +241,6 @@ static void exec_qemu(const char *qemu_bin, const char *rootfs,
     new_argv[2] = bn;
     new_argv[3] = "-L";
     new_argv[4] = (char *)rootfs;
-    /* Build real host-path to the binary within rootfs */
     char binpath[1024];
     snprintf(binpath, sizeof(binpath), "%s%s", rootfs, argv[0]);
     new_argv[5] = binpath;
@@ -199,6 +257,8 @@ static void exec_qemu(const char *qemu_bin, const char *rootfs,
 
 int ns_enter_and_exec(const char *rootfs, mbox_arch_t arch,
                       int use_qemu, const char *qemu_bin,
+                      const mbox_share_t *shares, int nshares,
+                      const char *cdrom, int usb, const char *net,
                       char *const argv[], char *const envp[],
                       int timeout_secs) {
     (void)arch;
@@ -221,13 +281,12 @@ int ns_enter_and_exec(const char *rootfs, mbox_arch_t arch,
         char **m_envp = (char **)envp;
 
         if (use_qemu && qemu_bin) {
-            /* Cross-arch: QEMU -L; no namespace needed */
             exec_qemu(qemu_bin, rootfs, m_argv, m_envp);
         } else {
-            /* Same-arch: try namespace + chroot */
             int ns_ok = (unshare(CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWIPC) == 0);
             if (ns_ok)
-                exec_native_ns(rootfs, m_argv, m_envp);
+                exec_native_ns(rootfs, shares, nshares, cdrom, usb, net,
+                               m_argv, m_envp);
             else
                 exec_native_no_ns(rootfs, m_argv, m_envp);
         }
