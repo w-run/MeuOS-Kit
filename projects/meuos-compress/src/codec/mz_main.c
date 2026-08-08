@@ -63,5 +63,5 @@ mz_strerror(int e)
 int
 mz2_level_supported(int level)
 {
-    return (level >= 1 && level <= 9) ? 1 : 0;
+    return (level >= 0 && level <= 9) ? 1 : 0;
 }

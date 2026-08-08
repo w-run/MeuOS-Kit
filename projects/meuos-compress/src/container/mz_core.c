@@ -436,6 +436,20 @@ int mz2_open(const void *data, size_t len, void **ctx)
 }
 
 /* ================================================================
+ * mz2_list_files — list all files in an opened MZv2 container
+ * ================================================================ */
+int mz2_list_files(void *ctx, struct mz_file_entry **entries, int *count)
+{
+    if (!ctx || !entries || !count)
+        return MZ_ERR_PARAM;
+
+    struct mz_read_ctx *r = (struct mz_read_ctx *)ctx;
+    *count = r->num_files;
+    *entries = r->files;
+    return MZ_OK;
+}
+
+/* ================================================================
  * mz2_read_file — find file by name and decompress
  * ================================================================ */
 int mz2_read_file(void *ctx, const char *name, void **data, size_t *size)
@@ -541,29 +555,4 @@ int mz2_block_read(const void *data, size_t len, size_t *offset,
     return MZ_OK;
 }
 
-/* ================================================================
- * mz2_block_encrypt — encrypt a block (stub, no real crypto)
- * ================================================================ */
-int mz2_block_encrypt(uint8_t *block, size_t size,
-                      const uint8_t key[32], const uint8_t nonce[12])
-{
-    (void)block;
-    (void)size;
-    (void)key;
-    (void)nonce;
-    return MZ_ERR_CRYPT;
-}
-
-/* ================================================================
- * mz2_block_sign — sign a block (stub, no real crypto)
- * ================================================================ */
-int mz2_block_sign(uint8_t *block, size_t size,
-                   const uint8_t secret_key[32])
-{
-    (void)block;
-    (void)size;
-    (void)secret_key;
-    return MZ_ERR_CRYPT;
-}
-
-/* mz2_level_supported moved to mz_main.c */
+/* mz2_block_encrypt / mz2_block_sign — implemented in mz_crypt.c */

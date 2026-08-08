@@ -10,7 +10,8 @@
 #define MZ_CODEC_MEUOS     3   /* meuos-compress 统一算法引擎 */
 #define MZ_CODEC_DEFLATE   4   /* RFC 1951 DEFLATE */
 
-/* Compression levels */
+/* Compression levels — level 0 = adaptive auto-select */
+#define MZ_LEVEL_AUTO      0
 #define MZ_LEVEL_FASTEST   1
 #define MZ_LEVEL_BALANCED  6
 #define MZ_LEVEL_MAXIMUM   9
@@ -74,6 +75,7 @@ int mz2_create(void **out, size_t *out_len, const struct mz_params *params);
 int mz2_add_file(void *ctx, const char *name, const void *data, size_t size, uint16_t mode);
 int mz2_finish(void *ctx, void **result, size_t *result_len);
 int mz2_open(const void *data, size_t len, void **ctx);
+int mz2_list_files(void *ctx, struct mz_file_entry **entries, int *count);
 int mz2_read_file(void *ctx, const char *name, void **data, size_t *size);
 void mz2_close(void *ctx);
 
