@@ -150,7 +150,10 @@ unaryexpr(struct scope *s)
 			error_code(E_INCOMPLETE, &tok.loc, "%s operator applied to incomplete type", tokenstr(op));
 		if (t->kind == TYPEFUNC)
 			error_code(E_DECL, &tok.loc, "%s operator applied to function type", tokenstr(op));
-		if (t->kind == TYPEARRAY && t->size == 0 && op == TSIZEOF) {
+		if (t->kind == TYPEARRAY && (t->prop & PROPVM) && op == TSIZEOF) {
+			/* VLA: size is computed at runtime.  A GNU zero-length
+			 * array (int e[0]) also has size 0 but no PROPVM, so it
+			 * falls through to the constant path (sizeof == 0). */
 			e = mkexpr(EXPRSIZEOF, &typeulong, e);
 			e->u.szof.type = t;
 		} else {

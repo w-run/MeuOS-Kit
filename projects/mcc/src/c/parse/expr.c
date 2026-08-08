@@ -448,7 +448,7 @@ struct expr *
 mksizeofexpr(struct type *t) {
 	struct expr *e;
 
-	if (t->kind == TYPEARRAY && t->size == 0) {
+	if (t->kind == TYPEARRAY && (t->prop & PROPVM)) {
 		e = mkexpr(EXPRSIZEOF, &typeulong, NULL);
 		e->u.szof.type = t;
 	} else {

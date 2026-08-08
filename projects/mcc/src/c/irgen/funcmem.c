@@ -44,6 +44,13 @@ funcalloc(struct func *f, struct decl *d)
 	if (d->type->size) {
 		f->end = f->start;
 		v = mkintconst(d->type->size);
+	} else if (d->type->kind == TYPEARRAY && !d->type->u.array.size) {
+		/* GNU zero-length array extension (`int e[0]`): sizeof is 0,
+		 * but the object still gets a 1-byte stack slot so it has a
+		 * distinct address (matching GCC behaviour).  A VLA with a
+		 * runtime length of 0 also lands here with u.array.size set;
+		 * a true zero-length array has no VLA size expression. */
+		v = mkintconst(1);
 	} else {
 		assert(d->type->kind == TYPEARRAY);
 		assert(d->type->u.array.size);

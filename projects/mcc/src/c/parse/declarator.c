@@ -450,10 +450,15 @@ declarator(struct scope *s, struct qualtype base, char **name, int *align, struc
 			t->size = 0;
 			if (t->u.array.length) {
 				e = eval(t->u.array.length);
-				if (e->kind == EXPRCONST && base.type->size) {
+				if (e->kind == EXPRCONST) {
+					/* A zero-length or zero-sized element type (GNU
+					 * zero-length array, e.g. int[2][0]) must NOT make
+					 * the enclosing array look like a VLA: the length
+					 * expression is a compile-time constant.  The size
+					 * computation just yields 0. */
 					if (e->type->u.arith.issigned && e->u.constant.u >> 63)
 						error_code(E_CTYPE, &tok.loc, "array length must be non-negative");
-					if (e->u.constant.u > ULLONG_MAX / base.type->size)
+					if (base.type->size && e->u.constant.u > ULLONG_MAX / base.type->size)
 						error_code(E_CTYPE, &tok.loc, "array length is too large");
 					t->size = base.type->size * e->u.constant.u;
 				} else {
