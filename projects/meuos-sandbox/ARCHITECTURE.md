@@ -142,9 +142,9 @@ HTML 页面不需要复杂框架——纯 JavaScript + Canvas 或 pre 元素。�
 | Phase | 内容 | 状态 |
 |-------|------|------|
 | 0 | `env/meuos-sandbox` shell MVP (验证概念) | ✅ |
-| 1 | `projects/meuos-sandbox/` C 实现：mbox 基本框架 — 架构解析 + namespace + chroot + qemu-user 整合 + mbox.conf 加载 | ⏳ |
-| 2 | CLI 硬件参数: `--share-dir` `--net=user` `--cdrom` `--usb` | ⏳ |
-| 3 | PTY 复用器 + MCP 服务器 — sh/read/edit/screen/input 等 Tools | ⏳ |
-| 4 | WebPTY (HTTP+WebSocket) — 浏览器终端界面 | ⏳ |
-| 5 | 6 架构 QEMU 用户态深度整合 (源码层，非调二进制) | ⏳ |
-| S | `mbox-mkrootfs` shell 脚本 (make + cp, 不内嵌) | ⏳ |
+| 1 | `projects/meuos-sandbox/` C 实现：mbox 基本框架 — 架构解析 + namespace + chroot + qemu-user 整合 + mbox.conf 加载 | ✅ |
+| 2 | CLI 硬件参数: `--share-dir` `--net=user` `--cdrom` `--usb` | ✅ |
+| 3 | PTY 复用器 + MCP 服务器 — sh/read/edit/screen/input 等 Tools | ✅ |
+| 4 | WebPTY (HTTP+WebSocket) — 浏览器终端界面 | ✅ |
+| 5 | 6 架构 QEMU 用户态深度整合。**轻量版完成**：增强 QEMU 自动检测（env/qemu/ → PATH → /usr/libexec/qemu/ → /usr/lib/qemu/）+ `qemu_available_mask()` + `qemu_version_info()`。**源码嵌入 QEMU 为远期目标**，当前调用宿主 `qemu-*-static` 二进制。 | ✅（轻量版）|
+| S | `mbox-mkrootfs` shell 脚本 (make + cp, 不内嵌) | ✅ |
