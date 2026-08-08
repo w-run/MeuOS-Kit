@@ -68,6 +68,7 @@
 - `meuos-utils` - 核心工具集（coreutils/diffutils/findutils 完整替代）
 - `meuos-shell`（msh）- Shell 终端
 - `meuos-buildtools` - 构建工具（m4/bison/flex/gperf）
+- `meuos-compress` - 轻量 LZ77 压缩库（libmz.a）
 - `meuos-libtui` - 终端 UI 库（纯 C11，零依赖）
 - `meuos-kernel` - MeuOS 自研内核（设计/规划中）
 
