@@ -330,6 +330,11 @@ bool cpp_find_final(struct type *d, const char *key, struct type **owner,
                     struct member **outm);
 void cpp_init_vptrs(struct func *f, struct type *t, struct expr *thisp);
 
+/* Virtual base DAG layout */
+void cpp_compute_virtual_bases(struct type *t);
+bool cpp_vbase_offset(struct type *derived, struct type *base,
+                      unsigned long long *off);
+
 /* Function-template declaration / alias machinery (cpp_parse.c +
  * cpp_tmpl_alias.c). */
 struct cpp_template *cpp_tmpl_find(const char *name);

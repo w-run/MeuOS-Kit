@@ -177,6 +177,11 @@ emit_base_ctors_for(struct func *f, struct type *classt, struct expr *thisp)
 		/* destructor marker members are not objects */
 		if (m->name && m->name[0] == '~')
 			continue;
+		/* virtual base subobjects: constructed by the most-derived
+		 * class only, not by intermediate bases in the hierarchy.
+		 * They are skipped here (the most-derived ctor handles them). */
+		if (m->is_virtual_base)
+			continue;
 		bt = m->type;
 		if (!bt || (bt->kind != TYPESTRUCT && bt->kind != TYPEUNION)) {
 			/* scalar member: no ctor call, but a ctor initializer-list

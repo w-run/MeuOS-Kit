@@ -121,11 +121,27 @@ struct member {
 	/* C++20 [[no_unique_address]]: this member may share its address
 	 * with another member (layout optimization). */
 	bool is_no_unique_address;
+	/* C++ virtual base subobject: this anonymous base member is a virtual
+	 * base (shared across the hierarchy in diamond inheritance).  The
+	 * most-derived class constructs it once; vbptr adjustment at runtime
+	 * resolves the offset. */
+	bool is_virtual_base;
 	struct member *next;
 };
 
 /* C++ vtable slot (full definition in cpp/cpp.h). */
 struct cpp_vslot;
+
+/* C++ virtual base record: one virtual base (direct or indirect) of a
+ * class.  `offset` is the fixed byte offset from the complete object's
+ * start.  The link is stored on the most-derived class that owns the
+ * virtual base; inherited indirectly via the `type`'s own cpp_vbase list
+ * during the DAG flattening. */
+struct cpp_vbase {
+	struct type *type;             /* the virtual base class itself */
+	unsigned long long offset;     /* fixed offset from object start */
+	struct cpp_vbase *next;
+};
 
 /* C++ friend class of a class (recorded by `friend class B;` inside the
  * class body).  Methods of a friend class may access the befriending
@@ -192,6 +208,14 @@ struct type {
 			/* friend classes (`friend class B;` inside the body) whose
 			 * methods may access this class's private/protected members */
 			struct cpp_friend *friends;
+			/* C++ virtual base subobjects: when `has_virtual_base` is set,
+			 * this class has at least one virtual base (direct or
+			 * inherited).  `virtual_bases` is the flattened list of all
+			 * virtual bases with their fixed offsets, computed by
+			 * cpp_compute_virtual_bases() after the class body is
+			 * finalized. */
+			bool has_virtual_base;
+			struct cpp_vbase *virtual_bases;
 		} structunion;
 		struct {
 			enum typequal basequal;

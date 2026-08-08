@@ -63,6 +63,7 @@ addmember(struct structbuilder *b, struct qualtype mt, char *name, int align, un
 				mf->is_pure = b->member_pure;
 				mf->is_const = b->member_const;
 				mf->is_explicit = b->member_explicit;
+				mf->is_virtual_base = false;
 				mf->vslot = -1;
 				if (b->last)
 					*b->last = mf;
@@ -110,6 +111,7 @@ addmember(struct structbuilder *b, struct qualtype mt, char *name, int align, un
 		m->is_pure = b->member_pure;
 		m->is_const = b->member_const;
 		m->is_no_unique_address = b->member_no_unique_address;
+		m->is_virtual_base = b->member_virtual_base;
 		m->vslot = -1;
 		*b->last = m;
 		b->last = &m->next;
@@ -128,8 +130,9 @@ addmember(struct structbuilder *b, struct qualtype mt, char *name, int align, un
 		 * its address with another member.  Skip size contribution for
 		 * zero-sized or empty-class (size == 1) members and place them
 		 * at offset 0 so they overlap with the first member. */
-		bool no_size = m && m->is_no_unique_address &&
-		                mt.type->size <= 1 && mt.type->kind == TYPESTRUCT;
+		bool no_size = (m && m->is_no_unique_address &&
+		                mt.type->size <= 1 && mt.type->kind == TYPESTRUCT) ||
+		               (m && m->is_virtual_base);
 		if (no_size) {
 			m->offset = 0;
 		} else if (t->kind == TYPESTRUCT) {

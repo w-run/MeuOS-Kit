@@ -86,6 +86,10 @@ struct structbuilder {
 	bool member_pure;
 	/* current member has C++20 [[no_unique_address]] attribute */
 	bool member_no_unique_address;
+	/* current anonymous member is a C++ virtual base subobject:
+	 * registered for lookup but does NOT advance the sequential layout
+	 * offset (the DAG layout assigns its position later). */
+	bool member_virtual_base;
 };
 
 /* Tentative-definition list: tracked in decl.c but drained by

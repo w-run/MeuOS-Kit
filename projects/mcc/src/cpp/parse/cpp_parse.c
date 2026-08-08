@@ -504,6 +504,7 @@ cpp_class_decl(struct scope *s)
 {
 	struct type *t;
 	struct type *bases[8];
+	bool base_virtual[8];
 	char *tag;
 	struct structbuilder b;
 	bool is_class;
@@ -525,9 +526,22 @@ cpp_class_decl(struct scope *s)
 	if (tok.kind == TCOLON) {
 		next(); /* consume ':' */
 		for (;;) {
+			bool virt = false;
+			/* `virtual` may appear before or after the access specifier:
+			 * `class D : virtual public B` or `class D : public virtual B` */
 			enum cpp_tokenkind bk = cpp_tok_kind();
+			if (bk == CPP_TVIRTUAL) {
+				virt = true;
+				next();
+				bk = cpp_tok_kind();
+			}
 			if (bk == CPP_TPUBLIC || bk == CPP_TPRIVATE || bk == CPP_TPROTECTED)
 				next();
+			if (tok.kind == CPP_TVIRTUAL && !virt) {
+				/* `virtual` after the access specifier */
+				virt = true;
+				next();
+			}
 			if (tok.kind < TIDENT)
 				error_code(E_SYNTAX, &tok.loc, "expected base class name after ':'");
 			if (nbases >= (int)countof(bases))
@@ -536,6 +550,7 @@ cpp_class_decl(struct scope *s)
 			if (!bases[nbases] ||
 			    (bases[nbases]->kind != TYPESTRUCT && bases[nbases]->kind != TYPEUNION))
 				error_code(E_CTYPE, &tok.loc, "'%s' is not a class type", tokenstr(tok.kind));
+			base_virtual[nbases] = virt;
 			++nbases;
 			next();
 			if (tok.kind == TCOMMA) {
@@ -591,7 +606,13 @@ cpp_class_decl(struct scope *s)
 
 		/* Each base-class subobject is registered as an anonymous member
 		 * so typemember()'s recursive search and the layout computation
-		 * see them like ordinary members (first base at offset 0). */
+		 * see them like ordinary members (first base at offset 0).
+		 * Virtual bases are marked on the member; the class gets
+		 * has_virtual_base when any direct base is virtual.
+		 * Virtual base subobjects are registered but the sequential
+		 * layout skips them (offset 0, no size contribution); the DAG
+		 * pass assigns their final offsets later. */
+		t->u.structunion.has_virtual_base = false;
 		{
 			int bi;
 			for (bi = 0; bi < nbases; ++bi) {
@@ -599,7 +620,11 @@ cpp_class_decl(struct scope *s)
 				bq.type = bases[bi];
 				bq.qual = QUALNONE;
 				bq.expr = NULL;
+				b.member_virtual_base = base_virtual[bi];
 				addmember(&b, bq, NULL, 0, -1);
+				b.member_virtual_base = false;
+				if (base_virtual[bi])
+					t->u.structunion.has_virtual_base = true;
 			}
 		}
 

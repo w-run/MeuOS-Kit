@@ -167,6 +167,7 @@ cpp_base_offset_r(struct type *d, struct type *base, unsigned long long *off)
 	}
 	if (!d || (d->kind != TYPESTRUCT && d->kind != TYPEUNION))
 		return false;
+	/* Search direct base subobjects (anonymous members) first. */
 	for (m = d->u.structunion.members; m; m = m->next) {
 		if (!m->name && m->type &&
 		    (m->type->kind == TYPESTRUCT || m->type->kind == TYPEUNION)) {
@@ -176,6 +177,31 @@ cpp_base_offset_r(struct type *d, struct type *base, unsigned long long *off)
 			}
 			if (cpp_base_offset_r(m->type, base, &sub)) {
 				*off = m->offset + sub;
+				return true;
+			}
+		}
+	}
+	/* Not found in the non-virtual hierarchy: check virtual bases. */
+	if (d->u.structunion.virtual_bases) {
+		struct cpp_vbase *vb;
+		for (vb = d->u.structunion.virtual_bases; vb; vb = vb->next) {
+			if (vb->type == base) {
+				*off = vb->offset;
+				return true;
+			}
+			/* recurse into the virtual base's own virtual bases */
+			if (cpp_base_offset_r(vb->type, base, &sub)) {
+				*off = vb->offset + sub;
+				return true;
+			}
+		}
+	}
+	/* Also try each base's virtual_bases if this type has none directly */
+	for (m = d->u.structunion.members; m; m = m->next) {
+		if (!m->name && m->type &&
+		    (m->type->kind == TYPESTRUCT || m->type->kind == TYPEUNION)) {
+			if (cpp_base_offset_r(m->type, base, &sub)) {
+				*off = sub;
 				return true;
 			}
 		}
@@ -233,6 +259,155 @@ cpp_insert_vptr(struct type *t)
 		t->align = 8;
 }
 
+/* --- virtual base DAG layout (simplified fixed-offset ABI) ---------- */
+
+/* Collect every unique virtual base reachable from `t`, including those
+ * inherited indirectly through another virtual or non-virtual base.
+ * Returns the count of unique virtual bases found (written to *out
+ * as a linked list, each at offset 0 — the DAG pass assigns offsets). */
+static struct cpp_vbase *
+collect_virtual_bases(struct type *t, struct cpp_vbase *seen)
+{
+	struct member *m;
+	struct cpp_vbase *vb, *cur;
+	struct cpp_vbase *tail = NULL, *result = NULL;
+
+	if (!t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
+		return NULL;
+
+	/* check direct bases for virtual ones, then recurse into every
+	 * base (virtual and non-virtual alike) for indirect virtuals */
+	for (m = t->u.structunion.members; m; m = m->next) {
+		if (m->name || !m->type ||
+		    (m->type->kind != TYPESTRUCT && m->type->kind != TYPEUNION))
+			continue;
+		if (m->is_virtual_base) {
+			/* deduplicate: skip if already in `seen` */
+			for (cur = seen; cur; cur = cur->next)
+				if (cur->type == m->type)
+					break;
+			if (cur)
+				continue;
+			/* mark as seen, add to result */
+			for (cur = result; cur; cur = cur->next)
+				if (cur->type == m->type)
+					break;
+			if (cur)
+				continue;
+			vb = xmalloc(sizeof *vb);
+			vb->type = m->type;
+			vb->offset = 0;
+			vb->next = NULL;
+			if (tail)
+				tail->next = vb;
+			else
+				result = vb;
+			tail = vb;
+			/* add to seen list too */
+			vb = xmalloc(sizeof *vb);
+			vb->type = m->type;
+			vb->offset = 0;
+			vb->next = seen;
+			seen = vb;
+			/* recurse into the virtual base class itself */
+			seen = collect_virtual_bases(m->type, seen);
+		}
+		/* also recurse into non-virtual bases (they may inherit
+		 * virtual bases of their own) */
+		seen = collect_virtual_bases(m->type, seen);
+	}
+	return result;
+}
+
+/* Assign fixed offsets to the virtual bases of `t` and finalise the
+ * class's size.  Virtual bases are placed after the non-virtual portion
+ * (which is already finalised by this point), each aligned to its own
+ * alignment, and each appearing only once (shared across diamonds). */
+static void
+assign_vbase_offsets(struct type *t, struct cpp_vbase *list)
+{
+	struct cpp_vbase *vb;
+	unsigned long long off = ALIGNUP(t->size, 8); /* start after non-virtual tail */
+
+	for (vb = list; vb; vb = vb->next) {
+		int align = vb->type->align > 8 ? 8 : vb->type->align;
+		off = ALIGNUP(off, align);
+		vb->offset = off;
+		off += vb->type->size;
+	}
+	/* update class size to cover the virtual bases */
+	if (off > t->size)
+		t->size = off;
+	t->align = 8; /* virtual bases may require pointer alignment */
+}
+
+/* Compute the flattened virtual-base list for a complete-object class
+ * `t`.  Called from cpp_compute_vtable after the sequential layout is
+ * fixed.  Results are stored in t->u.structunion.virtual_bases. */
+void
+cpp_compute_virtual_bases(struct type *t)
+{
+	struct cpp_vbase *list, *vb;
+	struct member *m;
+
+	if (!t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
+		return;
+
+	list = collect_virtual_bases(t, NULL);
+	if (!list)
+		return;
+
+	assign_vbase_offsets(t, list);
+	t->u.structunion.virtual_bases = list;
+	t->u.structunion.has_virtual_base = true;
+
+	/* back-patch the anonymous member offsets so existing recursive
+	 * helpers (cpp_base_offset_r, cpp_is_derived) see the correct
+	 * DAG-assigned position rather than the stale 0 from the
+	 * sequential layout skip */
+	for (m = t->u.structunion.members; m; m = m->next) {
+		if (!m->name && m->is_virtual_base) {
+			for (vb = list; vb; vb = vb->next)
+				if (vb->type == m->type)
+					m->offset = vb->offset;
+		}
+	}
+}
+
+/* --- virtual call through a virtual base ---------------------------- */
+
+/* Find the offset of `base` within `derived` when `base` is a virtual
+ * base.  Returns true and sets *off on success. */
+bool
+cpp_vbase_offset(struct type *derived, struct type *base,
+                 unsigned long long *off)
+{
+	struct cpp_vbase *vb;
+
+	if (!derived || (derived->kind != TYPESTRUCT && derived->kind != TYPEUNION))
+		return false;
+	/* check direct virtual_bases */
+	for (vb = derived->u.structunion.virtual_bases; vb; vb = vb->next) {
+		if (vb->type == base) {
+			*off = vb->offset;
+			return true;
+		}
+	}
+	/* if derived doesn't have the list, try searching the member
+	 * hierarchy recursively for a class that does */
+	{
+		struct member *m;
+		for (m = derived->u.structunion.members; m; m = m->next) {
+			if (!m->name && m->type &&
+			    (m->type->kind == TYPESTRUCT || m->type->kind == TYPEUNION)) {
+				if (cpp_vbase_offset(m->type, base, off))
+					return true;
+			}
+		}
+	}
+	return false;
+}
+
 /* Polyorphic classes needing vtable emission, in definition order. */
 struct cpp_vclass {
 	struct type *t;
@@ -257,9 +432,12 @@ cpp_compute_vtable(struct type *t)
 	if (!t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
 		return;
 
-	/* primary base: first polymorphic direct base (anonymous member) */
+	/* primary base: first polymorphic direct base (anonymous member).
+	 * Virtual bases are excluded from primary base consideration —
+	 * they live at the tail of the object layout and never serve as
+	 * the primary base (which must be at offset 0). */
 	for (m = t->u.structunion.members; m; m = m->next) {
-		if (!m->name && m->type &&
+		if (!m->name && !m->is_virtual_base && m->type &&
 		    (m->type->kind == TYPESTRUCT || m->type->kind == TYPEUNION) &&
 		    m->type->u.structunion.poly) {
 			P = m->type;
@@ -325,7 +503,7 @@ cpp_compute_vtable(struct type *t)
 	}
 
 	for (m = t->u.structunion.members; m; m = m->next)
-		if (!m->name && m->type &&
+		if (!m->name && !m->is_virtual_base && m->type &&
 		    (m->type->kind == TYPESTRUCT || m->type->kind == TYPEUNION) &&
 		    m->type->u.structunion.poly)
 			has_poly_base = true;
@@ -333,6 +511,10 @@ cpp_compute_vtable(struct type *t)
 
 	if (t->u.structunion.poly && !P && t->u.structunion.own_poly)
 		cpp_insert_vptr(t);
+
+	/* virtual base DAG layout: assign fixed offsets for every shared
+	 * virtual base in this hierarchy (after the sequential layout). */
+	cpp_compute_virtual_bases(t);
 
 	/* record for vtable emission (once) */
 	if (t->u.structunion.poly) {
@@ -418,26 +600,34 @@ emit_vptr_store(struct func *f, struct expr *thisp, unsigned long long off,
 
 /* Install every vptr of a complete object of type `t` at `thisp`:
  * the primary vptr (offset 0) plus one per secondary polymorphic base
- * subobject.  Called at the start of a constructor body (after the base
- * constructors ran) and when an object with no user constructor is
- * defined. */
+ * subobject, and one per polymorphic virtual base subobject.
+ * Called at the start of a constructor body (after the base constructors
+ * ran) and when an object with no user constructor is defined. */
 void
 cpp_init_vptrs(struct func *f, struct type *t, struct expr *thisp)
 {
 	struct member *m;
+	struct cpp_vbase *vb;
 
 	if (!f || !t || (t->kind != TYPESTRUCT && t->kind != TYPEUNION))
 		return;
 	if (!t->u.structunion.poly)
 		return;
+	/* primary vptr */
 	if (t->u.structunion.primary_base || t->u.structunion.own_poly)
 		emit_vptr_store(f, thisp, 0, vt_decl(t, t));
+	/* secondary non-virtual polymorphic bases */
 	for (m = t->u.structunion.members; m; m = m->next) {
-		if (!m->name && m->type &&
+		if (!m->name && !m->is_virtual_base && m->type &&
 		    (m->type->kind == TYPESTRUCT || m->type->kind == TYPEUNION) &&
 		    m->type->u.structunion.poly &&
 		    m->type != t->u.structunion.primary_base)
 			emit_vptr_store(f, thisp, m->offset, vt_decl(t, m->type));
+	}
+	/* polymorphic virtual bases: each gets its own vptr */
+	for (vb = t->u.structunion.virtual_bases; vb; vb = vb->next) {
+		if (vb->type->u.structunion.poly)
+			emit_vptr_store(f, thisp, vb->offset, vt_decl(t, vb->type));
 	}
 }
 
@@ -472,23 +662,30 @@ emit_vtable_one(struct type *most, struct type *owner)
 
 /* Emit the vtables of every polymorphic class defined in this translation
  * unit: the primary table plus one secondary table per polymorphic
- * secondary base subobject. */
+ * secondary base subobject, and one per polymorphic virtual base. */
 void
 cpp_emit_vtables(void)
 {
 	struct cpp_vclass *vc;
 	struct member *m;
+	struct cpp_vbase *vb;
 
 	for (vc = g_cpp_vclasses; vc; vc = vc->next) {
 		struct type *t = vc->t;
 		if (t->u.structunion.primary_base || t->u.structunion.own_poly)
 			emit_vtable_one(t, t);
 		for (m = t->u.structunion.members; m; m = m->next) {
-			if (!m->name && m->type &&
+			if (!m->name && !m->is_virtual_base && m->type &&
 			    (m->type->kind == TYPESTRUCT || m->type->kind == TYPEUNION) &&
 			    m->type->u.structunion.poly &&
 			    m->type != t->u.structunion.primary_base)
 				emit_vtable_one(t, m->type);
+		}
+		/* polymorphic virtual bases: each gets its own vtable
+		 * (emitted as a secondary vtable of the most-derived class) */
+		for (vb = t->u.structunion.virtual_bases; vb; vb = vb->next) {
+			if (vb->type->u.structunion.poly)
+				emit_vtable_one(t, vb->type);
 		}
 	}
 }
