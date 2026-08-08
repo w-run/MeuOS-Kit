@@ -16,6 +16,7 @@
 #define AT_PHDR 3
 #define AT_PHENT 4
 #define AT_PHNUM 5
+#define PT_PHDR 6
 #define PT_TLS 7
 #define LINUX_SYS_MMAP 9
 #define ARCH_SET_FS 0x1002
@@ -198,6 +199,7 @@ __meuos_tls_init(char **environment)
 	struct meuos_auxv *auxv;
 	struct meuos_phdr *headers = 0;
 	unsigned long entry_size = 0, count = 0, index;
+	unsigned long load_base = 0;
 	void *thread_pointer;
 
 	while (*environment)
@@ -210,6 +212,20 @@ __meuos_tls_init(char **environment)
 	}
 	if (!headers || entry_size != sizeof(*headers))
 		return;
+
+	/* First pass: compute load_base from PT_PHDR so we can fix up
+	 * PT_TLS virtual_address for PIE executables.
+	 *   load_base = AT_PHDR - PT_PHDR.p_vaddr
+	 * For non-PIE (position-dependent) this yields zero; for PIE it
+	 * gives the actual load offset. */
+	for (index = 0; index < count; ++index) {
+		struct meuos_phdr *header = (struct meuos_phdr *)((char *)headers + index * entry_size);
+		if (header->type == PT_PHDR) {
+			load_base = (unsigned long)headers - header->virtual_address;
+			break;
+		}
+	}
+
 	for (index = 0; index < count; ++index) {
 		struct meuos_phdr *header = (struct meuos_phdr *)((char *)headers + index * entry_size);
 		if (header->type != PT_TLS)
@@ -221,7 +237,8 @@ __meuos_tls_init(char **environment)
 		if (header->alignment == 0 ||
 		    (header->alignment & (header->alignment - 1)))
 			continue;
-		tls_image = (const void *)(uintptr_t)header->virtual_address;
+		/* PT_TLS p_vaddr is file-relative; add load_base for PIE. */
+		tls_image = (const void *)(load_base + (uintptr_t)header->virtual_address);
 		tls_file_size = (size_t)header->file_size;
 		tls_memory_size = (size_t)header->memory_size;
 		tls_alignment = (size_t)header->alignment;
