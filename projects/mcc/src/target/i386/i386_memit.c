@@ -506,6 +506,32 @@ fstore_scratch(FILE *f, MVal *d)
 	}
 }
 
+/* FP condition-code suffix: after ucomisd/ucomiss the FLAGS use
+ * CF/ZF/PF encoding (not the signed integer SF/OF encoding that
+ * setl/setg/setle/setge test).  For example `setl` after ucomisd
+ * always returns 0 because ucomisd clears SF and OF, making
+ * SF != OF = 0 (defect: broken ordered FP comparisons like `>`).
+ * Correct FP suffixes:
+ *   EQ -> e  (ZF=1)
+ *   NE -> ne (ZF=0)
+ *   LT -> b  (CF=1, below)
+ *   LE -> be (CF=1 | ZF=1)
+ *   GT -> a  (CF=0 & ZF=0, above)
+ *   GE -> ae (CF=0, above-or-equal) */
+static const char *
+i386_fpcc_suffix(MCC cc)
+{
+	switch (cc) {
+	case MCC_EQ:  return "e";
+	case MCC_NE:  return "ne";
+	case MCC_LT:  return "b";
+	case MCC_LE:  return "be";
+	case MCC_GT:  return "a";
+	case MCC_GE:  return "ae";
+	default:      return "e";
+	}
+}
+
 /* dst = (a cc b) ? 1 : 0 for floating operands. */
 static void
 emit_setccr_fp(FILE *f, MInsM *in)
@@ -551,7 +577,7 @@ emit_setccr_fp(FILE *f, MInsM *in)
 		fputs("\tucomiss\t%xmm1, %xmm0\n", f);
 	else
 		fputs("\tucomisd\t%xmm1, %xmm0\n", f);
-	fprintf(f, "\tset%s\t%%al\n", i386_cc_suffix(cc));
+	fprintf(f, "\tset%s\t%%al\n", i386_fpcc_suffix(cc));
 	fputs("\tmovzbl\t%al, %eax\n", f);
 	scratch_to_dst(f, in->dst, "eax");
 }
@@ -1406,23 +1432,81 @@ emit_ins(FILE *f, MInsM *in)
 		fstore_scratch(f, d);
 		return;
 	}
-	case MMOP_CVTSI2SS_U: /* unsigned i32 -> f32 */
+	case MMOP_CVTSI2SS_U: /* unsigned i32/i64 -> f32 */
 	case MMOP_CVTSI2SD_U: {
 		static uint32_t g_u2f_id;
 		bool is32 = (op == MMOP_CVTSI2SS_U);
 		uint32_t id = g_u2f_id++;
+		if (s0 && s0->type == MT_I64) {
+			/* i64 source (e.g. unsigned long long -> double): normalise
+			 * into a scratch pair, load as signed 64-bit via fildq,
+			 * then add 2^64 if the high bit is set.
+			 *   - hi >= 0: fildq gives the correct unsigned value
+			 *     (value < 2^63).
+			 *   - hi < 0: fildq gives signed_i64 = unsigned - 2^64,
+			 *     so add 2^64 back. */
+			int sbase = i64_base(f, s0, 0);
+			fprintf(f, "\tcmpl\t$0, %d(%%ebp)\n", sbase + 4);
+			fprintf(f, "\tjs\t.Lu2f_hi%u\n", id);
+			/* hi >= 0: fildq as signed (value < 2^63) */
+			fputs("\tsubl\t$8, %esp\n", f);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sbase);
+			fputs("\tmovl\t%eax, (%esp)\n", f);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sbase + 4);
+			fputs("\tmovl\t%eax, 4(%esp)\n", f);
+			fputs("\tfildq\t(%esp)\n", f);
+			fputs("\taddl\t$8, %esp\n", f);
+			fprintf(f, "\tjmp\t.Lu2f_done%u\n", id);
+			fprintf(f, ".Lu2f_hi%u:\n", id);
+			/* hi < 0 (>= 2^63): fildq gives signed negative, add 2^64 */
+			fputs("\tsubl\t$8, %esp\n", f);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sbase);
+			fputs("\tmovl\t%eax, (%esp)\n", f);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sbase + 4);
+			fputs("\tmovl\t%eax, 4(%esp)\n", f);
+			fputs("\tfildq\t(%esp)\n", f);
+			fputs("\taddl\t$8, %esp\n", f);
+			if (is32) {
+				/* 2^64 as float = 0x5f800000 */
+				fputs("\tpushl\t$0x5f800000\n", f);
+				fputs("\tfadds\t(%esp)\n", f);
+				fputs("\taddl\t$4, %esp\n", f);
+			} else {
+				fputs("\tpushl\t$0x00000000\n", f);
+				fputs("\tpushl\t$0x43f00000\n", f);
+				fputs("\tfaddl\t(%esp)\n", f);
+				fputs("\taddl\t$8, %esp\n", f);
+			}
+			fprintf(f, ".Lu2f_done%u:\n", id);
+			if (is32)
+				fputs("\tfstps\t-4(%esp)\n\tmovss\t-4(%esp), %xmm0\n", f);
+			else
+				fputs("\tfstpl\t-8(%esp)\n\tmovsd\t-8(%esp), %xmm0\n", f);
+			fstore_scratch(f, d);
+			return;
+		}
+		/* i32 source */
 		mv_to_scratch(f, s0, "eax");
-		/* unsigned conversion: test if sign bit is set, handle via
-		 * float conversion trick */
 		fprintf(f, "\ttestl\t%%eax, %%eax\n");
 		fprintf(f, "\tjs\t.Lu2f%u\n", id);
 		fprintf(f, "\tcvtsi2%s\t%%eax, %%xmm0\n", is32 ? "ss" : "sd");
 		fprintf(f, "\tjmp\t.Lu2fe%u\n", id);
 		fprintf(f, ".Lu2f%u:\n", id);
-		/* push %eax, then convert via memory */
+		/* Unsigned >= 2^31: fildl loads as signed negative; add 2^32. */
 		fputs("\tpushl\t%eax\n", f);
 		fputs("\tfildl\t(%esp)\n", f);
 		fputs("\taddl\t$4, %esp\n", f);
+		if (is32) {
+			/* 2^32 as float = 0x4f800000 */
+			fputs("\tpushl\t$0x4f800000\n", f);
+			fputs("\tfadds\t(%esp)\n", f);
+			fputs("\taddl\t$4, %esp\n", f);
+		} else {
+			fputs("\tpushl\t$0x00000000\n", f);
+			fputs("\tpushl\t$0x41f00000\n", f);
+			fputs("\tfaddl\t(%esp)\n", f);
+			fputs("\taddl\t$8, %esp\n", f);
+		}
 		if (is32)
 			fputs("\tfstps\t-4(%esp)\n\tmovss\t-4(%esp), %xmm0\n", f);
 		else
