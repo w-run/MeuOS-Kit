@@ -228,6 +228,7 @@ emitdata(struct decl *d, struct init *init)
 
 	/* Build linkage from decl attributes. */
 	lnk.export = (d->linkage == LINKEXTERN || d->linkage == LINKC);
+	lnk.weak = d->weak;
 	lnk.thread = (d->kind == DECLOBJECT && d->u.obj.storage == SDTHREAD);
 	lnk.align = d->u.obj.align;
 

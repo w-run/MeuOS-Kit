@@ -330,6 +330,7 @@ struct MFn {
 	int32_t salign;      /* stack alignment */
 	bool vararg;
 	bool export;         /* external linkage (true) or local/static (false) */
+	bool weak;           /* __attribute__((weak)) — emit .weak instead of .globl */
 	int optlevel;        /* 0=O0, 1=O1, 2=O2 (default), 3=O3 */
 	bool emitted;        /* codegen already run */
 	/* Frontend value-id -> MVal side table (func_to_mir).  Indexed by

@@ -374,6 +374,7 @@ func_to_mir(struct func *f, int optlevel, bool export)
 
 	fn = mfn_new(f->name, optlevel);
 	fn->export = export;
+	fn->weak = f->decl ? f->decl->weak : false;
 	fn->rettype = MT_NONE;
 	if (f->type->base && f->type->base->kind == TYPEVOID)
 		fn->rettype = MT_VOID;

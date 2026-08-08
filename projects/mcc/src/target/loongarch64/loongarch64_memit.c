@@ -927,7 +927,8 @@ mfnm_emit_loongarch64(MFnM *fm, FILE *f)
 	fprintf(f, ".text\n");
 	if (fm->name) {
 		if (fm->host && fm->host->export)
-			fprintf(f, ".globl %s\n", fm->name);
+			fprintf(f, "%s%s\n",
+			        fm->host->weak ? ".weak " : ".globl ", fm->name);
 		fprintf(f, "%s:\n", fm->name);
 	}
 	if (framesize <= 2047)

@@ -1337,7 +1337,8 @@ gd_scan_done:
 	bool has_eh = false;
 	if (fm->name) {
 		if (fm->host && fm->host->export)
-			fprintf(f, ".globl %s\n", fm->name);
+			fprintf(f, "%s%s\n",
+			        fm->host->weak ? ".weak " : ".globl ", fm->name);
 		/* .cfi_startproc / .cfi_endproc emit DWARF CFI for every function,
 		 * enabling .eh_frame generation for stack unwinding.  For functions
 		 * that call exception runtime helpers (_meuos_exc_*), also emit

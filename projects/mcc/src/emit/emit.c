@@ -53,7 +53,8 @@ emitlnk(char *n, Lnk *l, int s, FILE *f)
 	if (l->align)
 		fprintf(f, ".balign %d\n", l->align);
 	if (l->export)
-		fprintf(f, ".globl %s%s\n", pfx, n);
+		fprintf(f, "%s%s%s\n",
+		        l->weak ? ".weak " : ".globl ", pfx, n);
 	fprintf(f, "%s%s%s:\n", pfx, n, sfx);
 }
 

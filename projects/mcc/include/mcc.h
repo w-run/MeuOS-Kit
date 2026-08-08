@@ -272,6 +272,7 @@ struct decl {
 	bool warned_uninit;
 	/* 声明处源码位置（未使用/未初始化等警告的精确标记点） */
 	struct location loc;
+	bool weak;              /* __attribute__((weak)) */
 	struct decl *next;
 
 	union {

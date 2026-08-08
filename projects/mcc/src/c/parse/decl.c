@@ -489,6 +489,8 @@ decl(struct scope *s, struct func *f)
 				}
 			}
 			d = declcommon(s, kind, name, asmname, t, tq, sc, prior);
+			if (a.kind & ATTRWEAK)
+				d->weak = true;
 			if (d->u.obj.align < align)
 				d->u.obj.align = align;
 			/* C++: a namespace-scope (or file-scope) object may be
@@ -711,6 +713,8 @@ decl(struct scope *s, struct func *f)
 					}
 				}
 				d = declcommon(s, kind, (char *)regname, asmname, t, tq, sc, prior);
+				if (a.kind & ATTRWEAK)
+					d->weak = true;
 				if (mng && d == prior)
 					free(mng); /* existing overload: name not retained */
 				d->value = mkglobal(d);

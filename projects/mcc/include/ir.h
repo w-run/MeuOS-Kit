@@ -414,6 +414,7 @@ struct Lnk {
 	char thread;
 	char common;
 	char align;
+	char weak;             /* __attribute__((weak)) global symbol */
 	char *sec;
 	char *secf;
 };
