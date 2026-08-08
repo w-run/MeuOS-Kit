@@ -514,7 +514,7 @@ mreg_scan(MFnM *fm, MRegCtx *ctx)
 		int savesz = 0;
 		for (int r = mt->gpr0; r < mt->gpr0 + mt->ngpr; r++)
 			if (mt->regs[r].callee_saved && ((fm->regsused >> r) & 1))
-				savesz += 8;
+				savesz += mt->ptrsize;
 		if (savesz)
 			for (uint32_t i = 0; i < ctx->nval; i++)
 				if (ctx->intv[i].v && ctx->intv[i].v->slot != -1)
