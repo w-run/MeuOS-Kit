@@ -1335,8 +1335,15 @@ nextinto(struct token *t)
 					break;
 				}
 			}
+			/* A directive always ends at a newline, so the next
+			 * position is a line start.  Without this reset the
+			 * static newline flag retains the value left by the
+			 * last non-directive token processed before a
+			 * directive or scanner pop, causing a THASH on a
+			 * parent line to be mistaken for a non-directive `#`. */
+			newline = true;
 		} else {
-			newline = tok.kind == TNEWLINE;
+			newline = t->kind == TNEWLINE;
 			break;
 		}
 	}
