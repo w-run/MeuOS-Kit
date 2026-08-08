@@ -1,5 +1,0 @@
-import json
-d = json.load(open("/workspace/static/mcc-toolchain/data.json"))
-print(f"meta: {d['meta']['commit']} {d['meta']['generated']}")
-for c in d['components']:
-    print(f"  {c['id']:15s} {c['progress']:3d}%")

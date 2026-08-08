@@ -1,1 +1,0 @@
-import json; d = json.load(open('/workspace/static/mcc-toolchain/data.json')); d['meta']['generated'] = '2026-08-08T16:00:00+08:00'; d['meta']['commit'] = '3e173e77'; json.dump(d, open('/workspace/static/mcc-toolchain/data.json','w'), indent=2, ensure_ascii=False); print('OK')

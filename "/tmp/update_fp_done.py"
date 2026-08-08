@@ -1,9 +1,0 @@
-import json
-d = json.load(open('/workspace/static/mcc-toolchain/data.json'))
-for t in d['components'][0]['todos']:
-    if 'FP scratch 规范' in t['text']:
-        t['text'] += ' [x]'
-        t['status'] = 'done'
-        break
-json.dump(d, open('/workspace/static/mcc-toolchain/data.json','w'), indent=2, ensure_ascii=False)
-print('OK')
