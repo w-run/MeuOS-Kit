@@ -67,7 +67,14 @@ check: $(TEST_MX) $(TEST_MXA) $(TEST_FUSION) $(MZ_BIN)
 	@$(MZ_BIN) d $(BUILD)/test_out.gz > $(BUILD)/test_out_decomp.txt 2>/dev/null && \
 	  cmp -s $(BUILD)/test_in.txt $(BUILD)/test_out_decomp.txt && \
 	  echo "PASS: mz d .gz roundtrip"
-	@rm -f $(BUILD)/test_in.txt $(BUILD)/test_out.mz $(BUILD)/test_out.gz $(BUILD)/xtract/test_in.txt
+	@$(MZ_BIN) c -o $(BUILD)/test_out.tar $(BUILD)/test_in.txt >/dev/null && echo "PASS: mz c -> .tar"
+	@$(MZ_BIN) l $(BUILD)/test_out.tar >/dev/null && echo "PASS: mz l .tar"
+	@$(MZ_BIN) t $(BUILD)/test_out.tar >/dev/null && echo "PASS: mz t .tar"
+	@rm -rf $(BUILD)/xtract && mkdir $(BUILD)/xtract && \
+	  cd $(BUILD)/xtract && $(CURDIR)/$(MZ_BIN) d $(CURDIR)/$(BUILD)/test_out.tar >/dev/null && \
+	  cmp -s $(CURDIR)/$(BUILD)/test_in.txt $(CURDIR)/$(BUILD)/xtract/test_in.txt && \
+	  echo "PASS: mz d .tar roundtrip"
+	@rm -f $(BUILD)/test_in.txt $(BUILD)/test_out.mz $(BUILD)/test_out.gz $(BUILD)/test_out.tar $(BUILD)/test_out_decomp.txt $(BUILD)/xtract/test_in.txt
 
 $(TEST_MX): test/test.c $(LIB)
 	$(CC) $(CFLAGS) -Iinclude -o $@ test/test.c $(LIB)
