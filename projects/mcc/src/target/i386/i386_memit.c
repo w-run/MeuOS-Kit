@@ -28,13 +28,7 @@ static MFnM *g_fm;
 static int g_alloca_cur;
 static const char *g_fname;
 static int g_slot_base;    /* -(pushbytes): push area above slots */
-/* FP constant pool — same design as x86_64: per-function .rodata entries
- * loaded directly into %xmm0/%xmm1, zero-frame-cost, deduplicated. */
-static MConst **fp_pool;
-static uint32_t nfp, cfp;
-/* Pre-built FP sign-mask constants for FNEG (avoid stack-local dangling ptr). */
-static const MConst f32_signmask = { .kind = MC_FLT, .type = MT_F32, .u = { .s = -0.0f } };
-static const MConst f64_signmask = { .kind = MC_FLT, .type = MT_F64, .u = { .d = -0.0 } };
+static int g_callee_save_after;  /* bytes pushed below ebp for callee-saved regs */
 
 /* ---- width helpers ------------------------------------------------------ */
 
@@ -68,65 +62,6 @@ alloca_total(MFnM *fm)
 				t += alloca_size_ins(&b->ins[i]);
 		}
 	return t;
-}
-
-/* ---- float constant pool (per emitted function) --------------------------- */
-
-/* find or add a float constant, returning its .rodata label index */
-static uint32_t
-fp_label(MConst *c)
-{
-	for (uint32_t i = 0; i < nfp; i++) {
-		MConst *x = fp_pool[i];
-		if (x->type != c->type)
-			continue;
-		/* Compare the IEEE bit pattern (memcmp), not the value: -0.0 == +0.0
-		 * numerically but they differ in the sign bit and must stay distinct. */
-		size_t sz = x->type == MT_F32 ? sizeof(float) : sizeof(double);
-		if (memcmp(&x->u, &c->u, sz) == 0)
-			return i;
-	}
-	if (nfp == cfp) {
-		cfp = cfp ? cfp * 2 : 8;
-		fp_pool = realloc(fp_pool, cfp * sizeof *fp_pool);
-	}
-	fp_pool[nfp++] = c;
-	return nfp - 1;
-}
-
-static void
-fp_pool_emit(FILE *f)
-{
-	if (!nfp)
-		return;
-	fputs(".section .rodata\n", f);
-	for (uint32_t i = 0; i < nfp; i++) {
-		MConst *c = fp_pool[i];
-		fprintf(f, ".L%s.lc%u:\n", g_fname ? g_fname : "f", i);
-		if (c->type == MT_F32) {
-			union { float s; uint32_t u; } x = { .s = c->u.s };
-			fprintf(f, "\t.long %u\n", x.u);
-		} else {
-			union { double d; uint64_t u; } x = { .d = c->u.d };
-			fprintf(f, "\t.quad %llu\n", (unsigned long long)x.u);
-		}
-	}
-}
-
-/* Emit a load of an FP pool constant into an XMM register.  PIC uses
- * @GOTOFF(%%ebx) (GOT base in EBX from the prologue); non-PIC uses the
- * label directly.  The function name g_fname is %-prefixed in the format
- * so the double-% becomes a single literal %. */
-static void
-emit_fp_pool_load(FILE *f, uint32_t idx, const char *xmm_reg)
-{
-	const char *ld = fp_pool[idx]->type == MT_F32 ? "ss" : "sd";
-	if (g_pic)
-		fprintf(f, "\tmov%s\t.L%s.lc%u@GOTOFF(%%ebx), %%%s\n",
-		        ld, g_fname ? g_fname : "f", idx, xmm_reg);
-	else
-		fprintf(f, "\tmov%s\t.L%s.lc%u, %%%s\n",
-		        ld, g_fname ? g_fname : "f", idx, xmm_reg);
 }
 
 /* ---- value printing ------------------------------------------------------ */
@@ -252,6 +187,12 @@ scratch_to_dst(FILE *f, MVal *d, const char *rn)
 
 static int g_i64_scratch;  /* %ebp offset of scratch pair 0 (already based) */
 
+/* FP constant scratch slot (8 bytes, below the i64 scratch pair), used so
+ * that FP constant loading does NOT corrupt the alloca stack area by
+ * using pushl/movss/addl which overwrites the live alloca reservation. */
+#define FP_SCRATCH_BYTES 8
+static int g_fp_scratch;
+
 /* Frame offset of a slot-resident value's low half. */
 static int
 i64_slot(const MVal *v)
@@ -269,9 +210,16 @@ i64_has_slot(const MVal *v)
  * Resolve an i64 operand to a frame offset whose low half is at the
  * returned offset and high half at +4.  Slot-resident temps are used in
  * place; everything else is materialised into scratch pair `nth`.
+ *
+ * When `ext` is non-zero, a register-resident temp is widened via
+ * zero-extension (ext == 1) or sign-extension (ext == 2) instead of
+ * the default cdq (sign-extension).  This is needed because the i64
+ * comparison path in emit_setccr may compare a 32-bit unsigned value
+ * against an i64 constant — cdq would sign-extend 0xFFFFFFFF to
+ * 0xFFFFFFFFFFFFFFFF, making the comparison fail.
  */
 static int
-i64_base(FILE *f, MVal *v, int nth)
+i64_base_ext(FILE *f, MVal *v, int nth, int ext)
 {
 	int off = g_i64_scratch + nth * 8;
 
@@ -290,13 +238,23 @@ i64_base(FILE *f, MVal *v, int nth)
 		return off;
 	}
 	/* register-resident temp or any other kind: only the low word is
-	 * addressable, so sign-extend it into the pair (i64 temps that made
-	 * it into a single register hold a 32-bit-representable value) */
+	 * addressable, so widen it into the pair. */
 	mv_to_scratch(f, v, "eax");
-	fputs("\tcdq\n", f);
+	if (ext == 1)
+		fputs("\txorl\t%edx, %edx\n", f);          /* zero-extend */
+	else if (ext == 2)
+		fputs("\tmovsbl\t%al, %eax\n\tcdq\n", f);   /* sign-extend i8 -> i64 */
+	else
+		fputs("\tcdq\n", f);                         /* sign-extend (default) */
 	fprintf(f, "\tmovl\t%%eax, %d(%%ebp)\n", off);
 	fprintf(f, "\tmovl\t%%edx, %d(%%ebp)\n", off + 4);
 	return off;
+}
+
+static int
+i64_base(FILE *f, MVal *v, int nth)
+{
+	return i64_base_ext(f, v, nth, 0);
 }
 
 /*
@@ -450,15 +408,28 @@ fload_scratch(FILE *f, MVal *v)
 				memcpy(&bits, &c->u.s, 4);
 				if (bits == 0)
 					fputs("\txorps\t%xmm0, %xmm0\n", f);
-				else
-					emit_fp_pool_load(f, fp_label(c), "xmm0");
+				else {
+					/* load constant through the dedicated FP scratch slot.
+					 * Before the fix, this used pushl/movss/addl which
+					 * corrupts the alloca reservation when alloca has
+					 * already been called (struct.x=1.0 bug). */
+fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
+				        bits, g_fp_scratch);
+					fprintf(f, "\tmovss\t%d(%%ebp), %%xmm0\n", g_fp_scratch);
+				}
 			} else {
 				uint64_t bits;
 				memcpy(&bits, &c->u.d, 8);
 				if (bits == 0)
 					fputs("\txorpd\t%xmm0, %xmm0\n", f);
-				else
-					emit_fp_pool_load(f, fp_label(c), "xmm0");
+				else {
+					/* load 8-byte constant through the FP scratch slot */
+					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
+					        (uint32_t)bits, g_fp_scratch);
+					fprintf(f, "\tmovl\t$0x%x, %d(%%ebp)\n",
+					        (uint32_t)(bits >> 32), g_fp_scratch + 4);
+					fprintf(f, "\tmovsd\t%d(%%ebp), %%xmm0\n", g_fp_scratch);
+				}
 			}
 			return;
 		}
@@ -536,6 +507,32 @@ fstore_scratch(FILE *f, MVal *d)
 	}
 }
 
+/* FP condition-code suffix: after ucomisd/ucomiss the FLAGS use
+ * CF/ZF/PF encoding (not the signed integer SF/OF encoding that
+ * setl/setg/setle/setge test).  For example `setl` after ucomisd
+ * always returns 0 because ucomisd clears SF and OF, making
+ * SF != OF = 0 (defect: broken ordered FP comparisons like `>`).
+ * Correct FP suffixes:
+ *   EQ -> e  (ZF=1)
+ *   NE -> ne (ZF=0)
+ *   LT -> b  (CF=1, below)
+ *   LE -> be (CF=1 | ZF=1)
+ *   GT -> a  (CF=0 & ZF=0, above)
+ *   GE -> ae (CF=0, above-or-equal) */
+static const char *
+i386_fpcc_suffix(MCC cc)
+{
+	switch (cc) {
+	case MCC_EQ:  return "e";
+	case MCC_NE:  return "ne";
+	case MCC_LT:  return "b";
+	case MCC_LE:  return "be";
+	case MCC_GT:  return "a";
+	case MCC_GE:  return "ae";
+	default:      return "e";
+	}
+}
+
 /* dst = (a cc b) ? 1 : 0 for floating operands. */
 static void
 emit_setccr_fp(FILE *f, MInsM *in)
@@ -553,17 +550,18 @@ emit_setccr_fp(FILE *f, MInsM *in)
 				if (is32) {
 					uint32_t bits;
 					memcpy(&bits, &c->u.s, 4);
-					if (bits == 0)
-						fputs("\txorpd\t%xmm1, %xmm1\n", f);
-					else
-						emit_fp_pool_load(f, fp_label(c), "xmm1");
+					fprintf(f, "\tpushl\t$0x%x\n", bits);
+					fputs("\tmovss\t(%esp), %xmm1\n", f);
+					fputs("\taddl\t$4, %esp\n", f);
 				} else {
 					uint64_t bits;
 					memcpy(&bits, &c->u.d, 8);
-					if (bits == 0)
-						fputs("\txorpd\t%xmm1, %xmm1\n", f);
-					else
-						emit_fp_pool_load(f, fp_label(c), "xmm1");
+					fprintf(f, "\tpushl\t$0x%x\n",
+					        (uint32_t)(bits >> 32));
+					fprintf(f, "\tpushl\t$0x%x\n",
+					        (uint32_t)bits);
+					fputs("\tmovsd\t(%esp), %xmm1\n", f);
+					fputs("\taddl\t$8, %esp\n", f);
 				}
 			}
 		} else if (b->kind == MV_REG || (b->kind == MV_TEMP && b->reg >= 0)) {
@@ -580,7 +578,7 @@ emit_setccr_fp(FILE *f, MInsM *in)
 		fputs("\tucomiss\t%xmm1, %xmm0\n", f);
 	else
 		fputs("\tucomisd\t%xmm1, %xmm0\n", f);
-	fprintf(f, "\tset%s\t%%al\n", i386_cc_suffix(cc));
+	fprintf(f, "\tset%s\t%%al\n", i386_fpcc_suffix(cc));
 	fputs("\tmovzbl\t%al, %eax\n", f);
 	scratch_to_dst(f, in->dst, "eax");
 }
@@ -597,8 +595,8 @@ i386_cc_suffix(MCC cc)
 	case MCC_LT:  return "l";
 	case MCC_GT:  return "g";
 	case MCC_LE:  return "le";
-	case MCC_CS:  return "ae";   /* carry set  -> unsigned >= / fp >= */
-	case MCC_CC:  return "b";    /* carry clear-> unsigned <  / fp < */
+	case MCC_CS:  return "b";    /* below (unsigned lt) */
+	case MCC_CC:  return "ae";   /* above or equal (unsigned ge) */
 	case MCC_HI:  return "a";    /* above (unsigned gt) */
 	case MCC_LS:  return "be";   /* below or equal (unsigned le) */
 	default:      return "e";
@@ -614,12 +612,46 @@ emit_setccr(FILE *f, MInsM *in)
 	MCC cc = in->cc;
 
 	if (a && b && (a->type == MT_I64 || b->type == MT_I64)) {
-		/* i64 comparison: compare high 32 bits first; if equal, compare
-		 * low 32 bits with unsigned comparison.  Use a global counter
-		 * for unique labels across the whole assembly file. */
+		/* Mixed-width comparison: one operand is MT_I64, the other is
+		 * narrower (e.g. i32).  For EQ/NE the comparison can be done in
+		 * 32 bits (sufficient for equality).  For ordered comparisons,
+		 * the narrower operand must be widened with the correct signedness:
+		 * signed CC (GE/LT/GT/LE) → sign-extend; unsigned CC (CS/CC/HI/LS)
+		 * → zero-extend; otherwise a register-resident 32-bit value like
+		 * 0xFFFFFFFF from an unsigned fp->int conversion would be cdq'd to
+		 * 0xFFFFFFFFFFFFFFFF, mismatching the constant's 0x00000000FFFFFFFF
+		 * (i386-double-uint64-cmp). */
+		if ((a->type != MT_I64 || b->type != MT_I64) &&
+		    (cc == MCC_EQ || cc == MCC_NE)) {
+			/* 32-bit compare suffices */
+			mv_to_scratch(f, a, "eax");
+			mv_to_scratch(f, b, "ecx");
+			fputs("\tcmpl\t%ecx, %eax\n", f);
+			fprintf(f, "\tset%s\t%%al\n", i386_cc_suffix(cc));
+			fputs("\tmovzbl\t%al, %eax\n", f);
+			scratch_to_dst(f, in->dst, "eax");
+			return;
+		}
+		/* Full i64 comparison: compare high 32 bits first; if equal,
+		 * compare low 32 bits.  Use a global counter for unique labels
+		 * across the whole assembly file. */
 		static uint32_t g_i64cc_id;
-		int sa = i64_base(f, a, 0);
-		int sb = i64_base(f, b, 1);
+		int sa, sb;
+		if (a->type != MT_I64 && b->type == MT_I64) {
+			/* a is narrower: widen based on CC signedness */
+			bool usign = (cc == MCC_CS || cc == MCC_CC ||
+			              cc == MCC_HI || cc == MCC_LS);
+			sa = i64_base_ext(f, a, 0, usign ? 1 : 0);
+			sb = i64_base(f, b, 1);
+		} else if (a->type == MT_I64 && b->type != MT_I64) {
+			bool usign = (cc == MCC_CS || cc == MCC_CC ||
+			              cc == MCC_HI || cc == MCC_LS);
+			sa = i64_base(f, a, 0);
+			sb = i64_base_ext(f, b, 1, usign ? 1 : 0);
+		} else {
+			sa = i64_base(f, a, 0);
+			sb = i64_base(f, b, 1);
+		}
 		uint32_t id = g_i64cc_id++;
 		const char *suffix = i386_cc_suffix(cc);
 
@@ -834,7 +866,7 @@ emit_ins(FILE *f, MInsM *in)
 			fstore_scratch(f, d);
 			return;
 		}
-		if (in->dtype == MT_I64 || (s0 && s0->type == MT_I64)) {
+		if (in->dtype == MT_I64) {
 			/* i64 on i386: two 32-bit moves, normalised through a single
 			 * half-pair base so the source halves are read back from the
 			 * frame address they were actually written to (i64_base).
@@ -1210,14 +1242,17 @@ emit_ins(FILE *f, MInsM *in)
 		}
 		fload_scratch(f, s0);
 		if (op == MMOP_FNEG) {
-			/* XOR sign bit — load the sign-mask constant from the fp pool.
-			 * Uses file-scope static consts so the pointer in fp_pool never
-			 * dangles. */
+			/* XOR sign bit */
 			if (is32) {
-				emit_fp_pool_load(f, fp_label((MConst *)&f32_signmask), "xmm1");
+				fputs("\tpushl\t$0x80000000\n", f);
+				fputs("\tmovss\t(%esp), %xmm1\n", f);
+				fputs("\taddl\t$4, %esp\n", f);
 				fputs("\txorps\t%xmm1, %xmm0\n", f);
 			} else {
-				emit_fp_pool_load(f, fp_label((MConst *)&f64_signmask), "xmm1");
+				fputs("\tpushl\t$0x80000000\n", f);
+				fputs("\tpushl\t$0x00000000\n", f);
+				fputs("\tmovsd\t(%esp), %xmm1\n", f);
+				fputs("\taddl\t$8, %esp\n", f);
 				fputs("\txorpd\t%xmm1, %xmm0\n", f);
 			}
 		} else if (op == MMOP_FSQRT) {
@@ -1231,17 +1266,18 @@ emit_ins(FILE *f, MInsM *in)
 						if (is32) {
 							uint32_t bits;
 							memcpy(&bits, &c->u.s, 4);
-							if (bits == 0)
-								fputs("\txorpd\t%xmm1, %xmm1\n", f);
-							else
-								emit_fp_pool_load(f, fp_label(c), "xmm1");
+							fprintf(f, "\tpushl\t$0x%x\n", bits);
+							fputs("\tmovss\t(%esp), %xmm1\n", f);
+							fputs("\taddl\t$4, %esp\n", f);
 						} else {
 							uint64_t bits;
 							memcpy(&bits, &c->u.d, 8);
-							if (bits == 0)
-								fputs("\txorpd\t%xmm1, %xmm1\n", f);
-							else
-								emit_fp_pool_load(f, fp_label(c), "xmm1");
+							fprintf(f, "\tpushl\t$0x%x\n",
+							        (uint32_t)(bits >> 32));
+							fprintf(f, "\tpushl\t$0x%x\n",
+							        (uint32_t)bits);
+							fputs("\tmovsd\t(%esp), %xmm1\n", f);
+							fputs("\taddl\t$8, %esp\n", f);
 						}
 					}
 				} else if (s1->kind == MV_REG ||
@@ -1278,6 +1314,114 @@ emit_ins(FILE *f, MInsM *in)
 		scratch_to_dst(f, d, "eax");
 		return;
 	}
+	case MMOP_CVTTSS2SQ:  /* f32 -> i64 (trunc) */
+	case MMOP_CVTTSD2SQ: {
+		/* f32/f64 -> i64 truncation on i386: SSE cvtts*2si only produces
+		 * 32-bit EAX.  Load fp into x87 via memory and use fisttpq. */
+		bool is64 = (op == MMOP_CVTTSD2SQ);
+		fload_scratch(f, s0);
+		fprintf(f, "\tsubl\t$8, %%esp\n");
+		if (is64)
+			fputs("\tmovsd\t%xmm0, (%esp)\n", f);
+		else
+			fputs("\tmovss\t%xmm0, (%esp)\n", f);
+		if (is64)
+			fputs("\tfldl\t(%esp)\n", f);
+		else
+			fputs("\tflds\t(%esp)\n", f);
+		fputs("\tfisttpq\t(%esp)\n", f);
+		fputs("\tmovl\t(%esp), %eax\n", f);
+		fputs("\tmovl\t4(%esp), %edx\n", f);
+		fputs("\taddl\t$8, %esp\n", f);
+		i64_store_pair(f, d);
+		return;
+	}
+	case MMOP_CVTTSS2SI_U: /* f32 -> u32 (trunc) */
+	case MMOP_CVTTSD2SI_U: {
+		/* f32/f64 -> u32 truncation: x87 fisttpl produces signed result.
+		 * Values >= 2^31 overflow; subtract 2^31, truncate, add 2^31 back. */
+		static uint32_t g_f2u32_id;
+		uint32_t id = g_f2u32_id++;
+		bool is64 = (op == MMOP_CVTTSD2SI_U);
+		fload_scratch(f, s0);
+		fprintf(f, "\tsubl\t$16, %%esp\n");
+		if (is64) {
+			fputs("\tmovsd\t%xmm0, (%esp)\n", f);
+			/* threshold 2^31 as double = 0x41e00000 00000000 */
+			fputs("\tmovl\t$0x00000000, 8(%esp)\n", f);
+			fputs("\tmovl\t$0x41e00000, 12(%esp)\n", f);
+			fputs("\tfldl\t(%esp)\n", f);
+			fputs("\tfcoml\t8(%esp)\n", f);
+		} else {
+			fputs("\tmovss\t%xmm0, (%esp)\n", f);
+			/* threshold 2^31 as float = 0x4f000000 */
+			fputs("\tmovl\t$0x4f000000, 8(%esp)\n", f);
+			fputs("\tflds\t(%esp)\n", f);
+			fputs("\tfcoms\t8(%esp)\n", f);
+		}
+		fputs("\tpushl\t%eax\n\tfnstsw\t%ax\n\tsahf\n\tpopl\t%eax\n", f);
+		fprintf(f, "\tjae\t.Lf2u32ge%u\n", id);
+		/* fp < 2^31: fisttpl (signed truncation works) */
+		fputs("\tfisttpl\t8(%esp)\n", f);
+		fprintf(f, "\tjmp\t.Lf2u32d%u\n", id);
+		fprintf(f, ".Lf2u32ge%u:\n", id);
+		/* fp >= 2^31: subtract 2^31, fisttpl, add 0x80000000.
+		 * st(0) still holds the original fp (fcom didn't pop). */
+		if (is64)
+			fputs("\tfsubl\t8(%esp)\n", f);
+		else
+			fputs("\tfsubs\t8(%esp)\n", f);
+		fputs("\tfisttpl\t8(%esp)\n", f);
+		fputs("\taddl\t$0x80000000, 8(%esp)\n", f);
+		fprintf(f, ".Lf2u32d%u:\n", id);
+		fputs("\tmovl\t8(%esp), %eax\n", f);
+		fputs("\taddl\t$16, %esp\n", f);
+		scratch_to_dst(f, d, "eax");
+		return;
+	}
+	case MMOP_CVTTSS2SQ_U: /* f32 -> u64 (trunc) */
+	case MMOP_CVTTSD2SQ_U: {
+		/* f32/f64 -> u64 truncation: x87 fisttpq produces signed result.
+		 * Values >= 2^63 overflow; subtract 2^63, truncate, add 2^63 back. */
+		static uint32_t g_f2u64_id;
+		uint32_t id = g_f2u64_id++;
+		bool is64 = (op == MMOP_CVTTSD2SQ_U);
+		fload_scratch(f, s0);
+		fprintf(f, "\tsubl\t$16, %%esp\n");
+		if (is64) {
+			fputs("\tmovsd\t%xmm0, (%esp)\n", f);
+			/* threshold 2^63 as double = 0x43e00000 00000000 */
+			fputs("\tmovl\t$0x00000000, 8(%esp)\n", f);
+			fputs("\tmovl\t$0x43e00000, 12(%esp)\n", f);
+			fputs("\tfldl\t(%esp)\n", f);
+			fputs("\tfcoml\t8(%esp)\n", f);
+		} else {
+			fputs("\tmovss\t%xmm0, (%esp)\n", f);
+			/* threshold 2^63 as float = 0x5f000000 */
+			fputs("\tmovl\t$0x5f000000, 8(%esp)\n", f);
+			fputs("\tflds\t(%esp)\n", f);
+			fputs("\tfcoms\t8(%esp)\n", f);
+		}
+		fputs("\tpushl\t%eax\n\tfnstsw\t%ax\n\tsahf\n\tpopl\t%eax\n", f);
+		fprintf(f, "\tjae\t.Lf2u64ge%u\n", id);
+		/* fp < 2^63: fisttpq (signed truncation works) */
+		fputs("\tfisttpq\t8(%esp)\n", f);
+		fprintf(f, "\tjmp\t.Lf2u64d%u\n", id);
+		fprintf(f, ".Lf2u64ge%u:\n", id);
+		/* fp >= 2^63: subtract 2^63, fisttpq, add 0x80000000 to high word */
+		if (is64)
+			fputs("\tfsubl\t8(%esp)\n", f);
+		else
+			fputs("\tfsubs\t8(%esp)\n", f);
+		fputs("\tfisttpq\t8(%esp)\n", f);
+		fputs("\taddl\t$0x80000000, 12(%esp)\n", f);
+		fprintf(f, ".Lf2u64d%u:\n", id);
+		fputs("\tmovl\t8(%esp), %eax\n", f);
+		fputs("\tmovl\t12(%esp), %edx\n", f);
+		fputs("\taddl\t$16, %esp\n", f);
+		i64_store_pair(f, d);
+		return;
+	}
 	case MMOP_CVTSI2SS:   /* i32 -> f32 */
 	case MMOP_CVTSI2SD: {
 		bool is32 = (op == MMOP_CVTSI2SS);
@@ -1289,84 +1433,83 @@ emit_ins(FILE *f, MInsM *in)
 		fstore_scratch(f, d);
 		return;
 	}
-	case MMOP_CVTSI2SS_U: /* unsigned i32 -> f32 */
+	case MMOP_CVTSI2SS_U: /* unsigned i32/i64 -> f32 */
 	case MMOP_CVTSI2SD_U: {
 		static uint32_t g_u2f_id;
 		bool is32 = (op == MMOP_CVTSI2SS_U);
 		uint32_t id = g_u2f_id++;
-
 		if (s0 && s0->type == MT_I64) {
-			/* 64-bit unsigned -> float/double.
-			 * fildq reads the 64-bit value as signed; if the
-			 * high bit is set (value >= 2^63), subtract 2^63
-			 * first, fildq, then add back 2^63.0.
-			 * Matches the LIR Oultof (i386_emit.c).
-			 *
-			 * NOTE: cannot use i64_base() here — it sign-extends
-			 * the low word via cdq, destroying the real high word
-			 * for unsigned values (i64_has_slot rejects values with
-			 * v->reg >= 0, falling back to cdq).  Access the slot
-			 * directly when available. */
-			static uint32_t g_ultof_id;
-			uint32_t lid = g_ultof_id++;
-			int base;
-			if (s0->slot != -1) {
-				base = s0->slot + g_slot_base;
-			} else {
-				base = i64_base(f, s0, 0);
-			}
-
-			/* Check high bit (bit 31 of the high word). */
-			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", base + 4);
-			fprintf(f, "\ttestl\t%%eax, %%eax\n");
-			fprintf(f, "\tjns\t.Lultof%u\n", lid);
-
-			/* >= 2^63: subtract 2^63, fildq, add back 2^63.0 */
+			/* i64 source (e.g. unsigned long long -> double): normalise
+			 * into a scratch pair, load as signed 64-bit via fildq,
+			 * then add 2^64 if the high bit is set.
+			 *   - hi >= 0: fildq gives the correct unsigned value
+			 *     (value < 2^63).
+			 *   - hi < 0: fildq gives signed_i64 = unsigned - 2^64,
+			 *     so add 2^64 back. */
+			int sbase = i64_base(f, s0, 0);
+			fprintf(f, "\tcmpl\t$0, %d(%%ebp)\n", sbase + 4);
+			fprintf(f, "\tjs\t.Lu2f_hi%u\n", id);
+			/* hi >= 0: fildq as signed (value < 2^63) */
 			fputs("\tsubl\t$8, %esp\n", f);
-			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", base);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sbase);
 			fputs("\tmovl\t%eax, (%esp)\n", f);
-			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", base + 4);
-			fputs("\tsubl\t$0x80000000, %eax\n", f);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sbase + 4);
 			fputs("\tmovl\t%eax, 4(%esp)\n", f);
 			fputs("\tfildq\t(%esp)\n", f);
-			/* 2^63.0: fildq(-2^63) then fchs */
-			fputs("\tpushl\t$0x80000000\n\tpushl\t$0\n", f);
+			fputs("\taddl\t$8, %esp\n", f);
+			fprintf(f, "\tjmp\t.Lu2f_done%u\n", id);
+			fprintf(f, ".Lu2f_hi%u:\n", id);
+			/* hi < 0 (>= 2^63): fildq gives signed negative, add 2^64 */
+			fputs("\tsubl\t$8, %esp\n", f);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sbase);
+			fputs("\tmovl\t%eax, (%esp)\n", f);
+			fprintf(f, "\tmovl\t%d(%%ebp), %%eax\n", sbase + 4);
+			fputs("\tmovl\t%eax, 4(%esp)\n", f);
 			fputs("\tfildq\t(%esp)\n", f);
-			fputs("\tfchs\n", f);
-			fputs("\tfaddp\n", f);
-			fputs("\taddl\t$16, %esp\n", f);
+			fputs("\taddl\t$8, %esp\n", f);
+			if (is32) {
+				/* 2^64 as float = 0x5f800000 */
+				fputs("\tpushl\t$0x5f800000\n", f);
+				fputs("\tfadds\t(%esp)\n", f);
+				fputs("\taddl\t$4, %esp\n", f);
+			} else {
+				/* 2^64 = 0x43f00000_00000000; push HIGH dword first */
+				fputs("\tpushl\t$0x43f00000\n", f);
+				fputs("\tpushl\t$0x00000000\n", f);
+				fputs("\tfaddl\t(%esp)\n", f);
+				fputs("\taddl\t$8, %esp\n", f);
+			}
+			fprintf(f, ".Lu2f_done%u:\n", id);
 			if (is32)
 				fputs("\tfstps\t-4(%esp)\n\tmovss\t-4(%esp), %xmm0\n", f);
 			else
 				fputs("\tfstpl\t-8(%esp)\n\tmovsd\t-8(%esp), %xmm0\n", f);
-			fprintf(f, "\tjmp\t.Lultofe%u\n", lid);
-
-			/* < 2^63: fildq directly. */
-			fprintf(f, ".Lultof%u:\n", lid);
-			fprintf(f, "\tfildq\t%d(%%ebp)\n", base);
-			if (is32)
-				fputs("\tfstps\t-4(%esp)\n\tmovss\t-4(%esp), %xmm0\n", f);
-			else
-				fputs("\tfstpl\t-8(%esp)\n\tmovsd\t-8(%esp), %xmm0\n", f);
-
-			fprintf(f, ".Lultofe%u:\n", lid);
 			fstore_scratch(f, d);
 			return;
 		}
-
+		/* i32 source */
 		mv_to_scratch(f, s0, "eax");
 		fprintf(f, "\ttestl\t%%eax, %%eax\n");
 		fprintf(f, "\tjs\t.Lu2f%u\n", id);
 		fprintf(f, "\tcvtsi2%s\t%%eax, %%xmm0\n", is32 ? "ss" : "sd");
 		fprintf(f, "\tjmp\t.Lu2fe%u\n", id);
 		fprintf(f, ".Lu2f%u:\n", id);
-		/* Zero-extend u32 to 64 bits, fildq loads it as signed
-		 * 64-bit in [0, 2^32-1] — the exact unsigned value. */
-		fputs("\tsubl\t$8, %esp\n", f);
-		fputs("\tmovl\t%eax, (%esp)\n", f);
-		fputs("\tmovl\t$0, 4(%esp)\n", f);
-		fputs("\tfildq\t(%esp)\n", f);
-		fputs("\taddl\t$8, %esp\n", f);
+		/* Unsigned >= 2^31: fildl loads as signed negative; add 2^32. */
+		fputs("\tpushl\t%eax\n", f);
+		fputs("\tfildl\t(%esp)\n", f);
+		fputs("\taddl\t$4, %esp\n", f);
+		if (is32) {
+			/* 2^32 as float = 0x4f800000 */
+			fputs("\tpushl\t$0x4f800000\n", f);
+			fputs("\tfadds\t(%esp)\n", f);
+			fputs("\taddl\t$4, %esp\n", f);
+		} else {
+			/* 2^32 = 0x41f00000_00000000; push HIGH dword first */
+			fputs("\tpushl\t$0x41f00000\n", f);
+			fputs("\tpushl\t$0x00000000\n", f);
+			fputs("\tfaddl\t(%esp)\n", f);
+			fputs("\taddl\t$8, %esp\n", f);
+		}
 		if (is32)
 			fputs("\tfstps\t-4(%esp)\n\tmovss\t-4(%esp), %xmm0\n", f);
 		else
@@ -1596,10 +1739,27 @@ emit_block(FILE *f, MBlkM *b)
 		} else if (t.src[0]) {
 			mv_to_scratch(f, t.src[0], "eax");
 		}
-		/* epilogue: restore frame and pop */
+		/* epilogue: restore frame and pop callee-saved regs */
 		fputs("\tmovl\t%ebp, %esp\n", f);
-		if (g_pic)
-			fputs("\tpopl\t%ebx\n", f);
+		/* Skip to the callee-saved area (below saved-ebp). */
+		if (g_callee_save_after)
+			fprintf(f, "\tsubl\t$%d, %%esp\n", g_callee_save_after);
+		/* Pop callee-saved registers in reverse push order.
+		 * Used rclob regs (excluding PIC ebx) then PIC ebx. */
+		{
+			int used[4], nused = 0;
+			for (int i = 0; g_fm->mt->rclob && g_fm->mt->rclob[i] >= 0; i++) {
+				int r = g_fm->mt->rclob[i];
+				if (r == I386MREG_EBX && g_pic)
+					continue;
+				if ((g_fm->regsused >> r) & 1)
+					used[nused++] = r;
+			}
+			if (g_pic)
+				used[nused++] = I386MREG_EBX;
+			for (int i = nused - 1; i >= 0; i--)
+				fprintf(f, "\tpopl\t%%%s\n", mreg_name(g_fm->mt, used[i]));
+		}
 		fputs("\tpopl\t%ebp\n", f);
 		fputs("\tret\n", f);
 		break;
@@ -1617,11 +1777,26 @@ mfnm_emit_i386(MFnM *fm, FILE *f)
 	g_fname = fm->name ? fm->name : "?";
 
 	/* frame: push ebp (4 bytes) above the slot area; PIC additionally
-	 * pushes the callee-saved EBX (GOT base) before setting ebp. */
+	 * pushes the callee-saved EBX (GOT base) before setting ebp.
+	 * Callee-saved registers used by the regalloc (fm->regsused)
+	 * are pushed AFTER mov %esp, %ebp so they sit at [ebp-4],
+	 * [ebp-8], ... below the frame pointer.  pushbytes includes
+	 * saved ebp + PIC ebx + all callee-saves; g_slot_base =
+	 * -pushbytes so all slots sit below the callee-save area. */
 	int pushbytes = 4;
+	int callee_save_after = 0;
+	for (int i = 0; fm->mt->rclob && fm->mt->rclob[i] >= 0; i++) {
+		int r = fm->mt->rclob[i];
+		if (r == I386MREG_EBX && g_pic)
+			continue;
+		if ((fm->regsused >> r) & 1)
+			callee_save_after += 4;
+	}
 	if (g_pic)
-		pushbytes += 4;
+		callee_save_after += 4;
+	pushbytes += callee_save_after;
 	g_slot_base = -pushbytes;
+	g_callee_save_after = callee_save_after;
 
 	fm->dynalloc = false;
 	for (MBlkM *b = fm->link; !fm->dynalloc && b; b = b->link)
@@ -1637,17 +1812,16 @@ mfnm_emit_i386(MFnM *fm, FILE *f)
 
 	/* Reserve the i64 half-pair scratch below the register-allocated
 	 * slots (see i64_base): normalising a constant or register-resident
-	 * i64 operand needs a real lo/hi pair to read back from. */
-	g_i64_scratch = -(fm->slot + pushbytes + I64_SCRATCH_BYTES);
+	 * i64 operand needs a real lo/hi pair to read back from.
+	 * Below the i64 scratch sits the FP constant scratch (8 bytes)
+	 * so float constant loads do NOT corrupt the alloca area via
+	 * pushl/movss/addl (struct.x=1.0 bug). */
+	g_i64_scratch = -(fm->slot + pushbytes + FP_SCRATCH_BYTES + I64_SCRATCH_BYTES);
+	g_fp_scratch = g_i64_scratch + I64_SCRATCH_BYTES;
 
-	/* FP constants now live in the .rodata pool (fp_pool / fp_pool_emit),
-	 * so there is no FP scratch in the frame — saves 8 bytes per function
-	 * vs the previous g_fp_scratch hack. */
-	nfp = 0;
-
-	int framesize = fm->slot + I64_SCRATCH_BYTES + alloca_total(fm) + pushbytes;
+	int framesize = fm->slot + FP_SCRATCH_BYTES + I64_SCRATCH_BYTES + alloca_total(fm) + pushbytes;
 	framesize = (framesize + 15) & ~15;
-	g_alloca_cur = -(fm->slot + pushbytes + I64_SCRATCH_BYTES);
+	g_alloca_cur = -(fm->slot + pushbytes + FP_SCRATCH_BYTES + I64_SCRATCH_BYTES);
 
 	fprintf(f, ".text\n");
 	if (fm->name) {
@@ -1656,9 +1830,19 @@ mfnm_emit_i386(MFnM *fm, FILE *f)
 		fprintf(f, "%s:\n", fm->name);
 	}
 	fprintf(f, "\tpushl\t%%ebp\n");
+	fprintf(f, "\tmovl\t%%esp, %%ebp\n");
+	/* Callee-saved registers (EBX/ESI/EDI) used by the regalloc
+	 * are pushed below ebp.  They will be restored in reverse
+	 * order in the epilogue. */
 	if (g_pic)
 		fprintf(f, "\tpushl\t%%ebx\n");
-	fprintf(f, "\tmovl\t%%esp, %%ebp\n");
+	for (int i = 0; fm->mt->rclob && fm->mt->rclob[i] >= 0; i++) {
+		int r = fm->mt->rclob[i];
+		if (r == I386MREG_EBX && g_pic)
+			continue;
+		if ((fm->regsused >> r) & 1)
+			fprintf(f, "\tpushl\t%%%s\n", mreg_name(fm->mt, r));
+	}
 	if (framesize > pushbytes)
 		fprintf(f, "\tsubl\t$%d, %%esp\n", framesize - pushbytes);
 
@@ -1674,5 +1858,4 @@ mfnm_emit_i386(MFnM *fm, FILE *f)
 
 	for (MBlkM *b = fm->link; b; b = b->link)
 		emit_block(f, b);
-	fp_pool_emit(f);
 }
