@@ -35,6 +35,7 @@
 #include <dirent.h>
 #include <dlfcn.h>
 #include <errno.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -279,6 +280,120 @@ static void collector_free(struct collector *c)
 	free(c->entries);
 }
 
+/* ---- parallel compression ---- */
+
+struct compress_funcs {
+	int is_zlib;
+	int is_zstd;
+	unsigned long (*zlib_compressBound)(unsigned long);
+	int (*zlib_deflateInit)(void *, int, const char *, int);
+	int (*zlib_deflate)(void *, int);
+	int (*zlib_deflateEnd)(void *);
+	size_t (*zstd_compress)(void *, size_t, const void *, size_t, int);
+	size_t (*zstd_compressBound)(size_t);
+};
+
+static volatile int g_parallel_failed = 0;
+
+struct chunk_work {
+	struct entry *entries;
+	unsigned char **compressed;
+	size_t *comp_sizes;
+	size_t start, end;
+	const struct compress_funcs *cf;
+};
+
+static void *compress_chunk(void *arg)
+{
+	struct chunk_work *cw = (struct chunk_work *)arg;
+	for (size_t i = cw->start; i < cw->end; i++) {
+		if (g_parallel_failed) return NULL;
+		struct entry *e = &cw->entries[i];
+		if (e->data_size == 0) {
+			cw->comp_sizes[i] = 0;
+			cw->compressed[i] = NULL;
+			continue;
+		}
+		if (cw->cf->is_zlib) {
+			unsigned long bound = (*cw->cf->zlib_compressBound)((unsigned long)e->data_size);
+			unsigned char *out = malloc(bound + 8);
+			if (!out) { g_parallel_failed = 1; return NULL; }
+			z_stream_min strm;
+			memset(&strm, 0, sizeof(strm));
+			strm.next_in = e->data;
+			strm.avail_in = (unsigned int)e->data_size;
+			strm.next_out = out;
+			strm.avail_out = (unsigned int)(bound + 8);
+			if ((*cw->cf->zlib_deflateInit)(&strm, Z_DEFAULT_COMPRESSION, "1.2.3", (int)sizeof(z_stream_min)) != Z_OK) {
+				free(out); g_parallel_failed = 1; return NULL;
+			}
+			int ret = (*cw->cf->zlib_deflate)(&strm, Z_FINISH);
+			if (ret != Z_STREAM_END) {
+				free(out); (*cw->cf->zlib_deflateEnd)(&strm); g_parallel_failed = 1; return NULL;
+			}
+			(*cw->cf->zlib_deflateEnd)(&strm);
+			size_t csize = strm.total_out;
+			if (csize >= e->data_size) {
+				free(out);
+				cw->compressed[i] = NULL;
+				cw->comp_sizes[i] = e->data_size;
+			} else {
+				cw->compressed[i] = out;
+				cw->comp_sizes[i] = csize;
+			}
+		} else {
+			/* zstd */
+			size_t bound = (*cw->cf->zstd_compressBound)(e->data_size);
+			unsigned char *out = malloc(bound + 8);
+			if (!out) { g_parallel_failed = 1; return NULL; }
+			size_t ret = (*cw->cf->zstd_compress)(out, bound + 8, e->data, e->data_size, 3);
+			if (ret >= e->data_size) {
+				free(out);
+				cw->compressed[i] = NULL;
+				cw->comp_sizes[i] = e->data_size;
+			} else {
+				cw->compressed[i] = out;
+				cw->comp_sizes[i] = ret;
+			}
+		}
+	}
+	return NULL;
+}
+
+static void
+parallel_compress(struct entry *entries, size_t count,
+		  unsigned char **compressed, size_t *comp_sizes,
+		  const struct compress_funcs *cf)
+{
+	g_parallel_failed = 0;
+	long nproc = sysconf(_SC_NPROCESSORS_ONLN);
+	if (nproc < 1) nproc = 2;
+	int nthreads = (int)nproc;
+	if (nthreads > (int)count) nthreads = (int)count;
+	if (nthreads > 8) nthreads = 8;
+	if (nthreads < 1) nthreads = 1;
+
+	pthread_t threads[8];
+	struct chunk_work chunks[8];
+	size_t chunk_size = count / (size_t)nthreads;
+
+	for (int t = 0; t < nthreads; t++) {
+		chunks[t].entries = entries;
+		chunks[t].compressed = compressed;
+		chunks[t].comp_sizes = comp_sizes;
+		chunks[t].start = (size_t)t * chunk_size;
+		chunks[t].end = (t == nthreads - 1) ? count : chunks[t].start + chunk_size;
+		chunks[t].cf = cf;
+		if (pthread_create(&threads[t], NULL, compress_chunk, &chunks[t]) != 0)
+			die("pthread_create");
+	}
+	for (int t = 0; t < nthreads; t++)
+		pthread_join(threads[t], NULL);
+
+	if (g_parallel_failed)
+		die("parallel compression failed");
+}
+
 /* ---- write .msys ---- */
 
 static void write_msys(const char *output, struct collector *c, uint32_t flags)
@@ -384,56 +499,24 @@ static void write_msys(const char *output, struct collector *c, uint32_t flags)
 	/* Re-sort after adding @mt/ entries */
 	qsort(c->entries, c->count, sizeof(struct entry), entry_cmp);
 
-	/* Phase 1: compute data sizes (compress each block) */
+	/* Phase 1: compute data sizes (compress each block, parallel) */
 	unsigned char **compressed = NULL;
 	size_t *comp_sizes = NULL;
 	if ((flags & (MSYS_F_ZLIB | MSYS_F_ZSTD))) {
-		int is_zlib = (flags & MSYS_F_ZLIB);
+		struct compress_funcs cf;
+		memset(&cf, 0, sizeof(cf));
+		cf.is_zlib = (flags & MSYS_F_ZLIB) ? 1 : 0;
+		cf.is_zstd = (flags & MSYS_F_ZSTD) ? 1 : 0;
+		cf.zlib_compressBound = zlib_compressBound;
+		cf.zlib_deflateInit = zlib_deflateInit;
+		cf.zlib_deflate = zlib_deflate;
+		cf.zlib_deflateEnd = zlib_deflateEnd;
+		cf.zstd_compress = zstd_compress;
+		cf.zstd_compressBound = zstd_compressBound;
 		compressed = calloc(c->count, sizeof(*compressed));
 		comp_sizes = calloc(c->count, sizeof(*comp_sizes));
 		if (!compressed || !comp_sizes) die("malloc");
-		for (size_t i = 0; i < c->count; i++) {
-			struct entry *e = &c->entries[i];
-			if (e->data_size == 0) { comp_sizes[i] = 0; continue; }
-			if (is_zlib) {
-				unsigned long bound = (*zlib_compressBound)((unsigned long)e->data_size);
-				compressed[i] = malloc(bound + 8);
-				if (!compressed[i]) die("malloc");
-				z_stream_min strm;
-				memset(&strm, 0, sizeof(strm));
-				strm.next_in = e->data;
-				strm.avail_in = (unsigned int)e->data_size;
-				strm.next_out = compressed[i];
-				strm.avail_out = (unsigned int)(bound + 8);
-				if ((*zlib_deflateInit)(&strm, Z_DEFAULT_COMPRESSION, "1.2.3", (int)sizeof(z_stream_min)) != Z_OK)
-					die("deflateInit");
-				int ret = (*zlib_deflate)(&strm, Z_FINISH);
-				if (ret != Z_STREAM_END) die("deflate");
-				(*zlib_deflateEnd)(&strm);
-				comp_sizes[i] = strm.total_out;
-			} else {
-				/* zstd */
-				size_t bound = (*zstd_compressBound)(e->data_size);
-				compressed[i] = malloc(bound + 8);
-				if (!compressed[i]) die("malloc");
-				int level = 3; /* default compression level */
-				size_t ret = (*zstd_compress)(compressed[i], bound + 8, e->data, e->data_size, level);
-				/* ZSTD_compress returns error code > bound on failure;
-				 * also fall back to uncompressed if compression expands data. */
-				if (ret >= e->data_size) {
-					free(compressed[i]);
-					compressed[i] = NULL;
-					comp_sizes[i] = e->data_size;
-				} else {
-					comp_sizes[i] = ret;
-				}
-			}
-			if (comp_sizes[i] >= e->data_size) {
-				free(compressed[i]);
-				compressed[i] = NULL;
-				comp_sizes[i] = e->data_size;
-			}
-		}
+		parallel_compress(c->entries, c->count, compressed, comp_sizes, &cf);
 	}
 
 	/* Phase 2: compute offsets */
@@ -804,50 +887,26 @@ static void write_msys_v2(const char *output, struct collector *c, uint32_t flag
 	}
 	qsort(c->entries, c->count, sizeof(struct entry), entry_cmp);
 
-	/* Phase 1: compute data sizes (compress each block if needed) */
+	/* Phase 1: compute data sizes (compress each block, parallel) */
 	int is_zlib = (flags & MSYS_F_ZLIB);
 	int is_zstd = (flags & MSYS_F_ZSTD);
 	unsigned char **compressed = NULL;
 	size_t *comp_sizes = NULL;
 	if (is_zlib || is_zstd) {
+		struct compress_funcs cf;
+		memset(&cf, 0, sizeof(cf));
+		cf.is_zlib = is_zlib;
+		cf.is_zstd = is_zstd;
+		cf.zlib_compressBound = zlib_compressBound;
+		cf.zlib_deflateInit = zlib_deflateInit;
+		cf.zlib_deflate = zlib_deflate;
+		cf.zlib_deflateEnd = zlib_deflateEnd;
+		cf.zstd_compress = zstd_compress;
+		cf.zstd_compressBound = zstd_compressBound;
 		compressed = calloc(c->count, sizeof(*compressed));
 		comp_sizes = calloc(c->count, sizeof(*comp_sizes));
 		if (!compressed || !comp_sizes) die("malloc");
-		for (size_t i = 0; i < c->count; i++) {
-			struct entry *e = &c->entries[i];
-			if (e->data_size == 0) { comp_sizes[i] = 0; continue; }
-			if (is_zlib) {
-				unsigned long bound = (*zlib_compressBound)((unsigned long)e->data_size);
-				compressed[i] = malloc(bound + 8);
-				if (!compressed[i]) die("malloc");
-				z_stream_min strm;
-				memset(&strm, 0, sizeof(strm));
-				strm.next_in = e->data;
-				strm.avail_in = (unsigned int)e->data_size;
-				strm.next_out = compressed[i];
-				strm.avail_out = (unsigned int)(bound + 8);
-				if ((*zlib_deflateInit)(&strm, Z_DEFAULT_COMPRESSION, "1.2.3", (int)sizeof(z_stream_min)) != Z_OK)
-					die("deflateInit");
-				if ((*zlib_deflate)(&strm, Z_FINISH) != Z_STREAM_END) die("deflate");
-				(*zlib_deflateEnd)(&strm);
-				comp_sizes[i] = strm.total_out;
-				if (comp_sizes[i] >= e->data_size) {
-					free(compressed[i]); compressed[i] = NULL;
-					comp_sizes[i] = e->data_size;
-				}
-			} else {
-				size_t bound = (*zstd_compressBound)(e->data_size);
-				compressed[i] = malloc(bound + 8);
-				if (!compressed[i]) die("malloc");
-				size_t out = (*zstd_compress)(compressed[i], bound, e->data, e->data_size, 3);
-				if (out >= e->data_size) {
-					free(compressed[i]); compressed[i] = NULL;
-					comp_sizes[i] = e->data_size;
-				} else {
-					comp_sizes[i] = out;
-				}
-			}
-		}
+		parallel_compress(c->entries, c->count, compressed, comp_sizes, &cf);
 	}
 
 	/* Phase 2: build directory block + compute offsets */
@@ -1189,6 +1248,7 @@ int main(int argc, char *argv[])
 	  "  --arch <name>      Write @meuos_arch metadata entry\n"
 	  "  --compress=<type>  Compress data blocks: zlib, zstd\n"
 	  "  --incremental      Incremental mode: only repack changed files\n"
+	  "  --append           Append mode (incremental + v2): merge new/changed into v2 archive\n"
 	  "  --dedup            Content dedup (v2 only): SHA-256 identical data stored once\n"
 	  "  --fast             Skip SHA-256 and compression for fastest packing (dev iteration)\n"
 	  "  --sign=<keyfile>   Sign the index with ed25519 secret key (v2 only)\n"
@@ -1218,6 +1278,8 @@ int main(int argc, char *argv[])
 			incremental = 1; i++;
 		} else if (strcmp(argv[i], "--dedup") == 0) {
 			dedup_mode = 1; i++;
+		} else if (strcmp(argv[i], "--append") == 0) {
+			incremental = 1; format_v2 = 1; dedup_mode = 1; i++;
 		} else if (strcmp(argv[i], "--fast") == 0) {
 			fast_mode = 1; i++;
 		} else if (strcmp(argv[i], "--streaming") == 0) {
@@ -1291,7 +1353,8 @@ int main(int argc, char *argv[])
 
 	if (fast_mode) {
 		g_fast_mode = 1;
-		fprintf(stderr, "mkmsys: fast mode (SHA-256 + compression skipped)\n");
+		flags &= ~(MSYS_F_ZLIB | MSYS_F_ZSTD | MSYS_F_DEDUP);
+		fprintf(stderr, "mkmsys: fast mode (SHA-256 + compression + dedup skipped)\n");
 	}
 
 	struct collector c;

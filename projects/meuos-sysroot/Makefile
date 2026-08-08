@@ -51,7 +51,7 @@ so: $(MSYS_SO)
 # mkmsys — .msys packer (standalone binary)
 $(MKMSYS_BIN): $(MKMSYS_OBJS) $(MSYS_LIB)
 	@mkdir -p $(dir $@)
-	$(HOST_CC) $(CFLAGS) -o $@ $(MKMSYS_OBJS) $(MSYS_LIB) -ldl
+	$(HOST_CC) $(CFLAGS) -o $@ $(MKMSYS_OBJS) $(MSYS_LIB) -ldl -lpthread
 
 $(OBJDIR)/mkmsys/main.o: src/mkmsys/main.c include/mt/msys.h
 	@mkdir -p $(dir $@)
