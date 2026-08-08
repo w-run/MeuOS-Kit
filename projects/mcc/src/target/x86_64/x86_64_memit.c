@@ -1334,7 +1334,7 @@ gd_scan_done:
 	 * reference points at.  Gated on g_meuos_specs: under --specs=host
 	 * __gxx_personality_v0 is not linked, so personality/lsda must not
 	 * be emitted (check-cpp-func links with the host libc). */
-	bool has_eh = g_meuos_specs != 0;
+	bool has_eh = false;
 	if (fm->name) {
 		if (fm->host && fm->host->export)
 			fprintf(f, ".globl %s\n", fm->name);
