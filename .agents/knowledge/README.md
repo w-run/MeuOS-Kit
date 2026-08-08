@@ -22,6 +22,7 @@
 | [feedback_reuse_workers.md](feedback_reuse_workers.md) | 纪律 | worker 完赛后直接 SendMessage 复用进下一任务，保持热上下文，不每次新建 |
 | [feedback_worker_progress_report.md](feedback_worker_progress_report.md) | 纪律 | 长任务 prompt 须含每15分钟汇报进展的要求，及时暴露阻塞 |
 | [project_mcc_static_global_array.md](project_mcc_static_global_array.md) | 缺陷 | x86_64 静态全局数组 segfault 闭环：根因 mt/as `imul $imm, %reg` 2-操作数编码缺失(dfcc0dc7)；回归测试(9e65b72d)；verify-all 门禁(9f1cf2be) |
+| [project_mcc_zero_length_array.md](project_mcc_zero_length_array.md) | 缺陷 | GNU 零长数组 (int e[0]) 4 处根因（funcalloc/sizeof/mksizeofexpr/declarator VLA 误判）；check-dwarf personality has_eh 初始值 bug |
 
 ## 使用约定
 
