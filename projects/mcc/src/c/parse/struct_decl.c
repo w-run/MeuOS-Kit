@@ -92,7 +92,13 @@ addmember(struct structbuilder *b, struct qualtype mt, char *name, int align, un
 					error_tok_code(E_REDEF, &tok, "redefinition of member '%s'", name);
 		}
 	}
-	if (name || width == -1) {
+	if (name || width == -1 || width >= 0) {
+		/* A member record is created for every declaration, including
+		 * unnamed bit-fields (C11 6.7.2.1p12): an aggregate whose only
+		 * declaration is `struct { int: 0; }` is valid (it is used as a
+		 * sizeof trap in _Generic fallback branches), and keeping the
+		 * record makes the aggregate non-empty for the "struct has no
+		 * members" check.  name may be NULL for such a bit-field. */
 		m = xmalloc(sizeof(*m));
 		m->type = mt.type;
 		m->qual = mt.qual;

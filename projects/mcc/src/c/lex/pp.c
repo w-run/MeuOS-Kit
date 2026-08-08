@@ -332,24 +332,40 @@ define(void)
 	m->nparam = params.len / sizeof(m->param[0]);
 
 	/* read macro body */
-	i = macroparam(m, t);
-	while (t->kind != TNEWLINE && t->kind != TEOF) {
-		prev = t->kind;
-		t = arrayadd(&repl, sizeof(*t));
-		scan(t);
-		if (t->kind == T__VA_ARGS__ && !macrovarargs(m))
-			error_code(E_SYNTAX, &t->loc, "__VA_ARGS__ can only be used in variadic function-like macros");
-		if (m->kind != MACROFUNC)
-			continue;
-		if (i != -1)
-			m->param[i].flags |= PARAMTOK;
+	{
+		const char *file = tok.loc.file;
+
 		i = macroparam(m, t);
-		if (prev == THASH) {
-			tokencheck(t, TPPIDENT, "after '#' operator");
-			if (i == -1)
-				error_code(E_SYNTAX, &t->loc, "'%s' is not a macro parameter name", t->lit);
-			m->param[i].flags |= PARAMSTR;
-			i = -1;
+		while (t->kind != TNEWLINE && t->kind != TEOF) {
+			if (t->loc.file != file) {
+				/* The macro's file ended without a trailing
+				 * newline; scan() popped into the parent file.
+				 * Terminate the replacement list here and push
+				 * the parent token back for the normal stream. */
+				if (t->kind != TEOF) {
+					struct token saved = *t;
+					*t = (struct token){ .kind = TEOF, .loc = t->loc };
+					ctxpush(&saved, 1, NULL, saved.space);
+				}
+				break;
+			}
+			prev = t->kind;
+			t = arrayadd(&repl, sizeof(*t));
+			scan(t);
+			if (t->kind == T__VA_ARGS__ && !macrovarargs(m))
+				error_code(E_SYNTAX, &t->loc, "__VA_ARGS__ can only be used in variadic function-like macros");
+			if (m->kind != MACROFUNC)
+				continue;
+			if (i != -1)
+				m->param[i].flags |= PARAMTOK;
+			i = macroparam(m, t);
+			if (prev == THASH) {
+				tokencheck(t, TPPIDENT, "after '#' operator");
+				if (i == -1)
+					error_code(E_SYNTAX, &t->loc, "'%s' is not a macro parameter name", t->lit);
+				m->param[i].flags |= PARAMSTR;
+				i = -1;
+			}
 		}
 	}
 	m->token = repl.val;
@@ -407,12 +423,36 @@ pushcond(bool parent, bool val)
 	f->anytaken = f->istaken;
 }
 
-/* Advance raw tokens until the end of the current directive line. */
+/* Advance raw tokens until the end of the current directive line.
+ *
+ * A directive whose file ends without a trailing newline is valid (the
+ * source file is allowed to end mid-line; GCC/clang accept it).  scan()
+ * transparently pops into the parent file when the current file hits EOF,
+ * so this loop must stop as soon as it sees a token from a different
+ * file: otherwise the trailing directive of a header without a final
+ * newline (e.g. a bare `#endif` at EOF) would swallow the parent file's
+ * following tokens.  The parent token is pushed back onto the context so
+ * the regular token stream resumes it. */
 static void
 expectnewline(void)
 {
-	while (tok.kind != TNEWLINE && tok.kind != TEOF)
+	const char *file = tok.loc.file;
+
+	while (tok.kind != TNEWLINE && tok.kind != TEOF) {
 		scan(&tok);
+		if (tok.loc.file != file) {
+			/* scan() popped into the parent file: this directive's
+			 * file ended without a newline.  End the directive and
+			 * let the parent token resume on the normal stream. */
+			if (tok.kind != TEOF) {
+				struct token saved = tok;
+				tok.kind = TEOF;
+				tok.lit = NULL;
+				ctxpush(&saved, 1, NULL, saved.space);
+			}
+			break;
+		}
+	}
 }
 
 /* The #if constant-expression arithmetic evaluator now lives in
@@ -486,11 +526,26 @@ evalexpr(void)
 	size_t i, n;
 
 	/* 1. read the raw expression line (including a TNEWLINE sentinel) */
-	for (;;) {
-		t = arrayadd(&line, sizeof *t);
-		scan(t);
-		if (t->kind == TNEWLINE || t->kind == TEOF)
-			break;
+	{
+		const char *file = tok.loc.file;
+
+		for (;;) {
+			t = arrayadd(&line, sizeof *t);
+			scan(t);
+			if (t->kind == TNEWLINE || t->kind == TEOF)
+				break;
+			if (t->loc.file != file) {
+				/* #if's file ended without a trailing newline:
+				 * scan() popped into the parent file.  Push the
+				 * parent token back and terminate the expression. */
+				if (t->kind != TEOF) {
+					struct token saved = *t;
+					*t = (struct token){ .kind = TEOF, .loc = t->loc };
+					ctxpush(&saved, 1, NULL, saved.space);
+				}
+				break;
+			}
+		}
 	}
 	n = line.len / sizeof *t;
 
@@ -1312,7 +1367,11 @@ directive(void)
 	default:
 		error_code(E_SYNTAX, &tok.loc, "invalid preprocessor directive #%s", tokenstr(tok.kind));
 	}
-	tokencheck(&tok, TNEWLINE, "after preprocessing directive");
+	/* A directive whose file ends without a trailing newline ends at
+	 * TEOF (or at the parent token restored by expectnewline()).  Both
+	 * are valid terminations, so only a real stray token is an error. */
+	if (tok.kind != TNEWLINE && tok.kind != TEOF)
+		tokencheck(&tok, TNEWLINE, "after preprocessing directive");
 	ppflags = oldflags;
 }
 
@@ -1324,14 +1383,21 @@ nextinto(struct token *t)
 
 	for (;;) {
 		scan(t);
+	again:
 		if (newline && t->kind == THASH) {
 			directive();
 			/* After directive returns, if tokens were pushed to context
-			 * (e.g. #embed), consume them here instead of scanning source. */
+			 * (e.g. #embed, or a token restored across a no-newline EOF
+			 * by expectnewline()), consume them here instead of scanning
+			 * source.  A restored token sitting at a line start that is
+			 * itself a THASH must be processed as a directive, so re-enter
+			 * the check (without rescanning). */
 			if (ctx.len > 0) {
 				struct token *ct = ctxnext();
 				if (ct) {
 					*t = *ct;
+					if (newline && t->kind == THASH)
+						goto again;
 					break;
 				}
 			}
