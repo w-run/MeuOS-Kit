@@ -446,7 +446,7 @@ mabi_vaarg(MFnM *fm, MOut *o, MInsM *in)
 	MVal *ap = in->src[0];
 	MVal *dst = in->dst;
 	MType dt = in->dtype;
-	int slotsize = (dt == MT_I64) ? 8 : 4;
+	int slotsize = (dt == MT_I64 || dt == MT_F64) ? 8 : 4;
 
 	/* Load the current va_list value (pointer to next arg) */
 	MVal *cur = tmp(fm, MT_PTR, "va");
